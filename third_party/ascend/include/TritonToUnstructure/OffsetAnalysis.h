@@ -95,6 +95,7 @@ public:
   SmallVector<Value> getOffsets() const;
   SmallVector<Value> &getOffsetsRef();
   bool isScalarLike() const;
+  bool isPointerDescriptorOwned() const;
   SmallVector<AxisInfo> &getStructuredRef();
   const SmallVector<AxisInfo> &getStructured() const;
   int getRank() const;
@@ -105,11 +106,15 @@ public:
   void setStructured();
   void setStructured(int rank);
   void setStructured(int rank, AxisInfo info);
+  // These setters update only per-axis structure. They intentionally preserve
+  // the independent scalarLike property; callers that invalidate scalar
+  // equivalence must clear it explicitly.
   void setUnstructured();
   void setUnstructured(int rank);
   void setStructured(ArrayRef<AxisInfo> structured);
   void setStructured(const PtrOffsetInfo &other);
   void setScalarLike(bool scalarLike);
+  void setPointerDescriptorOwned(bool pointerDescriptorOwned);
 
   bool isStructured(int dim) const;
   bool isStructured() const;
@@ -124,6 +129,12 @@ private:
   SmallVector<Value> tptOffsets;
 
   bool scalarLike = false;
+
+  // True only when the pointer originates from a CFO descriptor rebuild and
+  // every pointer-preserving operation since that rebuild was modeled by this
+  // analysis. Consumers may then use the analyzed scalar base without relying
+  // on the load operand's direct producer.
+  bool pointerDescriptorOwned = false;
 
   SmallVector<AxisInfo> structured;
 };

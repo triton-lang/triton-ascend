@@ -47,6 +47,7 @@ def _make_tuner(do_bench):
 def _make_run_tuner(configs):
     key = ("disk-cache-key", )
     tuner = object.__new__(AutoTilingTuner)
+    tuner.arg_names = []
     tuner.cache = {}
     tuner.is_simt_mode = False
     tuner.simt_stack_limit = 8192

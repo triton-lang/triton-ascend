@@ -91,7 +91,9 @@ def compiler_module():
     module_name = "triton.backends.ascend.compiler_layout_memory_contract_under_test"
     utils_name = "triton.backends.ascend.utils"
     driver_name = "triton.backends.ascend.driver"
+    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
     cache_name = "triton.runtime.cache"
+    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
 
     def return_false(*_args, **_kwargs):
         return False
@@ -123,6 +125,8 @@ def compiler_module():
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
     utils_stub._get_auto_blockify_blacklist_reasons = lambda *_args, **_kwargs: []
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
+    utils_stub._remove_deprecated_npu_options = lambda options, **_kwargs: options
+    utils_stub._warn_deprecated_ascend_env_vars = lambda: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
@@ -134,17 +138,27 @@ def compiler_module():
     driver_stub = types.ModuleType(driver_name)
     driver_stub.NPUUtils = UnusedNPUUtils
 
+    debug_line_rewriter_stub = types.ModuleType(debug_line_rewriter_name)
+    debug_line_rewriter_stub.rewrite_debug_line = lambda artifact, **_kwargs: artifact
+
     cache_stub = types.ModuleType(cache_name)
     cache_stub._base32 = lambda value: str(value)
     cache_stub.get_dump_manager = lambda *_args, **_kwargs: SimpleNamespace(cache_dir="", put=lambda *_args, **_kwargs:
                                                                             None)
 
+    debug_line_rewriter_stub = types.ModuleType(debug_line_rewriter_name)
+    debug_line_rewriter_stub.rewrite_debug_line = lambda artifact, metadata=None, options=None: artifact
+
     previous_utils = sys.modules.get(utils_name)
     previous_driver = sys.modules.get(driver_name)
+    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
     previous_cache = sys.modules.get(cache_name)
+    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
     sys.modules[utils_name] = utils_stub
     sys.modules[driver_name] = driver_stub
+    sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules[cache_name] = cache_stub
+    sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules.pop(module_name, None)
     try:
         spec = importlib.util.spec_from_file_location(module_name, compiler_path)
@@ -161,10 +175,18 @@ def compiler_module():
             sys.modules.pop(driver_name, None)
         else:
             sys.modules[driver_name] = previous_driver
+        if previous_debug_line_rewriter is None:
+            sys.modules.pop(debug_line_rewriter_name, None)
+        else:
+            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
         if previous_cache is None:
             sys.modules.pop(cache_name, None)
         else:
             sys.modules[cache_name] = previous_cache
+        if previous_debug_line_rewriter is None:
+            sys.modules.pop(debug_line_rewriter_name, None)
+        else:
+            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
     return module
 
 
@@ -320,6 +342,9 @@ def _run_ttir_to_npubin(
         commands.append(list(command))
         output = Path(command[command.index("-o") + 1] + ".o")
         output.write_bytes(b"npubin")
+        metadata_option = next((arg for arg in command if arg.startswith("--triton-metadata-output=")), None)
+        if metadata_option is not None:
+            Path(metadata_option.split("=", 1)[1]).write_text("{}")
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(
@@ -366,6 +391,16 @@ def _run_ttir_to_npubin(
     assert result == b"npubin"
     assert len(commands) == 1
     return events, commands[0]
+
+
+@pytest.mark.parametrize("force_simt_only", (False, True))
+def test_ttir_to_npubin_global_scratch_allocation_flag(compiler_module, monkeypatch, force_simt_only):
+    _events, command = _run_ttir_to_npubin(
+        compiler_module,
+        monkeypatch,
+        force_simt_only=force_simt_only,
+    )
+    assert ("--enable-global-scratch-allocation" in command) is force_simt_only
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -530,7 +565,6 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, mon
         graph_optimize_rule_mask=8,
         graph_optimize_max_rewrites_per_function=17,
         graph_optimize_ub_capacity_bytes=4096,
-        graph_optimize_emit_remarks=True,
         force_simt_only=True,
         debug=False,
     )
@@ -541,10 +575,14 @@ def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, mon
         "rule_mask": 8,
         "max_rewrites_per_function": 17,
         "ub_capacity_bytes": 4096,
-        "emit_remarks": True,
         "force_simt_only": True,
     }]
     assert events[-1] == "run_row"
+
+
+def test_npu_options_do_not_expose_graph_remark_switch(compiler_module):
+    """Graph rewrite logging is controlled by LLVM DEBUG, not an NPU option."""
+    assert "graph_optimize_emit_remarks" not in compiler_module.NPUOptions.__dataclass_fields__
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -564,7 +602,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
         graph_optimize_rule_mask=8,
         graph_optimize_max_rewrites_per_function=17,
         graph_optimize_ub_capacity_bytes=requested_capacity,
-        graph_optimize_emit_remarks=True,
         force_simt_only=True,
     )
 
@@ -574,7 +611,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
         "rule_mask": 8,
         "max_rewrites_per_function": 17,
         "ub_capacity_bytes": expected_capacity,
-        "emit_remarks": True,
         "force_simt_only": True,
     }]
     assert events[-1] == "run_row"
@@ -594,6 +630,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",
+        "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
         "--enable-bishengir-simt-optimization=17",
@@ -644,7 +681,12 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 f"R={row_applied}, superblock={superblock}, "
                 f"bisheng_options={case_bisheng_options!r}")
 
-        expected_options = [*common_options, *pure_simt_prefix]
+        metadata_options = [arg for arg in command if arg.startswith("--triton-metadata-output=")]
+        assert len(metadata_options) == 1, case
+        metadata_option = metadata_options[0]
+        assert Path(metadata_option.split("=", 1)[1]).name == "triton-metadata.json", case
+
+        expected_options = [*common_options, metadata_option, *pure_simt_prefix]
         if first_injection:
             expected_options.append(auto_blockify_flag)
         if case_bisheng_options is not None:

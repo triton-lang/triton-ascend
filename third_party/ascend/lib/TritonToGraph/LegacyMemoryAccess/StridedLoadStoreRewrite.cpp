@@ -40,7 +40,7 @@
 #include <cstdlib>
 #include <functional>
 
-#define DEBUG_TYPE "triton-to-linalg-indirect-load-rewrite"
+#define DEBUG_TYPE "graph-optimize"
 
 namespace StridedLoadStoreRewrite {
 

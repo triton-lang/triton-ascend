@@ -66,6 +66,8 @@ inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
 inline constexpr llvm::StringLiteral kCrossBuffer = "ssbuffer.cross_buffer";
+inline constexpr llvm::StringLiteral kForMayNotExec =
+    "ssbuffer.for_may_not_exec";
 inline constexpr llvm::StringLiteral kClone = "ssbuffer.clone";
 inline constexpr llvm::StringLiteral kEnableUbRefineOpt =
     "ssbuffer.enable_ub_refine_opt";
@@ -236,6 +238,7 @@ bool isViewLike(Operation *op);
 // 0 scalar constant. Used to detect the "add 0" operand of VECTOR pseudo-ops
 // (`arith.addf` / `arith.addi` carrying `ssbuffer.add_from_matmul`).
 bool isZeroFillValue(Value v);
+bool isZeroAdd(mlir::Operation *op);
 
 // Read the `hivm.tightly_coupled_buffer<N>` id attached to a `memref.alloc`
 // via its `annotation.mark` user. Returns nullopt when no annotation with
@@ -252,6 +255,22 @@ bool allResultHasOneUser(Operation *op);
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
+
+CoreType getValueCoreType(Value value);
+
+// Helper: convert OpCoreType to string for IR attribute
+inline llvm::StringRef coreTypeToString(CoreType ct) {
+  switch (ct) {
+  case CUBE_ONLY:
+    return "CUBE";
+  case VECTOR_ONLY:
+    return "VECTOR";
+  case CUBE_AND_VECTOR:
+    return "CUBE_AND_VECTOR";
+  default:
+    return "UNDETERMINED";
+  }
+}
 
 } // namespace CVPipeline
 } // namespace mlir

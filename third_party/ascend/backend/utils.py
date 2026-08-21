@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sysconfig
+import warnings
 from pathlib import Path
 import logging
 import platform
@@ -34,6 +35,136 @@ import pybind11
 
 # Lazy init for is_compile_on_910_95
 _is_compile_on_910_95 = None
+
+# Phase-one compatibility boundary for compile-option cleanup.  Keep the
+# existing NPUOptions fields and their internal consumers intact while public
+# dictionaries route supported aliases and drop backend-managed fields.
+_DEPRECATED_NPU_OPTIONS = frozenset({
+    "add_auto_scheduling",
+    "allow_fp8e4nv",
+    "arch",
+    "auto_blockify_size",
+    "auto_tile_and_bind_subblock",
+    "bisheng_options",
+    "code_motion",
+    "compile_on_910_95",
+    "disable_size_align_for_cast",
+    "enable_auto_blockify",
+    "enable_buffer_insert_optimization",
+    "enable_cce_vf_auto_sync",
+    "enable_cce_vf_remove_membar",
+    "enable_cross_if_fusion",
+    "enable_cube_block_merge",
+    "enable_drop_unit_dims",
+    "enable_linearize",
+    "enable_mask_fallback_conversion",
+    "enable_nd2nz_on_vector",
+    "enable_select_analysis",
+    "enable_sync_block_lock",
+    "enable_ub_refine_opt",
+    "enable_vf_fusion",
+    "force_simt_only",
+    "force_simt_template",
+    "graph_optimize_emit_remarks",
+    "graph_optimize_max_rewrites_per_function",
+    "graph_optimize_rule_mask",
+    "graph_optimize_ub_capacity_bytes",
+    "grid_num_tiles",
+    "has_auto_blockify_blacklist_op",
+    "hfusion_enable_multiple_consumer_fusion",
+    "kernel_name",
+    "llvm_version",
+    "mix_mode",
+    "ops_reorder",
+    "optimize_dynamic_offset",
+    "parallel_mode",
+    "storage_align",
+    "stream",
+    "use_bytecode",
+    "vf_merge_level",
+    "warp_size",
+})
+
+_DEPRECATED_NPU_OPTION_ROUTES = {
+    "force_simt_only": ("compile_mode", "simt_only"),
+    "force_simt_template": ("compile_mode", "unstructured_in_simt"),
+}
+
+_DEPRECATED_ASCEND_ENV_VARS = frozenset({
+    "LLVM_ROOT",
+    "MLIR_ROOT",
+    "TRITON_ALL_BLOCKS_PARALLEL",
+    "TRITON_ASCEND_ARCH",
+    "TRITON_ASCEND_COMPILE_SPEED_OPT",
+    "TRITON_BACKEND",
+    "TRITON_DISABLE_FFTS",
+    "TRITON_REGISTER_TENSOR_MSPROF",
+})
+_WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
+
+
+class _InternalNPUOptionInt(int):
+    """Marks an integer option value produced by the Ascend backend itself."""
+
+
+def _is_internal_npu_option_value(value) -> bool:
+    return isinstance(value, _InternalNPUOptionInt)
+
+
+def _get_deprecated_npu_options(options) -> set[str]:
+    return {
+        name
+        for name in options.keys() & _DEPRECATED_NPU_OPTIONS
+        if not _is_internal_npu_option_value(options[name])
+    }
+
+
+def _warn_deprecated_npu_option(name: str) -> None:
+    route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
+    if route is not None:
+        replacement_name, replacement_value = route
+        message = (f"Ascend compile option '{name}' is deprecated; "
+                   f"use {replacement_name}={replacement_value!r} instead.")
+    else:
+        message = (f"Ascend compile option '{name}' is deprecated and ignored; "
+                   "the backend-managed/default behavior is used instead.")
+    warnings.warn(
+        message,
+        FutureWarning,
+        stacklevel=3,
+    )
+
+
+def _remove_deprecated_npu_options(options, *, protected=(), in_place=False):
+    """Normalize and remove deprecated public NPU options, copying by default."""
+    normalized = options if in_place else dict(options)
+    deprecated = _get_deprecated_npu_options(normalized) - set(protected)
+    for name in sorted(deprecated):
+        _warn_deprecated_npu_option(name)
+        route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
+        if route is not None and normalized[name]:
+            replacement_name, replacement_value = route
+            normalized.setdefault(replacement_name, replacement_value)
+        normalized.pop(name)
+    return normalized
+
+
+def _warn_deprecated_ascend_env_var(name: str) -> None:
+    if (name not in _DEPRECATED_ASCEND_ENV_VARS or name not in os.environ
+            or name in _WARNED_DEPRECATED_ASCEND_ENV_VARS):
+        return
+    _WARNED_DEPRECATED_ASCEND_ENV_VARS.add(name)
+    warnings.warn(
+        f"Ascend environment variable '{name}' is deprecated and ignored; "
+        "the default behavior is used instead.",
+        FutureWarning,
+        stacklevel=3,
+    )
+
+
+def _warn_deprecated_ascend_env_vars() -> None:
+    for name in sorted(_DEPRECATED_ASCEND_ENV_VARS & os.environ.keys()):
+        _warn_deprecated_ascend_env_var(name)
 
 
 def is_compile_on_910_95():
@@ -69,16 +200,13 @@ backend_policy = None
 def get_backend_func(name, *args, **kwargs):
     global backend_policy
     if backend_policy is None:
-        backend_policy_env = os.getenv("TRITON_BACKEND", "default").lower()
-        if backend_policy_env == "torch_npu" or backend_policy_env == "mindspore":
-            backend_policy = backend_policy_env
-        if backend_policy is None:
-            try:
-                import torch
-                import torch_npu
-                backend_policy = "torch_npu"
-            except ImportError:
-                backend_policy = "mindspore"
+        _warn_deprecated_ascend_env_var("TRITON_BACKEND")
+        try:
+            import torch
+            import torch_npu
+            backend_policy = "torch_npu"
+        except ImportError:
+            backend_policy = "mindspore"
     return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 
 
@@ -166,18 +294,26 @@ def _get_triton_adapter_opt_path() -> str:
     return path
 
 
+def _get_default_tool_path(path: str, *paths) -> str:
+    relative_path = os.path.join(path, *paths)
+    try:
+        import triton._C.libtriton as libtriton
+        tool_path = os.path.join(os.path.dirname(libtriton.__file__), relative_path)
+        if os.path.exists(tool_path) and os.access(tool_path, os.X_OK):
+            return tool_path
+    except (ImportError, AttributeError):
+        pass
+    return _get_tool_path(os.path.basename(relative_path))
+
+
 def _get_mlir_path(path: str, *paths) -> str:
-    root_path = os.getenv("MLIR_ROOT", "")
-    if root_path == "":
-        raise EnvironmentError("MLIR_ROOT is not set.")
-    return os.path.join(root_path, path, *paths)
+    _warn_deprecated_ascend_env_var("MLIR_ROOT")
+    return _get_default_tool_path(path, *paths)
 
 
 def _get_llvm_path(path: str, *paths) -> str:
-    root_path = os.getenv("LLVM_ROOT", "")
-    if root_path == "":
-        raise EnvironmentError("LLVM_ROOT is not set.")
-    return os.path.join(root_path, path, *paths)
+    _warn_deprecated_ascend_env_var("LLVM_ROOT")
+    return _get_default_tool_path(path, *paths)
 
 
 def _get_tool_path(tool_name: str) -> str:
@@ -347,7 +483,8 @@ def _is_debug_line_info_disabled() -> bool:
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:
-    return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")
+    _warn_deprecated_ascend_env_var("TRITON_ALL_BLOCKS_PARALLEL")
+    return True
 
 
 def _get_auto_blockify_blacklist_reasons(ir_text: str):
@@ -524,38 +661,8 @@ def _check_bishengir_able_save_ir() -> bool:
 
 
 def get_ascend_arch_from_env():
-    arch = os.getenv("TRITON_ASCEND_ARCH", "")
-    if arch == "":
-        # User does not set arch by ENV. Thus directly return.
-        return arch
-    # User sets arch by ENV. Thus we need to check if it is supported.
-    valid_arch_list = [
-        "Ascend910B1",
-        "Ascend910B2",
-        "Ascend910B3",
-        "Ascend910B4",
-        "Ascend910_9362",
-        "Ascend910_9363",
-        "Ascend910_9372",
-        "Ascend910_9381",
-        "Ascend910_9382",
-        "Ascend910_9391",
-        "Ascend910_9392",
-        "Ascend310B1",
-        "Ascend310B2",
-        "Ascend310B3",
-        "Ascend310B4",
-        "Ascend910_9579",
-        "Ascend910_9581",
-        "Ascend910_9589",
-        "Ascend910_9599",
-    ]
-    is_valid = arch in valid_arch_list
-    if not is_valid:
-        valid_arch_str = ", ".join(valid_arch_list)
-        raise ValueError(f"TRITON_ASCEND_ARCH = {arch} is invalid!"
-                         f"Candidates are [{valid_arch_str}]")
-    return arch
+    _warn_deprecated_ascend_env_var("TRITON_ASCEND_ARCH")
+    return ""
 
 
 def ub_size_in_kbytes_for_arch(arch: str) -> int:
@@ -603,8 +710,8 @@ def force_disable_ffts():
     '''
     if is_compile_on_910_95():
         return True
-    disable_ffts = os.getenv("TRITON_DISABLE_FFTS", "false").lower() in ("true", "1")
-    return disable_ffts
+    _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
+    return False
 
 
 def triton_support_ffts():

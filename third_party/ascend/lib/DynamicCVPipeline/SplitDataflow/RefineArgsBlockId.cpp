@@ -206,6 +206,11 @@ static void processOneLoop(Operation *loopOp,
                 << yieldOperand << "\n");
       continue;
     }
+    if (llvm::isa<scf::IfOp>(yieldDefOp)) {
+      LOG_DEBUG("Yield operand is a if result, skip. Operand: " << yieldOperand
+                                                                << "\n");
+      continue;
+    }
     LOG_DEBUG("yieldDefOp: " << *yieldDefOp << "\n"
                              << "idx: " << i << "\n");
     if (isDependenceOther(yieldDefOp, loopBlock, i, memGraph)) {

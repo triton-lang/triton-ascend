@@ -24,6 +24,7 @@ rather than a misleading green skip.
 import ast
 import copy
 import itertools
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -34,6 +35,7 @@ import pytest
 
 _BASELINE_COMMIT = "895c5fbe2b0e69349b76388e65fd8c3e79703bb9"
 _REQUIRE_BASELINE_ENV = "TRITON_REQUIRE_895_DIFFERENTIAL"
+_TRITON_METADATA_OUTPUT_PREFIX = "--triton-metadata-output="
 _SOURCE_PATHS = {
     "compiler": "third_party/ascend/backend/compiler.py",
     "driver": "third_party/ascend/backend/driver.py",
@@ -121,6 +123,7 @@ def _load_compiler_closure(source):
     # the installed compiler package or an NPU toolchain.
     subprocess_proxy = SimpleNamespace(CalledProcessError=subprocess.CalledProcessError, )
     namespace = {
+        "json": json,
         "os": os,
         "tempfile": tempfile,
         "Path": Path,
@@ -239,6 +242,9 @@ def _run_ttir_to_npubin(
         commands.append(list(command))
         bin_file = Path(command[command.index("-o") + 1])
         bin_file.with_name(f"{bin_file.name}.o").write_bytes(b"npubin")
+        metadata_option = next((arg for arg in command if arg.startswith(_TRITON_METADATA_OUTPUT_PREFIX)), None)
+        if metadata_option is not None:
+            Path(metadata_option.removeprefix(_TRITON_METADATA_OUTPUT_PREFIX)).write_text("{}")
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     closure["ir"] = SimpleNamespace(pass_manager=lambda _context: pass_manager)
@@ -274,7 +280,7 @@ def _normalise_command(command):
     return [
         command[0],
         Path(command[1]).name,
-        *command[2:-2],
+        *(arg for arg in command[2:-2] if not arg.startswith(_TRITON_METADATA_OUTPUT_PREFIX)),
         command[-2],
         Path(command[-1]).name,
     ]
@@ -472,6 +478,7 @@ def _load_make_launcher(source):
 
 def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
     return SimpleNamespace(
+        target=SimpleNamespace(arch="Ascend910B"),
         workspace_size=0,
         lock_init_value=0,
         lock_num=0,
@@ -694,13 +701,14 @@ def _load_inject_grid_num_tiles(source):
     ]
     assert len(candidates) == 1
     function = copy.deepcopy(candidates[0])
-    # Execute the method as a stand-alone function.  Its body intentionally
-    # closes only over Python builtins, so this verifies the source behavior
-    # rather than importing whichever Triton wheel happens to be installed.
+    # Execute the method as a stand-alone function.  Supply a local equivalent
+    # of the backend's int marker so this verifies the source behavior rather
+    # than importing whichever Triton wheel happens to be installed.
     function.decorator_list = []
     module = ast.Module(body=[function], type_ignores=[])
     ast.fix_missing_locations(module)
-    namespace = {}
+    internal_npu_option_int = type("_InternalNPUOptionInt", (int, ), {})
+    namespace = {"_InternalNPUOptionInt": internal_npu_option_int}
     exec(compile(module, "<grid-num-tiles-closure>", "exec"), namespace)
     return namespace["_inject_grid_num_tiles"]
 

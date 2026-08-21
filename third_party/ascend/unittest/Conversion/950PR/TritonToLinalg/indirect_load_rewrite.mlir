@@ -771,7 +771,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 
 // -----
 // CHECK-LABEL: func.func @indirect_load_unknown_root_int_to_ptr
-// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<1xi32, strided<[1]>>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
+// CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = true} : (memref<?xi32>, tensor<128xi64>, tensor<128xi1>, tensor<128xi32>) -> tensor<128xi32>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @indirect_load_unknown_root_int_to_ptr(%arg0: !tt.ptr<i32>) {
     %base_i64 = arith.constant 1024 : i64

@@ -62,6 +62,8 @@ from triton.backends.ascend.utils import (
     _is_auto_map_parallel_blocks_enabled,
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
+    _remove_deprecated_npu_options,
+    _warn_deprecated_ascend_env_vars,
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
@@ -183,7 +185,6 @@ def make_ttir(mod, metadata, opt):
             rule_mask=opt.graph_optimize_rule_mask,
             max_rewrites_per_function=opt.graph_optimize_max_rewrites_per_function,
             ub_capacity_bytes=opt.graph_optimize_ub_capacity_bytes,
-            emit_remarks=opt.graph_optimize_emit_remarks,
             force_simt_only=opt.force_simt_only,
         )
     pm.run(mod, 'make_ttir')
@@ -1098,7 +1099,6 @@ class NPUOptions:
     graph_optimize_rule_mask: int = 511
     graph_optimize_max_rewrites_per_function: int = 64
     graph_optimize_ub_capacity_bytes: Optional[int] = None
-    graph_optimize_emit_remarks: bool = False
     allow_fp8e4nv: bool = False
     auto_tile_and_bind_subblock: bool = True
     vf_merge_level: int = 0
@@ -1253,12 +1253,15 @@ def ttir_to_npubin(mod, metadata, opt):
         # prepare output
         bin_file = os.path.join(tmpdir, "kernel")
         bin_path = os.path.join(tmpdir, "kernel.o")
+        metadata_path = os.path.join(tmpdir, "triton-metadata.json")
         # build compile options
         _compile_option_list = get_common_bishengir_compile_options(metadata)
         if opt.force_simt_only:
+            _compile_option_list += [f"--triton-metadata-output={metadata_path}"]
             _compile_option_list += ["--enable-hivm-compile=false"]
             _compile_option_list += ["--enable-triton-ir-compile"]
             _compile_option_list += ["--pure-simt"]
+            _compile_option_list += ["--enable-global-scratch-allocation"]
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.enable_bishengir_simt_optimization != 000:
@@ -1305,6 +1308,8 @@ def ttir_to_npubin(mod, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
+        if opt.force_simt_only:
+            metadata.update(json.loads(Path(metadata_path).read_text()))
         return Path(bin_path).read_bytes()
 
 
@@ -1349,7 +1354,17 @@ class AscendBackend(BaseBackend):
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
-            args = {k: opts[k] for k in NPUOptions.__dataclass_fields__.keys() if k in opts}
+            _warn_deprecated_ascend_env_vars()
+            option_names = NPUOptions.__dataclass_fields__.keys()
+            # JIT and AOT hand the complete, already-normalized dataclass back to
+            # parse_options before compilation.  Those values are internal state,
+            # not a second batch of user overrides.
+            internal_options = option_names <= opts.keys()
+            # JIT validates the same dictionary after this call.  Remove public
+            # compatibility keys in place so Ascend can accept them without
+            # requiring any change to the community JIT implementation.
+            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
+            args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             args.setdefault("arch", self.target.arch)
             options = NPUOptions(**args)
             # Lazy init compile_on_910_95 if not provided

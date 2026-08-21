@@ -34,6 +34,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 
+#include <limits>
 #include <optional>
 
 using namespace mlir;
@@ -43,6 +44,8 @@ using mlir::triton::controlflow::ControlFlowRewritePlan;
 using mlir::triton::controlflow::ControlFlowRewritePolicy;
 using mlir::triton::controlflow::ControlFlowSlotAnalysis;
 using mlir::triton::controlflow::DecomposedValue;
+using mlir::triton::controlflow::kPointerDescriptorBoundaryAttr;
+using mlir::triton::controlflow::kPointerDescriptorRebuildAttr;
 
 namespace mlir::triton::controlflow {
 
@@ -65,7 +68,7 @@ namespace {
 // handlers are mutually recursive through rewriteBodyOps(), share one
 // short-lived RewriteEnv, and must agree on signature expansion, nested-op
 // ordering and failure cleanup. Splitting them by op kind would expose those
-// private invariants through additional internal headers without creating an
+// private constraints through additional internal headers without creating an
 // independently reusable component.
 //
 //===----------------------------------------------------------------------===//
@@ -84,8 +87,8 @@ namespace {
 /// offsets, a region-local environment can contain:
 /// valueMapping:      %old_ptr_arg -> %rebuilt_ptr
 /// decomposedValues:  %old_ptr_arg -> {
-///   components = [%shape0, %stride0, %new_offset0],
-///   invariants = [%base], attributes = [order]
+///   components = [%base, %shape0, %stride0, %new_offset0],
+///   attributes = [order]
 /// }
 /// Operations cloned into that region use the mapping, while pointer
 /// decomposition uses the stored components.
@@ -152,9 +155,9 @@ struct RewriteEnv {
   /// %next = tt.advance %ptr, [%delta0, %delta1]
   ///
   /// decomposeValue(%next) -> DecomposedValue {
-  ///   components = [%shape0, %shape1, %stride0, %stride1,
+  ///   components = [%base, %shape0, %shape1, %stride0, %stride1,
   ///                 %offset0 + %delta0, %offset1 + %delta1],
-  ///   invariants = [%base], attributes = [order]
+  ///   attributes = [order]
   /// }
   /// The caller can put selected components into a new control-flow signature
   /// or pass the whole descriptor to policy.recompose(). Unsupported values
@@ -208,6 +211,8 @@ struct LoopPointerInfo {
   // Ordered schema decided by ControlFlowSlotAnalysis.
   SmallVector<unsigned> componentIndices;
   SmallVector<Type> componentTypes;
+  // Policy metadata after all loop incoming paths have been normalized.
+  SmallVector<Attribute> resultAttributes;
   // Positions occupied by those components in the replacement operation.
   SmallVector<unsigned> newIndices;
 };
@@ -216,8 +221,83 @@ struct IfPointerInfo {
   unsigned oldIndex = 0;
   SmallVector<unsigned> componentIndices;
   SmallVector<Type> componentTypes;
+  SmallVector<Attribute> resultAttributes;
   std::optional<DecomposedValue> thenInfo;
 };
+
+// Updates the downstream descriptor marker after a loop signature expansion.
+// Existing slots are remapped through oldToNewStart before slots introduced by
+// the active policy are merged. The array is always expressed in the
+// replacement loop's iter-argument/result coordinate space.
+//
+// Example:
+//   old slots = [1], oldToNewStart = [0, 1, 3]
+//   the active policy expands old slot 2 into new slots [3, 4]
+//   result = [1, 3, 4]
+static LogicalResult updatePointerDescriptorBoundaryMarker(
+    Operation *loop, ArrayRef<LoopPointerInfo> pointerInfos,
+    ArrayRef<unsigned> oldToNewStart, const ControlFlowRewritePolicy &policy) {
+  SmallVector<int32_t> descriptorSlots;
+  bool ownsPointerBoundary = false;
+  llvm::SmallDenseSet<unsigned> seenSlots;
+  auto appendSlot = [&](unsigned slot) -> LogicalResult {
+    if (slot > static_cast<unsigned>(std::numeric_limits<int32_t>::max()))
+      return failure();
+    if (!seenSlots.insert(slot).second)
+      return failure();
+    descriptorSlots.push_back(static_cast<int32_t>(slot));
+    return success();
+  };
+
+  if (Attribute oldMarker = loop->getAttr(kPointerDescriptorBoundaryAttr)) {
+    ownsPointerBoundary = true;
+    auto oldSlots = dyn_cast<DenseI32ArrayAttr>(oldMarker);
+    if (!oldSlots)
+      return failure();
+    for (int32_t oldSlot : oldSlots.asArrayRef()) {
+      if (oldSlot < 0 ||
+          static_cast<unsigned>(oldSlot) >= oldToNewStart.size() ||
+          failed(appendSlot(oldToNewStart[oldSlot])))
+        return failure();
+    }
+  }
+
+  if (policy.requiresPointerDescriptorBoundaryMarker()) {
+    ownsPointerBoundary |= !pointerInfos.empty();
+    for (const LoopPointerInfo &pointerInfo : pointerInfos) {
+      for (unsigned newSlot : pointerInfo.newIndices) {
+        if (failed(appendSlot(newSlot)))
+          return failure();
+      }
+    }
+  }
+
+  if (!ownsPointerBoundary) {
+    loop->removeAttr(kPointerDescriptorBoundaryAttr);
+    return success();
+  }
+  llvm::sort(descriptorSlots);
+  loop->setAttr(kPointerDescriptorBoundaryAttr,
+                DenseI32ArrayAttr::get(loop->getContext(), descriptorSlots));
+  return success();
+}
+
+// Marks policy-created pointer descriptor reconstructions. Their defining
+// operation consumes the complete descriptor, including invariant components
+// omitted from a replacement SCF signature. TritonToLinalg uses these operands
+// as precise preservation roots and removes the marker after conversion.
+static LogicalResult
+markPointerDescriptorRebuild(Value rebuiltPointer, const DecomposedValue &value,
+                             const ControlFlowRewritePolicy &policy) {
+  if (!policy.requiresPointerDescriptorBoundaryMarker())
+    return success();
+  Operation *definingOp = rebuiltPointer.getDefiningOp();
+  if (!definingOp)
+    return failure();
+  definingOp->setAttr(kPointerDescriptorRebuildAttr,
+                      UnitAttr::get(definingOp->getContext()));
+  return policy.annotatePointerDescriptorRebuild(definingOp, value);
+}
 
 // Copies the values selected by indices into a new owning vector while
 // preserving their input order. Indices must be unique and in bounds; this
@@ -245,9 +325,9 @@ static FailureOr<SmallVector<Value>> gatherValues(ValueRange sourceValues,
 // replacement changes the component type; the input object remains unchanged.
 //
 // Example:
-//   decomposition.components = [shape, stride, originalOffset]
-//   componentIndices = [2], replacements = [nextOffset]
-//   result.components = [shape, stride, nextOffset]
+//   decomposition.components = [base, shape, stride, originalOffset]
+//   componentIndices = [3], replacements = [nextOffset]
+//   result.components = [base, shape, stride, nextOffset]
 static FailureOr<DecomposedValue>
 withReplacedComponents(DecomposedValue decomposition,
                        ArrayRef<unsigned> componentIndices,
@@ -306,10 +386,13 @@ static auto findPointerInfoByOldIndex(InfoRange &pointerInfos,
   return nullptr;
 }
 
-// A replacement loop carries selected scalar or tensor descriptor components
-// instead of the original pointer iter-argument. Operations cloned from the
-// original body still expect one pointer-typed block argument, so this function
-// reconstructs that pointer at the replacement region entry.
+// A replacement loop carries policy-selected scalar or tensor descriptor
+// components instead of the original pointer iter-argument. BlockPtr selects
+// every component that analysis found dynamic; TensorPtr selects only the
+// base/offset fields whose symbolic identities change at that boundary.
+// Operations cloned from the original body still expect one pointer-typed
+// block argument, so this function reconstructs that pointer at the replacement
+// region entry.
 // `pointerInfo.newIndices` selects the current component values from
 // `newRegionArguments`, while
 // `pointerInfo.componentIndices` identifies the descriptor fields that those
@@ -323,17 +406,17 @@ static auto findPointerInfoByOldIndex(InfoRange &pointerInfos,
 //
 // Example:
 //   oldRegionArgument = %old_ptr
-//   newRegionArguments = [%ordinary, %current_offset0, %current_offset1]
-//   pointerInfo.newIndices = [1, 2]
-//   pointerInfo.componentIndices = [4, 5]
+//   newRegionArguments = [%ordinary, %base, %shape, %stride, %offset]
+//   pointerInfo.newIndices = [1, 2, 3, 4]
+//   pointerInfo.componentIndices = [0, 1, 2, 3]
 //   pointerInfo.initInfo.components =
-//       [shape0, shape1, stride0, stride1, initial_offset0, initial_offset1]
+//       [initial_base, initial_shape, initial_stride, initial_offset]
 //
-// The rebuilt descriptor keeps shape and stride, replaces the final two
-// components with the current offsets, and records `%old_ptr -> %rebuilt_ptr`
-// in `regionEnv`. Invalid indices, incompatible component types, or a policy
-// that cannot recompose the descriptor return failure without recording a
-// partial binding; the enclosing loop rewrite owns cleanup of inserted IR.
+// The rebuilt BlockPtr descriptor replaces all four fields with the current
+// loop values and records `%old_ptr -> %rebuilt_ptr` in `regionEnv`. Invalid
+// indices, incompatible component types, or a policy that cannot recompose the
+// descriptor return failure without recording a partial binding; the enclosing
+// loop rewrite owns cleanup of inserted IR.
 static LogicalResult bindLoopCarriedPointer(Value oldRegionArgument,
                                             const LoopPointerInfo &pointerInfo,
                                             ValueRange newRegionArguments,
@@ -347,12 +430,15 @@ static LogicalResult bindLoopCarriedPointer(Value oldRegionArgument,
   FailureOr<DecomposedValue> argumentInfo =
       withReplacedComponents(pointerInfo.initInfo, pointerInfo.componentIndices,
                              *carriedComponentValues);
-  if (failed(argumentInfo))
+  if (failed(argumentInfo) ||
+      failed(regionEnv.policy.normalizeControlFlowValue(
+          *argumentInfo, pointerInfo.resultAttributes, builder, loc)))
     return failure();
 
   Value rebuiltPointer =
       regionEnv.policy.recompose(*argumentInfo, builder, loc);
-  if (!rebuiltPointer)
+  if (!rebuiltPointer || failed(markPointerDescriptorRebuild(
+                             rebuiltPointer, *argumentInfo, regionEnv.policy)))
     return failure();
 
   regionEnv.recordDecomposition(oldRegionArgument, *argumentInfo,
@@ -416,16 +502,19 @@ static LogicalResult bindLoopRegionArguments(
 // Example:
 //   oldOperands = [%next_ptr, %sum]
 //   pointerInfo = {
-//     oldIndex = 0, componentIndices = [4, 5], newIndices = [0, 1]
+//     oldIndex = 0, componentIndices = [0, 1, 2, 3],
+//     newIndices = [0, 1, 2, 3]
 //   }
-//   currentRegionArguments = [%current_offset0, %current_offset1, %sum_arg]
+//   currentRegionArguments =
+//       [%current_base, %current_shape, %current_stride, %current_offset,
+//        %sum_arg]
 //
 // A valid `%next_ptr` decomposition produces
-// `[%next_offset0, %next_offset1, %mapped_sum]`. If pointer decomposition or
-// component normalization fails, the output instead uses
-// `[%current_offset0, %current_offset1, %mapped_sum]`. The fallback keeps the
-// temporary scf.yield/scf.condition structurally complete until the enclosing
-// failed loop rewrite erases it.
+// `[%next_base, %next_shape, %next_stride, %next_offset, %mapped_sum]`. If
+// pointer decomposition or component normalization fails, the output instead
+// uses the four current descriptor arguments followed by `%mapped_sum`. The
+// fallback keeps the temporary scf.yield/scf.condition structurally complete
+// until the enclosing failed loop rewrite erases it.
 //
 // The output vector is separate from the LogicalResult intentionally. The
 // function visits every old operand and fills all available fallback positions
@@ -453,9 +542,12 @@ static LogicalResult rewriteLoopTerminatorOperands(
 
     FailureOr<DecomposedValue> nextInfo =
         regionEnv.decomposeValue(oldOperand, builder, loc);
-    if (failed(nextInfo) || failed(castPlannedComponents(
-                                *nextInfo, pointerInfo->componentIndices,
-                                pointerInfo->componentTypes, builder, loc))) {
+    if (failed(nextInfo) ||
+        failed(castPlannedComponents(*nextInfo, pointerInfo->componentIndices,
+                                     pointerInfo->componentTypes, builder,
+                                     loc)) ||
+        failed(regionEnv.policy.normalizeControlFlowValue(
+            *nextInfo, pointerInfo->resultAttributes, builder, loc))) {
       allOperandsValid = false;
       appendFallbackComponents(*pointerInfo);
       continue;
@@ -484,15 +576,17 @@ static LogicalResult rewriteLoopTerminatorOperands(
 //
 // Example:
 //   oldResults = [%old_sum, %old_ptr, %old_flag]
-//   newResults = [%new_sum, %offset0, %offset1, %new_flag]
+//   newResults =
+//       [%new_sum, %base, %shape, %stride, %offset, %new_flag]
 //   pointerInfo = {
-//     oldIndex = 1, componentIndices = [4, 5], newIndices = [1, 2]
+//     oldIndex = 1, componentIndices = [0, 1, 2, 3],
+//     newIndices = [1, 2, 3, 4]
 //   }
-//   oldToNewStart = [0, 1, 3]
+//   oldToNewStart = [0, 1, 5]
 //
 // The function maps `%old_sum -> %new_sum` and `%old_flag -> %new_flag`. It
-// inserts `%offset0` and `%offset1` into the pointer descriptor, rebuilds
-// `%old_ptr`, and records `%old_ptr -> %rebuilt_ptr` plus that decomposition.
+// inserts all four results into the pointer descriptor, rebuilds `%old_ptr`,
+// and records `%old_ptr -> %rebuilt_ptr` plus that decomposition.
 //
 // The caller must set the builder insertion point after the replacement loop,
 // so any rebuilt pointer dominates later operations. On failure this function
@@ -518,12 +612,15 @@ rebuildAndMapLoopResults(ValueRange oldResults, ValueRange newResults,
     FailureOr<DecomposedValue> resultInfo = withReplacedComponents(
         pointerInfo->initInfo, pointerInfo->componentIndices,
         *resultComponentValues);
-    if (failed(resultInfo))
+    if (failed(resultInfo) || failed(env.policy.normalizeControlFlowValue(
+                                  *resultInfo, pointerInfo->resultAttributes,
+                                  builder, oldResult.getLoc())))
       return failure();
 
     Value rebuiltPointer =
         env.policy.recompose(*resultInfo, builder, oldResult.getLoc());
-    if (!rebuiltPointer)
+    if (!rebuiltPointer || failed(markPointerDescriptorRebuild(
+                               rebuiltPointer, *resultInfo, env.policy)))
       return failure();
 
     env.recordDecomposition(oldResult, *resultInfo, rebuiltPointer);
@@ -562,6 +659,9 @@ static LogicalResult materializePointerResult(Operation &originalOp,
 
     Value rebuilt = env.policy.recompose(*info, builder, oldResult.getLoc());
     if (!rebuilt)
+      return failure();
+    if (env.policy.shouldMarkOperationRecomposition(&originalOp) &&
+        failed(markPointerDescriptorRebuild(rebuilt, *info, env.policy)))
       return failure();
     env.recordDecomposition(oldResult, *info, rebuilt);
   }
@@ -620,12 +720,19 @@ static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
 
     FailureOr<DecomposedValue> initInfo =
         env.decomposeValue(forOp.getInitArgs()[idx], builder, forOp.getLoc());
-    if (failed(initInfo) || failed(castPlannedComponents(
-                                *initInfo, slot.componentIndices,
-                                slot.componentTypes, builder, forOp.getLoc())))
+    if (failed(initInfo) ||
+        failed(env.policy.normalizeControlFlowValue(
+            *initInfo, slot.resultAttributes, builder, forOp.getLoc())) ||
+        failed(castPlannedComponents(*initInfo, slot.componentIndices,
+                                     slot.componentTypes, builder,
+                                     forOp.getLoc())))
       return failure();
-    pointerInfos.push_back(LoopPointerInfo{
-        idx, *initInfo, slot.componentIndices, slot.componentTypes, {}});
+    pointerInfos.push_back(LoopPointerInfo{idx,
+                                           *initInfo,
+                                           slot.componentIndices,
+                                           slot.componentTypes,
+                                           slot.resultAttributes,
+                                           {}});
   }
 
   SmallVector<Value> newInitArgs;
@@ -675,6 +782,12 @@ static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
         bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newForOp->setAttrs(forOp->getAttrs());
+  if (analysis->rewritesOwnSignature() &&
+      failed(updatePointerDescriptorBoundaryMarker(
+          newForOp, pointerInfos, oldToNewStart, env.policy))) {
+    newForOp.erase();
+    return failure();
+  }
 
   if (!bodyOk) {
     newForOp.erase();
@@ -718,12 +831,18 @@ static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
     FailureOr<DecomposedValue> initInfo =
         env.decomposeValue(whileOp.getInits()[idx], builder, whileOp.getLoc());
     if (failed(initInfo) ||
+        failed(env.policy.normalizeControlFlowValue(
+            *initInfo, slot.resultAttributes, builder, whileOp.getLoc())) ||
         failed(castPlannedComponents(*initInfo, slot.componentIndices,
                                      slot.componentTypes, builder,
                                      whileOp.getLoc())))
       return failure();
-    pointerInfos.push_back(LoopPointerInfo{
-        idx, *initInfo, slot.componentIndices, slot.componentTypes, {}});
+    pointerInfos.push_back(LoopPointerInfo{idx,
+                                           *initInfo,
+                                           slot.componentIndices,
+                                           slot.componentTypes,
+                                           slot.resultAttributes,
+                                           {}});
   }
 
   // Expand inits and result types in lockstep. oldToNewStart keeps untouched
@@ -797,6 +916,12 @@ static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
         bodyBuilder.create<scf::YieldOp>(yieldOp.getLoc(), newYieldOperands);
       });
   newWhileOp->setAttrs(whileOp->getAttrs());
+  if (analysis->rewritesOwnSignature() &&
+      failed(updatePointerDescriptorBoundaryMarker(
+          newWhileOp, pointerInfos, oldToNewStart, env.policy))) {
+    newWhileOp.erase();
+    return failure();
+  }
 
   if (!bodyOk) {
     newWhileOp.erase();
@@ -836,7 +961,8 @@ static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
         slot.componentIndices.size() != slot.componentTypes.size())
       return failure();
     pointerInfos.push_back(IfPointerInfo{slot.oldIndex, slot.componentIndices,
-                                         slot.componentTypes, std::nullopt});
+                                         slot.componentTypes,
+                                         slot.resultAttributes, std::nullopt});
   }
 
   // Expand only result positions selected by analysis. An if with no pointer
@@ -871,7 +997,10 @@ static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
         if (failed(branchInfo) ||
             failed(castPlannedComponents(*branchInfo, info->componentIndices,
                                          info->componentTypes, branchBuilder,
-                                         oldYield.getLoc())))
+                                         oldYield.getLoc())) ||
+            failed(branchEnv.policy.normalizeControlFlowValue(
+                *branchInfo, info->resultAttributes, branchBuilder,
+                oldYield.getLoc())))
           return failure();
         if (isThen)
           info->thenInfo = *branchInfo;
@@ -939,13 +1068,16 @@ static LogicalResult rewriteIfOp(scf::IfOp ifOp, OpBuilder &builder,
         componentValues.push_back(newIfOp.getResult(newResultIndex++));
       FailureOr<DecomposedValue> resultInfo = withReplacedComponents(
           *info->thenInfo, info->componentIndices, componentValues);
-      if (failed(resultInfo)) {
+      if (failed(resultInfo) || failed(env.policy.normalizeControlFlowValue(
+                                    *resultInfo, info->resultAttributes,
+                                    builder, oldResult.getLoc()))) {
         newIfOp.erase();
         return failure();
       }
       Value rebuilt =
           env.policy.recompose(*resultInfo, builder, oldResult.getLoc());
-      if (!rebuilt) {
+      if (!rebuilt || failed(markPointerDescriptorRebuild(rebuilt, *resultInfo,
+                                                          env.policy))) {
         newIfOp.erase();
         return failure();
       }

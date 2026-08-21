@@ -77,14 +77,46 @@ using namespace triton;
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
 
+static bool shouldMaterializeCustomPointer(Value ptr) {
+  auto result = dyn_cast<OpResult>(ptr);
+  if (!result)
+    return false;
+
+  Operation *defOp = result.getOwner();
+  if (!defOp || !isDistributedTypeCustomOp(defOp))
+    return false;
+
+  auto srcIndices = defOp->getAttrOfType<DenseI32ArrayAttr>(
+      ConverterUtils::customSrcPtrIndexAttrName);
+  if (!srcIndices)
+    return false;
+
+  auto values = srcIndices.asArrayRef();
+  unsigned resultIdx = result.getResultNumber();
+  return resultIdx < values.size() && values[resultIdx] >= 0;
+}
+
+static FailureOr<Value>
+resolveMemoryPointer(Value originalPtr, Value convertedPtr,
+                     ConversionPatternRewriter &rewriter) {
+  llvm::SmallDenseMap<Value, BlockData> known;
+
+  if (shouldMaterializeCustomPointer(originalPtr))
+    return BlockDataParser::materializePointer(originalPtr, rewriter, known);
+
+  if (isa<MemRefType>(convertedPtr.getType()))
+    return convertedPtr;
+
+  return BlockDataParser::materializePointer(originalPtr, rewriter, known);
+}
+
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
   Location loc = op.getLoc();
   insertDebugNop(loc, rewriter);
   llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
-  return success();
+  return BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
 }
 
 LogicalResult LoadConverter::toTensorAndReplace(
@@ -376,15 +408,25 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   auto loc = op.getLoc();
   insertDebugNopForMask(mask, rewriter);
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the load pointer as a memref");
+  ptr = *resolvedPtr;
   // handling scalar
   if (!isa<ShapedType>(op.getResult().getType())) {
-    auto scalarMemref =
+    FailureOr<Value> scalarMemref =
         BlockDataParser::getScalarMemRef(op.getPtr(), ptr, loc, rewriter);
+    if (failed(scalarMemref))
+      return rewriter.notifyMatchFailure(
+          op, "scalar pointer operand has not been converted to a memref");
+
     auto resTy = op.getResult().getType();
     auto idxZero =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
     auto loadedValue = rewriter
-                           .create<memref::LoadOp>(loc, resTy, scalarMemref,
+                           .create<memref::LoadOp>(loc, resTy, *scalarMemref,
                                                    idxZero.getResult())
                            .getResult();
     propagateWasBoolToInt8Attr(op.getOperation(), loadedValue.getDefiningOp(),
@@ -732,9 +774,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto mask = op.getMask();
   auto rmwOp = op.getAtomicRmwOp();
   auto resType = dyn_cast<TensorType>(op.getResult().getType());
-  auto ptrType = dyn_cast<MemRefType>(ptr.getType());
   insertDebugNop(loc, rewriter);
   insertDebugNopForMask(mask, rewriter);
+
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the atomic RMW pointer as a memref");
+  ptr = *resolvedPtr;
+  auto ptrType = dyn_cast<MemRefType>(ptr.getType());
   if (!resType)
     return rewriter.notifyMatchFailure(
         op, "atomicRMWConverter: scalar will be handled by "
@@ -896,6 +945,12 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   auto val = op.getVal();
   auto loc = op.getLoc();
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the atomic CAS pointer as a memref");
+  ptr = *resolvedPtr;
   auto resType = dyn_cast<TensorType>(op.getResult().getType());
   if (!resType) {
     return rewriter.notifyMatchFailure(
@@ -1340,6 +1395,12 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the store pointer as a memref");
+  ptr = *resolvedPtr;
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {

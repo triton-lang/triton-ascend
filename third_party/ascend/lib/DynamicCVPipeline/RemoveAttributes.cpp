@@ -56,7 +56,8 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{
     kEnableUbRefineOpt, kDepMark,
     kIf,                kArg,
     kWhileArg,          kIterCounter,
-    kCrossBuffer};
+    kCrossBuffer,       kIntraDeps,
+    kForMayNotExec};
 
 void RemoveSsbufAttrPass::runOnOperation() {
   auto module = getOperation();

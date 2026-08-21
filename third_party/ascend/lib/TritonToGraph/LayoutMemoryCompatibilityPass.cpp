@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "TritonToGraph/GraphOptimization.h"
 #include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"
 #include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
@@ -34,14 +35,34 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/Support/Debug.h"
 
+#include <cstddef>
 #include <memory>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 namespace mlir {
 namespace triton {
 namespace cfg {
 namespace {
+
+static void emitAppliedGraphOptimizationRule(GraphOptimizationRuleId rule) {
+  LLVM_DEBUG(llvm::dbgs() << "[" DEBUG_TYPE "] applied graph optimization rule "
+                          << static_cast<unsigned>(rule) << " ("
+                          << getGraphOptimizationRuleName(rule) << ")\n");
+}
+
+static std::size_t countStridedLoadStoreRewrites(ModuleOp moduleOp) {
+  std::size_t count = 0;
+  moduleOp.walk([&](Operation *op) {
+    if (op->hasAttr(
+            StridedLoadStoreRewrite::RewrittenByStridedLoadStoreRewriteTAG))
+      ++count;
+  });
+  return count;
+}
 
 class LayoutMemoryCompatibilityPass final
     : public PassWrapper<LayoutMemoryCompatibilityPass,
@@ -61,19 +82,34 @@ public:
 
   void runOnOperation() override {
     ModuleOp moduleOp = getOperation();
+    bool wasCoalesced = false;
     switch (phase) {
     case LayoutMemoryCompatibilityPhase::BeforeDiagonal:
       // Preserve the original module-wide, no-op-on-bailout semantics.  This
       // phase intentionally has no cleanup pass.
+      wasCoalesced = moduleOp->hasAttr("hacc.coalesce_factor");
       StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+      if (!wasCoalesced && moduleOp->hasAttr("hacc.coalesce_factor"))
+        emitAppliedGraphOptimizationRule(
+            GraphOptimizationRuleId::StridedAxisCoalescing);
       return;
     case LayoutMemoryCompatibilityPhase::AfterDiagonal:
       // Keep the legacy order.  Chunk sees Axis's module attr and consumes the
       // static-grid hint before the greedy StridedLoadStore patterns run.
+      wasCoalesced = moduleOp->hasAttr("hacc.coalesce_factor");
       ChunkCoalescing::rewriteChunkCoalesce(moduleOp);
+      if (!wasCoalesced && moduleOp->hasAttr("hacc.coalesce_factor"))
+        emitAppliedGraphOptimizationRule(
+            GraphOptimizationRuleId::ChunkCoalescing);
       break;
     }
 
+    // Count rewrite tags only while this DEBUG_TYPE is active. The tag lets us
+    // emit one pass-level match line even when several load/store ops rewrite.
+    bool emitStridedLoadStoreMatch = false;
+    LLVM_DEBUG(emitStridedLoadStoreMatch = true;);
+    const std::size_t stridedLoadStoreRewritesBefore =
+        emitStridedLoadStoreMatch ? countStridedLoadStoreRewrites(moduleOp) : 0;
     RewritePatternSet patterns(&getContext());
     patterns.add<StridedLoadStoreRewrite::LoadConverter,
                  StridedLoadStoreRewrite::StoreConverter>(
@@ -82,6 +118,10 @@ public:
       signalPassFailure();
       return;
     }
+    if (emitStridedLoadStoreMatch && countStridedLoadStoreRewrites(moduleOp) >
+                                         stridedLoadStoreRewritesBefore)
+      emitAppliedGraphOptimizationRule(
+          GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
     // CSE/Canonicalizer deliberately remain in TritonToLinalg at the original
     // call site.  PtrAnalysis may create helper IR even on an SLS no-op, and

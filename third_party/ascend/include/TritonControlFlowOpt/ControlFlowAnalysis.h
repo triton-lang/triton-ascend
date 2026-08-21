@@ -75,21 +75,25 @@ struct AnalyzedComponent {
 struct AnalyzedValue {
   Type originalType;
   SmallVector<AnalyzedComponent> components;
-  SmallVector<Value> invariants;
   SmallVector<Attribute> attributes;
 };
 
-/// Signature decision for one original result/iter-argument position.
+/// Signature decision for one original result/iter-argument position. The slot
+/// itself means the original value is removed from the SCF signature;
+/// componentIndices may be empty when every component is invariant and no
+/// replacement operand/result is required.
 struct ControlFlowSlotAnalysis {
   unsigned oldIndex = 0;
   SmallVector<ComponentTransferKind> componentKinds;
   SmallVector<unsigned> componentIndices;
   SmallVector<Type> componentTypes;
+  /// Policy metadata after all incoming paths have been joined.
+  SmallVector<Attribute> resultAttributes;
 };
 
 /// Cached decision for one structured control-flow operation.
 struct ControlFlowOpAnalysis {
-  SmallVector<ControlFlowSlotAnalysis> slots;
+  SmallVector<ControlFlowSlotAnalysis, 0> slots;
   bool hasNestedRewrite = false;
 
   bool rewritesOwnSignature() const { return !slots.empty(); }
@@ -146,6 +150,16 @@ public:
 
   /// Selects the component type used in the replacement SCF signature.
   virtual FailureOr<Type> joinComponentTypes(Type lhs, Type rhs) const = 0;
+
+  /// Joins policy-owned metadata across one control-flow boundary. The
+  /// default requires exact equality, which preserves BlockPtr behavior.
+  virtual FailureOr<SmallVector<Attribute>>
+  mergeControlFlowAttributes(const AnalyzedValue &lhs,
+                             const AnalyzedValue &rhs) const {
+    if (lhs.attributes != rhs.attributes)
+      return failure();
+    return lhs.attributes;
+  }
 };
 
 /// Stage-scoped transient cache used while computing a rewrite plan. One

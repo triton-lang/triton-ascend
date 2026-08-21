@@ -697,12 +697,8 @@ def make_launcher(constants, signature, metadata):
     ordered_sync_block_lock_count = sync_block_lock_layout & 0xFFFFFFFF
     unordered_sync_block_lock_count = (sync_block_lock_layout >> 32) & 0xFFFFFFFF
     has_sync_block_lock = (ordered_sync_block_lock_count + unordered_sync_block_lock_count) > 0
-    unordered_sync_block_participant_factor = (
-        2 if unordered_sync_block_lock_count > 0
-        and metadata.mix_mode == "mix"
-        and getattr(metadata, "auto_tile_and_bind_subblock", False)
-        else 1
-    )
+    unordered_sync_block_participant_factor = (2 if unordered_sync_block_lock_count > 0 and metadata.mix_mode == "mix"
+                                               and getattr(metadata, "auto_tile_and_bind_subblock", False) else 1)
     sync_block_lock_layout_stmt = f"""
     constexpr uint64_t syncBlockLockCacheLineI64 = 8;
     constexpr uint64_t syncBlockLockOrderedCount = {ordered_sync_block_lock_count};

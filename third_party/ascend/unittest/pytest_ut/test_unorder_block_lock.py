@@ -61,7 +61,7 @@ def test_unorder_block_lock(shape, dtype):
 
     blocks = list(value.size())
     strides = list(value.stride())
-    grid = (shape[0],)
+    grid = (shape[0], )
     store_mask_split_dim0[grid](
         value,
         actual,
@@ -120,12 +120,7 @@ def simd_unorder_block_lock_a5(
     k_offsets = tl.arange(0, BLOCK_K)
     n_offsets = n_tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
     x_ptrs = x_ptr + row_indices[:, None] * stride_xm + k_offsets[None, :] * stride_xk
-    weight_ptrs = (
-        weight_ptr
-        + group_id * stride_wg
-        + k_offsets[:, None] * stride_wk
-        + n_offsets[None, :] * stride_wn
-    )
+    weight_ptrs = (weight_ptr + group_id * stride_wg + k_offsets[:, None] * stride_wk + n_offsets[None, :] * stride_wn)
     x = tl.load(x_ptrs, mask=row_mask[:, None], other=0.0)
     weight = tl.load(weight_ptrs)
     # Dot adds Cube work and makes this a CV mixed kernel.
@@ -162,12 +157,10 @@ def test_cv_simd_unorder_block_lock_a5():
 
     x = torch.randn((m, k), device=device, dtype=dtype)
     weight = torch.randn((groups, k, n), device=device, dtype=dtype)
-    group_ids = torch.cat(
-        (
-            torch.zeros(48, device=device, dtype=torch.int64),
-            torch.ones(48, device=device, dtype=torch.int64),
-        )
-    )
+    group_ids = torch.cat((
+        torch.zeros(48, device=device, dtype=torch.int64),
+        torch.ones(48, device=device, dtype=torch.int64),
+    ))
     row_indices = torch.arange(m, device=device, dtype=torch.int64)
     # The last two programs intentionally skip the guarded region.
     tile_starts = torch.tensor([0, 48, m, m], device=device, dtype=torch.int64)
@@ -258,7 +251,7 @@ def test_simd_three_unorder_block_locks_a3_a5(shape, dtype):
 
     blocks = list(value.size())
     strides = list(value.stride())
-    simd_three_unorder_block_locks[(shape[0],)](
+    simd_three_unorder_block_locks[(shape[0], )](
         value,
         *actuals,
         *masks,
@@ -271,6 +264,8 @@ def test_simd_three_unorder_block_locks_a3_a5(shape, dtype):
     for actual, original, mask, stored_value in zip(actuals, originals, masks, stored_values):
         expected = torch.where(mask, stored_value, original)
         torch.testing.assert_close(actual.cpu(), expected.cpu())
+
+
 @triton.jit
 def simd_unorder_block_lock_a3(
     x_ptr,
@@ -308,12 +303,7 @@ def simd_unorder_block_lock_a3(
     k_offsets = tl.arange(0, BLOCK_K)
     n_offsets = n_tile_id * BLOCK_N + tl.arange(0, BLOCK_N)
     x_ptrs = x_ptr + row_indices[:, None] * stride_xm + k_offsets[None, :] * stride_xk
-    weight_ptrs = (
-        weight_ptr
-        + group_id * stride_wg
-        + k_offsets[:, None] * stride_wk
-        + n_offsets[None, :] * stride_wn
-    )
+    weight_ptrs = (weight_ptr + group_id * stride_wg + k_offsets[:, None] * stride_wk + n_offsets[None, :] * stride_wn)
     x = tl.load(x_ptrs, mask=row_mask[:, None], other=0.0)
     weight = tl.load(weight_ptrs)
     acc = tl.dot(x, weight, out_dtype=tl.float32)
@@ -334,12 +324,10 @@ def test_cv_simd_unorder_block_lock_a3():
 
     x = torch.randn((m, k), device=device, dtype=dtype)
     weight = torch.randn((groups, k, n), device=device, dtype=dtype)
-    group_ids = torch.cat(
-        (
-            torch.zeros(48, device=device, dtype=torch.int64),
-            torch.ones(48, device=device, dtype=torch.int64),
-        )
-    )
+    group_ids = torch.cat((
+        torch.zeros(48, device=device, dtype=torch.int64),
+        torch.ones(48, device=device, dtype=torch.int64),
+    ))
     row_indices = torch.arange(m, device=device, dtype=torch.int64)
     tile_starts = torch.tensor([0, 48, m, m], device=device, dtype=torch.int64)
     actual = torch.full((m, n), float("nan"), device=device, dtype=dtype)

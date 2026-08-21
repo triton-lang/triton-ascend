@@ -42,9 +42,6 @@ std::unique_ptr<OperationPass<ModuleOp>> createUnifyStoreBlockPass();
 void registerUnifyStoreBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
 
-std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
-void registerSplitIfByBlockIdPass();
-
 } // namespace triton
 } // namespace mlir
 

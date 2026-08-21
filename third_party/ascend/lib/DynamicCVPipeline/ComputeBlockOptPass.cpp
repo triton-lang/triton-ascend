@@ -20,13 +20,9 @@
  * THE SOFTWARE.
  */
 
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Pass/PassRegistry.h"
-
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
-
 #include "DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
@@ -66,7 +62,6 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createFixpipeOptPass());
-  pm.addPass(createSplitIfByBlockIdPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
@@ -95,7 +90,6 @@ void registerComputeBlockOptPasses() {
   registerPass(createMergeCubeForBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
-  registerPass(createSplitIfByBlockIdPass);
 }
 
 } // namespace triton

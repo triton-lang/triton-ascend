@@ -48,7 +48,7 @@ public:
                         llvm::DenseMap<Operation *, int> &indegree);
 
   llvm::LogicalResult markOpBlockId(Operation *op);
-  llvm::LogicalResult markOpsWithNewId(llvm::ArrayRef<Operation *> ops);
+  llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
   void updateBlockId(Operation *op, int blockId);
 
   bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;

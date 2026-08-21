@@ -58,7 +58,7 @@ using namespace mlir;
 using namespace triton;
 using namespace CVPipeline;
 
-static constexpr const char *DEBUG_TYPE = "PlanCubeBlock";
+static constexpr const char *DEBUG_TYPE = "plan-cube-block";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
@@ -537,10 +537,21 @@ static bool checkValidInputSeed(Operation *op) {
              tensor::EmptyOp, linalg::BroadcastOp, tensor::ExpandShapeOp,
              arith::ExtFOp>(op);
 }
-static bool checkValidUserSeed(Operation *op) {
+static bool checkValidUserSeed(Operation *op, linalg::MatmulOp &preDot) {
   // keep unify to OpClassifer
-  return isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp,
-             ViewLikeOpInterface, tensor::ExtractSliceOp>(op);
+  if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp,
+          ViewLikeOpInterface, tensor::ExtractSliceOp>(op)) {
+    return true;
+  }
+  // add matmul link by L0C
+  if (auto nextDot = dyn_cast<linalg::MatmulOp>(op)) {
+    if (nextDot.getDpsInits()[0] == *preDot->getResults().begin()) {
+      preDot = nextDot;
+      return true;
+    }
+    return false;
+  }
+  return false;
 }
 SmallVector<Operation *>
 PlanCubeBlockPass::matchSeed(Operation *dotOp, ComputeBlockIdManager &bm,
@@ -561,13 +572,14 @@ PlanCubeBlockPass::matchSeed(Operation *dotOp, ComputeBlockIdManager &bm,
   }
   // match outputs
   Operation *nowOp = dotOp;
+  linalg::MatmulOp linkMatmul = llvm::dyn_cast<linalg::MatmulOp>(dotOp);
   while (nowOp->hasOneUse()) {
     auto user = *nowOp->getUsers().begin();
     if (user->getBlock() != dotOp->getBlock() || !isCubeOp(user) ||
         bm.getBlockIdByOp(user) != -1) {
       break;
     }
-    if (checkValidUserSeed(user)) {
+    if (checkValidUserSeed(user, linkMatmul)) {
       nowOp = user;
       ret.push_back(user);
     } else {

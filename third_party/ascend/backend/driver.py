@@ -204,6 +204,26 @@ class NPULauncher(object):
             cache_manager = get_cache_manager(args[5]['hash'])
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
+
+        # Fix device context for multi-NPU: jit.py captures device/stream before
+        # kernel args are available, so on multi-NPU systems the kernel may
+        # launch on the wrong device. Detect the target device from tensor args
+        # and correct both device and stream here.
+
+        args = list(args)
+        target_device = None
+        for arg in args:
+            if hasattr(arg, 'device') and str(arg.device).startswith('npu'):
+                target_device = arg.device.index
+                break
+
+        if target_device is not None:
+            current_device = get_backend_func("get_current_device")
+            if target_device != current_device:
+                get_backend_func("set_current_device", target_device)
+                new_stream = get_backend_func("get_current_stream", target_device)
+                args[3] = new_stream
+
         if self.enable_msprof_register_tensor:
             tensor_params_shape = get_backend_func("get_tensor_params_shape", *args)
             # args[5] must be the packed metadata.

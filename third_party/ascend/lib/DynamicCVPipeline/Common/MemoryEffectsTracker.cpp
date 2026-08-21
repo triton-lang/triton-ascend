@@ -37,6 +37,8 @@
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -52,6 +54,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/MathExtras.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "memory-effects-tracker";
@@ -135,6 +138,63 @@ void collectLeafOps(Operation *op, SmallVectorImpl<Operation *> &leafOps) {
       }
     }
   }
+}
+
+using AddressRange = std::pair<int64_t, int64_t>;
+
+static std::optional<int64_t> getArithConstantInt(Value value) {
+  auto constantOp = value.getDefiningOp<arith::ConstantOp>();
+  if (!constantOp) {
+    return std::nullopt;
+  }
+  auto integerAttr = dyn_cast<IntegerAttr>(constantOp.getValue());
+  if (!integerAttr) {
+    return std::nullopt;
+  }
+  return integerAttr.getInt();
+}
+
+static std::optional<SmallVector<AddressRange>>
+getConstantAddressRanges(hivm::PointerCastOp pointerCast) {
+  auto memrefType = cast<MemRefType>(pointerCast.getResult().getType());
+  int64_t sizeInBits = memrefType.getElementTypeBitWidth();
+
+  // Dynamic shape should be predicted by the input constant value.
+  auto dynamicSize = pointerCast.getDynamicSizes().begin();
+  for (int64_t dim : memrefType.getShape()) {
+    int64_t dimSize = dim;
+    if (ShapedType::isDynamic(dim)) {
+      auto constantSize = getArithConstantInt(*dynamicSize++);
+      if (!constantSize) {
+        return std::nullopt;
+      }
+      dimSize = *constantSize;
+    }
+    int64_t newSizeInBits = -1;
+    if (llvm::MulOverflow(sizeInBits, dimSize, newSizeInBits)) {
+      return std::nullopt;
+    }
+    sizeInBits = newSizeInBits;
+  }
+
+  SmallVector<AddressRange> ranges;
+  ranges.reserve(pointerCast.getAddrs().size());
+  constexpr int64_t bitsPerByte = 8;
+  int64_t sizeInBytes = sizeInBits / bitsPerByte +
+                        (sizeInBits % bitsPerByte != 0);
+  for (Value address : pointerCast.getAddrs()) {
+    auto constantAddress = getArithConstantInt(address);
+    if (!constantAddress) {
+      return std::nullopt;
+    }
+    int64_t begin = *constantAddress;
+    int64_t end;
+    if (llvm::AddOverflow(begin, sizeInBytes, end)) {
+      return std::nullopt;
+    }
+    ranges.emplace_back(begin, end);
+  }
+  return ranges;
 }
 
 } // namespace
@@ -345,12 +405,14 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
   return filtered;
 }
 
+// Entry of checking whether lhs's memory overlaps with rhs's memory.
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
   auto lhsSource = getViewSource(lhs);
   auto rhsSource = getViewSource(rhs);
   if (!rhsSource) {
     rhsSource = rhs;
   }
+  // Case 1: Entry args are considered with unique memory space.
   auto isFuncEntryArg = [](const Value &val) -> bool {
     auto arg = llvm::dyn_cast<BlockArgument>(val);
     if (!arg) {
@@ -363,6 +425,33 @@ AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
   if (isFuncEntryArg(getViewSource(lhs)) &&
       isFuncEntryArg(getViewSource(rhs))) {
     return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
+  }
+
+  // Case 2: Pointer casts with compile-time constant ranges are checked by
+  // their addresses. Unknown addresses/sizes conservatively may alias.
+  auto lhsPointerCast = lhs.getDefiningOp<hivm::PointerCastOp>();
+  auto rhsPointerCast = rhs.getDefiningOp<hivm::PointerCastOp>();
+  if (lhsPointerCast && rhsPointerCast) {
+    auto lhsType = cast<MemRefType>(lhsPointerCast.getResult().getType());
+    auto rhsType = cast<MemRefType>(rhsPointerCast.getResult().getType());
+    if (lhsType.getMemorySpace() != rhsType.getMemorySpace()) {
+      return AliasResult::NoAlias;
+    }
+
+    auto lhsRanges = getConstantAddressRanges(lhsPointerCast);
+    auto rhsRanges = getConstantAddressRanges(rhsPointerCast);
+    if (!lhsRanges || !rhsRanges) {
+      return AliasResult::MayAlias;
+    }
+
+    for (const auto &[lhsBegin, lhsEnd] : *lhsRanges) {
+      for (const auto &[rhsBegin, rhsEnd] : *rhsRanges) {
+        if (lhsBegin < rhsEnd && rhsBegin < lhsEnd) {
+          return AliasResult::MustAlias;
+        }
+      }
+    }
+    return AliasResult::NoAlias;
   }
   return aa.alias(lhsSource, rhsSource);
 }

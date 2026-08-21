@@ -9,7 +9,7 @@ module {
   // CHECK: %[[ALLOC:[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[B_ID:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: scf.for
   // CHECK:   %[[SUBVIEW:[A-Za-z0-9_]+]] = memref.subview %[[ALLOC]]
-  // CHECK:   memref.copy %{{.*}}, %[[SUBVIEW]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK:   memref.copy %{{.*}}, %[[SUBVIEW]] {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: %[[LHS:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"}
   func.func @extracted_load_store_stays_vector(
@@ -67,7 +67,7 @@ module {
   // CHECK-LABEL: func.func @vector_control_flow_inheritance(
   // CHECK: %[[ALLOC:[A-Za-z0-9_]+]] = memref.alloc() {ssbuffer.block_id = [[B_ID:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: scf.if
-  // CHECK:   linalg.fill {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK:   linalg.fill {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
   // CHECK: memref.copy %[[ALLOC]], %{{.*}} {ssbuffer.block_id = [[B_ID]] : i32, ssbuffer.core_type = "VECTOR"}
   func.func @vector_control_flow_inheritance(%cond: i1, %arg0: memref<64x64xf32>) {
     %cst = arith.constant 0.0 : f32

@@ -538,22 +538,24 @@ void PlanVectorBlockPass::runOnOperation() {
   }
 
   // 2. search blocks in topo order and assign block id for each block
-  auto result = moduleOp.walk([&](Block *block) -> WalkResult {
-    if (bm.shouldInheritFromParent(block, CoreType::VECTOR_ONLY)) {
-      if (llvm::failed(bm.inheritFromParent(block))) {
-        block->getParentOp()->emitError()
-            << "[" << DEBUG_TYPE
-            << "] Sub-blocks failed to inherit block id from parent op";
-        return WalkResult::interrupt();
-      }
-      return WalkResult::advance();
-    }
-    if (llvm::failed(
-            planVectorBlockId(block, memDepGraph, bm, isUBRefineOptEnabled))) {
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
+  auto result =
+      moduleOp.walk<WalkOrder::PreOrder>([&](Block *block) -> WalkResult {
+        if (bm.shouldInheritFromParent(block, CoreType::VECTOR_ONLY)) {
+          LOG_DEBUG("Inherit from parentOp: " << block->getParentOp() << "\n");
+          if (llvm::failed(bm.inheritFromParent(block))) {
+            block->getParentOp()->emitError()
+                << "[" << DEBUG_TYPE
+                << "] Sub-blocks failed to inherit block id from parent op";
+            return WalkResult::interrupt();
+          }
+          return WalkResult::advance();
+        }
+        if (llvm::failed(planVectorBlockId(block, memDepGraph, bm,
+                                           isUBRefineOptEnabled))) {
+          return WalkResult::interrupt();
+        }
+        return WalkResult::advance();
+      });
   if (result.wasInterrupted()) {
     LOG_DEBUG("Failed to plan vector block id for block\n");
     CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);

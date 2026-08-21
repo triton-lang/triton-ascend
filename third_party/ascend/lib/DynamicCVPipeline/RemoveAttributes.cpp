@@ -68,7 +68,6 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{kBlockId,
                                                       kWhileArg,
                                                       kIterCounter,
                                                       kCrossBuffer,
-                                                      kIntraDeps,
                                                       kForMayNotExec};
 
 void RemoveSsbufAttrPass::runOnOperation() {

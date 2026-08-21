@@ -427,6 +427,7 @@ def generate_npu_header_src():
 #include <assert.h>
 #include <stdbool.h>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <memory>
 #include <sys/syscall.h>
@@ -496,6 +497,159 @@ def wrap_handle_tensordesc(launcher, signature):
     return inner
 
 
+_CPP_DEVICE_POINTER = r"""
+typedef struct _DevicePtrInfo {
+  void* dev_ptr;
+  bool valid;
+} DevicePtrInfo;
+
+static inline DevicePtrInfo getPointer(PyObject* obj, int idx) {
+  DevicePtrInfo ptr_info;
+  ptr_info.dev_ptr = nullptr;
+  ptr_info.valid = true;
+  if (PyLong_Check(obj)) {
+    ptr_info.dev_ptr = reinterpret_cast<void*>(PyLong_AsUnsignedLongLong(obj));
+    return ptr_info;
+  }
+  if (obj == Py_None) {
+    return ptr_info;
+  }
+  // Cache the interned "data_ptr" key once instead of rebuilding a temporary
+  // PyUnicode on every call. Function-local static init is thread-safe in C++11
+  // and the GIL is held here, so the one-time init is safe.
+  static PyObject* data_ptr_str = PyUnicode_InternFromString("data_ptr");
+  // PyObject_CallMethodNoArgs avoids creating a temporary tuple and a temporary
+  // method-name PyUnicode on every call (Python 3.9+).
+  PyObject* ret = PyObject_CallMethodNoArgs(obj, data_ptr_str);
+  if (ret) {
+    if (!PyLong_Check(ret)) {
+      PyErr_SetString(PyExc_TypeError, "data_ptr method of Pointer object must return 64-bit int");
+      ptr_info.valid = false;
+      Py_DECREF(ret);
+      return ptr_info;
+    }
+    ptr_info.dev_ptr = reinterpret_cast<void*>(PyLong_AsUnsignedLongLong(ret));
+    Py_DECREF(ret);
+    if (!ptr_info.dev_ptr) {
+      return ptr_info;
+    }
+    return ptr_info;
+  }
+  PyErr_SetString(PyExc_TypeError, "Pointer argument must be either uint64 or have data_ptr method");
+  ptr_info.valid = false;
+  return ptr_info;
+}
+"""
+
+_CPP_MSPROF_EXTERN = r"""
+extern "C" {
+typedef int (*callback)(unsigned int type, void* data, unsigned int len);
+extern int MsprofReportApi(unsigned int agingFlag, const MsprofApi* api);
+extern unsigned long int MsprofSysCycleTime();
+extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
+static unsigned int __MsprofFlagL0 = 0;
+static unsigned int __MsprofFlagL1 = 0;
+static std::vector<int> tensorKinds;
+
+int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
+  if ((CtrlData == nullptr) || (DataLen == 0U)) {
+    return 1;
+  }
+  if (CtrlType == 1) {
+    MsprofCommandHandle* handle = (MsprofCommandHandle*)(CtrlData);
+    if (handle->type >= 6) {
+      return 1;
+    }
+    if (handle->type == 1) {
+      __MsprofFlagL0 = ((0x00000800ULL & handle->profSwitch) == 0x00000800ULL) ? 1 : 0;
+      __MsprofFlagL1 = ((0x00000002ULL & handle->profSwitch) == 0x00000002ULL) ? 1 : 0;
+    }
+  }
+  return 0;
+}
+}
+"""
+
+_CPP_MSPROF_CALLBACK = r"""
+    MsprofRegisterCallback(8, ProfCtrlHandle);
+"""
+
+_CPP_MSPROF_BEFORE_LAUNCH = r"""
+    unsigned long int beginTime = 0;
+    unsigned long int endTime = 0;
+    unsigned long int opNameHashID = 0;
+    unsigned int threadId = 0;
+    char* _kernelName = const_cast<char*>(kernelName);
+    size_t length = kernelName ? strlen(kernelName) : 0;
+    if (__MsprofFlagL0 || __MsprofFlagL1) {
+      beginTime = MsprofSysCycleTime();
+    }
+"""
+
+_CPP_ALIGN_LAUNCH_OFFSET = r"""
+static inline size_t _align_launch_offset(size_t offset, size_t alignment) {
+  return (offset + alignment - 1) & ~(alignment - 1);
+}
+
+// aclrtGetHardwareSyncAddr returns a per-process per-stream constant address;
+// re-querying it on every kernel launch is pure overhead. Cache the most
+// recently observed (stream, ffts_addr) pair on the calling thread.
+// Thread-safety: launch_call is invoked synchronously from the launcher thread
+// by triton_async_launch (see npu_utils.cpp), so thread_local is safe.
+static thread_local aclrtStream g_last_ffts_stream = nullptr;
+static thread_local void* g_last_ffts_addr = nullptr;
+static inline aclError get_ffts_addr(aclrtStream stream, void** out_addr) {
+  if (stream == g_last_ffts_stream && g_last_ffts_addr) {
+    *out_addr = g_last_ffts_addr;
+    return ACL_SUCCESS;
+  }
+  void* ffts_addr = nullptr;
+  uint32_t ffts_len = 0;
+  aclError ret = aclrtGetHardwareSyncAddr(&ffts_addr);
+  if (ret == ACL_SUCCESS) {
+    g_last_ffts_stream = stream;
+    g_last_ffts_addr = ffts_addr;
+    *out_addr = ffts_addr;
+  }
+  return ret;
+}
+"""
+
+_CPP_GET_TENSOR_SHAPE = r"""
+static std::vector<int64_t> _get_tensor_shape(PyObject* tensor) {
+  std::vector<int64_t> shape;
+  if (!tensor || tensor == Py_None) {
+    return shape;
+  }
+  // Cache the interned "size" key once; avoid temporary PyUnicode/tuple per call.
+  static PyObject* size_str = PyUnicode_InternFromString("size");
+  // PyObject_CallMethodNoArgs avoids building "size" PyUnicode and an empty
+  // tuple on every launch (Python 3.9+).
+  PyObject* size_result = PyObject_CallMethodNoArgs(tensor, size_str);
+  if (!size_result) {
+    // Defensive: profiling-only path; swallow attribute errors so subsequent
+    // PyErr_Occurred() checks in launch() are not poisoned.
+    PyErr_Clear();
+    return shape;
+  }
+  PyObject* seq = PySequence_Fast(size_result, "Expected a sequence from tensor.size()");
+  if (seq) {
+    Py_ssize_t len = PySequence_Fast_GET_SIZE(seq);
+    PyObject** items = PySequence_Fast_ITEMS(seq);
+    for (Py_ssize_t i = 0; i < len; ++i) {
+      PyObject* dim = items[i];
+      if (PyLong_Check(dim)) {
+        shape.push_back(PyLong_AsLong(dim));
+      }
+    }
+  }
+  Py_DECREF(seq);
+  Py_DECREF(size_result);
+  return shape;
+}
+"""
+
+
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def make_launcher(constants, signature, metadata):
     import os
@@ -519,17 +673,17 @@ def make_launcher(constants, signature, metadata):
          lockOffset += syncBlockLockStrideI64) {{
       lockInitData[lockOffset] = syncBlockLockParticipantNum;
     }}
-    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize,
+    ret = aclrtMemcpy(syncBlockLock_ptr, syncBlockLockSize,
                    reinterpret_cast<void *>(lockInitData.data()),
-                   syncBlockLockSize, RT_MEMCPY_HOST_TO_DEVICE);"""
+                   syncBlockLockSize, ACL_MEMCPY_HOST_TO_DEVICE);"""
     elif lock_init_value == 0:
-        lock_init_stmt = ("ret = rtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
+        lock_init_stmt = ("ret = aclrtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
                           "syncBlockLockSize, stream);")
     else:
         lock_init_stmt = (f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
-                          "    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
+                          "    ret = aclrtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
                           "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-                          "RT_MEMCPY_HOST_TO_DEVICE);")
+                          "ACL_MEMCPY_HOST_TO_DEVICE);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95
@@ -612,6 +766,36 @@ def make_launcher(constants, signature, metadata):
             "uint64_t": "K",
         }[ty_to_cpp(ty)]
 
+    def _format_to_fastcall_stmt(ty, var, idx):
+        """Generate C statement to parse argument at index idx from METH_FASTCALL args array."""
+        fmt = format_of(ty)
+        if fmt == "O":
+            return f"{var} = args[{idx}];"
+        elif fmt == "i":
+            return f"{var} = (int)PyLong_AsLong(args[{idx}]);"
+        elif fmt == "L":
+            return f"{var} = (int64_t)PyLong_AsLongLong(args[{idx}]);"
+        elif fmt == "K":
+            return f"{var} = (uint64_t)PyLong_AsUnsignedLongLong(args[{idx}]);"
+        elif fmt == "I":
+            return f"{var} = (uint32_t)PyLong_AsUnsignedLong(args[{idx}]);"
+        elif fmt == "H":
+            return f"{var} = (uint16_t)PyLong_AsUnsignedLong(args[{idx}]);"
+        elif fmt == "B":
+            return f"{var} = (uint8_t)PyLong_AsUnsignedLong(args[{idx}]);"
+        elif fmt == "h":
+            return f"{var} = (int16_t)PyLong_AsLong(args[{idx}]);"
+        elif fmt == "b":
+            return f"{var} = (int8_t)PyLong_AsLong(args[{idx}]);"
+        elif fmt == "l":
+            return f"{var} = (long)PyLong_AsLong(args[{idx}]);"
+        elif fmt == "f":
+            return f"{var} = (float)PyFloat_AsDouble(args[{idx}]);"
+        elif fmt == "d":
+            return f"{var} = PyFloat_AsDouble(args[{idx}]);"
+        else:
+            raise ValueError(f"Unsupported format: {fmt} for type {ty}")
+
     def _format_of_msprof_task_type_ratio(bs_task_type, mix_mode):
         # Default fallback based on mix_mode
         default_task_type = "MSPROF_GE_TASK_TYPE_AIV" if mix_mode == "aiv" else "MSPROF_GE_TASK_TYPE_AI_CORE"
@@ -652,6 +836,12 @@ def make_launcher(constants, signature, metadata):
         _flatten_signature(sig, flat_signature)
     signature = {i: s for i, s in enumerate(flat_signature)}
     args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
+    # Total expected argument count for METH_FASTCALL arity check.
+    total_nargs = _BASE_ARGS_FORMAT_LEN + len(signature)
+    # Generate manual parsing statements for signature args (indices 9..) used by
+    # the METH_FASTCALL fast path in launch().
+    fastcall_sig_parse_stmts = '\n  '.join(
+        _format_to_fastcall_stmt(ty, f"_arg{i}", _BASE_ARGS_FORMAT_LEN + i) for i, ty in signature.items())
     # Record the end of regular arguments;
     # subsequent arguments are architecture-specific descriptors.
     arg_decls = ', '.join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items() if ty != "constexpr")
@@ -665,7 +855,7 @@ def make_launcher(constants, signature, metadata):
     # generate glue code
     newline = '\n  '
     ptr_decls = [
-        f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return NULL;"
+        f"DevicePtrInfo ptr_info{i} = getPointer(_arg{i}, {i}); if (!ptr_info{i}.valid) return nullptr;"
         for i, ty in signature.items()
         if ty[0] == "*"
     ]
@@ -687,7 +877,7 @@ def make_launcher(constants, signature, metadata):
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
     is_mix_task_type = "true" if ("MIX" in task_type) else "false"
-    LINE_CHANGE_CHAR = chr(10)  # it is \n
+    LINE_CHANGE_CHAR = '\n'
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
@@ -696,13 +886,7 @@ def make_launcher(constants, signature, metadata):
         exported_scratch_guard = (
             'fprintf(stderr, "Error: triton_launch_kernel does not support nonzero global scratch\\n");\n'
             '  return;')
-    launch_signature_items = [(i, ty) for i, ty in signature.items() if ty != "constexpr"]
-    launch_arg_count = len(launch_signature_items)
-    launch_arg_ptrs = ', '.join(f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items)
-    launch_arg_sizes = ', '.join(f'sizeof({ty_to_cpp(ty)})' for i, ty in launch_signature_items)
-
-    npu_utils_inst = NPUUtils()
-    npu_utils_mod = getattr(npu_utils_inst, "npu_utils_mod", None)
+    npu_utils_mod = getattr(npu_utils, "npu_utils_mod", None)
     npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
     # The generated launcher source is part of its cache key. Preserve only the
     # deterministic cache-key directory so the launcher can be reused after the
@@ -788,96 +972,10 @@ static void release_npu_tensor_handle(void* handle) {{
     else:
         coalesce_grid_div = ""
 
-    cpp_device_pointer = """
-typedef struct _DevicePtrInfo {
-  void *dev_ptr;
-  bool valid;
-} DevicePtrInfo;
-
-static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
-  DevicePtrInfo ptr_info;
-  ptr_info.dev_ptr = 0;
-  ptr_info.valid = true;
-  if (PyLong_Check(obj)) {
-    ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(obj));
-    return ptr_info;
-  }
-  if (obj == Py_None) {
-    // valid nullptr
-    return ptr_info;
-  }
-  // Cache the interned "data_ptr" key once instead of rebuilding a temporary
-  // PyUnicode on every call. Function-local static init is thread-safe in C++11
-  // and the GIL is held here, so the one-time init is safe.
-  static PyObject *data_ptr_str = PyUnicode_InternFromString("data_ptr");
-  PyObject *ptr = PyObject_GetAttr(obj, data_ptr_str);
-  if(ptr){
-    PyObject *empty_tuple = PyTuple_New(0);
-    PyObject *ret = PyObject_Call(ptr, empty_tuple, NULL);
-    Py_DECREF(empty_tuple);
-    Py_DECREF(ptr);
-    if (!PyLong_Check(ret)) {
-      PyErr_SetString(PyExc_TypeError, "data_ptr method of Pointer object must return 64-bit int");
-      ptr_info.valid = false;
-      return ptr_info;
-    }
-    ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
-    if(!ptr_info.dev_ptr)
-      return ptr_info;
-    Py_DECREF(ret);
-    return ptr_info;
-  }
-  PyErr_SetString(PyExc_TypeError, "Pointer argument must be either uint64 or have data_ptr method");
-  ptr_info.valid = false;
-  return ptr_info;
-}
-"""
-
-    cpp_msprof_extern = """
-extern "C" {
-  typedef int (* callback)(unsigned int type, void* data, unsigned int len);
-  extern int MsprofReportApi(unsigned int  agingFlag, const MsprofApi *api);
-  extern unsigned long int  MsprofSysCycleTime();
-  extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
-  static unsigned int __MsprofFlagL0  = 0;
-  static unsigned int __MsprofFlagL1  = 0;
-  static std::vector<int> tensorKinds;
-
-  int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
-    if ((CtrlData == nullptr) || (DataLen == 0U)) {
-      return 1;
-    }
-
-    if (CtrlType == 1) {
-      MsprofCommandHandle* handle = (MsprofCommandHandle *)(CtrlData);
-      if (handle->type >= 6)  // 6 is not used here
-        return 1;
-      if (handle->type == 1) {  // init - 0  , start - 1
-        __MsprofFlagL0 = ((0x00000800ULL & handle->profSwitch) == 0x00000800ULL) ? 1 : 0;
-        __MsprofFlagL1 = ((0x00000002ULL & handle->profSwitch) == 0x00000002ULL) ? 1 : 0;
-      }
-    }
-    return 0;
-  }
-}
-"""
-
-    cpp_msprof_callback = """
-    MsprofRegisterCallback(8, ProfCtrlHandle);      // 8 - CCE defined in msprof headerfile slog.h
-"""
-
-    cpp_msprof_call_before_launch = """
-    unsigned long int beginTime = 0;
-    unsigned long int endTime = 0;
-    unsigned long int opNameHashID = 0;
-    unsigned int threadId = 0;
-    char* _kernelName = const_cast<char*>(name.c_str());
-    size_t length = name.length();
-    if (__MsprofFlagL0 || __MsprofFlagL1)
-    {
-      beginTime = MsprofSysCycleTime();
-    }
-"""
+    cpp_device_pointer = _CPP_DEVICE_POINTER
+    cpp_msprof_extern = _CPP_MSPROF_EXTERN
+    cpp_msprof_callback = _CPP_MSPROF_CALLBACK
+    cpp_msprof_call_before_launch = _CPP_MSPROF_BEFORE_LAUNCH
 
     cpp_msprof_call_after_launch = f"""
     if (__MsprofFlagL0 || __MsprofFlagL1)
@@ -980,33 +1078,91 @@ extern "C" {
     }}
 """
 
-    cpp_kernel_launch = f"""
-    ret = aclrtLaunchKernelWithHostArgs(func, blockNum, stream, nullptr, static_cast<void*>(launch_args.data()), launch_args.size(), nullptr, 0);
+    def _make_kernel_launch(args_ptr, args_size, indent="    "):
+        cfg = "&cfgCfgInfo" if (compile_on_910_95 and enable_simt) else "nullptr"
+        cfg_setup = ""
+        if compile_on_910_95 and enable_simt:
+            cfg_setup = f"""{indent}aclrtLaunchKernelAttr attrInfo = {{}};
+{indent}attrInfo.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
+{indent}aclrtLaunchKernelAttrValue value = {{}};
+{indent}value.localMemorySize = {metadata.shared_mem_dynamic_size};
+{indent}attrInfo.value = value;
+{indent}aclrtLaunchKernelCfg cfgCfgInfo = {{}};
+{indent}cfgCfgInfo.attrs = &attrInfo;
+{indent}cfgCfgInfo.numAttrs = 1;
 """
-    cpp_kernel_launch_local = f"""
-        ret = aclrtLaunchKernelWithHostArgs(func, blockNum, stream, nullptr, &args, sizeof(args), nullptr, 0);
-    """
-    if compile_on_910_95 and enable_simt:
-        cpp_kernel_args = f"""
-        aclrtLaunchKernelAttr attrInfo = {{}};
-        attrInfo.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
-        aclrtLaunchKernelAttrValue value = {{}};
-        value.localMemorySize = {metadata.shared_mem_dynamic_size};
-        attrInfo.value = value;
-        aclrtLaunchKernelCfg cfgCfgInfo = {{}};
-        cfgCfgInfo.attrs = &attrInfo;
-        cfgCfgInfo.numAttrs = 1;
-    """
-        cpp_kernel_launch = f"""
-        {cpp_kernel_args}
-        ret = aclrtLaunchKernelWithHostArgs(func, blockNum, stream, &cfgCfgInfo,  static_cast<void*>(launch_args.data()), launch_args.size() , nullptr, 0);
-"""
-        cpp_kernel_launch_local = f"""
-        {cpp_kernel_args}
-        ret = aclrtLaunchKernelWithHostArgs(func, blockNum, stream, &cfgCfgInfo,  &args, sizeof(args) , nullptr, 0);
+        return f"""{cfg_setup}{indent}ret = aclrtLaunchKernelWithHostArgs(func, blockNum, stream, {cfg}, {args_ptr}, {args_size}, nullptr, 0);
 """
 
+    cpp_kernel_launch = _make_kernel_launch("static_cast<void*>(launch_args.data())", "launch_args.size()")
+    cpp_kernel_launch_local = _make_kernel_launch("&args", "sizeof(args)", indent="        ")
+
     npu_headers = generate_npu_header_src()
+
+    _launch_preamble = f"""
+  void* workspace_addr_ptr = nullptr;
+  void* workspace_handle = nullptr;
+  {coalesce_grid_div}
+  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  {get_backend_func("pre_launch", True)}
+  {f'''
+  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
+  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
+  ''' if workspace_size > 0 else ''}"""
+
+    _launch_lambda_pre = f"""  {'std::function<aclError()> launch_call = [=]() -> aclError' if enable_taskqueue else ''} {{
+    {get_backend_func("pre_launch", False)}
+    uint32_t blockNum = gridX * gridY * gridZ;
+
+    #ifdef ENABLE_GRID_WARN_PRINT
+      static bool warned = false;
+      if (!warned && blockNum > (uint32_t){num_physical_blocks}) {{
+        printf("WARNING: Grid %u > physical limit {num_physical_blocks}, performance maybe reduced.\\n",blockNum);
+        warned = true;
+    }}
+    #endif
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
+    // set mixBlockNumRation for nodeBasicBlockDim for msprof report
+    uint32_t mixBlockNumRation = {mix_block_dim_ratio};
+    uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
+
+    {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
+    aclError ret = ACL_SUCCESS;
+    {'void *ffts_addr = nullptr; ret = get_ffts_addr(stream, &ffts_addr);' if target_support_ffts else ''}
+    {'if (ret != ACL_SUCCESS) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != ACL_SUCCESS) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
+    // stub argument for workspace
+    void *syncBlockLock_ptr = nullptr;
+    void *syncBlockLock_handle = nullptr;
+    uint16_t ModuleId = 0;
+    {f'''
+    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
+    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
+    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
+    if (!syncBlockLock_ptr) {{
+      {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
+    }}
+    {lock_init_stmt}
+    if (ret != ACL_SUCCESS) {{
+      return {'ret' if enable_taskqueue else ''};
+    }}
+    ''' if lock_num > 0 else ''}
+    {'if (ret != ACL_SUCCESS) {{ return ret; }}' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != ACL_SUCCESS) {{ return; }}' if (workspace_size > 0 and not enable_taskqueue) else ''}"""
+
+    _launch_lambda_post = f"""
+    {cpp_msprof_call_before_launch}
+    __KERNEL_LAUNCH_CALL__
+    {'void*& stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
+    {'cce::internal::DebugTunnel::Close(DTData, stream_ref);' if enable_device_print else ''}
+    {cpp_msprof_call_after_launch}
+    {'return ret;' if enable_taskqueue else 'ret = aclrtSynchronizeStream(stream);'}
+  }};
+  {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
+  return;
+}}"""
 
     return f"""
 {npu_headers}
@@ -1024,17 +1180,17 @@ extern "C" {
 
 {cpp_device_pointer}
 
-static inline size_t _align_launch_offset(size_t offset, size_t alignment) {{
-  return (offset + alignment - 1) & ~(alignment - 1);
-}}
+{_CPP_ALIGN_LAUNCH_OFFSET}
 
 extern "C" {{
-void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStream stream, int gridX, int gridY, int gridZ,
+void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStream stream,
+    int gridX, int gridY, int gridZ,
     const int64_t* shapes_data, const int* shape_dims, int num_tensors,
     const int* tensor_kinds,
     const void* const* kernel_args, const size_t* arg_sizes, int num_args) {{
-  if (gridX <=0 || gridY <=0 || gridZ <=0) {{
-    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
+  if (gridX <= 0 || gridY <= 0 || gridZ <= 0) {{
+    printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n",
+           kernelName, gridX, gridY, gridZ);
     return;
   }}
   {exported_scratch_guard}
@@ -1066,61 +1222,13 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     memcpy(copied_kernel_args.back().data(), kernel_args[arg_idx], arg_sizes[arg_idx]);
   }}
 
-  // only 1D parallelization is supported for NPU
-  // Pointer type becomes flattend 1-D Memref tuple: base_ptr, data_ptr, offset, shape, stride
-  // base_ptr offset shape and stride are not used, arbitrarily set for now
-  std::string name(kernelName);
-  void *workspace_addr_ptr = NULL;
-  void *workspace_handle = NULL;
-  {'void *global_scratch = nullptr; void *profile_scratch = nullptr;' if metadata.force_simt_only else ''}
-  {coalesce_grid_div}
-  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
-  {get_backend_func("pre_launch", True)}
-  {f'''
-  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
-  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
-  if (!workspace_addr_ptr) {{
-    {workspace_fail_code}
-  }}
-  ''' if workspace_size > 0 else ''}
-  {'std::function<aclError()> launch_call = [=]() -> aclError' if enable_taskqueue else ''} {{
-    {get_backend_func("pre_launch", False)}
-    uint32_t blockNum = gridX * gridY * gridZ;
-
-    #ifdef ENABLE_GRID_WARN_PRINT
-      static bool warned = false;
-      if (!warned && blockNum > (uint32_t){num_physical_blocks}) {{
-        printf("WARNING: Grid %u > physical limit {num_physical_blocks}, performance maybe reduced.\\n",blockNum);
-        warned = true;
-    }}
-    #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
-    // set mixBlockNumRation for nodeBasicBlockDim for msprof report
-    uint32_t mixBlockNumRation = {mix_block_dim_ratio};
-    uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
-
-    {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
-    aclError ret = ACL_SUCCESS;
-    {'void *ffts_addr = NULL; uint32_t ffts_len; ret = aclrtGetHardwareSyncAddr(&ffts_addr);' if target_support_ffts else ''}
-    {'if (ret != ACL_SUCCESS) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != ACL_SUCCESS) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
-    // stub argument for workspace
-    void *syncBlockLock_ptr = NULL;
-    void *syncBlockLock_handle = NULL;
-    uint16_t ModuleId = 0;
-    {f'''
-    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
-    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
-    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
-    if (!syncBlockLock_ptr) {{
-      {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
-    }}
-    {lock_init_stmt}
-    if (ret != ACL_SUCCESS) {{
-      return {'ret' if enable_taskqueue else ''};
-    }}
-    ''' if lock_num > 0 else ''}
-    {'if (ret != ACL_SUCCESS) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != ACL_SUCCESS) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
+  // Only 1D parallelization is supported for NPU.
+  // Pointer type becomes flattened 1-D Memref tuple: base_ptr, data_ptr,
+  // offset, shape, stride. base_ptr offset shape and stride are not used,
+  // arbitrarily set for now.
+{'void *global_scratch = nullptr; void *profile_scratch = nullptr;' if metadata.force_simt_only else ''}
+{_launch_preamble}
+{_launch_lambda_pre}
 
     size_t args_offset = 0;
     auto reserve_slot = [&](size_t size, size_t alignment) -> size_t {{
@@ -1164,78 +1272,20 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     {'memcpy(launch_args.data() + profile_scratch_offset, &profile_scratch, sizeof(void*));' if metadata.force_simt_only else ''}
     {'memcpy(launch_args.data() + dtdata_offset, &DTData, sizeof(void*));' if enable_device_print else ''}
 
-    {cpp_msprof_call_before_launch}
-    {cpp_kernel_launch}
-    {'void *&stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
-    {'cce::internal::DebugTunnel::Close(DTData, stream_ref);' if enable_device_print else ''}
-    {cpp_msprof_call_after_launch}
-    {'return ret;' if enable_taskqueue else 'ret = aclrtSynchronizeStream(stream);'}
-   }};
-   {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
-  return;
-}}
+{_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch)}
 }} // extern "C"
 
-static void _launch(
-    const char* kernelName, aclrtFuncHandle func, aclrtStream stream,
+static void _launch(const char* kernelName, aclrtFuncHandle func, aclrtStream stream,
     int gridX, int gridY, int gridZ,
     std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds,
-    void *global_scratch, void *profile_scratch
-    {(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
+    void *global_scratch, void *profile_scratch{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
   if (gridX <=0 || gridY <=0 || gridZ <=0) {{
     printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
     return;
   }}
-  std::string name(kernelName);
-  void *workspace_addr_ptr = NULL;
-  void *workspace_handle = NULL;
-  {coalesce_grid_div}
-  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
-  {get_backend_func("pre_launch", True)}
-  {f'''
-  uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
-  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
-  if (!workspace_addr_ptr) {{
-    {workspace_fail_code}
-  }}
-  ''' if workspace_size > 0 else ''}
-  {'std::function<aclError()> launch_call = [=]() -> aclError' if enable_taskqueue else ''} {{
-    {get_backend_func("pre_launch", False)}
-    uint32_t blockNum = gridX * gridY * gridZ;
-
-    #ifdef ENABLE_GRID_WARN_PRINT
-      static bool warned = false;
-      if (!warned && blockNum > (uint32_t){num_physical_blocks}) {{
-        printf("WARNING: Grid %u > physical limit {num_physical_blocks}, performance maybe reduced.\\n",blockNum);
-        warned = true;
-    }}
-    #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
-    uint32_t mixBlockNumRation = {mix_block_dim_ratio};
-    uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
-
-    {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
-    aclError ret = ACL_SUCCESS;
-    {'void *ffts_addr = NULL; uint32_t ffts_len; ret = aclrtGetHardwareSyncAddr(&ffts_addr);' if target_support_ffts else ''}
-    {'if (ret != ACL_SUCCESS) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != ACL_SUCCESS) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
-    void *syncBlockLock_ptr = NULL;
-    void *syncBlockLock_handle = NULL;
-    uint16_t ModuleId = 0;
-    {f'''
-    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
-    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
-    std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
-    if (!syncBlockLock_ptr) {{
-      {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
-    }}
-    {lock_init_stmt}
-    if (ret != ACL_SUCCESS) {{
-      return {'ret' if enable_taskqueue else ''};
-    }}
-    ''' if lock_num > 0 else ''}
-    {'if (ret != ACL_SUCCESS) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != ACL_SUCCESS) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
+{_launch_preamble}
+{_launch_lambda_pre}
     struct __attribute__((packed)) {{
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
@@ -1257,71 +1307,46 @@ static void _launch(
       {', static_cast<void*>(profile_scratch)' if metadata.force_simt_only else ''}
       {', static_cast<void*>(DTData)' if enable_device_print else ''}
     }};
-    {cpp_msprof_call_before_launch}
-    {cpp_kernel_launch_local}
-    {'void *&stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
-    {'cce::internal::DebugTunnel::Close(DTData, stream_ref);' if enable_device_print else ''}
-    {cpp_msprof_call_after_launch}
-    {'return ret;' if enable_taskqueue else 'ret = aclrtSynchronizeStream(stream);'}
-   }};
-   {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
-  return;
-}}
+{_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch_local)}
 
-// Extract tensor shape from PyObject
-static std::vector<int64_t> _get_tensor_shape(PyObject *tensor) {{
-  std::vector<int64_t> shape;
+{_CPP_GET_TENSOR_SHAPE}
 
-  // Early return if tensor is None or null
-  if (!tensor || tensor == Py_None) {{
-    return shape;
-  }}
-
-  // Calling tensor.size()
-  PyObject* size_result = PyObject_CallMethod(tensor, "size", NULL);
-  if (!size_result) {{
-    return shape;
-  }}
-  // Using PySequence_Fast to improve access efficiency
-  PyObject* seq = PySequence_Fast(size_result, "Expected a sequence from tensor.size()");
-  if (seq) {{
-    Py_ssize_t len = PySequence_Fast_GET_SIZE(seq);
-    PyObject** items = PySequence_Fast_ITEMS(seq);
-    for (Py_ssize_t i = 0; i < len; ++i) {{
-      PyObject* dim = items[i];
-      if (PyLong_Check(dim)) {{
-        shape.push_back(PyLong_AsLong(dim));
-      }}
-    }}
-  }}
-  Py_DECREF(seq);
-  Py_DECREF(size_result);
-  return shape;
-}}
-
-static PyObject* launch(PyObject* self, PyObject* args) {{
+static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs) {{
   int gridX, gridY, gridZ;
   aclrtStream stream;
   aclrtFuncHandle function;
-  PyObject *packedMetadata = NULL;
-  PyObject *launch_metadata = NULL;
-  PyObject *launch_enter_hook = NULL;
-  PyObject *launch_exit_hook = NULL;
-  PyObject *global_scratch_obj = NULL;
-  PyObject *profile_scratch_obj = NULL;
+  PyObject *packedMetadata = nullptr;
+  PyObject *launch_metadata = nullptr;
+  PyObject *launch_enter_hook = nullptr;
+  PyObject *launch_exit_hook = nullptr;
+  PyObject *global_scratch_obj = nullptr;
+  PyObject *profile_scratch_obj = nullptr;
   std::vector<std::vector<int64_t>> tensorShapes;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
-  if(!PyArg_ParseTuple(
-      args, \"{format}\",
-      &gridX, &gridY, &gridZ, &stream, &function,
-      &global_scratch_obj, &profile_scratch_obj,
-      &packedMetadata, &launch_metadata,
-      &launch_enter_hook, &launch_exit_hook{args_list})) {{
-    return NULL;
+  // METH_FASTCALL fast path: avoid per-call tuple allocation (METH_VARARGS) and
+  // skip PyArg_ParseTuple's format-string interpreter by parsing manually.
+  // Borrowed-reference semantics match PyArg_ParseTuple("O").
+  if (nargs != {total_nargs}) {{
+    PyErr_Format(PyExc_TypeError, "launch expects %d arguments, got %zd", {total_nargs}, nargs);
+    return nullptr;
   }}
-  if (__MsprofFlagL1)
-  {{
+  gridX = (int)PyLong_AsLong(args[0]);
+  gridY = (int)PyLong_AsLong(args[1]);
+  gridZ = (int)PyLong_AsLong(args[2]);
+  stream = reinterpret_cast<aclrtStream>(PyLong_AsUnsignedLongLong(args[3]));
+  function = reinterpret_cast<aclrtFuncHandle>(PyLong_AsUnsignedLongLong(args[4]));
+  global_scratch_obj = args[5];
+  profile_scratch_obj = args[6];
+  packedMetadata = args[7];
+  launch_metadata = args[8];
+  launch_enter_hook = args[9];
+  launch_exit_hook = args[10];
+  {fastcall_sig_parse_stmts}
+  if (PyErr_Occurred()) {{
+    return nullptr;
+  }}
+  if (__MsprofFlagL1) {{
     {
       LINE_CHANGE_CHAR.join(
         f"{{ auto tmp = _get_tensor_shape(_arg{i}); if (!tmp.empty()) tensorShapes.push_back(tmp); }}"
@@ -1331,18 +1356,18 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
   }}
 
   if (launch_enter_hook != Py_None){{
-    PyObject* args = Py_BuildValue("(O)", launch_metadata);
-    PyObject* ret = PyObject_CallObject(launch_enter_hook, args);
-    Py_DECREF(args);
-    if (!ret)
-      return NULL;
+    PyObject* hook_args = Py_BuildValue("(O)", launch_metadata);
+    PyObject* hook_ret = PyObject_CallObject(launch_enter_hook, hook_args);
+    Py_DECREF(hook_args);
+    if (!hook_ret)
+      return nullptr;
   }}
 
   void *global_scratch = 0;
   if (global_scratch_obj != Py_None) {{
     DevicePtrInfo global_scratch_info = getPointer(global_scratch_obj, -1);
     if (!global_scratch_info.valid) {{
-      return NULL;
+      return nullptr;
     }}
     global_scratch = global_scratch_info.dev_ptr;
   }}
@@ -1355,23 +1380,27 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
     }}
     profile_scratch = profile_scratch_info.dev_ptr;
   }}
-
-
-  // get kernel_name
-  PyObject *kernelNameObj = PyDict_GetItemString(packedMetadata, "kernel_name");
-  const char* kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  // get tensor_kinds
-  if( tensorKinds.empty() ) {{
-     PyObject *tensorKindList = PyDict_GetItemString(packedMetadata, "tensor_kinds");
-     if (tensorKindList) {{
-       int size = PyObject_Size(tensorKindList);
-       for (int i = 0; i < size; i++) {{
-         PyObject *kind = PySequence_GetItem(tensorKindList, i);
-         tensorKinds.push_back(PyLong_AsLong(kind));
-       }}
-     }}
+  // get kernel_name (use interned key to avoid temporary PyUnicode per call)
+  static PyObject* key_kernel_name = PyUnicode_InternFromString("kernel_name");
+  PyObject* kernelNameObj = PyDict_GetItemWithError(packedMetadata, key_kernel_name);
+  if (!kernelNameObj) {{
+    PyErr_SetString(PyExc_KeyError, "packedMetadata missing 'kernel_name'");
+    return nullptr;
   }}
-
+  const char* kernelName = PyUnicode_AsUTF8(kernelNameObj);
+  // get tensor_kinds (use interned key, cache result in tensorKinds)
+  if (tensorKinds.empty()) {{
+    static PyObject* key_tensor_kinds = PyUnicode_InternFromString("tensor_kinds");
+    PyObject* tensorKindList = PyDict_GetItemWithError(packedMetadata, key_tensor_kinds);
+    if (tensorKindList) {{
+      Py_ssize_t size = PySequence_Size(tensorKindList);
+      for (Py_ssize_t i = 0; i < size; ++i) {{
+        PyObject* kind = PySequence_GetItem(tensorKindList, i);
+        tensorKinds.push_back(PyLong_AsLong(kind));
+        Py_DECREF(kind);
+      }}
+    }}
+  }}
 
   // raise exception asap
   {newline.join(ptr_decls)}
@@ -1381,38 +1410,41 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
           global_scratch, profile_scratch
           {', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
   if (PyErr_Occurred()) {{
-    return NULL;
+    return nullptr;
   }}
   if(launch_exit_hook != Py_None){{
-    PyObject* args = Py_BuildValue("(O)", launch_metadata);
-    PyObject* ret = PyObject_CallObject(launch_exit_hook, args);
-    Py_DECREF(args);
-    if (!ret)
-      return NULL;
+    PyObject* hook_args = Py_BuildValue("(O)", launch_metadata);
+    PyObject* hook_ret = PyObject_CallObject(launch_exit_hook, hook_args);
+    Py_DECREF(hook_args);
+    if (!hook_ret)
+      return nullptr;
   }}
   Py_RETURN_NONE;
 }}
 
 static PyMethodDef ModuleMethods[] = {{
-  {{"launch", launch, METH_VARARGS, "Entry point for all kernels with this signature"}},
-  {{NULL, NULL, 0, NULL}} // sentinel
+  {{"launch", (PyCFunction)launch, METH_FASTCALL, "Entry point for all kernels with this signature"}},
+  {{nullptr, nullptr, 0, nullptr}} // sentinel
 }};
 
 static struct PyModuleDef ModuleDef = {{
   PyModuleDef_HEAD_INIT,
   \"__triton_launcher\",
-  NULL, //documentation
+  nullptr, //documentation
   -1, //size
   ModuleMethods
 }};
 
 PyMODINIT_FUNC PyInit___triton_launcher(void) {{
   PyObject *m = PyModule_Create(&ModuleDef);
-  if(m == NULL) {{
-    return NULL;
+  if(m == nullptr) {{
+    return nullptr;
   }}
   PyModule_AddFunctions(m, ModuleMethods);
   {cpp_msprof_callback}
+  // One-time initialization of NPU utils (dlsym lookup for g_async_launch etc.)
+  // Moved here from the per-call async_launch path to avoid repeated dlsym work.
+  init_npu_utils();
   return m;
 }}
 """

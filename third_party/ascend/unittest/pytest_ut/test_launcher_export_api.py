@@ -1,8 +1,11 @@
 import importlib.util
+import sys
 from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 
 def _load_driver_module():
@@ -41,6 +44,11 @@ def _make_metadata():
         row_coalescing_applied=False,
         enable_auto_blockify=None,
     )
+
+
+def _split_launch_functions(src):
+    c_abi_part, cpp_part = src.split("static void _launch(", maxsplit=1)
+    return c_abi_part, "static void _launch(" + cpp_part
 
 
 @patch.object(driver, "NPUUtils")
@@ -100,9 +108,7 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
 
     producer_utils = make_utils("/producer/cache")
     consumer_utils = make_utils("/consumer/cache")
-    # make_launcher currently reads NPUUtils once for core counts and once for
-    # the loaded module path.
-    mock_npu_utils.side_effect = [producer_utils, producer_utils, consumer_utils, consumer_utils]
+    mock_npu_utils.side_effect = [producer_utils, consumer_utils]
 
     producer_src = driver.make_launcher(
         constants={},
@@ -200,7 +206,6 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
     _mock_auto_map,
     mock_npu_utils,
 ):
-    """SLS-created indirect ops keep the original mixed-SIMT launch path."""
     mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     metadata = _make_metadata()
@@ -214,9 +219,14 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
         metadata=metadata,
     )
 
-    # Both the ABI and local generated launch paths use the 910_95 SIMT launch
-    # API only when the T2L result advertises SIMT in parallel_mode.
     assert src.count("aclrtLaunchKernelWithHostArgs") == 2
+    assert src.count("aclrtLaunchKernelCfg cfgCfgInfo = {};") == 2
+    assert src.count("attrInfo.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;") == 2
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    assert "static_cast<void*>(launch_args.data())" in c_abi_launch
+    assert "&args" in cpp_launch
+    assert "launch_args.size()" in c_abi_launch
+    assert "sizeof(args)" in cpp_launch
 
 
 @patch.object(driver, "NPUUtils")
@@ -231,15 +241,10 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
     _mock_disable_ffts,
     mock_npu_utils,
 ):
-    """The launcher cap is the 895 E && !B contract, independent of Row."""
     mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    # E = TRITON_ALL_BLOCKS_PARALLEL, B = blacklist, R = Row coalescing.
-    # The Row result must not leak into the launcher predicate: only E && !B
-    # controls whether both generated launch paths contain the physical-core
-    # cap.  (O is intentionally absent here; it is a compiler argv option.)
     for env_enabled, blacklisted, row_applied in product((False, True), (False, True), (False, True)):
         metadata = _make_metadata()
         metadata.row_coalescing_applied = row_applied
@@ -256,9 +261,238 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
             )
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}"
         expected_per_launch_path = 1 if env_enabled and not blacklisted else 0
-        c_abi_launch, cpp_launch = src.split("static void _launch(", maxsplit=1)
+        c_abi_launch, cpp_launch = _split_launch_functions(src)
         assert c_abi_launch.count(cap) == expected_per_launch_path, case
         assert cpp_launch.count(cap) == expected_per_launch_path, case
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_workspace_allocation_appears_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.workspace_size = 1024
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=metadata,
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert c_abi_launch.count("allocate_memory") == 1
+    assert cpp_launch.count("allocate_memory") == 1
+    assert c_abi_launch.count("workspace_handle_guard") == 1
+    assert cpp_launch.count("workspace_handle_guard") == 1
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_sync_block_lock_appears_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.lock_num = 2
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=metadata,
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert c_abi_launch.count("/* allocate_sync_block_lock: ('syncBlockLockSize', 'stream') */") == 1
+    assert cpp_launch.count("/* allocate_sync_block_lock: ('syncBlockLockSize', 'stream') */") == 1
+    assert c_abi_launch.count("syncBlockLock_handle_guard") == 1
+    assert cpp_launch.count("syncBlockLock_handle_guard") == 1
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_msprof_calls_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=_make_metadata(),
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert c_abi_launch.count("beginTime = MsprofSysCycleTime();") == 1
+    assert cpp_launch.count("beginTime = MsprofSysCycleTime();") == 1
+    assert c_abi_launch.count("MsprofReportApi(false, &info);") == 1
+    assert cpp_launch.count("MsprofReportApi(false, &info);") == 1
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_preamble_shared_variables_present(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32", 2: "i32"},
+        metadata=_make_metadata(),
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    for section_name, section in [("triton_launch_kernel", c_abi_launch), ("_launch", cpp_launch)]:
+        assert "void* workspace_addr_ptr = nullptr;" in section, f"{section_name}: missing workspace_addr_ptr"
+        assert "void* workspace_handle = nullptr;" in section, f"{section_name}: missing workspace_handle"
+        assert "uint32_t blockNum4Workspace = gridX * gridY * gridZ;" in section, f"{section_name}: missing blockNum4Workspace"
+        assert "uint32_t blockNum = gridX * gridY * gridZ;" in section, f"{section_name}: missing blockNum"
+        assert "aclError ret = ACL_SUCCESS;" in section, f"{section_name}: missing ret"
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_taskqueue_mode_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=_make_metadata(),
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert c_abi_launch.count("std::function<aclError()> launch_call") == 1
+    assert cpp_launch.count("std::function<aclError()> launch_call") == 1
+    # The dlsym helpers in cpp_npu_utils_dlopen reference "async_launch" multiple
+    # times (typedef, static decl, dlsym). Use the call site marker returned by
+    # the mocked get_backend_func to verify the actual call appears in both paths.
+    assert c_abi_launch.count("/* async_launch: ('launch_call',) */") == 1
+    assert cpp_launch.count("/* async_launch: ('launch_call',) */") == 1
+    assert c_abi_launch.count("return ret;") >= 1
+    assert cpp_launch.count("return ret;") >= 1
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_merged_code_grid_warning_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    with patch.dict("os.environ", {"TRITON_GRID_WARN_PRINT": "true"}):
+        src = driver.make_launcher(
+            constants={},
+            signature={0: "*fp32", 1: "*fp32"},
+            metadata=_make_metadata(),
+        )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert c_abi_launch.count("Grid %u > physical limit") == 1
+    assert cpp_launch.count("Grid %u > physical limit") == 1
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_argument_packing_differs_between_launch_paths(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32", 2: "i32"},
+        metadata=_make_metadata(),
+    )
+
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    assert "std::vector<char> launch_args(total_size, 0);" in c_abi_launch
+    assert "reserve_slot" in c_abi_launch
+
+    assert "struct __attribute__((packed))" in cpp_launch
+    assert "void* ffts_addr __attribute__((aligned(8)));" in cpp_launch
+    assert "memcpy(launch_args.data()" not in cpp_launch
 
 
 @patch("importlib.util.module_from_spec")

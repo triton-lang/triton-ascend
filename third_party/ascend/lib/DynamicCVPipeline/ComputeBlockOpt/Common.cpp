@@ -181,7 +181,10 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
 }
 
 void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
-                                     SetVector<Operation *> &matchedOps) {
+                                     SetVector<Operation *> &matchedOps,
+                                     int targetBlockId) {
+
+  // This means move matchedOps into targetBlockId
   auto sorted = mlir::topologicalSort(matchedOps);
   for (Operation *op : llvm::reverse(sorted)) {
     if (op->getNumResults() == 1 &&
@@ -196,15 +199,15 @@ void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
         if (!userInBlock)
           continue;
         if (llvm::find(matchedOps, userInBlock) == matchedOps.end() &&
-            bmOriginal.getBlockIdByOp(userInBlock) !=
-                bmOriginal.getBlockIdByOp(matchedOps[0])) {
+            bmOriginal.getBlockIdByOp(userInBlock) != targetBlockId) {
           otherUses.push_back(&use);
         }
       }
       if (otherUses.size() > 0) {
-        LOG_DEBUG("now cloned: " << *op << "\n");
+        LOG_DEBUG("now cloned: " << *op);
         OpBuilder builder(op);
         auto clonedOp = builder.clone(*op);
+        bmOriginal.updateBlockId(clonedOp, bmOriginal.getBlockIdByOp(op));
         for (auto use : otherUses) {
           (*use).set(clonedOp->getResult(0));
         }

@@ -72,7 +72,8 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
  * @param matchedOps The op set of one pattern (target op first).
  */
 void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
-                                     SetVector<Operation *> &matchedOps);
+                                     SetVector<Operation *> &matchedOps,
+                                     int targetBlockId);
 
 } // namespace CVPipeline
 } // namespace mlir

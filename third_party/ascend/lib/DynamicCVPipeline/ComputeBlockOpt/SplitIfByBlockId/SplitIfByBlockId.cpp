@@ -1730,7 +1730,7 @@ void SplitIfByBlockIdPass::runOnOperation() {
   });
 
   if (llvm::failed(mainRes)) {
-    restoreModuleFromBackup(moduleOp, moduleBackup);
+    restoreModuleFromBackup(module, moduleBackup);
     moduleBackup->destroy();
     return;
   }

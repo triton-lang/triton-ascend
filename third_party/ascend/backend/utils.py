@@ -52,7 +52,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_cross_if_fusion",
-    "enable_costmodel_backend",
     "enable_drop_unit_dims",
     "enable_linearize",
     "enable_mask_fallback_conversion",

@@ -1695,7 +1695,7 @@ void SplitIfByBlockIdPass::runOnOperation() {
     return;
   }
 
-  ModuleOp moduleBackup(moduleOp->clone());
+  ModuleOp moduleBackup(module->clone());
 
   constexpr llvm::StringLiteral noSplitFns{"parallel_deltaformer_fwd_kernel"};
   auto walkRes = module.walk([&](func::FuncOp funcOp) {

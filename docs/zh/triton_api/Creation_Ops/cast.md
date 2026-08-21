@@ -2,19 +2,18 @@
 
 ## 1 功能作用说明
 
-将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast）、浮点降精度舍入模式，以及Ascend扩展的整数溢出处理模式。
+将张量转换为指定的数据类型，支持数值类型转换、位级别重解释（bitcast），以及浮点降精度舍入模式。
 
 **语法：**
 
-- `triton.language.cast(input, dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None)` - 函数调用形式
-- `input.cast(dtype, fp_downcast_rounding=None, bitcast=False, overflow_mode=None)` - 成员函数形式
+- `triton.language.cast(input, dtype, fp_downcast_rounding=None, bitcast=False)` - 函数调用形式
+- `input.cast(dtype, fp_downcast_rounding=None, bitcast=False)` - 成员函数形式
 
 **功能：**
 
 - 数值类型转换：整型<->整型、浮点<->浮点、整型<->浮点
 - 位级别重解释（bitcast）：不改变比特，只改变解释类型
 - 浮点降精度支持舍入模式：`rtne`（默认，四舍六入五成双）、`rtz`（向零）
-- 整数转换（Ascend 扩展）支持溢出模式：`trunc`（截断，默认）、`saturate`（饱和）
 
 ## 2 参数规格
 
@@ -26,20 +25,18 @@
 | dtype | tl.dtype | 是 | 目标数据类型 |
 | fp_downcast_rounding | str | 否 | 仅对浮点降精度有效，`rtne` 或 `rtz` |
 | bitcast | bool | 否 | 是否执行位级别重解释，默认 False |
-| overflow_mode | str | 否 | Ascend 扩展：整数溢出处理，`trunc` 或 `saturate` |
 
 **返回值：**
 
 - **类型：** tensor
 - **形状：** 与输入张量相同
-- **数据类型：** 与dtype参数指定的目标类型相同
-- **内存布局：** 根据bitcast参数决定是否进行位级别重解释
+- **数据类型：** 与 dtype 参数指定的目标类型相同
+- **内存布局：** 根据 bitcast 参数决定是否进行位级别重解释
 
 **约束条件：**
 
 - `fp_downcast_rounding` 仅在浮点降精度时可设置，否则将报错
-- `bitcast=True` 时不进行数值转换，忽略舍入/溢出模式
-- `overflow_mode` 仅对整型有意义（Ascend 扩展）
+- `bitcast=True` 时不进行数值转换，忽略舍入模式
 
 ### 2.2 DataType支持表
 
@@ -60,56 +57,95 @@
 
 **基本用法：**
 
+将 `float32` 输入转换为 `int32`，并通过 host 侧启动 kernel 查看输出类型：
+
 ```python
+import torch
 import triton
 import triton.language as tl
 
 @triton.jit
-def cast_example():
-    # 创建float32张量
-    x = tl.zeros([2, 3], dtype=tl.float32)
-
-    # 转换为int32
+def cast_kernel(x_ptr, y_ptr, n_elements, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(x_ptr + offs, mask=mask)
+    # float32 -> int32
     y = tl.cast(x, tl.int32)
+    tl.store(y_ptr + offs, y, mask=mask)
 
-    return y
+n = 8
+x = torch.randn(n, device="npu", dtype=torch.float32)
+y = torch.empty(n, device="npu", dtype=torch.int32)
+cast_kernel[(1,)](x, y, n, BLOCK=8)
 
-## 调用示例
-result = cast_example()
-print(result.dtype)  # 输出: int32
+print(x.dtype)  # torch.float32
+print(y.dtype)  # torch.int32
 ```
 
 **高级用法：**
 
+成员函数形式同样支持 `bitcast` 与浮点降精度舍入：
+
 ```python
+import torch
+import triton
+import triton.language as tl
+
 @triton.jit
-def cast_advanced_example():
-    # 创建float32张量
-    x = tl.zeros([2, 3], dtype=tl.float32)
+def cast_advanced_kernel(x_ptr, y_ptr, z_ptr, n_elements, BLOCK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < n_elements
+    x = tl.load(x_ptr + offs, mask=mask)
 
-    # 位级别重解释
+    # Bitcast reinterpret: float32 -> int32
     y = x.cast(tl.int32, bitcast=True)
-
-    # 浮点降精度，向零舍入
+    # FP downcast with round-toward-zero: float32 -> float16
     z = x.cast(tl.float16, fp_downcast_rounding="rtz")
 
-    # 整数转换，饱和模式（Ascend扩展）
-    w = x.cast(tl.int8, overflow_mode="saturate")
+    tl.store(y_ptr + offs, y, mask=mask)
+    tl.store(z_ptr + offs, z, mask=mask)
 
-    return y, z, w
+n = 8
+x = torch.randn(n, device="npu", dtype=torch.float32)
+y = torch.empty(n, device="npu", dtype=torch.int32)
+z = torch.empty(n, device="npu", dtype=torch.float16)
+cast_advanced_kernel[(1,)](x, y, z, n, BLOCK=8)
+
+print(y.dtype)  # torch.int32
+print(z.dtype)  # torch.float16
 ```
 
 **实际应用场景：**
 
+量化场景中将缩放后的浮点值转为 `int8`：
+
 ```python
+import torch
+import triton
+import triton.language as tl
+
 @triton.jit
-def quantization_kernel(x_ptr, output_ptr, scale, zero_point, M, N, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    # 加载float32数据
+def quantization_kernel(x_ptr, output_ptr, scale, zero_point, M, N,
+                        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
+    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    offsets = offs_m[:, None] * N + offs_n[None, :]
+    mask = (offs_m[:, None] < M) & (offs_n[None, :] < N)
+
     x = tl.load(x_ptr + offsets, mask=mask)
-
-    # 量化：转换为int8
-    x_quantized = tl.cast(x * scale + zero_point, tl.int8, overflow_mode="saturate")
-
-    # 存储量化结果
+    x_quantized = tl.cast(x * scale + zero_point, tl.int8)
     tl.store(output_ptr + offsets, x_quantized, mask=mask)
+
+M, N = 16, 16
+BLOCK_M, BLOCK_N = 8, 8
+x = torch.randn((M, N), device="npu", dtype=torch.float32)
+out = torch.empty((M, N), device="npu", dtype=torch.int8)
+grid = (triton.cdiv(M, BLOCK_M), triton.cdiv(N, BLOCK_N))
+quantization_kernel[grid](x, out, 1.0, 0.0, M, N, BLOCK_M, BLOCK_N)
+
+print(out.dtype)  # torch.int8
 ```

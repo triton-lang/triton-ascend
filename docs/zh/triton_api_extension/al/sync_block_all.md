@@ -1,60 +1,85 @@
-# 1. 硬件背景
+# al.sync_block_all
 
-当不同核之间操作同一块全局内存且可能存在读后写、写后读以及写后写等数据依赖问题时，通过调用该函数来插入同步语句来避免上述数据依赖时可能出现的数据读写错误问题。
+## 1. 概述
 
-# 2. 接口说明
+`al.sync_block_all` 让当前 Kernel 调度范围内参与执行的 Cube Core、Vector Core 或
+Vector Sub Block 到达同一个同步点。它用于参与者访问共享 GM 且存在 RAW、WAR 或 WAW
+数据依赖的场景。
 
-<table>
-  <tr>
-    <td>Plain Text<br>def sync_block_all(mode, event_id, _builder=None):</td>
-  </tr>
-</table>
+该接口是集合屏障，不是
+[`al.sync_block_set`](./sync_block_set.md) 与
+[`al.sync_block_wait`](./sync_block_wait.md) 的单向生产者/消费者配对。
 
-## 2.1 入参
+## 2. 接口说明
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>mode</td>
-    <td>str</td>
-    <td>是</td>
-    <td>同步的模式 ，可选字符串:all_cube/all_vector/all/all_sub_vector。&lt;br&gt;all_cube：同步所有cube核&lt;br&gt;all_vector: 同步所有vector核&lt;br&gt;all: 同步所有cube核和vector核&lt;br&gt;all_sub_vector：Vector子块间同步</td>
-  </tr>
-  <tr>
-    <td>event_id</td>
-    <td>int</td>
-    <td>是</td>
-    <td>标记id。 范围是[0,15]</td>
-  </tr>
-</table>
+```python
+al.sync_block_all(mode: str, event_id: int) -> None
+```
 
-## 2.2 返回值
+### 参数
 
-无
+| 参数名 | 类型 | 含义 |
+| --- | --- | --- |
+| `mode` | `str` | 同步范围，只能取下表中的四个字符串 |
+| `event_id` | `int` | 同步标记 ID，取值范围为 `[0, 15]` |
 
-# 3. 约束
+| `mode` | 同步范围 |
+| --- | --- |
+| `"all_cube"` | 当前调度范围内参与执行的所有 Cube Core |
+| `"all_vector"` | 当前调度范围内参与执行的所有 Vector Core |
+| `"all"` | 当前调度范围内参与执行的所有 Cube Core 与 Vector Core |
+| `"all_sub_vector"` | 当前 AI Core 上参与执行的所有 Vector Sub Block |
 
-- mode可选字符串:all_cube/all_vector/all/all_sub_vector
+### 返回值
 
-- event_id范围是[0,15]
+无。
 
-# 4. 示例
+## 3. 使用方法
 
-<table>
-  <tr>
-    <td>Plain Text<br>import os<br>import pytest<br>import triton<br>import triton.language as tl<br>import triton.language.extra.cann.extension as al<br>from triton.compiler.compiler import ASTSource<br>from triton.compiler.code_generator import ast_to_ttir<br>from triton._C.libtriton import ir<br>from triton._C.libtriton.ascend import ir as ascend_ir<br><br>os.environ[&quot;TORCH_DEVICE_BACKEND_AUTOLOAD&quot;] = &quot;0&quot;<br><br><br>class Options:<br>    num_warps = 4<br>    num_stages = 3<br>    num_ctas = 1<br>    cluster_dims = (1, 1, 1)<br>    enable_fp_fusion = True<br>    debug = False<br><br><br>def compile_kernel(kernel, signature, constants):<br>    &quot;&quot;&quot;Helper to compile a kernel to MLIR.&quot;&quot;&quot;<br>    src = ASTSource(kernel, signature, constants)<br>    context = ir.context()<br>    ir.load_dialects(context)<br>    ascend_ir.load_dialects(context)<br>    module = ast_to_ttir(kernel, src, context, Options(), {}, {})<br>    return str(module)<br><br>@triton.jit<br>def test_sync_block_all():<br>    al.sync_block_all(&quot;all_cube&quot;, 8)<br>    al.sync_block_all(&quot;all_vector&quot;, 9)<br>    al.sync_block_all(&quot;all&quot;, 10)<br>    al.sync_block_all(&quot;all_sub_vector&quot;, 11)<br><br>if __name__ == &quot;__main__&quot;:<br>    print(&quot;=&quot; * 60)<br>    print(&quot;Test 1: test_sync_block_all&quot;)<br>    print(&quot;=&quot; * 60)<br>    mlir = compile_kernel(test_sync_block_all, {}, {})<br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br>    print(mlir)</td>
-  </tr>
-</table>
+下面的 Kernel 展示四种模式的编译写法：
 
-输出：
+```python
+import triton
+import triton.language.extra.cann.extension as al
 
-<table>
-  <tr>
-    <td>Plain Text<br>module {<br>  tt.func public @test_sync_block_all() attributes {noinline = false} {<br>    hivm.hir.sync_block[&lt;ALL_CUBE&gt;, 8 : index] tcube_pipe = &lt;PIPE_ALL&gt; loc(#loc1)<br>    hivm.hir.sync_block[&lt;ALL_VECTOR&gt;, 9 : index] tvector_pipe = &lt;PIPE_ALL&gt; loc(#loc2)<br>    hivm.hir.sync_block[&lt;ALL&gt;, 10 : index] tcube_pipe = &lt;PIPE_ALL&gt; tvector_pipe = &lt;PIPE_ALL&gt; loc(#loc3)<br>    hivm.hir.sync_block[&lt;ALL_SUB_VECTOR&gt;, 11 : index] tvector_pipe = &lt;PIPE_ALL&gt; loc(#loc4)<br>    tt.return loc(#loc5)<br>  } loc(#loc)<br>} loc(#loc)<br>#loc = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:37:0)<br>#loc1 = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:38:34)<br>#loc2 = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:39:36)<br>#loc3 = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:40:29)<br>#loc4 = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:41:40)<br>#loc5 = loc(&quot;/home/linxin/triton-test/sync_block_all.py&quot;:41:4)</td>
-  </tr>
-</table>
+
+@triton.jit
+def sync_all_modes():
+    al.sync_block_all("all_cube", 8)
+    al.sync_block_all("all_vector", 9)
+    al.sync_block_all("all", 10)
+    al.sync_block_all("all_sub_vector", 11)
+```
+
+对应的关键 IR 为：
+
+```mlir
+hivm.hir.sync_block[<ALL_CUBE>, 8 : index]
+  tcube_pipe = <PIPE_ALL>
+hivm.hir.sync_block[<ALL_VECTOR>, 9 : index]
+  tvector_pipe = <PIPE_ALL>
+hivm.hir.sync_block[<ALL>, 10 : index]
+  tcube_pipe = <PIPE_ALL> tvector_pipe = <PIPE_ALL>
+hivm.hir.sync_block[<ALL_SUB_VECTOR>, 11 : index]
+  tvector_pipe = <PIPE_ALL>
+```
+
+## 4. 约束说明
+
+- `mode` 必须是 `"all_cube"`、`"all_vector"`、`"all"` 或
+  `"all_sub_vector"`。
+- `event_id` 必须是 `[0, 15]` 范围内的整数。
+- 这里的 `event_id` 是普通整数，不是定制宏算子使用的
+  [`al.EVENT_ID`](./event_id.md) 枚举。
+- 当前后端中，`"all_cube"`、`"all_vector"` 和 `"all_sub_vector"` 会保留用户传入的
+  `event_id`；`"all"` 在后续分解时使用编译器内部的 10、11、12、13 号 flag，不把用户值作为
+  最终同步 flag。不要使用 `"all"` 的 `event_id` 与其他显式同步操作建立配对关系。
+- 这里的“所有”仅指当前 Kernel 调度范围内的参与者，不是整张设备、跨 Kernel 或多卡全局屏障。
+- 参与同步的数据必须先移动到参与者都可见的 GM。
+- 同步范围内的所有参与者必须以一致的控制流到达同一屏障；参与者缺失或到达次数不一致可能导致
+  Kernel 一直等待。
+
+## 5. 验证范围
+
+仓库现有 `test_sync_block_all.py` 覆盖四种模式的 Python 到 HIVM IR 编译结果，
+但没有执行真实 NPU 屏障功能校验。因此该页面不把编译成功表述为硬件同步已验证。

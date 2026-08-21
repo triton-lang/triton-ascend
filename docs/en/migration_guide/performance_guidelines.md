@@ -4,7 +4,7 @@
 
 ### I. Principles for Automatically Combining Grid Cores
 
-Some scenarios requiring migration of Triton operators from GPUs to NPUs. Due to architectural differences, the Triton operators developed on GPUs often utilize large grid core counts. When executed on NPUs, these operators cannot be scheduled all at once. Delivering them in batches introduces significant latency and degrades performance. To optimize NPU-based Triton operators, you need to check the grid core counts first. In cases with large grid core counts, set the environment variable *TRITON_ALL_BLOCKS_PARALLEL* to improve operator execution performance.
+Some scenarios require migration of Triton operators from GPUs to NPUs. Due to architectural differences, Triton operators developed for GPUs often use large grid core counts. When executed on NPUs, these operators cannot be scheduled all at once. Delivering them in batches introduces significant latency and degrades performance. For large grid core counts, the backend's automatic block-mapping policy can reduce scheduling overhead when logical programs are independent.
 
 ## Optimizing Instruction Parallelism
 

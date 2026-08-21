@@ -41,11 +41,8 @@ python run_kernel.py
 | **编译控制** | TRITON_DEFAULT_FP_FUSION | 1 启用 | 控制是否默认启用浮点运算融合优化，覆盖默认的浮点运算融合行为（如mul+add->fma）。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_KERNEL_OVERRIDE | 0 或未设置 | 启用或禁用 Triton 内核覆盖功能，允许在每个编译阶段开始时用用户指定的外部文件（IR/PTX等）覆盖默认生成的内核代码。 | 0：不启用<br>1：启用 | |
 | **编译控制** | TRITON_OVERRIDE_DIR | ~/.triton/override | 指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。 | "path"：保存路径 | |
-| **编译控制** | TRITON_ASCEND_COMPILE_SPEED_OPT | 0 或未设置 | 控制JIT编译器在发现内核编译失败后是否跳过后续编译阶段。设为`1`跳过（默认`0`继续尝试）。 | 0：继续尝试<br>1：跳过 | |
 | **编译控制** | TRITON_COMPILE_ONLY | 0 或未设置 | remote_launch时使用，只编译不运行。 | 0：不启用<br>1：启用 | |
-| **编译控制** | TRITON_DISABLE_FFTS | 0 或未设置 | 是否禁用FFTS。**注意**：逻辑为取反，0 表示启用 FFTS，1 表示禁用。 | 0：启用<br>1：禁用 | |
 | **编译控制** | TRITON_DISABLE_PRECOMPILE | 0 或未设置 | 是否禁用预编译。                                                                                                                                                                                                                                                                                  | 0：启用预编译<br>1：禁用预编译                                                                               | |
-| **运行与调度** | TRITON_ALL_BLOCKS_PARALLEL | 0 或未设置 | 启用或禁用自动根据物理核数优化逻辑核数，仅当逻辑核间可并行时方可启动。当逻辑核数大于物理核数时，启动该优化，则编译器自动调整逻辑核数量为物理核数，减少调度开销；启用后允许grid>65535。限制：triton kernel的逻辑必须对执行顺序不敏感才能开启该选项，否则可能会导致死锁。per-kernel 选项 `enable_auto_blockify`（详见 `architecture_difference.md`）在显式设置时优先于该环境变量；环境变量仅对未设置 `enable_auto_blockify` 的 kernel 起默认值作用。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | TRITON_ENABLE_TASKQUEUE | 1 | 是否开启task_queue。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | TRITON_ENABLE_SANITIZER | 0 或未设置 | 是否启用 SANITIZER。 | 0：不启用<br>1：启用 | |
 | **运行与调度** | ENABLE_PRINT_UB_BITS | 0 或未设置 | 打开后可以获取当前UB占用量，给inductor使用。 | 0：不启用<br>1：启用 | |
@@ -99,6 +96,8 @@ if __name__ == "__main__":
 | 类别 | 编译选项 | 默认值/可选值 | 功能说明 | 配置说明 |
 |------|----------|----------------|----------|----------|
 | **通用流水** | `multibuffer` | `True`（默认）、`False` | 启用或禁用 ping-pong/double buffer 流水。默认开启。 | `triton.Config` 或 launch meta-parameter |
+| **编译模式** | `compile_mode` | `simd`（默认）；A5 还支持 `simd_simt`、`simt_template`、`simt_only` | 选择唯一的编译路径：SIMD、SIMD/SIMT 混合 gather/scatter、template-SIMT 或 Pure-SIMT。 | `triton.Config` 或 launch meta-parameter |
+| **Pure-SIMT 优化** | `enable_bishengir_simt_optimization` | `0`（默认）或 BiShengIR 工具链值 | 仅在 A5 `compile_mode="simt_only"` 时生效；其他模式或产品显式传入时告警并忽略。该值直接透传，不在 Python 侧做数值或范围校验。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合** | `enable_auto_bind_sub_block` | `None`、`True`、`False` | 启用或禁用自动绑定 sub-block。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合** | `enable_hivm_auto_cv_balance` | `None`、`True`、`False` | 启用或禁用自动 CV balance。 | `triton.Config` 或 Autotune 参数 |
 | **CV 融合/同步** | `sync_solver` | `None`、`True`、`False` | 启用或禁用 HIVM 同步求解器。 | `triton.Config` 或 launch meta-parameter |
@@ -111,8 +110,11 @@ if __name__ == "__main__":
 | **CV 融合 tiling** | `tile_mix_vector_loop` | `None`、`2`、`4`、`8` | 配置 Vector loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
 | **CV 融合 tiling** | `tile_mix_cube_loop` | `None`、`2`、`4`、`8` | 配置 Cube loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
 | **CV 融合/同步** | `disable_auto_inject_block_sync` | `None`、`True`、`False` | 启用或禁用自动 block sync 注入。 | `triton.Config` 或 launch meta-parameter |
-| **运行流** | `stream` | `None` 或 NPU stream 标识 | 指定 NPU stream。 | launch meta-parameter |
-| **编译 Pass** | `enable_linearize` | 版本相关 | 启用或禁用 linearization pass。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合/layout** | `enable_nd2nz_on_vector` | 默认 `False` | 启用或禁用 Vector 路径上的 ND 到 NZ 布局转换。 | `triton.Config` 或 launch meta-parameter |
-| **大 grid 优化** | `auto_blockify_size` | 默认 `1` | 启用或禁用 AutoBlockify pass。未设置 `TRITON_ALL_BLOCKS_PARALLEL` 时忽略。 | launch meta-parameter 或 `triton.Config` |
-| **编译模式** | `compile_mode` | `"unstructured_in_simt"`（默认）、`"simd"`、`"simt_only"` | 控制 Ascend 950 上 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"unstructured_in_simt"`：混合（结构化 SIMD，离散/非结构化尽量走 SIMT 间接访存模板）；`"simt_only"`：纯 SIMT （`ttir→npubin`）。| `triton.Config` 或 launch meta-parameter |
+| **大 grid 优化** | `auto_blockify_size` | 默认 `1` | 配置 AutoBlockify pass 的扩展大小。 | launch meta-parameter 或 `triton.Config` |
+
+#### 编译模式兼容性
+
+所有产品默认使用 `simd`。A2/A3 仅接受 `simd`；A5 支持全部四个规范取值。`simd_simt` 开启混合编译器路径并传递 warp 几何参数，`simt_template` 驱动 discrete-mask、unstructured lowering 与 template lowering，`simt_only` 驱动 Pure-SIMT 图优化、编译器、launcher 和 autotuner 路径。
+
+`compile_mode="unstructured_in_simt"` 是到 `simt_template` 的临时兼容别名，会产生 `FutureWarning`；请迁移为 `simt_template`。已删除的 `force_simt_template`、`force_simt_only` 不再接受。原先依赖 template-SIMT 默认值的调用方需显式设置 `compile_mode="simt_template"`。

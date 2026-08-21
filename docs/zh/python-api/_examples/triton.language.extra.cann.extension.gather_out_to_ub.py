@@ -30,7 +30,7 @@ def kernel(src_ptr, index_ptr, out_ptr):
 
 
 def test_gather_out_to_ub():
-    if not is_compile_on_910_95():
+    if not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch):
         pytest.skip("gather_out_to_ub is only supported on Ascend 950")
     # src(4,2) = [[1.,2.],[3.,4.],[5.,6.],[7.,8.]]
     src = torch.tensor([[1., 2.], [3., 4.], [5., 6.], [7., 8.]], device='npu')

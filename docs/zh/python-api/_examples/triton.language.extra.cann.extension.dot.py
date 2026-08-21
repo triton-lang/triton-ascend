@@ -35,7 +35,7 @@ def _to_zN(t: torch.Tensor) -> torch.Tensor:
 
 
 def test_dot_a_fractal():
-    if not is_compile_on_910_95():
+    if not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch):
         pytest.skip("dot with fractal format is only supported on Ascend 950")
     M, K, N = 32, 64, 32
     a_nd = torch.randn(M, K, dtype=torch.float16)

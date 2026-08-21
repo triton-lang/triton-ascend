@@ -6,7 +6,7 @@
 
 该接口以 `extern "C"` 方式导出，与标准 Python JIT 调用路径（`@triton.jit` → `kernel[grid](...)`）**并列独立**——普通用户通过 `@triton.jit` 调用时不经过此函数；它面向的是需要 C 级别 kernel 发射能力的高级场景，如自定义部署流水线、推理引擎集成、同签名 kernel 复用等。
 
-每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、ffts 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#limitations-and-notes)）。
+每个 JIT 编译产物（launcher stub `.so`）中均包含一份由 `generate_npu_wrapper_src()` 动态生成的 `triton_launch_kernel`，其参数区内存布局受 kernel signature、metadata（workspace / syncBlockLock / coalesce）、device_print、FFTS 等因素共同影响。调用方应注意不同编译产物之间的布局差异（详见[第 8 章](#limitations-and-notes)）。
 
 ## 2. 函数签名
 
@@ -61,8 +61,8 @@ void triton_launch_kernel(
 
 函数内部将所有发射参数组装到一段连续的 `std::vector<char> launch_args` 中，按以下顺序布局（各槽位按对齐要求偏移）：
 
-```bash
-[ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
+```text
+[FFTS 地址] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
 [DTData]   // 仅当 TRITON_DEVICE_PRINT="true" 时存在
@@ -91,7 +91,7 @@ void triton_launch_kernel(
 
 此路径**不经过** `triton_launch_kernel`，是 Triton 的标准调用方式：
 
-```bash
+```text
 用户代码:  kernel[grid](args...)
   │
   ▼
@@ -115,7 +115,7 @@ rtKernelLaunch() → NPU 硬件执行
 
 面向需要 C 级别 kernel 发射的场景：
 
-```bash
+```text
 第三方 C/C++ 代码
   │  dlopen / dlsym 获取 triton_launch_kernel 符号
   │  或直接链接 launcher stub .so
@@ -212,9 +212,9 @@ void launch_kernel_via_stub(
 
 > **说明：** 示例中的 `func` 参数是 CANN runtime 注册后的 kernel function handle，获取方式（`rtDevBinaryRegister` / `rtFunctionRegister`）属于 CANN runtime 标准流程。当前仓内 `npu_utils.cpp` 中的 `loadKernelBinary` / `registerKernel` 函数提供了 Python 侧的封装实现，具体 API 签名请以 CANN 头文件（`runtime/kernel.h`）为准。
 
-### 6.2 Python ctypes 示例
+### 6.2 Python FFI 示例
 
-通过 ctypes 直接调用 launcher stub 中的 `triton_launch_kernel`：
+通过 Python C 外部函数接口直接调用 launcher stub 中的 `triton_launch_kernel`：
 
 ```python
 import ctypes
@@ -311,7 +311,7 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 ### ABI 稳定性
 
 - `triton_launch_kernel` 由 `generate_npu_wrapper_src()` 按 kernel 编译动态生成，每个 launcher stub `.so` 中的该函数其参数区内存布局可能不同
-- 布局影响因素包括：kernel signature、`metadata.workspace_size`、`metadata.lock_num`、`metadata.coalesce_factor`、`metadata.coalesce_axis`、`metadata.force_simt_only`、`TRITON_DEVICE_PRINT`、ffts 支持状态
+- 布局影响因素包括：kernel signature、`metadata.workspace_size`、`metadata.lock_num`、`metadata.coalesce_factor`、`metadata.coalesce_axis`、内部 `metadata.is_pure_simt`、`TRITON_DEVICE_PRINT`、FFTS 支持状态
 - **不同编译产物生成的 `triton_launch_kernel` 不可互换使用**；调用方应确保使用的 launcher stub `.so` 与目标 kernel 编译产物匹配
 
 ### grid 语义

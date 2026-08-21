@@ -348,6 +348,52 @@ def linalg_to_bc_by_triton_mlir_opt(linalg: str, metadata, opt):
         return bc_data
 
 
+# bishengir, hivmc and the CANN toolchain below them are built against their own
+# LLVM, which trails the one this triton-ascend is built with. Two bufferization
+# spellings changed in between, so IR printed here does not parse there. Rewriting
+# them back is what lets an LLVM-22 triton-ascend drive an LLVM-19 bishengir; when
+# the two already agree the patterns do not match and this is a no-op.
+_IR_DOWNGRADE_RULES = (
+    # MLIR 21 renamed bufferization.to_memref to bufferization.to_buffer.
+    (re.compile(r"\bbufferization\.to_buffer\b"), "bufferization.to_memref"),
+    # Both ops now print "<operand> to <result>" where the older parser accepts a
+    # single type -- always the memref side, which is the operand of to_tensor and
+    # the result of to_memref.
+    (re.compile(r"(bufferization\.to_tensor\b[^\n]*? : )([^\n]+?) to [^\n]+?(?=(?: loc\()|$)", re.M), r"\1\2"),
+    (re.compile(r"(bufferization\.to_memref\b[^\n]*? : )[^\n]+? to ([^\n]+?)(?=(?: loc\()|$)", re.M), r"\1\2"),
+)
+
+
+def _downgrade_ir_for_bishengir(linalg: str) -> str:
+    """Spell the IR the way the bishengir toolchain's older MLIR parses it."""
+    for pattern, replacement in _IR_DOWNGRADE_RULES:
+        linalg = pattern.sub(replacement, linalg)
+    return linalg
+
+
+# bishengir-opt decodes bytecode with the LLVM it was built against. When that
+# LLVM is older than the one this triton-ascend was built with, it has no reader
+# for the newer encodings -- a NameLoc nested inside a callsite, for example --
+# and aborts the parse. Cleared the first time that happens so the rest of the
+# process reads its own bytecode directly instead of retrying a decode that
+# cannot succeed.
+_bishengir_opt_reads_our_bytecode = True
+
+
+def _note_bytecode_reader_fallback(bishengir_opt_path, stderr):
+    """Stop routing bytecode through bishengir-opt, and say so once."""
+    global _bishengir_opt_reads_our_bytecode
+    if not _bishengir_opt_reads_our_bytecode:
+        return
+    _bishengir_opt_reads_our_bytecode = False
+    detail = next((line.strip() for line in (stderr or "").splitlines() if "error:" in line), "")
+    warnings.warn(f"{bishengir_opt_path} cannot read the MLIR bytecode this triton-ascend "
+                  f"produces, so the bytecode stage is bypassed for the rest of this process "
+                  f"and the IR is printed with triton-mlir-opt instead. bishengir-compile "
+                  f"receives the same module the use_bytecode=False flow would give it. This "
+                  f"is a toolchain version mismatch, not a kernel error. {detail}")
+
+
 def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
     """
     Convert MLIR Bytecode to MLIR text format using bishengir-opt.
@@ -367,14 +413,16 @@ def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
             f.write(bc_data)
 
         bishengir_opt_path, env = _get_bishengir_opt_path()
+        reader_argv = [bc_path, "--mlir-print-debuginfo", "-o", mlir_path]
+        reader = bishengir_opt_path if _bishengir_opt_reads_our_bytecode else _get_triton_mlir_opt_path()
 
-        subprocess.run([
-            bishengir_opt_path,
-            bc_path,
-            "--mlir-print-debuginfo",
-            "-o",
-            mlir_path,
-        ], env=env, capture_output=True, check=True, text=True)
+        try:
+            subprocess.run([reader] + reader_argv, env=env, capture_output=True, check=True, text=True)
+        except subprocess.CalledProcessError as read_error:
+            if reader != bishengir_opt_path:
+                raise
+            _note_bytecode_reader_fallback(bishengir_opt_path, read_error.stderr)
+            subprocess.run([_get_triton_mlir_opt_path()] + reader_argv, capture_output=True, check=True, text=True)
 
         # Read the generated MLIR text
         linalg_text = Path(mlir_path).read_text()
@@ -581,7 +629,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
-        Path(ttadapter_path).write_text(linalg)
+        Path(ttadapter_path).write_text(_downgrade_ir_for_bishengir(linalg))
         bin_file = os.path.join(tmpdir, "kernel")
         if _check_bishengir_api_change():
             bin_file_with_ext = "kernel.o"
@@ -805,7 +853,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
-        Path(ttadapter_path).write_text(linalg)
+        Path(ttadapter_path).write_text(_downgrade_ir_for_bishengir(linalg))
         bin_file = os.path.join(tmpdir, "kernel")
         if _check_bishengir_api_change():
             bin_file_with_ext = "kernel.o"

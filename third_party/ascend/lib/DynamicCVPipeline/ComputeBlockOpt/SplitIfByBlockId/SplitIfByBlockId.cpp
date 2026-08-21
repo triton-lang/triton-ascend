@@ -1675,6 +1675,18 @@ public:
   }
 };
 
+void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup) {
+  Operation *moduleOperation = moduleOp.getOperation();
+  Operation *backupOperation = moduleBackup.getOperation();
+
+  moduleOperation->setLoc(backupOperation->getLoc());
+  moduleOperation->setAttrs(backupOperation->getAttrs());
+  if (moduleOperation->getPropertiesStorageSize() != 0) {
+    moduleOperation->copyProperties(backupOperation->getPropertiesStorage());
+  }
+  moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
+}
+
 } // namespace
 
 void SplitIfByBlockIdPass::runOnOperation() {
@@ -1682,6 +1694,8 @@ void SplitIfByBlockIdPass::runOnOperation() {
   if (hasFallbackAttr(module)) {
     return;
   }
+
+  ModuleOp moduleBackup(moduleOp->clone());
 
   constexpr llvm::StringLiteral noSplitFns{"parallel_deltaformer_fwd_kernel"};
   auto walkRes = module.walk([&](func::FuncOp funcOp) {
@@ -1716,7 +1730,8 @@ void SplitIfByBlockIdPass::runOnOperation() {
   });
 
   if (llvm::failed(mainRes)) {
-    setFallbackAttr(module, ERRCODE_FAILED);
+    restoreModuleFromBackup(moduleOp, moduleBackup);
+    moduleBackup->destroy();
     return;
   }
 

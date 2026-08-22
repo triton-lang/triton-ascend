@@ -8,6 +8,7 @@ import inspect
 
 import pytest
 import torch
+
 from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
 from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
@@ -16,6 +17,7 @@ pytestmark = pytest.mark.backend("native")
 
 
 class PointerArg:
+
     dtype = torch.float32
 
     def __init__(self, address):

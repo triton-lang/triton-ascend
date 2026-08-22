@@ -185,26 +185,26 @@ def _ref_multi_d(src_flat_cpu: torch.Tensor, blocks, strides) -> torch.Tensor:
 
 
 @pytest.mark.parametrize("dtype,blocks,strides", [
-    # ---- V1 hit: non-permuted, last-axis stride statically > 1, all blocks power-of-2 ----
+    # ---- V1 命中: 非 permuted, 尾轴 stride 静态 > 1, 所有 block 是 2 的幂 ----
     # 2D
     ("float32", (4, 8), (8, 4)),  # stride 4
-    ("float32", (4, 8), (24, 3)),  # stride 3 (odd)
+    ("float32", (4, 8), (24, 3)),  # stride 3 (奇)
     # 3D
     ("float16", (2, 4, 8), (32, 8, 4)),  # stride 4
-    ("float32", (4, 4, 8), (96, 24, 3)),  # stride 3 (odd)
+    ("float32", (4, 4, 8), (96, 24, 3)),  # stride 3 (奇)
     # 4D
     ("float16", (2, 4, 4, 8), (128, 32, 8, 3)),  # stride 3
     # 5D
-    ("float32", (2, 2, 2, 4, 8), (256, 128, 64, 16, 5)),  # stride 5 (odd)
+    ("float32", (2, 2, 2, 4, 8), (256, 128, 64, 16, 5)),  # stride 5 (奇)
 
-    # ---- Deinterleave handles (stride==2 + even last block) ----
+    # ---- Deinterleave 接管 (stride==2 + 偶数 last block) ----
     ("float16", (4, 4, 8), (32, 8, 2)),
 
-    # ---- Permuted: ImplicitPermute handles, V1 must skip ----
-    ("float32", (4, 8), (1, 4)),  # strides ascending
-    ("float32", (4, 4, 8), (1, 4, 16)),  # strictly ascending
+    # ---- Permuted: ImplicitPermute 处理, V1 必须放过 ----
+    ("float32", (4, 8), (1, 4)),  # strides 升序
+    ("float32", (4, 4, 8), (1, 4, 16)),  # 严格升序
 
-    # ---- Normal contiguous (stride==1): no rewrite ----
+    # ---- Normal contiguous (stride==1): 不应改写 ----
     ("float32", (4, 8), (8, 1)),
     ("float32", (4, 4, 8), (32, 8, 1)),
 ])
@@ -556,15 +556,15 @@ def _ref_boundary_load(src_cpu_flat, parent_m, parent_n, stride_m, stride_n, blo
 
 
 @pytest.mark.parametrize("dtype,parent_m,parent_n,stride_m,stride_n,block_m,block_n,pad_nan", [
-    # V1.5 hit: PAD_ZERO, stride_n=4, block exceeds parent
+    # V1.5 命中: PAD_ZERO, stride_n=4, block 超出 parent
     pytest.param("float32", 5, 3, 12, 4, 8, 8, False, marks=a3_known_boundary_load_issue),
-    # V1.5 hit: PAD_ZERO, stride_n=3, block partially out-of-bounds
+    # V1.5 命中: PAD_ZERO, stride_n=3, block 部分越界
     pytest.param("float32", 7, 5, 15, 3, 8, 8, False, marks=a3_known_boundary_load_issue),
-    # V1.5 hit: PAD_NAN (float)
+    # V1.5 命中: PAD_NAN (float)
     pytest.param("float32", 5, 3, 12, 4, 8, 8, True, marks=a3_known_boundary_load_issue),
-    # V1.5 hit: float16
+    # V1.5 命中: float16
     pytest.param("float16", 5, 5, 20, 4, 8, 8, False, marks=a3_known_boundary_load_issue),
-    # OOB only on last axis: block fully fits axis 0
+    # 越界都在尾轴: block 完全装得下 axis 0
     pytest.param("float32", 8, 3, 12, 4, 8, 8, False, marks=a3_known_boundary_load_issue),
 ])
 def test_block_ptr_boundary_load(dtype, parent_m, parent_n, stride_m, stride_n, block_m, block_n, pad_nan):

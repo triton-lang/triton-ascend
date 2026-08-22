@@ -28,7 +28,6 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Casting.h"
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -167,14 +166,8 @@ inline bool isMainLoopOp(Operation *op) {
   return op && isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop);
 }
 
-CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
-
-inline bool isCubeSimpleOpOrCf(Operation *op) {
-  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
-}
-
-inline bool isVectorSimpleOpOrCf(Operation *op) {
-  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
+inline bool isCubeOp(Operation *op) {
+  return !isScfOp(op) && CVPipeline::getOpCoreType(op) == CoreType::CUBE_ONLY;
 }
 
 // ============================================================================
@@ -261,6 +254,8 @@ int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
 
+CoreType getValueCoreType(Value value);
+
 // Helper: convert OpCoreType to string for IR attribute
 inline llvm::StringRef coreTypeToString(CoreType ct) {
   switch (ct) {
@@ -273,43 +268,6 @@ inline llvm::StringRef coreTypeToString(CoreType ct) {
   default:
     return "UNDETERMINED";
   }
-}
-
-inline OpOperand *getTiedYieldOperand(Value value, Block *block) {
-  int argIdx = getLoopCarriedArgIndex(value, block);
-  if (argIdx == -1) {
-    return nullptr;
-  }
-  auto *terminator = block->getTerminator();
-  return &terminator->getOpOperand(argIdx);
-}
-
-inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
-  auto *yieldOperand = getTiedYieldOperand(value, block);
-  if (yieldOperand && yieldOperand->get()) {
-    return yieldOperand->get().getDefiningOp();
-  }
-  return nullptr;
-}
-
-inline bool isTensorComputeOp(Operation *op) {
-  if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp))
-      return false;
-    auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
-      return false;
-    if (isa<linalg::FillOp>(op))
-      return false;
-    return true;
-  }
-
-  if (op->hasTrait<mlir::OpTrait::Elementwise>()) {
-    return llvm::any_of(op->getResultTypes(),
-                        [](Type t) { return isa<RankedTensorType>(t); });
-  }
-
-  return false;
 }
 
 } // namespace CVPipeline

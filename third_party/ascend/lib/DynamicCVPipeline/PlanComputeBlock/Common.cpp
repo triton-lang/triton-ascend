@@ -20,12 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include "llvm/ADT/iterator.h"
-
-#include "mlir/IR/Value.h"
-
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-
 #include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
@@ -33,16 +28,32 @@ namespace CVPipeline {
 
 void initializeIndegreeForBlock(Block *block,
                                 llvm::DenseMap<Operation *, int> &indegree,
-                                const DependencyHelper &depHelper,
+                                const MemoryDependenceGraph &memGraph,
                                 ComputeBlockIdManager &bm) {
-  for (auto *op : llvm::make_pointer_range(block->getOperations())) {
+
+  block->walk([&](Operation *op) {
+    if (op->getBlock() != block) {
+      return;
+    }
     indegree[op] = 0;
-    depHelper.forEachSource(op, [&](Operation *source) {
-      if (source->getBlock() == block && !bm.isSameBlock(source, op)) {
-        indegree[op]++;
+    // We need to consider op itself && op's region-contained ops.
+    op->walk([&](Operation *nestedOp) {
+      for (auto inValue : nestedOp->getOperands()) {
+        if (auto defOp = inValue.getDefiningOp()) {
+          if (defOp->getBlock() == block && !bm.isSameBlock(defOp, op)) {
+            indegree[op]++;
+          }
+        }
+      }
+
+      for (auto memDepUser : memGraph.getExecBefore(nestedOp)) {
+        if (memDepUser->getBlock() == block &&
+            !bm.isSameBlock(memDepUser, op)) {
+          indegree[op]++;
+        }
       }
     });
-  }
+  });
 }
 
 Operation *getAncestorInBlock(Operation *inner, Block *block) {

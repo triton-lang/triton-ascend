@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  */
 
-#include <algorithm>
 #include <string_view>
 #include <utility>
 
@@ -33,11 +32,7 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "DynamicCVPipeline/Common/DependencyHelper.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -47,16 +42,18 @@
 #include "mlir/Pass/Pass.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
+
+#include "DynamicCVPipeline/Common/Utils.h"
+#include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "TritonToUnstructure/OffsetAnalysis.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
-
-#define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
-#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
+#define LOG_DEBUG(...)                                                         \
+  LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace triton;
 using namespace CVPipeline;
@@ -85,14 +82,16 @@ struct EdgeHelper {
   // either fails
   Operation *resolveToBlockOp(Operation *op);
 
+  template <bool IsMemory = false>
   void addEdge(Operation *pred, Operation *succ);
 
+  template <bool IsMemory = false>
   void addEdgeToUser(Operation *op, Operation *user) {
     if (graph.opIndex.contains(user)) {
       return; // same-level use, already covered by the def-side loop
     }
     Operation *ancestor = resolveToBlockOp(user);
-    addEdge(op, ancestor);
+    addEdge<IsMemory>(op, ancestor);
   };
 
   EdgeHelper(BlockOpGraph &g, Block *block) : graph(g), block(block) {};
@@ -111,12 +110,14 @@ Operation *EdgeHelper::resolveToBlockOp(Operation *op) {
   return ancestor;
 }
 
+template <bool IsMemory>
 void EdgeHelper::addEdge(Operation *pred, Operation *succ) {
   if (!pred || !succ || pred == succ) {
     return;
   }
   if (seen.insert({pred, succ}).second) {
-    LOG_DEBUG("Adding edge from " << *pred << " to " << *succ);
+    LOG_DEBUG("Adding " << (IsMemory ? "memory " : "") << "edge from " << *pred
+                        << " to " << *succ << "\n");
     graph.succs[pred].push_back(succ);
     graph.preds[succ].push_back(pred);
   }
@@ -132,16 +133,35 @@ BlockOpGraph::BlockOpGraph(ArrayRef<Operation *> allOps, Block *block,
   }
 
   EdgeHelper edges(*this, block);
-  DependencyHelper depHelper{memGraph};
 
   for (Operation *op : allOps) {
-    LOG_DEBUG("Processing op: " << *op);
-    depHelper.forEachSource(op, [&](Operation *source) {
-      Operation *def = edges.resolveToBlockOp(source);
+    LOG_DEBUG("Processing op: " << *op << "\n");
+    // Edges from operand defs (including defs nested inside other ops).
+    for (Value const operand : op->getOperands()) {
+      Operation *defOp = operand.getDefiningOp();
+      if (!defOp) {
+        continue;
+      }
+      Operation *def = edges.resolveToBlockOp(defOp);
       edges.addEdge(def, op);
-    });
-    depHelper.forEachUser(
-        op, [&](Operation *user) { edges.addEdgeToUser(op, user); });
+    }
+
+    // Edges from uses that live inside nested regions of another block-level
+    // op.
+    for (Value const result : op->getResults()) {
+      for (Operation *user : result.getUsers()) {
+        edges.addEdgeToUser(op, user);
+      }
+    }
+
+    for (auto *memDef : memGraph.getExecBefore(op)) {
+      Operation *def = edges.resolveToBlockOp(memDef);
+      edges.addEdge<true>(def, op);
+    }
+
+    for (auto *memUser : memGraph.getExecAfter(op)) {
+      edges.addEdgeToUser<true>(op, memUser);
+    }
   }
 }
 
@@ -190,10 +210,8 @@ struct GroupAdjacencyGraph {
   SmallVector<int> groupIds;
   SmallVector<SmallVector<unsigned>> succs;
   SmallVector<unsigned> inDeg;
-  ComputeBlockIdManager &bm;
   GroupAdjacencyGraph(const BlockOpGraph &g,
-                      const DenseMap<Operation *, int> &opBlockId,
-                      ComputeBlockIdManager &bm);
+                      const DenseMap<Operation *, int> &opBlockId);
   llvm::FailureOr<SmallVector<int>> computeTopologicalOrder();
 };
 
@@ -205,9 +223,8 @@ struct GroupAdjacencyGraph {
  * dependencies between those groups.
  */
 GroupAdjacencyGraph::GroupAdjacencyGraph(
-    const BlockOpGraph &g, const DenseMap<Operation *, int> &opBlockId,
-    ComputeBlockIdManager &bm)
-    : block(g.block), bm(bm) {
+    const BlockOpGraph &g, const DenseMap<Operation *, int> &opBlockId)
+    : block(g.block) {
   // 1. Collect distinct group IDs while preserving the first-appearance order.
   DenseSet<int> seenIds;
   for (Operation *op : g.ops) {
@@ -246,11 +263,11 @@ GroupAdjacencyGraph::GroupAdjacencyGraph(
   // Logging the constructed group graph.
   LOG_DEBUG("Group-level edges:\n");
   for (unsigned i = 0; i < n; ++i) {
-    DBGS("  Group " << groupIds[i] << " -> ");
+    LOG_DEBUG("  Group " << groupIds[i] << " -> ");
     for (unsigned succIdx : succs[i]) {
-      DBGS(groupIds[succIdx] << " ");
+      LOG_DEBUG(groupIds[succIdx] << " ");
     }
-    DBGS("\n");
+    LOG_DEBUG("\n");
   }
 }
 
@@ -264,39 +281,11 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
   SmallVector<unsigned> ready; // Nodes with in-degree 0.
   unsigned n = groupIds.size();
 
-  SmallVector<unsigned> startingVectorBlocks;
-  for (auto [i, groupId] : llvm::enumerate(groupIds)) {
-    if (inDeg[i] != 0) {
-      continue;
-    }
-    auto ops = bm.getOpsRefByBlockId(groupId);
-    if (ops.empty() ||
-        getCoreTypeOfSimpleOpOrCf(ops.front()) == mlir::CVPipeline::CUBE_ONLY) {
+  for (unsigned i = 0; i < n; ++i) {
+    if (inDeg[i] == 0) {
       ready.push_back(i);
-    } else {
-      startingVectorBlocks.push_back(i);
     }
   }
-  constexpr size_t kPriviledgedMaxComputeOpCnt = 1;
-  std::stable_partition(startingVectorBlocks.begin(),
-                        startingVectorBlocks.end(), [this](unsigned idx) {
-                          const auto blockId = groupIds[idx];
-                          const auto ops = bm.getOpsRefByBlockId(blockId);
-                          auto computeOpCnt = 0;
-                          for (auto op : ops) {
-                            if (isTensorComputeOp(op)) {
-                              computeOpCnt++;
-                              LOG_DEBUG("Tensor compute op: " << *op);
-                            } else {
-                              LOG_DEBUG("Not tensor compute op: " << *op);
-                            }
-                          }
-                          LOG_DEBUG("Summary: group id "
-                                    << blockId
-                                    << " compute ops: " << computeOpCnt);
-                          return computeOpCnt > kPriviledgedMaxComputeOpCnt;
-                        });
-  ready.append(startingVectorBlocks);
 
   while (!ready.empty()) {
     auto cur = ready.pop_back_val();
@@ -343,28 +332,19 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
 // Stable sort ops based on their group orders
 static llvm::FailureOr<SmallVector<Operation *>>
 buildReorderedOps(const BlockOpGraph &graph,
-                  const DenseMap<Operation *, int> &opBlockId,
-                  ComputeBlockIdManager &bm) {
+                  const DenseMap<Operation *, int> &opBlockId) {
   SmallVector<Operation *> reordered;
-  GroupAdjacencyGraph adjacencyGraph{graph, opBlockId, bm};
+  GroupAdjacencyGraph adjacencyGraph{graph, opBlockId};
   auto groupOrderResult = adjacencyGraph.computeTopologicalOrder();
   if (llvm::failed(groupOrderResult)) {
     return llvm::failure();
   }
 
   for (int const blockId : groupOrderResult.value()) {
-    SmallVector<Operation *> storeOps;
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
-        if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
-          storeOps.push_back(op);
-          continue;
-        }
         reordered.push_back(op);
       }
-    }
-    for (auto op : storeOps) {
-      reordered.push_back(op);
     }
   }
   return reordered;
@@ -402,7 +382,7 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
     LOG_DEBUG("  Op: " << *op << ", opBlockId = " << opBlockId[op] << "\n");
   }
 
-  const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm);
+  const auto reorderedRes = buildReorderedOps(graph, opBlockId);
   if (failed(reorderedRes)) {
     return failure();
   }
@@ -413,6 +393,7 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
 }
 
 void ReorderOpsByBlockIdPass::runOnOperation() {
+  LOG_DEBUG("\n=== Pass: TuningOpSeq ===\n");
   OpBuilder const builder(&getContext());
 
   auto moduleOp = getOperation();

@@ -154,9 +154,6 @@ private:
   mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue,
                                                   int iniConsumerId);
   mlir::Operation *getConsumerWaitPoint(int transferIndex);
-  mlir::Operation *getCopyPointBeforeStore(Value depValue,
-                                           Operation *vectorEndOp,
-                                           int iniProducerBlockId);
   mlir::Operation *insertVectorToCubeTransfer(
       mlir::OpBuilder &builder, mlir::Value srcValue,
       mlir::Value normalizedValue, mlir::Operation *vectorEndOp,

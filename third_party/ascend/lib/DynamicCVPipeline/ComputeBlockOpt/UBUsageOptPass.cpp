@@ -19,9 +19,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
-#include "DynamicCVPipeline/Common/CycleDetector.h"
-#include "DynamicCVPipeline/Common/DependencyHelper.h"
-#include "DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -554,6 +551,127 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
   return recordChange;
 }
 
+namespace {
+
+struct DependencyCycleDetector {
+  llvm::DenseSet<mlir::Operation *>
+      &okSet; // node in okSet will become one compute block;
+  llvm::DenseSet<mlir::Operation *> visited;
+  const CVPipeline::MemoryDependenceGraph &memGraph;
+  CVPipeline::ComputeBlockIdManager &bm;
+  Block *block;
+  void clear() { visited.clear(); }
+  bool operator()(Operation *cur);
+  bool dfs(Operation *cur) { return (*this)(cur); };
+
+  DependencyCycleDetector(Block *block,
+                          const CVPipeline::MemoryDependenceGraph &memGraph,
+                          llvm::DenseSet<mlir::Operation *> &okSet,
+                          CVPipeline::ComputeBlockIdManager &bm)
+      : block(block), memGraph(memGraph), okSet(okSet), bm(bm) {}
+};
+
+} // namespace
+
+bool DependencyCycleDetector::operator()(Operation *cur) {
+  if (okSet.contains(cur)) {
+    return true;
+  }
+  if (!visited.insert(cur).second) {
+    return false;
+  }
+
+  SmallVector<Operation *> allusers;
+  allusers.append(cur->getUsers().begin(), cur->getUsers().end());
+  for (auto *memUser : memGraph.getExecAfter(cur)) {
+    allusers.push_back(memUser);
+  }
+  for (auto *user : allusers) {
+    auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+    if (bm.getBlockIdByOp(userInBlock) == -1) {
+      if (dfs(userInBlock)) {
+        return true;
+      }
+    } else {
+      for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
+        if (dfs(nx)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if adding willaddOps to targetBlockId will create cycle.
+ * Walk from every op in targetBlockId and willaddOps.
+ * if reach other blockid ops and dfs find any targetBlockId op, then there is
+ * cycle.
+ */
+std::optional<bool>
+willCreateCycle(llvm::SmallVectorImpl<Operation *> &willaddOps, Block *block,
+                const CVPipeline::MemoryDependenceGraph &memGraph,
+                int targetBlockId, CVPipeline::ComputeBlockIdManager &bm) {
+  // Step1: Init, Add willaddOps to targetBlockId.
+  // OkSet is new block, includes two part: 1. original ops in targetBlockId. 2.
+  // willaddOps.
+  llvm::DenseSet<mlir::Operation *> okSet;
+  for (auto op : bm.getOpsByBlockId(targetBlockId)) {
+    okSet.insert(op);
+  }
+  llvm::DenseMap<mlir::Operation *, int> originBlockId;
+  for (auto op : willaddOps) {
+    okSet.insert(op);
+    // For backtracing
+    originBlockId[op] = bm.getBlockIdByOp(op);
+    bm.updateBlockId(op, targetBlockId);
+  }
+  DependencyCycleDetector dfs = {block, memGraph, okSet, bm};
+
+  // Step2: Walk from every op in okSet
+  auto ret = false;
+  for (mlir::Operation *okOp : okSet) {
+    SmallVector<Operation *> allusers;
+    allusers.append(okOp->getUsers().begin(), okOp->getUsers().end());
+    for (auto *memUser : memGraph.getExecAfter(okOp)) {
+      allusers.push_back(memUser);
+    }
+    for (auto *user : allusers) {
+      auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+      if (okSet.contains(userInBlock)) {
+        continue;
+      }
+      if (bm.getBlockIdByOp(userInBlock) == -1) {
+        dfs.clear();
+        if (dfs(userInBlock)) {
+          ret = true;
+          break;
+        }
+        continue;
+      }
+      auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
+      for (auto *userOp : opsUsedBlockId) {
+        dfs.clear();
+        if (dfs(userOp)) {
+          ret = true;
+          break;
+        }
+      }
+    }
+    if (ret) {
+      // early stop if find cycle.
+      break;
+    }
+  }
+
+  // Step3: Backtrace blockId change.
+  for (auto op : willaddOps) {
+    bm.updateBlockId(op, originBlockId[op]);
+  }
+  return ret;
+}
+
 static void processOpsInblock(Operation *parentOp, int targetId,
                               CVPipeline::ComputeBlockIdManager &bm) {
   // If the parentOp's blockId is the same as every op's id in each of its
@@ -597,7 +715,9 @@ bool applyRecordChange(DenseMap<int, int> &recordChange,
     for (int nodeId : willaddNodes) {
       willaddOps.push_back(nodeId2op[nodeId]);
     }
-    if (CVPipeline::willCreateCycle(willaddOps, memGraph, targetBlockId, bm)) {
+    if (willCreateCycle(willaddOps, willaddOps[0]->getBlock(), memGraph,
+                        targetBlockId, bm)
+            .value_or(true)) {
       LOG_DEBUG("Find cycle when apply change for blockId: " << targetBlockId
                                                              << "\n");
       for (auto nodeId : willaddNodes) {
@@ -703,7 +823,8 @@ UBUsageOptPass::optBroadcast(Block *block,
     }
     llvm::SmallVector<Operation *> willaddOps{broadcastOp};
 
-    if (!CVPipeline::willCreateCycle(willaddOps, memGraph, userBlockId, bm)) {
+    if (!willCreateCycle(willaddOps, block, memGraph, userBlockId, bm)
+             .value_or(true)) {
       bm.updateBlockId(broadcastOp, userBlockId);
     } else {
       LOG_DEBUG("Moved" << *broadcastOp << " to blockId: " << userBlockId
@@ -769,7 +890,9 @@ UBUsageOptPass::optSmallBlock(Block *block,
     }
     llvm::SmallVector<Operation *> willaddOps(opsInSmallBlcok.begin(),
                                               opsInSmallBlcok.end());
-    if (willCreateCycle(willaddOps, memGraph, candidateUserBlockIds[0], bm)) {
+    if (!willCreateCycle(willaddOps, block, memGraph, candidateUserBlockIds[0],
+                         bm)
+             .value_or(true)) {
       for (Operation *op : opsInSmallBlcok) {
         bm.updateBlockId(op, candidateUserBlockIds[0]);
       }

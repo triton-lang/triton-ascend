@@ -25,7 +25,6 @@
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
 
-#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -97,6 +96,125 @@ private:
   bool isValidMul(Operation *op, Value matmulValues,
                   SetVector<Operation *> &matchedOps);
 };
+
+namespace {
+struct DependencyCycleDetector {
+  llvm::DenseSet<mlir::Operation *> &opsInNewBlock;
+  llvm::DenseSet<mlir::Operation *> visited;
+  const CVPipeline::MemoryDependenceGraph &memGraph;
+  CVPipeline::ComputeBlockIdManager &bm;
+  Block *block;
+  void clear() { visited.clear(); }
+  bool dfs(Operation *cur);
+  DependencyCycleDetector(Block *block,
+                          const CVPipeline::MemoryDependenceGraph &memGraph,
+                          llvm::DenseSet<mlir::Operation *> &opsInNewBlock,
+                          CVPipeline::ComputeBlockIdManager &bm)
+      : block(block), memGraph(memGraph), opsInNewBlock(opsInNewBlock), bm(bm) {
+  }
+};
+
+} // namespace
+
+bool DependencyCycleDetector::dfs(Operation *cur) {
+  if (opsInNewBlock.contains(cur)) {
+    return true;
+  }
+  if (!visited.insert(cur).second) {
+    return false;
+  }
+
+  SmallVector<Operation *> allusers;
+  allusers.append(cur->getUsers().begin(), cur->getUsers().end());
+  allusers.append(memGraph.getExecAfter(cur).begin(),
+                  memGraph.getExecAfter(cur).end());
+  for (auto *user : allusers) {
+    auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+    if (!userInBlock) {
+      continue;
+    }
+    if (bm.getBlockIdByOp(userInBlock) == -1) {
+      if (dfs(userInBlock)) {
+        return true;
+      }
+    } else {
+      for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
+        if (dfs(nx)) {
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Check if adding willaddOps to targetBlockId will create cycle.
+ * Walk from every op in targetBlockId and willaddOps.
+ * if reach other blockid ops and dfs find any targetBlockId op, then there is
+ * cycle.
+ */
+static std::optional<bool>
+willCreateCycle(SetVector<Operation *> &willaddOps, Block *block,
+                const CVPipeline::MemoryDependenceGraph &memGraph,
+                int targetBlockId, CVPipeline::ComputeBlockIdManager &bm) {
+  // Step1: Init, Add willaddOps to targetBlockId.
+  // opsInNewBlock is new block, includes two part: 1. original ops in
+  // targetBlockId. 2. willaddOps.
+  llvm::DenseSet<mlir::Operation *> opsInNewBlock;
+  for (auto op : bm.getOpsByBlockId(targetBlockId)) {
+    opsInNewBlock.insert(op);
+  }
+  llvm::DenseMap<mlir::Operation *, int> originBlockId;
+  for (auto op : willaddOps) {
+    opsInNewBlock.insert(op);
+    // For backtracing
+    originBlockId[op] = bm.getBlockIdByOp(op);
+    bm.updateBlockId(op, targetBlockId);
+  }
+  DependencyCycleDetector detector = {block, memGraph, opsInNewBlock, bm};
+
+  // Step2: Walk from every op in opsInNewBlock
+  auto ret = false;
+  for (mlir::Operation *testOp : opsInNewBlock) {
+    SmallVector<Operation *> allusers;
+    allusers.append(testOp->getUsers().begin(), testOp->getUsers().end());
+    allusers.append(memGraph.getExecAfter(testOp).begin(),
+                    memGraph.getExecAfter(testOp).end());
+    for (auto *user : allusers) {
+      auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
+      if (opsInNewBlock.contains(userInBlock)) {
+        continue;
+      }
+      if (bm.getBlockIdByOp(userInBlock) == -1) {
+        detector.clear();
+        if (detector.dfs(userInBlock)) {
+          ret = true;
+          break;
+        }
+        continue;
+      }
+      auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
+      for (auto *userOp : opsUsedBlockId) {
+        detector.clear();
+        if (detector.dfs(userOp)) {
+          ret = true;
+          break;
+        }
+      }
+    }
+    if (ret) {
+      // early stop if find cycle.
+      break;
+    }
+  }
+
+  // Step3: Backtrace blockId change.
+  for (auto op : willaddOps) {
+    bm.updateBlockId(op, originBlockId[op]);
+  }
+  return ret;
+}
 
 bool FixpipeOptPass::isValidTrunc(Operation *op) {
   // Just filter: arith.truncf(f32->bf16, f32->f16, i32->i8)
@@ -428,8 +546,8 @@ bool FixpipeOptPass::applyFixpipeOpt(
   int targetBlockId = bm.getBlockIdByOp(matmulOp);
   auto block = matmulOp->getBlock();
 
-  if (CVPipeline::willCreateCycle(matchedOps.getArrayRef(), memGraph,
-                                  targetBlockId, bm)) {
+  if (willCreateCycle(matchedOps, block, memGraph, targetBlockId, bm)
+          .value_or(true)) {
     return false;
   }
   for (Operation *op : matchedOps) {
@@ -483,15 +601,6 @@ void FixpipeOptPass::runOnOperation() {
   */
   auto bmOriginal = CVPipeline::ComputeBlockIdManager(module);
   for (auto &matchedOps : allMatchedPatterns) {
-    if (matchedOps.empty()) {
-      continue;
-    }
-    CVPipeline::SplitIf::ScalarClosure closure{matchedOps.front()->getBlock(),
-                                               matchedOps.getArrayRef(), false};
-    closure.collect();
-    for (auto op : closure.scalarOps) {
-      matchedOps.insert(op);
-    }
     CVPipeline::cloneScalarOpsForCrossBlockUses(bmOriginal, matchedOps);
   }
 

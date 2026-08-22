@@ -41,6 +41,9 @@ void registerMergeCubeForBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createUnifyStoreBlockPass();
 void registerUnifyStoreBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+std::unique_ptr<OperationPass<ModuleOp>> createSinkI1ProducersIntoUsersPass();
+std::unique_ptr<OperationPass<ModuleOp>> createBroadcastUBOptPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMoveLoadIntoUserPass();
 
 } // namespace triton
 } // namespace mlir

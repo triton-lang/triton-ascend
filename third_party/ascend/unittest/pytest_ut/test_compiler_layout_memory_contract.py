@@ -90,12 +90,9 @@ def compiler_module():
     """
     compiler_path = Path(__file__).resolve().parents[2] / "backend" / "compiler.py"
     module_name = "triton.backends.ascend.compiler_layout_memory_contract_under_test"
-    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
     utils_name = "triton.backends.ascend.utils"
     driver_name = "triton.backends.ascend.driver"
-    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
     cache_name = "triton.runtime.cache"
-    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
 
     def return_false(*_args, **_kwargs):
         return False
@@ -143,16 +140,10 @@ def compiler_module():
     driver_stub = types.ModuleType(driver_name)
     driver_stub.NPUUtils = UnusedNPUUtils
 
-    debug_line_rewriter_stub = types.ModuleType(debug_line_rewriter_name)
-    debug_line_rewriter_stub.rewrite_debug_line = lambda artifact, **_kwargs: artifact
-
     cache_stub = types.ModuleType(cache_name)
     cache_stub._base32 = lambda value: str(value)
     cache_stub.get_dump_manager = lambda *_args, **_kwargs: SimpleNamespace(cache_dir="", put=lambda *_args, **_kwargs:
                                                                             None)
-
-    debug_line_rewriter_stub = types.ModuleType(debug_line_rewriter_name)
-    debug_line_rewriter_stub.rewrite_debug_line = lambda artifact, metadata=None, options=None: artifact
 
     # Initialize the installed Triton package before temporarily replacing its
     # cache module below.  Loading compiler.py starts from triton._C; doing it
@@ -162,21 +153,18 @@ def compiler_module():
 
     previous_utils = sys.modules.get(utils_name)
     previous_driver = sys.modules.get(driver_name)
-    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
     previous_cache = sys.modules.get(cache_name)
-    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
     sys.modules[utils_name] = utils_stub
     sys.modules[driver_name] = driver_stub
-    sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules[cache_name] = cache_stub
-    sys.modules[debug_line_rewriter_name] = debug_line_rewriter_stub
     sys.modules.pop(module_name, None)
+    debug_line_rewriter_name = "triton.backends.ascend.debug_line_rewriter"
+    previous_debug_line_rewriter = sys.modules.get(debug_line_rewriter_name)
+    sys.modules.pop(debug_line_rewriter_name, None)
     try:
         debug_line_rewriter_path = compiler_path.with_name("debug_line_rewriter.py")
-        debug_line_rewriter_spec = importlib.util.spec_from_file_location(
-            debug_line_rewriter_name,
-            debug_line_rewriter_path,
-        )
+        debug_line_rewriter_spec = importlib.util.spec_from_file_location(debug_line_rewriter_name,
+                                                                          debug_line_rewriter_path)
         debug_line_rewriter = importlib.util.module_from_spec(debug_line_rewriter_spec)
         assert debug_line_rewriter_spec is not None and debug_line_rewriter_spec.loader is not None
         sys.modules[debug_line_rewriter_name] = debug_line_rewriter
@@ -187,6 +175,10 @@ def compiler_module():
         sys.modules[module_name] = module
         spec.loader.exec_module(module)
     finally:
+        if previous_debug_line_rewriter is None:
+            sys.modules.pop(debug_line_rewriter_name, None)
+        else:
+            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
         if previous_utils is None:
             sys.modules.pop(utils_name, None)
         else:
@@ -195,18 +187,10 @@ def compiler_module():
             sys.modules.pop(driver_name, None)
         else:
             sys.modules[driver_name] = previous_driver
-        if previous_debug_line_rewriter is None:
-            sys.modules.pop(debug_line_rewriter_name, None)
-        else:
-            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
         if previous_cache is None:
             sys.modules.pop(cache_name, None)
         else:
             sys.modules[cache_name] = previous_cache
-        if previous_debug_line_rewriter is None:
-            sys.modules.pop(debug_line_rewriter_name, None)
-        else:
-            sys.modules[debug_line_rewriter_name] = previous_debug_line_rewriter
     return module
 
 
@@ -359,9 +343,6 @@ def _run_ttir_to_npubin(
         commands.append(list(command))
         output = Path(command[command.index("-o") + 1] + ".o")
         output.write_bytes(b"npubin")
-        metadata_option = next((arg for arg in command if arg.startswith("--triton-metadata-output=")), None)
-        if metadata_option is not None:
-            Path(metadata_option.split("=", 1)[1]).write_text("{}")
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     monkeypatch.setattr(
@@ -408,16 +389,6 @@ def _run_ttir_to_npubin(
     assert result == b"npubin"
     assert len(commands) == 1
     return events, commands[0]
-
-
-@pytest.mark.parametrize("is_pure_simt", (False, True))
-def test_ttir_to_npubin_global_scratch_allocation_flag(compiler_module, monkeypatch, is_pure_simt):
-    _events, command = _run_ttir_to_npubin(
-        compiler_module,
-        monkeypatch,
-        is_pure_simt=is_pure_simt,
-    )
-    assert ("--enable-global-scratch-allocation" in command) is is_pure_simt
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -625,7 +596,6 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",
-        "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
         "--enable-bishengir-simt-optimization=17",
@@ -661,12 +631,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         second_injection = env_enabled and not blacklisted and not row_applied
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
-        metadata_options = [arg for arg in command if arg.startswith("--triton-metadata-output=")]
-        assert len(metadata_options) == 1, case
-        metadata_option = metadata_options[0]
-        assert Path(metadata_option.split("=", 1)[1]).name == "triton-metadata.json", case
-
-        expected_options = [*common_options, metadata_option, *pure_simt_prefix]
+        expected_options = [*common_options, *pure_simt_prefix]
         if second_injection:
             expected_options.append(auto_blockify_flag)
             if superblock > 0:

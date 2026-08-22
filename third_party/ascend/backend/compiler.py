@@ -1211,15 +1211,12 @@ def ttir_to_npubin(mod, metadata, opt):
         # prepare output
         bin_file = os.path.join(tmpdir, "kernel")
         bin_path = os.path.join(tmpdir, "kernel.o")
-        metadata_path = os.path.join(tmpdir, "triton-metadata.json")
         # build compile options
         _compile_option_list = get_common_bishengir_compile_options(metadata)
         if opt.is_pure_simt:
-            _compile_option_list += [f"--triton-metadata-output={metadata_path}"]
             _compile_option_list += ["--enable-hivm-compile=false"]
             _compile_option_list += ["--enable-triton-ir-compile"]
             _compile_option_list += ["--pure-simt"]
-            _compile_option_list += ["--enable-global-scratch-allocation"]
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.enable_bishengir_simt_optimization != 000:
@@ -1251,8 +1248,6 @@ def ttir_to_npubin(mod, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
-        if opt.is_pure_simt:
-            metadata.update(json.loads(Path(metadata_path).read_text()))
         return Path(bin_path).read_bytes()
 
 

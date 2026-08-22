@@ -24,18 +24,16 @@ rather than a misleading green skip.
 import ast
 import copy
 import itertools
-import json
 import os
-from pathlib import Path
 import subprocess
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 _BASELINE_COMMIT = "895c5fbe2b0e69349b76388e65fd8c3e79703bb9"
 _REQUIRE_BASELINE_ENV = "TRITON_REQUIRE_895_DIFFERENTIAL"
-_TRITON_METADATA_OUTPUT_PREFIX = "--triton-metadata-output="
 _SOURCE_PATHS = {
     "compiler": "third_party/ascend/backend/compiler.py",
     "driver": "third_party/ascend/backend/driver.py",
@@ -123,7 +121,6 @@ def _load_compiler_closure(source):
     # the installed compiler package or an NPU toolchain.
     subprocess_proxy = SimpleNamespace(CalledProcessError=subprocess.CalledProcessError, )
     namespace = {
-        "json": json,
         "os": os,
         "tempfile": tempfile,
         "Path": Path,
@@ -248,9 +245,6 @@ def _run_ttir_to_npubin(
         commands.append(list(command))
         bin_file = Path(command[command.index("-o") + 1])
         bin_file.with_name(f"{bin_file.name}.o").write_bytes(b"npubin")
-        metadata_option = next((arg for arg in command if arg.startswith(_TRITON_METADATA_OUTPUT_PREFIX)), None)
-        if metadata_option is not None:
-            Path(metadata_option.removeprefix(_TRITON_METADATA_OUTPUT_PREFIX)).write_text("{}")
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
 
     closure["ir"] = SimpleNamespace(pass_manager=lambda _context: pass_manager)
@@ -284,7 +278,7 @@ def _normalise_command(command):
     return [
         command[0],
         Path(command[1]).name,
-        *(arg for arg in command[2:-2] if not arg.startswith(_TRITON_METADATA_OUTPUT_PREFIX)),
+        *command[2:-2],
         command[-2],
         Path(command[-1]).name,
     ]
@@ -429,7 +423,6 @@ def test_895_coalesce_attrs_export_identically(name, attrs, expected, source_pai
 
 
 class _FakeNPUUtils:
-
     npu_utils_mod = SimpleNamespace(__file__="")
 
     def get_aivector_core_num(self):

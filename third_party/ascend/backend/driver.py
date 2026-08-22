@@ -28,7 +28,6 @@ import sysconfig
 from typing import Optional
 import functools
 import hashlib
-from triton.runtime import _allocation
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
@@ -183,8 +182,6 @@ class NPULauncher(object):
         cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
         signature = {cst_key(key): value for key, value in self.src.signature.items()}
         self.launch = wrap_handle_tensordesc(getattr(mod, "launch"), signature)
-        self.global_scratch_size = getattr(metadata, "global_scratch_size", 0)
-        self.global_scratch_align = getattr(metadata, "global_scratch_align", 1)
 
     def _make_launcher_stub_path(self):
         header_src = generate_npu_header_src()
@@ -198,22 +195,13 @@ class NPULauncher(object):
     def get_launcher_so_path(self):
         return self.so_launcher_path
 
-    def __call__(self, gridX, gridY, gridZ, stream, function, packed_metadata, launch_metadata, launch_enter_hook,
-                 launch_exit_hook, *kernel_args, **kwargs):
+    def __call__(self, *args, **kwargs):
         if self.compile_only:
-            cache_manager = get_cache_manager(packed_metadata['hash'])
+            cache_manager = get_cache_manager(args[5]['hash'])
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
-        global_scratch = None
-        if self.global_scratch_size > 0 and gridX > 0 and gridY > 0 and gridZ > 0:
-            grid_size = gridX * gridY * gridZ
-            alloc_size = grid_size * self.global_scratch_size
-            alloc_fn = _allocation._allocator.get()
-            global_scratch = alloc_fn(alloc_size, self.global_scratch_align, stream)
-
-        profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, global_scratch, None, packed_metadata,
-                                          launch_metadata, launch_enter_hook, launch_exit_hook, *kernel_args, **kwargs)
+        profiler_registered = self.launch(*args, **kwargs)
         _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 
@@ -454,7 +442,7 @@ def ty_to_cpp(ty):
     }[ty]
 
 
-_BASE_ARGS_FORMAT = "iiiKKOOOOOO"
+_BASE_ARGS_FORMAT = "iiiKKOOOO"
 _BASE_ARGS_FORMAT_LEN = len(_BASE_ARGS_FORMAT)
 
 
@@ -640,7 +628,6 @@ def make_launcher(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
-    global_scratch_size = int(getattr(metadata, "global_scratch_size", 0) or 0)
     lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
                           lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
     lock_num = int(metadata.lock_num) \
@@ -804,7 +791,6 @@ def make_launcher(constants, signature, metadata):
         int gridX, gridY, gridZ;
         aclrtStream stream;
         aclrtFuncHandle functon;
-        PyObject* global_scratch, *profile_scratch;
         PyObject* packed_metadata, *launch_metadata;
         PyObject* launch_enter_hook, *launch_exit_hook;
         *args_expand
@@ -866,11 +852,6 @@ def make_launcher(constants, signature, metadata):
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
-    exported_scratch_guard = ""
-    if metadata.is_pure_simt and global_scratch_size > 0:
-        exported_scratch_guard = (
-            'fprintf(stderr, "Error: triton_launch_kernel does not support nonzero global scratch\\n");\n'
-            '  return;')
     npu_utils_mod = getattr(npu_utils, "npu_utils_mod", None)
     npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
     # The generated launcher source is part of its cache key. Preserve only the
@@ -1178,7 +1159,6 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
            kernelName, gridX, gridY, gridZ);
     return;
   }}
-  {exported_scratch_guard}
   std::vector<std::vector<int64_t>> tensorShapes;
   if (shapes_data != nullptr && shape_dims != nullptr) {{
     int shapes_idx = 0;
@@ -1211,7 +1191,6 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
   // Pointer type becomes flattened 1-D Memref tuple: base_ptr, data_ptr,
   // offset, shape, stride. base_ptr offset shape and stride are not used,
   // arbitrarily set for now.
-{'void *global_scratch = nullptr; void *profile_scratch = nullptr;' if metadata.is_pure_simt else ''}
 {_launch_preamble}
 {_launch_lambda_pre}
 
@@ -1234,8 +1213,6 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
-    {'size_t global_scratch_offset = reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
-    {'size_t profile_scratch_offset = reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
     {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else ''}
     size_t total_size = args_offset;
 
@@ -1253,8 +1230,6 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
     memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + sizeof(int32_t), &gridY, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + 2 * sizeof(int32_t), &gridZ, sizeof(int32_t));
-    {'memcpy(launch_args.data() + global_scratch_offset, &global_scratch, sizeof(void*));' if metadata.is_pure_simt else ''}
-    {'memcpy(launch_args.data() + profile_scratch_offset, &profile_scratch, sizeof(void*));' if metadata.is_pure_simt else ''}
     {'memcpy(launch_args.data() + dtdata_offset, &DTData, sizeof(void*));' if enable_device_print else ''}
 
 {_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch)}
@@ -1262,8 +1237,7 @@ void triton_launch_kernel(const char* kernelName, aclrtFuncHandle func, aclrtStr
 
 static void _launch(const char* kernelName, aclrtFuncHandle func, aclrtStream stream,
     int gridX, int gridY, int gridZ,
-    std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds,
-    void *global_scratch, void *profile_scratch{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
+    std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
   if (gridX <=0 || gridY <=0 || gridZ <=0) {{
     printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
@@ -1277,8 +1251,6 @@ static void _launch(const char* kernelName, aclrtFuncHandle func, aclrtStream st
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
       {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
-      {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
-      {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
@@ -1288,8 +1260,6 @@ static void _launch(const char* kernelName, aclrtFuncHandle func, aclrtStream st
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
       {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
-      {', static_cast<void*>(global_scratch)' if metadata.is_pure_simt else ''}
-      {', static_cast<void*>(profile_scratch)' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(DTData)' if enable_device_print else ''}
     }};
 {_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch_local)}
@@ -1304,8 +1274,6 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   PyObject *launch_metadata = nullptr;
   PyObject *launch_enter_hook = nullptr;
   PyObject *launch_exit_hook = nullptr;
-  PyObject *global_scratch_obj = nullptr;
-  PyObject *profile_scratch_obj = nullptr;
   std::vector<std::vector<int64_t>> tensorShapes;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
@@ -1321,12 +1289,10 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   gridZ = (int)PyLong_AsLong(args[2]);
   stream = reinterpret_cast<aclrtStream>(PyLong_AsUnsignedLongLong(args[3]));
   function = reinterpret_cast<aclrtFuncHandle>(PyLong_AsUnsignedLongLong(args[4]));
-  global_scratch_obj = args[5];
-  profile_scratch_obj = args[6];
-  packedMetadata = args[7];
-  launch_metadata = args[8];
-  launch_enter_hook = args[9];
-  launch_exit_hook = args[10];
+  packedMetadata = args[5];
+  launch_metadata = args[6];
+  launch_enter_hook = args[7];
+  launch_exit_hook = args[8];
   {fastcall_sig_parse_stmts}
   if (PyErr_Occurred()) {{
     return nullptr;
@@ -1348,23 +1314,6 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
       return nullptr;
   }}
 
-  void *global_scratch = 0;
-  if (global_scratch_obj != Py_None) {{
-    DevicePtrInfo global_scratch_info = getPointer(global_scratch_obj, -1);
-    if (!global_scratch_info.valid) {{
-      return nullptr;
-    }}
-    global_scratch = global_scratch_info.dev_ptr;
-  }}
-
-  void *profile_scratch = 0;
-  if (profile_scratch_obj != Py_None) {{
-    DevicePtrInfo profile_scratch_info = getPointer(profile_scratch_obj, -1);
-    if (!profile_scratch_info.valid) {{
-      return NULL;
-    }}
-    profile_scratch = profile_scratch_info.dev_ptr;
-  }}
   // get kernel_name (use interned key to avoid temporary PyUnicode per call)
   static PyObject* key_kernel_name = PyUnicode_InternFromString("kernel_name");
   PyObject* kernelNameObj = PyDict_GetItemWithError(packedMetadata, key_kernel_name);
@@ -1391,8 +1340,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   {newline.join(ptr_decls)}
   _launch(kernelName, function, stream,
           gridX, gridY, gridZ,
-          tensorShapes, tensorKinds,
-          global_scratch, profile_scratch
+          tensorShapes, tensorKinds
           {', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
   if (PyErr_Occurred()) {{
     return nullptr;

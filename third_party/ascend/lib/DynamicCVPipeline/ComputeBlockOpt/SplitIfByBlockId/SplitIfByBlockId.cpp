@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 #include <cstdint>
+#include <optional>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
@@ -27,6 +28,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -35,6 +37,7 @@
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -45,6 +48,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
@@ -56,7 +60,9 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 #include "Common.h"
+#include "DynamicCVPipeline/Common/FallbackHelper.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 
 static constexpr const char *DEBUG_TYPE = "SplitIfByBlockId";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -786,15 +792,67 @@ static Value getRootTensor(Value v) {
   return v;
 }
 
+static llvm::FailureOr<Value>
+createMatmulPlaceHolderValue(OpBuilder &builder, scf::IfOp ifOp,
+                             linalg::MatmulOp matmulOp,
+                             RankedTensorType tensorType, Location loc) {
+  auto bias = matmulOp.getDpsInitOperand(0)->get();
+  auto block = ifOp->getBlock();
+  return llvm::TypeSwitch<Value, llvm::FailureOr<Value>>(bias)
+      .Case([&](BlockArgument barg) -> llvm::FailureOr<Value> {
+        if (barg.getParentBlock()->findAncestorOpInBlock(*ifOp))
+          return bias;
+        else
+          return llvm::failure();
+      })
+      .Case([&](OpResult res) -> llvm::FailureOr<Value> {
+        auto defOp = res.getDefiningOp();
+        auto fillOp = llvm::dyn_cast_if_present<linalg::FillOp>(defOp);
+        if (!fillOp) {
+          return llvm::failure();
+        }
+
+        auto sourceOp = fillOp.getDpsInitOperand(0)->get().getDefiningOp();
+        auto sourceEmpty = llvm::dyn_cast_if_present<tensor::EmptyOp>(sourceOp);
+        if (!sourceEmpty)
+          return llvm::failure();
+
+        if (ifOp->isAncestor(sourceEmpty) || ifOp->isAncestor(fillOp)) {
+          auto valueDefinedInsideIf = [ifOp](Value value) {
+            Operation *defOp =
+                llvm::TypeSwitch<Value, Operation *>(value)
+                    .Case([&](BlockArgument barg) -> Operation * {
+                      auto block = barg.getOwner();
+                      if (!block)
+                        return nullptr;
+                      auto parentOp = block->getParentOp();
+                      if (!parentOp)
+                        return nullptr;
+                      return parentOp;
+                    })
+                    .Case([&](OpResult res) { return res.getDefiningOp(); })
+                    .Default([&](auto) { return nullptr; });
+            return defOp && ifOp->isAncestor(defOp);
+          };
+          if (llvm::any_of(matmulOp.getDpsInputs(), valueDefinedInsideIf))
+            return llvm::failure();
+        }
+
+        auto emptyOp = builder.create<tensor::EmptyOp>(
+            loc, tensorType.getShape(), tensorType.getElementType());
+        return emptyOp.getResult();
+      })
+      .Default([](auto) { return llvm::failure(); });
+}
+
 /// Create a zero/default SSA value of the given type.
 /// Used for placeholder values in Case A else blocks when the original
 /// scf.if has no yield results to passthrough.
 /// When \p referenceValue traces to a function argument, the placeholder
 /// preserves that provenance instead of creating a fresh alloca.
-static llvm::FailureOr<Value> createPlaceholderValue(int blockId,
-                                                     OpBuilder &builder,
-                                                     Location loc, Type type,
-                                                     Value referenceValue) {
+static llvm::FailureOr<Value>
+createPlaceholderValue(int blockId, OpBuilder &builder, Location loc, Type type,
+                       Value referenceValue, scf::IfOp ifOp) {
   Value result;
   bool usedTrace = false;
   if (auto tensorType = dyn_cast<RankedTensorType>(type)) {
@@ -806,18 +864,33 @@ static llvm::FailureOr<Value> createPlaceholderValue(int blockId,
     // the builder's region. Values defined inside inner regions
     // (e.g. scf.if then-blocks) or sibling regions are rejected.
     if (referenceValue) {
-      Value root = getRootTensor(referenceValue);
-      auto *rootRegion = root.getParentRegion();
-      auto *builderRegion = builder.getBlock()->getParent();
-      bool dominates = (rootRegion == builderRegion) ||
-                       rootRegion->isAncestor(builderRegion);
-      if (dominates) {
-        if (auto *rootOp = root.getDefiningOp()) {
-          auto existingId =
-              rootOp->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
-          if (!existingId || existingId.getInt() != -1) {
-            result = root;
-            usedTrace = true;
+      auto matmulOpt = hivm::traceDefOp<linalg::MatmulOp>(referenceValue);
+      if (matmulOpt.has_value()) {
+        auto matmulOp = llvm::dyn_cast<linalg::MatmulOp>(matmulOpt.value());
+        if (matmulOp) {
+          auto resultRes = createMatmulPlaceHolderValue(builder, ifOp, matmulOp,
+                                                        tensorType, loc);
+          if (llvm::failed(resultRes)) {
+            return llvm::failure();
+          }
+          result = resultRes.value();
+          usedTrace = true;
+        }
+      }
+      if (!usedTrace) {
+        Value root = getRootTensor(referenceValue);
+        auto *rootRegion = root.getParentRegion();
+        auto *builderRegion = builder.getBlock()->getParent();
+        bool dominates = (rootRegion == builderRegion) ||
+                         rootRegion->isAncestor(builderRegion);
+        if (dominates) {
+          if (auto *rootOp = root.getDefiningOp()) {
+            auto existingId =
+                rootOp->getAttrOfType<IntegerAttr>(CVPipeline::kBlockId);
+            if (!existingId || existingId.getInt() != -1) {
+              result = root;
+              usedTrace = true;
+            }
           }
         }
       }
@@ -1100,6 +1173,9 @@ static bool valueDominates(Value val, Block *block) {
 static llvm::LogicalResult
 buildElseYieldForGroup(const int blockId, const GroupOutputInfo &output,
                        Block &elseBlock, Location loc, OpBuilder &builder) {
+  auto ifOp = llvm::dyn_cast<scf::IfOp>(elseBlock.getParentOp());
+  if (!ifOp)
+    return llvm::failure();
   builder.setInsertionPointToEnd(&elseBlock);
   SmallVector<Value> yieldVals;
 
@@ -1111,7 +1187,7 @@ buildElseYieldForGroup(const int blockId, const GroupOutputInfo &output,
     if (it != placeholderCache.end()) {
       return it->second;
     }
-    auto ph = createPlaceholderValue(blockId, builder, loc, type, ref);
+    auto ph = createPlaceholderValue(blockId, builder, loc, type, ref, ifOp);
     placeholderCache[type] = ph;
     return ph;
   };
@@ -1225,6 +1301,7 @@ static llvm::LogicalResult
 buildElseYieldForLastIf(int blockId, const OtherSideContext &otherCtx,
                         ArrayRef<Type> lastIfTypes, Block &elseBlock,
                         Location loc, OpBuilder &builder) {
+  auto ifOp = llvm::dyn_cast<scf::IfOp>(elseBlock.getParentOp());
   if (elseBlock.mightHaveTerminator()) {
     elseBlock.getTerminator()->erase();
   }
@@ -1249,7 +1326,7 @@ buildElseYieldForLastIf(int blockId, const OtherSideContext &otherCtx,
                                            elseBlock, builder));
     } else {
       auto phRes = createPlaceholderValue(blockId, builder, loc,
-                                          lastIfTypes[slot], Value());
+                                          lastIfTypes[slot], Value(), ifOp);
       if (llvm::failed(phRes)) {
         return failure();
       }
@@ -1606,6 +1683,9 @@ void SplitIfByBlockIdPass::runOnOperation() {
   if (hasFallbackAttr(module)) {
     return;
   }
+
+  FallbackHelper fallback{module};
+
   LDBG("Before:\n" << module << "\n----------");
 
   CVPipeline::ComputeBlockIdManager bm(module);
@@ -1629,7 +1709,8 @@ void SplitIfByBlockIdPass::runOnOperation() {
   });
 
   if (llvm::failed(mainRes)) {
-    setFallbackAttr(module, ERRCODE_FAILED);
+    LDBG("Split if failed, fallback to original");
+    fallback.restore();
     return;
   }
 

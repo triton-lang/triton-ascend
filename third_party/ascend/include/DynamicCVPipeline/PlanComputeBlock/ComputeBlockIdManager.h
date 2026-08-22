@@ -68,8 +68,8 @@ public:
   ~ComputeBlockIdManager() = default;
   ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;
   ComputeBlockIdManager &operator=(const ComputeBlockIdManager &) = delete;
-  ComputeBlockIdManager(ComputeBlockIdManager &&) = delete;
-  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = delete;
+  ComputeBlockIdManager(ComputeBlockIdManager &&) = default;
+  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = default;
 
 private:
   int cntComputeBlockId = 0;

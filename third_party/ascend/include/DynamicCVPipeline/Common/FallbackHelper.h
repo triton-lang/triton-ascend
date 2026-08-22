@@ -20,32 +20,50 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+#ifndef TRITON_DYNAMIC_CV_PIPELINE_COMMON_FALLBACKHELPER_H
+#define TRITON_DYNAMIC_CV_PIPELINE_COMMON_FALLBACKHELPER_H
+
+#include <memory>
+
+#include "llvm/ADT/STLExtras.h"
 
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/Pass.h"
+#include "mlir/IR/Operation.h"
 
-namespace mlir {
-namespace triton {
+namespace mlir::CVPipeline {
 
-std::unique_ptr<OperationPass<ModuleOp>> createUBUsageOptPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeSameSourceAxisPass();
-void registerMergeSameSourceAxisPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyAllocBlockPass();
-void registerUnifyAllocBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
-void registerMergeVectorIfBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createMergeCubeForBlockPass();
-void registerMergeCubeForBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createUnifyStoreBlockPass();
-void registerUnifyStoreBlockPass();
-std::unique_ptr<OperationPass<ModuleOp>> createFixpipeOptPass();
+class FallbackHelper {
+  struct OperationEraser {
+    void operator()(Operation *op) const {
+      if (op) {
+        op->erase();
+      }
+    }
+  };
 
-std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
-void registerSplitIfByBlockIdPass();
+  std::unique_ptr<Operation, OperationEraser> backup;
+  ModuleOp original;
 
-} // namespace triton
-} // namespace mlir
+public:
+  FallbackHelper(ModuleOp original)
+      : backup(original->clone()), original(original) {}
 
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASSES_H
+  void restore() {
+    if (!backup) {
+      return;
+    }
+    original->setLoc(backup->getLoc());
+    original->setAttrs(backup->getAttrs());
+    if (original->getPropertiesStorageSize() != 0) {
+      original->copyProperties(backup->getPropertiesStorage());
+    }
+    for (auto [oRegion, bRegion] :
+         llvm::zip(original->getRegions(), backup->getRegions())) {
+      oRegion.takeBody(bRegion);
+    }
+  }
+};
+
+} // namespace mlir::CVPipeline
+
+#endif

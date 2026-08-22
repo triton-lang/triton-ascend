@@ -139,7 +139,7 @@ InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,
     if (knownOpInBlock) {
       return;
     }
-    if (CVPipeline::getOpBlockId(op).value_or(-1) == targetId) {
+    if (CVPipeline::getOpBlockId(op) == targetId) {
       knownOpInBlock = op;
     }
   });
@@ -462,8 +462,9 @@ InterCoreTransferAndSyncPass::findMainLoopforTransfer(Operation *endOp,
                                                       Operation *startOp) {
   Operation *lca = endOp->getParentOp();
   if (lca != startOp->getParentOp()) {
-    LOG_DEBUG("startOp and endOp are not in the same parent block, which is "
-              "unexpected.");
+    LOG_DEBUG("startOp: " << *startOp << " and endOp: " << *endOp
+                          << " are not in the same parent block, which is "
+                             "unexpected.");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
   Operation *current = lca;
@@ -1322,7 +1323,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
   if (dep.consumerBlockId == dep.iniConsumerBlockId) {
     auto consumerPoint =
         analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
-    if (consumerPoint) {
+    if (consumerPoint && consumerPoint->getBlock() == consStart->getBlock()) {
       consStart = consumerPoint;
     }
   }
@@ -1344,7 +1345,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
 
   if (dep.consumerBlockId == dep.iniConsumerBlockId) {
     auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
-    if (newconsumerPoint) {
+    if (newconsumerPoint &&
+        newConsStart->getBlock() == newconsumerPoint->getBlock()) {
       newConsStart = newconsumerPoint;
     }
   }
@@ -1388,7 +1390,6 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
 
   bool isStoreDirectly =
       isStoreDirectlyInUserChain(consumedDataOp->getResult(0));
-
   insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId,
                       loc, transferIndex, flagIdReuseManager, consumedDataOp,
                       isStoreDirectly);

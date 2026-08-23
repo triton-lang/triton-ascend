@@ -129,6 +129,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_nd2nz_on_vector": "it is ignored; the backend fixes vector ND2NZ conversion to False.",
     "enable_select_analysis": "it is ignored; the backend fixes select analysis to True.",
     "enable_sync_block_lock": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "enable_ub_refine_opt": "it is ignored; the backend keeps UB refine optimization disabled.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

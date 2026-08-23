@@ -144,6 +144,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "optimize_dynamic_offset": "it is ignored; the backend fixes dynamic-offset optimization to False.",
     "parallel_mode": "it is ignored; parallel mode is derived from compile_mode and Linalg IR.",
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
+    "stream": "it is ignored; launch streams are managed by the runtime and driver.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

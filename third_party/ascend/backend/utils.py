@@ -137,6 +137,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_ub_capacity_bytes": "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
     "hfusion_enable_multiple_consumer_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

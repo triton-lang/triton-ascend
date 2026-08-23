@@ -44,7 +44,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_costmodel_backend",
     "force_simt_only",
     "force_simt_template",
-    "graph_optimize_max_rewrites_per_function",
     "graph_optimize_rule_mask",
     "graph_optimize_ub_capacity_bytes",
     "grid_num_tiles",

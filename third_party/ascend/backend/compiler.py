@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    graph_optimize_max_rewrites_per_function: Any = _deprecated_npu_option("it is ignored; the backend fixes the maximum rewrites per function to 64.")
     graph_optimize_emit_remarks: Any = _deprecated_npu_option("it is ignored; the backend fixes graph-optimization remarks to False.")
     enable_vf_fusion: Any = _deprecated_npu_option("it is ignored; use 'vf_fusion_mode' instead.")
     enable_ub_refine_opt: Any = _deprecated_npu_option("it is ignored; the backend keeps UB refine optimization disabled.")

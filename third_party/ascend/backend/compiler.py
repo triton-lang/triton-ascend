@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    optimize_dynamic_offset: Any = _deprecated_npu_option("it is ignored; the backend fixes dynamic-offset optimization to False.")
     ops_reorder: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     mix_mode: Any = _deprecated_npu_option("it is ignored; mix mode is derived from Linalg IR as internal metadata.")
     llvm_version: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")

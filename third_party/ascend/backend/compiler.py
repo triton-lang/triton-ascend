@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    enable_sync_block_lock: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
     enable_select_analysis: Any = _deprecated_npu_option("it is ignored; the backend fixes select analysis to True.")
     enable_nd2nz_on_vector: Any = _deprecated_npu_option("it is ignored; the backend fixes vector ND2NZ conversion to False.")
     enable_mask_fallback_conversion: Any = _deprecated_npu_option("it is ignored; the backend fixes mask fallback conversion to False.")

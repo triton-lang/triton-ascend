@@ -82,6 +82,7 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
 _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
+    "MLIR_ROOT": "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
     "LLVM_ROOT": "it is ignored; set CC to select the CPU launcher compiler.",
 }
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()

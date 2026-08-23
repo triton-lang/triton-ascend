@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    use_bytecode: Any = _deprecated_npu_option("it is ignored; the bytecode pipeline is always enabled.")
     stream: Any = _deprecated_npu_option("it is ignored; launch streams are managed by the runtime and driver.")
     storage_align: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     optimize_dynamic_offset: Any = _deprecated_npu_option("it is ignored; the backend fixes dynamic-offset optimization to False.")

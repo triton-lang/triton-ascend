@@ -82,6 +82,7 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
 _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
+    "TRITON_DISABLE_FFTS": "it is ignored; FFTS policy is derived from the explicit target architecture.",
     "TRITON_BACKEND": "it is ignored; the backend policy is fixed to 'torch_npu'.",
     "TRITON_ASCEND_COMPILE_SPEED_OPT": "it is ignored; this variable has no replacement because it had no effective consumer.",
     "TRITON_ASCEND_ARCH": "use an explicit GPUTarget.arch instead; host environment overrides are ignored.",
@@ -704,6 +705,7 @@ def is_ffts_supported(arch: str):
 
 def force_disable_ffts(arch: str) -> bool:
     """Return whether the selected target requires FFTS to be disabled."""
+    _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
     return is_compile_on_910_95(arch)
 
 

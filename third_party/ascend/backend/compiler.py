@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    enable_drop_unit_dims: Any = _deprecated_npu_option("it is ignored; consider 'enable_flatten' when flattening is intended.")
     enable_cross_if_fusion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     enable_cce_vf_remove_membar: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     enable_cce_vf_auto_sync: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")

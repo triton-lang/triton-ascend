@@ -32,7 +32,7 @@ import warnings
 from dataclasses import InitVar, dataclass, field
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, ClassVar, Dict, Optional, Tuple, Union
 from .debug_line_rewriter import rewrite_debug_line
 
 from triton._C.libtriton import ir, passes, ascend, buffer_ir
@@ -999,8 +999,23 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
     return canonical_mode
 
 
+_DEPRECATED_NPU_OPTION_DETAIL_KEY = "ascend_deprecated_option_detail"
+
+
+def _deprecated_npu_option(detail: str):
+    """Create an accepted no-op NPUOptions field with a migration message."""
+    return field(
+        default=None,
+        repr=False,
+        compare=False,
+        metadata={_DEPRECATED_NPU_OPTION_DETAIL_KEY: detail},
+    )
+
+
 @dataclass(frozen=True)
 class NPUOptions:
+    _warned_deprecated_options: ClassVar[set[str]] = set()
+
     debug: bool = False
     sanitize_overflow: bool = True
     # Backend-only construction input.  AscendBackend.parse_options injects
@@ -1009,6 +1024,9 @@ class NPUOptions:
     # This becomes compiler metadata, so its name must also be valid for the
     # namedtuple constructed by CompiledKernel on Python 3.10.
     target_arch: str = field(init=False, repr=False)
+
+    # Removed public controls remain accepted only as no-op compatibility
+    # fields. NPUOptions owns both their warning and value normalization.
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
@@ -1094,10 +1112,38 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
+    @classmethod
+    def deprecated_option_names(cls) -> frozenset[str]:
+        return frozenset(name for name, option_field in cls.__dataclass_fields__.items()
+                         if _DEPRECATED_NPU_OPTION_DETAIL_KEY in option_field.metadata)
+
+    @classmethod
+    def _warn_deprecated_option(cls, name: str, detail: str) -> None:
+        if name in cls._warned_deprecated_options:
+            return
+        cls._warned_deprecated_options.add(name)
+        warnings.warn(
+            f"Ascend compile option '{name}' is deprecated and will be removed in a future release; {detail}",
+            FutureWarning,
+            stacklevel=3,
+        )
+
+    def _normalize_deprecated_options(self) -> None:
+        for name, option_field in self.__dataclass_fields__.items():
+            detail = option_field.metadata.get(_DEPRECATED_NPU_OPTION_DETAIL_KEY)
+            if detail is None or name == "arch":
+                continue
+            if getattr(self, name) is not None:
+                self._warn_deprecated_option(name, detail)
+                object.__setattr__(self, name, None)
+
     def __post_init__(self, arch):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
+        self._normalize_deprecated_options()
+        # Some no-op compatibility fields also expose backend-owned values.
+        object.__setattr__(self, "warp_size", 32)
         object.__setattr__(self, "target_arch", arch)
         object.__setattr__(
             self,
@@ -1308,7 +1354,12 @@ class AscendBackend(BaseBackend):
             # compatibility keys in place so Ascend can accept them without
             # requiring any change to the community JIT implementation.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
-            args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
+            deprecated_names = NPUOptions.deprecated_option_names()
+            args = {
+                k: normalized_opts[k]
+                for k in option_names
+                if k in normalized_opts and (not internal_options or k not in deprecated_names)
+            }
             options = NPUOptions(arch=self.target.arch, **args)
             # Lazy init enable_dynamic_cv_pipeline if not provided.
             # compile_on_910_95 is already resolved from the requested target.

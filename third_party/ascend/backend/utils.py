@@ -112,6 +112,7 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
 # the behavior and messages defined by PR #1729.
 _DEPRECATED_NPU_OPTION_DETAILS = {
     "add_auto_scheduling": "it is ignored; the removed DAG scheduling switch has no replacement.",
+    "allow_fp8e4nv": "it is ignored; this option has no replacement because it had no effective consumer.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

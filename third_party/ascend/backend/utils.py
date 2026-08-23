@@ -133,6 +133,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_vf_fusion": "it is ignored; use 'vf_fusion_mode' instead.",
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
     "graph_optimize_max_rewrites_per_function": "it is ignored; the backend fixes the maximum rewrites per function to 64.",
+    "graph_optimize_rule_mask": "it is ignored; the backend fixes the graph-optimization rule mask to 511.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

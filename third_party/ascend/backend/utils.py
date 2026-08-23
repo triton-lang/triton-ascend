@@ -41,7 +41,6 @@ _is_compile_on_910_95 = None
 _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "compile_on_910_95",
-    "enable_buffer_insert_optimization",
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_cross_if_fusion",

@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    add_auto_scheduling: Any = _deprecated_npu_option("it is ignored; the removed DAG scheduling switch has no replacement.")
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32

@@ -107,6 +107,11 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
     "load_cache_num": "buf_slot_num_of_gm",
 }
 
+# Removed no-op options keep using the compatibility path above.  This table
+# only specializes their migration guidance; route and alias options retain
+# the behavior and messages defined by PR #1729.
+_DEPRECATED_NPU_OPTION_DETAILS = {}
+
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",
     "MLIR_ROOT",
@@ -142,12 +147,16 @@ def _warn_deprecated_npu_option(name: str) -> None:
     _WARNED_DEPRECATED_NPU_OPTIONS.add(name)
     route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
     alias = _DEPRECATED_NPU_OPTION_ALIASES.get(name)
+    detail = _DEPRECATED_NPU_OPTION_DETAILS.get(name)
     if route is not None:
         replacement_name, replacement_value = route
         message = (f"Ascend compile option '{name}' is deprecated; "
                    f"use {replacement_name}={replacement_value!r} instead.")
     elif alias is not None:
         message = f"Ascend compile option '{name}' is deprecated; use '{alias}' instead."
+    elif detail is not None:
+        message = (f"Ascend compile option '{name}' is deprecated and will be removed in a future release; "
+                   f"{detail}")
     else:
         message = (f"Ascend compile option '{name}' is deprecated and ignored; "
                    "the backend-managed/default behavior is used instead.")

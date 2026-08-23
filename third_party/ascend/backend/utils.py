@@ -142,6 +142,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
     "ops_reorder": "it is ignored; the removed vendor compiler control has no replacement.",
     "optimize_dynamic_offset": "it is ignored; the backend fixes dynamic-offset optimization to False.",
+    "parallel_mode": "it is ignored; parallel mode is derived from compile_mode and Linalg IR.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

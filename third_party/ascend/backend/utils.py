@@ -42,7 +42,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "compile_on_910_95",
     "enable_costmodel_backend",
-    "enable_nd2nz_on_vector",
     "enable_select_analysis",
     "enable_sync_block_lock",
     "enable_ub_refine_opt",

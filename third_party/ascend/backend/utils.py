@@ -138,6 +138,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
     "hfusion_enable_multiple_consumer_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
+    "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

@@ -122,6 +122,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_buffer_insert_optimization": "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
     "enable_cce_vf_auto_sync": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_cce_vf_remove_membar": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_cross_if_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

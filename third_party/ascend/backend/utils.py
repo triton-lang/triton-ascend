@@ -161,6 +161,7 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
 })
 _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
     "LLVM_ROOT": "it is ignored; set CC to select the CPU launcher compiler.",
+    "MLIR_ROOT": "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
 }
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
 

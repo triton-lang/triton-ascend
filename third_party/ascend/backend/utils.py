@@ -120,6 +120,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
     "enable_buffer_insert_optimization": "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
+    "enable_cce_vf_auto_sync": "it is ignored; the removed vendor compiler control has no replacement.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

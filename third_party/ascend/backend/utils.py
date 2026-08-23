@@ -47,7 +47,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "grid_num_tiles",
     "inter_cache_num",
     "intra_cache_num",
-    "kernel_name",
     "load_cache_num",
     "llvm_version",
     "mix_mode",

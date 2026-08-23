@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    kernel_name: Any = _deprecated_npu_option("it is ignored; the kernel name is derived from TTIR.")
     hfusion_enable_multiple_consumer_fusion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     has_auto_blockify_blacklist_op: Any = _deprecated_npu_option("it is ignored; the safety flag is derived by scanning TTIR.")
     graph_optimize_ub_capacity_bytes: Any = _deprecated_npu_option("it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).")

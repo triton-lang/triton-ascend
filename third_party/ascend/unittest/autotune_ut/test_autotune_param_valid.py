@@ -68,6 +68,8 @@ def _load_autotuner_methods(*method_names):
         "valid_axis_names": VALID_AXIS_NAMES,
         "VectorAxes": _load_vector_axes_module().VectorAxes,
         "_InternalNPUOptionInt": ascend_autotuner._InternalNPUOptionInt,
+        "_DEFAULT_COMPILE_MODE": ascend_autotuner._DEFAULT_COMPILE_MODE,
+        "_inject_default_simt_stack_limit": ascend_autotuner._inject_default_simt_stack_limit,
     }
     exec(compile(extracted_module, str(AUTOTUNER_PATH), "exec"), namespace)
     return namespace
@@ -607,7 +609,14 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
         17,
     )
 
-    assert key == (17, "float16")
+    assert key == (17, "float16", ("compile_mode", "simd_simt_template"))
+    simt_key = _normalize_loaded_method(namespace["generate_key_and_configs"])(
+        tuner,
+        FakeArg(),
+        17,
+        compile_mode="simt_only",
+    )
+    assert simt_key == (17, "float16", ("compile_mode", "simt_only"))
     assert captured["kv_dict"] == {"x": 17}
 
 
@@ -1617,7 +1626,7 @@ def test_autoparse_reduction_axes_rejects_prefixed_parser_output():
     assert refresh_calls == []
 
 
-def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_explicit_value():
+def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_internal_value():
     namespace = _load_autotuner_methods("_inject_grid_num_tiles")
     inject_grid_num_tiles = _normalize_loaded_method(namespace["_inject_grid_num_tiles"])
 
@@ -1636,9 +1645,12 @@ def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_explicit_valu
     inject_grid_num_tiles(callable_grid)
     assert "grid_num_tiles" not in callable_grid
 
-    explicit_hint = {"grid": (2, 16), "grid_num_tiles": 99}
-    inject_grid_num_tiles(explicit_hint)
-    assert explicit_hint["grid_num_tiles"] == 99
+    internal_hint = {
+        "grid": (2, 16),
+        "grid_num_tiles": ascend_autotuner._InternalNPUOptionInt(99),
+    }
+    inject_grid_num_tiles(internal_hint)
+    assert internal_hint["grid_num_tiles"] == 99
 
 
 def test_make_kernel_call_extracts_name_from_jit_run():
@@ -1654,7 +1666,7 @@ def test_make_kernel_call_extracts_name_from_jit_run():
         tl.store(x_ptr + offsets, x, mask=mask)
 
     fake_self = SimpleNamespace(fn=test_kernel_jit, pre_hook=lambda full_nargs: None,
-                                post_hook=lambda full_nargs, exception=None: None, nargs={})
+                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")
@@ -1680,7 +1692,7 @@ def test_make_kernel_call_extracts_name_from_libentry_tuple():
         tl.store(x_ptr + offsets, x, mask=mask)
 
     fake_self = SimpleNamespace(fn=test_kernel_libentry, pre_hook=lambda full_nargs: None,
-                                post_hook=lambda full_nargs, exception=None: None, nargs={})
+                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")

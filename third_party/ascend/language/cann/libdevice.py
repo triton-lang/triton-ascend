@@ -22,21 +22,15 @@ from math import pi as math_pi
 from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95, triton_enable_libdevice_simt
 
 
 def _is_libdevice_simt_enabled(_semantic) -> bool:
-    """Enable the SIMT libdevice implementation for A5 pure-SIMT compilation.
+    return triton_enable_libdevice_simt(_semantic.builder.options.arch)
 
-    ``AscendBackend.parse_options`` injects ``GPUTarget.arch`` into
-    ``NPUOptions``.  The builder's established ``options.arch`` view exposes
-    that internal target without serializing a second architecture field.
-    Template-SIMT lowering keeps the language builder in SIMD mode, so only
-    an effective pure-SIMT selection may select SIMT libdevice symbols.
-    """
-    options = _semantic.builder.options
-    return is_compile_on_910_95(options.arch) and (getattr(options, "is_pure_simt", False)
-                                                   or getattr(options, "compile_mode", "simd") == "simt_only")
+
+def _is_a5_target(_semantic) -> bool:
+    return is_compile_on_910_95(_semantic.builder.options.arch)
 
 
 class _FlipStaticRange:
@@ -375,7 +369,7 @@ def pow(arg0, arg1, _semantic=None):
     if arg1.dtype == core.dtype("int32"):
         arg1 = _semantic.cast(arg1, arg0.dtype)
 
-    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
+    if arg0.dtype == core.dtype("fp32") and _is_a5_target(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_pow_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -517,7 +511,7 @@ def sad(arg0, arg1, arg2, _semantic=None):
 def ffs(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
     dtype = arg0.dtype
-    if _is_libdevice_simt_enabled(_semantic):
+    if _is_a5_target(_semantic):
         return core.extern_elementwise(
             "", "", [arg0], {
                 (core.dtype("int32"), ): ("__hmf_ffs_i32", core.dtype("int32")),
@@ -1505,7 +1499,7 @@ def acos(arg0: core.tensor, _semantic=None):
     :param arg0: The input tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg0: tl.tensor
     """
-    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
+    if arg0.dtype == core.dtype("fp32") and _is_a5_target(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_acos_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -1733,7 +1727,7 @@ def nextafter(arg0: core.tensor, arg1: core.tensor, _semantic=None):
     :param arg1: The direction value tensor. Supported dtypes: fp32, fp16, bf16.
     :type arg1: tl.tensor
     """
-    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
+    if arg0.dtype == core.dtype("fp32") and _is_a5_target(_semantic):
         return core.extern_elementwise("", "", [arg0, arg1], {
             (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_nextafter_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)
@@ -2583,7 +2577,7 @@ def rint(arg0: core.tensor, _semantic=None):
     :type arg0: tl.tensor
     """
     arg0 = _semantic.to_tensor(arg0)
-    if _is_libdevice_simt_enabled(_semantic):
+    if _is_a5_target(_semantic):
         if arg0.dtype != core.dtype("fp32"):
             arg0 = _semantic.cast(arg0, core.dtype("fp32"))
         return core.extern_elementwise("", "", [
@@ -2923,7 +2917,7 @@ def rsqrt(arg0, _semantic=None):
 @math._add_math_1arg_docstr("sine")
 def sin(arg0, _semantic=None):
     arg0 = _semantic.to_tensor(arg0)
-    if arg0.dtype == core.dtype("fp32") and _is_libdevice_simt_enabled(_semantic):
+    if arg0.dtype == core.dtype("fp32") and _is_a5_target(_semantic):
         return core.extern_elementwise("", "", [arg0], {
             (core.dtype("fp32"), ): ("__hmf_sin_fp32", core.dtype("fp32")),
         }, is_pure=True, _semantic=_semantic)

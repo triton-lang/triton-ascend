@@ -42,7 +42,8 @@ from torch import Tensor
 
 import triton
 from triton.runtime.autotuner import Autotuner, Config
-from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options, is_compile_on_910_95)
+from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
+                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -71,6 +72,12 @@ _RESERVED_HINT_KEYS = {
     "vv_parser_v2_mode",
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
+_DEFAULT_COMPILE_MODE = "simd_simt_template"
+
+
+def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: int) -> None:
+    if options.get("compile_mode") == "simt_only" and options.get("simt_stack_limit") is None:
+        options["simt_stack_limit"] = stack_limit
 
 
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
@@ -123,12 +130,12 @@ def _clone_config_with_kwargs(
     )
 
 
-def _normalize_user_configs(configs, *, protected=()):
+def _normalize_user_configs(configs):
     if not configs:
         return configs
     normalized_configs = []
     for config in configs:
-        normalized_kwargs = _remove_deprecated_npu_options(config.kwargs, protected=protected)
+        normalized_kwargs = _remove_deprecated_npu_options(config.kwargs)
         if normalized_kwargs == config.kwargs:
             normalized_configs.append(config)
             continue
@@ -136,6 +143,13 @@ def _normalize_user_configs(configs, *, protected=()):
         normalized_config.kwargs = normalized_kwargs
         normalized_configs.append(normalized_config)
     return normalized_configs
+
+
+def _validate_reserved_npu_option_names(arg_names) -> None:
+    conflicts = sorted(set(arg_names) & _RESERVED_NPU_OPTION_NAMES)
+    if conflicts:
+        raise ValueError("Kernel parameters cannot use reserved Ascend compile-option names: {}.".format(
+            ", ".join(conflicts)))
 
 
 def _split_hints(hints: Optional[Dict[str, object]]):
@@ -258,9 +272,9 @@ class AutoTilingTuner(Autotuner):
             and trigger re-evaluation of candidate configs.
         :type key: List[str]
         """
-        constexpr_names = _get_constexpr_candidates_from_fn(fn)
-        hints = _remove_deprecated_npu_options(hints or {}, protected=constexpr_names)
-        configs = _normalize_user_configs(configs, protected=constexpr_names)
+        _validate_reserved_npu_option_names(arg_names)
+        hints = _remove_deprecated_npu_options(hints or {})
+        configs = _normalize_user_configs(configs)
         _validate_user_hints(fn, hints)
         reserved_hints, config_hints = _split_hints(hints)
         config_hints = _normalize_config_hints(
@@ -1994,11 +2008,8 @@ class AutoTilingTuner(Autotuner):
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        compile_mode_is_explicit = kwargs.get("compile_mode_is_explicit", "compile_mode" in kwargs)
-        if compile_mode_is_explicit:
-            self.is_simt_mode = kwargs.get("compile_mode") == "simt_only"
-        else:
-            self.is_simt_mode = bool(kwargs.get("force_simt_only", False))
+        compile_mode = kwargs.get("compile_mode", _DEFAULT_COMPILE_MODE)
+        self.is_simt_mode = compile_mode == "simt_only"
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
             self.user_specified_warps = kwargs['num_warps']
         else:
@@ -2025,6 +2036,7 @@ class AutoTilingTuner(Autotuner):
                 dtype = (arg.dtype if get_byte_per_numel(arg.dtype) >= get_byte_per_numel(dtype) else dtype)
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
+        key.append(("compile_mode", compile_mode))
 
         key = tuple(key)
         if key not in self.cache:
@@ -2077,12 +2089,11 @@ class AutoTilingTuner(Autotuner):
             kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
 
     def run(self, *args, **kwargs):
-        kwargs = _remove_deprecated_npu_options(kwargs, protected=self.arg_names)
+        kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
         cache_miss = key not in self.cache
-        if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:
-            kwargs['simt_stack_limit'] = self.simt_stack_limit
+        _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
         did_benchmark = False
         disk_cache_hit = False
         if cache_miss:
@@ -2133,12 +2144,11 @@ class AutoTilingTuner(Autotuner):
         if did_benchmark and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
-        if config.pre_hook is not None:
-            full_nargs = {**self.nargs, **kwargs, **config.all_kwargs()}
-            full_nargs.update(ub_cfg)
-            config.pre_hook(full_nargs)
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
+        _inject_default_simt_stack_limit(final_kwargs, self.simt_stack_limit)
+        if config.pre_hook is not None:
+            config.pre_hook({**self.nargs, **final_kwargs})
         try:
             ret = self.fn.run(
                 *args,
@@ -2289,6 +2299,7 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if ub_cfg:
             current.update(ub_cfg)
+        _inject_default_simt_stack_limit(current, self.simt_stack_limit)
         full_nargs = {**self.nargs, **current}
 
         def kernel_call(warmup):
@@ -2321,11 +2332,17 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
-        kwargs = _remove_deprecated_npu_options(kwargs, protected=self.arg_names)
+        kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         _ = self.generate_key_and_configs(*args, **kwargs)
         pruned_configs = self.prune_configs(kwargs)
         ret = []
+
+        def warmup_config(config):
+            compile_options = dict(config.all_kwargs(), **kwargs)
+            _inject_default_simt_stack_limit(compile_options, self.simt_stack_limit)
+            return self.fn.warmup(*args, **compile_options)
+
         if self.compile_parallel:
             import psutil
 
@@ -2335,10 +2352,10 @@ class AutoTilingTuner(Autotuner):
                     triton.AsyncCompileMode(executor),
             ):
                 for config in pruned_configs:
-                    ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                    ret.append(warmup_config(config))
         else:
             for config in pruned_configs:
-                ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                ret.append(warmup_config(config))
         self.nargs = None
         return ret
 

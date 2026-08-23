@@ -29,9 +29,11 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         debug_line_rewriter_mod = types.ModuleType("triton.backends.ascend.debug_line_rewriter")
         debug_line_rewriter_mod.rewrite_debug_line = lambda fn: fn
         libtriton_mod = types.ModuleType("triton._C.libtriton")
+        libtriton_ascend_mod = types.ModuleType("triton._C.libtriton.ascend")
+        libtriton_ascend_mod.ir = Dummy()
         libtriton_mod.ir = Dummy()
         libtriton_mod.passes = Dummy()
-        libtriton_mod.ascend = Dummy()
+        libtriton_mod.ascend = libtriton_ascend_mod
         libtriton_mod.buffer_ir = Dummy()
 
         utils_mod = types.ModuleType("triton.backends.ascend.utils")
@@ -111,6 +113,7 @@ class CompilerCostmodelContractTest(unittest.TestCase):
             "triton": triton_mod,
             "triton._C": triton_c_mod,
             "triton._C.libtriton": libtriton_mod,
+            "triton._C.libtriton.ascend": libtriton_ascend_mod,
             "triton.backends.ascend": ascend_backend_mod,
             "triton.backends.ascend.debug_line_rewriter": debug_line_rewriter_mod,
             "triton.backends.ascend.utils": utils_mod,
@@ -129,17 +132,17 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         spec.loader.exec_module(module)
         return module, dump_mgr, GPUTarget
 
-    def test_parse_options_costmodel_forces_no_bytecode(self):
+    def test_obsolete_costmodel_and_bytecode_switches_are_not_npu_options(self):
         cmplr, _dump_mgr, GPUTarget = self._load_compiler_module()
 
         backend = cmplr.AscendBackend(GPUTarget(backend="npu", arch="910B"))
+        options = backend.parse_options({
+            "enable_costmodel_backend": True,
+            "use_bytecode": True,
+        })
 
-        opt_plain = backend.parse_options({})
-        self.assertFalse(hasattr(opt_plain, "use_bytecode"))
-
-        opt_costmodel = backend.parse_options({"enable_costmodel_backend": True})
-        self.assertTrue(opt_costmodel.enable_costmodel_backend)
-        self.assertFalse(hasattr(opt_costmodel, "use_bytecode"))
+        self.assertFalse(hasattr(options, "enable_costmodel_backend"))
+        self.assertFalse(hasattr(options, "use_bytecode"))
 
 
 if __name__ == "__main__":

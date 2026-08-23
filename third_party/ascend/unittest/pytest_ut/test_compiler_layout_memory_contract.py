@@ -97,10 +97,9 @@ def compiler_module():
     def return_false(*_args, **_kwargs):
         return False
 
-    def remove_deprecated_npu_options(options, *, protected=(), in_place=False):
+    def remove_deprecated_npu_options(options, *, in_place=False):
         normalized = options if in_place else dict(options)
-        if "compile_on_910_95" not in protected:
-            normalized.pop("compile_on_910_95", None)
+        normalized.pop("compile_on_910_95", None)
         return normalized
 
     utils_stub = types.ModuleType(utils_name)
@@ -375,7 +374,7 @@ def _run_ttir_to_npubin(
 
     result = compiler.ttir_to_npubin(
         module,
-        {},
+        {"bisheng_options": None},
         _make_opt(
             is_pure_simt=is_pure_simt,
             superblock_factor=superblock_factor,
@@ -546,12 +545,11 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
     return events, graph_calls
 
 
-def test_make_ttir_passes_force_simt_only_to_graph_optimize(compiler_module, monkeypatch):
+def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
         target_arch="Ascend910B1",
         compile_mode="simt_only",
-        effective_compile_mode="simt_only",
         debug=False,
     )
 
@@ -651,13 +649,11 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     a2_default = compiler_module.NPUOptions(arch="Ascend910B1")
     assert a2_default.compile_on_910_95 is False
     assert a2_default.compile_mode == "simd_simt_template"
-    assert a2_default.effective_compile_mode == "simd_simt_template"
     assert a2_default.is_pure_simt is False
 
     a5_default = compiler_module.NPUOptions(arch="Ascend910_9589")
     assert a5_default.compile_on_910_95 is True
     assert a5_default.compile_mode == "simd_simt_template"
-    assert a5_default.effective_compile_mode == "simd_simt_template"
     assert a5_default.is_pure_simt is False
 
     canonical = compiler_module.NPUOptions(
@@ -672,49 +668,25 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
         )
     assert not caught
     assert alias.compile_mode == canonical.compile_mode == "simd_simt_template"
-    assert alias.effective_compile_mode == canonical.effective_compile_mode
     assert alias.hash() == canonical.hash()
 
     with pytest.raises(ValueError, match=r"invalid compile_mode='simt_template'"):
         compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simt_template")
 
-    explicit_simd = compiler_module.NPUOptions(
-        arch="Ascend910_9589",
-        compile_mode="simd",
-        force_simt_only=True,
-        force_simt_template=True,
-    )
-    assert explicit_simd.effective_compile_mode == "simd"
+    explicit_simd = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simd")
+    assert explicit_simd.compile_mode == "simd"
     assert explicit_simd.is_pure_simt is False
 
     explicit_template = compiler_module.NPUOptions(
         arch="Ascend910_9589",
         compile_mode="simd_simt_template",
-        force_simt_only=True,
     )
-    assert explicit_template.effective_compile_mode == "simd_simt_template"
+    assert explicit_template.compile_mode == "simd_simt_template"
     assert explicit_template.is_pure_simt is False
 
-    explicit_only = compiler_module.NPUOptions(
-        arch="Ascend910_9589",
-        compile_mode="simt_only",
-        force_simt_template=True,
-    )
-    assert explicit_only.effective_compile_mode == "simt_only"
+    explicit_only = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simt_only")
+    assert explicit_only.compile_mode == "simt_only"
     assert explicit_only.is_pure_simt is True
 
-    force_template = compiler_module.NPUOptions(arch="Ascend910_9589", force_simt_template=True)
-    assert force_template.effective_compile_mode == "simd_simt_template"
-    assert force_template.is_pure_simt is False
-
-    force_only = compiler_module.NPUOptions(arch="Ascend910_9589", force_simt_only=True)
-    assert force_only.effective_compile_mode == "simt_only"
-    assert force_only.is_pure_simt is True
-
-    both_forces = compiler_module.NPUOptions(
-        arch="Ascend910_9589",
-        force_simt_only=True,
-        force_simt_template=True,
-    )
-    assert both_forces.effective_compile_mode == "simt_only"
-    assert both_forces.is_pure_simt is True
+    assert "force_simt_only" not in compiler_module.NPUOptions.__dataclass_fields__
+    assert "force_simt_template" not in compiler_module.NPUOptions.__dataclass_fields__

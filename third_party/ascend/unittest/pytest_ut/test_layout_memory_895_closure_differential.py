@@ -233,9 +233,8 @@ def _run_ttir_to_npubin(
             # pass result from the mock module attrs, just like production.
             "row_coalescing_applied": False,
         })
-        # The 895 baseline still reads this retired metadata key.  Supply a
-        # null legacy value only so its historical closure can be compared to
-        # the current source, which no longer consumes it.
+        # Both the 895 baseline and the compatibility-restored target read
+        # this option. Keep it neutral for the argv differential below.
         if "bisheng_options" in closure["ttir_to_npubin"].__code__.co_consts:
             parsed["bisheng_options"] = None
         metadata_after_parse.append(parsed)
@@ -337,8 +336,8 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         )
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
-        # The target contract is explicit: after deleting bisheng_options,
-        # retain the full pure-SIMT envelope and its automatic block policy.
+        # Keep bisheng_options neutral in this matrix so it verifies only the
+        # pure-SIMT envelope and automatic block policy.
         expected_options = list(common_prefix)
         auto_blockify = env_enabled and not blacklisted and not row_applied
         if auto_blockify:

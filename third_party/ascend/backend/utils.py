@@ -33,9 +33,11 @@ from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
 
-# Phase-one compatibility boundary for compile-option cleanup.  Keep the
-# existing NPUOptions fields and their internal consumers intact while public
-# dictionaries route supported aliases and drop backend-managed fields.
+_is_compile_on_910_95 = None
+
+# Compatibility boundary for compile-option cleanup.  Public dictionaries
+# route renamed options and discard backend-managed options before community
+# JIT validates the remaining keys.
 _DEPRECATED_NPU_OPTIONS = frozenset({
     "add_auto_scheduling",
     "allow_fp8e4nv",
@@ -50,6 +52,7 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_cce_vf_auto_sync",
     "enable_cce_vf_remove_membar",
     "enable_cross_if_fusion",
+    "enable_costmodel_backend",
     "enable_drop_unit_dims",
     "enable_linearize",
     "enable_mask_fallback_conversion",
@@ -58,13 +61,19 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_sync_block_lock",
     "enable_ub_refine_opt",
     "enable_vf_fusion",
+    "force_simt_only",
+    "force_simt_template",
     "graph_optimize_emit_remarks",
     "graph_optimize_max_rewrites_per_function",
     "graph_optimize_rule_mask",
     "graph_optimize_ub_capacity_bytes",
+    "grid_num_tiles",
     "has_auto_blockify_blacklist_op",
     "hfusion_enable_multiple_consumer_fusion",
+    "inter_cache_num",
+    "intra_cache_num",
     "kernel_name",
+    "load_cache_num",
     "llvm_version",
     "mix_mode",
     "ops_reorder",
@@ -76,6 +85,27 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "vf_merge_level",
     "warp_size",
 })
+
+# These names remain reserved while the compatibility layer accepts them as
+# deprecated compile options.  Kernel parameters, including tl.constexpr
+# parameters supplied through autotune configs, must not reuse them.
+_RESERVED_NPU_OPTION_NAMES = _DEPRECATED_NPU_OPTIONS
+_WARNED_DEPRECATED_NPU_OPTIONS = set()
+
+# Boolean compatibility switches route only their enabled state.  False keeps
+# the canonical compile_mode supplied by the user or its backend default.
+_DEPRECATED_NPU_OPTION_ROUTES = {
+    "force_simt_only": ("compile_mode", "simt_only"),
+    "force_simt_template": ("compile_mode", "simd_simt_template"),
+}
+
+# Renamed value options preserve the complete user value.  A simultaneously
+# supplied canonical option wins via setdefault below.
+_DEPRECATED_NPU_OPTION_ALIASES = {
+    "intra_cache_num": "buf_slot_num_of_veccore",
+    "inter_cache_num": "buf_slot_num_of_crosscore",
+    "load_cache_num": "buf_slot_num_of_gm",
+}
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",
@@ -107,8 +137,20 @@ def _get_deprecated_npu_options(options) -> set[str]:
 
 
 def _warn_deprecated_npu_option(name: str) -> None:
-    message = (f"Ascend compile option '{name}' is deprecated and ignored; "
-               "the backend-managed/default behavior is used instead.")
+    if name in _WARNED_DEPRECATED_NPU_OPTIONS:
+        return
+    _WARNED_DEPRECATED_NPU_OPTIONS.add(name)
+    route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
+    alias = _DEPRECATED_NPU_OPTION_ALIASES.get(name)
+    if route is not None:
+        replacement_name, replacement_value = route
+        message = (f"Ascend compile option '{name}' is deprecated; "
+                   f"use {replacement_name}={replacement_value!r} instead.")
+    elif alias is not None:
+        message = f"Ascend compile option '{name}' is deprecated; use '{alias}' instead."
+    else:
+        message = (f"Ascend compile option '{name}' is deprecated and ignored; "
+                   "the backend-managed/default behavior is used instead.")
     warnings.warn(
         message,
         FutureWarning,
@@ -116,12 +158,19 @@ def _warn_deprecated_npu_option(name: str) -> None:
     )
 
 
-def _remove_deprecated_npu_options(options, *, protected=(), in_place=False):
-    """Normalize and remove deprecated public NPU options, copying by default."""
+def _remove_deprecated_npu_options(options, *, in_place=False):
+    """Normalize reserved legacy NPU options, copying by default."""
     normalized = options if in_place else dict(options)
-    deprecated = _get_deprecated_npu_options(normalized) - set(protected)
+    deprecated = _get_deprecated_npu_options(normalized)
     for name in sorted(deprecated):
         _warn_deprecated_npu_option(name)
+        route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
+        if route is not None and normalized[name]:
+            replacement_name, replacement_value = route
+            normalized.setdefault(replacement_name, replacement_value)
+        alias = _DEPRECATED_NPU_OPTION_ALIASES.get(name)
+        if alias is not None:
+            normalized.setdefault(alias, normalized[name])
         normalized.pop(name)
     return normalized
 
@@ -144,9 +193,21 @@ def _warn_deprecated_ascend_env_vars() -> None:
         _warn_deprecated_ascend_env_var(name)
 
 
-def is_compile_on_910_95(arch: str) -> bool:
-    """Return whether the explicit compilation target belongs to the A5 generation."""
-    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+def is_compile_on_910_95(arch: str = None) -> bool:
+    """Return whether the compilation target belongs to the A5 generation."""
+    if arch is not None:
+        return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
+
+    global _is_compile_on_910_95
+    if _is_compile_on_910_95 is None:
+        try:
+            import acl
+            name_lower = acl.get_soc_name().lower()
+            _is_compile_on_910_95 = ("ascend910_95" in name_lower or "ascend950" in name_lower
+                                     or "910_958b" in name_lower)
+        except (ImportError, AttributeError):
+            _is_compile_on_910_95 = False
+    return _is_compile_on_910_95
 
 
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
@@ -666,6 +727,11 @@ def is_ffts_supported(arch: str):
 def force_disable_ffts(arch: str) -> bool:
     """Return whether the selected target requires FFTS to be disabled."""
     return is_compile_on_910_95(arch)
+
+
+def triton_enable_libdevice_simt(arch: str = None) -> bool:
+    """Return whether the environment switch selects SIMT libdevice."""
+    return bool(os.getenv("TRITON_ENABLE_LIBDEVICE_SIMT", False)) and is_compile_on_910_95(arch)
 
 
 def get_cann_version_file_hash():

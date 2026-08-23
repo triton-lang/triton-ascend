@@ -126,6 +126,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_drop_unit_dims": "it is ignored; consider 'enable_flatten' when flattening is intended.",
     "enable_linearize": "it is ignored; this option has no replacement because it had no effective consumer.",
     "enable_mask_fallback_conversion": "it is ignored; the backend fixes mask fallback conversion to False.",
+    "enable_nd2nz_on_vector": "it is ignored; the backend fixes vector ND2NZ conversion to False.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

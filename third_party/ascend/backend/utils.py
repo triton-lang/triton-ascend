@@ -113,6 +113,7 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
 _DEPRECATED_NPU_OPTION_DETAILS = {
     "add_auto_scheduling": "it is ignored; the removed DAG scheduling switch has no replacement.",
     "allow_fp8e4nv": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "arch": "it is ignored; the target architecture is injected from GPUTarget.arch.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

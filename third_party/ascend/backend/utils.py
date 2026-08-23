@@ -110,7 +110,9 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
 # Removed no-op options keep using the compatibility path above.  This table
 # only specializes their migration guidance; route and alias options retain
 # the behavior and messages defined by PR #1729.
-_DEPRECATED_NPU_OPTION_DETAILS = {}
+_DEPRECATED_NPU_OPTION_DETAILS = {
+    "add_auto_scheduling": "it is ignored; the removed DAG scheduling switch has no replacement.",
+}
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",

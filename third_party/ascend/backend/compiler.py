@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    stream: Any = _deprecated_npu_option("it is ignored; launch streams are managed by the runtime and driver.")
     storage_align: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     optimize_dynamic_offset: Any = _deprecated_npu_option("it is ignored; the backend fixes dynamic-offset optimization to False.")
     ops_reorder: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
@@ -1392,6 +1393,10 @@ class AscendBackend(BaseBackend):
                 if k in normalized_opts and (not internal_options or k not in deprecated_names)
             }
             options = NPUOptions(arch=self.target.arch, **args)
+            # Community JIT treats stream as a special launch-only keyword.
+            # NPUOptions has already warned and normalized its legacy value.
+            if not internal_options:
+                normalized_opts.pop("stream", None)
             # Lazy init enable_dynamic_cv_pipeline if not provided.
             # compile_on_910_95 is already resolved from the requested target.
             if options.enable_dynamic_cv_pipeline is None:

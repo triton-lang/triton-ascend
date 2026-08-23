@@ -167,6 +167,7 @@ _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
     "TRITON_ASCEND_COMPILE_SPEED_OPT": "it is ignored; this variable has no replacement because it had no effective consumer.",
     "TRITON_BACKEND": "it is ignored; the backend policy is fixed to 'torch_npu'.",
     "TRITON_DISABLE_FFTS": "it is ignored; FFTS policy is derived from the explicit target architecture.",
+    "TRITON_REGISTER_TENSOR_MSPROF": "it is ignored; tensor-shape msprof registration is no longer controlled by an environment variable.",
 }
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
 

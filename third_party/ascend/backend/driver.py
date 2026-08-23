@@ -196,6 +196,7 @@ class NPULauncher(object):
         return self.so_launcher_path
 
     def __call__(self, *args, **kwargs):
+        _ascend_utils._warn_deprecated_ascend_env_var("TRITON_REGISTER_TENSOR_MSPROF")
         if self.compile_only:
             cache_manager = get_cache_manager(args[5]['hash'])
             print("[INFO]: skip running kernel")

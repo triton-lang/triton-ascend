@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    auto_blockify_size: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
     allow_fp8e4nv: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
     add_auto_scheduling: Any = _deprecated_npu_option("it is ignored; the removed DAG scheduling switch has no replacement.")
 

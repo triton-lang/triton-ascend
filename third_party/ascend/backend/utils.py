@@ -40,7 +40,6 @@ _is_compile_on_910_95 = None
 # JIT validates the remaining keys.
 _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
-    "auto_blockify_size",
     "auto_tile_and_bind_subblock",
     "code_motion",
     "compile_on_910_95",

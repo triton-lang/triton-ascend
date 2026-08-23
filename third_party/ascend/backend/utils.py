@@ -146,6 +146,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
     "stream": "it is ignored; launch streams are managed by the runtime and driver.",
     "use_bytecode": "it is ignored; the bytecode pipeline is always enabled.",
+    "warp_size": "it is ignored; the Ascend backend fixes warp_size to 32.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

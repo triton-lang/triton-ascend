@@ -115,6 +115,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "allow_fp8e4nv": "it is ignored; this option has no replacement because it had no effective consumer.",
     "arch": "it is ignored; the target architecture is injected from GPUTarget.arch.",
     "auto_blockify_size": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "auto_tile_and_bind_subblock": "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

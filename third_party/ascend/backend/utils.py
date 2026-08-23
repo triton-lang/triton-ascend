@@ -48,7 +48,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "inter_cache_num",
     "intra_cache_num",
     "load_cache_num",
-    "ops_reorder",
     "optimize_dynamic_offset",
     "parallel_mode",
     "storage_align",

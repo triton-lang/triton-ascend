@@ -41,7 +41,6 @@ _is_compile_on_910_95 = None
 _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "compile_on_910_95",
-    "enable_cross_if_fusion",
     "enable_costmodel_backend",
     "enable_drop_unit_dims",
     "enable_linearize",

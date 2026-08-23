@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    enable_cross_if_fusion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     enable_cce_vf_remove_membar: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     enable_cce_vf_auto_sync: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     enable_buffer_insert_optimization: Any = _deprecated_npu_option("it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.")

@@ -132,6 +132,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_ub_refine_opt": "it is ignored; the backend keeps UB refine optimization disabled.",
     "enable_vf_fusion": "it is ignored; use 'vf_fusion_mode' instead.",
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
+    "graph_optimize_max_rewrites_per_function": "it is ignored; the backend fixes the maximum rewrites per function to 64.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

@@ -125,6 +125,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_cross_if_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_drop_unit_dims": "it is ignored; consider 'enable_flatten' when flattening is intended.",
     "enable_linearize": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "enable_mask_fallback_conversion": "it is ignored; the backend fixes mask fallback conversion to False.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

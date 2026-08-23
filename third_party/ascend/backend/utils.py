@@ -159,6 +159,7 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_DISABLE_FFTS",
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
+_DEPRECATED_ASCEND_ENV_VAR_DETAILS = {}
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
 
 
@@ -226,9 +227,15 @@ def _warn_deprecated_ascend_env_var(name: str) -> None:
             or name in _WARNED_DEPRECATED_ASCEND_ENV_VARS):
         return
     _WARNED_DEPRECATED_ASCEND_ENV_VARS.add(name)
+    detail = _DEPRECATED_ASCEND_ENV_VAR_DETAILS.get(name)
+    if detail is None:
+        message = (f"Ascend environment variable '{name}' is deprecated and ignored; "
+                   "the default behavior is used instead.")
+    else:
+        message = (f"Ascend environment variable '{name}' is deprecated and will be removed in a future release; "
+                   f"{detail}")
     warnings.warn(
-        f"Ascend environment variable '{name}' is deprecated and ignored; "
-        "the default behavior is used instead.",
+        message,
         FutureWarning,
         stacklevel=3,
     )

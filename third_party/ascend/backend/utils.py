@@ -42,7 +42,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "compile_on_910_95",
     "enable_costmodel_backend",
-    "enable_vf_fusion",
     "force_simt_only",
     "force_simt_template",
     "graph_optimize_emit_remarks",

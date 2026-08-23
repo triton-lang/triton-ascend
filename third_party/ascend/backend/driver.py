@@ -33,7 +33,7 @@ from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
                                           _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
-                                          get_backend_func)
+                                          get_backend_func, _warn_deprecated_ascend_env_var)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -196,6 +196,7 @@ class NPULauncher(object):
         return self.so_launcher_path
 
     def __call__(self, *args, **kwargs):
+        _warn_deprecated_ascend_env_var("TRITON_REGISTER_TENSOR_MSPROF")
         if self.compile_only:
             cache_manager = get_cache_manager(args[5]['hash'])
             print("[INFO]: skip running kernel")

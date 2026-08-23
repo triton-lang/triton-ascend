@@ -115,11 +115,13 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "allow_fp8e4nv": "it is ignored; this option has no replacement because it had no effective consumer.",
     "arch": "it is ignored; the target architecture is injected from GPUTarget.arch.",
     "auto_blockify_size": "it is ignored; this option has no replacement because it had no effective consumer.",
-    "auto_tile_and_bind_subblock": "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
+    "auto_tile_and_bind_subblock":
+    "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
     "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
-    "enable_buffer_insert_optimization": "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
+    "enable_buffer_insert_optimization":
+    "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
     "enable_cce_vf_auto_sync": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_cce_vf_remove_membar": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_cross_if_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
@@ -132,9 +134,11 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_ub_refine_opt": "it is ignored; the backend keeps UB refine optimization disabled.",
     "enable_vf_fusion": "it is ignored; use 'vf_fusion_mode' instead.",
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
-    "graph_optimize_max_rewrites_per_function": "it is ignored; the backend fixes the maximum rewrites per function to 64.",
+    "graph_optimize_max_rewrites_per_function":
+    "it is ignored; the backend fixes the maximum rewrites per function to 64.",
     "graph_optimize_rule_mask": "it is ignored; the backend fixes the graph-optimization rule mask to 511.",
-    "graph_optimize_ub_capacity_bytes": "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
+    "graph_optimize_ub_capacity_bytes":
+    "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
     "hfusion_enable_multiple_consumer_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
@@ -160,14 +164,22 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
 _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
-    "LLVM_ROOT": "it is ignored; set CC to select the CPU launcher compiler.",
-    "MLIR_ROOT": "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
-    "TRITON_ALL_BLOCKS_PARALLEL": "it is ignored; automatic block mapping is managed by backend policy.",
-    "TRITON_ASCEND_ARCH": "use an explicit GPUTarget.arch instead; host environment overrides are ignored.",
-    "TRITON_ASCEND_COMPILE_SPEED_OPT": "it is ignored; this variable has no replacement because it had no effective consumer.",
-    "TRITON_BACKEND": "it is ignored; the backend policy is fixed to 'torch_npu'.",
-    "TRITON_DISABLE_FFTS": "it is ignored; FFTS policy is derived from the explicit target architecture.",
-    "TRITON_REGISTER_TENSOR_MSPROF": "it is ignored; tensor-shape msprof registration is no longer controlled by an environment variable.",
+    "LLVM_ROOT":
+    "it is ignored; set CC to select the CPU launcher compiler.",
+    "MLIR_ROOT":
+    "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
+    "TRITON_ALL_BLOCKS_PARALLEL":
+    "it is ignored; automatic block mapping is managed by backend policy.",
+    "TRITON_ASCEND_ARCH":
+    "use an explicit GPUTarget.arch instead; host environment overrides are ignored.",
+    "TRITON_ASCEND_COMPILE_SPEED_OPT":
+    "it is ignored; this variable has no replacement because it had no effective consumer.",
+    "TRITON_BACKEND":
+    "it is ignored; the backend policy is fixed to 'torch_npu'.",
+    "TRITON_DISABLE_FFTS":
+    "it is ignored; FFTS policy is derived from the explicit target architecture.",
+    "TRITON_REGISTER_TENSOR_MSPROF":
+    "it is ignored; tensor-shape msprof registration is no longer controlled by an environment variable.",
 }
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
 

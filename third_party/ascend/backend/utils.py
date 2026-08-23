@@ -140,6 +140,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
     "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
     "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
+    "ops_reorder": "it is ignored; the removed vendor compiler control has no replacement.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

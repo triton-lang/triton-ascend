@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    disable_size_align_for_cast: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     code_motion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     auto_tile_and_bind_subblock: Any = _deprecated_npu_option("it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.")
     auto_blockify_size: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")

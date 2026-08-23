@@ -82,6 +82,7 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
 _DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
+    "TRITON_ASCEND_ARCH": "use an explicit GPUTarget.arch instead; host environment overrides are ignored.",
     "TRITON_ALL_BLOCKS_PARALLEL": "it is ignored; automatic block mapping is managed by backend policy.",
     "MLIR_ROOT": "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
     "LLVM_ROOT": "it is ignored; set CC to select the CPU launcher compiler.",

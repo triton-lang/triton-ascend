@@ -40,7 +40,7 @@ def test_get_logger():
 def test_get_ascend_arch_from_env_is_deprecated(monkeypatch):
     monkeypatch.setattr(utils, "_WARNED_DEPRECATED_ASCEND_ENV_VARS", set(), raising=False)
     monkeypatch.setenv("TRITON_ASCEND_ARCH", "Ascend910_9599")
-    with pytest.warns(FutureWarning, match=r"TRITON_ASCEND_ARCH.*deprecated and ignored"):
+    with pytest.warns(FutureWarning, match=r"TRITON_ASCEND_ARCH.*will be removed.*GPUTarget.arch"):
         result = utils.get_ascend_arch_from_env()
     assert result == ""
 

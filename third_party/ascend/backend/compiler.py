@@ -1027,6 +1027,7 @@ class NPUOptions:
 
     # Removed public controls remain accepted only as no-op compatibility
     # fields. NPUOptions owns both their warning and value normalization.
+    graph_optimize_ub_capacity_bytes: Any = _deprecated_npu_option("it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).")
     graph_optimize_rule_mask: Any = _deprecated_npu_option("it is ignored; the backend fixes the graph-optimization rule mask to 511.")
     graph_optimize_max_rewrites_per_function: Any = _deprecated_npu_option("it is ignored; the backend fixes the maximum rewrites per function to 64.")
     graph_optimize_emit_remarks: Any = _deprecated_npu_option("it is ignored; the backend fixes graph-optimization remarks to False.")

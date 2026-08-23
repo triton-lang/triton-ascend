@@ -117,6 +117,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "auto_blockify_size": "it is ignored; this option has no replacement because it had no effective consumer.",
     "auto_tile_and_bind_subblock": "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

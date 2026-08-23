@@ -107,6 +107,52 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
     "load_cache_num": "buf_slot_num_of_gm",
 }
 
+# Removed no-op options keep using the compatibility path above.  This table
+# only specializes their migration guidance; route and alias options retain
+# the behavior and messages defined by PR #1729.
+_DEPRECATED_NPU_OPTION_DETAILS = {
+    "add_auto_scheduling": "it is ignored; the removed DAG scheduling switch has no replacement.",
+    "allow_fp8e4nv": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "arch": "it is ignored; the target architecture is injected from GPUTarget.arch.",
+    "auto_blockify_size": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "auto_tile_and_bind_subblock":
+    "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
+    "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
+    "enable_buffer_insert_optimization":
+    "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
+    "enable_cce_vf_auto_sync": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_cce_vf_remove_membar": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_cross_if_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_drop_unit_dims": "it is ignored; consider 'enable_flatten' when flattening is intended.",
+    "enable_linearize": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "enable_mask_fallback_conversion": "it is ignored; the backend fixes mask fallback conversion to False.",
+    "enable_nd2nz_on_vector": "it is ignored; the backend fixes vector ND2NZ conversion to False.",
+    "enable_select_analysis": "it is ignored; the backend fixes select analysis to True.",
+    "enable_sync_block_lock": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "enable_ub_refine_opt": "it is ignored; the backend keeps UB refine optimization disabled.",
+    "enable_vf_fusion": "it is ignored; use 'vf_fusion_mode' instead.",
+    "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
+    "graph_optimize_max_rewrites_per_function":
+    "it is ignored; the backend fixes the maximum rewrites per function to 64.",
+    "graph_optimize_rule_mask": "it is ignored; the backend fixes the graph-optimization rule mask to 511.",
+    "graph_optimize_ub_capacity_bytes":
+    "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
+    "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
+    "hfusion_enable_multiple_consumer_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
+    "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
+    "ops_reorder": "it is ignored; the removed vendor compiler control has no replacement.",
+    "optimize_dynamic_offset": "it is ignored; the backend fixes dynamic-offset optimization to False.",
+    "parallel_mode": "it is ignored; parallel mode is derived from compile_mode and Linalg IR.",
+    "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
+    "stream": "it is ignored; launch streams are managed by the runtime and driver.",
+    "use_bytecode": "it is ignored; the bytecode pipeline is always enabled.",
+    "warp_size": "it is ignored; the Ascend backend fixes warp_size to 32.",
+}
+
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "LLVM_ROOT",
     "MLIR_ROOT",
@@ -117,6 +163,24 @@ _DEPRECATED_ASCEND_ENV_VARS = frozenset({
     "TRITON_DISABLE_FFTS",
     "TRITON_REGISTER_TENSOR_MSPROF",
 })
+_DEPRECATED_ASCEND_ENV_VAR_DETAILS = {
+    "LLVM_ROOT":
+    "it is ignored; set CC to select the CPU launcher compiler.",
+    "MLIR_ROOT":
+    "it is ignored; packaged or PATH-discovered MLIR tools are used instead.",
+    "TRITON_ALL_BLOCKS_PARALLEL":
+    "it is ignored; automatic block mapping is managed by backend policy.",
+    "TRITON_ASCEND_ARCH":
+    "use an explicit GPUTarget.arch instead; host environment overrides are ignored.",
+    "TRITON_ASCEND_COMPILE_SPEED_OPT":
+    "it is ignored; this variable has no replacement because it had no effective consumer.",
+    "TRITON_BACKEND":
+    "it is ignored; the backend policy is fixed to 'torch_npu'.",
+    "TRITON_DISABLE_FFTS":
+    "it is ignored; FFTS policy is derived from the explicit target architecture.",
+    "TRITON_REGISTER_TENSOR_MSPROF":
+    "it is ignored; tensor-shape msprof registration is no longer controlled by an environment variable.",
+}
 _WARNED_DEPRECATED_ASCEND_ENV_VARS = set()
 
 
@@ -142,12 +206,16 @@ def _warn_deprecated_npu_option(name: str) -> None:
     _WARNED_DEPRECATED_NPU_OPTIONS.add(name)
     route = _DEPRECATED_NPU_OPTION_ROUTES.get(name)
     alias = _DEPRECATED_NPU_OPTION_ALIASES.get(name)
+    detail = _DEPRECATED_NPU_OPTION_DETAILS.get(name)
     if route is not None:
         replacement_name, replacement_value = route
         message = (f"Ascend compile option '{name}' is deprecated; "
                    f"use {replacement_name}={replacement_value!r} instead.")
     elif alias is not None:
         message = f"Ascend compile option '{name}' is deprecated; use '{alias}' instead."
+    elif detail is not None:
+        message = (f"Ascend compile option '{name}' is deprecated and will be removed in a future release; "
+                   f"{detail}")
     else:
         message = (f"Ascend compile option '{name}' is deprecated and ignored; "
                    "the backend-managed/default behavior is used instead.")
@@ -180,9 +248,15 @@ def _warn_deprecated_ascend_env_var(name: str) -> None:
             or name in _WARNED_DEPRECATED_ASCEND_ENV_VARS):
         return
     _WARNED_DEPRECATED_ASCEND_ENV_VARS.add(name)
+    detail = _DEPRECATED_ASCEND_ENV_VAR_DETAILS.get(name)
+    if detail is None:
+        message = (f"Ascend environment variable '{name}' is deprecated and ignored; "
+                   "the default behavior is used instead.")
+    else:
+        message = (f"Ascend environment variable '{name}' is deprecated and will be removed in a future release; "
+                   f"{detail}")
     warnings.warn(
-        f"Ascend environment variable '{name}' is deprecated and ignored; "
-        "the default behavior is used instead.",
+        message,
         FutureWarning,
         stacklevel=3,
     )
@@ -726,6 +800,7 @@ def is_ffts_supported(arch: str):
 
 def force_disable_ffts(arch: str) -> bool:
     """Return whether the selected target requires FFTS to be disabled."""
+    _warn_deprecated_ascend_env_var("TRITON_DISABLE_FFTS")
     return is_compile_on_910_95(arch)
 
 

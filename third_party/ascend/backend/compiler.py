@@ -1032,37 +1032,62 @@ class NPUOptions:
     # fields. NPUOptions owns both their warning and value normalization.
     use_bytecode: Any = _deprecated_npu_option("it is ignored; the bytecode pipeline is always enabled.")
     stream: Any = _deprecated_npu_option("it is ignored; launch streams are managed by the runtime and driver.")
-    storage_align: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    optimize_dynamic_offset: Any = _deprecated_npu_option("it is ignored; the backend fixes dynamic-offset optimization to False.")
+    storage_align: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
+    optimize_dynamic_offset: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes dynamic-offset optimization to False.")
     ops_reorder: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
     mix_mode: Any = _deprecated_npu_option("it is ignored; mix mode is derived from Linalg IR as internal metadata.")
-    llvm_version: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
+    llvm_version: Any = _deprecated_npu_option(
+        "it is ignored; this option has no replacement because it had no effective consumer.")
     kernel_name: Any = _deprecated_npu_option("it is ignored; the kernel name is derived from TTIR.")
-    hfusion_enable_multiple_consumer_fusion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    has_auto_blockify_blacklist_op: Any = _deprecated_npu_option("it is ignored; the safety flag is derived by scanning TTIR.")
-    graph_optimize_ub_capacity_bytes: Any = _deprecated_npu_option("it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).")
-    graph_optimize_rule_mask: Any = _deprecated_npu_option("it is ignored; the backend fixes the graph-optimization rule mask to 511.")
-    graph_optimize_max_rewrites_per_function: Any = _deprecated_npu_option("it is ignored; the backend fixes the maximum rewrites per function to 64.")
-    graph_optimize_emit_remarks: Any = _deprecated_npu_option("it is ignored; the backend fixes graph-optimization remarks to False.")
+    hfusion_enable_multiple_consumer_fusion: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
+    has_auto_blockify_blacklist_op: Any = _deprecated_npu_option(
+        "it is ignored; the safety flag is derived by scanning TTIR.")
+    graph_optimize_ub_capacity_bytes: Any = _deprecated_npu_option(
+        "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).")
+    graph_optimize_rule_mask: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes the graph-optimization rule mask to 511.")
+    graph_optimize_max_rewrites_per_function: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes the maximum rewrites per function to 64.")
+    graph_optimize_emit_remarks: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes graph-optimization remarks to False.")
     enable_vf_fusion: Any = _deprecated_npu_option("it is ignored; use 'vf_fusion_mode' instead.")
-    enable_ub_refine_opt: Any = _deprecated_npu_option("it is ignored; the backend keeps UB refine optimization disabled.")
-    enable_sync_block_lock: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
+    enable_ub_refine_opt: Any = _deprecated_npu_option(
+        "it is ignored; the backend keeps UB refine optimization disabled.")
+    enable_sync_block_lock: Any = _deprecated_npu_option(
+        "it is ignored; this option has no replacement because it had no effective consumer.")
     enable_select_analysis: Any = _deprecated_npu_option("it is ignored; the backend fixes select analysis to True.")
-    enable_nd2nz_on_vector: Any = _deprecated_npu_option("it is ignored; the backend fixes vector ND2NZ conversion to False.")
-    enable_mask_fallback_conversion: Any = _deprecated_npu_option("it is ignored; the backend fixes mask fallback conversion to False.")
-    enable_linearize: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
-    enable_drop_unit_dims: Any = _deprecated_npu_option("it is ignored; consider 'enable_flatten' when flattening is intended.")
-    enable_cross_if_fusion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    enable_cce_vf_remove_membar: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    enable_cce_vf_auto_sync: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    enable_buffer_insert_optimization: Any = _deprecated_npu_option("it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.")
-    enable_auto_blockify: Any = _deprecated_npu_option("it is ignored; automatic block mapping and its safety blacklist are backend-managed.")
-    disable_size_align_for_cast: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
+    enable_nd2nz_on_vector: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes vector ND2NZ conversion to False.")
+    enable_mask_fallback_conversion: Any = _deprecated_npu_option(
+        "it is ignored; the backend fixes mask fallback conversion to False.")
+    enable_linearize: Any = _deprecated_npu_option(
+        "it is ignored; this option has no replacement because it had no effective consumer.")
+    enable_drop_unit_dims: Any = _deprecated_npu_option(
+        "it is ignored; consider 'enable_flatten' when flattening is intended.")
+    enable_cross_if_fusion: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
+    enable_cce_vf_remove_membar: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
+    enable_cce_vf_auto_sync: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
+    enable_buffer_insert_optimization: Any = _deprecated_npu_option(
+        "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.")
+    enable_auto_blockify: Any = _deprecated_npu_option(
+        "it is ignored; automatic block mapping and its safety blacklist are backend-managed.")
+    disable_size_align_for_cast: Any = _deprecated_npu_option(
+        "it is ignored; the removed vendor compiler control has no replacement.")
     code_motion: Any = _deprecated_npu_option("it is ignored; the removed vendor compiler control has no replacement.")
-    auto_tile_and_bind_subblock: Any = _deprecated_npu_option("it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.")
-    auto_blockify_size: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
-    allow_fp8e4nv: Any = _deprecated_npu_option("it is ignored; this option has no replacement because it had no effective consumer.")
-    add_auto_scheduling: Any = _deprecated_npu_option("it is ignored; the removed DAG scheduling switch has no replacement.")
+    auto_tile_and_bind_subblock: Any = _deprecated_npu_option(
+        "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.")
+    auto_blockify_size: Any = _deprecated_npu_option(
+        "it is ignored; this option has no replacement because it had no effective consumer.")
+    allow_fp8e4nv: Any = _deprecated_npu_option(
+        "it is ignored; this option has no replacement because it had no effective consumer.")
+    add_auto_scheduling: Any = _deprecated_npu_option(
+        "it is ignored; the removed DAG scheduling switch has no replacement.")
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
@@ -1388,7 +1413,7 @@ class AscendBackend(BaseBackend):
             option_names = {
                 name
                 for name, option_field in NPUOptions.__dataclass_fields__.items()
-                if option_field.init and name != "_target_arch"
+                if option_field.init and name not in {"_target_arch", "_warned_deprecated_options"}
             }
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public

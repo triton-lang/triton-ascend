@@ -128,6 +128,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_mask_fallback_conversion": "it is ignored; the backend fixes mask fallback conversion to False.",
     "enable_nd2nz_on_vector": "it is ignored; the backend fixes vector ND2NZ conversion to False.",
     "enable_select_analysis": "it is ignored; the backend fixes select analysis to True.",
+    "enable_sync_block_lock": "it is ignored; this option has no replacement because it had no effective consumer.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

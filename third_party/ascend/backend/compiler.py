@@ -1120,7 +1120,8 @@ class NPUOptions:
     plan_memory_strategy: str = None
     # Internal launch metadata.  The mode is initially derived from
     # compile_mode, then replaced with the mode emitted by TritonToLinalg.
-    parallel_mode: str = field(default="simd", init=False)
+    parallel_mode: Any = _deprecated_npu_option(
+        "it is ignored; parallel mode is derived from compile_mode and Linalg IR.")
     # Internal pure-SIMT state, derived from the effective lowering mode.
     is_pure_simt: bool = field(default=False, init=False)
     # Only takes effect on the pure-SIMT path.

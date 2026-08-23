@@ -118,6 +118,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "auto_tile_and_bind_subblock": "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
     "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

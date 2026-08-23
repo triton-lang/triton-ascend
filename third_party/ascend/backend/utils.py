@@ -145,6 +145,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "parallel_mode": "it is ignored; parallel mode is derived from compile_mode and Linalg IR.",
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
     "stream": "it is ignored; launch streams are managed by the runtime and driver.",
+    "use_bytecode": "it is ignored; the bytecode pipeline is always enabled.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

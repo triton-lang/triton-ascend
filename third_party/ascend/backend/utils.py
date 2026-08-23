@@ -39,7 +39,6 @@ _is_compile_on_910_95 = None
 # route renamed options and discard backend-managed options before community
 # JIT validates the remaining keys.
 _DEPRECATED_NPU_OPTIONS = frozenset({
-    "arch",
     "compile_on_910_95",
     "enable_costmodel_backend",
     "force_simt_only",

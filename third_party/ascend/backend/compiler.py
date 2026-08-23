@@ -1018,9 +1018,12 @@ class NPUOptions:
 
     debug: bool = False
     sanitize_overflow: bool = True
-    # Backend-only construction input.  AscendBackend.parse_options injects
-    # GPUTarget.arch and never forwards a user-supplied compile option.
-    arch: InitVar[str] = ""
+    # Direct NPUOptions construction keeps accepting arch as the target. The
+    # backend uses _target_arch so a user-supplied legacy arch can be warned
+    # and ignored without overriding GPUTarget.arch.
+    arch: InitVar[Optional[str]] = _deprecated_npu_option(
+        "it is ignored; the target architecture is injected from GPUTarget.arch.")
+    _target_arch: InitVar[str] = ""
     # This becomes compiler metadata, so its name must also be valid for the
     # namedtuple constructed by CompiledKernel on Python 3.10.
     target_arch: str = field(init=False, repr=False)
@@ -1171,18 +1174,25 @@ class NPUOptions:
                 self._warn_deprecated_option(name, detail)
                 object.__setattr__(self, name, None)
 
-    def __post_init__(self, arch):
+    def __post_init__(self, arch, _target_arch):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
+        target_arch = _target_arch or arch or ""
+        if _target_arch and arch is not None:
+            detail = self.__dataclass_fields__["arch"].metadata[_DEPRECATED_NPU_OPTION_DETAIL_KEY]
+            self._warn_deprecated_option("arch", detail)
+        # The post-class property exposes target_arch while core JIT recognizes
+        # the no-op compatibility key through options.__dict__.
+        self.__dict__["arch"] = None
         self._normalize_deprecated_options()
         # Some no-op compatibility fields also expose backend-owned values.
         object.__setattr__(self, "warp_size", 32)
-        object.__setattr__(self, "target_arch", arch)
+        object.__setattr__(self, "target_arch", target_arch)
         object.__setattr__(
             self,
             "compile_on_910_95",
-            isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
+            isinstance(target_arch, str) and target_arch.startswith(("Ascend910_95", "Ascend950")),
         )
         # The core compiler serializes ``options.__dict__`` into launch
         # metadata.  An init=False field with its class-level default alone is
@@ -1193,7 +1203,7 @@ class NPUOptions:
         if self.simt_stack_limit is not None:
             _validate_simt_stack_limit(self.simt_stack_limit)
 
-        compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
+        compile_mode = str(_normalize_compile_mode(self.compile_mode, target_arch))
         object.__setattr__(self, "compile_mode", compile_mode)
 
         if compile_mode == "simt_only":
@@ -1378,7 +1388,7 @@ class AscendBackend(BaseBackend):
             option_names = {
                 name
                 for name, option_field in NPUOptions.__dataclass_fields__.items()
-                if option_field.init and name != "arch"
+                if option_field.init and name != "_target_arch"
             }
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public
@@ -1394,7 +1404,7 @@ class AscendBackend(BaseBackend):
                 for k in option_names
                 if k in normalized_opts and (not internal_options or k not in deprecated_names)
             }
-            options = NPUOptions(arch=self.target.arch, **args)
+            options = NPUOptions(_target_arch=self.target.arch, **args)
             # Community JIT treats stream as a special launch-only keyword.
             # NPUOptions has already warned and normalized its legacy value.
             if not internal_options:

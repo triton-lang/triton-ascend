@@ -139,6 +139,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "hfusion_enable_multiple_consumer_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
     "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
+    "mix_mode": "it is ignored; mix mode is derived from Linalg IR as internal metadata.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

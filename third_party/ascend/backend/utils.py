@@ -123,6 +123,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_cce_vf_auto_sync": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_cce_vf_remove_membar": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_cross_if_fusion": "it is ignored; the removed vendor compiler control has no replacement.",
+    "enable_drop_unit_dims": "it is ignored; consider 'enable_flatten' when flattening is intended.",
 }
 
 _DEPRECATED_ASCEND_ENV_VARS = frozenset({

@@ -50,7 +50,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "load_cache_num",
     "parallel_mode",
     "vf_merge_level",
-    "warp_size",
 })
 
 # These names remain reserved while the compatibility layer accepts them as

@@ -1066,7 +1066,7 @@ class NPUOptions:
     num_ctas: int = 1
     num_stages: int = 2
     # Ascend threads-per-warp is a backend capability, not a compile option.
-    warp_size: int = field(default=32, init=False)
+    warp_size: Any = _deprecated_npu_option("it is ignored; the Ascend backend fixes warp_size to 32.")
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
     # Internal lowering selector derived from the explicit GPUTarget.arch.

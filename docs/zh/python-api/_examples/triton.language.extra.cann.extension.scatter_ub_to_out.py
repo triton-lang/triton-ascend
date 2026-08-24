@@ -28,7 +28,7 @@ def kernel(value_ptr, index_ptr, dst_ptr):
 
 
 def test_scatter_ub_to_out():
-    if not is_compile_on_910_95():
+    if not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch):
         pytest.skip("scatter_ub_to_out is only supported on Ascend 950")
     # dst: (4,2) of zeros
     dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)

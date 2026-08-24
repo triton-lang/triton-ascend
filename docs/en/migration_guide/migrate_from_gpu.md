@@ -20,7 +20,7 @@ GPU kernels often use a large logical grid and rely on the runtime and hardware 
 
 - Prefer 1D grids. NPU 2D adaptations are merged into 1D; for example, `(20,)` and `(4, 5)` produce equivalent execution results.
 - For Vector-only operators, organize concurrent tasks around the Vector Core count. For operators containing `tl.dot`, organize concurrent tasks around the AI Core count.
-- If the logical grid is much larger than the physical core count, consider letting each program process multiple tiles in an inner loop, or use `TRITON_ALL_BLOCKS_PARALLEL` when logical programs have no ordering dependency.
+- If the logical grid is much larger than the physical core count, consider letting each program process multiple tiles in an inner loop; the backend's automatic block mapping applies when logical programs have no ordering dependency.
 - `coreDim` cannot exceed `UINT16_MAX` (65535). For large shapes, control grid size through BLOCK_SIZE or tiling.
 
 | Dimension | Core Structure | Operator Type |
@@ -157,11 +157,7 @@ Case: Optimizing the `zeros_like` function
 (data scale `N = 1073741824`; original `BLOCK_SIZE = 2048`; calculated `coreDim = 524288`, exceeding the limit of **65535**)
 
 Solution 1:
-To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command:
-
-```bash
-export TRITON_ALL_BLOCKS_PARALLEL=1
-```
+For logical programs without ordering dependencies, the backend's automatic block mapping applies the physical-core cap and keeps **coreDim** within the compiler limit; no environment setting is required.
 
 Solution 2:
 Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit.

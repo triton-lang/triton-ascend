@@ -21,7 +21,7 @@
 
 No real .npubin is needed: minimal ELF + DWARF-4 line programs are synthesized
 in memory, so the full parse -> plan -> patch -> verify path is exercised, and
-each demotion rule is tested directly against synthetic rows.
+each demotion rule is tested directly against synthetic rows
 """
 
 import os

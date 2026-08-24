@@ -128,6 +128,8 @@ def compiler_module():
     utils_stub._get_auto_blockify_blacklist_reasons = lambda *_args, **_kwargs: []
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
     utils_stub._remove_deprecated_npu_options = remove_deprecated_npu_options
+    utils_stub._warn_deprecated_npu_option = lambda name: warnings.warn(
+        f"Ascend compile option '{name}' is deprecated and ignored.", FutureWarning)
     utils_stub._warn_deprecated_ascend_env_vars = lambda: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
@@ -655,6 +657,13 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     assert a5_default.compile_on_910_95 is True
     assert a5_default.compile_mode == "simd_simt_template"
     assert a5_default.is_pure_simt is False
+
+    with pytest.warns(FutureWarning, match="compile_on_910_95"):
+        ignored_legacy_value = compiler_module.NPUOptions(
+            arch="Ascend910_9589",
+            compile_on_910_95=False,
+        )
+    assert ignored_legacy_value.compile_on_910_95 is True
 
     canonical = compiler_module.NPUOptions(
         arch="Ascend910_9589",

@@ -77,14 +77,30 @@ def test_deprecated_simt_option_routes_to_compile_mode(legacy_option, compile_mo
     assert options == {legacy_option: True}
 
 
-def test_explicit_compile_mode_takes_precedence_over_deprecated_simt_option():
-    options = {"compile_mode": "simd", "force_simt_only": True}
+@pytest.mark.parametrize(
+    ("options", "expected_compile_mode"),
+    [
+        pytest.param({"compile_mode": "simd", "force_simt_only": True}, "simt_only", id="simt-only"),
+        pytest.param(
+            {"compile_mode": "simt_only", "force_simt_template": True},
+            "simd_simt_template",
+            id="simt-template",
+        ),
+        pytest.param(
+            {"compile_mode": "simd", "force_simt_only": True, "force_simt_template": True},
+            "simt_only",
+            id="simt-only-over-template",
+        ),
+    ],
+)
+def test_deprecated_simt_force_option_takes_precedence_over_compile_mode(options, expected_compile_mode):
+    original = dict(options)
 
-    with pytest.warns(FutureWarning, match=r"force_simt_only.*compile_mode='simt_only'"):
+    with pytest.warns(FutureWarning):
         normalized = utils._remove_deprecated_npu_options(options)
 
-    assert normalized == {"compile_mode": "simd"}
-    assert options == {"compile_mode": "simd", "force_simt_only": True}
+    assert normalized == {"compile_mode": expected_compile_mode}
+    assert options == original
 
 
 def test_deprecated_simt_option_is_routed_once_during_in_place_normalization():

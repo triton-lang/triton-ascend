@@ -60,13 +60,13 @@ SIMD_OPTIONS = [
     pytest.param({"compile_mode": "simd"}, id="simd"),
     pytest.param({"compile_mode": "unstructured_in_simt"}, id="unstructured-in-simt"),
     pytest.param({"force_simt_template": True}, id="force-simt-template"),
-    pytest.param({"compile_mode": "simd", "force_simt_only": True}, id="compile-mode-overrides-force-simt"),
     pytest.param({}, id="default-simd-simt-template"),
 ]
 
 SIMT_OPTIONS = [
     pytest.param({"compile_mode": "simt_only"}, id="simt-only"),
     pytest.param({"force_simt_only": True}, id="force-simt-only"),
+    pytest.param({"compile_mode": "simd", "force_simt_only": True}, id="force-simt-overrides-mode"),
 ]
 
 

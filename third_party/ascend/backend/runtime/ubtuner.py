@@ -568,7 +568,7 @@ class UBTuner(KernelInterface):
             npu_option_keys = {
                 field.name
                 for field in NPUOptions.__dataclass_fields__.values()
-                if field.init and field.name != "arch"
+                if field.init and field.name not in {"arch", "compile_on_910_95"}
             }
             opts_dict = {k: v for k, v in metadata.items() if k in npu_option_keys}
             target_arch = metadata.get("target_arch", metadata.get("arch", ""))

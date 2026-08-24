@@ -60,6 +60,7 @@ from triton.backends.ascend.utils import (
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
     _remove_deprecated_npu_options,
+    _warn_deprecated_npu_option,
     _warn_deprecated_ascend_env_vars,
     downgrade_llir,
     force_disable_ffts,
@@ -721,6 +722,12 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if vf_merge_level is not None:
             _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
+        hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
+        if hfusion_enable_multiple_consumer_fusion:
+            _compile_option_list += [
+                f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"
+            ]
+
         plan_memory_strategy = metadata["plan_memory_strategy"]
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
@@ -1018,8 +1025,9 @@ class NPUOptions:
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    # Internal lowering selector derived from the explicit GPUTarget.arch.
-    compile_on_910_95: bool = field(init=False, repr=False)
+    # Deprecated constructor-only compatibility input.  The supplied value is
+    # ignored and replaced with the lowering selector derived from GPUTarget.arch.
+    compile_on_910_95: Optional[bool] = field(default=None, repr=False, kw_only=True)
     enable_warp_specialization: bool = False
     enable_persistent: bool = False
     optimize_epilogue: bool = False
@@ -1061,6 +1069,7 @@ class NPUOptions:
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_cube_block_merge: bool = False
+    hfusion_enable_multiple_consumer_fusion: bool = False
     buf_slot_num_of_veccore: int = None
     buf_slot_num_of_crosscore: int = None
     buf_slot_num_of_gm: int = None
@@ -1099,6 +1108,8 @@ class NPUOptions:
 
         _apply_ascend_patch()
         object.__setattr__(self, "target_arch", arch)
+        if self.compile_on_910_95 is not None:
+            _warn_deprecated_npu_option("compile_on_910_95")
         object.__setattr__(
             self,
             "compile_on_910_95",
@@ -1298,7 +1309,7 @@ class AscendBackend(BaseBackend):
             option_names = {
                 name
                 for name, option_field in NPUOptions.__dataclass_fields__.items()
-                if option_field.init and name != "arch"
+                if option_field.init and name not in {"arch", "compile_on_910_95"}
             }
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public

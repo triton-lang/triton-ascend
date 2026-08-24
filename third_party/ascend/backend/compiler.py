@@ -524,6 +524,12 @@ def get_common_bishengir_compile_options(metadata):
     return [bishengir_target_opt]
 
 
+def _append_custom_pipeline_option(compile_options, metadata):
+    custom_pipeline = metadata.get("custom_pipeline")
+    if custom_pipeline is not None:
+        compile_options.append(f"--custom-compilation-pipeline={custom_pipeline}")
+
+
 def get_auto_bind_sub_block_option(metadata):
     # auto_tile_and_bind_subblock is read from the module.
     # enable_auto_bind_sub_block is set by the user and has a higher priority.
@@ -800,6 +806,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
+        if os.path.basename(npu_compiler_path) == "bishengir-compile":
+            _append_custom_pipeline_option(_compile_option_list, metadata)
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
@@ -1021,6 +1029,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
+        if os.path.basename(npu_compiler_path) == "bishengir-compile":
+            _append_custom_pipeline_option(_compile_option_list, metadata)
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
@@ -1108,6 +1118,7 @@ class NPUOptions:
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
     bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
+    custom_pipeline: str = None
 
     multibuffer: bool = True
     storage_align: bool = None
@@ -1296,6 +1307,8 @@ def ttir_to_npubin(mod, metadata, opt):
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]
 
         npu_compiler_path, env = _get_npucompiler_path()
+        if os.path.basename(npu_compiler_path) == "bishengir-compile":
+            _append_custom_pipeline_option(_compile_option_list, metadata)
         cmd_list = ([npu_compiler_path, src_path] + _compile_option_list + ["-o", bin_file])
         ret = subprocess.run(cmd_list, env=env, capture_output=True, check=True)
         if not Path(bin_path).exists():

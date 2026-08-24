@@ -1,0 +1,51 @@
+name: buildkit-dockerfile-test
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/buildkit-dockerfile-test.yaml'
+      - 'docker/Dockerfile'
+  workflow_dispatch:
+
+jobs:
+  build-test:
+    name: "build docker/Dockerfile (${{ matrix.runner_info.arch }})"
+    runs-on: ${{ matrix.runner_info.runner }}
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+
+    strategy:
+      fail-fast: false
+      matrix:
+        runner_info:
+          - {runner: linux-aarch64-cpu-4, arch: arm64}
+          - {runner: linux-amd64-cpu-4, arch: amd64}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Login to SWR
+        uses: docker/login-action@v3
+        with:
+          registry: swr.cn-southwest-2.myhuaweicloud.com
+          username: ${{ secrets.SWR_USERNAME }}
+          password: ${{ secrets.SWR_PASSWORD }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          push: true
+          tags: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/test-buildkit:triton-${{ matrix.runner_info.arch }}-${{ github.sha }}
+          build-args: |
+            CANN_BASE_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:8.5.0-a3-ubuntu22.04-py3.10
+            APTMIRROR=http://cache-service.nginx-pypi-cache.svc.cluster.local:8081
+            PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
+            PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local
+            TORCH_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/whl/cpu
+          provenance: false

@@ -5,8 +5,17 @@ SHELL ["/bin/bash", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ="Asia/shanghai"
 
-RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list 2>/dev/null || true && \
-    sed -i 's|http://security.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list 2>/dev/null || true && \
+ARG APTMIRROR
+ARG PIP_INDEX_URL="https://repo.huaweicloud.com/repository/pypi/simple"
+ARG TORCH_INDEX_URL="http://cache-service.nginx-pypi-cache.svc.cluster.local/whl/cpu"
+ARG PIP_TRUSTED_HOST=""
+
+RUN if [ -n "$APTMIRROR" ]; then \
+        sed -Ei "s@(ports|archive).ubuntu.com@${APTMIRROR#http://}@g" /etc/apt/sources.list; \
+    else \
+        sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list 2>/dev/null || true; \
+        sed -i 's|http://security.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/apt/sources.list 2>/dev/null || true; \
+    fi && \
     echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
     apt update && \
@@ -36,9 +45,15 @@ RUN sed -i 's|http://archive.ubuntu.com|http://mirrors.huaweicloud.com|g' /etc/a
     update-ca-certificates
 
 RUN mkdir -p /root/.config/pip && \
-    echo -e "[global]\nindex-url = https://repo.huaweicloud.com/repository/pypi/simple\nextra-index-url = https://download.pytorch.org/whl/cpu" > /root/.config/pip/pip.conf
+    printf '[global]\nindex-url = %s\ntimeout = 600\n' "$PIP_INDEX_URL" > /root/.config/pip/pip.conf && \
+    if [ -n "$PIP_TRUSTED_HOST" ]; then printf 'trusted-host = %s\n' "$PIP_TRUSTED_HOST" >> /root/.config/pip/pip.conf; fi
 
 COPY requirements.txt requirements_dev.txt ./
+
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python3 -m pip install torch==2.7.1+cpu \
+      --find-links ${TORCH_INDEX_URL}/torch/ \
+      --timeout 600
 
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m pip install -r requirements_dev.txt && \

@@ -23,6 +23,7 @@ __all__ = [
     "address_space",
     "buffer_type",
     "subview",
+    "reinterpret_view",
     "alloc",
     "buffer",
     "to_buffer",
@@ -177,6 +178,11 @@ class buffer(tl.base_value):
     def subview(self, offsets: List[tl.constexpr], sizes: List[tl.constexpr], strides: List[tl.constexpr],
                 _semantic=None) -> 'buffer':
         return subview(self, offsets, sizes, strides, _semantic=_semantic)
+
+    @builtin
+    def reinterpret_view(self, shape: List[tl.constexpr], strides: List[tl.constexpr], offset: tl.constexpr = 0,
+                         _semantic=None) -> 'buffer':
+        return reinterpret_view(self, shape, strides, offset=offset, _semantic=_semantic)
 
     @builtin
     def to_tensor(self, writable=True, target_shape=None, _semantic=None):
@@ -339,3 +345,68 @@ def subview(src: buffer, offsets: List[tl.constexpr], sizes: List[tl.constexpr],
 
     check_subview(src, check_offsets, new_sizes, new_strides)
     return semantic.subview(src, new_offsets, new_sizes, new_strides, _semantic.builder)
+
+
+@builtin
+def reinterpret_view(src: buffer, shape: List[tl.constexpr], strides: List[tl.constexpr], offset: tl.constexpr = 0,
+                     _semantic=None) -> buffer:
+    '''
+    Creates a static strided view of the same physical local allocation.
+
+    Unlike :func:`subview`, this operation may assign a new logical row pitch.
+    It does not allocate or copy data. The view must fit entirely within the
+    source allocation, and the source must be a direct static local allocation.
+
+    :param src: The directly allocated local buffer that owns the storage.
+    :type src: buffer
+    :param shape: A list of positive, compile-time result dimensions.
+    :type shape: List[tl.constexpr]
+    :param strides: A list of positive, compile-time strides measured in elements.
+    :type strides: List[tl.constexpr]
+    :param offset: A non-negative, compile-time element offset into ``src``.
+    :type offset: tl.constexpr
+    :return: A new buffer aliasing the storage of the source buffer.
+    :rtype: buffer
+    '''
+    if not isinstance(src, buffer):
+        raise TypeError("src must be a bl.buffer")
+
+    shape_int = tl._unwrap_shape(shape)
+    strides_int = tl._unwrap_shape(strides)
+    offset_int = tl._unwrap_if_constexpr(offset)
+
+    if not shape_int:
+        raise ValueError("shape must contain at least one dimension")
+    if len(shape_int) != len(strides_int):
+        raise ValueError("shape and strides must have the same rank")
+    if not isinstance(offset_int, int) or isinstance(offset_int, bool):
+        raise TypeError("offset must be a compile-time integer")
+    if offset_int < 0:
+        raise ValueError("offset must be non-negative")
+
+    for i, size in enumerate(shape_int):
+        if not isinstance(size, int) or isinstance(size, bool):
+            raise TypeError(f"shape[{i}] must be a compile-time integer")
+        if size <= 0:
+            raise ValueError(f"shape[{i}] must be positive")
+    for i, stride in enumerate(strides_int):
+        if not isinstance(stride, int) or isinstance(stride, bool):
+            raise TypeError(f"strides[{i}] must be a compile-time integer")
+        if stride <= 0:
+            raise ValueError(f"strides[{i}] must be positive")
+
+    source_shape = list(src.shape)
+    if not source_shape or any(not isinstance(dim, int) or isinstance(dim, bool) or dim <= 0 for dim in source_shape):
+        raise ValueError("src must have a positive static shape")
+
+    capacity = 1
+    for dim in source_shape:
+        capacity *= dim
+    max_index = offset_int
+    for size, stride in zip(shape_int, strides_int):
+        max_index += (size - 1) * stride
+    if max_index >= capacity:
+        raise ValueError("reinterpret_view footprint exceeds the source allocation: "
+                         f"maximum element index {max_index}, capacity {capacity}")
+
+    return semantic.reinterpret_view(src, shape_int, strides_int, offset_int, _semantic.builder)

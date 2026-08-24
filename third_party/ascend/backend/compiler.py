@@ -1522,14 +1522,14 @@ class NPUOptions:
     # enable_bishengir_simt_optimization is passed as
     # -enable-bishengir-simt-optimization flag to bishengir-compile.
     enable_bishengir_simt_optimization: int = 000
-    # compile_mode: "simd" (default), "simd_simt", "simd_simt_template", "simt_only"
-    #   - "simd":          pure SIMD path (default)
+    # compile_mode: "simd", "simd_simt", "simd_simt_template", "simt_only"
+    #   - "simd":          pure SIMD path
     #   - "simd_simt":     unstructured access -> hfusion.gather_load/scatter_store
-    #   - "simd_simt_template": unstructured access -> SIMT template call
+    #   - "simd_simt_template(default)": unstructured access -> SIMT template call
     #   - "simt_only":     pure SIMT path
     # "simt_template" and "unstructured_in_simt" are deprecated aliases for
     # "simd_simt_template".
-    compile_mode: str = "simd"
+    compile_mode: str = "simd_simt_template"
     mix_mode: str = ""
     simt_stack_limit: int = None
     # use_bytecode:
@@ -1733,9 +1733,6 @@ class AscendBackend(BaseBackend):
                     stacklevel=2,
                 )
                 object.__setattr__(options, "compile_mode", "simd_simt_template")
-            if not options.compile_on_910_95:
-                raise ValueError(f"compile_mode='{options.compile_mode}' is only supported on 910_95. "
-                                 "A2/A3 targets do not support SIMT mix compile.")
             if options.shared_mem_dynamic_size is None:
                 object.__setattr__(options, "shared_mem_dynamic_size", 221184)
         elif options.compile_mode == "simt_only":

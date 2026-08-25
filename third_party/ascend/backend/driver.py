@@ -41,7 +41,8 @@ from triton.backends.ascend.utils import (
     get_ascend_arch_from_env,
     is_ffts_supported,
     force_disable_ffts,
-    get_backend_func
+    get_backend_func,
+    get_cann_version
 )
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
@@ -94,11 +95,14 @@ class NPUUtils(object):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
+        cann_version = get_cann_version()
+        cann_version_str = ".".join(map(str, cann_version)) if cann_version else ""
         key_parts = [
             "npu_utils",
             "torch_npu_wrapper_abi=triton_async_launch_v1",
             "USE_TORCH_NPU",
             src,
+            cann_version_str,
         ]
         key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
@@ -138,12 +142,19 @@ class NPUUtils(object):
         return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
+    def get_device_core(self):
+        import torch
+        device = torch.npu.current_device()
+        prop = torch.npu.get_device_properties(device)
+        cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
+        return cube_core_num, vector_core_num
+    
+    @functools.lru_cache()
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
         # fetch available memory at runtime
-        num_aic = self.get_aicore_num()
-        num_aiv = num_aic * 2
-        return {"max_shared_mem": 1, "num_aicore": num_aic, "num_vectorcore": num_aiv}
+        cube_core_num, vector_core_num = self.get_device_core()
+        return {"max_shared_mem": 1, "num_aicore": cube_core_num, "num_vectorcore": vector_core_num}
 
     @functools.lru_cache()
     def get_arch(self):
@@ -153,7 +164,7 @@ class NPUUtils(object):
     @functools.lru_cache()
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
-        return self._load_mod().get_aicore_num()
+        return self.get_device_properties("npu")["num_aicore"]
 
     @functools.lru_cache()
     def get_aivector_core_num(self):
@@ -254,7 +265,7 @@ class NPUDriver(DriverBase):
         """
         Get stream for current device
         """
-        # According to torch_npu, the content of a torch.npu.Stream is essentilly an rtStream_t
+        # According to torch_npu, the content of a torch.npu.Stream is essentilly an cann_stream
         # TODO: use CANN API instead of torchnpu
         return get_backend_func("get_current_stream", device)
 
@@ -383,13 +394,79 @@ def generate_npu_header_src():
 #define TRITON_NPU_HEADERS
 #include <assert.h>
 #include <stdbool.h>
+#include <cstdlib>
+#include <cstring>
 #include <string>
 #include <memory>
 #include <sys/syscall.h>
 #include <vector>
 #include <Python.h>
 #include "runtime/runtime/rt.h"
+#ifdef TRITON_CANN_910
 #include <acl/acl.h>
+#endif
+
+// Compatibility shim for CANN runtime API transition (rt -> aclrt in 9.0.0).
+#ifdef TRITON_CANN_910
+using cann_error = aclError;
+using cann_stream = aclrtStream;
+using cann_func_handle = aclrtFuncHandle;
+using cann_memcpy_kind = aclrtMemcpyKind;
+static constexpr cann_error CANN_SUCCESS = ACL_SUCCESS;
+static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = ACL_MEMCPY_HOST_TO_DEVICE;
+static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return aclrtMallocHost(ptr, size); }}
+static inline cann_error cann_free_host(void *ptr) {{ return aclrtFreeHost(ptr); }}
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return aclrtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return aclrtMemsetAsync(dst, destMax, value, count, stream); }}
+static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return aclrtSynchronizeStream(stream); }}
+static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ return aclrtGetHardwareSyncAddr(addr); }}
+static inline cann_error cann_launch_kernel(cann_func_handle func, uint32_t block_dim, cann_stream stream, void *cfg, void *args, size_t arg_size) {{
+  return aclrtLaunchKernelWithHostArgs(func, block_dim, stream, static_cast<aclrtLaunchKernelCfg *>(cfg), args, arg_size, nullptr, 0);
+}}
+static inline void* cann_get_launch_kernel_cfg(uint32_t shared_mem_dynamic_size) {{
+  // thread_local storage: launch is synchronous on the launcher thread, so the
+  // returned pointer remains valid until cann_launch_kernel returns.
+  static thread_local aclrtLaunchKernelAttr attrInfo;
+  static thread_local aclrtLaunchKernelCfg cfgCfgInfo;
+  attrInfo.id = ACL_RT_LAUNCH_KERNEL_ATTR_DYN_UBUF_SIZE;
+  attrInfo.value.localMemorySize = shared_mem_dynamic_size;
+  cfgCfgInfo.attrs = &attrInfo;
+  cfgCfgInfo.numAttrs = 1;
+  return &cfgCfgInfo;
+}}
+#else
+using cann_error = rtError_t;
+using cann_stream = rtStream_t;
+using cann_func_handle = const void*;
+using cann_memcpy_kind = rtMemcpyKind_t;
+static constexpr cann_error CANN_SUCCESS = RT_ERROR_NONE;
+static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = RT_MEMCPY_HOST_TO_DEVICE;
+static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return rtMallocHost(ptr, size, RT_MEMORY_HOST); }}
+static inline cann_error cann_free_host(void *ptr) {{ return rtFreeHost(ptr); }}
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return rtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return rtMemsetAsync(dst, destMax, value, count, stream); }}
+static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return rtStreamSynchronize(stream); }}
+static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ uint32_t len = 0; return rtGetC2cCtrlAddr(reinterpret_cast<uint64_t *>(addr), &len); }}
+static inline cann_error cann_launch_kernel(cann_func_handle func, uint32_t block_dim, cann_stream stream, void *cfg, void *args, size_t arg_size) {{
+  if (cfg != nullptr) {{
+    rtArgsEx_t argsInfo = {{}};
+    argsInfo.args = args;
+    argsInfo.argsSize = arg_size;
+    return rtKernelLaunchWithFlagV2(func, block_dim, &argsInfo, NULL, stream, 0, static_cast<rtTaskCfgInfo_t *>(cfg));
+  }}
+  return rtKernelLaunch(func, block_dim, args, arg_size, NULL, stream);
+}}
+static inline void* cann_get_launch_kernel_cfg(uint32_t shared_mem_dynamic_size) {{
+  // thread_local storage: launch is synchronous on the launcher thread, so the
+  // returned pointer remains valid until cann_launch_kernel returns.
+  static thread_local rtTaskCfgInfo_t cfgInfo;
+  cfgInfo.localMemorySize = shared_mem_dynamic_size;
+  return &cfgInfo;
+}}
+
+
+#endif
+
 {get_backend_func("header_file", enable_taskqueue)}
 #endif
 """
@@ -493,9 +570,10 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     """
     args:
         int gridX, gridY, gridZ;
-        rtStream_t stream;
-        const void *functon;
-        PyObject* packed_metadata,       
+        cann_stream stream;
+        cann_func_handle functon;
+        PyObject* packed_metadata, *launch_metadata;
+        PyObject* launch_enter_hook, *launch_exit_hook;
         *args_expand
     """
 
@@ -634,27 +712,6 @@ static inline DevicePtrInfo getPointer(PyObject *obj, int idx) {
     ptr_info.dev_ptr = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(ret));
     if(!ptr_info.dev_ptr)
       return ptr_info;
-        aclrtPtrAttributes attributes;
-        aclError status = aclrtPointerGetAttributes(ptr_info.dev_ptr, &attributes);
-
-        if (status == ACL_SUCCESS) {
-          if (attributes.location.type != ACL_MEM_LOCATION_TYPE_DEVICE && attributes.location.type != 4) {
-            Py_DECREF(ret);
-            PyErr_Format(PyExc_ValueError,
-                         "Pointer argument (at %d) cannot be accessed from Triton (cpu tensor?)", idx);
-            ptr_info.valid = false;
-            return ptr_info;
-          }
-        } else {
-          Py_DECREF(ret);
-          PyErr_Format(PyExc_RuntimeError,
-                       "Failed to query pointer attributes at argument %d. "
-                       "Error code: %d. This may indicate invalid memory address "
-                       "or NPU device error.",
-                       idx, status);
-          ptr_info.valid = false;
-          return ptr_info;
-        }
     Py_DECREF(ret);
     return ptr_info;
   }
@@ -809,28 +866,20 @@ extern "C" {
 """
 
     cpp_kernel_launch = f"""
-    ret = rtKernelLaunch(func, blockNum, static_cast<void*>(launch_args.data()), launch_args.size(), NULL, stream);
+    ret = cann_launch_kernel(func, blockNum, stream, NULL, static_cast<void*>(launch_args.data()), launch_args.size());
 """
     if compile_on_910_95 and enable_simt:
         cpp_kernel_launch = f"""
-    rtArgsEx_t argsInfo = {{}};
-    argsInfo.args = static_cast<void*>(launch_args.data());
-    argsInfo.argsSize = launch_args.size();
-    rtTaskCfgInfo_t cfgInfo = {{}};
-    cfgInfo.localMemorySize = {metadata.shared_mem_dynamic_size};
-    ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
+    void *kernel_cfg = cann_get_launch_kernel_cfg({metadata.shared_mem_dynamic_size});
+    ret = cann_launch_kernel(func, blockNum, stream, kernel_cfg, static_cast<void*>(launch_args.data()), launch_args.size());
 """
     cpp_kernel_launch_local = f"""
-    ret = rtKernelLaunch(func, blockNum, static_cast<void*>(&args), sizeof(args), NULL, stream);
+    ret = cann_launch_kernel(func, blockNum, stream, NULL, static_cast<void*>(&args), sizeof(args));
 """
     if compile_on_910_95 and enable_simt:
         cpp_kernel_launch_local = f"""
-    rtArgsEx_t argsInfo = {{}};
-    argsInfo.args = static_cast<void*>(&args);
-    argsInfo.argsSize = sizeof(args);
-    rtTaskCfgInfo_t cfgInfo = {{}};
-    cfgInfo.localMemorySize = {metadata.shared_mem_dynamic_size};
-    ret = rtKernelLaunchWithFlagV2(func, blockNum, &argsInfo, NULL, stream, 0, &cfgInfo);
+    void *kernel_cfg = cann_get_launch_kernel_cfg({metadata.shared_mem_dynamic_size});
+    ret = cann_launch_kernel(func, blockNum, stream, kernel_cfg, static_cast<void*>(&args), sizeof(args));
 """
 
     npu_headers = generate_npu_header_src()
@@ -857,7 +906,7 @@ static inline size_t _align_launch_offset(size_t offset, size_t alignment) {{
 
 extern "C" {{
 void triton_launch_kernel(
-    const char* kernelName, const void* func, rtStream_t stream,
+    const char* kernelName, cann_func_handle func, cann_stream stream,
     int gridX, int gridY, int gridZ,
     const int64_t* shapes_data, const int* shape_dims, int num_tensors,
     const int* tensor_kinds,
@@ -906,7 +955,7 @@ void triton_launch_kernel(
     {workspace_fail_code}
   }}
   ''' if workspace_size > 0 else ''}
-  {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+  {'std::function<cann_error()> launch_call = [=]() -> cann_error' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 
@@ -923,9 +972,9 @@ void triton_launch_kernel(
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
 
     {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
-    rtError_t ret = RT_ERROR_NONE;
-    {'void *ffts_addr = NULL; uint32_t ffts_len; ret = rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);' if target_support_ffts else ''}
-    {'if (ret != RT_ERROR_NONE) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
+    cann_error ret = CANN_SUCCESS;
+    {'void *ffts_addr = NULL; ret = cann_get_hardware_sync_addr(&ffts_addr);' if target_support_ffts else ''}
+    {'if (ret != CANN_SUCCESS) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != CANN_SUCCESS) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
     // stub argument for workspace
     void *syncBlockLock_ptr = NULL;
     void *syncBlockLock_handle = NULL;
@@ -938,16 +987,16 @@ void triton_launch_kernel(
       {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
     }}
     std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});
-    ret = rtMemcpy(
+    ret = cann_memcpy(
         syncBlockLock_ptr, syncBlockLockSize,
         reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize,
-        RT_MEMCPY_HOST_TO_DEVICE
+        CANN_MEMCPY_HOST_TO_DEVICE
     );
-    if (ret != RT_ERROR_NONE) {{
+    if (ret != CANN_SUCCESS) {{
       return {'ret' if enable_taskqueue else ''};
     }}
     ''' if lock_num > 0 else ''}
-    {'if (ret != RT_ERROR_NONE) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
+    {'if (ret != CANN_SUCCESS) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != CANN_SUCCESS) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
 
     size_t args_offset = 0;
     auto reserve_slot = [&](size_t size, size_t alignment) -> size_t {{
@@ -992,14 +1041,14 @@ void triton_launch_kernel(
     {'void *&stream_ref = const_cast<void*&>(stream);' if enable_device_print else ''}
     {'cce::internal::DebugTunnel::Close(DTData, stream_ref);' if enable_device_print else ''}
     {cpp_msprof_call_after_launch}
-    {'return ret;' if enable_taskqueue else 'ret = rtStreamSynchronize(stream);'}
+    {'return ret;' if enable_taskqueue else 'ret = cann_synchronize_stream(stream);'}
    }};
    {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
   return;
 }}
 }} // extern "C"
 
-static void _launch(const char* kernelName, const void* func, rtStream_t stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
+static void _launch(const char* kernelName, cann_func_handle func, cann_stream stream, int gridX, int gridY, int gridZ, std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', ' + arg_decls if len(signature) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
   std::string name = "";
   name.append(kernelName);
@@ -1014,7 +1063,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     {workspace_fail_code}
   }}
   ''' if workspace_size > 0 else ''}
-  {'std::function<rtError_t()> launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+  {'std::function<cann_error()> launch_call = [=]() -> cann_error' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
 
@@ -1030,9 +1079,9 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
 
     {'cce::internal::DebugTunnelData *DTData = cce::internal::DebugTunnel::Open(blockNum);' if enable_device_print else ''}
-    rtError_t ret = RT_ERROR_NONE;
-    {'void *ffts_addr = NULL; uint32_t ffts_len; ret = rtGetC2cCtrlAddr((uint64_t*)&ffts_addr, &ffts_len);' if target_support_ffts else ''}
-    {'if (ret != RT_ERROR_NONE) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
+    cann_error ret = CANN_SUCCESS;
+    {'void *ffts_addr = NULL; ret = cann_get_hardware_sync_addr(&ffts_addr);' if target_support_ffts else ''}
+    {'if (ret != CANN_SUCCESS) return ret;' if (target_support_ffts and enable_taskqueue) else 'if (ret != CANN_SUCCESS) return;' if (target_support_ffts and (not enable_taskqueue)) else ''}
     void *syncBlockLock_ptr = NULL;
     void *syncBlockLock_handle = NULL;
     uint16_t ModuleId = 0;
@@ -1047,13 +1096,13 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     ret = rtMemcpy(
         syncBlockLock_ptr, syncBlockLockSize,
         reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize,
-        RT_MEMCPY_HOST_TO_DEVICE
+        CANN_MEMCPY_HOST_TO_DEVICE
     );
-    if (ret != RT_ERROR_NONE) {{
+    if (ret != CANN_SUCCESS) {{
       return {'ret' if enable_taskqueue else ''};
     }}
     ''' if lock_num > 0 else ''}
-    {'if (ret != RT_ERROR_NONE) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != RT_ERROR_NONE) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
+    {'if (ret != CANN_SUCCESS) return ret;' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != CANN_SUCCESS) return;' if (workspace_size > 0 and not enable_taskqueue) else ''}
     struct __attribute__((packed)) {{
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.force_simt_only else ''}
@@ -1115,7 +1164,7 @@ static std::vector<int64_t> _get_tensor_shape(PyObject *tensor) {{
 
 static PyObject* launch(PyObject* self, PyObject* args) {{
   int gridX, gridY, gridZ;
-  rtStream_t stream;
+  cann_stream stream;
   const void *function;
   PyObject *packedMetadata = NULL;
   PyObject *launch_metadata = NULL;

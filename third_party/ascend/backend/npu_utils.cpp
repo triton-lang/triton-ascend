@@ -42,13 +42,110 @@
 #include <functional>
 #endif
 
+// Compatibility shim for CANN runtime API transition (rt -> aclrt in 9.1.0).
+#ifdef TRITON_CANN_910
+using cann_error = aclError;
+using cann_stream = aclrtStream;
+static constexpr int CANN_MEMCPY_HOST_TO_DEVICE = ACL_MEMCPY_HOST_TO_DEVICE;
+static constexpr int CANN_MEMCPY_DEVICE_TO_HOST = ACL_MEMCPY_DEVICE_TO_HOST;
+static constexpr cann_error CANN_SUCCESS = ACL_SUCCESS;
+
+static inline cann_error cann_set_device(int32_t device) {
+  return aclrtSetDevice(device);
+}
+static inline cann_error cann_create_stream(cann_stream *stream) {
+  return aclrtCreateStream(stream);
+}
+static inline cann_error cann_destroy_stream(cann_stream stream) {
+  return aclrtDestroyStream(stream);
+}
+static inline cann_error cann_malloc_host(void **ptr, size_t size) {
+  return aclrtMallocHost(ptr, size);
+}
+static inline cann_error cann_free_host(void *ptr) {
+  return aclrtFreeHost(ptr);
+}
+static inline cann_error cann_malloc(void **ptr, size_t size) {
+  aclrtMemMallocPolicy policy = static_cast<aclrtMemMallocPolicy>(
+      ACL_MEM_MALLOC_HUGE_FIRST | ACL_MEM_TYPE_HIGH_BAND_WIDTH);
+  return aclrtMalloc(ptr, size, policy);
+}
+static inline cann_error cann_free(void *ptr) { return aclrtFree(ptr); }
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src,
+                                     size_t count, int kind) {
+  return aclrtMemcpy(dst, destMax, src, count,
+                     static_cast<aclrtMemcpyKind>(kind));
+}
+static inline const char *cann_get_soc_name() { return aclrtGetSocName(); }
+static inline std::tuple<void *, void *>
+cann_register_kernel(const char *name, const void *data, size_t data_size,
+                     const char *kernel_mode_str) {
+  uint32_t magic;
+  const std::string kernel_mode{kernel_mode_str};
+  if (kernel_mode == "aiv")
+    magic = ACL_RT_BINARY_MAGIC_ELF_VECTOR_CORE;
+  else
+    magic = ACL_RT_BINARY_MAGIC_ELF_AICORE;
+
+  aclrtBinaryLoadOption optArr[] = {
+      {.type = ACL_RT_BINARY_LOAD_OPT_LAZY_LOAD, .value = {.isLazyLoad = 0}},
+      {.type = ACL_RT_BINARY_LOAD_OPT_MAGIC, .value = {.magic = magic}}};
+  aclrtBinaryLoadOptions loadOptions = {.options = optArr, .numOpt = 2};
+  aclrtBinHandle binHandle = nullptr;
+  aclError aclRet =
+      aclrtBinaryLoadFromData(data, data_size, &loadOptions, &binHandle);
+  if (aclRet != ACL_SUCCESS) {
+    printf("aclrtBinaryLoadFromData failed, 0x%x\n", aclRet);
+    return {nullptr, nullptr};
+  }
+  aclrtFuncHandle funcHandle = nullptr;
+  aclRet = aclrtBinaryGetFunction(binHandle, name, &funcHandle);
+  if (aclRet != ACL_SUCCESS) {
+    printf("aclrtBinaryGetFunction failed(name = %s), 0x%x\n", name, aclRet);
+    return {nullptr, nullptr};
+  }
+  return std::make_tuple(binHandle, funcHandle);
+}
+#else
+using cann_error = rtError_t;
+using cann_stream = rtStream_t;
+static constexpr int CANN_MEMCPY_HOST_TO_DEVICE = RT_MEMCPY_HOST_TO_DEVICE;
+static constexpr int CANN_MEMCPY_DEVICE_TO_HOST = RT_MEMCPY_DEVICE_TO_HOST;
+static constexpr cann_error CANN_SUCCESS = RT_ERROR_NONE;
+
+static inline cann_error cann_set_device(int32_t device) {
+  return rtSetDevice(device);
+}
+static inline cann_error cann_create_stream(cann_stream *stream) {
+  return rtStreamCreate(stream, 0);
+}
+static inline cann_error cann_destroy_stream(cann_stream stream) {
+  return rtStreamDestroy(stream);
+}
+static inline cann_error cann_malloc_host(void **ptr, size_t size) {
+  return rtMallocHost(ptr, size, RT_MEMORY_HOST);
+}
+static inline cann_error cann_free_host(void *ptr) { return rtFreeHost(ptr); }
+static inline cann_error cann_malloc(void **ptr, size_t size) {
+  return rtMalloc(ptr, size, RT_MEMORY_HBM, 0);
+}
+static inline cann_error cann_free(void *ptr) { return rtFree(ptr); }
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src,
+                                     size_t count, int kind) {
+  return rtMemcpy(dst, destMax, src, count, static_cast<rtMemcpyKind_t>(kind));
+}
+static inline const char *cann_get_soc_name() {
+  static thread_local char name[64] = {};
+  if (rtGetSocVersion(name, sizeof(name)) != RT_ERROR_NONE)
+    return nullptr;
+  return name;
+}
 // Use map to differentiate same name functions from different binary
 static std::unordered_map<std::string, size_t> registered_names;
 static std::unordered_map<std::string, std::unique_ptr<size_t>> func_stubs;
-
-static std::tuple<void *, void *>
-registerKernel(const char *name, const void *data, size_t data_size,
-               int device, const char *kernel_mode_str) {
+static inline std::tuple<void *, void *>
+cann_register_kernel(const char *name, const void *data, size_t data_size,
+                     const char *kernel_mode_str) {
   rtError_t rtRet;
 
   rtDevBinary_t devbin;
@@ -60,12 +157,6 @@ registerKernel(const char *name, const void *data, size_t data_size,
   else
     devbin.magic = RT_DEV_BINARY_MAGIC_ELF;
   devbin.version = 0;
-
-  rtRet = rtSetDevice(device);
-  if (rtRet != RT_ERROR_NONE) {
-    printf("rtSetDevice failed, 0x%x\n", rtRet);
-    return {nullptr, nullptr};
-  }
 
   void *devbinHandle = nullptr;
   rtRet = rtDevBinaryRegister(&devbin, &devbinHandle);
@@ -89,6 +180,19 @@ registerKernel(const char *name, const void *data, size_t data_size,
 
   return std::make_tuple(devbinHandle, func_stub_handle);
 }
+#endif
+
+static std::tuple<void *, void *> registerKernel(const char *name,
+                                                 const void *data,
+                                                 size_t data_size, int device,
+                                                 const char *kernel_mode_str) {
+  cann_error rtRet = cann_set_device(device);
+  if (rtRet != CANN_SUCCESS) {
+    printf("cann_set_device failed, 0x%x\n", rtRet);
+    return {nullptr, nullptr};
+  }
+  return cann_register_kernel(name, data, data_size, kernel_mode_str);
+}
 
 static PyObject *loadKernelBinary(PyObject *self, PyObject *args) {
   const char *name;        // kernel name
@@ -102,10 +206,8 @@ static PyObject *loadKernelBinary(PyObject *self, PyObject *args) {
                         &device, &kernel_mode)) {
     return nullptr;
   }
-
   auto [module_handle, func_handle] =
       registerKernel(name, data, data_size, device, kernel_mode);
-
   uint64_t mod = reinterpret_cast<uint64_t>(module_handle);
   uint64_t func = reinterpret_cast<uint64_t>(func_handle);
   if (PyErr_Occurred()) {
@@ -116,55 +218,36 @@ static PyObject *loadKernelBinary(PyObject *self, PyObject *args) {
 }
 
 static PyObject *getArch(PyObject *self, PyObject *args) {
-  char name[64] = {'\0'};
+  const char *socName = cann_get_soc_name();
 
-  rtError_t rtRet = rtGetSocVersion(name, 64);
-
-  if (rtRet != RT_ERROR_NONE) {
-    printf("rtGetSocVersion failed, 0x%x", rtRet);
+  if (socName == nullptr) {
+    printf("cann_get_soc_name failed.");
     return nullptr;
   }
   if (PyErr_Occurred()) {
     return nullptr;
   }
-  return Py_BuildValue("s", name);
-}
-
-static PyObject *getAiCoreNum(PyObject *self, PyObject *args) {
-  uint32_t aiCoreCnt;
-
-  rtError_t rtRet = rtGetAiCoreCount(&aiCoreCnt);
-
-  if (rtRet != RT_ERROR_NONE) {
-    printf("rtGetAiCoreCount failed, 0x%x", rtRet);
-    return nullptr;
-  }
-  if (PyErr_Occurred()) {
-    return nullptr;
-  }
-  return Py_BuildValue("I", aiCoreCnt);
+  return Py_BuildValue("s", socName);
 }
 
 static PyObject *createStream(PyObject *self, PyObject *args) {
-	rtStream_t stream;
+  cann_stream stream;
+  cann_error rtRet = cann_create_stream(&stream);
+  if (rtRet != CANN_SUCCESS) {
+    printf("cann_create_stream failed, 0x%x", rtRet);
+    return nullptr;
+  }
+  if (PyErr_Occurred()) {
+    return nullptr;
+  }
+  uint64_t stream_uint64 = reinterpret_cast<uint64_t>(stream);
+  PyObject *result = Py_BuildValue("K", stream_uint64);
 
-	rtError_t rtRet = rtStreamCreate(&stream, 0);
+  if (result == nullptr) {
+    cann_destroy_stream(stream);
+  }
 
-	if (rtRet != RT_ERROR_NONE) {
-		printf("rtStreamCreate failed, 0x%x", rtRet);
-		return nullptr;
-	}
-	if (PyErr_Occurred()) {
-		return nullptr;
-	}
-	uint64_t stream_uint64 = reinterpret_cast<uint64_t>(stream);
-    PyObject* result = Py_BuildValue("K", stream_uint64);
-
-    if (result == nullptr) {
-        rtStreamDestroy(stream);
-    }
-
-    return result;
+  return result;
 }
 
 /**
@@ -258,18 +341,16 @@ static PyObject* allocateHostMemory(PyObject* self, PyObject* args) {
 	}
 
 	void* host_ptr = nullptr;
-	rtError_t error = rtMallocHost(&host_ptr, num_bytes, RT_MEMORY_HOST);
-	if (error != RT_ERROR_NONE) {
-		PyErr_Format(PyExc_RuntimeError, "rtMallocHost failed with error code: 0x%x", error);
+	cann_error error = cann_malloc_host(&host_ptr, num_bytes);
+	if (error != CANN_SUCCESS) {
+		PyErr_Format(PyExc_RuntimeError, "cann_malloc_host failed with error code: 0x%x", error);
 		return nullptr;
 	}
 
     PyObject* result = Py_BuildValue("K", (uint64_t)host_ptr);
-
     if (result == nullptr) {
-        rtFreeHost(host_ptr);
+        cann_free_host(host_ptr);
     }
-
     return result;
 }
 
@@ -280,16 +361,16 @@ static PyObject* allocateDeviceMemory(PyObject* self, PyObject* args) {
 	}
 
 	void* device_ptr = nullptr;
-	rtError_t error = rtMalloc(&device_ptr, num_bytes, RT_MEMORY_HBM, 0);
-	if (error != RT_ERROR_NONE) {
-		PyErr_Format(PyExc_RuntimeError, "rtMalloc failed with error code: 0x%x", error);
+	cann_error error = cann_malloc(&device_ptr, num_bytes);
+	if (error != CANN_SUCCESS) {
+		PyErr_Format(PyExc_RuntimeError, "cann_malloc failed with error code: 0x%x", error);
 		return nullptr;
 	}
 
     PyObject* result = Py_BuildValue("K", (uint64_t)device_ptr);
 
     if (result == nullptr) {
-        rtFree(device_ptr);
+        cann_free(device_ptr);
     }
 
     return result;
@@ -300,16 +381,16 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 	uint64_t src_ptr;
 	size_t count;
 	const char* direction_str;
-	rtMemcpyKind_t copy_direction;
+	int copy_direction;
 
 	if (!PyArg_ParseTuple(args, "KKns", &dst_ptr, &src_ptr, &count, &direction_str)) {
 		return nullptr;
 	}
 
 	if (strcmp(direction_str, "H2D") == 0) {
-		copy_direction = RT_MEMCPY_HOST_TO_DEVICE;
+		copy_direction = CANN_MEMCPY_HOST_TO_DEVICE;
 	} else if (strcmp(direction_str, "D2H") == 0) {
-		copy_direction = RT_MEMCPY_DEVICE_TO_HOST;
+		copy_direction = CANN_MEMCPY_DEVICE_TO_HOST;
 	} else {
 		PyErr_SetString(PyExc_ValueError, "Invalid copy direction. Must be 'H2D' or 'D2H'.");
 		return nullptr;
@@ -318,9 +399,9 @@ static PyObject* copyMemory(PyObject* self, PyObject* args) {
 	void *dst = (void*)dst_ptr;
 	void *src = (void*)src_ptr;
 
-	rtError_t error = rtMemcpy(dst, count, src, count, copy_direction);
-	if (error != RT_ERROR_NONE) {
-		PyErr_Format(PyExc_RuntimeError, "rtMemcpy failed with error code: 0x%x", error);
+	cann_error error = cann_memcpy(dst, count, src, count, copy_direction);
+	if (error != CANN_SUCCESS) {
+		PyErr_Format(PyExc_RuntimeError, "CANN_SUCCESS failed with error code: 0x%x", error);
 		return nullptr;
 	}
 
@@ -383,8 +464,6 @@ static PyMethodDef NpuUtilsMethods[] = {
     {"load_kernel_binary", loadKernelBinary, METH_VARARGS,
      "Load NPU kernel binary into NPU driver"},
     {"get_arch", getArch, METH_VARARGS, "Get soc version of NPU"},
-    // sentinel
-    {"get_aicore_num", getAiCoreNum, METH_VARARGS, "Get the number of AI core"},
 	{"create_stream", createStream, METH_VARARGS, "Create a stream"},
 	{"read_data_from_file", readDataFromBinaryFileWrapper, METH_VARARGS, "Read binary file into the array already allocated"},
 	{"write_data_to_file", writeDataToBinaryFileWrapper, METH_VARARGS, "Write an array to a binary file"},

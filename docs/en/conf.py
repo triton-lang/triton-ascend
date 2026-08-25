@@ -35,6 +35,7 @@ extensions = [
     'sphinx.ext.autosummary',
     'sphinx.ext.mathjax',
     'myst_parser',
+    'sphinx_copybutton',
 ]
 
 # -- MyST configuration -------------------------------------------------------
@@ -158,10 +159,32 @@ source_suffix = {
     '.md': 'markdown',
 }
 
-html_theme = 'furo'
+# -- HTML theme: sphinx_book_theme (same setup as the pre-mkdocs vllm-ascend
+# docs, e.g. https://docs.vllm.ai/projects/ascend/en/v0.23.0/) ---------------
+html_theme = 'sphinx_book_theme'
+html_title = 'Triton Ascend'
 html_static_path = ['_static']
-pygments_style = "friendly"
 html_last_updated_fmt = "%b %d, %Y"
+
+html_theme_options = {
+    # Repository buttons (top right of every page) and "suggest edit" links.
+    'path_to_docs': 'docs/en',
+    'repository_url': 'https://github.com/triton-lang/triton-ascend',
+    'repository_branch': 'main',
+    'use_repository_button': True,
+    'use_edit_page_button': True,
+    # Sidebar shows only the project name (no logo image).
+    'logo': {
+        'text': 'Triton Ascend',
+    },
+    # No persistent items in the top navbar: pydata-sphinx-theme otherwise
+    # renders a search field there that duplicates the sidebar search, and
+    # its hidden sidebar-toggle would steal the JS click binding from the
+    # visible toggle in the article header. Note this only empties the
+    # navbar's content -- the empty top bar (sticky background strip) is
+    # hidden separately via _static/custom.css (#pst-header).
+    'navbar_persistent': [],
+}
 
 
 def setup(app):

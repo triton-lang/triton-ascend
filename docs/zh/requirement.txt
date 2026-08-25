@@ -1,5 +1,5 @@
 sphinx
-sphinx_rtd_theme
 myst_parser
-furo
+sphinx_book_theme
+sphinx_copybutton
 jieba

@@ -1,4 +1,4 @@
-/* Furo theme customizations */
+/* Theme customizations */
 
 .content img {
     max-width: 100%;
@@ -23,5 +23,21 @@ article table.docutils {
 /* DataType support tables: center the √/× support marks */
 div.dtype-support-table table.docutils th:not(:first-child),
 div.dtype-support-table table.docutils td:not(:first-child) {
+    text-align: center;
+}
+
+/* sphinx_book_theme tweaks */
+
+/* Hide the top navbar. html_theme_options['navbar_persistent'] = [] only
+   empties its content; the empty <header class="bd-header"> still renders a
+   sticky full-width background strip, so hide it here. The bare class
+   selector guards against the element id changing across theme upgrades. */
+#pst-header,
+.bd-header {
+    display: none !important;
+}
+
+/* Center the landing-page project title */
+section#triton-ascend h1 {
     text-align: center;
 }

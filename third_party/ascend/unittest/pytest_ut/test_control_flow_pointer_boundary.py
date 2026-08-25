@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import re
+
 import pytest
 import torch
 import torch_npu  # noqa: F401
@@ -178,6 +180,22 @@ def dense_splat_affine_rank2_loop_kernel(x, out, steps_ptr, n: tl.constexpr, BM:
     for _ in tl.range(0, steps):
         pointers += 1
     value = tl.load(pointers, mask=offsets + steps < n, other=0.0)
+    tl.store(out + row * BN + col, value)
+
+
+@triton.jit
+def broadcasted_pointer_rank2_loop_kernel(x, out, steps_ptr, BM: tl.constexpr, BN: tl.constexpr,
+                                          ROW_STRIDE: tl.constexpr):
+    steps = tl.load(steps_ptr)
+    row = tl.arange(0, BM)[:, None]
+    col = tl.arange(0, BN)[None, :]
+    # Match grouped matmul's construction order: first create a lower-rank
+    # pointer tensor, then broadcast it while adding the second axis.
+    row_pointers = x + row * ROW_STRIDE
+    pointers = row_pointers + col
+    for _ in tl.range(0, steps):
+        pointers += 1
+    value = tl.load(pointers)
     tl.store(out + row * BN + col, value)
 
 
@@ -344,6 +362,35 @@ def test_dense_splat_affine_rank2_loop(steps):
     cols = torch.arange(bn)[None, :]
     expected = source_cpu[rows * row_stride + cols + steps]
     _assert_output(out, expected)
+
+
+@pytest.mark.parametrize("steps", [0, 2])
+def test_broadcasted_pointer_rank2_loop(steps):
+    bm, bn, row_stride = 8, 16, 64
+    n = 1024
+    source_cpu = torch.arange(n, dtype=torch.float32)
+    source = source_cpu.npu()
+    out = torch.empty((bm, bn), dtype=torch.float32, device="npu")
+
+    compiled = broadcasted_pointer_rank2_loop_kernel[(1, )](
+        source,
+        out,
+        _device_i32(steps),
+        BM=bm,
+        BN=bn,
+        ROW_STRIDE=row_stride,
+    )
+
+    rows = torch.arange(bm)[:, None]
+    cols = torch.arange(bn)[None, :]
+    expected = source_cpu[rows * row_stride + cols + steps]
+    _assert_output(out, expected)
+
+    # Before descriptor propagation, the pointer broadcast becomes an opaque
+    # tensor<8x16xi32> loop carrier even though both axes are affine.
+    adapter = compiled.asm["ttadapter"]
+    assert not re.search(r"scf\.for[^\n]*-> \(tensor<8x16xi32>\)", adapter)
+    assert re.search(r"scf\.for[^\n]*-> \(i32\)", adapter)
 
 
 @pytest.mark.parametrize("steps", [0, 2, 4])

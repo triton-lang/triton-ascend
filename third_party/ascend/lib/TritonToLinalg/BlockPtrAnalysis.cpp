@@ -470,9 +470,9 @@ BlockDataParser::getScalarMemRef(Value ptr, Value memref, const Location &loc,
   if (ptr.getDefiningOp<triton::IntToPtrOp>()) {
     if (!isa<BaseMemRefType>(memref.getType()))
       return failure();
-    if (auto memrefType = dyn_cast<MemRefType>(memref.getType());
-        memrefType && memrefType.getRank() == 1)
-      return memref;
+    // IntToPtrConverter's rank-1 carrier is still a dynamic base memref, not
+    // the canonical scalar view consumed by indirect loads.  Normalize every
+    // int_to_ptr carrier to the one-element identity view below.
     BlockData data;
     data.setSource(memref);
     data.getOffsetsRef().push_back(rewriter.getIndexAttr(0));

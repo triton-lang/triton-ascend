@@ -102,6 +102,24 @@ static bool isTensorPointerType(Type type) {
   return tensorType && isa<triton::PointerType>(tensorType.getElementType());
 }
 
+static bool isCompatiblePointerBroadcast(Type sourceType, Type resultType) {
+  auto sourceTensor = dyn_cast<RankedTensorType>(sourceType);
+  auto resultTensor = dyn_cast<RankedTensorType>(resultType);
+  if (!sourceTensor || !resultTensor || !isTensorPointerType(sourceType) ||
+      !isTensorPointerType(resultType) ||
+      sourceTensor.getRank() != resultTensor.getRank() ||
+      sourceTensor.getElementType() != resultTensor.getElementType() ||
+      sourceTensor.getEncoding() != resultTensor.getEncoding())
+    return false;
+
+  for (auto [sourceExtent, resultExtent] :
+       llvm::zip(sourceTensor.getShape(), resultTensor.getShape())) {
+    if (sourceExtent != resultExtent && sourceExtent != 1)
+      return false;
+  }
+  return true;
+}
+
 static bool isRankOneTensorPointer(Type type) {
   auto tensorType = dyn_cast<RankedTensorType>(type);
   return tensorType && tensorType.getRank() == 1 &&
@@ -1647,6 +1665,49 @@ public:
       return *known;
     }
 
+    // Broadcasting an already-structured pointer tensor only changes the
+    // descriptor shape. An expanded unit dimension repeats the same pointer,
+    // so that dimension has stride zero in the result descriptor. Restrict the
+    // propagation to scalar-base descriptors with no opaque contribution;
+    // unknown or partially opaque pointer tensors retain the established
+    // complete-pointer fallback below.
+    if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>()) {
+      FailureOr<AnalyzedValue> result =
+          context.analyzeValue(broadcast.getSrc());
+      if (succeeded(result) && hasValidLayout(*result) &&
+          hasScalarBase(*result) &&
+          isCompatiblePointerBroadcast(broadcast.getSrc().getType(),
+                                       value.getType())) {
+        FailureOr<SmallVector<AxisKind>> kinds = getAxisKinds(*result);
+        auto sourceType = cast<RankedTensorType>(broadcast.getSrc().getType());
+        auto resultType = cast<RankedTensorType>(value.getType());
+        unsigned rank = resultType.getRank();
+        if (succeeded(kinds) && !llvm::is_contained(*kinds, AxisKind::Opaque) &&
+            isZeroIdentity(
+                result->components[getOpaqueContributionComponent(rank)]
+                    .identity)) {
+          for (unsigned axis = 0; axis < rank; ++axis) {
+            if (sourceType.getShape()[axis] == 1 &&
+                resultType.getShape()[axis] != 1) {
+              result->components[getStrideComponent(axis)].identity =
+                  ComponentIdentity::zero(getStrideComponent(axis));
+            }
+          }
+          Type scalarType =
+              result->components[getUniformOffsetComponent(rank)].type;
+          auto resultOffsetsType = RankedTensorType::get(
+              resultType.getShape(), scalarType, resultType.getEncoding());
+          result->components[getOpaqueContributionComponent(rank)] = {
+              resultOffsetsType,
+              ComponentIdentity::zero(getOpaqueContributionComponent(rank))};
+          result->originalType = value.getType();
+          result->attributes[kAxisKindsAttribute] =
+              getAxisKindsAttr(value.getContext(), *kinds);
+          return *result;
+        }
+      }
+    }
+
     if (auto addPtr = value.getDefiningOp<triton::AddPtrOp>()) {
       FailureOr<AnalyzedValue> result = context.analyzeValue(addPtr.getPtr());
       FailureOr<AnalyzedTensorOffset> delta =
@@ -1907,6 +1968,52 @@ public:
     }
 
     value = context.remap(value);
+    if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>()) {
+      FailureOr<DecomposedValue> result =
+          decompose(broadcast.getSrc(), context, builder, loc);
+      if (succeeded(result) && hasValidLayout(*result) &&
+          hasScalarBase(*result) &&
+          isCompatiblePointerBroadcast(broadcast.getSrc().getType(),
+                                       value.getType())) {
+        FailureOr<SmallVector<AxisKind>> kinds = getAxisKinds(*result);
+        auto sourceType = cast<RankedTensorType>(broadcast.getSrc().getType());
+        auto resultType = cast<RankedTensorType>(value.getType());
+        unsigned rank = resultType.getRank();
+        if (succeeded(kinds) && !llvm::is_contained(*kinds, AxisKind::Opaque) &&
+            isConstantZero(
+                result->components[getOpaqueContributionComponent(rank)])) {
+          OpBuilder::InsertionGuard guard(builder);
+          builder.setInsertionPoint(broadcast);
+          for (unsigned axis = 0; axis < rank; ++axis) {
+            if (sourceType.getShape()[axis] == 1 &&
+                resultType.getShape()[axis] != 1) {
+              Type strideType =
+                  result->components[getStrideComponent(axis)].getType();
+              result->components[getStrideComponent(axis)] =
+                  createScalarConstant(builder, broadcast.getLoc(), strideType,
+                                       0);
+              if (!result->components[getStrideComponent(axis)])
+                return failure();
+            }
+          }
+          Type scalarType =
+              result->components[getUniformOffsetComponent(rank)].getType();
+          auto resultOffsetsType = RankedTensorType::get(
+              resultType.getShape(), scalarType, resultType.getEncoding());
+          Value zeroOffsets =
+              createZeroOffsets(builder, broadcast.getLoc(), resultOffsetsType);
+          if (!zeroOffsets)
+            return failure();
+          result->components[getOpaqueContributionComponent(rank)] =
+              zeroOffsets;
+          result->originalType = value.getType();
+          result->attributes[kAxisKindsAttribute] =
+              getAxisKindsAttr(value.getContext(), *kinds);
+          return *result;
+        }
+      }
+    }
+
     if (auto addPtr = value.getDefiningOp<triton::AddPtrOp>()) {
       FailureOr<DecomposedValue> result =
           decompose(addPtr.getPtr(), context, builder, loc);

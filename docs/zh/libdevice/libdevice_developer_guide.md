@@ -292,7 +292,7 @@ triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 
 - x: `float32`
 
-返回值: `tl.tensor`, 返回输入参数的反双曲正切值，输入参数取值范围 \[-1, 1]。
+返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 (-∞, +∞)。
 
 返回类型：`float32`
 
@@ -2730,7 +2730,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 ### OP概述
 
-计算 x 的倒数运算。
+计算 x 的倒数（即 1 / x）。
 
 原型:
 

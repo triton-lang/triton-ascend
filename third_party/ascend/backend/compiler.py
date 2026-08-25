@@ -211,8 +211,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         Path(src_path).write_text(ttir_code)
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
-        # Select analysis is a fixed lowering policy, not a user compile option.
-        enable_select_analysis = True
+        enable_select_analysis = metadata["enable_select_analysis"]
         compile_on_910_95 = metadata["compile_on_910_95"]
         compile_mode = opt.compile_mode
         metadata["compile_mode"] = compile_mode
@@ -1050,6 +1049,7 @@ class NPUOptions:
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
+    enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None
     sync_solver: bool = None
     unit_flag: bool = None

@@ -88,6 +88,30 @@ Indexing Ops
     swizzle2d
     gather
 
+辅助接口（swizzle）
+-------------------
+
+以下接口来自 ``Triton-distributed-ascend``，用于分布式融合算子的 tile 调度。
+使用时需从 ``triton_dist.language.extra.ascend.algorithm`` 导入。
+
+它们将一维迭代序号转换为 tile 坐标，与接收二维索引的
+:doc:`triton.language.swizzle2d <generated/triton.language.swizzle2d>` 不同。
+
+.. list-table::
+    :widths: 35 65
+    :class: autosummary longtable
+
+    * - :doc:`dist_swizzle2d_Nz <triton_dist.language.extra.ascend.algorithm.dist_swizzle2d_Nz>`
+      - 返回通信 tile、目标 rank 和尾块大小。
+    * - :doc:`gemm_swizzle2d_Nz <triton_dist.language.extra.ascend.algorithm.gemm_swizzle2d_Nz>`
+      - 按蛇形顺序返回 GEMM tile 坐标。
+
+.. toctree::
+    :hidden:
+
+    triton_dist.language.extra.ascend.algorithm.dist_swizzle2d_Nz
+    triton_dist.language.extra.ascend.algorithm.gemm_swizzle2d_Nz
+
 Math Ops
 --------
 

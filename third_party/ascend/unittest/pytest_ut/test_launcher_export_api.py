@@ -3,7 +3,7 @@ import sys
 from itertools import product
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
@@ -126,6 +126,11 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
     assert f'npu_utils_path = std::string(cache_root) + "/{cache_key}/npu_utils.so";' in producer_src
     assert 'const char* triton_home = std::getenv("TRITON_HOME");' in producer_src
     assert f'npu_utils_path = std::string(base) + "/.triton/cache/{cache_key}/npu_utils.so";' in producer_src
+    assert "std::string npu_utils_path = g_npu_utils_path;" in producer_src
+    assert '"set_npu_utils_path", (PyCFunction)set_npu_utils_path, METH_O' in producer_src
+    assert "if (!init_npu_utils())" in producer_src
+    module_init = producer_src.split("PyMODINIT_FUNC PyInit___triton_launcher", maxsplit=1)[1]
+    assert "init_npu_utils();" not in module_init
 
 
 @patch.object(driver, "NPUUtils")
@@ -476,14 +481,19 @@ def test_argument_packing_differs_between_launch_paths(
 @patch.object(driver, "make_npu_launcher_stub", return_value="/tmp/fake_launcher.so")
 @patch.object(driver, "make_launcher", return_value="// wrapper src")
 @patch.object(driver, "generate_npu_header_src", return_value="// header src")
+@patch.object(driver, "NPUUtils")
 def test_npu_launcher_exposes_launcher_so_path(
+    mock_npu_utils,
     mock_header_src,
     mock_wrapper_src,
     mock_launcher_stub,
     mock_spec_from_file_location,
     mock_module_from_spec,
 ):
-    fake_module = SimpleNamespace(launch=object())
+    npu_utils_so_path = "/custom/cache-manager/path/npu_utils.so"
+    mock_npu_utils.return_value.get_so_path.return_value = npu_utils_so_path
+    set_npu_utils_path = Mock()
+    fake_module = SimpleNamespace(launch=object(), set_npu_utils_path=set_npu_utils_path)
     fake_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module: None))
     mock_module_from_spec.return_value = fake_module
     mock_spec_from_file_location.return_value = fake_spec
@@ -502,6 +512,7 @@ def test_npu_launcher_exposes_launcher_so_path(
     assert mock_header_src.call_count == 1
     assert mock_wrapper_src.call_count == 1
     assert mock_launcher_stub.call_count == 1
+    set_npu_utils_path.assert_called_once_with(npu_utils_so_path)
     mock_wrapper_src.assert_called_with(
         {0: 1},
         {0: "*fp32", 1: "i32"},

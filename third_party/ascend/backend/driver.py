@@ -241,6 +241,7 @@ class NPULauncher(object):
         spec = importlib.util.spec_from_file_location("__triton_launcher", self.so_launcher_path)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
+        mod.set_npu_utils_path(NPUUtils().get_so_path())
         cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
         signature = {cst_key(key): value for key, value in self.src.signature.items()}
         self.launch = wrap_handle_tensordesc(getattr(mod, "launch"), signature)
@@ -1010,6 +1011,8 @@ static triton_allocate_workspace_t g_allocate_workspace = nullptr;
 static triton_allocate_sync_block_lock_t g_allocate_sync_block_lock = nullptr;
 static triton_async_launch_t g_async_launch = nullptr;
 static triton_release_retained_tensor_t g_release_retained_tensor = nullptr;
+static std::string g_npu_utils_path;
+static std::string g_npu_utils_error;
 
 static bool npu_utils_ready() {{
     return g_allocate_workspace &&
@@ -1018,31 +1021,57 @@ static bool npu_utils_ready() {{
            g_release_retained_tensor;
 }}
 
-static void init_npu_utils() {{
-    if (npu_utils_ready()) return;
-    const char* cache_root = std::getenv("TRITON_CACHE_DIR");
-    std::string npu_utils_path;
-    if (cache_root && cache_root[0] != '\\0') {{
-        npu_utils_path = std::string(cache_root) + "/{npu_utils_cache_relative}";
-    }} else {{
-        const char* triton_home = std::getenv("TRITON_HOME");
-        const char* home = std::getenv("HOME");
-        const char* base = triton_home && triton_home[0] != '\\0' ? triton_home : home;
-        if (!base || base[0] == '\\0') {{
-            fprintf(stderr, "Error: neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set\\n");
-            return;
+static bool init_npu_utils() {{
+    if (npu_utils_ready()) return true;
+    std::string npu_utils_path = g_npu_utils_path;
+    if (npu_utils_path.empty()) {{
+        // Compatibility fallback for callers of the exported C launcher API,
+        // which cannot inject the cache-manager-resolved path through Python.
+        const char* cache_root = std::getenv("TRITON_CACHE_DIR");
+        if (cache_root && cache_root[0] != '\\0') {{
+            npu_utils_path = std::string(cache_root) + "/{npu_utils_cache_relative}";
+        }} else {{
+            const char* triton_home = std::getenv("TRITON_HOME");
+            const char* home = std::getenv("HOME");
+            const char* base = triton_home && triton_home[0] != '\\0' ? triton_home : home;
+            if (!base || base[0] == '\\0') {{
+                g_npu_utils_error = "neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set";
+                fprintf(stderr, "Error: %s\\n", g_npu_utils_error.c_str());
+                return false;
+            }}
+            npu_utils_path = std::string(base) + "/.triton/cache/{npu_utils_cache_relative}";
         }}
-        npu_utils_path = std::string(base) + "/.triton/cache/{npu_utils_cache_relative}";
     }}
     void* handle = dlopen(npu_utils_path.c_str(), RTLD_LAZY);
     if (!handle) {{
-        fprintf(stderr, "Error: dlopen %s failed: %s\\n", npu_utils_path.c_str(), dlerror());
-        return;
+        const char* error = dlerror();
+        g_npu_utils_error = error ? error : "unknown dlopen error";
+        fprintf(stderr, "Error: dlopen %s failed: %s\\n", npu_utils_path.c_str(), g_npu_utils_error.c_str());
+        return false;
     }}
     g_allocate_workspace = (triton_allocate_workspace_t)dlsym(handle, "triton_allocate_workspace");
     g_allocate_sync_block_lock = (triton_allocate_sync_block_lock_t)dlsym(handle, "triton_allocate_sync_block_lock");
     g_async_launch = (triton_async_launch_t)dlsym(handle, "triton_async_launch");
     g_release_retained_tensor = (triton_release_retained_tensor_t)dlsym(handle, "triton_release_retained_tensor");
+    if (!npu_utils_ready()) {{
+        g_npu_utils_error = "required NPU utility symbols are unavailable";
+        fprintf(stderr, "Error: %s in %s\\n", g_npu_utils_error.c_str(), npu_utils_path.c_str());
+        return false;
+    }}
+    g_npu_utils_error.clear();
+    return true;
+}}
+
+static PyObject* set_npu_utils_path(PyObject* self, PyObject* path_obj) {{
+    const char* path = PyUnicode_AsUTF8(path_obj);
+    if (!path) return nullptr;
+    g_npu_utils_path = path;
+    if (!init_npu_utils()) {{
+        PyErr_Format(PyExc_RuntimeError, "Failed to load NPU utilities from %s: %s", path,
+                     g_npu_utils_error.c_str());
+        return nullptr;
+    }}
+    Py_RETURN_NONE;
 }}
 
 static void release_npu_tensor_handle(void* handle) {{
@@ -1488,6 +1517,8 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
 }}
 
 static PyMethodDef ModuleMethods[] = {{
+  {{"set_npu_utils_path", (PyCFunction)set_npu_utils_path, METH_O,
+    "Initialize NPU utilities from the cache-manager-resolved shared-object path"}},
   {{"launch", (PyCFunction)launch, METH_FASTCALL, "Entry point for all kernels with this signature"}},
   {{nullptr, nullptr, 0, nullptr}} // sentinel
 }};
@@ -1507,9 +1538,6 @@ PyMODINIT_FUNC PyInit___triton_launcher(void) {{
   }}
   PyModule_AddFunctions(m, ModuleMethods);
   {cpp_msprof_callback}
-  // One-time initialization of NPU utils (dlsym lookup for g_async_launch etc.)
-  // Moved here from the per-call async_launch path to avoid repeated dlsym work.
-  init_npu_utils();
   return m;
 }}
 """

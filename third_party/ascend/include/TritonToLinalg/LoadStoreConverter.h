@@ -24,6 +24,7 @@
 #define TRITON_ADAPTER_LOADSTORECONVERTER_H
 
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/MLIRContext.h"
@@ -123,6 +124,25 @@ public:
   LogicalResult matchAndRewrite(OpTy op,
                                 PatternRewriter &rewriter) const override {
     Value ptrVal = op.getPtr();
+
+    // A uniform scalar pointer can be broadcast and immediately extracted at
+    // a memory boundary. Fold that round-trip here so scalar pointer
+    // conversion does not require a tensor-of-pointer materialization.
+    if (auto extractOp = ptrVal.getDefiningOp<tensor::ExtractOp>()) {
+      if (auto splatOp =
+              extractOp.getTensor().getDefiningOp<triton::SplatOp>()) {
+        Value scalarPointer = splatOp.getSrc();
+        auto pointerType =
+            dyn_cast<triton::PointerType>(scalarPointer.getType());
+        if (pointerType && !isa<ShapedType>(pointerType.getPointeeType()) &&
+            scalarPointer.getType() == ptrVal.getType()) {
+          rewriter.modifyOpInPlace(
+              op, [&]() { op->replaceUsesOfWith(ptrVal, scalarPointer); });
+          return success();
+        }
+      }
+    }
+
     auto ptrTy = dyn_cast<RankedTensorType>(ptrVal.getType());
     if (!ptrTy || !isa<triton::PointerType>(ptrTy.getElementType()))
       return failure();

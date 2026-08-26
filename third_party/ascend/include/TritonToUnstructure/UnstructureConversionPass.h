@@ -38,6 +38,7 @@
 #include "ascend/include/TritonToUnstructure/Passes.h.inc"
 
 extern bool compileOn91095Flag;
+extern bool forceSimtTemplateFlag;
 
 namespace mlir {
 namespace triton {

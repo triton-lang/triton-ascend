@@ -96,7 +96,7 @@ _WARNED_DEPRECATED_NPU_OPTIONS = set()
 # semantics; False keeps the canonical mode or backend default unchanged.
 _DEPRECATED_NPU_OPTION_ROUTES = {
     "force_simt_only": ("compile_mode", "simt_only"),
-    "force_simt_template": ("compile_mode", "simd_simt_template"),
+    "force_simt_template": ("compile_mode", "unstructured_in_simt"),
 }
 
 # Apply weaker selectors first so pure SIMT wins if both legacy force switches

@@ -53,9 +53,10 @@ using namespace hivm;
 // before pattern application, so that OpRewritePattern subclasses can read
 // them.
 static bool compileOn91095Flag = false;
-static triton::ascend::CompileMode compileModeFlag =
-    triton::ascend::CompileMode::Simd;
+static bool forceSimtTemplateFlag = false;
 static bool useSyncBlockLockFlag = true;
+static constexpr const char *routeDiscreteMaskToSimtAttrName =
+    "route_discrete_mask_to_simt";
 
 static void markSyncBlockLockUnordered(Operation *op) {
   op->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
@@ -180,7 +181,7 @@ static bool checkAllProgramIdNonOverlap(ModuleOp module) {
 
 LogicalResult isDiscreteMask(Operation *op, Value mask,
                              PatternRewriter &rewriter) {
-  if (!mask || op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
+  if (!mask || op->hasAttr(routeDiscreteMaskToSimtAttrName)) {
     return failure();
   }
 
@@ -275,9 +276,6 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
 
   LogicalResult matchAndRewrite(triton::StoreOp op,
                                 PatternRewriter &rewriter) const final {
-    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName))
-      return failure();
-
     auto mask = op.getMask();
     auto loc = op.getLoc();
     auto dst = op.getPtr();
@@ -290,11 +288,9 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag &&
-        triton::ascend::isSimtTemplateMode(compileModeFlag) &&
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 
@@ -363,9 +359,6 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
-    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName))
-      return failure();
-
     auto loc = op.getLoc();
     auto other = op.getOther();
     auto mask = op.getMask();
@@ -377,11 +370,9 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag &&
-        triton::ascend::isSimtTemplateMode(compileModeFlag) &&
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
       return failure();
     }
 
@@ -443,15 +434,6 @@ struct DiscreteMaskAtomicConversion
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    // The template atomic ABI consumes the original lane mask.  Do not turn it
-    // into a select before TritonToUnstructure has the chance to preserve it.
-    if (compileOn91095Flag &&
-        triton::ascend::isSimtTemplateMode(compileModeFlag)) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
-      return failure();
-    }
-
     const std::map<RMWOp, TypelessValue> initMap = {
         {RMWOp::FADD, TypelessValue::Zero},
         {RMWOp::ADD, TypelessValue::Zero},
@@ -474,6 +456,15 @@ struct DiscreteMaskAtomicConversion
     }
 
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
+    if (!contMask && discMask && compileOn91095Flag && forceSimtTemplateFlag) {
+      // A pure discrete mask cannot safely be removed because masked-off
+      // elements may carry out-of-bounds pointers. Keep the original mask so
+      // Unstructure can use either the masked indirect atomic template or its
+      // masked fallback.
+      op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
+      return failure();
+    }
+
     FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
         typelessVal, src.getType(), loc, rewriter);
     if (failed(fill)) {
@@ -512,15 +503,7 @@ DiscreteMaskAccessConversionPass::DiscreteMaskAccessConversionPass(
 
 void DiscreteMaskAccessConversionPass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
-  auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
-  if (!compileMode) {
-    getOperation().emitError()
-        << "discrete-mask-access-conversion compile-mode is invalid: "
-        << this->compileMode;
-    signalPassFailure();
-    return;
-  }
-  compileModeFlag = *compileMode;
+  forceSimtTemplateFlag = this->forceSimtTemplate;
   auto moduleOp = getOperation();
   bool tileNonOverlap = checkAllProgramIdNonOverlap(moduleOp);
   useSyncBlockLockFlag = !tileNonOverlap;

@@ -28,7 +28,6 @@
 
 #include <cstdint>
 #include <memory>
-#include <string>
 
 namespace mlir {
 namespace triton {
@@ -115,10 +114,10 @@ struct GraphOptimizationOptions {
   uint16_t enabledRuleMask = kAllGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
-  // RowCoalescing changes the launch grid and is valid only for
-  // compile_mode="simt_only".  Keep the source selector rather than a
-  // second derived force flag so every consumer follows one mode contract.
-  std::string compileMode = "simd_simt_template";
+  // RowCoalescing changes the launch grid and is valid only for the
+  // pure-SIMT compilation route.  This must be an explicit per-pass
+  // option rather than inferred from later pipeline state.
+  bool forceSimtOnly = false;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>>

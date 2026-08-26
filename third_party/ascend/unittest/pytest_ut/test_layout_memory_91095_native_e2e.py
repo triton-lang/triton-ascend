@@ -130,7 +130,7 @@ def _assert_real_91095_gate(compiled, *, pure_simt: bool) -> None:
     assert compiled.metadata.compile_on_910_95 is True
     assert compiled.metadata.is_pure_simt is pure_simt
     if not pure_simt:
-        assert compiled.metadata.compile_mode == "simd_simt_template"
+        assert compiled.metadata.force_simt_template is True
 
 
 @triton.jit

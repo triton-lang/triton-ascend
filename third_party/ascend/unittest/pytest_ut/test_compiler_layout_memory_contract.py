@@ -21,7 +21,6 @@ import importlib.util
 import itertools
 import sys
 import types
-import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -547,11 +546,11 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
     return events, graph_calls
 
 
-def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_module, monkeypatch):
+def test_make_ttir_passes_pure_simt_state_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
         target_arch="Ascend910B1",
-        compile_mode="simt_only",
+        is_pure_simt=True,
         debug=False,
     )
 
@@ -559,7 +558,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
 
     assert graph_calls == [{
         "ub_capacity_bytes": 96 * 1024,
-        "compile_mode": "simt_only",
+        "force_simt_only": True,
     }]
     assert events[-1] == "run_row"
 
@@ -586,6 +585,7 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
     events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
 
     assert graph_calls[0]["ub_capacity_bytes"] == expected_capacity
+    assert graph_calls[0]["force_simt_only"] is False
     assert events[-1] == "run_row"
 
 
@@ -646,56 +646,46 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
 
 
 def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):
-    """The canonical default is portable and enables the A5 template gate."""
+    """The normal compiler default supplies the second half of the T2L gate.
+
+    Axis/Chunk/SLS must remain controlled by the original
+    ``compile_on_910_95 && force_simt_template`` predicate.  The first half
+    is still target-derived at this point in the revert series.  This contract
+    preserves the historical ``unstructured_in_simt`` selector and verifies
+    that the newer spelling no longer activates template-SIMT implicitly.
+    """
 
     a2_default = compiler_module.NPUOptions(arch="Ascend910B1")
     assert a2_default.compile_on_910_95 is False
-    assert a2_default.compile_mode == "simd_simt_template"
+    assert a2_default.compile_mode == "unstructured_in_simt"
+    assert a2_default.force_simt_template is True
     assert a2_default.is_pure_simt is False
 
     a5_default = compiler_module.NPUOptions(arch="Ascend910_9589")
     assert a5_default.compile_on_910_95 is True
-    assert a5_default.compile_mode == "simd_simt_template"
+    assert a5_default.compile_mode == "unstructured_in_simt"
+    assert a5_default.force_simt_template is True
     assert a5_default.is_pure_simt is False
 
-    with pytest.warns(FutureWarning, match="compile_on_910_95"):
-        ignored_legacy_value = compiler_module.NPUOptions(
-            arch="Ascend910_9589",
-            compile_on_910_95=False,
-        )
-    assert ignored_legacy_value.compile_on_910_95 is True
+    simd_options = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simd")
+    assert simd_options.force_simt_template is False
+    assert simd_options.is_pure_simt is False
 
-    canonical = compiler_module.NPUOptions(
+    new_spelling = compiler_module.NPUOptions(
         arch="Ascend910_9589",
         compile_mode="simd_simt_template",
     )
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always")
-        alias = compiler_module.NPUOptions(
-            arch="Ascend910_9589",
-            compile_mode="unstructured_in_simt",
-        )
-    assert not caught
-    assert alias.compile_mode == canonical.compile_mode == "simd_simt_template"
-    assert alias.hash() == canonical.hash()
+    assert new_spelling.force_simt_template is False
+    assert new_spelling.is_pure_simt is False
 
-    with pytest.raises(ValueError, match=r"invalid compile_mode='simt_template'"):
-        compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simt_template")
-
-    explicit_simd = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simd")
-    assert explicit_simd.compile_mode == "simd"
-    assert explicit_simd.is_pure_simt is False
-
-    explicit_template = compiler_module.NPUOptions(
+    legacy_spelling = compiler_module.NPUOptions(
         arch="Ascend910_9589",
-        compile_mode="simd_simt_template",
+        compile_mode="simt_template",
     )
-    assert explicit_template.compile_mode == "simd_simt_template"
-    assert explicit_template.is_pure_simt is False
+    assert legacy_spelling.force_simt_template is True
 
-    explicit_only = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simt_only")
-    assert explicit_only.compile_mode == "simt_only"
-    assert explicit_only.is_pure_simt is True
+    pure_simt = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simt_only")
+    assert pure_simt.is_pure_simt is True
 
-    assert "force_simt_only" not in compiler_module.NPUOptions.__dataclass_fields__
-    assert "force_simt_template" not in compiler_module.NPUOptions.__dataclass_fields__
+    assert "force_simt_only" in compiler_module.NPUOptions.__dataclass_fields__
+    assert "force_simt_template" in compiler_module.NPUOptions.__dataclass_fields__

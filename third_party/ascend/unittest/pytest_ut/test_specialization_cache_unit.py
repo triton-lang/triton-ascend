@@ -60,7 +60,7 @@ SIMD_OPTIONS = [
     pytest.param({"compile_mode": "simd"}, id="simd"),
     pytest.param({"compile_mode": "unstructured_in_simt"}, id="unstructured-in-simt"),
     pytest.param({"force_simt_template": True}, id="force-simt-template"),
-    pytest.param({}, id="default-simd-simt-template"),
+    pytest.param({}, id="default-unstructured-in-simt"),
 ]
 
 SIMT_OPTIONS = [
@@ -137,7 +137,7 @@ def test_simd_integer_alignment_reuses_cache_key(options, values):
 
 @pytest.mark.parametrize("options", [
     pytest.param({"compile_mode": "simd"}, id="simd"),
-    pytest.param({"compile_mode": "simd_simt_template"}, id="simd-simt-template"),
+    pytest.param({"compile_mode": "unstructured_in_simt"}, id="unstructured-in-simt"),
 ])
 @pytest.mark.parametrize(
     "values, expected_type",

@@ -30,15 +30,12 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#include <string>
-
 #define GEN_PASS_CLASSES
 #include "ascend/include/TritonToLinalg/Passes.h.inc"
 
 extern int nd2nzFlag;
 extern bool compileOn91095Flag;
 extern bool existDotFlag;
-extern mlir::triton::ascend::CompileMode compileModeFlag;
 
 namespace mlir {
 namespace triton {
@@ -46,8 +43,7 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createTritonToLinalgPass(bool, bool, bool, bool, bool,
-                         const std::string &compileMode = "simd_simt_template");
+createTritonToLinalgPass(bool, bool, bool, bool, bool);
 
 } // namespace triton
 } // namespace mlir
@@ -103,14 +99,12 @@ public:
   TritonToLinalgPass() = default;
 
   TritonToLinalgPass(bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
-                     bool enableSelectAnalysis, bool compileOn91095,
-                     const std::string &compileMode = "simd_simt_template") {
+                     bool enableSelectAnalysis, bool compileOn91095) {
     this->globalKernel = globalKernel;
     this->namedOps = namedOps;
     this->enableNd2nzOnVector = enableNd2nzOnVector;
     this->enableSelectAnalysis = enableSelectAnalysis;
     this->compileOn91095 = compileOn91095;
-    this->compileMode = compileMode;
   };
 
   void getDependentDialects(DialectRegistry &registry) const override;

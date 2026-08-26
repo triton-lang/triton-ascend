@@ -72,7 +72,7 @@ _RESERVED_HINT_KEYS = {
     "vv_parser_v2_mode",
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
-_DEFAULT_COMPILE_MODE = "simd_simt_template"
+_DEFAULT_COMPILE_MODE = "unstructured_in_simt"
 
 
 def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: int) -> None:
@@ -2008,8 +2008,12 @@ class AutoTilingTuner(Autotuner):
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        compile_mode = kwargs.get("compile_mode", _DEFAULT_COMPILE_MODE)
-        self.is_simt_mode = compile_mode == "simt_only"
+        if "compile_mode" in kwargs:
+            compile_mode = kwargs["compile_mode"]
+            self.is_simt_mode = compile_mode == "simt_only"
+        else:
+            self.is_simt_mode = bool(kwargs.get("force_simt_only", False))
+            compile_mode = "simt_only" if self.is_simt_mode else _DEFAULT_COMPILE_MODE
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
             self.user_specified_warps = kwargs['num_warps']
         else:

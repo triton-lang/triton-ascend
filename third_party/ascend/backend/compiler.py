@@ -180,7 +180,7 @@ def make_ttir(mod, metadata, opt):
         ascend.passes.ttir.add_graph_optimize(
             pm,
             ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
-            compile_mode=opt.compile_mode,
+            force_simt_only=opt.is_pure_simt,
         )
     pm.run(mod, 'make_ttir')
     if opt.debug:
@@ -214,8 +214,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         # Select analysis is a fixed lowering policy, not a user compile option.
         enable_select_analysis = True
         compile_on_910_95 = metadata["compile_on_910_95"]
-        compile_mode = opt.compile_mode
-        metadata["compile_mode"] = compile_mode
+        force_simt_template = metadata["force_simt_template"]
         enable_mixed_cv = metadata.get("enable_mixed_cv")
         disable_auto_inject_block_sync = metadata.get("disable_auto_inject_block_sync")
         set_workspace_multibuffer = metadata.get("set_workspace_multibuffer")
@@ -238,16 +237,16 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
-        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
+        ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_annotation(pm)
-        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
+        ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, force_simt_template)
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
-        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
-                                                compile_mode)
+        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis,
+                                                compile_on_910_95)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
         # memref.copy ops, and on 910_9362 the generated code only makes the
         # copy next to the surviving to_tensor visible, so the other half of the
@@ -979,33 +978,6 @@ def _get_libdevice_compile_state(arch: str) -> tuple[bool, bool]:
     )
 
 
-_CANONICAL_COMPILE_MODES = ("simd", "simd_simt_template", "simt_only")
-_COMPILE_MODE_ALIASES = {
-    "unstructured_in_simt": "simd_simt_template",
-}
-
-
-def _normalize_compile_mode(compile_mode, arch: str) -> str:
-    """Validate and canonicalize the public compile-mode contract.
-
-    ``simd_simt_template`` is the portable default: it retains the ordinary
-    SIMD pipeline on A2/A3 and enables the existing template-SIMT subpaths on
-    A5.  ``unstructured_in_simt`` is an equivalent spelling of that mode.
-    Pure-SIMT remains an A5-only explicit compile mode.
-    """
-    if not isinstance(compile_mode, str):
-        raise ValueError("compile_mode must be a string; expected one of: " + ", ".join(_CANONICAL_COMPILE_MODES))
-
-    canonical_mode = _COMPILE_MODE_ALIASES.get(compile_mode, compile_mode)
-    if canonical_mode not in _CANONICAL_COMPILE_MODES:
-        raise ValueError(f"invalid compile_mode={compile_mode!r}; expected one of: " +
-                         ", ".join(_CANONICAL_COMPILE_MODES))
-
-    if canonical_mode == "simt_only" and not _is_a5_target_arch(arch):
-        raise ValueError('compile_mode="simt_only" is supported only on A5 targets.')
-    return canonical_mode
-
-
 @dataclass(frozen=True)
 class NPUOptions:
     debug: bool = False
@@ -1079,16 +1051,20 @@ class NPUOptions:
     # Internal launch metadata.  The mode is initially derived from
     # compile_mode, then replaced with the mode emitted by TritonToLinalg.
     parallel_mode: str = field(default="simd", init=False)
-    # Internal pure-SIMT state, derived from the effective lowering mode.
+    # Internal pure-SIMT state, derived from compile_mode or the retained
+    # direct force_simt_only selector.
     is_pure_simt: bool = field(default=False, init=False)
-    # Only takes effect on the pure-SIMT path.
+    force_simt_only: bool = False
+    force_simt_template: bool = False
+    # only take effect on the simt-only & simd-simt-mix scenarios
     shared_mem_dynamic_size: int = None
-    # A5 pure-SIMT-only option passed as -enable-bishengir-simt-optimization
-    # to bishengir-compile. Its value grammar belongs to the toolchain.
+    # enable_bishengir_simt_optimization is passed as
+    # -enable-bishengir-simt-optimization flag to bishengir-compile.
     enable_bishengir_simt_optimization: int = 000
-    # Canonical modes: SIMD (D), SIMD with template-SIMT (P), and pure-SIMT
-    # (T). ``unstructured_in_simt`` is an equivalent P spelling.
-    compile_mode: str = "simd_simt_template"
+    # compile_mode: "simd", "unstructured_in_simt" (legacy template alias),
+    # "simt_template", or "simt_only"
+    # When compile_mode is provided, it automatically sets other fields
+    compile_mode: str = "unstructured_in_simt"
     simt_stack_limit: int = None
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False
@@ -1124,14 +1100,20 @@ class NPUOptions:
         if self.simt_stack_limit is not None:
             _validate_simt_stack_limit(self.simt_stack_limit)
 
-        compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
-        object.__setattr__(self, "compile_mode", compile_mode)
-
-        if compile_mode == "simt_only":
+        # Parse compile_mode and retain the direct pure-SIMT selector.  The
+        # selector changes internal lowering state but never rewrites the
+        # caller-provided compile_mode value.
+        if self.compile_mode == "simd":
+            object.__setattr__(self, "parallel_mode", "simd")
+        elif self.compile_mode in ("unstructured_in_simt", "simt_template"):
+            object.__setattr__(self, "force_simt_template", True)
+        elif self.compile_mode == "simt_only":
             object.__setattr__(self, "is_pure_simt", True)
             object.__setattr__(self, "parallel_mode", "simt")
-        else:
-            object.__setattr__(self, "parallel_mode", "simd")
+
+        if self.force_simt_only:
+            object.__setattr__(self, "is_pure_simt", True)
+            object.__setattr__(self, "parallel_mode", "simt")
 
         if self.is_pure_simt:
             if self.shared_mem_dynamic_size is None:

@@ -565,14 +565,10 @@ class UBTuner(KernelInterface):
         """Create NPUOptions from metadata."""
         from triton.backends.ascend.compiler import NPUOptions
         try:
-            npu_option_keys = {
-                field.name
-                for field in NPUOptions.__dataclass_fields__.values()
-                if field.init and field.name not in {"arch", "compile_on_910_95"}
-            }
+            npu_option_keys = {field.name for field in NPUOptions.__dataclass_fields__.values() if field.init}
             opts_dict = {k: v for k, v in metadata.items() if k in npu_option_keys}
-            target_arch = metadata.get("target_arch", metadata.get("arch", ""))
-            return NPUOptions(arch=target_arch, **opts_dict)
+            opts_dict.setdefault("arch", metadata.get("arch", ""))
+            return NPUOptions(**opts_dict)
         except Exception as e:
             _log_debug(f"Failed to create NPUOptions: {e}")
             return None

@@ -29,7 +29,7 @@ import shlex
 import subprocess
 import tempfile
 import warnings
-from dataclasses import InitVar, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, Optional, Tuple, Union
@@ -60,12 +60,12 @@ from triton.backends.ascend.utils import (
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
     _remove_deprecated_npu_options,
-    _warn_deprecated_npu_option,
     _warn_deprecated_ascend_env_vars,
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
     get_cann_version_file_hash,
+    is_compile_on_910_95,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.compiler import (
@@ -179,7 +179,7 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(
             pm,
-            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
+            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.arch),
             force_simt_only=opt.is_pure_simt,
         )
     pm.run(mod, 'make_ttir')
@@ -225,7 +225,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         grid_num_tiles = metadata.get("grid_num_tiles")
         if isinstance(grid_num_tiles, int) and grid_num_tiles > 0:
             try:
-                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.target_arch)
+                _builder = ascend.ir.ascendnpu_ir_builder(mod.context, opt.arch)
                 mod.set_attr("hacc.grid_num_tiles", _builder.parse_attr(f"{grid_num_tiles} : i32"))
             except Exception:
                 pass  # graceful fallback: pass runs without hint
@@ -245,8 +245,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
-        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis,
-                                                compile_on_910_95)
+        ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
         # memref.copy ops, and on 910_9362 the generated code only makes the
         # copy next to the surviving to_tensor visible, so the other half of the
@@ -611,7 +610,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
             ]
 
-        if force_disable_ffts(opt.target_arch):
+        if force_disable_ffts(opt.arch):
             _compile_option_list += ["--disable-ffts"]
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
@@ -982,12 +981,7 @@ def _get_libdevice_compile_state(arch: str) -> tuple[bool, bool]:
 class NPUOptions:
     debug: bool = False
     sanitize_overflow: bool = True
-    # Backend-only construction input.  AscendBackend.parse_options injects
-    # GPUTarget.arch and never forwards a user-supplied compile option.
-    arch: InitVar[str] = ""
-    # This becomes compiler metadata, so its name must also be valid for the
-    # namedtuple constructed by CompiledKernel on Python 3.10.
-    target_arch: str = field(init=False, repr=False)
+    arch: str = ""
 
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
@@ -997,9 +991,7 @@ class NPUOptions:
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
 
-    # Deprecated constructor-only compatibility input.  The supplied value is
-    # ignored and replaced with the lowering selector derived from GPUTarget.arch.
-    compile_on_910_95: Optional[bool] = field(default=None, repr=False, kw_only=True)
+    compile_on_910_95: bool = None
     enable_warp_specialization: bool = False
     enable_persistent: bool = False
     optimize_epilogue: bool = False
@@ -1079,18 +1071,10 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
-    def __post_init__(self, arch):
+    def __post_init__(self):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
-        object.__setattr__(self, "target_arch", arch)
-        if self.compile_on_910_95 is not None:
-            _warn_deprecated_npu_option("compile_on_910_95")
-        object.__setattr__(
-            self,
-            "compile_on_910_95",
-            isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
-        )
         # The core compiler serializes ``options.__dict__`` into launch
         # metadata.  An init=False field with its class-level default alone is
         # not present there, so materialize the false state before the
@@ -1127,21 +1111,8 @@ class NPUOptions:
         return hashlib.sha256(key.encode("utf-8")).hexdigest()
 
 
-def _get_npu_options_arch(options: NPUOptions) -> str:
-    """Expose the injected target to the established lowering builder API.
-
-    ``arch`` is an ``InitVar`` rather than a user compile option, so it is not
-    stored or serialized.  The builder still reads ``options.arch`` while
-    creating TTIR, and this view returns the target injected by
-    ``AscendBackend.parse_options``.
-    """
-    return options.target_arch
-
-
-NPUOptions.arch = property(_get_npu_options_arch)
-
 _INTERNAL_NPU_OPTION_MARKERS = frozenset({
-    "target_arch",
+    "arch",
     "compile_on_910_95",
     "parallel_mode",
     "is_pure_simt",
@@ -1150,8 +1121,7 @@ _INTERNAL_NPU_OPTION_MARKERS = frozenset({
 
 def _is_internal_npu_options(options, target_arch: str) -> bool:
     """Recognize an NPUOptions metadata round trip by backend-only fields."""
-    return (_INTERNAL_NPU_OPTION_MARKERS <= options.keys() and options.get("target_arch") == target_arch
-            and options.get("compile_on_910_95") == _is_a5_target_arch(target_arch))
+    return _INTERNAL_NPU_OPTION_MARKERS <= options.keys() and options.get("arch") == target_arch
 
 
 def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_options) -> None:
@@ -1160,7 +1130,7 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
     if option_name not in raw_options:
         return
 
-    if _is_a5_target_arch(options.target_arch) and options.is_pure_simt:
+    if _is_a5_target_arch(options.arch) and options.is_pure_simt:
         # The BiShengIR toolchain owns the option's value grammar; keep the
         # Python boundary free of numeric or range validation.
         return
@@ -1288,11 +1258,7 @@ class AscendBackend(BaseBackend):
         # TODO: get available targets when building options?
         if self.target.backend == "npu":
             _warn_deprecated_ascend_env_vars()
-            option_names = {
-                name
-                for name, option_field in NPUOptions.__dataclass_fields__.items()
-                if option_field.init and name not in {"arch", "compile_on_910_95"}
-            }
+            option_names = {name for name, option_field in NPUOptions.__dataclass_fields__.items() if option_field.init}
             # Serialized NPUOptions include backend-only derived fields.  Use
             # those provenance markers instead of depending on every public
             # field being present, which changes whenever the dataclass evolves.
@@ -1302,11 +1268,14 @@ class AscendBackend(BaseBackend):
             # requiring any change to the community JIT implementation.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
-            options = NPUOptions(arch=self.target.arch, **args)
-            # Lazy init enable_dynamic_cv_pipeline if not provided.
-            # compile_on_910_95 is already resolved from the requested target.
+            args.setdefault("arch", self.target.arch)
+            options = NPUOptions(**args)
+            # Lazy init compile_on_910_95 if not provided
+            if options.compile_on_910_95 is None:
+                object.__setattr__(options, "compile_on_910_95", is_compile_on_910_95())
+            # Lazy init enable_dynamic_cv_pipeline if not provided
             if options.enable_dynamic_cv_pipeline is None:
-                object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
+                object.__setattr__(options, "enable_dynamic_cv_pipeline", is_compile_on_910_95())
             if not internal_options:
                 _normalize_bishengir_simt_optimization_for_context(options, opts)
         else:

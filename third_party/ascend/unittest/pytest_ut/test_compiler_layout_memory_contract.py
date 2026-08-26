@@ -127,12 +127,11 @@ def compiler_module():
     utils_stub._get_auto_blockify_blacklist_reasons = lambda *_args, **_kwargs: []
     utils_stub._warn_auto_blockify_disabled = lambda *_args, **_kwargs: None
     utils_stub._remove_deprecated_npu_options = remove_deprecated_npu_options
-    utils_stub._warn_deprecated_npu_option = lambda name: warnings.warn(
-        f"Ascend compile option '{name}' is deprecated and ignored.", FutureWarning)
     utils_stub._warn_deprecated_ascend_env_vars = lambda: None
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
+    utils_stub.is_compile_on_910_95 = lambda: False
 
     class UnusedNPUUtils:
         pass
@@ -246,7 +245,6 @@ def test_parse_options_normalizes_graph_ub_budget(compiler_module, arch, request
     options = _parse_options(compiler_module, arch, opts)
 
     assert options.arch == arch
-    assert not hasattr(options, "_arch")
     assert options.graph_optimize_ub_capacity_bytes == expected_capacity
 
 
@@ -549,7 +547,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
 def test_make_ttir_passes_pure_simt_state_to_graph_optimize(compiler_module, monkeypatch):
     options = SimpleNamespace(
         enable_graph_optimize=True,
-        target_arch="Ascend910B1",
+        arch="Ascend910B1",
         is_pure_simt=True,
         debug=False,
     )
@@ -645,27 +643,35 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         assert Path(command[-1]).name == "kernel", case
 
 
-def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):
-    """The normal compiler default supplies the second half of the T2L gate.
+def test_legacy_compile_mode_and_host_91095_gate_are_restored(compiler_module):
+    """Restore the legacy template selector and host-probed 91095 gate.
 
     Axis/Chunk/SLS must remain controlled by the original
-    ``compile_on_910_95 && force_simt_template`` predicate.  The first half
-    is still target-derived at this point in the revert series.  This contract
-    preserves the historical ``unstructured_in_simt`` selector and verifies
-    that the newer spelling no longer activates template-SIMT implicitly.
+    ``compile_on_910_95 && force_simt_template`` predicate.  Direct option
+    construction retains an explicit selector, while backend parsing fills an
+    omitted selector from the host probe.  The historical
+    ``unstructured_in_simt`` spelling supplies the template half of the gate.
     """
 
     a2_default = compiler_module.NPUOptions(arch="Ascend910B1")
-    assert a2_default.compile_on_910_95 is False
+    assert a2_default.compile_on_910_95 is None
     assert a2_default.compile_mode == "unstructured_in_simt"
     assert a2_default.force_simt_template is True
     assert a2_default.is_pure_simt is False
 
     a5_default = compiler_module.NPUOptions(arch="Ascend910_9589")
-    assert a5_default.compile_on_910_95 is True
+    assert a5_default.compile_on_910_95 is None
     assert a5_default.compile_mode == "unstructured_in_simt"
     assert a5_default.force_simt_template is True
     assert a5_default.is_pure_simt is False
+
+    parsed_a5 = _parse_options(compiler_module, "Ascend910_9589")
+    assert parsed_a5.arch == "Ascend910_9589"
+    assert parsed_a5.compile_on_910_95 is False
+    assert parsed_a5.enable_dynamic_cv_pipeline is False
+
+    explicit_a5 = compiler_module.NPUOptions(arch="Ascend910_9589", compile_on_910_95=True)
+    assert explicit_a5.compile_on_910_95 is True
 
     simd_options = compiler_module.NPUOptions(arch="Ascend910_9589", compile_mode="simd")
     assert simd_options.force_simt_template is False

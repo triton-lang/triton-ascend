@@ -56,6 +56,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HACC/IR/HACC.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
@@ -245,6 +246,21 @@ void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
   // Append the arguments to the entry block.
   for (unsigned i = 0; i < TRITON_PROGRAM_INFO_ARG_COUNT; i++) {
     func.getBody().front().addArgument(b.getI32Type(), func.getLoc());
+  }
+
+  // Stamp the TA<->NPUIR launch-grid contract onto the new args:
+  // 1. program_num x/y/z
+  // 2. program_id x/y/z
+  static constexpr hacc::KernelArgType
+      kGridArgTypes[TRITON_PROGRAM_INFO_ARG_COUNT] = {
+          hacc::KernelArgType::kProgramNumX, hacc::KernelArgType::kProgramNumY,
+          hacc::KernelArgType::kProgramNumZ, hacc::KernelArgType::kProgramIdX,
+          hacc::KernelArgType::kProgramIdY, hacc::KernelArgType::kProgramIdZ};
+  const unsigned gridArgBase = origInputTypes.size();
+  for (unsigned i = 0; i < TRITON_PROGRAM_INFO_ARG_COUNT; i++) {
+    func.setArgAttr(gridArgBase + i, hacc::KernelArgTypeAttr::name,
+                    hacc::KernelArgTypeAttr::get(func.getContext(),
+                                                 kGridArgTypes[i]));
   }
 
   if (globalKernel) {
@@ -756,7 +772,8 @@ void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
                   linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
                   tensor::TensorDialect, bufferization::BufferizationDialect,
                   memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect>();
+                  hivm::HIVMDialect, hacc::HACCDialect,
+                  annotation::AnnotationDialect>();
 }
 
 LogicalResult

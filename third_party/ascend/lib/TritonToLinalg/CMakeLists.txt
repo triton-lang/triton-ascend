@@ -28,6 +28,7 @@ add_triton_library(TritonToLinalg
   MLIRTensorDialect
   MLIRTransforms
   MLIRSupport
+  BiShengIRHACCDialect
   BiShengIRHIVMDialect
   TritonIR
   TritonTransforms

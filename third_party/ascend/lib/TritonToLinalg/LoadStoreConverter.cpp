@@ -76,6 +76,7 @@ using namespace triton;
 
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
+static constexpr llvm::StringLiteral kAlreadySyncAttr = "already_sync";
 
 static bool shouldMaterializeCustomPointer(Value ptr) {
   auto result = dyn_cast<OpResult>(ptr);
@@ -842,19 +843,22 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
        elementType.isInteger(32));
 
   bool isDiscreteMask = false;
+  bool hasContinuousMaskSubview = false;
+  bool hasUsedReturn = !op.getResult().use_empty();
+  MaskState mstate;
   if (mask) {
     auto constantMask = mask.getDefiningOp<arith::ConstantOp>();
     if (constantMask && !isConstantMaskTrue(mask)) {
       rewriter.eraseOp(op);
       return success();
     }
-    MaskState mstate;
     isDiscreteMask = mstate.parse(mask, loc, rewriter).failed();
     if (!constantMask && !isDiscreteMask) {
       // For dstMemref (store output), use subview to maintain reference to
       // original memref. For inputVal (store input), use tensor.extract_slice
       // to keep tensor semantics.
       dstMemref = mstate.getSubview(ptr, loc, rewriter);
+      hasContinuousMaskSubview = true;
       if (isHardwareSupported) {
         auto inputTensorType = RankedTensorType::get(
             inputMemrefType.getShape(), inputMemrefType.getElementType());
@@ -868,12 +872,30 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     }
   }
 
-  if (!op.getResult().use_empty()) {
+  bool needsReturnValueLock =
+      hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
+  Value returnValueLock;
+  if (hasUsedReturn) {
     auto tensorType =
         RankedTensorType::get(ptrType.getShape(), ptrType.getElementType());
     auto alloc = rewriter.create<memref::AllocOp>(
         loc, MemRefType::get(ptrType.getShape(), ptrType.getElementType()));
-    rewriter.create<memref::CopyOp>(loc, ptr, alloc);
+    Value copySrc = ptr;
+    Value copyDst = alloc;
+    if (hasContinuousMaskSubview) {
+      // Masked-off atomic results are undefined. Copy only the active region
+      // so the old-value read and the atomic store use the same address view.
+      copySrc = dstMemref;
+      copyDst = mstate.getSubview(alloc, loc, rewriter);
+    }
+    if (needsReturnValueLock) {
+      auto lockType = MemRefType::get({1}, rewriter.getI64Type());
+      auto lockVar =
+          rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
+      returnValueLock = lockVar.getResult();
+      rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock);
+    }
+    rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
     Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
         loc, tensorType, alloc, true /* restrict */, true /* writable */);
     rewriter.replaceOp(op, tensorToReplace);
@@ -895,10 +917,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
   } else {
-    if (isHardwareSupported)
-      rewriter.create<hivm::StoreOp>(op.getLoc(), TypeRange{}, inputVal,
-                                     dstMemref, atomicKind);
-    else if (rmwOp == RMWOp::XCHG)
+    if (isHardwareSupported) {
+      auto storeOp = rewriter.create<hivm::StoreOp>(
+          op.getLoc(), TypeRange{}, inputVal, dstMemref, atomicKind);
+      if (needsReturnValueLock) {
+        // The return-value copy and the atomic update must be one critical
+        // section. Mark the store so HIVM does not add another lock.
+        storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
+        rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock);
+      }
+    } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                              inputMemref, dstMemref);
     else {

@@ -100,6 +100,12 @@ def compiler_module():
     def remove_deprecated_npu_options(options, *, in_place=False):
         normalized = options if in_place else dict(options)
         normalized.pop("compile_on_910_95", None)
+        if "bisheng_options" in normalized:
+            warnings.warn(
+                "Ascend compile option 'bisheng_options' is deprecated and ignored.",
+                FutureWarning,
+            )
+            normalized.pop("bisheng_options")
         return normalized
 
     utils_stub = types.ModuleType(utils_name)
@@ -198,6 +204,21 @@ def compiler_module():
 def _parse_options(compiler, arch, opts=None):
     backend = compiler.AscendBackend(SimpleNamespace(backend="npu", arch=arch))
     return backend.parse_options({} if opts is None else opts)
+
+
+def test_parse_options_ignores_removed_bisheng_options(compiler_module):
+    opts = {
+        "bisheng_options": "-mllvm --cce-enable-dynamic-micsched=true",
+        "debug": True,
+    }
+
+    with pytest.warns(FutureWarning, match=r"bisheng_options.*deprecated and ignored"):
+        options = _parse_options(compiler_module, "Ascend910B1", opts)
+
+    assert opts == {"debug": True}
+    assert options.debug is True
+    assert "bisheng_options" not in compiler_module.NPUOptions.__dataclass_fields__
+    assert "bisheng_options" not in options.__dict__
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -376,7 +397,7 @@ def _run_ttir_to_npubin(
 
     result = compiler.ttir_to_npubin(
         module,
-        {"bisheng_options": None},
+        {},
         _make_opt(
             is_pure_simt=is_pure_simt,
             superblock_factor=superblock_factor,

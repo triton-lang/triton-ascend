@@ -44,6 +44,7 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "auto_blockify_size",
     "auto_tile_and_bind_subblock",
+    "bisheng_options",
     "code_motion",
     "compile_on_910_95",
     "disable_size_align_for_cast",

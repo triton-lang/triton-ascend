@@ -82,3 +82,17 @@ def test_graph_ub_budget_resolves_from_explicit_arch(arch, raw_ub_kib, graph_bud
 
     assert utils.ub_size_in_kbytes_for_arch(arch) == raw_ub_kib
     assert utils.graph_ub_budget_bytes_for_arch(arch) == graph_budget_bytes
+
+
+def test_removed_bisheng_options_warns_and_is_ignored_in_place():
+    utils = _load_utils_module()
+    options = {
+        "bisheng_options": "-mllvm --cce-enable-dynamic-micsched=true",
+        "debug": True,
+    }
+
+    with pytest.warns(FutureWarning, match=r"bisheng_options.*deprecated and ignored"):
+        normalized = utils._remove_deprecated_npu_options(options, in_place=True)
+
+    assert normalized is options
+    assert options == {"debug": True}

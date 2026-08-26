@@ -710,9 +710,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-        bisheng_options = metadata["bisheng_options"]
-        if bisheng_options is not None:
-            _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
@@ -1043,7 +1040,6 @@ class NPUOptions:
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
-    bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
     multibuffer: bool = True
     vf_fusion_mode: str = None
     enable_ubuf_saving: bool = None
@@ -1228,10 +1224,6 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += ["--enable-simt-reorder-instruction=true"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
-
-            bisheng_options = metadata["bisheng_options"]
-            if bisheng_options is not None:
-                _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
             # Enable SIMT auto-blockify under the fixed automatic block-mapping
             # policy, mirroring the SIMD compile paths. driver.py's runtime

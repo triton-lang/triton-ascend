@@ -46,7 +46,8 @@ static constexpr llvm::StringLiteral interceptrFunc[]{
     "flash_varlen_fwd_kernel",
     "chunk_gsa_bwd_k_kernel_dqkvg",
     "_jagged_flash_attention_bwd_basic_kernel",
-    "triton_flash_mla_sparse_fwd"};
+    "triton_flash_mla_sparse_fwd",
+    "_sparse_decode_kernel"};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

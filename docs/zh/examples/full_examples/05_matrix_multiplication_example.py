@@ -1,24 +1,3 @@
-# 矩阵乘法 （Matrix Multiplication）
-
-在本节中，我们展示了使用 Triton 进行矩阵乘法的内核实现。
-
-## 计算内核
-
-以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：
-计算公式为：
-
-$$ \mathrm{output}[b, i, j] = \sum_{k} x[b, i, k] \cdot y[k, j] + z[b, i, j] $$
-
-其中：
-
-- `x` 的形状为 `(A, B)`
-- `y` 的形状为 `(B, C)`
-- `z`（偏置）的形状为 `(A, C)`
-- 输出 `output` 的形状为 `(A, C)`
-
-该内核假设单个 block 负责整个输出矩阵的计算，适用于小规模矩阵（A、B、C 较小且能被当前程序块完全覆盖）。
-
-```python
 import pytest
 import torch
 import torch_npu
@@ -27,15 +6,14 @@ import triton.language as tl
 
 
 @triton.jit
-def triton_dot_2_Bias(
-    output_ptr,   # 输出张量指针，形状 (A, C)
-    x_ptr,        # 输入张量 x 指针，形状 (A, B)
-    y_ptr,        # 输入张量 y 指针，形状 (B, C)
-    z_ptr,        # 偏置张量 z 指针，形状 (A, C)
-    A: tl.constexpr,  # 第一维度大小（batch / 行数）
-    B: tl.constexpr,  # 共享维度（x 的列数，y 的行数）
-    C: tl.constexpr   # 第二维度大小（列数）
-):
+def triton_dot_2_Bias(output_ptr,  # 输出张量指针，形状 (A, C)
+                      x_ptr,  # 输入张量 x 指针，形状 (A, B)
+                      y_ptr,  # 输入张量 y 指针，形状 (B, C)
+                      z_ptr,  # 偏置张量 z 指针，形状 (A, C)
+                      A: tl.constexpr,  # 第一维度大小（batch / 行数）
+                      B: tl.constexpr,  # 共享维度（x 的列数，y 的行数）
+                      C: tl.constexpr  # 第二维度大小（列数）
+                      ):
     # 创建索引向量
     bidx = tl.arange(0, A)  # [0, 1, ..., A-1]，用于行维度
     cidx = tl.arange(0, B)  # [0, 1, ..., B-1]，用于 x 的列 / y 的行
@@ -61,17 +39,13 @@ def triton_dot_2_Bias(
     # 写回结果到全局内存
     oidx = bidx[:, None] * C + didx[None, :]  # 与 Zidx 相同，可复用
     tl.store(output_ptr + oidx, ret)
-```
 
-## 工具方法
 
-以下辅助函数用于支持 Triton 内核的测试与验证，包括 PyTorch 参考实现、数据类型映射、随机张量生成及结果校验。
-
-```Python
 def torch_dot_Bias(x0, x1, bias):
     """PyTorch 参考实现：执行矩阵乘法并加上偏置项。"""
     res = torch.matmul(x0, x1) + bias
     return res
+
 
 def get_torch_typename(dtype):
     """将字符串形式的数据类型映射为对应的 torch.dtype。"""
@@ -95,6 +69,7 @@ def get_torch_typename(dtype):
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
     return tyname
 
+
 def generate_tensor(shape, dtype):
     """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
@@ -108,36 +83,36 @@ def generate_tensor(shape, dtype):
     else:
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
 
+
 def validate_cmp(dtype, y_cal, y_ref):
     """在 NPU 上比较 Triton 计算结果与 PyTorch 参考结果，按数据类型设置容差或严格相等。"""
-    y_cal=y_cal.npu()
-    y_ref=y_ref.npu()
+    y_cal = y_cal.npu()
+    y_ref = y_ref.npu()
     if dtype == 'float16':
-        torch.testing.assert_close(y_ref, y_cal,  rtol=1e-03, atol=1e-03, equal_nan=True)
+        torch.testing.assert_close(y_ref, y_cal, rtol=1e-03, atol=1e-03, equal_nan=True)
     elif dtype == 'bfloat16':
-        torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32),  rtol=1e-03, atol=1e-03, equal_nan=True)
+        torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32), rtol=1e-03, atol=1e-03,
+                                   equal_nan=True)
     elif dtype == 'float32':
-        torch.testing.assert_close(y_ref, y_cal,  rtol=1e-04, atol=1e-04, equal_nan=True)
+        torch.testing.assert_close(y_ref, y_cal, rtol=1e-04, atol=1e-04, equal_nan=True)
     elif dtype == 'int32' or dtype == 'int64' or dtype == 'int16' or dtype == 'int8':
         assert torch.equal(y_cal, y_ref)
     elif dtype == 'bool':
         assert torch.equal(y_cal, y_ref)
     else:
         raise ValueError('Invalid parameter \"dtype\" is found : {}'.format(dtype))
-```
 
-## 参数化测试
 
-使用 `pytest` 对 `triton_dot_2_Bias` 内核进行参数化功能验证，覆盖不同矩阵维度和数据类型组合。
-
-```python
 # 测试用例配置：(A, B, C) 表示矩阵 x: (A,B), y: (B,C), bias/output: (A,C)
 testlist = [
     (16, 16, 16),
 ]
 
 # 支持的数据类型列表（当前仅 float16）
-typelist = ['float16',]
+typelist = [
+    'float16',
+]
+
 
 @pytest.mark.parametrize('A, B, C', testlist)
 @pytest.mark.parametrize('sigtype', typelist)
@@ -172,18 +147,3 @@ def test_dot_2_Bias(sigtype, A, B, C):
 if __name__ == "__main__":
     # 支持直接运行单个测试用例（便于调试）
     test_dot_2_Bias("float16", 16, 16, 16)
-```
-
-**输出示例：**
-
-```python
-Test matmul with dtype=float16, shape=(16,16,16) PASSED!
-```
-
-上面输出日志表明Triton和Pytorch上的输出结果完全一致。
-
-## 完整示例
-
-以下是本文各代码片段的完整可运行示例：
-
-{download}`05_matrix_multiplication_example.py <full_examples/05_matrix_multiplication_example.py>`

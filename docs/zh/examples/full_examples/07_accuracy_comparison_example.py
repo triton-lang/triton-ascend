@@ -1,13 +1,10 @@
-# 精度比对 （Accuracy Comparison）
+import torch
+import torch_npu
 
-在本节中，我们将使用 Triton 编写一个简单的精度比对的程序。
-在此过程中，用户会学习到：
+import triton
+import triton.language as tl
 
-- Triton 每种数据类型的精度比对方法。
 
-计算内核:
-
-```Python
 def test_add(x0, x1):
     """
     测试 Triton 实现的向量加法与 PyTorch 的结果,精度比对是否一致。
@@ -25,12 +22,11 @@ def test_add(x0, x1):
 
     # 2. 定义 Triton kernel（在 NPU/GPU 上执行）
     @triton.jit
-    def triton_kernel_add(
-        out_ptr0,   # 输出指针：结果存储位置
-        in_ptr0,    # 输入指针0：x0 的起始地址
-        in_ptr1,    # 输入指针1：x1 的起始地址
-        XS: tl.constexpr  # constexpr 参数：向量长度，在编译时确定
-    ):
+    def triton_kernel_add(out_ptr0,  # 输出指针：结果存储位置
+                          in_ptr0,  # 输入指针0：x0 的起始地址
+                          in_ptr1,  # 输入指针1：x1 的起始地址
+                          XS: tl.constexpr  # constexpr 参数：向量长度，在编译时确定
+                          ):
         # 生成 [0, 1, 2, ..., XS-1] 的索引数组
         idx = tl.arange(0, XS)
         # 从 in_ptr0 + idx 处加载 x0 的值
@@ -61,12 +57,6 @@ def test_add(x0, x1):
     print(f"== dtype:{triton_cal.dtype} == The accuracy comparison between triton_cal and torch_ref was successful.")
 
 
-```
-
-创建一个精度比对函数，适应每一种dtype，采用对应的精度比对方法。
-
-```Python
-
 def accuracy_comparison(y_cal, y_ref):
     """
     精度比对函数：根据数据类型选择合适的比对策略。
@@ -90,13 +80,8 @@ def accuracy_comparison(y_cal, y_ref):
         torch.testing.assert_close(y_ref, y_cal, rtol=1e-3, atol=1e-3, equal_nan=True)
     elif tensor_dtype == torch.bfloat16:
         # bfloat16 精度更低，建议转为 float32 再比较
-        torch.testing.assert_close(
-            y_ref.to(torch.float32),
-            y_cal.to(torch.float32),
-            rtol=1e-3,
-            atol=1e-3,
-            equal_nan=True
-        )
+        torch.testing.assert_close(y_ref.to(torch.float32), y_cal.to(torch.float32), rtol=1e-3, atol=1e-3,
+                                   equal_nan=True)
     elif tensor_dtype == torch.float32:
         # float32 精度较高，使用更严格的容差
         torch.testing.assert_close(y_ref, y_cal, rtol=1e-4, atol=1e-4, equal_nan=True)
@@ -109,10 +94,14 @@ def accuracy_comparison(y_cal, y_ref):
     else:
         raise ValueError(f'Invalid or unsupported tensor dtype: {tensor_dtype}')
 
-```
 
-## 完整示例
-
-以下是本文各代码片段的完整可运行示例：
-
-{download}`07_accuracy_comparison_example.py <full_examples/07_accuracy_comparison_example.py>`
+if __name__ == "__main__":
+    # 对多种数据类型执行精度比对（输入张量需创建在 NPU 上）
+    N = 1024
+    test_add(torch.randn(N, device="npu"), torch.randn(N, device="npu"))  # float32
+    test_add(torch.randn(N, dtype=torch.float16, device="npu"), torch.randn(N, dtype=torch.float16,
+                                                                            device="npu"))  # float16
+    test_add(torch.randn(N, dtype=torch.bfloat16, device="npu"), torch.randn(N, dtype=torch.bfloat16,
+                                                                             device="npu"))  # bfloat16
+    test_add(torch.randint(0, 100, (N, ), dtype=torch.int32, device="npu"),
+             torch.randint(0, 100, (N, ), dtype=torch.int32, device="npu"))  # int32                    # int32

@@ -146,3 +146,9 @@ The maximum difference between torch and triton is 1.4901161193847656e-08
 ```
 
 "The maximum difference between torch and triton is 1.4901161193847656e-08" 表示Triton和PyTorch的输出结果非常接近，肉眼不可区分。
+
+## 完整示例
+
+以下是本文各代码片段的完整可运行示例：
+
+{download}`02_fused_softmax_example.py <full_examples/02_fused_softmax_example.py>`

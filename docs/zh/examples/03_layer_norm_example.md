@@ -171,3 +171,9 @@ Layer Normalization 128,128 torch.float32 PASSED!
 “Layer Normalization 128,128 torch.float16 PASSED!”、\
 “Layer Normalization 128,128 torch.bfloat16 PASSED!”、\
 “Layer Normalization 128,128 torch.float32 PASSED!” 表明Triton和PyTorch上float16、bfloat16、float32数据类型的输出结果完全一致。
+
+## 完整示例
+
+以下是本文各代码片段的完整可运行示例：
+
+{download}`03_layer_norm_example.py <full_examples/03_layer_norm_example.py>`

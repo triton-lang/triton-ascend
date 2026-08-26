@@ -1,4 +1,4 @@
-// RUN: not triton-opt --triton-control-flow-opt %s 2>&1 | FileCheck %s
+// RUN: triton-opt --triton-control-flow-opt %s | FileCheck %s
 
 module {
   tt.func public @if_block_ptr_different_base(%base0: !tt.ptr<f32>, %base1: !tt.ptr<f32>, %cond: i1) -> !tt.ptr<tensor<16xf32>> {
@@ -20,4 +20,16 @@ module {
   }
 }
 
-// CHECK: error: failed to analyze pointer components across control flow
+// CHECK-LABEL: tt.func public @if_block_ptr_different_base(
+// CHECK-SAME:  %[[BASE0:[^ ,]+]]: !tt.ptr<f32>, %[[BASE1:[^ ,]+]]: !tt.ptr<f32>
+// CHECK:       %[[BASE0_ADDR:.*]] = tt.ptr_to_int %[[BASE0]]
+// CHECK:       %[[BASE1_ADDR:.*]] = tt.ptr_to_int %[[BASE1]]
+// CHECK:       %[[SELECTED:[^ :]+]]:2 = scf.if %{{[^ ]+}} -> (i64, i32) {
+// CHECK:         scf.yield %[[BASE0_ADDR]], %{{[^ ,]+}} : i64, i32
+// CHECK:       } else {
+// CHECK:         scf.yield %[[BASE1_ADDR]], %{{[^ ,]+}} : i64, i32
+// CHECK:       }
+// CHECK:       %[[SELECTED_BASE:.*]] = tt.int_to_ptr %[[SELECTED]]#0
+// CHECK:       %[[REBUILT:.*]] = tt.make_tensor_ptr %[[SELECTED_BASE]],
+// CHECK-SAME:      [%{{.*}}], [%{{.*}}], [%[[SELECTED]]#1]
+// CHECK:       tt.return %[[REBUILT]] : !tt.ptr<tensor<16xf32>>

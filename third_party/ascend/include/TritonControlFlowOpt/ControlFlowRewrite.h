@@ -32,26 +32,52 @@
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 
 namespace mlir::triton::controlflow {
 
+/// Handoff marker for SCF loops whose pointer slots have already been expanded
+/// into policy-owned descriptor components. TritonToLinalg consumes and
+/// removes it instead of applying its legacy pointer-loop decomposition a
+/// second time.
+inline constexpr llvm::StringLiteral kPointerDescriptorBoundaryAttr =
+    "PointerDescriptorBoundary";
+
+/// Handoff marker for a pointer rebuilt at a CFO control-flow boundary. The
+/// defining operation's operands are the complete descriptor roots, including
+/// invariant components omitted from the replacement SCF signature.
+inline constexpr llvm::StringLiteral kPointerDescriptorRebuildAttr =
+    "PointerDescriptorRebuild";
+
+/// Optional companion on a PointerDescriptorRebuild root. The `strided_1d`
+/// form means the tensor-pointer offset operand is a proven rank-1 affine
+/// expression rather than an opaque complete-offset carrier.
+inline constexpr llvm::StringLiteral kPointerDescriptorOffsetFormAttr =
+    "PointerDescriptorOffsetForm";
+inline constexpr llvm::StringLiteral kStrided1DOffsetForm = "strided_1d";
+
+/// Dense per-axis classification attached to a descriptor rebuild. A value
+/// of one means the complete contribution of that logical axis is represented
+/// by its scalar stride; zero means the axis is carried by the opaque complete
+/// contribution tensor.
+inline constexpr llvm::StringLiteral kPointerDescriptorStructuredAxesAttr =
+    "PointerDescriptorStructuredAxes";
+
 /// Policy-owned description of one value crossing a control-flow boundary.
 ///
-/// `components` are runtime values that a policy may place in an expanded SCF
-/// signature. `invariants` and `attributes` are public storage whose layout is
-/// interpreted only by the policy that creates them. The shared rewrite treats
-/// those fields as opaque and only accesses `components` directly.
+/// `components` contain every runtime value needed to rebuild the original
+/// value. A policy may place a selected subset in an expanded SCF signature.
+/// `attributes` retain non-SSA metadata. Both layouts are private to the
+/// policy; the shared rewrite never interprets pointer-specific fields.
 struct DecomposedValue {
   Type originalType;
   SmallVector<Value> components;
-  SmallVector<Value> invariants;
   SmallVector<Attribute> attributes;
 };
 
 /// Read-only view of the SSA mapping and decompositions visible at the current
 /// rewrite point. Policies use it while recursively analyzing pointer
-/// producers; the state exists only for one control-flow rewrite attempt. The
-/// referenced mappings are not owned and must outlive the context.
+/// producers; the state exists only for one control-flow rewrite attempt.
 class ControlFlowRewriteContext {
 public:
   ControlFlowRewriteContext(
@@ -71,8 +97,9 @@ private:
 ///
 /// The policy decides how its value is decomposed and rebuilt, which components
 /// cross loop/if boundaries, and whether two decompositions share a compatible
-/// invariant schema. It is not an IR marker and carries no state between
-/// policy invocations.
+/// non-carried schema. It carries no mutable state between policy invocations.
+/// A policy that expands pointer descriptors may request a downstream handoff
+/// marker; the shared rewrite owns the positional slot metadata.
 class ControlFlowRewritePolicy : public ControlFlowAnalysisPolicy {
 public:
   virtual ~ControlFlowRewritePolicy() = default;
@@ -80,6 +107,41 @@ public:
   /// Whether results of this ordinary operation need immediate decomposition
   /// after cloning so later operations can reuse their exact component state.
   virtual bool shouldDecomposeOperation(Operation *op) const = 0;
+
+  /// Whether rewritten loops owned by this policy must expose their descriptor
+  /// slots to downstream conversion. The shared rewrite records the exact
+  /// expanded result indices because only it knows both old and new signatures.
+  virtual bool requiresPointerDescriptorBoundaryMarker() const { return false; }
+
+  /// Whether recomposing a result of this ordinary cloned operation creates a
+  /// descriptor root that downstream conversion must recognize. This is more
+  /// selective than the boundary marker request above: most policies need
+  /// handoff markers only for SCF argument/result reconstructions, while a
+  /// policy may opt in for a specific pointer-preserving operation.
+  virtual bool shouldMarkOperationRecomposition(Operation *) const {
+    return false;
+  }
+
+  /// Adds policy-private metadata to a descriptor rebuild root.
+  /// This is called only after the generic rewrite has attached the ownership
+  /// marker, whether the root was created at an SCF boundary or by an ordinary
+  /// operation recomposition explicitly selected by the policy.
+  virtual LogicalResult
+  annotatePointerDescriptorRebuild(Operation *, const DecomposedValue &) const {
+    return success();
+  }
+
+  /// Normalizes a concrete descriptor to the schema selected by control-flow
+  /// analysis. The default only replaces policy metadata; tensor-pointer
+  /// policies override it to fold structured fields into an opaque carrier
+  /// when an incoming edge was downgraded.
+  virtual LogicalResult
+  normalizeControlFlowValue(DecomposedValue &value,
+                            ArrayRef<Attribute> targetAttributes, OpBuilder &,
+                            Location) const {
+    value.attributes.assign(targetAttributes.begin(), targetAttributes.end());
+    return success();
+  }
 
   virtual FailureOr<DecomposedValue>
   decompose(Value value, const ControlFlowRewriteContext &context,
@@ -95,17 +157,21 @@ public:
 /// Signature expansion, region cloning, terminator rewriting, nested recursion
 /// and result replacement are driven solely by operation-level decisions in
 /// `plan`.
-LogicalResult
-applyControlFlowRewritePlan(ModuleOp module,
-                            const ControlFlowRewritePolicy &policy,
-                            const ControlFlowRewritePlan &plan);
+/// Set `emitDiagnostics` to false for a speculative rewrite on a detached
+/// clone whose failure is intentionally treated as an unsupported case.
+LogicalResult applyControlFlowRewritePlan(
+    ModuleOp module, const ControlFlowRewritePolicy &policy,
+    const ControlFlowRewritePlan &plan, bool emitDiagnostics = true);
 
 /// Analyzes the complete decomposition stage before mutating the IR, then
 /// applies the frozen plan from outermost to innermost. Pointer semantics
 /// remain selected by `policy` so different decompositions share the same SCF
 /// plumbing.
+/// When `allowUnsupportedFallback` is true, a failed complete rewrite is
+/// treated as an unsupported optimization and leaves the input module intact.
 LogicalResult rewriteControlFlow(ModuleOp module,
-                                 const ControlFlowRewritePolicy &policy);
+                                 const ControlFlowRewritePolicy &policy,
+                                 bool allowUnsupportedFallback = false);
 
 } // namespace mlir::triton::controlflow
 

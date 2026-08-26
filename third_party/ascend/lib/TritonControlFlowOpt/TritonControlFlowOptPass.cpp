@@ -26,6 +26,7 @@
 #include "TritonControlFlowOpt/CFGStructuring.h"
 #include "TritonControlFlowOpt/TensorPtrDecompose.h"
 
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -39,8 +40,9 @@ void TritonControlFlowOptPass::getDependentDialects(
     DialectRegistry &registry) const {
   // CFG structuring creates SCF operations, while pointer decomposition
   // materializes arith and Triton pointer operations.
-  registry.insert<arith::ArithDialect, cf::ControlFlowDialect,
-                  func::FuncDialect, scf::SCFDialect, triton::TritonDialect>();
+  registry
+      .insert<arith::ArithDialect, cf::ControlFlowDialect, func::FuncDialect,
+              scf::SCFDialect, scope::ScopeDialect, triton::TritonDialect>();
 }
 
 void TritonControlFlowOptPass::runOnOperation() {
@@ -48,8 +50,8 @@ void TritonControlFlowOptPass::runOnOperation() {
 
   // Apply the control-flow preprocessing pipeline in dependency order:
   //   1. normalize supported cf graphs to scf;
-  //   2. decompose block-pointer descriptors across SCF boundaries;
-  //   3. replace common-base tensor pointers at SCF boundaries with offsets.
+  //   2. decompose block-pointer descriptors across supported boundaries;
+  //   3. replace common-base tensor pointers at those boundaries with offsets.
   // TODO: Extend stage 3 to carry both the base and complete offsets, then add
   // StructuredOffsetsDecompose to further split structured offsets into a
   // base offset and per-dimension strides.

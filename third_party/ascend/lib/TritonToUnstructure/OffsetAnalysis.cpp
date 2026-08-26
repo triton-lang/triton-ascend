@@ -21,6 +21,7 @@
  */
 
 #include "TritonToUnstructure/OffsetAnalysis.h"
+#include "TritonControlFlowOpt/ControlFlowRewrite.h"
 #include "Utils/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -77,6 +78,7 @@ PtrOffsetInfo &PtrOffsetInfo::operator=(const PtrOffsetInfo &other) {
   setOffsets(other.getOffsets());
   setStructured(other.getStructured());
   setScalarLike(other.isScalarLike());
+  setPointerDescriptorOwned(other.isPointerDescriptorOwned());
   return *this;
 }
 
@@ -88,6 +90,9 @@ SmallVector<Value> PtrOffsetInfo::getOffsets() const {
 SmallVector<Value> &PtrOffsetInfo::getOffsetsRef() { return this->tptOffsets; }
 
 bool PtrOffsetInfo::isScalarLike() const { return this->scalarLike; }
+bool PtrOffsetInfo::isPointerDescriptorOwned() const {
+  return this->pointerDescriptorOwned;
+}
 
 SmallVector<PtrOffsetInfo::AxisInfo> &PtrOffsetInfo::getStructuredRef() {
   return this->structured;
@@ -151,6 +156,10 @@ void PtrOffsetInfo::setScalarLike(bool scalarLike) {
   this->scalarLike = scalarLike;
 }
 
+void PtrOffsetInfo::setPointerDescriptorOwned(bool pointerDescriptorOwned) {
+  this->pointerDescriptorOwned = pointerDescriptorOwned;
+}
+
 bool PtrOffsetInfo::isStructured(int dim) const {
   return this->scalarLike || structured[dim] == AxisInfo::structured ||
          structured[dim] == AxisInfo::scalar;
@@ -184,7 +193,8 @@ void PtrOffsetInfo::setZeroOffset() {
     offset = builder.create<arith::ConstantOp>(
         ptr.getLoc(), DenseElementsAttr::get(
                           RankedTensorType::get(tensorType.getShape(),
-                                                builder.getIntegerType(64)),
+                                                builder.getIntegerType(64),
+                                                tensorType.getEncoding()),
                           builder.getZeroAttr(builder.getIntegerType(64))));
   } else {
     offset = builder.create<arith::ConstantOp>(ptr.getLoc(),
@@ -206,6 +216,111 @@ PtrOffsetInfo combineInfo(const PtrOffsetInfo &lhs, const PtrOffsetInfo &rhs) {
     structuredRef[i] = std::min(lhsStructured[i], rhsStructured[i]);
   return info;
 }
+
+namespace {
+
+bool isScalarPointer(Value value) {
+  auto pointerType = dyn_cast<triton::PointerType>(value.getType());
+  return pointerType && !isa<ShapedType>(pointerType.getPointeeType());
+}
+
+bool isTensorPointer(Value value) {
+  auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+  return tensorType && isa<triton::PointerType>(tensorType.getElementType());
+}
+
+// A scalar pointer selected or carried by structured control flow is already a
+// complete runtime address. Recording the SSA value itself as the source avoids
+// choosing one incoming source and losing the other branch or loop iteration.
+// Later addptr users can still accumulate a separate offset from this address.
+void recordOpaqueScalarPointer(
+    Value pointer, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  offsetMap[pointer] = PtrOffsetInfo();
+  offsetMap[pointer].setPtr(pointer);
+  offsetMap[pointer].setZeroOffset();
+  offsetMap[pointer].setScalarLike(true);
+}
+
+// A tensor pointer without a proven common scalar base may choose a different
+// source for every element. This includes opaque function arguments,
+// per-lane selects, and loop phi values whose incoming provenance has not been
+// merged. Preserve the pointer tensor itself as the complete opaque base and
+// attach a zero displacement. Later addptr parsing can accumulate an additional
+// offset without discarding the runtime lane-wise source choice.
+void recordOpaqueTensorPointer(
+    Value pointerTensor, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  auto tensorType = cast<RankedTensorType>(pointerTensor.getType());
+  offsetMap[pointerTensor] = PtrOffsetInfo();
+  offsetMap[pointerTensor].setPtr(pointerTensor);
+  offsetMap[pointerTensor].setZeroOffset();
+  offsetMap[pointerTensor].setUnstructured(tensorType.getRank());
+}
+
+// PointerDescriptorBoundary stores loop-carried slot indices in the common
+// init/region-argument/result/terminator coordinate space. Only those slots
+// belong to the CFO descriptor protocol; unmarked tensor-pointer loops retain
+// the established main-dev provenance analysis.
+bool isPointerDescriptorBoundarySlot(Operation *loop, unsigned slot) {
+  auto slots = dyn_cast_or_null<DenseI32ArrayAttr>(
+      loop->getAttr(controlflow::kPointerDescriptorBoundaryAttr));
+  if (!slots)
+    return false;
+  return llvm::is_contained(slots.asArrayRef(), static_cast<int32_t>(slot));
+}
+
+bool isScalarPointerOffsetBoundarySlot(Operation *loop, unsigned slot) {
+  auto slots = dyn_cast_or_null<DenseI32ArrayAttr>(
+      loop->getAttr(kScalarPointerOffsetBoundaryAttr));
+  return slots &&
+         llvm::is_contained(slots.asArrayRef(), static_cast<int32_t>(slot));
+}
+
+bool isScalarPointerOffsetBoundaryRegionArgument(LoopLikeOpInterface loopOp,
+                                                 BlockArgument regionIterArg) {
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation())) {
+    if (regionIterArg.getOwner() != whileOp.getBeforeBody() &&
+        regionIterArg.getOwner() != whileOp.getAfterBody())
+      return false;
+    return isScalarPointerOffsetBoundarySlot(loopOp.getOperation(),
+                                             regionIterArg.getArgNumber());
+  }
+
+  if (auto forOp = dyn_cast<scf::ForOp>(loopOp.getOperation())) {
+    if (regionIterArg.getOwner() != forOp.getBody() ||
+        regionIterArg.getArgNumber() == 0)
+      return false;
+    return isScalarPointerOffsetBoundarySlot(loopOp.getOperation(),
+                                             regionIterArg.getArgNumber() - 1);
+  }
+  return false;
+}
+
+bool isPointerDescriptorBoundaryRegionArgument(LoopLikeOpInterface loopOp,
+                                               BlockArgument regionIterArg) {
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation())) {
+    if (regionIterArg.getOwner() != whileOp.getBeforeBody() &&
+        regionIterArg.getOwner() != whileOp.getAfterBody())
+      return false;
+    return isPointerDescriptorBoundarySlot(whileOp,
+                                           regionIterArg.getArgNumber());
+  }
+
+  for (auto [slot, argument] : llvm::enumerate(loopOp.getRegionIterArgs())) {
+    if (argument == regionIterArg)
+      return isPointerDescriptorBoundarySlot(loopOp.getOperation(), slot);
+  }
+  return false;
+}
+
+bool isPointerDescriptorBoundaryResult(LoopLikeOpInterface loopOp,
+                                       Value result) {
+  auto opResult = dyn_cast<OpResult>(result);
+  return opResult && opResult.getOwner() == loopOp.getOperation() &&
+         isPointerDescriptorBoundarySlot(loopOp.getOperation(),
+                                         opResult.getResultNumber());
+}
+
+} // namespace
 
 void parse(Value operand, const Location &loc, RewriterBase &rewriter,
            llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
@@ -260,6 +375,12 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
       if (auto ptrType = dyn_cast<triton::PointerType>(operand.getType())) {
         offsetMap[operand] =
             PtrOffsetInfo(operand, PtrOffsetInfo::AxisInfo::scalar);
+      } else if (isTensorPointer(operand)) {
+        // CFO may rebuild a tensor pointer from one invariant opaque function
+        // argument plus a separately carried displacement. The argument itself
+        // is the complete per-lane base: it has no common scalar provenance and
+        // must remain unstructured even when the added displacement is affine.
+        recordOpaqueTensorPointer(operand, offsetMap);
       } else {
         offsetMap[operand] = PtrOffsetInfo();
       }
@@ -296,6 +417,34 @@ void parseLoopRegionIterArg(LoopLikeOpInterface loopOp, const Location &loc,
                             RewriterBase &rewriter,
                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
                             BlockArgument regionIterArg) {
+  // This argument is a dynamic relative offset created by T2U.  Do not copy
+  // the loop init provenance here: doing so makes every backedge restart from
+  // the initial offset and drops the accumulated delta.  Record the argument
+  // itself as the offset identity so every later addptr keeps the live carrier
+  // (`offset(region_arg) = region_arg`) when adding its backedge delta.
+  if (isScalarPointerOffsetBoundaryRegionArgument(loopOp, regionIterArg)) {
+    offsetMap.erase(regionIterArg);
+    offsetMap[regionIterArg] = PtrOffsetInfo();
+    offsetMap[regionIterArg].setOffset(regionIterArg);
+    offsetMap[regionIterArg].setScalarLike(true);
+    return;
+  }
+
+  if (isScalarPointer(regionIterArg) &&
+      isPointerDescriptorBoundaryRegionArgument(loopOp, regionIterArg)) {
+    recordOpaqueScalarPointer(regionIterArg, offsetMap);
+    return;
+  }
+
+  // CFO descriptor slots may merge different incoming bases. Without a fixed
+  // point, preserve the runtime phi itself rather than choosing one edge.
+  // Ordinary unmarked loops stay on the established init/condition analysis.
+  if (isTensorPointer(regionIterArg) &&
+      isPointerDescriptorBoundaryRegionArgument(loopOp, regionIterArg)) {
+    recordOpaqueTensorPointer(regionIterArg, offsetMap);
+    return;
+  }
+
   if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation());
       whileOp && whileOp.getAfterBody() == regionIterArg.getOwner()) {
     auto argNum = regionIterArg.getArgNumber();
@@ -419,11 +568,132 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   // Get addPtr base_ptr
   Value ptr = op.getPtr();
   parse(ptr, op.getLoc(), rewriter, offsetMap);
+  auto ptrInfo = offsetMap.find(ptr);
+  if (ptrInfo == offsetMap.end()) {
+    op.emitOpError("could not analyze the pointer base");
+    return;
+  }
   // Get addPtr offset
   Value offsetValue = op.getOffset();
+  PtrOffsetInfo ptrOffsetInfo = ptrInfo->second;
+  bool isRebuild = op->hasAttr(controlflow::kPointerDescriptorRebuildAttr);
+  Attribute offsetForm =
+      op->getAttr(controlflow::kPointerDescriptorOffsetFormAttr);
+  auto structuredAxes = dyn_cast_or_null<DenseI32ArrayAttr>(
+      op->getAttr(controlflow::kPointerDescriptorStructuredAxesAttr));
+  auto resultType = dyn_cast<RankedTensorType>(op.getType());
+  SmallVector<PtrOffsetInfo::AxisInfo> descriptorAxes;
+  if (structuredAxes) {
+    if (!isRebuild || !resultType ||
+        structuredAxes.asArrayRef().size() !=
+            static_cast<size_t>(resultType.getRank())) {
+      op.emitOpError("invalid pointer descriptor structured-axis metadata");
+      return;
+    }
+    for (int32_t axis : structuredAxes.asArrayRef()) {
+      if (axis == 1)
+        descriptorAxes.push_back(PtrOffsetInfo::AxisInfo::structured);
+      else if (axis == 0)
+        descriptorAxes.push_back(PtrOffsetInfo::AxisInfo::unstructured);
+      else {
+        op.emitOpError(
+            "pointer descriptor structured axes must contain only 0 or 1");
+        return;
+      }
+    }
+  }
+  bool isStridedRankOne = false;
+  if (offsetForm) {
+    auto form = dyn_cast<StringAttr>(offsetForm);
+    if (!isRebuild || !form ||
+        form.getValue() != controlflow::kStrided1DOffsetForm) {
+      op.emitOpError("invalid pointer descriptor offset form");
+      return;
+    }
+    auto offsetType = dyn_cast<RankedTensorType>(offsetValue.getType());
+    auto offsetElementType =
+        offsetType ? dyn_cast<IntegerType>(offsetType.getElementType())
+                   : IntegerType();
+    auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
+    if (!resultType || resultType.getRank() != 1 || !offsetType ||
+        !isa<triton::PointerType>(resultType.getElementType()) ||
+        !offsetElementType || offsetElementType.getWidth() > 64 ||
+        resultType.getShape() != offsetType.getShape() ||
+        resultType.getEncoding() != offsetType.getEncoding() || !baseSplat ||
+        !isa<triton::PointerType>(baseSplat.getSrc().getType())) {
+      op.emitOpError(
+          "expected strided_1d on a rank-1 tensor pointer rebuilt from a "
+          "scalar pointer base and a compatible ranked integer offset");
+      return;
+    }
+    if (descriptorAxes.size() != 1 ||
+        descriptorAxes.front() != PtrOffsetInfo::AxisInfo::structured) {
+      op.emitOpError(
+          "strided_1d requires PointerDescriptorStructuredAxes = [1]");
+      return;
+    }
+    isStridedRankOne = true;
+  }
+  bool isCompleteOffsetCarrier = isRebuild && !isStridedRankOne;
+  bool isDescriptorOwned =
+      isRebuild || ptrOffsetInfo.isPointerDescriptorOwned();
+
+  if (isCompleteOffsetCarrier) {
+    // The carrier is complete relative to the descriptor base, but parsing
+    // that base may expose an additional displacement from its scalar source.
+    // Preserve both parts when reconstructing the complete pointer offset.
+    auto offsetType = dyn_cast<RankedTensorType>(offsetValue.getType());
+    auto offsetElementType =
+        offsetType ? dyn_cast<IntegerType>(offsetType.getElementType())
+                   : IntegerType();
+    if (!resultType || !offsetType || !offsetElementType ||
+        resultType.getShape() != offsetType.getShape() ||
+        resultType.getEncoding() != offsetType.getEncoding()) {
+      op.emitOpError("expected a shape- and encoding-compatible ranked integer "
+                     "complete-offset carrier");
+      return;
+    }
+    if (offsetElementType.getWidth() > 64) {
+      op.emitOpError("complete-offset carrier wider than i64 is unsupported");
+      return;
+    }
+
+    RewriterBase::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPoint(op);
+    if (offsetElementType.getWidth() != 64) {
+      auto carrierType =
+          RankedTensorType::get(offsetType.getShape(), rewriter.getI64Type(),
+                                offsetType.getEncoding());
+      offsetValue = rewriter.create<arith::ExtSIOp>(op.getLoc(), carrierType,
+                                                    offsetValue);
+    }
+    Value baseDisplacement = ptrOffsetInfo.getOffset();
+    if (!baseDisplacement ||
+        baseDisplacement.getType() != offsetValue.getType()) {
+      op.emitOpError(
+          "expected pointer-base displacement compatible with complete "
+          "carrier");
+      return;
+    }
+    Value completeOffset = rewriter.create<arith::AddIOp>(
+        op.getLoc(), baseDisplacement, offsetValue);
+    ptrOffsetInfo.setOffset(completeOffset);
+    // setUnstructured() updates only the per-axis classification; it does not
+    // clear the independent scalar-like property inherited from a splatted
+    // base. A complete offset carrier is intentionally opaque here, so there
+    // is no proof that all lanes address the same element. Keep this state
+    // conservative and force the lane-wise memory-access path.
+    ptrOffsetInfo.setScalarLike(false);
+    if (descriptorAxes.empty())
+      ptrOffsetInfo.setUnstructured(resultType.getRank());
+    else
+      ptrOffsetInfo.setStructured(descriptorAxes);
+    ptrOffsetInfo.setPointerDescriptorOwned(true);
+    offsetMap[op.getResult()] = ptrOffsetInfo;
+    return;
+  }
+
   parse(offsetValue, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo ptrOffsetInfo = offsetMap.at(ptr);
-  PtrOffsetInfo offsetOffsetInfo = offsetMap.at(offsetValue);
   // Modify IR
 
   RewriterBase::InsertionGuard guard(rewriter);
@@ -432,7 +702,8 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     auto offsetElementType = cast<IntegerType>(offsetType.getElementType());
     if (offsetElementType.getWidth() != 64) {
       auto newOffsetType = RankedTensorType::get(offsetType.getShape(),
-                                                 rewriter.getIntegerType(64));
+                                                 rewriter.getIntegerType(64),
+                                                 offsetType.getEncoding());
       offsetValue = rewriter.create<arith::ExtSIOp>(op.getLoc(), newOffsetType,
                                                     offsetValue);
     }
@@ -456,9 +727,25 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   });
   // Set addPtr offset map
   auto dst = op.getResult();
+  PtrOffsetInfo offsetOffsetInfo = offsetMap.at(op.getOffset());
   auto dstOffsetInfo = combineInfo(ptrOffsetInfo, offsetOffsetInfo);
   dstOffsetInfo.setPtr(ptrOffsetInfo.getPtr());
   dstOffsetInfo.setOffset(offset);
+  dstOffsetInfo.setPointerDescriptorOwned(isDescriptorOwned);
+  // CFO's strided_1d descriptor is an explicit proof that a scalar pointer
+  // base plus this rank-1 lane offset remains a contiguous SIMD access. The
+  // generic offset join above cannot retain that proof when the lane offset
+  // was built through several arithmetic operations, so restore the marker's
+  // classification after the join. Complete opaque carriers intentionally do
+  // not enter this branch and keep their conservative unstructured state.
+  if (isStridedRankOne) {
+    dstOffsetInfo.setStructured(descriptorAxes);
+    // The descriptor describes a lane-varying, structured offset.  It is
+    // contiguous, but it is not a scalar-like pointer: scalarLike would
+    // route the load/store converter through splatAndLoadScenario(), which
+    // loads lane zero once and fills every lane with that value.
+    dstOffsetInfo.setScalarLike(false);
+  }
   offsetMap[dst] = dstOffsetInfo;
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -495,7 +782,9 @@ void parseSplat(triton::SplatOp op, const Location &loc, RewriterBase &rewriter,
     rewriter.setInsertionPoint(op);
     Value valueOffset = srcOffsetInfo.getOffset();
     Value offset = rewriter.create<triton::SplatOp>(
-        loc, RankedTensorType::get(dstShape, rewriter.getIntegerType(64)),
+        loc,
+        RankedTensorType::get(dstShape, rewriter.getIntegerType(64),
+                              dstType.getEncoding()),
         valueOffset);
     dstOffsetInfo.setOffset(offset);
   }
@@ -505,6 +794,8 @@ void parseSplat(triton::SplatOp op, const Location &loc, RewriterBase &rewriter,
     dstStructured.push_back(dim == 1 ? PtrOffsetInfo::AxisInfo::scalar
                                      : PtrOffsetInfo::AxisInfo::scalarlike);
   dstOffsetInfo.setScalarLike(true);
+  dstOffsetInfo.setPointerDescriptorOwned(
+      srcOffsetInfo.isPointerDescriptorOwned());
   offsetMap[dst] = dstOffsetInfo;
 }
 
@@ -633,6 +924,8 @@ void parseBitcast(triton::BitcastOp op, const Location &loc,
     offsetMap[dst] = PtrOffsetInfo(srcStructured);
   }
   offsetMap[dst].setScalarLike(srcOffsetInfo.isScalarLike());
+  offsetMap[dst].setPointerDescriptorOwned(
+      srcOffsetInfo.isPointerDescriptorOwned());
 }
 
 void parseLoad(triton::LoadOp op, const Location &loc, RewriterBase &rewriter,
@@ -700,6 +993,8 @@ void parseBroadcast(triton::BroadcastOp op, const Location &loc,
   // Set broadcast offset map
   offsetMap[dst] = PtrOffsetInfo(srcOffsetInfo.getPtr());
   offsetMap[dst].setScalarLike(srcOffsetInfo.isScalarLike());
+  offsetMap[dst].setPointerDescriptorOwned(
+      srcOffsetInfo.isPointerDescriptorOwned());
 
   if (srcOffsetInfo.getPtr()) {
     RewriterBase::InsertionGuard guard(rewriter);
@@ -707,7 +1002,8 @@ void parseBroadcast(triton::BroadcastOp op, const Location &loc,
     Value valueOffset = srcOffsetInfo.getOffset();
     Value offset = rewriter.create<triton::BroadcastOp>(
         loc,
-        RankedTensorType::get(dstType.getShape(), rewriter.getIntegerType(64)),
+        RankedTensorType::get(dstType.getShape(), rewriter.getIntegerType(64),
+                              dstType.getEncoding()),
         valueOffset);
 
     offsetMap[dst].setOffset(offset);
@@ -736,6 +1032,8 @@ void parseExpandDims(triton::ExpandDimsOp op, const Location &loc,
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo(srcOffsetInfo.getPtr());
   offsetMap[dst].setScalarLike(srcOffsetInfo.isScalarLike());
+  offsetMap[dst].setPointerDescriptorOwned(
+      srcOffsetInfo.isPointerDescriptorOwned());
   if (srcOffsetInfo.getPtr()) {
     RewriterBase::InsertionGuard guard(rewriter);
     rewriter.setInsertionPoint(op);
@@ -787,6 +1085,16 @@ void parseClampF(triton::ClampFOp op, const Location &loc,
 void parseSelect(arith::SelectOp op, const Location &loc,
                  RewriterBase &rewriter,
                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  if (isScalarPointer(op.getResult())) {
+    recordOpaqueScalarPointer(op.getResult(), offsetMap);
+    return;
+  }
+
+  if (isTensorPointer(op.getResult())) {
+    recordOpaqueTensorPointer(op.getResult(), offsetMap);
+    return;
+  }
+
   // Get select condition
   auto condition = op.getCondition();
   parse(condition, op.getLoc(), rewriter, offsetMap);
@@ -967,6 +1275,11 @@ void parseReduceReturn(triton::ReduceReturnOp op, const Location &loc,
 
 void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
              llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+  if (isScalarPointer(dst)) {
+    recordOpaqueScalarPointer(dst, offsetMap);
+    return;
+  }
+
   const unsigned int index = cast<OpResult>(dst).getResultNumber();
   // Get if then region
   Block &thenBlock = op.getThenRegion().front();
@@ -977,6 +1290,7 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   auto thenSrcPtr = thenOffsetInfo.getPtr();
   // Get if else region
   bool dstIsScalar = thenOffsetInfo.isScalarLike();
+  bool descriptorOwned = thenOffsetInfo.isPointerDescriptorOwned();
   SmallVector<PtrOffsetInfo::AxisInfo> elseStructured;
   if (op.elseBlock()) {
     Block &elseBlock = op.getElseRegion().front();
@@ -985,6 +1299,8 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
     PtrOffsetInfo elseOffsetInfo = offsetMap.at(elseYieldedValue);
     elseStructured = elseOffsetInfo.getStructuredRef();
     dstIsScalar = dstIsScalar && elseOffsetInfo.isScalarLike();
+    descriptorOwned =
+        descriptorOwned && elseOffsetInfo.isPointerDescriptorOwned();
     if (thenSrcPtr != elseOffsetInfo.getPtr()) {
       emitError(loc)
           << "Currently ptr type from different source not supported";
@@ -995,6 +1311,7 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   offsetMap[dst] = PtrOffsetInfo();
   offsetMap[dst].setPtr(thenSrcPtr);
   offsetMap[dst].setScalarLike(dstIsScalar);
+  offsetMap[dst].setPointerDescriptorOwned(descriptorOwned);
   auto &dstStructured = offsetMap[dst].getStructuredRef();
   dstStructured.resize(thenStructured.size());
   for (size_t i = 0; i < dstStructured.size(); i++)
@@ -1022,6 +1339,18 @@ void parseYield(scf::YieldOp op, const Location &loc, RewriterBase &rewriter,
 void parseLoopOp(LoopLikeOpInterface op, const Location &loc,
                  RewriterBase &rewriter,
                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+  if (isScalarPointer(dst) && isPointerDescriptorBoundaryResult(op, dst)) {
+    recordOpaqueScalarPointer(dst, offsetMap);
+    return;
+  }
+
+  // Apply the same boundary-slot rule to results so entry, region arguments,
+  // backedges and zero-trip results cannot disagree about the representation.
+  if (isTensorPointer(dst) && isPointerDescriptorBoundaryResult(op, dst)) {
+    recordOpaqueTensorPointer(dst, offsetMap);
+    return;
+  }
+
   auto resNum = cast<OpResult>(dst).getResultNumber();
   Value yieldedValue = nullptr;
   if (auto whileOp = dyn_cast<scf::WhileOp>(op.getOperation())) {
@@ -1062,6 +1391,8 @@ void parseExtractSlice(tensor::ExtractSliceOp op, const Location &loc,
       dstStructured.push_back(srcStructured[i]);
   }
   offsetMap[dst] = PtrOffsetInfo(srcPtr, srcOffset, dstStructured);
+  offsetMap[dst].setPointerDescriptorOwned(
+      srcPtrInfo.isPointerDescriptorOwned());
 }
 
 void parseInsertSlice(tensor::InsertSliceOp op, const Location &loc,
@@ -1104,6 +1435,8 @@ void parseInsertSlice(tensor::InsertSliceOp op, const Location &loc,
       ++srcStructuredIter;
   }
   resPtrInfo.setStructured(resStructured);
+  resPtrInfo.setPointerDescriptorOwned(srcPtrInfo.isPointerDescriptorOwned() &&
+                                       dstPtrInfo.isPointerDescriptorOwned());
   offsetMap[res] = resPtrInfo;
 }
 
@@ -1145,6 +1478,8 @@ void parseInsert(tensor::InsertOp op, const Location &loc,
     resPtrInfo.setOffset(resOffset);
   }
   resPtrInfo.setUnstructured(dstPtrInfo.getRank());
+  resPtrInfo.setPointerDescriptorOwned(srcPtrInfo.isPointerDescriptorOwned() &&
+                                       dstPtrInfo.isPointerDescriptorOwned());
   offsetMap[res] = resPtrInfo;
 }
 

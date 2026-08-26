@@ -37,6 +37,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
@@ -576,6 +577,66 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
+// These predicates select only scalar !tt.ptr<T> transports. A
+// tensor<...x!tt.ptr<T>> follows the separate tensor-pointer lowering.
+bool hasScalarPointerResult(scf::IfOp op);
+bool isScalarPointerSelect(arith::SelectOp op);
+
+// Marks an scf.if temporarily rebuilt by IfConverter. Its scalar-pointer
+// results are represented as complete i64 addresses, so only its own yields
+// require the matching pointer-to-address conversion.
+inline constexpr llvm::StringLiteral kScalarPointerCarrierBoundaryAttr =
+    "ScalarPointerCarrierBoundary";
+
+// Rebuild an scf.if with scalar-pointer results so the boundary carries
+// complete i64 addresses and reconstructs memrefs only after the join.
+// The original branch regions are moved into the new operation, preserving
+// side effects and allowing the conversion driver to rewrite each scf.yield
+// operand in place.
+//
+// Example:
+//   %base = scf.if %cond -> !tt.ptr<f32> {
+//     scf.yield %lhs : !tt.ptr<f32>
+//   } else {
+//     scf.yield %rhs : !tt.ptr<f32>
+//   }
+//   %ptr = tt.make_tensor_ptr %base, ...
+// becomes an scf.if returning i64 plus one hivm.pointer_cast after the if.
+class IfConverter : public OpConversionPattern<scf::IfOp> {
+public:
+  using OpConversionPattern<scf::IfOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(scf::IfOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+// Convert a scalar-pointer select into a select over complete integer addresses
+// and reconstruct one memref after the selection. This handles both BlockPtr
+// bases and ordinary scalar pointers without asking the backend to merge two
+// memory objects.
+//
+// Example:
+//   %base = arith.select %cond, %lhs, %rhs : !tt.ptr<f32>
+//   %ptr = tt.make_tensor_ptr %base, ...
+// becomes:
+//   %lhs_addr = memref.extract_aligned_pointer_as_index %lhs
+//   %rhs_addr = memref.extract_aligned_pointer_as_index %rhs
+//   %selected_addr = arith.select %cond, %lhs_addr, %rhs_addr : i64
+//   %base = hivm.pointer_cast %selected_addr : i64 to memref<?xf32>
+class PointerSelectConverter : public OpConversionPattern<arith::SelectOp> {
+public:
+  using OpConversionPattern<arith::SelectOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(arith::SelectOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+// Convert the yields of an IfConverter-created scf.if to its carrier result
+// types. In particular, a yielded scalar pointer becomes its complete i64
+// address. Yields belonging to ordinary ifs or loops are intentionally left to
+// their owning conversions.
 class YieldConverter : public OpConversionPattern<scf::YieldOp> {
 public:
   using OpConversionPattern<scf::YieldOp>::OpConversionPattern;
@@ -596,11 +657,17 @@ public:
   matchAndRewrite(LoopOpTy op,
                   typename OpConversionPattern<LoopOpTy>::OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    // CFO-expanded descriptor loops already carry pointer-free policy values
+    // and remain structurally unchanged. This legacy BlockData rewrite is only
+    // valid for explicitly marked loops.
+    SmallVector<unsigned> markedRangeSlots = getMarkedMakeRangeCarrierSlots(op);
+    if (!op->hasAttr("UnhandledLoopOp") && markedRangeSlots.empty())
+      return failure();
     llvm::SmallDenseMap<Value, BlockData> known;
 
-    op->removeAttr("UnhandledLoopOp");
-    BlockDataParser::rewriteLoopOp(op, rewriter, known);
-    return success();
+    rewriter.modifyOpInPlace(op, [&]() { op->removeAttr("UnhandledLoopOp"); });
+    return BlockDataParser::rewriteLoopOp(op, rewriter, known,
+                                          markedRangeSlots);
   }
 };
 
@@ -733,6 +800,14 @@ public:
   using OpConversionPattern<triton::PtrToIntOp>::OpConversionPattern;
   LogicalResult
   matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override;
+};
+
+class IntToPtrConverter : public OpConversionPattern<triton::IntToPtrOp> {
+public:
+  using OpConversionPattern<triton::IntToPtrOp>::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(triton::IntToPtrOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override;
 };
 

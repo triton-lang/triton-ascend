@@ -60,7 +60,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "enable_select_analysis",
     "enable_sync_block_lock",
     "enable_ub_refine_opt",
-    "enable_vf_fusion",
     "force_simt_only",
     "force_simt_template",
     "graph_optimize_emit_remarks",
@@ -139,7 +138,6 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "enable_select_analysis": "it is ignored; the backend fixes select analysis to True.",
     "enable_sync_block_lock": "it is ignored; this option has no replacement because it had no effective consumer.",
     "enable_ub_refine_opt": "it is ignored; the backend keeps UB refine optimization disabled.",
-    "enable_vf_fusion": "it is ignored; use 'vf_fusion_mode' instead.",
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
     "graph_optimize_max_rewrites_per_function":
     "it is ignored; the backend fixes the maximum rewrites per function to 64.",

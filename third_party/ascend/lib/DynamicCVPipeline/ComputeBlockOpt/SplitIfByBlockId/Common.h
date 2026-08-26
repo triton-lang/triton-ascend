@@ -23,7 +23,6 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_COMPUTE_OPT_SPLIT_IF_BY_BLOCK_ID_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_COMPUTE_OPT_SPLIT_IF_BY_BLOCK_ID_COMMON_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/LogicalResult.h"
@@ -50,7 +49,6 @@ class ScalarClosure {
 private:
   mlir::Block *block = nullptr;
   mlir::Block *parentBlock = nullptr;
-  bool includeParent = true;
   llvm::ArrayRef<Operation *> ops;
 
   void collectScalarClosure(Value val);
@@ -60,7 +58,6 @@ public:
   static constexpr size_t kExpectedMaxScalarOps = 4;
   llvm::SmallPtrSet<Operation *, kExpectedMaxScalarOps> scalarOps;
   ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops);
-  ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent);
   void collect();
 
   // Safety: both operations must be in scalarOps

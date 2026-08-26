@@ -23,16 +23,12 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMPUTE_BLOCK_ID_MANAGER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMPUTE_BLOCK_ID_MANAGER_H
 
-#include <optional>
-
-#include "llvm/ADT/ArrayRef.h"
+#include "mlir/IR/Operation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/LogicalResult.h"
-
-#include "mlir/IR/Operation.h"
-
-#include "DynamicCVPipeline/Common/Utils.h"
+#include <mutex>
 
 namespace mlir {
 namespace CVPipeline {
@@ -51,31 +47,17 @@ public:
   llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
   void updateBlockId(Operation *op, int blockId);
 
-  bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
-  llvm::LogicalResult inheritFromParent(Block *block);
-
-  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId) const;
-  llvm::ArrayRef<Operation *> getOpsRefByBlockId(int blockId) const;
-
-  // Get operations that share the same block_id AND mlir block of op
-  llvm::SmallVector<Operation *> getOpsInSameBlock(Operation *op) const;
-
-  std::optional<int> getBlockIdByOpOpt(Operation *op) const;
+  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId);
+  int getBlockIdByOp(Operation *op);
+  void reset();
   int getNextId();
 
-  int getBlockIdByOp(Operation *op);
-
-  ~ComputeBlockIdManager() = default;
-  ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;
-  ComputeBlockIdManager &operator=(const ComputeBlockIdManager &) = delete;
-  ComputeBlockIdManager(ComputeBlockIdManager &&) = delete;
-  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = delete;
-
 private:
-  int cntComputeBlockId = 0;
+  int cntComputeBlockId;
   llvm::DenseMap<int, llvm::SmallVector<Operation *>> blockIdToOps;
   llvm::DenseMap<Operation *, int> opToBlockId;
-  static constexpr int kBlockIdWidth = 32;
+  mutable std::mutex managerMutex;
+  const int blockIdWidth = 32;
   llvm::LogicalResult markAndRecord(Operation *op, int blockId);
 };
 

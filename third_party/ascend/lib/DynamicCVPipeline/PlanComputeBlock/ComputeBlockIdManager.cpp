@@ -20,30 +20,32 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/BuiltinTypes.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypes.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
 
 ComputeBlockIdManager::ComputeBlockIdManager(Operation *root) {
+  cntComputeBlockId = 0;
   blockIdToOps.clear();
   opToBlockId.clear();
   root->walk([&](Operation *op) {
     if (auto blockIdAttr = op->getAttrOfType<IntegerAttr>(kBlockId)) {
-      auto blockId = blockIdAttr.getInt();
-      if (blockId <= 0) {
-        return;
+      if (auto blockId = blockIdAttr.getInt()) {
+        opToBlockId[op] = blockId;
+        blockIdToOps[blockId].push_back(op);
+        cntComputeBlockId =
+            std::max(cntComputeBlockId, static_cast<int>(blockId));
       }
-      opToBlockId[op] = blockId;
-      blockIdToOps[blockId].push_back(op);
-      cntComputeBlockId =
-          std::max(cntComputeBlockId, static_cast<int>(blockId));
     }
   });
   cntComputeBlockId++; // ensure new id is unique
@@ -51,7 +53,12 @@ ComputeBlockIdManager::ComputeBlockIdManager(Operation *root) {
 
 bool ComputeBlockIdManager::isWholeCubeReady(
     Operation *seedOp, llvm::DenseMap<Operation *, int> &indegree) {
-  for (auto *op : getOpsInSameBlock(seedOp)) {
+  auto id = getBlockIdByOp(seedOp);
+  if (id == -1) {
+    return (indegree[seedOp] == 0);
+  }
+  auto cubeBlock = getOpsByBlockId(id);
+  for (auto op : cubeBlock) {
     if (!indegree.contains(op)) {
       continue;
     }
@@ -80,10 +87,9 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
   if (blockId == -1) {
     op->removeAttr(kBlockId);
   } else {
-    op->setAttr(kBlockId, IntegerAttr::get(IntegerType::get(ctx, kBlockIdWidth),
-                                           blockId));
+    op->setAttr(kBlockId,
+                IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
   }
-
   auto it = opToBlockId.find(op);
   if (it != opToBlockId.end()) {
     int preBlockId = it->second;
@@ -95,13 +101,12 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
       }
     }
   }
-
   opToBlockId[op] = blockId;
   blockIdToOps[blockId].push_back(op);
 }
 
-llvm::ArrayRef<Operation *>
-ComputeBlockIdManager::getOpsRefByBlockId(int blockId) const {
+llvm::SmallVector<Operation *>
+ComputeBlockIdManager::getOpsByBlockId(int blockId) {
   if (blockId == -1) {
     return {};
   }
@@ -110,44 +115,15 @@ ComputeBlockIdManager::getOpsRefByBlockId(int blockId) const {
   if (it == blockIdToOps.end()) {
     return {};
   }
-  return it->second;
+  return llvm::SmallVector<Operation *>(it->second.begin(), it->second.end());
 }
 
-llvm::SmallVector<Operation *>
-ComputeBlockIdManager::getOpsByBlockId(int blockId) const {
-  auto ref = getOpsRefByBlockId(blockId);
-  return {ref.begin(), ref.end()};
-}
-
-llvm::SmallVector<Operation *>
-ComputeBlockIdManager::getOpsInSameBlock(Operation *op) const {
-  auto blockIdOpt = getBlockIdByOpOpt(op);
-  if (!blockIdOpt.has_value()) {
-    return {op};
-  }
-  auto blockId = blockIdOpt.value();
-  auto *block = op->getBlock();
-  if (auto it = blockIdToOps.find(blockId); it != blockIdToOps.end()) {
-    auto filtered =
-        llvm::make_filter_range(it->second, [block](Operation *opInBlock) {
-          return opInBlock->getBlock() == block;
-        });
-    return {filtered.begin(), filtered.end()};
-  }
-  return {op};
-}
-
-std::optional<int>
-ComputeBlockIdManager::getBlockIdByOpOpt(Operation *op) const {
+int ComputeBlockIdManager::getBlockIdByOp(Operation *op) {
   auto it = opToBlockId.find(op);
   if (it != opToBlockId.end()) {
     return it->second;
   }
-  return std::nullopt;
-}
-
-int ComputeBlockIdManager::getBlockIdByOp(Operation *op) {
-  return getBlockIdByOpOpt(op).value_or(-1);
+  return -1;
 }
 
 llvm::LogicalResult ComputeBlockIdManager::markAndRecord(Operation *op,
@@ -155,7 +131,7 @@ llvm::LogicalResult ComputeBlockIdManager::markAndRecord(Operation *op,
   // When we call mark, we assume the op have no record in manager.
   MLIRContext *ctx = op->getContext();
   op->setAttr(kBlockId,
-              IntegerAttr::get(IntegerType::get(ctx, kBlockIdWidth), blockId));
+              IntegerAttr::get(IntegerType::get(ctx, blockIdWidth), blockId));
   auto itOld = opToBlockId.find(op);
   if (itOld != opToBlockId.end() && itOld->second != -1) {
     llvm::errs() << "Error: Operation already has a block id. Op: " << *op
@@ -189,41 +165,10 @@ llvm::LogicalResult ComputeBlockIdManager::markOpsWithNewId(
   return llvm::success();
 }
 
-bool ComputeBlockIdManager::shouldInheritFromParent(
-    Block *block, CoreType requiredCoreType) const {
-  auto *parentOp = block->getParentOp();
-  if (!parentOp || !isScfOp(parentOp) ||
-      getCoreTypeOfSimpleOpOrCf(parentOp) != requiredCoreType) {
-    return false;
-  }
-
-  auto blockIdOpt = getBlockIdByOpOpt(parentOp);
-  return blockIdOpt.has_value();
-}
-
-llvm::LogicalResult ComputeBlockIdManager::inheritFromParent(Block *block) {
-  auto *parentOp = block->getParentOp();
-  if (!parentOp) {
-    return llvm::failure();
-  }
-
-  auto blockIdOpt = getBlockIdByOpOpt(parentOp);
-  if (!blockIdOpt.has_value()) {
-    return llvm::failure();
-  }
-
-  // no need to and should not walk inside nested blocks:
-  // 1. the caller is from walk already
-  // 2. if we have marked nested ops with this block id, it could be correct,
-  // since they will be re-marked with the same id, so no failures will be
-  // returned, but this is less robust
-  auto blockId = blockIdOpt.value();
-  for (auto &op : *block) {
-    if (llvm::failed(markAndRecord(&op, blockId))) {
-      return llvm::failure();
-    }
-  }
-  return llvm::success();
+void ComputeBlockIdManager::reset() {
+  cntComputeBlockId = 0;
+  blockIdToOps.clear();
+  opToBlockId.clear();
 }
 
 } // namespace CVPipeline

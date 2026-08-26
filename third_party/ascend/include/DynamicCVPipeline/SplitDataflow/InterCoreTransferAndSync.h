@@ -102,7 +102,6 @@ private:
   mlir::ModuleOp module;
   int transferIndex = 0;
   int markAllocIndex = 0;
-  int intraDepsGroupId = 0;
 
   llvm::DenseMap<mlir::Value, mlir::Value> ndnzValueMapping;
   SSBufferManager ssbufferManager;
@@ -118,8 +117,6 @@ private:
   handleCubeToVector(mlir::OpBuilder &builder, DependencyInfo &dep,
                      FlagIdManager &flagManager,
                      FlagIdReuseManager &flagIdReuseManager);
-  mlir::LogicalResult handleCubeToCube(mlir::OpBuilder &builder,
-                                       DependencyInfo &dep);
   mlir::LogicalResult handleMemoryDependency(
       mlir::OpBuilder &builder, DependencyInfo &dep, size_t depIndex,
       llvm::SmallVector<DependencyInfo> memDependencies,
@@ -147,12 +144,6 @@ private:
                                                 mlir::Location loc);
   mlir::Operation *findMainLoopforTransfer(mlir::Operation *endOp,
                                            mlir::Operation *startOp);
-  mlir::Operation *createC2CSharedL1Buffer(mlir::OpBuilder &builder,
-                                           mlir::Location loc,
-                                           llvm::ArrayRef<int64_t> shape,
-                                           mlir::Type elemType, int prodBlockId,
-                                           mlir::Operation *prodEnd,
-                                           mlir::Operation *consStart);
   std::pair<mlir::Operation *, mlir::Operation *>
   createTransferAllocs(mlir::OpBuilder &builder, mlir::Location loc,
                        llvm::ArrayRef<int64_t> shape, mlir::Type elemType,
@@ -163,9 +154,6 @@ private:
   mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue,
                                                   int iniConsumerId);
   mlir::Operation *getConsumerWaitPoint(int transferIndex);
-  mlir::Operation *getCopyPointBeforeStore(Value depValue,
-                                           Operation *vectorEndOp,
-                                           int iniProducerBlockId);
   mlir::Operation *insertVectorToCubeTransfer(
       mlir::OpBuilder &builder, mlir::Value srcValue,
       mlir::Value normalizedValue, mlir::Operation *vectorEndOp,

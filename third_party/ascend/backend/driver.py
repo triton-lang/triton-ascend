@@ -65,13 +65,7 @@ class NPUUtils(object):
         src = Path(src_path).read_text()
         cann_version = get_cann_version()
         cann_version_str = ".".join(map(str, cann_version)) if cann_version else ""
-        key_parts = [
-            "npu_utils",
-            "torch_npu_wrapper_abi=triton_async_launch_v1",
-            "USE_TORCH_NPU",
-            f"cann_version={cann_version_str}",
-            src,
-        ]
+        key_parts = [cann_version_str, src]
         key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"

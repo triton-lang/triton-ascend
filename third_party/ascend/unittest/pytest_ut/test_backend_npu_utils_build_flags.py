@@ -168,41 +168,43 @@ def test_npu_utils_initialization_builds_without_loading(monkeypatch, tmp_path):
     assert build_calls == [npu_utils]
 
 
-def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
+def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, tmp_path):
     driver = _load_driver_module()
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     cached_so = cache_dir / "npu_utils.so"
-    cached_so.write_bytes(b"cached")
+    built_so = tmp_path / "built_npu_utils.so"
+    built_so.write_bytes(b"built")
 
     class FakeCache:
-        lock_path = str(cache_dir / "lock")
 
         def __init__(self):
             self.get_file_calls = 0
+            self.put_calls = 0
 
         def get_file(self, filename):
             self.get_file_calls += 1
-            if self.get_file_calls == 1:
-                return None
-            return str(cached_so)
+            return None
 
         def put(self, data, filename, binary=True):
-            raise AssertionError("unexpected cache put")
+            self.put_calls += 1
+            assert data == b"built"
+            assert filename == "npu_utils.so"
+            assert binary is True
+            cached_so.write_bytes(data)
+            return str(cached_so)
 
     fake_cache = FakeCache()
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: fake_cache)
-    monkeypatch.setattr(
-        driver,
-        "_build_npu_ext",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected npu_utils build")),
-    )
+    monkeypatch.setattr(driver, "_build_npu_ext", lambda *args, **kwargs: str(built_so))
 
     npu_utils = driver.NPUUtils()
 
     assert npu_utils._cache_path == str(cached_so)
     assert npu_utils.npu_utils_mod is None
-    assert fake_cache.get_file_calls == 2
+    assert cached_so.read_bytes() == b"built"
+    assert fake_cache.get_file_calls == 1
+    assert fake_cache.put_calls == 1
 
 
 @pytest.mark.parametrize(

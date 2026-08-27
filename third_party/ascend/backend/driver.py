@@ -19,8 +19,6 @@
 # THE SOFTWARE.
 
 from pathlib import Path
-import contextlib
-import fcntl
 import tempfile
 import os
 import os.path
@@ -39,30 +37,6 @@ from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, conv
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
-
-
-def _get_cache_lock_path(cache):
-    lock_path = getattr(cache, "lock_path", None)
-    if lock_path is not None:
-        return lock_path
-    file_cache_manager = getattr(cache, "_file_cache_manager", None)
-    return getattr(file_cache_manager, "lock_path", None)
-
-
-@contextlib.contextmanager
-def _cache_build_lock(cache):
-    lock_path = _get_cache_lock_path(cache)
-    if lock_path is None:
-        yield
-        return
-
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    with open(lock_path, "a") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
 
 
 class NPUUtils(object):
@@ -105,18 +79,13 @@ class NPUUtils(object):
         if cache_path is not None and os.path.exists(cache_path):
             return cache_path
 
-        with _cache_build_lock(cache):
-            cache_path = cache.get_file(fname)
-            if cache_path is not None and os.path.exists(cache_path):
-                return cache_path
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
-                with open(tmp_src_path, "w") as f:
-                    f.write(src)
-                so = _build_npu_ext("npu_utils", tmp_src_path)
-                with open(so, "rb") as f:
-                    cache_path = cache.put(f.read(), fname, binary=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
+            with open(tmp_src_path, "w") as f:
+                f.write(src)
+            so = _build_npu_ext("npu_utils", tmp_src_path)
+            with open(so, "rb") as f:
+                cache_path = cache.put(f.read(), fname, binary=True)
         return cache_path
 
     def _load_mod(self):

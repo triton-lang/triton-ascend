@@ -214,7 +214,8 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
         "pcb10_tc01_kernel",
         "chunk_ttt_linear_fwd_kernel_h",
         "chunk_ttt_linear_bwd_kernel_h",
-        "chunk_gated_delta_rule_bwd_kernel_dhu_k128_blockdim128"};
+        "chunk_gated_delta_rule_bwd_kernel_dhu_k128_blockdim128",
+        "chunk_gated_delta_rule_fwd_kernel_h_k128_blockdim128"};
     if (llvm::is_contained(regionalDisabledOps, funcOp.getSymName())) {
       return CoreType::UNDETERMINED;
     }

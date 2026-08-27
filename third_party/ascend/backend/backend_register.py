@@ -76,19 +76,6 @@ class _LazyBackendStrategyRegister:
 backend_strategy_registry = _LazyBackendStrategyRegister()
 
 
-@backend_strategy_registry.register("mindspore", "version_hash")
-def version_hash():
-    import mindspore
-    return [str(mindspore.version)]
-
-
-@backend_strategy_registry.register("torch_npu", "version_hash")
-def version_hash():
-    import torch
-    import torch_npu
-    return [torch.version.git_version, torch_npu.version.git_version]
-
-
 @backend_strategy_registry.register("mindspore", "cxx_abi")
 def get_mindspore_cxx_abi():
     return 0

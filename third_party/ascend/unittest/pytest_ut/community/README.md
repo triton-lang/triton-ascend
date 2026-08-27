@@ -11,12 +11,16 @@ source files.
 - Historical Fail/Error nodes in this selected set: 0/0
 
 The selected test functions and their parametrization decorators are copied
-verbatim, except for one device-safety adaptation in `test_int_annotation`:
-its temporary output buffer is enlarged from one element to four because the
-unchanged kernel stores at offset `v=3`. Unselected top-level `test_*`
-functions are omitted, while shared module helpers are retained. `conftest.py`
-supplies the `npu` device and the same cache/knob/allocator fixtures used by the
-source test tree.
+verbatim, except for three Ascend adaptations. In `test_int_annotation`, the
+temporary output buffer is enlarged from one element to four because the
+unchanged kernel stores at offset `v=3`. In
+`test_host_tensor_descriptor_matmul`, six block shapes are scaled down while
+retaining their aspect ratios, `BLOCK_K`, and pipeline stages so the generated
+kernel fits the target's UB capacity. In `test_kernel_in_thread`, each caller
+thread explicitly selects the NPU that owns the test buffer because NPU device
+selection is thread-local. Unselected top-level `test_*` functions are omitted,
+while shared module helpers are retained. `conftest.py` supplies the `npu`
+device and the same cache/knob/allocator fixtures used by the source test tree.
 
 `MIGRATION_MANIFEST.tsv` is the auditable function-by-function mapping. The
 `destination_file` column is relative to `third_party/ascend/unittest/pytest_ut`.

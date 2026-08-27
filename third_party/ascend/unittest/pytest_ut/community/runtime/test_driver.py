@@ -42,7 +42,8 @@ def test_is_lazy():
 
 
 def test_kernel_in_thread(device):
-    # Test calling in a new thread sets a valid device context
+    # NPU device selection is thread-local, so bind each calling thread to the
+    # device that owns the buffer before launching the cached kernel.
     buf = torch.zeros((38016 * 1024, ), dtype=torch.float32, device=device)
 
     @triton.jit
@@ -54,6 +55,7 @@ def test_kernel_in_thread(device):
         tl.store(P + offset, p)
 
     def call_triton():
+        getattr(torch, device).set_device(buf.device)
         N = buf.numel()
         grid = lambda meta: (triton.cdiv(N, meta["BLOCK"]), )
         _kernel[grid](buf, BLOCK=1024)

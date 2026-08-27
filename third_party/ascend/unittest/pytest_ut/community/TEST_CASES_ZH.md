@@ -218,7 +218,7 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | 测试函数 | 用途与核心通过条件 |
 |---|---|
 | `test_host_tensor_descriptor_load` | 验证从 Python 侧构造并传入的 TensorDescriptor 元数据正确，指定二维块 load 结果等于原张量切片。 |
-| `test_host_tensor_descriptor_matmul` | 验证 Python 侧 TensorDescriptor 作为 JIT 参数完成分块矩阵乘，结果与 torch.matmul 一致。 |
+| `test_host_tensor_descriptor_matmul` | 验证 Python 侧 TensorDescriptor 作为 JIT 参数完成分块矩阵乘，结果与 torch.matmul 一致；六组 block shape 按比例缩小，以适配 Ascend UB 容量，同时保留横向、纵向、方形及不同流水阶段的覆盖。 |
 | `test_make_tensor_descriptor_matmul` | 在 Ascend 的 num_ctas=1 配置下，验证设备侧 make_tensor_descriptor 的 load/store 分块矩阵乘在多种块大小和 stage 数下与 torch.matmul 一致；num_ctas=2 在非 CUDA 后端明确 Skip。 |
 | `test_tensor_descriptor_functional_interface` | 验证函数式 load_tensor_descriptor/store_tensor_descriptor 可逐块完整复制二维张量。 |
 | `test_tensor_descriptor_load` | 验证设备侧二维 descriptor 的 shape/stride/block_shape 元数据及偏移块加载结果均正确。 |
@@ -309,7 +309,7 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | 测试函数 | 用途与核心通过条件 |
 |---|---|
 | `test_is_lazy` | 验证 runtime driver 在模块重载后保持惰性未初始化，首次访问 active/default 时再创建合法 DriverBase。 |
-| `test_kernel_in_thread` | 验证同一 Triton 内核在主线程和新线程中均能建立有效设备上下文并完成大缓冲区访问。 |
+| `test_kernel_in_thread` | 验证各线程按 Ascend 要求显式选择缓冲区所在 NPU 后，同一已编译 Triton Kernel 能在主线程和新线程中完成启动。 |
 
 ## `python/test/unit/runtime/test_launch.py`
 

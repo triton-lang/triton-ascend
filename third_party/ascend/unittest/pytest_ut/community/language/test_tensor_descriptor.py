@@ -1034,13 +1034,13 @@ def matmul_kernel_host_tensor_descriptor(a_desc, b_desc, c_desc):
 @pytest.mark.interpreter()
 @pytest.mark.parametrize("num_ctas", [1, 2])
 @pytest.mark.parametrize("BLOCK_M, BLOCK_N, BLOCK_K, num_stages", [
-    (128, 128, 16, 1),
-    (256, 64, 32, 2),
-    (64, 512, 32, 2),
-    (128, 128, 16, 4),
-    (64, 128, 32, 4),
+    (32, 32, 16, 1),
+    (64, 16, 32, 2),
+    (16, 128, 32, 2),
+    (32, 32, 16, 4),
+    (32, 64, 32, 4),
     (32, 32, 32, 4),
-    (256, 128, 32, 4),
+    (64, 32, 32, 4),
 ])
 def test_host_tensor_descriptor_matmul(num_stages, num_ctas, BLOCK_M, BLOCK_N, BLOCK_K, device):
     if num_ctas == 2 and (not is_cuda() or torch.cuda.get_device_capability(0)[0] not in (9, 10)):

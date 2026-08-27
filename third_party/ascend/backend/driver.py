@@ -95,9 +95,7 @@ class NPUUtils(object):
         self.npu_utils_mod = mod
         return self.npu_utils_mod
 
-    def load_binary(self, name, kernel, shared, device, mix_mode=None):
-        if mix_mode is None:
-            name, mix_mode = name.rsplit("_", 1)
+    def load_binary(self, name, kernel, shared, device, mix_mode):
         return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     def _get_npu_device_limit_form_env(self) -> tuple[int, int]:

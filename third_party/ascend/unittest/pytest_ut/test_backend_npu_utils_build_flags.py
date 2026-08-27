@@ -169,6 +169,23 @@ def test_npu_utils_initialization_builds_without_loading(monkeypatch, tmp_path):
     assert build_calls == [npu_utils]
 
 
+def test_npu_utils_load_binary_requires_explicit_mix_mode(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    cached_so = tmp_path / "npu_utils.so"
+    monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", lambda self: str(cached_so))
+
+    calls = []
+    expected = ("module", "function", 0, 0, 1)
+    fake_mod = SimpleNamespace(load_kernel_binary=lambda *args: calls.append(args) or expected, )
+    npu_utils = driver.NPUUtils()
+    monkeypatch.setattr(npu_utils, "_load_mod", lambda: fake_mod)
+
+    assert npu_utils.load_binary("vector_add_kernel", b"kernel", 1, 0, "aiv") == expected
+    assert calls == [("vector_add_kernel", b"kernel", 1, 0, "aiv")]
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'mix_mode'"):
+        npu_utils.load_binary("vector_add_kernel", b"kernel", 1, 0)
+
+
 def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, tmp_path):
     driver = _load_driver_module()
     cache_dir = tmp_path / "cache"

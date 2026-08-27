@@ -128,7 +128,12 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
     assert f'npu_utils_path = std::string(base) + "/.triton/cache/{cache_key}/npu_utils.so";' in producer_src
     assert "std::string npu_utils_path = g_npu_utils_path;" in producer_src
     assert '"set_npu_utils_path", (PyCFunction)set_npu_utils_path, METH_O' in producer_src
-    assert "if (!init_npu_utils())" in producer_src
+    set_path_body = producer_src.split("static PyObject* set_npu_utils_path",
+                                       maxsplit=1)[1].split("static void release_npu_tensor_handle", maxsplit=1)[0]
+    assert "init_npu_utils()" not in set_path_body
+    launch_body = producer_src.split("static PyObject* launch",
+                                     maxsplit=1)[1].split("static PyMethodDef ModuleMethods", maxsplit=1)[0]
+    assert "if (!init_npu_utils())" in launch_body
     module_init = producer_src.split("PyMODINIT_FUNC PyInit___triton_launcher", maxsplit=1)[1]
     assert "init_npu_utils();" not in module_init
 

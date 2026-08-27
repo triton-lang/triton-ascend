@@ -1036,11 +1036,6 @@ static PyObject* set_npu_utils_path(PyObject* self, PyObject* path_obj) {{
     const char* path = PyUnicode_AsUTF8(path_obj);
     if (!path) return nullptr;
     g_npu_utils_path = path;
-    if (!init_npu_utils()) {{
-        PyErr_Format(PyExc_RuntimeError, "Failed to load NPU utilities from %s: %s", path,
-                     g_npu_utils_error.c_str());
-        return nullptr;
-    }}
     Py_RETURN_NONE;
 }}
 
@@ -1428,6 +1423,10 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   if (PyErr_Occurred()) {{
     return nullptr;
   }}
+  if (!init_npu_utils()) {{
+    PyErr_Format(PyExc_RuntimeError, "Failed to load NPU utilities: %s", g_npu_utils_error.c_str());
+    return nullptr;
+  }}
   if (__MsprofFlagL1) {{
     {
       LINE_CHANGE_CHAR.join(
@@ -1488,7 +1487,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
 
 static PyMethodDef ModuleMethods[] = {{
   {{"set_npu_utils_path", (PyCFunction)set_npu_utils_path, METH_O,
-    "Initialize NPU utilities from the cache-manager-resolved shared-object path"}},
+    "Set the cache-manager-resolved NPU utilities path for lazy loading"}},
   {{"launch", (PyCFunction)launch, METH_FASTCALL, "Entry point for all kernels with this signature"}},
   {{nullptr, nullptr, 0, nullptr}} // sentinel
 }};

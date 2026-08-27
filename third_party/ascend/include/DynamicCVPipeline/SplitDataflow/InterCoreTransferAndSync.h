@@ -163,6 +163,8 @@ private:
   mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue,
                                                   int iniConsumerId);
   mlir::Operation *getConsumerWaitPoint(int transferIndex);
+  mlir::Operation *getFixpipePointAfterProducer(Value depValue,
+                                                int iniProducerBlockId);
   mlir::Operation *getCopyPointBeforeStore(Value depValue,
                                            Operation *vectorEndOp,
                                            int iniProducerBlockId);

@@ -36,8 +36,12 @@ def standard_round_to_nearest_neighbor_even(x0):  # TO BE FIXED round to nearest
 
 
 def standard_round(x0):
-    res = torch.where(x0 >= 0, torch.floor(x0 + 0.5), torch.ceil(x0 - 0.5))
-    return res
+    # Compute in fp32 like the kernel: fp16/bf16 native arithmetic rounds
+    # across .5 boundaries (e.g. ceil(-0.9997) becomes -1.0 in fp16), which
+    # makes the reference depend on the input sequence and torch version.
+    x = x0.to(torch.float32)
+    res = torch.where(x >= 0, torch.floor(x + 0.5), torch.ceil(x - 0.5))
+    return res.to(x0.dtype)
 
 
 @triton.jit

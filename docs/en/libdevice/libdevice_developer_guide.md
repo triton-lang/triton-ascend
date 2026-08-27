@@ -292,7 +292,7 @@ Input Types:
 
 - x: `float32`
 
-Return Value: `tl.tensor`, containing the inverse hyperbolic tangent of the input parameter, in the range \[-1, 1].
+Return Value: `tl.tensor`, containing the inverse hyperbolic tangent of the input parameter, in the range (-∞, +∞).
 
 Return Type: `float32`
 
@@ -2730,7 +2730,7 @@ Supported Compilation Mode: SIMT
 
 ### OP Overview
 
-Computes the reciprocal 1 / x.
+Computes the reciprocal of x (i.e., 1 / x).
 
 Prototype:
 

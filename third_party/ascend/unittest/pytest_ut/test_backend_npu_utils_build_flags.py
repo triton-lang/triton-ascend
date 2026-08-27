@@ -150,23 +150,32 @@ def test_get_cc_cmd_npu_utils_resolves_torch_npu_path_without_import(monkeypatch
     assert "torch_npu" not in sys.modules
 
 
-def test_npu_utils_initialization_builds_without_loading(monkeypatch, tmp_path):
+def test_npu_utils_initialization_refreshes_build_path_without_loading(monkeypatch, tmp_path):
     driver = _load_driver_module()
-    cached_so = tmp_path / "npu_utils.so"
+    producer_cache = tmp_path / "producer"
+    consumer_cache = tmp_path / "consumer"
     build_calls = []
 
     def fake_build(npu_utils):
-        build_calls.append(npu_utils)
-        return str(cached_so)
+        cache_root = os.environ["TRITON_CACHE_DIR"]
+        build_calls.append((npu_utils, cache_root))
+        return str(Path(cache_root) / "npu_utils.so")
 
     monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", fake_build)
 
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(producer_cache))
     npu_utils = driver.NPUUtils()
-
-    assert npu_utils._cache_path == str(cached_so)
+    assert npu_utils._cache_path == str(producer_cache / "npu_utils.so")
     assert npu_utils.npu_utils_mod is None
+
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(consumer_cache))
     assert driver.NPUUtils() is npu_utils
-    assert build_calls == [npu_utils]
+    assert npu_utils._cache_path == str(consumer_cache / "npu_utils.so")
+    assert npu_utils.npu_utils_mod is None
+    assert build_calls == [
+        (npu_utils, str(producer_cache)),
+        (npu_utils, str(consumer_cache)),
+    ]
 
 
 def test_npu_utils_load_binary_requires_explicit_mix_mode(monkeypatch, tmp_path):

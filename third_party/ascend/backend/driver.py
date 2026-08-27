@@ -48,12 +48,14 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
-        if getattr(self, "_initialized", False):
-            return
-        self._cache_path = None
-        self.npu_utils_mod = None
+        # NPUUtils is a singleton, but __init__ must refresh the cached shared
+        # object path on every construction. PyTorch Inductor may set
+        # TRITON_CACHE_DIR after the driver first initializes, so keeping the
+        # first path would make the launcher look for npu_utils.so in a newer
+        # cache root where it was never built.
         self._cache_path = self._build_or_get_cached_so()
-        self._initialized = True
+        if not hasattr(self, "npu_utils_mod"):
+            self.npu_utils_mod = None
 
     def get_so_path(self):
         if self._cache_path is None:

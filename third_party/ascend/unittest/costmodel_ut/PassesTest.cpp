@@ -153,13 +153,18 @@ TEST(CostModelPassesTest, PipelineAnalysisSetsCycleSummaryAttrs) {
       "ascend.scheduled_cycles_one_iter");
   auto roofline = module->getOperation()->getAttrOfType<mlir::IntegerAttr>(
       "ascend.roofline_cycles");
+  auto publicScheduled =
+      module->getOperation()->getAttrOfType<mlir::IntegerAttr>(
+          "ascend.scheduled_cycles");
   auto simple = module->getOperation()->getAttrOfType<mlir::IntegerAttr>(
       "ascend.simple_sum_cycles");
   ASSERT_TRUE(scheduled);
   ASSERT_TRUE(roofline);
+  ASSERT_TRUE(publicScheduled);
   ASSERT_TRUE(simple);
   EXPECT_GT(scheduled.getInt(), 0);
   EXPECT_GT(roofline.getInt(), 0);
+  EXPECT_EQ(publicScheduled.getInt(), roofline.getInt());
   EXPECT_GT(simple.getInt(), 0);
 }
 

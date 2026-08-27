@@ -65,6 +65,8 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
   if (!compileOn91095Flag) {
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
+    moduleOp->setAttr(CVPipeline::ERRCODE_ATTR,
+                      builder.getI32IntegerAttr(CVPipeline::ERRCODE_IGNORED));
     return;
   }
 

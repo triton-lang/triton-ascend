@@ -130,7 +130,23 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
+    requested = bool(metadata.get("enable_dynamic_cv_pipeline", False))
     rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
+    metadata["dynamic_cv_status_source"] = "compiler_final"
+    if not requested:
+        metadata["dynamic_cv_applied"] = False
+        metadata["dynamic_cv_skip_reason"] = "disabled"
+    elif rc == -1:
+        # The pass removes the stale rc before running and only writes it back
+        # on fallback. Therefore an absent rc after an invoked pass is success.
+        metadata["dynamic_cv_applied"] = True
+        metadata["dynamic_cv_skip_reason"] = "none"
+    else:
+        metadata["dynamic_cv_applied"] = False
+        metadata["dynamic_cv_skip_reason"] = {
+            1: "compiler_failed",
+            2: "compiler_ignored",
+        }.get(rc, f"compiler_rc_{rc}")
     if rc != -1 and rc > 0:
         # When the option dynamic_cv_pipeline is set to False,
         # these options should also reverted.
@@ -919,6 +935,23 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--tile-mix-cube-loop={tile_mix_cube_loop}"]
 
+        capture_tilemix_summary = False
+        parse_tilemix_pass_summary = None
+        try:
+            from triton.backends.ascend.runtime.tilemix_pass_summary import (
+                add_tilemix_pass_dump_options,
+                parse_tilemix_pass_summary,
+            )
+
+            capture_tilemix_summary = add_tilemix_pass_dump_options(
+                _compile_option_list,
+                tile_mix_cube_loop,
+                tile_mix_vector_loop,
+            )
+        except ImportError:
+            # Optional second-stage validation must not block normal compile.
+            pass
+
         auto_multi_buffer = metadata["limit_auto_multi_buffer_of_local_buffer"]
         if auto_multi_buffer is not None:
             _compile_option_list += \
@@ -973,6 +1006,14 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 
         if opt.debug:
             _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
+
+        if capture_tilemix_summary and parse_tilemix_pass_summary is not None:
+            compiler_output = b"\n".join((ret.stdout or b"", ret.stderr or b"")).decode("utf-8", errors="replace")
+            metadata["tile_mix_transform_summary"] = parse_tilemix_pass_summary(
+                compiler_output,
+                cube_loop=tile_mix_cube_loop,
+                vector_loop=tile_mix_vector_loop,
+            )
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
         match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)
@@ -1384,6 +1425,10 @@ class AscendBackend(BaseBackend):
             "hash": metadata.hash,
             "debug": metadata.debug,
             "tensor_kinds": metadata.tensor_kinds,
+            "tile_mix_transform_summary": getattr(metadata, "tile_mix_transform_summary", None),
+            "dynamic_cv_applied": getattr(metadata, "dynamic_cv_applied", None),
+            "dynamic_cv_skip_reason": getattr(metadata, "dynamic_cv_skip_reason", None),
+            "dynamic_cv_status_source": getattr(metadata, "dynamic_cv_status_source", None),
         }
 
     def get_codegen_implementation(self, options):

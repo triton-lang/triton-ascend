@@ -79,6 +79,7 @@ def test_batch_bench_supports_do_bench_with_quantiles():
 
     assert result[cfg] == (1.0, 1.0, 1.0)
     assert record["quantiles"] == (0.5, 0.2, 0.8)
+    assert tuner.tile_mix_transform_summaries[cfg] is None
 
 
 def test_batch_bench_requires_do_bench_quantiles_parameter():

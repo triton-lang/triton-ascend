@@ -55,6 +55,8 @@ class CompilerCostmodelContractTest(unittest.TestCase):
                 "_is_auto_map_parallel_blocks_enabled",
                 "_get_auto_blockify_blacklist_reasons",
                 "_warn_auto_blockify_disabled",
+                "_remove_deprecated_npu_options",
+                "_warn_deprecated_ascend_env_vars",
                 "downgrade_llir",
                 "force_disable_ffts",
                 "get_cann_version_file_hash",
@@ -144,6 +146,37 @@ class CompilerCostmodelContractTest(unittest.TestCase):
 
         self.assertFalse(hasattr(options, "enable_costmodel_backend"))
         self.assertFalse(hasattr(options, "use_bytecode"))
+
+    def test_dynamic_cv_compiler_final_status_is_exported(self):
+        cmplr, _dump_mgr, _GPUTarget = self._load_compiler_module()
+
+        metadata = {"enable_dynamic_cv_pipeline": True}
+        cmplr._get_then_remove_rc = lambda _mod, _name: -1
+        cmplr._adjust_metadata_by_module_result(
+            object(),
+            metadata,
+            types.SimpleNamespace(debug=False),
+            enable_mixed_cv=False,
+            disable_auto_inject_block_sync=False,
+            set_workspace_multibuffer=2,
+        )
+        self.assertTrue(metadata["dynamic_cv_applied"])
+        self.assertEqual(metadata["dynamic_cv_skip_reason"], "none")
+        self.assertEqual(metadata["dynamic_cv_status_source"], "compiler_final")
+
+        metadata = {"enable_dynamic_cv_pipeline": True}
+        cmplr._get_then_remove_rc = lambda _mod, _name: 2
+        cmplr._adjust_metadata_by_module_result(
+            object(),
+            metadata,
+            types.SimpleNamespace(debug=False),
+            enable_mixed_cv=False,
+            disable_auto_inject_block_sync=False,
+            set_workspace_multibuffer=2,
+        )
+        self.assertFalse(metadata["dynamic_cv_applied"])
+        self.assertEqual(metadata["dynamic_cv_skip_reason"], "compiler_ignored")
+        self.assertFalse(metadata["enable_dynamic_cv_pipeline"])
 
 
 if __name__ == "__main__":

@@ -1,4 +1,5 @@
 import builtins
+import hashlib
 import importlib.util
 import os
 import sys
@@ -195,6 +196,29 @@ def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
 
     assert driver.NPUUtils()._build_or_get_cached_so() == str(cached_so)
     assert fake_cache.get_file_calls == 2
+
+
+def test_npu_utils_cache_key_uses_only_cann_version_and_source(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    cached_so = tmp_path / "npu_utils.so"
+    cached_so.write_bytes(b"cached")
+    captured_keys = []
+
+    class FakeCache:
+
+        def get_file(self, filename):
+            assert filename == "npu_utils.so"
+            return str(cached_so)
+
+    monkeypatch.setattr(driver, "get_cann_version", lambda: (9, 0, 0))
+    monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
+
+    npu_utils = driver.NPUUtils()
+    source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()
+    expected_key = hashlib.md5("\0".join(["9.0.0", source]).encode("utf-8")).hexdigest()
+
+    assert npu_utils.get_so_path() == str(cached_so)
+    assert captured_keys == [expected_key]
 
 
 @pytest.mark.parametrize(

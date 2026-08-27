@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.metadata
 from pathlib import Path
 import tempfile
 import os
@@ -65,7 +66,8 @@ class NPUUtils(object):
         src = Path(src_path).read_text()
         cann_version = get_cann_version()
         cann_version_str = ".".join(map(str, cann_version)) if cann_version else ""
-        key_parts = [cann_version_str, src]
+        torch_npu_version = importlib.metadata.version("torch_npu")
+        key_parts = [cann_version_str, torch_npu_version, src]
         key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"

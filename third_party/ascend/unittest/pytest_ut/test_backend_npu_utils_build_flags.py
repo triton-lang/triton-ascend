@@ -208,11 +208,13 @@ def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, t
     assert fake_cache.put_calls == 1
 
 
-def test_npu_utils_cache_key_uses_only_cann_version_and_source(monkeypatch, tmp_path):
+def test_npu_utils_cache_key_uses_cann_torch_npu_version_and_source(monkeypatch, tmp_path):
     driver = _load_driver_module()
+    _guard_torch_npu_import(monkeypatch)
     cached_so = tmp_path / "npu_utils.so"
     cached_so.write_bytes(b"cached")
     captured_keys = []
+    version_calls = []
 
     class FakeCache:
 
@@ -221,14 +223,21 @@ def test_npu_utils_cache_key_uses_only_cann_version_and_source(monkeypatch, tmp_
             return str(cached_so)
 
     monkeypatch.setattr(driver, "get_cann_version", lambda: (9, 0, 0))
+    monkeypatch.setattr(
+        driver.importlib.metadata,
+        "version",
+        lambda name: version_calls.append(name) or "2.7.1.post5.dev20260622",
+    )
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
 
     npu_utils = driver.NPUUtils()
     source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()
-    expected_key = hashlib.md5("\0".join(["9.0.0", source]).encode("utf-8")).hexdigest()
+    expected_key = hashlib.md5("\0".join(["9.0.0", "2.7.1.post5.dev20260622", source]).encode("utf-8")).hexdigest()
 
     assert npu_utils.get_so_path() == str(cached_so)
+    assert version_calls == ["torch_npu"]
     assert captured_keys == [expected_key]
+    assert "torch_npu" not in sys.modules
 
 
 @pytest.mark.parametrize(

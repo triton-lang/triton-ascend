@@ -25,9 +25,11 @@ def test_div_rz():
     n = x0.numel()
     out = torch.empty(n, dtype=torch.float32, device='npu')
 
-    triton_kernel[(1, )](x0, x1, out, n, XBLOCK=n, XBLOCK_SUB=n)
+    triton_kernel[(1, )](x0, x1, out, n, XBLOCK=n, XBLOCK_SUB=n, compile_mode='simt_only')
 
     expected = x0 / x1
+    out = out.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(out, expected, rtol=1e-03, atol=1e-03)
 
 

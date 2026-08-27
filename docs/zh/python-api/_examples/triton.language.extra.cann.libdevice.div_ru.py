@@ -16,6 +16,16 @@ _SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 
+def torch_div_ru_reference(x0, x1):
+    assert x0.device.type == "cpu"
+    assert x1.device.type == "cpu"
+    assert x0.dtype == torch.float32
+    assert x1.dtype == torch.float32
+    assert x0.shape == x1.shape
+
+    return torch.div(x0, x1)
+
+
 @triton.jit
 def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
@@ -32,11 +42,15 @@ def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLO
 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_div_ru():
-    x0 = (torch.rand((8, )) + 0.1).to(torch.float32).npu()
-    x1 = (torch.rand((8, )) + 0.1).to(torch.float32).npu()
-    expected = (x0 / x1).to(torch.float32).npu()
+    x0 = (torch.rand((8, )) + 0.1).to(torch.float32)
+    x1 = (torch.rand((8, )) + 0.1).to(torch.float32)
+    expected = (torch_div_ru_reference(x0, x1)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
     output = torch.empty(8, dtype=torch.float32, device='npu')
-    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
+    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(output, expected, rtol=1e-02, atol=1e-02, equal_nan=True)
 
 

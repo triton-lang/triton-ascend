@@ -24,8 +24,10 @@ def test_signbit():
 
     torch_res = torch.signbit(x0).to(torch.int32)
     triton_res = torch.empty(shape, dtype=torch.int32, device='npu')
-    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub)
+    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
 
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
     torch.testing.assert_close(torch_res, triton_res, rtol=0, atol=0, equal_nan=True)
 
 

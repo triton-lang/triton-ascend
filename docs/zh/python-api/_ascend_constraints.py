@@ -3082,6 +3082,19 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.libdevice.fast_tanf",
     },
+    "triton.language.extra.cann.libdevice.fast_tanhf": {
+        "replace_docstring": [
+            "Computes the hyperbolic tangent of x using a fast approximation.",
+        ],
+        "constraints": [
+            "- x: ``float32``",
+            "Return value: ``tl.tensor``, returns the fast approximate hyperbolic tangent of x.",
+            "Return type: ``float32``",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.fast_tanhf",
+    },
     "triton.language.extra.cann.libdevice.fdim": {
         "replace_docstring": [
             "Computes the positive difference max(x - y, 0).",
@@ -3121,6 +3134,19 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.libdevice.finitef",
+    },
+    "triton.language.extra.cann.libdevice.float2half_rn": {
+        "replace_docstring": [
+            "Converts x from float32 to float16, rounding to nearest even.",
+        ],
+        "constraints": [
+            "- x: ``float32``",
+            "Return value: ``tl.tensor``, returns the converted 16-bit floating-point value.",
+            "Return type: ``float16``",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.float2half_rn",
     },
     "triton.language.extra.cann.libdevice.float2int_rd": {
         "replace_docstring": [
@@ -3476,6 +3502,19 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.libdevice.hadd",
     },
+    "triton.language.extra.cann.libdevice.half2float": {
+        "replace_docstring": [
+            "Converts x from float16 to float32.",
+        ],
+        "constraints": [
+            "- x: ``float16``",
+            "Return value: ``tl.tensor``, returns the converted 32-bit floating-point value.",
+            "Return type: ``float32``",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.half2float",
+    },
     "triton.language.extra.cann.libdevice.hypot": {
         "constraints": [
             "- x: ``float32``",
@@ -3780,6 +3819,34 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.libdevice.logb",
     },
+    "triton.language.extra.cann.libdevice.max": {
+        "replace_docstring": [
+            "Computes the maximum of x and y.",
+        ],
+        "constraints": [
+            "- x: ``int32`` or ``float32``",
+            "- y: ``int32`` or ``float32``; must have the same type as x",
+            "Return value: ``tl.tensor``, returns the maximum of x and y.",
+            "Return type: same as the input type",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.max",
+    },
+    "triton.language.extra.cann.libdevice.min": {
+        "replace_docstring": [
+            "Computes the minimum of x and y.",
+        ],
+        "constraints": [
+            "- x: ``int32`` or ``float32``",
+            "- y: ``int32`` or ``float32``; must have the same type as x",
+            "Return value: ``tl.tensor``, returns the minimum of x and y.",
+            "Return type: same as the input type",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.min",
+    },
     "triton.language.extra.cann.libdevice.mul24": {
         "replace_docstring": [
             "Computes the low 24-bit multiplication result of x and y.",
@@ -3863,6 +3930,19 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.libdevice.mulhi",
+    },
+    "triton.language.extra.cann.libdevice.nan": {
+        "replace_docstring": [
+            "Returns a NaN value.",
+        ],
+        "constraints": [
+            "- x: ``float32``",
+            "Return value: ``tl.tensor``, returns NaN for every input element.",
+            "Return type: ``float32``",
+            "Compilation modes: SIMT",
+        ],
+        "example":
+        "triton.language.extra.cann.libdevice.nan",
     },
     "triton.language.extra.cann.libdevice.nearbyint": {
         "constraints": [

@@ -193,6 +193,7 @@
   "powf",
   "sinf",
   "tanf",
+  "tanhf",
   "fdim",
   "finitef",
   "fmod",

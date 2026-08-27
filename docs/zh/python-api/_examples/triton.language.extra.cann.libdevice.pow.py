@@ -26,8 +26,10 @@ def test_pow():
 
     torch_res = torch.pow(x0, x1)
     triton_res = torch.empty_like(x0)
-    triton_kernel[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub)
+    triton_kernel[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
 
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
     torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 

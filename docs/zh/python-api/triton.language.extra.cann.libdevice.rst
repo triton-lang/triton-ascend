@@ -58,9 +58,11 @@ Libdevice Ops
     fast_powf
     fast_sinf
     fast_tanf
+    fast_tanhf
     fdim
     ffs
     finitef
+    float2half_rn
     float2int_rd
     float2int_rn
     float2int_ru
@@ -88,6 +90,7 @@ Libdevice Ops
     fmod
     gamma
     hadd
+    half2float
     hypot
     ilogb
     int2float_rd
@@ -113,12 +116,15 @@ Libdevice Ops
     log1p
     log2
     logb
+    max
+    min
     mul24
     mul_rd
     mul_rn
     mul_ru
     mul_rz
     mulhi
+    nan
     nearbyint
     nextafter
     norm3d

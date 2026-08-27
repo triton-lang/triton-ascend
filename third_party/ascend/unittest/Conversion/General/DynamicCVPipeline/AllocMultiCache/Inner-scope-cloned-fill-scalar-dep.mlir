@@ -44,12 +44,11 @@
 // (refactor innerscope): the cast is just a buffer container, the copy is the
 // actual producer behavior op.
 // CHECK-NOT: memref.memory_space_cast{{.+}}intraDeps
-// Producer-side ping-pong into multi-buffer (block_id = 13, intra_buffer).
-// Producer scf.if has no result type (consumer does: -> tensor<f32>).
-// CHECK: scf.if %{{[0-9_a-zA-Z]+}} {
-// Producer-side hivm.hir.copy now carries intraDeps = [0, 1] (refactor innerscope).
-// CHECK:   hivm.hir.copy ins(%{{.+}} : tensor<f32>) outs(%{{.+}} : memref<f32>) {{.+}}intraDeps = [0 : i32, 1 : i32]
-// CHECK: } {ssbuffer.block_id = 13 : i32, ssbuffer.intra_buffer}
+// Producer-side ping-pong via select chain (block_id = 13) + a single
+// bufferization.materialize_in_destination that targets the selected buffer.
+// (Producer no longer emits scf.if; refactor innerscope.)
+// CHECK: arith.select {{.+}} {ssbuffer.block_id = 13 : i32} : memref<f32>
+// CHECK: bufferization.materialize_in_destination %{{.+}} in restrict writable %{{.+}} {ssbuffer.block_id = 13 : i32, ssbuffer.intraDeps = [0 : i32, 1 : i32]}
 // Original empty+fill remains in producer block (block_id = 13).
 // CHECK: linalg.fill {ssbuffer.block_id = 13 : i32} ins(%extracted : f32) outs({{.*}} : tensor<32x1xf32>) -> tensor<32x1xf32>
 // Consumer-side multi-buffer selection (block_id = 22 = inner loop body).

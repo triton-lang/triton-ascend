@@ -75,9 +75,10 @@ class NPUUtils(object):
     def __init__(self):
         if getattr(self, "_initialized", False):
             return
-        self._initialized = True
         self._cache_path = None
         self.npu_utils_mod = None
+        self._cache_path = self._build_or_get_cached_so()
+        self._initialized = True
 
     def get_so_path(self):
         if self._cache_path is None:

@@ -149,18 +149,23 @@ def test_get_cc_cmd_npu_utils_resolves_torch_npu_path_without_import(monkeypatch
     assert "torch_npu" not in sys.modules
 
 
-def test_npu_utils_initialization_is_lazy(monkeypatch):
+def test_npu_utils_initialization_builds_without_loading(monkeypatch, tmp_path):
     driver = _load_driver_module()
-    monkeypatch.setattr(
-        driver,
-        "_build_npu_ext",
-        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected npu_utils build")),
-    )
+    cached_so = tmp_path / "npu_utils.so"
+    build_calls = []
+
+    def fake_build(npu_utils):
+        build_calls.append(npu_utils)
+        return str(cached_so)
+
+    monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", fake_build)
 
     npu_utils = driver.NPUUtils()
 
-    assert npu_utils._cache_path is None
+    assert npu_utils._cache_path == str(cached_so)
     assert npu_utils.npu_utils_mod is None
+    assert driver.NPUUtils() is npu_utils
+    assert build_calls == [npu_utils]
 
 
 def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
@@ -193,7 +198,10 @@ def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("unexpected npu_utils build")),
     )
 
-    assert driver.NPUUtils()._build_or_get_cached_so() == str(cached_so)
+    npu_utils = driver.NPUUtils()
+
+    assert npu_utils._cache_path == str(cached_so)
+    assert npu_utils.npu_utils_mod is None
     assert fake_cache.get_file_calls == 2
 
 

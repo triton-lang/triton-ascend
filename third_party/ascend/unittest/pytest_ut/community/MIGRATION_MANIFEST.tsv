@@ -1,4 +1,6 @@
 source_function	destination_file	raw_nodes	P	F	S	X	E
+python/test/unit/language/test_annotations.py::test_int_annotation	community/language/test_annotations.py	9	9	0	0	0	0
+python/test/unit/language/test_annotations.py::test_unknown_annotation	community/language/test_annotations.py	1	1	0	0	0	0
 python/test/unit/language/test_block_pointer.py::test_block_ptr_matmul_no_scf	community/language/test_block_pointer.py	6	6	0	0	0	0
 python/test/unit/language/test_compile_errors.py::test_constexpr_annotated_global_var_access	community/language/test_compile_errors.py	1	1	0	0	0	0
 python/test/unit/language/test_compile_errors.py::test_constexpr_global_var_access	community/language/test_compile_errors.py	1	1	0	0	0	0
@@ -62,6 +64,7 @@ python/test/unit/language/test_core.py::test_join_scalars	community/language/tes
 python/test/unit/language/test_core.py::test_join_with_mma	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_load_scalar_with_mask	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_load_store_same_ptr	community/language/test_core.py	1	1	0	0	0	0
+python/test/unit/language/test_core.py::test_map_elementwise	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_masked_load_scalar	community/language/test_core.py	4	4	0	0	0	0
 python/test/unit/language/test_core.py::test_masked_load_shared_memory	community/language/test_core.py	3	3	0	0	0	0
 python/test/unit/language/test_core.py::test_math_divide_op	community/language/test_core.py	2	2	0	0	0	0
@@ -91,6 +94,7 @@ python/test/unit/language/test_core.py::test_tl_range_num_stages	community/langu
 python/test/unit/language/test_core.py::test_tl_range_option_none	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_tma_load_block_shape_err	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_tma_store_block_shape_err	community/language/test_core.py	1	1	0	0	0	0
+python/test/unit/language/test_core.py::test_umulhi	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_unroll_attr	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_unsigned_name_mangling	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_unsplat	community/language/test_core.py	1	1	0	0	0	0
@@ -136,6 +140,7 @@ python/test/unit/language/test_random.py::test_rand_limits	community/language/te
 python/test/unit/language/test_random.py::test_randn	community/language/test_random.py	16	16	0	0	0	0
 python/test/unit/language/test_random.py::test_seed_is_int	community/language/test_random.py	1	1	0	0	0	0
 python/test/unit/language/test_standard.py::test_flip_inf	community/language/test_standard.py	1	1	0	0	0	0
+python/test/unit/language/test_standard.py::test_ravel	community/language/test_standard.py	1	1	0	0	0	0
 python/test/unit/language/test_standard.py::test_swizzle2d	community/language/test_standard.py	1	1	0	0	0	0
 python/test/unit/language/test_tensor_descriptor.py::test_host_tensor_descriptor_load	community/language/test_tensor_descriptor.py	72	36	0	36	0	0
 python/test/unit/language/test_tensor_descriptor.py::test_host_tensor_descriptor_matmul	community/language/test_tensor_descriptor.py	14	7	0	7	0	0
@@ -200,6 +205,7 @@ python/test/unit/runtime/test_launch.py::test_memory_leak	community/runtime/test
 python/test/unit/runtime/test_launch.py::test_metadata	community/runtime/test_launch.py	1	1	0	0	0	0
 python/test/unit/runtime/test_launch.py::test_multiple_hooks	community/runtime/test_launch.py	1	1	0	0	0	0
 python/test/unit/runtime/test_launch.py::test_pre_run_hooks	community/runtime/test_launch.py	1	1	0	0	0	0
+python/test/unit/runtime/test_specialize.py::test_specialize_impl	community/runtime/test_specialize.py	96	96	0	0	0	0
 python/test/unit/runtime/test_subproc.py::test_compile_in_forked_subproc_with_forced_gc	community/runtime/test_subproc.py	1	1	0	0	0	0
 python/test/unit/test_debug.py::test_device_assert_barrier	community/test_debug.py	1	1	0	0	0	0
 python/test/unit/test_debug.py::test_static_assert	community/test_debug.py	2	2	0	0	0	0

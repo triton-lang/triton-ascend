@@ -5,15 +5,18 @@ are collected by the Ascend integration suite without changing the community
 source files.
 
 - Source baseline: `main-dev@396df6cb5b001314e36f22220be07a560de44664`
-- Migrated source files: 26
-- Migrated top-level test functions: 225
-- Historical exhaustive raw nodes: 2075 = 1799P + 275S + 1X
+- Migrated source files: 28
+- Migrated top-level test functions: 231
+- Historical exhaustive raw nodes: 2184 = 1908P + 275S + 1X
 - Historical Fail/Error nodes in this selected set: 0/0
 
 The selected test functions and their parametrization decorators are copied
-verbatim. Unselected top-level `test_*` functions are omitted, while shared
-module helpers are retained. `conftest.py` supplies the `npu` device and the
-same cache/knob/allocator fixtures used by the source test tree.
+verbatim, except for one device-safety adaptation in `test_int_annotation`:
+its temporary output buffer is enlarged from one element to four because the
+unchanged kernel stores at offset `v=3`. Unselected top-level `test_*`
+functions are omitted, while shared module helpers are retained. `conftest.py`
+supplies the `npu` device and the same cache/knob/allocator fixtures used by the
+source test tree.
 
 `MIGRATION_MANIFEST.tsv` is the auditable function-by-function mapping. The
 `destination_file` column is relative to `third_party/ascend/unittest/pytest_ut`.

@@ -1066,6 +1066,43 @@ def test_load_store_same_ptr(device):
 
 
 @pytest.mark.interpreter
+@pytest.mark.parametrize("dtype_str", ['int32'])
+def test_umulhi(dtype_str, device):
+
+    @triton.jit
+    def kernel(X, Y, Z, N: tl.constexpr):
+        offs = tl.arange(0, N)
+        x = tl.load(X + offs)
+        y = tl.load(Y + offs)
+        z = tl.umulhi(x, y)
+        tl.store(Z + tl.arange(0, N), z)
+
+    def umulhi32(a, b):
+        # Convert to 64-bit unsigned integers to prevent overflow
+        a_64 = a.astype(np.int64)
+        b_64 = b.astype(np.int64)
+
+        # Perform the multiplication in 64-bit
+        product_64 = a_64 * b_64
+
+        # Shift right by 32 bits to get the high part of the product
+        result_high_32 = product_64 >> 32
+        return result_high_32
+
+    rs = RandomState(17)
+    N = 128
+    x = numpy_random((N, ), dtype_str=dtype_str, rs=rs, low=0)
+    x_tri = to_triton(x, device=device)
+    y = numpy_random((N, ), dtype_str=dtype_str, rs=rs, low=0)
+    y_tri = to_triton(y, device=device)
+    z_tri = torch.zeros_like(x_tri)
+    kernel[(1, )](x_tri, y_tri, z_tri, N=N)
+
+    z_ref = umulhi32(x, y)
+    np.testing.assert_equal(z_ref, to_numpy(z_tri))
+
+
+@pytest.mark.interpreter
 def test_join(device):
 
     @triton.jit
@@ -2440,6 +2477,37 @@ def test_constexpr_if_return(device):
 def test_constexpr_flattens():
     assert tl.constexpr(tl.constexpr(5)) == tl.constexpr(5)
     assert tl.constexpr(tl.constexpr(tl.constexpr(5))) == tl.constexpr(5)
+
+
+@pytest.mark.parametrize("num_ctas", num_ctas_list)
+def test_map_elementwise(num_ctas, device):
+
+    @triton.jit
+    def compare(x, y):
+        if x < y:
+            return -1
+        elif x == y:
+            return 0
+        else:
+            return 1
+
+    @triton.jit
+    def kernel(X, Y, Z, BLOCK: tl.constexpr):
+        x = tl.load(X + tl.arange(0, BLOCK))
+        y = tl.load(Y + tl.arange(0, BLOCK))
+        z = tl.map_elementwise(compare, x, y)
+        tl.store(Z + tl.arange(0, BLOCK), z)
+
+    shape = (128, )
+    rs = RandomState(17)
+    x = numpy_random(shape, dtype_str='int32', rs=rs)
+    y = numpy_random(shape, dtype_str='int32', rs=rs)
+    x_tri = to_triton(x, device=device)
+    y_tri = to_triton(y, device=device)
+    z_tri = to_triton(numpy_random(shape, dtype_str='int32', rs=rs), device=device)
+    kernel[(1, )](x_tri, y_tri, z_tri, BLOCK=shape[0], num_ctas=num_ctas)
+    z_ref = (x > y).astype(int) - (y > x).astype(int)
+    np.testing.assert_equal(z_ref, to_numpy(z_tri))
 
 
 @pytest.mark.parametrize("literal, tensor_ty", [(10, tl.int32), (32.1, tl.float32),

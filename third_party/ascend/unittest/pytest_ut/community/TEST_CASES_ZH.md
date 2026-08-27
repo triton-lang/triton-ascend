@@ -2,10 +2,17 @@
 
 本文逐项说明本目录迁入的社区测试函数用途，便于评审时核对测试目标。
 源码基线为 `main-dev@396df6cb5b001314e36f22220be07a560de44664`；
-共 225 个顶层测试函数、2075 个参数节点。逐函数来源及历史节点状态见
+共 231 个顶层测试函数、2184 个参数节点。逐函数来源及历史节点状态见
 `MIGRATION_MANIFEST.tsv`，本轮直接验证结果以 PR 描述为准。
-函数数量不表示每个参数节点都通过：冻结清单包含 1799 个 Pass、275 个
+函数数量不表示每个参数节点都通过：冻结清单包含 1908 个 Pass、275 个
 Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点理解。
+
+## `python/test/unit/language/test_annotations.py`
+
+| 测试函数 | 用途与核心通过条件 |
+|---|---|
+| `test_int_annotation` | 验证不同符号位和位宽的整数类型注解会生成对应 TTIR 参数类型及整数到浮点转换；迁移版仅把临时输出缓冲区从 1 个元素扩大到 4 个，以覆盖内核对 `X + 3` 的写入，参数矩阵和 IR 断言均未改变。 |
+| `test_unknown_annotation` | 验证 Triton 不认识的 Python 类型注解不会妨碍内核正常编译启动，错误形态的指针实参也不会导致未预期异常。 |
 
 ## `python/test/unit/language/test_block_pointer.py`
 
@@ -89,6 +96,7 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_join_with_mma` | 验证 join 后 reshape 的张量可继续参与 tl.dot，并与 PyTorch 矩阵乘结果一致。 |
 | `test_load_scalar_with_mask` | 验证标量索引和标量 mask 的 tl.load/tl.store 可正确读取并写回零值。 |
 | `test_load_store_same_ptr` | 验证同一指针先 load 后原位 store 的内核重复运行时始终把输入 1 正确写成 2。 |
+| `test_map_elementwise` | 验证 tl.map_elementwise 可把自定义三路比较函数逐元素应用到两个 int32 向量，并得到与 NumPy 比较参考值一致的 -1、0、1 结果。 |
 | `test_masked_load_scalar` | 验证 constexpr 标量 mask 为真时加载输入、为假时采用 other 值，输出与参考张量一致。 |
 | `test_masked_load_shared_memory` | 验证带 mask 的矩阵加载作为 tl.dot 输入时，计算结果与 torch.matmul 一致；源码未检查 Ascend IR 或实际存储层级，因此不能据此确认数据被放入共享内存。 |
 | `test_math_divide_op` | 验证 tl.math.fdiv 和 tl.math.div_rn 的 float32 向量除法与 NumPy 除法在容差内一致。 |
@@ -118,6 +126,7 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_tl_range_option_none` | 验证 tl.range 的 num_stages 与 loop_unroll_factor 显式传 None 时不会在 TTIR 中生成相应属性。 |
 | `test_tma_load_block_shape_err` | 验证 tensor descriptor load 的块最后一维不足 16 字节时被拒绝并报告最小块大小错误。 |
 | `test_tma_store_block_shape_err` | 验证 tensor descriptor store 的块最后一维不足 16 字节时被拒绝并报告最小块大小错误。 |
+| `test_umulhi` | 验证 tl.umulhi 对 int32 输入返回 32×32 位无符号乘积的高 32 位，并逐元素等于 NumPy int64 参考计算。 |
 | `test_unroll_attr` | 验证 tl.range(loop_unroll_factor) 对多种展开因子在 TTIR 中生成足够数量的循环体原子操作。 |
 | `test_unsigned_name_mangling` | 验证编译器对 uint32 与 int32 生成不同函数特化/名称修饰，使 abs 语义分别正确。 |
 | `test_unsplat` | 验证单元素 tensor 条件无论隐式还是通过 item() 显式标量化，都能正确控制分支写入。 |
@@ -198,6 +207,7 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | 测试函数 | 用途与核心通过条件 |
 |---|---|
 | `test_flip_inf` | 验证 tl.flip 对含 Inf 的二维重排数据保持正确元素顺序和值，不因 Inf 发生错误。 |
+| `test_ravel` | 验证二维 Triton 张量经 tl.ravel 展平后保持 0 至 255 的连续元素顺序。 |
 | `test_swizzle2d` | 验证 tl.swizzle2d 按给定分组重映射二维坐标，得到与手工期望矩阵完全一致的布局。 |
 
 ## `python/test/unit/language/test_tensor_descriptor.py`
@@ -310,6 +320,12 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_metadata` | 验证 launch_metadata 回调可从 grid 与参数构造延迟元数据，launch_enter_hook 读取到正确值。 |
 | `test_multiple_hooks` | 验证可同时注册多个 kernel load start/end hook，单次加载会调用全部四个 hook。 |
 | `test_pre_run_hooks` | 验证 JITFunction pre-run hook 在普通 launch 和显式 run 两条入口都会先清零输入，随后内核输出全 2。 |
+
+## `python/test/unit/runtime/test_specialize.py`
+
+| 测试函数 | 用途与核心通过条件 |
+|---|---|
+| `test_specialize_impl` | 以 96 组 host/native 参数组合核对 CUDABackend 与 HIPBackend 的 native specialization 结果和 Python 参考实现一致；该用例不启动 NPU Kernel，也不验证 AscendBackend。 |
 
 ## `python/test/unit/runtime/test_subproc.py`
 

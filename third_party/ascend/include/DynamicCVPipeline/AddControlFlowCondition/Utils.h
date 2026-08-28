@@ -127,5 +127,10 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
 // op is null or is not nested in any scf.if carrying the ssbuffer.if attr.
 scf::IfOp findIfOpContainingOp(Operation *op);
 
+// Get intra-core buffer count from module's ssbuffer.intra_buf_count attribute.
+// Returns the attribute value if present, otherwise returns -1 to indicate
+// error.
+int getIntraCoreBufferCount(ModuleOp module);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

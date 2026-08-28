@@ -49,6 +49,18 @@ struct InnerBlockInfo {
   SmallVector<Operation *> ops;
 };
 
+// Recursively collect every Operation in `block` and its nested regions into
+// `ops`, in pre-order. Shared between Phase 1 helpers (collectInnerBlockInfo,
+// rematerializeTensorRootedScalarDeps) and the main file's
+// findNestedMainloop / collectMainLoopsRecursively.
+void collectNestedOps(Block *block, SmallVector<Operation *> &ops);
+
+// Return the outermost ssbuffer.id visible on `op`'s ancestor chain. -1 is
+// returned when an ancestor carries kMainLoop and the innermost id seen on
+// the walk is empty. Used by both Phase 1 (dep analysis) and Phase 2
+// (cross-block consumer detection), so kept inline here.
+std::optional<int64_t> getOutermostSsbufferId(Operation *op);
+
 // Walk the main loop body, group ops by their ssbuffer.block_id, build the
 // per-block InnerBlockInfo map, and collect cross-block tensor deps into
 // `depValueMap`. `i1Found` is set when any collected tensor dep has element
@@ -93,11 +105,13 @@ int cloneAllocTensorsInBlocks(
 // set whenever an i1 tensor dep surfaces; mirroring the original driver,
 // callers check `i1Found` after Phase 2's second dep collection rather than
 // here.
-int runDepAnalysisAndClone(
-    CVPipeline::MainLoop &mainLoop, OpBuilder &globalBuilder, bool &i1Found,
-    bool &memrefFound, DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap,
-    SmallVector<Operation *> &allOps, DenseSet<Value> &phase1ClonedDepVals);
+int runDepAnalysisAndClone(CVPipeline::MainLoop &mainLoop,
+                           OpBuilder &globalBuilder, bool &i1Found,
+                           bool &memrefFound,
+                           DenseMap<Value, InnerBlockInfo> &blocks,
+                           DenseMap<Value, SmallVector<Value>> &depValueMap,
+                           SmallVector<Operation *> &allOps,
+                           DenseSet<Value> &phase1ClonedDepVals);
 
 } // namespace triton
 } // namespace mlir

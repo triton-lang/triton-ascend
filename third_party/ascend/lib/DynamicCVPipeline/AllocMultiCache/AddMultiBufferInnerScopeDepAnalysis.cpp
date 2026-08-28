@@ -63,10 +63,6 @@ static bool isOpInMainLoop(Operation *op, const MainLoop &mainLoop) {
   return op && mainLoop.getOperation()->isProperAncestor(op);
 }
 
-// Return the outermost ssbuffer.id visible on `op`'s ancestor chain. -1 is
-// returned when an ancestor carries kMainLoop and the innermost id seen on
-// the walk is empty. Used by both Phase 1 (dep analysis) and Phase 2
-// (cross-block consumer detection), so kept inline here.
 std::optional<int64_t> getOutermostSsbufferId(Operation *op) {
   std::optional<int64_t> result;
   for (Operation *current = op; current; current = current->getParentOp()) {
@@ -84,10 +80,6 @@ std::optional<int64_t> getOutermostSsbufferId(Operation *op) {
   return result;
 }
 
-// Recursively collect every Operation in `block` and its nested regions into
-// `ops`, in pre-order. Shared between Phase 1 helpers (collectInnerBlockInfo,
-// rematerializeTensorRootedScalarDeps) and the main file's
-// findNestedMainloop / collectMainLoopsRecursively.
 void collectNestedOps(Block *block, SmallVector<Operation *> &ops) {
   for (auto &op : *block) {
     ops.push_back(&op);
@@ -1017,7 +1009,7 @@ static Operation *findLastOpWithBlockIdInBlock(Operation *anchorOp,
 //      and so on; the innermost default is buf[0] (the remsi==0 case).
 //
 //   2) `bufferization.materialize_in_destination %depVal in restrict writable
-//      %sel` is anchored AFTER `matAnchor`. 
+//      %sel` is anchored AFTER `matAnchor`.
 //
 // intraDeps = [groupId, crossCoreProducerId] is set on the materialize op.
 // intra_buffer is no longer needed (no scf.if wrapper).
@@ -1361,8 +1353,7 @@ static int processDepVal(Value depVal, const MainLoop &loop,
     if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
       if (Operation *lastWithBlockId =
               findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        producerAnchor =
-            lastWithBlockId; // materialize moves to region end
+        producerAnchor = lastWithBlockId; // materialize moves to region end
     }
   }
   OpBuilder producedBuffers(loop.getContext());
@@ -1456,83 +1447,7 @@ static int processDepVal(Value depVal, const MainLoop &loop,
   return 0;
 }
 
-// Process cross-block tensor dependencies for double buffering
-static int
-processTensorDependencies(const MainLoop &loop,
-                          DenseMap<Value, InnerBlockInfo> &blocks,
-                          DenseMap<Value, SmallVector<Value>> &depValueMap,
-                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
-                          BufferMap &bufferMap, OpBuilder &globalBuilder,
-                          int &groupId, const DenseSet<Value> &clonedDepVals) {
-  // Dedupe by depVal instead of op
-  llvm::DenseSet<Value> seenVals;
 
-  for (auto &blockPair : blocks) {
-    Value blockKey = blockPair.first;
-    auto depIt = depValueMap.find(blockKey);
-    if (depIt == depValueMap.end())
-      continue;
-
-    SmallVector<Value> &depValues = depIt->second;
-
-    for (Value depVal : depValues) {
-      // Skip if already processed
-      if (!seenVals.insert(depVal).second)
-        continue;
-
-      // Validate dependency value (skip BlockArgument, null definingOp,
-      // non-ShapedType)
-      if (isa<BlockArgument>(depVal) || !depVal.getDefiningOp() ||
-          !isa<ShapedType>(depVal.getType()))
-        continue;
-
-      // Skip tensor::EmptyOp - it carries no producer-consumer value flow
-      if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
-        continue;
-
-      // Skip bufferization.alloc_tensor
-      if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
-        continue;
-
-      auto *parentOp = depVal.getDefiningOp()->getParentOp();
-      if (parentOp != loop.getOperation())
-        continue;
-
-      // Skip depVals that were already cloned by cloneEmptyFillsInBlocks.
-      if (clonedDepVals.contains(depVal))
-        continue;
-
-      auto userIt = depUserMap.find(depVal);
-      if (userIt == depUserMap.end())
-        continue;
-      SmallVector<Operation *> depUsers = userIt->second;
-
-      auto producerId = getOpBlockId(depVal.getDefiningOp());
-      if (!producerId.has_value()) {
-        continue;
-      }
-
-      // Check if all users are in the same block
-      bool allUsersSameBlock = true;
-      for (Operation *depUser : depUsers) {
-        auto userId = getOutermostSsbufferId(depUser);
-        if (!userId.has_value() || *userId != *producerId) {
-          allUsersSameBlock = false;
-          break;
-        }
-      }
-      if (allUsersSameBlock)
-        continue;
-
-      // Process cross-block dependency with double buffering
-      if (processDepVal(depVal, loop, bufferMap, depUserMap, globalBuilder,
-                        *producerId, groupId) != 0)
-        return -1;
-      groupId++;
-    }
-  }
-  return 0;
-}
 
 // Clone bufferization.alloc_tensor to each consumer block
 int cloneAllocTensorsInBlocks(

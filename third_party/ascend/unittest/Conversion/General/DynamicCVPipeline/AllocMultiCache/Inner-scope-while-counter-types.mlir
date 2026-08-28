@@ -9,7 +9,7 @@
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, index, i32) -> (tensor<128xf32>, index, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_INDEX:[^:]+]]: index, %[[COUNT_INDEX:[^:]+]]: i32):
 // CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
-// CHECK: %[[ONE_INDEX:[^ ]+]] = arith.constant {{.*}} 1 : i32
+// CHECK-NEXT: %[[ONE_INDEX:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_INDEX:[^ ]+]] = arith.addi %[[COUNT_INDEX]], %[[ONE_INDEX]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_INDEX:[^ ]+]] = arith.addi %[[IV_INDEX]], %{{[^ ]+}} : index
 // CHECK-NEXT: scf.yield %{{[^,]+}}, %[[NEXT_IV_INDEX]], %[[NEXT_COUNT_INDEX]] : tensor<128xf32>, index, i32
@@ -48,7 +48,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, i32, i32) -> (tensor<128xf32>, i32, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_I32:[^:]+]]: i32, %[[COUNT_I32:[^:]+]]: i32):
 // CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
-// CHECK: %[[ONE_I32:[^ ]+]] = arith.constant {{.*}} 1 : i32
+// CHECK-NEXT: %[[ONE_I32:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_I32:[^ ]+]] = arith.addi %[[COUNT_I32]], %[[ONE_I32]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_I32:[^ ]+]] = arith.addi %[[IV_I32]], %{{[^ ]+}} : i32
 // CHECK-NEXT: scf.yield %{{[^,]+}}, %[[NEXT_IV_I32]], %[[NEXT_COUNT_I32]] : tensor<128xf32>, i32, i32
@@ -87,7 +87,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.intr
 // CHECK: scf.while {{.*}} : (tensor<128xf32>, i64, i32) -> (tensor<128xf32>, i64, i32)
 // CHECK: ^bb0(%{{[^:]+}}: tensor<128xf32>, %[[IV_I64:[^:]+]]: i64, %[[COUNT_I64:[^:]+]]: i32):
 // CHECK: bufferization.materialize_in_destination %{{[^:]+}} in restrict writable %{{[^:]+}} {{.*}} : (tensor<128xf32>, memref<128xf32>) -> ()
-// CHECK: %[[ONE_I64:[^ ]+]] = arith.constant {{.*}} 1 : i32
+// CHECK-NEXT: %[[ONE_I64:[^ ]+]] = arith.constant {{.*}} 1 : i32
 // CHECK-NEXT: %[[NEXT_COUNT_I64:[^ ]+]] = arith.addi %[[COUNT_I64]], %[[ONE_I64]] {{.*}}ssbuffer.iterCounter{{.*}} : i32
 // CHECK: %[[NEXT_IV_I64:[^ ]+]] = arith.addi %[[IV_I64]], %{{[^ ]+}} : i64
 // CHECK-NEXT: scf.yield %{{[^,]+}}, %[[NEXT_IV_I64]], %[[NEXT_COUNT_I64]] : tensor<128xf32>, i64, i32

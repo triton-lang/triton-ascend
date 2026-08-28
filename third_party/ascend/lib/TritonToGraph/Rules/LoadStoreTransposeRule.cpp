@@ -1927,6 +1927,7 @@ LogicalResult applyCandidate(IRRewriter &rewriter,
   auto newFor = rewriter.create<scf::ForOp>(
       oldFor.getLoc(), oldFor.getLowerBound(), oldFor.getUpperBound(),
       oldFor.getStep(), newInitArgs);
+  newFor->setAttrs(oldFor->getAttrs());
   created.push_back(newFor.getOperation());
   Block *newBody = newFor.getBody();
   // The generated SCF builder may leave a newly created body empty.  Do not

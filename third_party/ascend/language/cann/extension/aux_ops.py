@@ -93,11 +93,15 @@ class parallel(range):
         This is used in the mixed cube-vector kernel on 910B. The number of vector cores is determined by the
         number of iterations in this loop. Currently on 910B, at most 2 vector cores can be used.
     :type bind_sub_block: bool
+    :param compile_hint: Optional backend compile hint attached to this loop.
+        Use ``"main_loop"`` to explicitly select the dynamic CV pipeline's
+        main loop.
+    :type compile_hint: str | None
     """
 
     def __init__(self, arg1, arg2=None, step=None, num_stages=None, loop_unroll_factor=None,
-                 bind_sub_block: bool = False):
-        super().__init__(arg1, arg2, step, num_stages, loop_unroll_factor)
+                 bind_sub_block: bool = False, compile_hint=None):
+        super().__init__(arg1, arg2, step, num_stages, loop_unroll_factor, compile_hint=compile_hint)
         self.bind_sub_block = bind_sub_block
 
 

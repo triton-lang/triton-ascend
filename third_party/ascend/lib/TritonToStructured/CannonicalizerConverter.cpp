@@ -819,9 +819,11 @@ PromotePointerIterArgsPattern::createNewIterArgsForAdvancePtr(
 scf::ForOp PromotePointerIterArgsPattern::createNewForLoop(
     scf::ForOp forOp, ArrayRef<Value> newInitArgs,
     ArrayRef<Type> newIterArgTypes, PatternRewriter &rewriter) const {
-  return rewriter.create<scf::ForOp>(forOp.getLoc(), forOp.getLowerBound(),
-                                     forOp.getUpperBound(), forOp.getStep(),
-                                     newInitArgs);
+  auto newFor = rewriter.create<scf::ForOp>(
+      forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
+      forOp.getStep(), newInitArgs);
+  newFor->setAttrs(forOp->getAttrs());
+  return newFor;
 }
 
 LogicalResult PromotePointerIterArgsPattern::rewriteLoopBody(
@@ -1957,6 +1959,7 @@ SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidates(
   auto newFor = rewriter.create<scf::ForOp>(
       forOp.getLoc(), forOp.getLowerBound(), forOp.getUpperBound(),
       forOp.getStep(), newInitArgs);
+  newFor->setAttrs(forOp->getAttrs());
   newFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> LogicalResult {
@@ -2274,6 +2277,7 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
   auto newOuterFor = rewriter.create<scf::ForOp>(
       outerFor.getLoc(), outerFor.getLowerBound(), outerFor.getUpperBound(),
       outerFor.getStep(), newOuterInitArgs);
+  newOuterFor->setAttrs(outerFor->getAttrs());
   newOuterFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> FailureOr<scf::ForOp> {

@@ -46,6 +46,27 @@ void MarkMainLoopPass::runOnOperation() {
   int mainLoopIdCounter = 0;
   SmallVector<Operation *> mainLoops;
 
+  // An explicit frontend hint takes precedence over the Fixpipe/Copy based
+  // heuristic below. This lets users select an outer loop even when a nested
+  // loop also contains a candidate operation.
+  module.walk([&](scf::ForOp forOp) {
+    auto hint = forOp->getAttrOfType<StringAttr>(CVPipeline::kLoopCompileHint);
+    if (hint && hint.getValue() == CVPipeline::kMainLoopHint)
+      mainLoops.push_back(forOp);
+  });
+
+  if (!mainLoops.empty()) {
+    for (Operation *loopOp : mainLoops) {
+      loopOp->removeAttr(CVPipeline::kLoopCompileHint);
+      loopOp->setAttr(
+          CVPipeline::kMainLoop,
+          Builder(module.getContext()).getI32IntegerAttr(mainLoopIdCounter++));
+    }
+    LOG_DEBUG("selected " << mainLoops.size()
+                          << " explicitly hinted main loop(s)\n");
+    return;
+  }
+
   // Find all candidate main loops (ForOp + WhileOp)
   auto isL1Fixpipe = [](Operation *op) -> bool {
     auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);

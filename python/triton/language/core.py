@@ -3277,6 +3277,9 @@ class range(base_value):
     :param disable_licm: Tells the compiler it shouldn't hoist loop invariant
         code outside the loop. This is often useful to avoid creating long liveranges
         within a loop.
+    :param compile_hint: Optional backend compile hint attached to this loop.
+        Ascend accepts ``"main_loop"`` to explicitly select the loop used by
+        the dynamic CV pipeline.
 
         Note that warp specialization is only supported on Blackwell GPUs and
         only works on simple matmul loops. Support for arbitrary loops will be
@@ -3284,7 +3287,8 @@ class range(base_value):
     """
 
     def __init__(self, arg1, arg2=None, step=None, num_stages=None, loop_unroll_factor=None,
-                 disallow_acc_multi_buffer=False, flatten=False, warp_specialize=False, disable_licm=False):
+                 disallow_acc_multi_buffer=False, flatten=False, warp_specialize=False, disable_licm=False,
+                 compile_hint=None):
         if step is None:
             self.step = constexpr(1)
         else:
@@ -3301,6 +3305,7 @@ class range(base_value):
         self.flatten = flatten
         self.warp_specialize = warp_specialize
         self.disable_licm = disable_licm
+        self.compile_hint = compile_hint
 
     def __iter__(self):
         raise RuntimeError("tl.range can only be used in @triton.jit'd functions")

@@ -449,7 +449,7 @@ index a3cf0ff0c..28ba11c92 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index c572f81e3..6e06b8477 100644
+index c572f81e3..90287eca8 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -10,8 +10,16 @@ from dataclasses import dataclass
@@ -568,27 +568,41 @@ index c572f81e3..6e06b8477 100644
          # Lower `with` statements by constructing context managers and calling their enter/exit hooks
          # Instantiate each context manager with builder injection
          cm_list = []
-@@ -1147,7 +1199,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1147,7 +1199,8 @@ class CodeGenerator(ast.NodeVisitor):
          flatten = False
          warp_specialize = False
          disable_licm = False
++        compile_hint = None
 -        if IteratorClass is language.range:
 +        if IteratorClass in [language.range, extension.parallel]:
              iterator = IteratorClass(*iter_args, **iter_kwargs)
              # visit iterator arguments
              # note: only `range` iterator is supported now
-@@ -1224,7 +1276,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1161,6 +1214,7 @@ class CodeGenerator(ast.NodeVisitor):
+             flatten = iterator.flatten
+             warp_specialize = iterator.warp_specialize
+             disable_licm = iterator.disable_licm
++            compile_hint = iterator.compile_hint
+         elif IteratorClass is range:
+             # visit iterator arguments
+             # note: only `range` iterator is supported now
+@@ -1224,7 +1278,14 @@ class CodeGenerator(ast.NodeVisitor):
              if warp_specialize:
                  for_op.set_attr("tt.warp_specialize", self.builder.get_unit_attr())
              if disable_licm:
 -                for_op.set_attr("llvm.loop_annotation", self.builder.get_disable_loop_licm_attr())
 +                for_op.set_attr("tt.disable_licm", self.builder.get_unit_attr())
++            compile_hint = _unwrap_if_constexpr(compile_hint)
++            if compile_hint is not None:
++                if not isinstance(compile_hint, str):
++                    raise TypeError(f"For loop compile_hint must be a string, got {type(compile_hint).__name__}")
++                for_op.set_attr("tt.compile_hint", self.builder.get_string_attr(compile_hint))
 +            if (IteratorClass is extension.parallel):
 +                for_op.set_attr("hivm.parallel_loop", self.builder.get_unit_attr())
  
              self.scf_stack.append(node)
              for_op_body = for_op.get_body(0)
-@@ -1286,7 +1340,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1286,7 +1347,7 @@ class CodeGenerator(ast.NodeVisitor):
          args = inspect.getcallargs(fn.fn, *args, **kwargs)
          args = [args[name] for name in fn.arg_names]
          for i, arg in enumerate(args):
@@ -597,7 +611,7 @@ index c572f81e3..6e06b8477 100644
                  args[i] = language.core.constexpr(arg)
          args_cst = find_paths_if(args, lambda _, x: _is_constexpr(x))
          args_cst = {path: get_iterable_path(args, path) for path in args_cst}
-@@ -1340,6 +1394,11 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1340,6 +1401,11 @@ class CodeGenerator(ast.NodeVisitor):
              return self.call_JitFunction(fn, args, kws)
          if (hasattr(fn, '__self__') and _is_triton_value(fn.__self__)) or language.core.is_builtin(fn) or isinstance(
                  fn, ConstexprFunction):
@@ -609,7 +623,7 @@ index c572f81e3..6e06b8477 100644
              extra_kwargs = dict()
  
              if isinstance(fn, ConstexprFunction):
-@@ -1355,6 +1414,9 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1355,6 +1421,9 @@ class CodeGenerator(ast.NodeVisitor):
                  # builtin functions return plain tuples for readability
                  if isinstance(ret, tuple):
                      ret = language.tuple(ret)
@@ -619,7 +633,7 @@ index c572f81e3..6e06b8477 100644
                  return ret
              except Exception as e:
                  if knobs.compilation.front_end_debugging:
-@@ -1594,6 +1656,7 @@ class CodeGenerator(ast.NodeVisitor):
+@@ -1594,6 +1663,7 @@ class CodeGenerator(ast.NodeVisitor):
          ttgl.static_print: static_executor(print),
          int: static_executor(int),
          len: static_executor(len),

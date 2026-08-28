@@ -13,3 +13,19 @@
 | [07_accuracy_comparison_example](./07_accuracy_comparison_example.md)| Accuracy comparison example|
 | [08_max_autotune_example](./08_max_autotune_example.md)| Example of using max_autotune on Kernels|
 | [09_costmodel_example](./09_costmodel_example.md)| End-to-end costmodel prediction example|
+
+```{toctree}
+:maxdepth: 3
+:hidden:
+
+01_vector_add_example.md
+02_fused_softmax_example.md
+03_layer_norm_example.md
+04_fused_attention_example.md
+05_matrix_multiplication_example.md
+06_autotune_example.md
+07_accuracy_comparison_example.md
+08_max_autotune_example.md
+09_costmodel_example.md
+
+```

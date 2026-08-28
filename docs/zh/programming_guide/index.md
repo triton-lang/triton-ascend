@@ -88,7 +88,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 
 ### 设置合适的循环内数据分块大小（BLOCK SIZE）
 
-以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
+以add_kernel为例，变量和操作共同决定了片上内存空间的占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
 
 ```python
 import triton.language as tl
@@ -308,7 +308,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。
 
 ```diff
-E triton.compiler. errors.MLIRCompilationError:
+E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
 E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":2:1): error: Failed to run BishengHIR pipeline

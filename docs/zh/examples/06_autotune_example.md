@@ -108,7 +108,7 @@ if __name__ == "__main__":
 # key（list[str]/Dict[str,str]）：
 # - 传入运行时参数名列表；列表中任一参数值变化会触发候选配置的重新生成与评估
 # 注意：1.若hints传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为Dict[str,str],如示例1：
-#      2.若hints不传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为list[str]，轴信息会按参数顺利进行分配，如示例2：
+#      2.若hints不传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为list[str]，轴信息会按参数顺序进行分配，如示例2：
 
 示例1:
 @triton.autotune(

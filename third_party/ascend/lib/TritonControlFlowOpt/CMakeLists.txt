@@ -1,4 +1,9 @@
 add_triton_library(TritonControlFlowOpt
+        BlockPtrDecompose.cpp
+        CFGStructuring.cpp
+        ControlFlowAnalysis.cpp
+        ControlFlowRewrite.cpp
+        TensorPtrDecompose.cpp
         TritonControlFlowOptPass.cpp
 
   DEPENDS
@@ -11,6 +16,8 @@ add_triton_library(TritonControlFlowOpt
   MLIRIR
   MLIRPass
   MLIRSCFDialect
+  MLIRSideEffectInterfaces
   MLIRSupport
+  MLIRTritonNPUUtils
   TritonIR
 )

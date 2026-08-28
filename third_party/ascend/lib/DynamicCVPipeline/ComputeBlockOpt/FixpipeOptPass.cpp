@@ -25,6 +25,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
 
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -92,155 +93,9 @@ private:
                        CVPipeline::ComputeBlockIdManager &bm);
   bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp,
                                  SetVector<Operation *> &matchedOps);
-  bool isValidTrunc(Operation *op);
   bool isValidMul(Operation *op, Value matmulValues,
                   SetVector<Operation *> &matchedOps);
 };
-
-namespace {
-struct DependencyCycleDetector {
-  llvm::DenseSet<mlir::Operation *> &opsInNewBlock;
-  llvm::DenseSet<mlir::Operation *> visited;
-  const CVPipeline::MemoryDependenceGraph &memGraph;
-  CVPipeline::ComputeBlockIdManager &bm;
-  Block *block;
-  void clear() { visited.clear(); }
-  bool dfs(Operation *cur);
-  DependencyCycleDetector(Block *block,
-                          const CVPipeline::MemoryDependenceGraph &memGraph,
-                          llvm::DenseSet<mlir::Operation *> &opsInNewBlock,
-                          CVPipeline::ComputeBlockIdManager &bm)
-      : block(block), memGraph(memGraph), opsInNewBlock(opsInNewBlock), bm(bm) {
-  }
-};
-
-} // namespace
-
-bool DependencyCycleDetector::dfs(Operation *cur) {
-  if (opsInNewBlock.contains(cur)) {
-    return true;
-  }
-  if (!visited.insert(cur).second) {
-    return false;
-  }
-
-  SmallVector<Operation *> allusers;
-  allusers.append(cur->getUsers().begin(), cur->getUsers().end());
-  allusers.append(memGraph.getExecAfter(cur).begin(),
-                  memGraph.getExecAfter(cur).end());
-  for (auto *user : allusers) {
-    auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-    if (!userInBlock) {
-      continue;
-    }
-    if (bm.getBlockIdByOp(userInBlock) == -1) {
-      if (dfs(userInBlock)) {
-        return true;
-      }
-    } else {
-      for (auto *nx : bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock))) {
-        if (dfs(nx)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * Check if adding willaddOps to targetBlockId will create cycle.
- * Walk from every op in targetBlockId and willaddOps.
- * if reach other blockid ops and dfs find any targetBlockId op, then there is
- * cycle.
- */
-static std::optional<bool>
-willCreateCycle(SetVector<Operation *> &willaddOps, Block *block,
-                const CVPipeline::MemoryDependenceGraph &memGraph,
-                int targetBlockId, CVPipeline::ComputeBlockIdManager &bm) {
-  // Step1: Init, Add willaddOps to targetBlockId.
-  // opsInNewBlock is new block, includes two part: 1. original ops in
-  // targetBlockId. 2. willaddOps.
-  llvm::DenseSet<mlir::Operation *> opsInNewBlock;
-  for (auto op : bm.getOpsByBlockId(targetBlockId)) {
-    opsInNewBlock.insert(op);
-  }
-  llvm::DenseMap<mlir::Operation *, int> originBlockId;
-  for (auto op : willaddOps) {
-    opsInNewBlock.insert(op);
-    // For backtracing
-    originBlockId[op] = bm.getBlockIdByOp(op);
-    bm.updateBlockId(op, targetBlockId);
-  }
-  DependencyCycleDetector detector = {block, memGraph, opsInNewBlock, bm};
-
-  // Step2: Walk from every op in opsInNewBlock
-  auto ret = false;
-  for (mlir::Operation *testOp : opsInNewBlock) {
-    SmallVector<Operation *> allusers;
-    allusers.append(testOp->getUsers().begin(), testOp->getUsers().end());
-    allusers.append(memGraph.getExecAfter(testOp).begin(),
-                    memGraph.getExecAfter(testOp).end());
-    for (auto *user : allusers) {
-      auto *userInBlock = CVPipeline::getAncestorInBlock(user, block);
-      if (opsInNewBlock.contains(userInBlock)) {
-        continue;
-      }
-      if (bm.getBlockIdByOp(userInBlock) == -1) {
-        detector.clear();
-        if (detector.dfs(userInBlock)) {
-          ret = true;
-          break;
-        }
-        continue;
-      }
-      auto opsUsedBlockId = bm.getOpsByBlockId(bm.getBlockIdByOp(userInBlock));
-      for (auto *userOp : opsUsedBlockId) {
-        detector.clear();
-        if (detector.dfs(userOp)) {
-          ret = true;
-          break;
-        }
-      }
-    }
-    if (ret) {
-      // early stop if find cycle.
-      break;
-    }
-  }
-
-  // Step3: Backtrace blockId change.
-  for (auto op : willaddOps) {
-    bm.updateBlockId(op, originBlockId[op]);
-  }
-  return ret;
-}
-
-bool FixpipeOptPass::isValidTrunc(Operation *op) {
-  // Just filter: arith.truncf(f32->bf16, f32->f16, i32->i8)
-  if (auto truncFOp = dyn_cast<arith::TruncFOp>(op)) {
-    Type inType = truncFOp.getIn().getType();
-    Type outType = truncFOp.getResult().getType();
-    if (auto shapedType = dyn_cast<ShapedType>(inType))
-      inType = shapedType.getElementType();
-    if (auto shapedType = dyn_cast<ShapedType>(outType))
-      outType = shapedType.getElementType();
-
-    return isa<Float32Type>(inType) &&
-           (isa<BFloat16Type>(outType) || isa<Float16Type>(outType));
-  }
-  if (auto truncIOp = dyn_cast<arith::TruncIOp>(op)) {
-    Type inType = truncIOp.getIn().getType();
-    Type outType = truncIOp.getResult().getType();
-    if (auto shapedType = dyn_cast<ShapedType>(inType))
-      inType = shapedType.getElementType();
-    if (auto shapedType = dyn_cast<ShapedType>(outType))
-      outType = shapedType.getElementType();
-
-    return inType.isInteger(32) && outType.isInteger(8);
-  }
-  return false;
-}
 
 void transSource(Value value, SetVector<Operation *> &matchedOps,
                  Block *block) {
@@ -321,63 +176,21 @@ bool FixpipeOptPass::isValidMul(Operation *op, Value matmulValue,
   return false;
 }
 
-bool FixpipeOptPass::isSubviewFromGlobalMemory(
-    ViewLikeOpInterface viewOp, SetVector<Operation *> &matchedOps) {
-  // Subview ops may be nested many layers deep through reinterpretation or
-  // other subviews. like, subview (subview (reinterpret_cast (subview
-  // (reinterpret_cast (arg0))))) so we need Search and only keep same block
-  // view-like op.
-  Value source = viewOp.getViewSource();
-  auto block = viewOp->getBlock();
-  while (true) {
-    LOG_DEBUG("Check view source: " << source << "\n");
-    if (auto blockArg = dyn_cast<BlockArgument>(source)) {
-      Operation *parentOp = blockArg.getOwner()->getParentOp();
-      if (isa<func::FuncOp>(parentOp)) {
-        return true;
-      } else {
-        LOG_DEBUG(
-            "Subview source block argument is not from func entry block.");
-        return false;
-      }
-    }
-    // From other view-like op
-    if (auto viewLike = dyn_cast<ViewLikeOpInterface>(source.getDefiningOp())) {
-      if (viewLike->getBlock() == block) {
-        matchedOps.insert(viewLike.getOperation());
-      }
-      source = viewLike.getViewSource();
-      continue;
-    }
-    LOG_DEBUG(
-        "Subview source defining op is not ViewLikeOpInterface: " << source);
-    return false;
-  }
-  return false;
-}
-
 bool FixpipeOptPass::isStoreToGM(Operation *storeOp,
                                  SetVector<Operation *> &matchedOps) {
-  ViewLikeOpInterface viewOp = nullptr;
+  Value viewValue = nullptr;
   if (auto materializeOp =
           dyn_cast<bufferization::MaterializeInDestinationOp>(storeOp)) {
-    Value destMemref = materializeOp.getDest();
-    viewOp = destMemref.getDefiningOp<ViewLikeOpInterface>();
+    viewValue = materializeOp.getDest();
   } else if (auto hivmStore = dyn_cast<hivm::StoreOp>(storeOp)) {
-    auto dest = hivmStore.getDst();
-    viewOp = dest.getDefiningOp<ViewLikeOpInterface>();
+    viewValue = hivmStore.getDst();
   } else {
     LOG_DEBUG("Cannot find store op, NOT match");
     return false;
   }
 
-  if (!viewOp) {
-    LOG_DEBUG("store destination is not from ViewLikeOpInterface, NOT match");
-    return false;
-  }
   matchedOps.insert(storeOp);
-  matchedOps.insert(viewOp);
-  if (!isSubviewFromGlobalMemory(viewOp, matchedOps)) {
+  if (!CVPipeline::collectViewOpsAndCheckGlobalMemory(viewValue, matchedOps)) {
     LOG_DEBUG("Subview is not from global memory (GM), NOT match.");
     return false;
   }
@@ -406,8 +219,18 @@ bool FixpipeOptPass::isFixpipeCastPattern(Operation *truncOp,
   tensor::ExtractSliceOp extractSliceOp = nullptr;
   if (auto extract = dyn_cast<tensor::ExtractSliceOp>(maybeExtract)) {
     extractSliceOp = extract;
+  } else if (auto consumerMatmul = dyn_cast<linalg::MatmulOp>(maybeExtract)) {
+    // matmul -> trunc -> matmul pattern
+    for (Value input : consumerMatmul.getDpsInputs()) {
+      if (input == truncResult) {
+        matchedOps.insert(truncOp);
+        return true;
+      }
+    }
+    LOG_DEBUG("Trunc result is not a DPS input of consumer matmul, NOT match.");
+    return false;
   } else {
-    LOG_DEBUG("Cannot find extract slice op, NOT match");
+    LOG_DEBUG("Cannot find extract slice op or matmul, NOT match");
     return false;
   }
 
@@ -513,7 +336,7 @@ bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp,
 
   auto matmulUser = *matmulResult.getUsers().begin();
 
-  if (isValidTrunc(matmulUser)) {
+  if (CVPipeline::getFixpipePreQuantMode(matmulUser).has_value()) {
     if (isFixpipeCastPattern(matmulUser, matchedOps)) {
       return true;
     }
@@ -546,8 +369,8 @@ bool FixpipeOptPass::applyFixpipeOpt(
   int targetBlockId = bm.getBlockIdByOp(matmulOp);
   auto block = matmulOp->getBlock();
 
-  if (willCreateCycle(matchedOps, block, memGraph, targetBlockId, bm)
-          .value_or(true)) {
+  if (CVPipeline::willCreateCycle(matchedOps.getArrayRef(), memGraph,
+                                  targetBlockId, bm)) {
     return false;
   }
   for (Operation *op : matchedOps) {
@@ -571,15 +394,16 @@ void FixpipeOptPass::getDependentDialects(DialectRegistry &registry) const {
 }
 
 void FixpipeOptPass::runOnOperation() {
+  LOG_DEBUG("== FixpipeOpt Pass Start ==\n");
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
     return;
   }
 
+  LOG_DEBUG(module);
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
-  LOG_DEBUG("== FixpipeOpt Pass Start ==\n");
   LOG_DEBUG(module);
 
   SmallVector<SetVector<Operation *>> allMatchedPatterns;
@@ -599,12 +423,21 @@ void FixpipeOptPass::runOnOperation() {
           D
       Now we want to fuse A/B/C, so clone A' for D to avoid cycle.
   */
-  auto bmOriginal = CVPipeline::ComputeBlockIdManager(module);
+  auto bm = CVPipeline::ComputeBlockIdManager(module);
   for (auto &matchedOps : allMatchedPatterns) {
-    CVPipeline::cloneScalarOpsForCrossBlockUses(bmOriginal, matchedOps);
+    if (matchedOps.empty()) {
+      continue;
+    }
+    CVPipeline::SplitIf::ScalarClosure closure{matchedOps.front()->getBlock(),
+                                               matchedOps.getArrayRef(), false};
+    closure.collect();
+    for (auto op : closure.scalarOps) {
+      matchedOps.insert(op);
+    }
+    CVPipeline::cloneScalarOpsForCrossBlockUses(
+        bm, matchedOps, bm.getBlockIdByOp(matchedOps[0]));
   }
 
-  auto bm = CVPipeline::ComputeBlockIdManager(module);
   for (auto &matchedOps : allMatchedPatterns) {
     if (!applyFixpipeOpt(matchedOps, memDepGraph, bm)) {
       for (Operation *op : matchedOps) {

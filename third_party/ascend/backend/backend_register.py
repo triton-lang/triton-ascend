@@ -163,26 +163,6 @@ def get_empty_tensor(size):
     return torch.empty(size, dtype=torch.int32, device='npu')
 
 
-@backend_strategy_registry.register("mindspore", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import mindspore
-    tensor_params = [arg for arg in args if isinstance(arg, mindspore.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
-@backend_strategy_registry.register("torch_npu", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import torch
-    tensor_params = [arg for arg in args if isinstance(arg, torch.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
 @backend_strategy_registry.register("mindspore", "get_cc_cmd")
 def get_cc_cmd():
     import mindspore
@@ -304,11 +284,11 @@ def allocate_memory(size, stream):
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
     return f'''init_npu_utils();
-    if (!g_allocate_workspace_legacy) {{
-      fprintf(stderr, "Error: triton_allocate_workspace_legacy is unavailable\\n");
+    if (!g_allocate_workspace) {{
+      fprintf(stderr, "Error: triton_allocate_workspace is unavailable\\n");
       workspace_addr_ptr = nullptr;
     }} else {{
-      workspace_addr_ptr = g_allocate_workspace_legacy({size});
+      workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);
     }}'''
 
 
@@ -355,4 +335,4 @@ def async_launch(func):
      fprintf(stderr, "Error: triton_async_launch is unavailable\\n");
      return;
    }}
-   g_async_launch(static_cast<void*>(&{func}), name.c_str());'''
+   g_async_launch(static_cast<void*>(&{func}), kernelName);'''

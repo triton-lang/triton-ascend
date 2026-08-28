@@ -79,7 +79,7 @@ def layer_norm(x, weight, bias, eps=1e-5):
     BLOCK_SIZE = 1024
 
     # enqueue kernel
-    kernel = _layer_norm_fwd_fused[(M,)](# M indicates the number of blocks, and launch grid=(M,)
+    kernel = _layer_norm_fwd_fused[(M, )](  # M indicates the number of blocks, and launch grid=(M,)
         x_arg, y, weight, bias, mean, rstd,  # Input, output, and intermediate variables
         x_arg.stride(0), N, eps,
         BLOCK_SIZE=BLOCK_SIZE)

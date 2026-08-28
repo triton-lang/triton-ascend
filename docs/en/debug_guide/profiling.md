@@ -16,7 +16,7 @@ The following command is an example of collecting performance data of an operato
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
 ```
 
-The following uses the [05-layer-norm.py](./../../../third_party/ascend/tutorials/05-layer-norm.py) test case as an example (the generated data file is saved in the current path when **if --output** is not specified):
+The following uses the [03-layer-norm.py](../../../third_party/ascend/unittest/autotune_ut/03-layer-norm.py) test case as an example (the generated data file is saved in the current path when **if --output** is not specified):
 
 ```bash
 msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
@@ -25,6 +25,8 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 - Note: For details about the result data of all the following collection items, see [op_summary (Operator Details)](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/devaids/Profiling/atlasprofiling_16_0067.html) in the *CANN Performance Optimization Tool User Guide*.
 **Figure 1** PipeUtilization.csv (ratios of time taken by compute units and MTEs)
 ![alt text](../figures/time_consumed.png)
+
+<a id="operator-simulation-pipeline"></a>
 
 ### Operator Simulation Pipeline Diagram
 
@@ -87,18 +89,20 @@ By default, the simulation pipeline files (`trace.json` / `visualize_data.bin`) 
 A Triton kernel does not need a manual `-g`. The triton-ascend backend controls whether `--enable-debug-info=true` is appended to the `bishengir-compile` command via the environment variable `TRITON_DISABLE_LINE_INFO`. Note that triton-ascend defaults this to `true` (i.e. line-number information is **off** by default, the opposite of upstream Triton, which enables it by default), so it must be set to `false` explicitly:
 
 ```bash
-export TRITON_DISABLE_LINE_INFO=false
+export TRITON_DISABLE_LINE_INFO=0
 ```
 
 To verify it took effect: the `[DEBUG] cmd_list:` line in the log should now include `--enable-debug-info=true`, and the `Kernel missed debug_line information` warning should disappear. After that, import `visualize_data.bin` into MindStudio Insight to view the source line and call stack associated with each instruction in the instruction timeline.
 
 ## Analyzing Performance Data
 
+<a id="theoretical-parameters"></a>
+
 ### Theoretical Parameters
 
 The theoretical performance is the ideal objective of the actual performance of the operator. Different hardware platforms have different hardware specifications. Theoretical performance helps us understand the potential of hardware and set performance optimization objectives.
 
-- Theoretical time required for transfer-related pipelines (such as MTE1, MTE2, and MTE3) = Data volume (unit: byte)/Theoretical bandwidth. For example, if the peak GM bandwidth of an AI processor is about 1.8 TB/s, the theoretical time required for transferring a float-type matrix of size 4096 x 4096 is sizeof(float) x 4096 x 4096/1.8 TB/s = 37.28 μs (calculated based on 1 TB = 10<sup>12</sup> Byte).
+- Theoretical time required for transfer-related pipelines (such as MTE1, MTE2, and MTE3) = Data volume (unit: byte)/Theoretical bandwidth. For example, if the peak GM bandwidth of an AI processor is about 1.8 TB/s, the theoretical time required for transferring a float-type matrix of size 4096 x 4096 is `sizeof(float) x 4096 x 4096/1.8 TB/s = 37.28 μs` (calculated based on 1 TB = 10<sup>12</sup> Byte).
 
 > Note:
 >
@@ -106,6 +110,8 @@ The theoretical performance is the ideal objective of the actual performance of 
 > - The bandwidth usage (effective bandwidth/theoretical bandwidth) varies according to the size of data blocks to be transferred. If the amount of data transferred each time is small, the actual performance cannot reach the theoretical bandwidth.
 >
 - Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32K float elements is 32K/11.06 TOPS = 0.003 μs (calculated based on 1K = 1000).
+
+<a id="locating-bottlenecks"></a>
 
 ### Locating Bottlenecks
 
@@ -117,7 +123,7 @@ View the **op_summary_\*.csv** file parsed by board profiling to analyze the pip
 
     In ideal cases, the utilization rate of each pipeline should be 100%. Any pipeline falling short of this target represents room for improvement. The preceding figure shows the data obtained from an AI processor. In the first scenario of the Vector operator _layer_norm_fwd_fused, the Vector pipeline utilization **aiv_vec_ratio** is less than 10%, indicating that the computing power is not fully utilized. The Scalar pipeline utilization **aiv_scalar_ratio** is about 60%, indicating that Scalar is the longest pipeline. \
     When Scalar is the longest pipeline, analyze whether complex operations are performed on scalar values in the operator source code. The SIMD microarchitecture of Ascend is more suitable for multi-data parallel computing. Another possibility is that the Triton software stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. Optimization should involve both pipeline and scalar optimization methods. For details, see method 3 to view the simulation pipeline diagram and method 4 to view the code hotspots for further analysis. \
-    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.055 μs (calculated based on 1 TB = 10<sup>12</sup> Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
+    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is `sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.055 μs` (calculated based on 1 TB = 10<sup>12</sup> Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
 
 - Method 2: Use board profiling to analyze the tiling.
 The AI processor used in the previous example has 48 vector cores. The _layer_norm_fwd_fused operator is a pure vector operator. However, in some scenarios, too many blocks (Block Dim > 48) are delivered, causing excessive host scheduling overhead. In this case, the next step is to optimize the tiling.
@@ -197,4 +203,4 @@ def npu_vector_cmp_kernel(
 **Example** Data comparison before and after optimization
 ![Figure 2 optimization2](../figures/optimization.png)
 According to the data in the figure, the values of **aiv_scalar_time** (in μs) and **aiv_scalar_ratio** before and after optimization are greatly different, indicating that the performance is poor due to many scalar operations.
-You can obtain **visualize_data.bin** by collecting the [operator simulation pipeline diagram](#operator-simulation-pipeline-diagram). Then, use MindStudio Insight to parse **visualize_data.bin**. It is found that **xbar = tl.where(cols < N, x - mean, 0.0)** contains many scalar operations, which can be reduced through the preceding optimization.
+You can obtain **visualize_data.bin** by collecting the [operator simulation pipeline diagram](#operator-simulation-pipeline). Then, use MindStudio Insight to parse **visualize_data.bin**. It is found that **xbar = tl.where(cols < N, x - mean, 0.0)** contains many scalar operations, which can be reduced through the preceding optimization.

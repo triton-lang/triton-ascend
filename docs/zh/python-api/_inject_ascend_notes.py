@@ -7,6 +7,7 @@ via the autodoc-process-docstring event.
 import functools as _functools
 import importlib.util as _importlib_util
 import os as _os
+import textwrap as _textwrap
 
 from sphinx.util import logging as _sphinx_logging
 
@@ -30,9 +31,17 @@ _RUBRIC_I18N = {
     "zh": {
         "Example": "示例",
         "Notes": "说明",
-        "Special Restrictions": "特别限制",
+        "Special Restrictions": "特殊说明",
+        "DataType Support": "数据类型支持",
     },
 }
+
+
+def _bold(text: str) -> str:
+    """Wrap rubric text in strong emphasis (``**text**``)."""
+    if text.startswith("**") and text.endswith("**"):
+        return text
+    return f"**{text}**"
 
 
 def _translate_rubric(rubric_text: str, lang: str) -> str:
@@ -46,15 +55,12 @@ def _translate_rubric(rubric_text: str, lang: str) -> str:
 
 def _localize_rubrics_in_lines(lines, lang: str) -> None:
     """Replace ``.. rubric:: <English>`` markers in *lines* with the
-    localized equivalents, in-place."""
-    if lang not in _RUBRIC_I18N:
-        return
-    translations = _RUBRIC_I18N[lang]
+    localized, bold equivalents, in-place."""
+    translations = _RUBRIC_I18N.get(lang, {})
     for i, line in enumerate(lines):
         if line.startswith(".. rubric:: "):
             en = line[len(".. rubric:: "):].strip()
-            if en in translations:
-                lines[i] = f".. rubric:: {translations[en]}"
+            lines[i] = f".. rubric:: {_bold(translations.get(en, en))}"
 
 
 @_functools.lru_cache(maxsize=None)
@@ -69,10 +75,12 @@ def _read_example(name):
 
 
 def _build_note(data, lang: str = "en"):
-    """Build RST content from a constraint dict (constraints + example)."""
+    """Build RST content from a constraint dict
+    (dtype_support table + constraints + example)."""
     lines = []
 
     constraints = data.get("constraints", [])
+    dtype_support = data.get("dtype_support", "")
     example_file = data.get("example", "")
 
     example = _read_example(example_file) if example_file else ""
@@ -81,7 +89,7 @@ def _build_note(data, lang: str = "en"):
         # Ensure a blank line separates the rubric from preceding content
         # (e.g. when replace_docstring is active and its last line isn't blank).
         lines.append("")
-        lines.append(f".. rubric:: {example_label}")
+        lines.append(f".. rubric:: {_bold(example_label)}")
         lines.append("")
         lines.append(".. code-block:: python")
         lines.append("")
@@ -89,12 +97,32 @@ def _build_note(data, lang: str = "en"):
             lines.append(f"    {line}")
         lines.append("")
 
+    if dtype_support:
+        # DataType support table — a standalone section, sibling of the
+        # constraints section below.  Wrapped in a ``dtype-support-table``
+        # container so CSS can center the support marks.
+        dtype_label = _translate_rubric("DataType Support", lang)
+        lines.append(f".. rubric:: {_bold(dtype_label)}")
+        lines.append("")
+        lines.append(".. container:: dtype-support-table")
+        lines.append("")
+        for table_line in _textwrap.dedent(dtype_support).splitlines():
+            lines.append(f"   {table_line}")
+        lines.append("")
+
     if constraints:
         restrictions_label = _translate_rubric("Special Restrictions", lang)
-        lines.append(f".. rubric:: {restrictions_label}")
+        lines.append(f".. rubric:: {_bold(restrictions_label)}")
         lines.append("")
         for c in constraints:
-            lines.append(f"* {c}")
+            if "\n" in c:
+                # Multi-line constraint — emitted as raw RST blocks
+                # (kept as a fallback for legacy entries).
+                for line in _textwrap.dedent(c).splitlines():
+                    lines.append(line)
+                lines.append("")
+            else:
+                lines.append(f"* {c}")
         lines.append("")
 
     return lines
@@ -109,10 +137,13 @@ def autodoc_process_docstring(app, what, name, obj, options, lines):
         return
 
     # Determine the Sphinx language (e.g. "zh", "en") for rubric localisation.
+    # Normalise regional variants ("zh_CN") to the base tag ("zh") so they
+    # match the keys of _RUBRIC_I18N.
     try:
         lang = app.config.language or "en"
     except AttributeError:
         lang = "en"
+    lang = str(lang).split("_")[0].lower()
 
     # If replace_docstring is present, clear the original docstring first
     # and use the Ascend-specific replacement, so GPU-related content from

@@ -17,8 +17,20 @@ def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         tl.store(output + (x0), tmp1, mask=mask)
 
 
+def test_isinf():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.randn(size=shape, dtype=torch.float32)
+    x0.view(-1)[0] = float("inf")
+    x0.view(-1)[1] = -float("inf")
+    x0 = x0.npu()
+
+    torch_res = torch.isinf(x0).to(torch.int32)
+    triton_res = torch.empty(shape, dtype=torch.int32, device='npu')
+    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub)
+
+    torch.testing.assert_close(torch_res.cpu(), triton_res.cpu(), rtol=0, atol=0)
+
+
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub)
+    test_isinf()

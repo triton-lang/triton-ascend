@@ -10,7 +10,7 @@ msProf工具用于采集和分析运行在昇腾AI处理器上算子的关键性
 
 - 注： msProf工具的使用依赖CANN包中的msopprof可执行文件，该文件中的接口功能和msprof op一致，该文件为CANN包自带，无需单独安装，msProf工具常用命令请参考[msProf常用命令](https://www.hiascend.com/document/detail/zh/mindstudio/82RC1/ODtools/Operatordevelopmenttools/atlasopdev_16_0082.html)。
 
-如下命令行使一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。实例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（如果不指定，则只对程序运行过程中调度的第一个算子进行采集）；$HOME/projects/test_op.py为算子可执行脚本。
+如下命令行是一个算子上板性能数据采集的示例，可以根据自身的需要灵活组合配置参数。实例中 --output为可选参数，用于指定收集到的性能数据的存放路径；--kernel-name为可选参数，用于指定需要收集的单个kernel的性能数据（如果不指定，则只对程序运行过程中调度的第一个算子进行采集）；$HOME/projects/test_op.py为算子可执行脚本。
 
 ```bash
 msprof op --kernel-name=target_kernel_name --output=$HOME/projects/output python3 $HOME/projects/test_op.py
@@ -89,7 +89,7 @@ visualize_data.bin支持在MindStudio Insight可视化呈现：
 Triton算子无需手动添加`-g`，triton-ascend后端通过环境变量`TRITON_DISABLE_LINE_INFO`控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`。注意triton-ascend默认值为`true`（即默认**关闭**行号信息，与社区Triton默认开启相反），需显式置为`False`：
 
 ```bash
-export TRITON_DISABLE_LINE_INFO=false
+export TRITON_DISABLE_LINE_INFO=0
 ```
 
 验证是否生效：日志中`[DEBUG] cmd_list:`一行应包含`--enable-debug-info=true`，且`Kernel missed debug_line information`告警消失。随后将`visualize_data.bin`导入MindStudio Insight，即可在指令时序图中查看每条指令关联的源码行与调用栈。
@@ -139,7 +139,7 @@ export TRITON_DISABLE_LINE_INFO=false
 ### 示例：i64/i32 的compare在npu上无法启用vector导致向量计算转为标量计算
 
 【描述】i64/i32 的cmp在npu上无法启用vector，退化为scalar计算效率降低；通过转化为fp32来利用vec_cast和vec_cmp实现vector操作加速。
-【注意】在tl.load和tl.save中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。
+【注意】在tl.load和tl.store中的mask使用cmp功能，大部分情况下编译器可以自动优化为vec操作，本例中tl.where则需要手动转换。
 
 ```diff
 import triton

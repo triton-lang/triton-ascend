@@ -17,6 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
+__version__ = '3.6.0'
 
 import logging
 from triton._C.libtriton.ascend import ir as ascend_ir
@@ -89,15 +90,9 @@ def _apply_ascend_patch():
             - Warn when max_num_imprecise_acc is explicitly set, since
               Ascend NPU does not support imprecise accumulation.
             """
-            # HF32 guard: only valid for fp32 x fp32.
-            # When lhs is fp32 ret_scalar_ty is guaranteed fp32 by upstream,
-            # so checking lhs and rhs alone is sufficient.
-            # input_precision is still a string at this point (set by core.py),
-            # so we compare as strings rather than with the MLIR enum.
-            if input_precision is not None and input_precision.lower() == "hf32":
-                if not lhs.dtype.is_fp32() or not rhs.dtype.is_fp32():
-                    input_precision = self.builder.options.default_dot_input_precision
-
+            # Ascend does not support tf32, tf32 is converted to hf32. Avoid tf32 verification interception
+            if input_precision == "tf32":
+                input_precision = "hf32"
             # Ascend NPU does not support imprecise accumulation.
             # Force max_num_imprecise_acc to None so the upstream None
             # branch handles it (via max_num_imprecise_acc_default = 0),

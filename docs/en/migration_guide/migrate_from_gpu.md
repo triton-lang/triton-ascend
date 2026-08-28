@@ -78,8 +78,7 @@ def add_kernel(
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
-    # [Deleted] GPU devices have consistency checks. NPUs do not need explicit assertion.
-    assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [Deleted] GPU device consistency check, which is not required on NPUs.
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -392,7 +391,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
         block_shape=(BT,), # Block size
         order=(0,) # Sequential access
     )
-​)
+)
 ```
 
 Optimization Approach

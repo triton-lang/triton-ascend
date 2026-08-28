@@ -1,4 +1,5 @@
 import torch
+import torch_npu
 import triton
 import triton.language as tl
 
@@ -17,10 +18,10 @@ def expand_dims_kernel(in_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr):
 def test_expand_dims():
     M, N = 2, 3
     torch.manual_seed(0)
-    x = torch.randn((M, N), dtype=torch.float32).npu()
-    out = torch.empty((M * N, ), dtype=torch.float32, device="npu")
+    x = torch.randn((M, N), dtype=torch.float32, device="npu")
+    out = torch.zeros((M * N, ), dtype=torch.float32, device="npu")
     expand_dims_kernel[(1, )](out, x, M=M, N=N)
-    ref = x.cpu().unsqueeze(1).flatten()
+    ref = x.cpu().flatten()
     torch.testing.assert_close(out.cpu(), ref)
     print("Test passed.")
 

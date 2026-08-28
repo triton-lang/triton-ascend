@@ -17,7 +17,7 @@ triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装�
 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
 x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。
 
-- 注：若安装triton-ascend后，在安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。
+- 注：若安装triton-ascend后，再安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。
 此时需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。
 
 ```Python

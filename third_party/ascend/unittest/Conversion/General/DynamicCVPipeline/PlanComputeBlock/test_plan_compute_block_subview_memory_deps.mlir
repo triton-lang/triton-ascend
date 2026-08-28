@@ -25,11 +25,11 @@ module {
   }
 
   // CHECK-LABEL: func.func @top_level_arg_subviews_do_not_alias(
+  // CHECK: [[B_VIEW:%[A-Za-z0-9_]+]] = memref.subview %arg1
+  // CHECK-NEXT: linalg.fill {ssbuffer.block_id = [[VECTOR:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} ins({{.*}} : f16) outs([[B_VIEW]]
   // CHECK: [[A_VIEW:%[A-Za-z0-9_]+]] = memref.subview %arg0
   // CHECK-NEXT: [[A_TENSOR:%[0-9]+]] = bufferization.to_tensor [[A_VIEW]] restrict writable {ssbuffer.block_id = [[CUBE:[0-9]+]] : i32, ssbuffer.core_type = "CUBE"}
   // CHECK: linalg.matmul {{.*}}ssbuffer.block_id = [[CUBE]] : i32, ssbuffer.core_type = "CUBE"
-  // CHECK: [[B_VIEW:%[A-Za-z0-9_]+]] = memref.subview %arg1
-  // CHECK-NEXT: linalg.fill {ssbuffer.block_id = [[VECTOR:[0-9]+]] : i32, ssbuffer.core_type = "VECTOR"} ins({{.*}} : f16) outs([[B_VIEW]]
   func.func @top_level_arg_subviews_do_not_alias(
     %lhs_gm: memref<64x64xf16>,
     %rhs_gm: memref<64x64xf16>,

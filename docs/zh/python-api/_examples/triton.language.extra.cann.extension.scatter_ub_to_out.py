@@ -1,3 +1,4 @@
+import pytest
 import torch
 import triton
 import triton.language as tl
@@ -27,6 +28,8 @@ def kernel(value_ptr, index_ptr, dst_ptr):
 
 
 def test_scatter_ub_to_out():
+    if not is_compile_on_910_95():
+        pytest.skip("scatter_ub_to_out is only supported on Ascend 950")
     # dst: (4,2) of zeros
     dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value(2,2) = [[1.,2.],[3.,4.]]
@@ -52,7 +55,4 @@ def test_scatter_ub_to_out():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95():
-        print("scatter_ub_to_out is only supported on Ascend 950, skipping test.")
-    else:
-        test_scatter_ub_to_out()
+    test_scatter_ub_to_out()

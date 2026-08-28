@@ -24,6 +24,7 @@
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
 #include "ascend/include/Utils/Utils.h"
 
@@ -75,10 +76,46 @@ using namespace triton;
 
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
+static constexpr llvm::StringLiteral kAlreadySyncAttr = "already_sync";
+
+static bool shouldMaterializeCustomPointer(Value ptr) {
+  auto result = dyn_cast<OpResult>(ptr);
+  if (!result)
+    return false;
+
+  Operation *defOp = result.getOwner();
+  if (!defOp || !isDistributedTypeCustomOp(defOp))
+    return false;
+
+  auto srcIndices = defOp->getAttrOfType<DenseI32ArrayAttr>(
+      ConverterUtils::customSrcPtrIndexAttrName);
+  if (!srcIndices)
+    return false;
+
+  auto values = srcIndices.asArrayRef();
+  unsigned resultIdx = result.getResultNumber();
+  return resultIdx < values.size() && values[resultIdx] >= 0;
+}
+
+static FailureOr<Value>
+resolveMemoryPointer(Value originalPtr, Value convertedPtr,
+                     ConversionPatternRewriter &rewriter) {
+  llvm::SmallDenseMap<Value, BlockData> known;
+
+  if (shouldMaterializeCustomPointer(originalPtr))
+    return BlockDataParser::materializePointer(originalPtr, rewriter, known);
+
+  if (isa<MemRefType>(convertedPtr.getType()))
+    return convertedPtr;
+
+  return BlockDataParser::materializePointer(originalPtr, rewriter, known);
+}
 
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
+  Location loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   llvm::SmallDenseMap<Value, BlockData> known;
   BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
   return success();
@@ -227,6 +264,137 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
 LoadConverter::LoadConverter(MLIRContext *context)
     : OpConversionPattern<triton::LoadOp>(context) {}
 
+// Masked load whose `other` is a non-scalar tensor.
+// ---------------------------------------------------------------------------
+// Case 1: other = mask   (Python: tl.load(ptr, mask=mask, other=mask))
+//
+// DSL:
+//   mask = offs < N
+//   x = tl.load(in_ptr + offs, mask=mask, other=mask)
+//   tl.store(out_ptr + offs, x, mask=mask)
+//
+// TTIR (fp — uitofp; int — extui/extsi):
+//   %mask  = arith.cmpi slt, %offs, %N : tensor<Nx i1>
+//   %other = arith.uitofp %mask …            // or arith.extui for i8
+//   %x     = tt.load %ptr, %mask, %other
+//
+// Lowering (linalg):
+//   %alloc = memref.alloc()
+//   memref.copy %src_view, %dst_view         // active SRC only
+//   %loaded = bufferization.to_tensor %alloc
+//   %zeros  = linalg.fill 0                  // [OTHER] cast(mask)→0 on pad
+//   %x = arith.select %mask, %loaded, %zeros
+// ---------------------------------------------------------------------------
+// Case 2: other = prior tensor
+//   (Python: other = tl.load(fill_ptr+offs); x = tl.load(ptr, mask=mask,
+//   other=other); tl.store(out, x)  # full store — pad must stay OTHER)
+//
+// TTIR:
+//   %other = tt.load %fill_ptr
+//   %x     = tt.load %ptr, %mask, %other
+//
+// Lowering:
+//   %other_t = bufferization.to_tensor …    // prior load
+//   %alloc = memref.alloc()
+//   memref.copy …                           // active SRC
+//   %loaded = bufferization.to_tensor %alloc
+//   %x = arith.select %mask, %loaded, %other_t
+// ---------------------------------------------------------------------------
+LogicalResult LoadConverter::replaceMaskedLoadWithTensorOther(
+    triton::LoadOp op, Value alloc, bool mayImplicitTransposeWithLastAxis,
+    ConversionPatternRewriter &rewriter) const {
+  auto loc = op.getLoc();
+  auto tensorType = cast<RankedTensorType>(op.getResult().getType());
+  Value mask = op.getMask();
+  Value tensorOther = op.getOther();
+  if (!mask || !tensorOther) {
+    return rewriter.notifyMatchFailure(
+        op,
+        "replaceMaskedLoadWithTensorOther requires non-null mask and other");
+  }
+
+  Value loadedTensor = rewriter.create<bufferization::ToTensorOp>(
+      loc, tensorType, alloc, true, true);
+  propagateWasBoolToInt8Attr(op.getOperation(), loadedTensor.getDefiningOp(),
+                             rewriter);
+  if (mayImplicitTransposeWithLastAxis) {
+    auto markOp = rewriter.create<annotation::MarkOp>(loc, loadedTensor);
+    markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
+                    UnitAttr::get(rewriter.getContext()));
+  }
+
+  // Case 1: cast(mask) → inactive is 0. Cover fp (uitofp/sitofp) and int
+  // (extui/extsi). Case 2: keep prior tensor as-is.
+  Value otherVal = tensorOther;
+  if (Value remappedOther = rewriter.getRemappedValue(tensorOther))
+    otherVal = remappedOther;
+
+  bool otherIsZeroOnInactive = false;
+  if (auto uitofp = tensorOther.getDefiningOp<arith::UIToFPOp>())
+    otherIsZeroOnInactive = (uitofp.getIn() == mask);
+  else if (auto sitofp = tensorOther.getDefiningOp<arith::SIToFPOp>())
+    otherIsZeroOnInactive = (sitofp.getIn() == mask);
+  else if (auto extui = tensorOther.getDefiningOp<arith::ExtUIOp>())
+    otherIsZeroOnInactive = (extui.getIn() == mask);
+  else if (auto extsi = tensorOther.getDefiningOp<arith::ExtSIOp>())
+    otherIsZeroOnInactive = (extsi.getIn() == mask);
+
+  if (otherIsZeroOnInactive) {
+    auto empty = rewriter.create<tensor::EmptyOp>(loc, tensorType.getShape(),
+                                                  tensorType.getElementType());
+    Value zero = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(tensorType.getElementType()));
+    otherVal =
+        rewriter
+            .create<linalg::FillOp>(loc, ValueRange{zero}, ValueRange{empty})
+            .getResult(0);
+  }
+
+  if (Value remappedMask = rewriter.getRemappedValue(mask))
+    mask = remappedMask;
+
+  Value result =
+      rewriter.create<arith::SelectOp>(loc, mask, loadedTensor, otherVal);
+  rewriter.replaceOp(op, result);
+  return success();
+}
+
+static bool skipNonComplementaryStaticDeinterleave(triton::LoadOp lhs) {
+  if (lhs->hasAttr("skip_deinterleave"))
+    return true;
+  auto lhsAddPtr = lhs.getPtr().getDefiningOp<triton::AddPtrOp>();
+  if (!lhsAddPtr)
+    return false;
+  auto lhsOffset = getConstantIntValue(lhsAddPtr.getOffset());
+  if (!lhsOffset)
+    return false;
+  auto pairBase = [](int64_t offset) {
+    int64_t lane = offset % 2;
+    return offset - (lane < 0 ? lane + 2 : lane);
+  };
+
+  for (triton::LoadOp rhs : lhs->getBlock()->getOps<triton::LoadOp>()) {
+    if (lhs == rhs || rhs.getMask() || rhs.getOther() ||
+        lhs.getResult().getType() != rhs.getResult().getType())
+      continue;
+    auto rhsAddPtr = rhs.getPtr().getDefiningOp<triton::AddPtrOp>();
+    if (!rhsAddPtr || lhsAddPtr.getPtr() != rhsAddPtr.getPtr())
+      continue;
+    auto rhsOffset = getConstantIntValue(rhsAddPtr.getOffset());
+    if (!rhsOffset)
+      continue;
+    if (lhsOffset.value() != rhsOffset.value() &&
+        pairBase(lhsOffset.value()) == pairBase(rhsOffset.value()))
+      continue;
+    // The first load can be rewritten before its sibling; tag both now.
+    auto skipAttr = UnitAttr::get(lhs->getContext());
+    lhs->setAttr("skip_deinterleave", skipAttr);
+    rhs->setAttr("skip_deinterleave", skipAttr);
+    return true;
+  }
+  return false;
+}
+
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
@@ -240,7 +408,14 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   auto mask = op.getMask();
   auto other = op.getOther();
   auto loc = op.getLoc();
+  insertDebugNopForMask(mask, rewriter);
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the load pointer as a memref");
+  ptr = *resolvedPtr;
   // handling scalar
   if (!isa<ShapedType>(op.getResult().getType())) {
     auto scalarMemref =
@@ -313,7 +488,11 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
 
   Value allocOp;
   Value allocOpTmp;
-  if (op->hasAttr(ConverterUtils::discreteAttrName)) {
+  auto parentLoop = dyn_cast<scf::ForOp>(op->getParentOp());
+  bool hasValidDiscreteLoop = op->hasAttr(ConverterUtils::discreteAttrName) &&
+                              parentLoop &&
+                              parentLoop->hasAttr("ExtractedLoadOrStore");
+  if (hasValidDiscreteLoop) {
     Operation *loop = op->getParentOp();
     int extractedLoopCount = 1;
     for (auto parentOp = loop->getParentOp();
@@ -445,6 +624,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       // If last dimension stride equals 2, try deinterleave optimization.
       auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
       if (ptrStrides.back() == 2 && (memRefShape.back() % 2 == 0) &&
+          !skipNonComplementaryStaticDeinterleave(op) &&
           mlir::triton::DeinterleaveStatusOptimization(op, adaptor, rewriter)
               .succeeded()) {
         return success();
@@ -477,15 +657,20 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         op, "can not lower uncontinuout masked loads");
   }
 
+  Value tensorOtherBase;
   if (other) {
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
-    assert(
-        scalarOther &&
-        "other value used in masked load produced by unsupported instruction!");
-
-    fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                       rewriter);
+    if (scalarOther) {
+      fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
+                                         rewriter);
+    } else if (isa<RankedTensorType>(other.getType())) {
+      tensorOtherBase = other;
+    } else {
+      return rewriter.notifyMatchFailure(
+          op, "other value used in masked load produced by unsupported "
+              "instruction");
+    }
   }
 
   // To enable deinterleave optimization with mask load, mask state along last
@@ -494,7 +679,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   //
   // The basis is that last dimension range comparison would generate
   // unaccepted discontinuous mask.
-  if (mstate.getRank() == memRefType.getRank() &&
+  if (!tensorOtherBase && mstate.getRank() == memRefType.getRank() &&
       isConstantIntValue(mstate.offsets.back(), 0) &&
       isConstantIntValue(mstate.dims.back(), memRefType.getShape().back())) {
     auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
@@ -540,8 +725,15 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                       UnitAttr::get(rewriter.getContext()));
     }
   }
-  return this->toTensorAndReplace(
-      op, tensorType, allocOp, mayImplicitTransposeWithLastAxis, loc, rewriter);
+
+  if (!tensorOtherBase) {
+    return this->toTensorAndReplace(op, tensorType, allocOp,
+                                    mayImplicitTransposeWithLastAxis, loc,
+                                    rewriter);
+  }
+
+  return replaceMaskedLoadWithTensorOther(
+      op, allocOp, mayImplicitTransposeWithLastAxis, rewriter);
 }
 
 AtomicRMWConverter::AtomicRMWConverter(MLIRContext *context)
@@ -580,8 +772,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto mask = op.getMask();
   auto rmwOp = op.getAtomicRmwOp();
   auto resType = dyn_cast<TensorType>(op.getResult().getType());
-  auto ptrType = dyn_cast<MemRefType>(ptr.getType());
+  insertDebugNop(loc, rewriter);
+  insertDebugNopForMask(mask, rewriter);
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the atomic RMW pointer as a memref");
+  ptr = *resolvedPtr;
+  auto ptrType = dyn_cast<MemRefType>(ptr.getType());
   if (!resType)
     return rewriter.notifyMatchFailure(
         op, "atomicRMWConverter: scalar will be handled by "
@@ -643,19 +843,22 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
        elementType.isInteger(32));
 
   bool isDiscreteMask = false;
+  bool hasContinuousMaskSubview = false;
+  bool hasUsedReturn = !op.getResult().use_empty();
+  MaskState mstate;
   if (mask) {
     auto constantMask = mask.getDefiningOp<arith::ConstantOp>();
     if (constantMask && !isConstantMaskTrue(mask)) {
       rewriter.eraseOp(op);
       return success();
     }
-    MaskState mstate;
     isDiscreteMask = mstate.parse(mask, loc, rewriter).failed();
     if (!constantMask && !isDiscreteMask) {
       // For dstMemref (store output), use subview to maintain reference to
       // original memref. For inputVal (store input), use tensor.extract_slice
       // to keep tensor semantics.
       dstMemref = mstate.getSubview(ptr, loc, rewriter);
+      hasContinuousMaskSubview = true;
       if (isHardwareSupported) {
         auto inputTensorType = RankedTensorType::get(
             inputMemrefType.getShape(), inputMemrefType.getElementType());
@@ -669,12 +872,30 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     }
   }
 
-  if (!op.getResult().use_empty()) {
+  bool needsReturnValueLock =
+      hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
+  Value returnValueLock;
+  if (hasUsedReturn) {
     auto tensorType =
         RankedTensorType::get(ptrType.getShape(), ptrType.getElementType());
     auto alloc = rewriter.create<memref::AllocOp>(
         loc, MemRefType::get(ptrType.getShape(), ptrType.getElementType()));
-    rewriter.create<memref::CopyOp>(loc, ptr, alloc);
+    Value copySrc = ptr;
+    Value copyDst = alloc;
+    if (hasContinuousMaskSubview) {
+      // Masked-off atomic results are undefined. Copy only the active region
+      // so the old-value read and the atomic store use the same address view.
+      copySrc = dstMemref;
+      copyDst = mstate.getSubview(alloc, loc, rewriter);
+    }
+    if (needsReturnValueLock) {
+      auto lockType = MemRefType::get({1}, rewriter.getI64Type());
+      auto lockVar =
+          rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
+      returnValueLock = lockVar.getResult();
+      rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock);
+    }
+    rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
     Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
         loc, tensorType, alloc, true /* restrict */, true /* writable */);
     rewriter.replaceOp(op, tensorToReplace);
@@ -696,10 +917,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
   } else {
-    if (isHardwareSupported)
-      rewriter.create<hivm::StoreOp>(op.getLoc(), TypeRange{}, inputVal,
-                                     dstMemref, atomicKind);
-    else if (rmwOp == RMWOp::XCHG)
+    if (isHardwareSupported) {
+      auto storeOp = rewriter.create<hivm::StoreOp>(
+          op.getLoc(), TypeRange{}, inputVal, dstMemref, atomicKind);
+      if (needsReturnValueLock) {
+        // The return-value copy and the atomic update must be one critical
+        // section. Mark the store so HIVM does not add another lock.
+        storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
+        rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock);
+      }
+    } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                              inputMemref, dstMemref);
     else {
@@ -743,6 +970,12 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   auto val = op.getVal();
   auto loc = op.getLoc();
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the atomic CAS pointer as a memref");
+  ptr = *resolvedPtr;
   auto resType = dyn_cast<TensorType>(op.getResult().getType());
   if (!resType) {
     return rewriter.notifyMatchFailure(
@@ -990,14 +1223,32 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
                                            PatternRewriter &rewriter) const {
   // Revert the op to its original form
   auto ptrBitcastOp = op.getPtr().getDefiningOp<triton::BitcastOp>();
+  triton::SplatOp ptrSplatOp;
+  if (!ptrBitcastOp) {
+    // For tensor atomics on a scalar base pointer, semantic.py emits
+    //   splat(bitcast(ptr<f32> -> ptr<i32>))
+    // instead of
+    //   bitcast(tensor<ptr<f32>> -> tensor<ptr<i32>>).
+    // Accept both forms so the expanded integer atomics can be fused before
+    // discrete-mask conversion.
+    ptrSplatOp = op.getPtr().getDefiningOp<triton::SplatOp>();
+    if (ptrSplatOp)
+      ptrBitcastOp = ptrSplatOp.getSrc().getDefiningOp<triton::BitcastOp>();
+  }
   auto valueBitcastOp = op.getVal().getDefiningOp<triton::BitcastOp>();
   if (!ptrBitcastOp || !valueBitcastOp) {
     return failure();
   }
 
+  auto eraseDeadPointerCasts = [&]() {
+    if (ptrSplatOp && ptrSplatOp->use_empty())
+      rewriter.eraseOp(ptrSplatOp);
+    if (ptrBitcastOp->use_empty())
+      rewriter.eraseOp(ptrBitcastOp);
+  };
+
   // We only need to handle the op when the element type is float
-  auto elementType =
-      dyn_cast<TensorType>(valueBitcastOp.getSrc().getType()).getElementType();
+  auto elementType = getElementTypeOrSelf(valueBitcastOp.getSrc().getType());
   if (!isa<FloatType>(elementType)) {
     return failure();
   }
@@ -1010,6 +1261,7 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
     // if the return value of op is used, we can't simply erase it
     if (op.getResult().use_empty()) {
       rewriter.eraseOp(op);
+      eraseDeadPointerCasts();
       return success();
     }
     return failure();
@@ -1028,26 +1280,86 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
   //
   // Here wanna extract original mask
   Value originalMask = op.getMask();
+  auto createAllTrueMask = [&]() -> Value {
+    Type maskType = op.getMask().getType();
+    if (auto shapedMaskType = dyn_cast<ShapedType>(maskType)) {
+      return rewriter.create<arith::ConstantOp>(
+          op->getLoc(), DenseElementsAttr::get(shapedMaskType, true));
+    }
+    if (maskType.isInteger(1)) {
+      return rewriter.create<arith::ConstantOp>(op->getLoc(),
+                                                rewriter.getBoolAttr(true));
+    }
+    return {};
+  };
+
   if (auto andOp = originalMask.getDefiningOp<arith::AndIOp>())
     // LHS is convention in semantic interpreter
     originalMask = andOp.getLhs();
-  else if (auto cmpOp = originalMask.getDefiningOp<arith::CmpFOp>()) {
+  else if (auto xorOp = originalMask.getDefiningOp<arith::XOrIOp>()) {
+    // Current f32 atomic_min uses !signbit as the positive mask:
+    //   shrui(value_bits, 31) -> cmpi ne 0 -> xori true.
+    if ((rmwOp != triton::RMWOp::MIN && rmwOp != triton::RMWOp::MAX) ||
+        (!elementType.isF32() && !elementType.isF64()) ||
+        !matchPattern(xorOp.getRhs(), m_One())) {
+      return failure();
+    }
+
+    auto cmpOp = xorOp.getLhs().getDefiningOp<arith::CmpIOp>();
+    if (!cmpOp || cmpOp.getPredicate() != arith::CmpIPredicate::ne ||
+        !matchPattern(cmpOp.getRhs(), m_Zero()))
+      return op->emitError("Illegal mask for atomicrmwOp of float type");
+
+    auto shiftOp = cmpOp.getLhs().getDefiningOp<arith::ShRUIOp>();
+    if (!shiftOp || shiftOp.getLhs() != valueBitcastOp.getResult())
+      return op->emitError("Illegal mask for atomicrmwOp of float type");
+
+    // Restore the implicit all-true mask.
+    originalMask = createAllTrueMask();
+    if (!originalMask)
+      return failure();
+  } else if (auto cmpOp = originalMask.getDefiningOp<arith::CmpIOp>()) {
+    // Scalar floating-point atomic max/min represents !signbit as:
+    //   shrui(value_bits, 31/63) -> cmpi eq 0.
+    if (cmpOp.getPredicate() != arith::CmpIPredicate::eq ||
+        !matchPattern(cmpOp.getRhs(), m_Zero()))
+      return failure();
+
+    auto shiftOp = cmpOp.getLhs().getDefiningOp<arith::ShRUIOp>();
+    if (!shiftOp || shiftOp.getLhs() != valueBitcastOp.getResult())
+      return failure();
+
+    originalMask = createAllTrueMask();
+    if (!originalMask)
+      return failure();
+  } else if (auto cmpOp = originalMask.getDefiningOp<arith::CmpFOp>()) {
     if (cmpOp.getPredicate() != mlir::arith::CmpFPredicate::OGE ||
         !matchPattern(cmpOp.getRhs(),
                       /*positive float zero matcher*/ m_PosZeroFloat()))
       // Here recheck frontend interpreter generation in no manual mask state
       return op->emitError("Illegal mask for atomicrmwOp of float type");
     // Restore original true mask
-    originalMask = rewriter.create<arith::ConstantOp>(
-        op->getLoc(),
-        /*typed attr*/ DenseElementsAttr::get(
-            cast<ShapedType>(originalMask.getType()), true));
+    originalMask = createAllTrueMask();
+    if (!originalMask)
+      return failure();
   } else
     return op->emitError("Illegal mask for atomicrmwOp of float type");
 
+  Value originalPtr = ptrBitcastOp.getSrc();
+  if (ptrSplatOp) {
+    auto ptrTensorType = dyn_cast<RankedTensorType>(op.getPtr().getType());
+    if (!ptrTensorType)
+      return failure();
+    auto originalPtrType = RankedTensorType::get(
+        ptrTensorType.getShape(), ptrBitcastOp.getSrc().getType(),
+        ptrTensorType.getEncoding());
+    originalPtr = rewriter.create<triton::SplatOp>(op.getLoc(), originalPtrType,
+                                                   ptrBitcastOp.getSrc());
+  }
+
   auto originAtomicOp = rewriter.create<triton::AtomicRMWOp>(
       op.getLoc(), valueBitcastOp.getSrc().getType(), op.getAtomicRmwOp(),
-      ptrBitcastOp.getSrc(), valueBitcastOp.getSrc(), originalMask, op.getSem(),
+      originalPtr, valueBitcastOp.getSrc(), originalMask, op.getSem(),
       op.getScope());
 
   // if the return value of op is used
@@ -1087,6 +1399,10 @@ AtomicMaxMinCanonicalizer::matchAndRewrite(triton::AtomicRMWOp op,
     rewriter.eraseOp(op);
   }
 
+  // The restored atomic uses the original floating-point GM pointer. Remove
+  // the expanded pointer splat/bitcast once the paired integer atomic is gone.
+  eraseDeadPointerCasts();
+
   return success();
 }
 
@@ -1100,9 +1416,16 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
   // triton store op basic
   auto mask = op.getMask();
   auto loc = op.getLoc();
+  insertDebugNopForMask(mask, rewriter);
   auto ptr = adaptor.getPtr();
   auto val = adaptor.getValue();
 
+  FailureOr<Value> resolvedPtr =
+      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+  if (failed(resolvedPtr))
+    return rewriter.notifyMatchFailure(
+        op, "unable to materialize the store pointer as a memref");
+  ptr = *resolvedPtr;
   // 1. boundary size check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {

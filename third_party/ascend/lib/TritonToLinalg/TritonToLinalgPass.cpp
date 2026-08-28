@@ -23,9 +23,12 @@
 
 #include <cstdlib>
 
+#include "TritonToGraph/LayoutMemoryOptimization.h"
 #include "TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToLinalg/ArgMinMaxConverter.h"
+#include "ascend/include/TritonToLinalg/CanonicalizeDebugLocationsPass.h"
+#include "ascend/include/TritonToLinalg/DeduplicateDebugNopsPass.h"
 #include "ascend/include/TritonToLinalg/DescriptorConverter.h"
 #include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
@@ -33,9 +36,6 @@
 #include "ascend/include/TritonToLinalg/ImplicitPermute.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
-#include "ascend/include/TritonToLinalg/StridedAxisCoalescing.h"
-#include "ascend/include/TritonToLinalg/StridedLoadStoreRewrite.h"
-#include "ascend/include/TritonToLinalg/TileChunkCoalescing.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToLinalg/UseAnalysis.h"
@@ -95,6 +95,7 @@ using namespace triton;
 int nd2nzFlag = 0;
 bool compileOn91095Flag = false;
 bool existDotFlag = false;
+triton::ascend::CompileMode compileModeFlag = triton::ascend::CompileMode::Simd;
 
 // Convert structured custom ops after operand type converted,
 // for example tt.ptr converted to memref.
@@ -675,6 +676,12 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
   patterns.add<LoadStoreConverter::AddPtrConverter>(patterns.getContext());
+  patterns
+      .add<LoadStoreConverter::MemoryPointerConverter<triton::SplatOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::BitcastOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::BroadcastOp>,
+           LoadStoreConverter::MemoryPointerConverter<triton::ExpandDimsOp>>(
+          patterns.getContext());
   patterns.add<FunctionConverter::GetProgramIDConverter>(patterns.getContext());
   patterns.add<FunctionConverter::GetNumProgramsConverter>(
       patterns.getContext());
@@ -752,11 +759,12 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect>();
+  registry
+      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+              tensor::TensorDialect, bufferization::BufferizationDialect,
+              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
+              annotation::AnnotationDialect, LLVM::LLVMDialect>();
 }
 
 LogicalResult
@@ -864,32 +872,28 @@ LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     ModuleOp moduleOp) {
   // The strided-axis rewrites below only apply in 950 SIMT mode. On other
   // targets we leave strided loads to the legacy strided DMA lowering.
-  if (!(compileOn91095Flag && forceSimtTemplateFlag)) {
+  if (!(compileOn91095Flag &&
+        triton::ascend::isSimtTemplateMode(compileModeFlag))) {
     return success();
   }
 
-  // coalesce adjacent strided axes into one  so that to convert discrete memory
-  // asccess into continuous memory access .
-  StridedAxisCoalescing::rewriteStridedAxisCoalesce(moduleOp);
+  auto runLayoutMemoryPhase =
+      [&](cfg::LayoutMemoryCompatibilityPhase phase) -> LogicalResult {
+    mlir::PassManager phasePm(&getContext(), moduleOp.getOperationName());
+    phasePm.addPass(cfg::createLayoutMemoryCompatibilityPass(phase));
+    return runPipeline(phasePm, getOperation());
+  };
 
-  // TileChunkCoalescing (default-on, lower priority): when the outermost
-  // program-id axis is a pure tile index over a contiguous problem axis with a
-  // small tile T, fold H adjacent tiles into one program so the per-tile
-  // load/store become a single contiguous H*T DMA (H picked so the block is
-  // >= 512B and within UB). Emits hacc.coalesce_factor = H and
-  // hacc.coalesce_axis. Bails when the pattern / lane-safety do not hold, when
-  // the kernel reads num_programs(axis) (the launcher changes it), or when
-  // StridedAxisCoalescing above already claimed the coalesce factor.
-  TileChunkCoalescing::rewriteTileChunkCoalesce(moduleOp);
+  // Keep the original insertion point after ImplicitPermute.  Axis remains in
+  // the pre-Diagonal slot; the current target has no Diagonal migration, so
+  // the two compatibility phases run adjacently.
+  if (failed(runLayoutMemoryPhase(
+          cfg::LayoutMemoryCompatibilityPhase::BeforeDiagonal))) {
+    return failure();
+  }
 
-  mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<StridedLoadStoreRewrite::LoadConverter,
-               StridedLoadStoreRewrite::StoreConverter>(patterns.getContext());
-
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
-    LLVM_DEBUG({
-      llvm::dbgs() << "StridedLoadStoreRewrite: pattern application failed\n";
-    });
+  if (failed(runLayoutMemoryPhase(
+          cfg::LayoutMemoryCompatibilityPhase::AfterDiagonal))) {
     return failure();
   }
 
@@ -928,6 +932,14 @@ TritonToLinalgPass::processLegalStrideOperations(ModuleOp moduleOp) {
 
 void TritonToLinalgPass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
+  auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
+  if (!compileMode) {
+    getOperation().emitError()
+        << "triton-to-linalg compile-mode is invalid: " << this->compileMode;
+    signalPassFailure();
+    return;
+  }
+  compileModeFlag = *compileMode;
 
   auto moduleOp = getOperation();
 
@@ -946,6 +958,10 @@ void TritonToLinalgPass::runOnOperation() {
   // a cube (mix) kernel, not a pure-AIV one. Without this the func gets tagged
   // mix_mode="aiv" and the cube tile-and-slice fails (cbuf overflow).
   moduleOp.walk([&](triton::ascend::DotOp dotOp) {
+    existDot = true;
+    return WalkResult::interrupt();
+  });
+  moduleOp.walk([&](hfusion::Conv1DOp conv1dOp) {
     existDot = true;
     return WalkResult::interrupt();
   });
@@ -1135,6 +1151,28 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
   }
 
+  // 10. Collapses call-site locations whose callee is an inlined Triton stdlib
+  // helper (under site-packages) down to their caller (user-file) frame
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
+  {
+    PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createCanonicalizeDebugLocationsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("CanonicalizeDebugLocationsPass pass failed");
+    }
+  }
+
+  // 11. Deduplicate debug NOPs inserted by converters.
+  //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
+  {
+    PassManager pm(&getContext(), moduleOp.getOperationName());
+    pm.addPass(triton::createDeduplicateDebugNopsPass());
+    if (failed(runPipeline(pm, moduleOp))) {
+      moduleOp->emitWarning("DeduplicateDebugNops pass failed");
+      // Non-fatal: dedup is a quality improvement, not a correctness pass.
+    }
+  }
+
   // Calculate size of PointerCastOp precisely
   SmallVector<hivm::PointerCastOp> castOps;
 
@@ -1213,12 +1251,27 @@ void TritonToLinalgPass::runOnOperation() {
       markOp->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
                       {hivm::AddressSpaceAttr::get(rewriter.getContext(),
                                                    hivm::AddressSpace::GM)});
+
+      // update result offset
+      auto origResultType =
+          cast<MemRefType>(reinterpretCastOp.getResult().getType());
+      MemRefType newResultType = origResultType;
+      if (auto stridedLayout =
+              dyn_cast<StridedLayoutAttr>(origResultType.getLayout())) {
+        int64_t offset = stridedLayout.getOffset();
+        if (!ShapedType::isDynamic(offset)) {
+          auto newLayout = StridedLayoutAttr::get(rewriter.getContext(), 0,
+                                                  stridedLayout.getStrides());
+          newResultType = MemRefType::get(
+              origResultType.getShape(), origResultType.getElementType(),
+              newLayout, origResultType.getMemorySpace());
+        }
+      }
+
       rewriter.replaceOpWithNewOp<memref::ReinterpretCastOp>(
-          reinterpretCastOp,
-          cast<MemRefType>(reinterpretCastOp.getResult().getType()), newCastOp,
-          ValueRange({}), reinterpretCastOp.getSizes(),
-          reinterpretCastOp.getStrides(), SmallVector<int64_t>({0}),
-          reinterpretCastOp.getStaticSizes(),
+          reinterpretCastOp, newResultType, newCastOp, ValueRange({}),
+          reinterpretCastOp.getSizes(), reinterpretCastOp.getStrides(),
+          SmallVector<int64_t>({0}), reinterpretCastOp.getStaticSizes(),
           reinterpretCastOp.getStaticStrides());
     }
     rewriter.eraseOp(op);
@@ -1338,12 +1391,14 @@ void TritonToLinalgPass::runOnOperation() {
   });
 }
 
-std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass(
-    bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
-    bool enableSelectAnalysis, bool compileOn91095) {
+std::unique_ptr<OperationPass<ModuleOp>>
+triton::createTritonToLinalgPass(bool globalKernel, bool namedOps,
+                                 bool enableNd2nzOnVector,
+                                 bool enableSelectAnalysis, bool compileOn91095,
+                                 const std::string &compileMode) {
   return std::make_unique<TritonToLinalgPass>(
       globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
-      compileOn91095);
+      compileOn91095, compileMode);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createTritonToLinalgPass() {

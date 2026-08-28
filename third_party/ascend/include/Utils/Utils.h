@@ -23,6 +23,7 @@
 #ifndef TRITONNPU_UTILS_UTILS_H
 #define TRITONNPU_UTILS_UTILS_H
 
+#include "TritonMemoryAccess/OpFoldResultUtils.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -31,9 +32,11 @@
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/TypeRange.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/LogicalResult.h"
 
@@ -46,6 +49,7 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
 const std::string discreteAttrName = "DiscreteMemAccess";
 const std::string continuousAttrName = "ContinuousMemAccess";
 const std::string customSrcPtrIndexAttrName = "SrcPtrIndex";
@@ -95,6 +99,38 @@ SmallVector<int64_t> getUnbroadcastDims(RankedTensorType src,
 class ConversionPatternRewriter;
 
 namespace triton {
+
+namespace ascend {
+
+// Keep the C++ pass contract aligned with the public Python selector.  The
+// Python boundary performs the target validation and canonicalization; pass
+// parsing remains strict so direct pass-pipeline users cannot silently turn an
+// unknown string into SIMD.
+enum class CompileMode {
+  Simd,
+  SimtTemplate,
+  SimtOnly,
+};
+
+inline std::optional<CompileMode> parseCompileMode(llvm::StringRef mode) {
+  if (mode == "simd")
+    return CompileMode::Simd;
+  if (mode == "simd_simt_template" || mode == "unstructured_in_simt")
+    return CompileMode::SimtTemplate;
+  if (mode == "simt_only")
+    return CompileMode::SimtOnly;
+  return std::nullopt;
+}
+
+inline bool isSimtTemplateMode(CompileMode mode) {
+  return mode == CompileMode::SimtTemplate;
+}
+
+inline bool isPureSimtMode(CompileMode mode) {
+  return mode == CompileMode::SimtOnly;
+}
+
+} // namespace ascend
 
 enum class IndirectLoadInterfaceOpType { Undefined = 0, Load = 1, Calc = 2 };
 
@@ -218,26 +254,8 @@ inline constexpr unsigned kDotAccIntWidth = 32;
 
 class OpBuilder;
 
-OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult subOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult mulOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult divOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult remOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult minOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
-
-OpFoldResult maxOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b);
+/// Returns true when both ranges have identical ordered type signatures.
+bool haveSameTypes(TypeRange lhs, TypeRange rhs);
 
 enum class ReduceWithIndexType { MAX, MIN, None };
 enum class TieBreakType { LEFT, RIGHT, None };
@@ -255,8 +273,6 @@ void addReduceWithIndexAttr(ReduceWithIndexParams params,
                             ConversionPatternRewriter &rewriter,
                             linalg::ReduceOp reduceOp);
 
-OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder);
-
 enum class TypelessValue { Undefined = 0, Zero = 1, Min = 2, Max = 3 };
 
 FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue, Type,
@@ -264,20 +280,6 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue, Type,
 
 FailureOr<Value> specializeTypelessValueToConstant(TypelessValue, Type,
                                                    Location, OpBuilder &);
-
-std::optional<int64_t> getIntAttr(const OpFoldResult ofr);
-
-Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr);
-
-bool isZero(const OpFoldResult ofr);
-
-bool isOne(const OpFoldResult ofr);
-
-Value convertToIndexIfNeeded(Value intValue, const Location &loc, OpBuilder &b);
-
-RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
-                                      const llvm::SmallBitVector &droppedDims,
-                                      Type elemType);
 
 bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter);
 

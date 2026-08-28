@@ -4,13 +4,15 @@ Cube operators use matrix multiplication or batched matrix multiplication as the
 
 ## Simple Cube Operator Development
 
-For a simple Cube operator, refer to the [Matrix Multiplication example](../examples/05_matrix_multiplication_example.md).
+For a simple Cube operator, refer to the [Matrix Multiplication example](../examples/05_matrix_multiplication_example.md). A minimal development path includes:
 
 1. Define input/output shapes and strides, for example `A[M, K]`, `B[K, N]`, and `C[M, N]`.
 2. Map `tl.program_id` to the output tile `(pid_m, pid_n)`.
 3. Build 2D offsets for A and B using `BLOCK_SIZE_M/N/K`.
 4. Loop over K, load A/B sub-blocks, and accumulate with `tl.dot` in fp32.
 5. Cast the accumulator to the output dtype and store with boundary masks.
+
+The core structure is as follows:
 
 ```python
 @triton.jit
@@ -41,7 +43,11 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr,
              acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
 ```
 
-Tune `BLOCK_M/N/K` within hardware and UB/L1 limits, consider `multibuffer` for the K loop, and classify the operator as CV fusion if the epilogue becomes a non-trivial Vector reduction, softmax, or synchronized post-process.
+When tuning a simple Cube operator, prioritize the following:
+
+- Check whether `BLOCK_M/N/K` meets hardware support and UB/L1 capacity limits.
+- Check whether `multibuffer` can be enabled for the K-dimension loop to form a data movement and computation pipeline.
+- Check whether the output tile includes extra bias, scale, or activation. If the post-processing is light, the operator can still be classified as a Cube operator; if the post-processing involves obvious Vector reduction or cross-core synchronization, it should be organized as a CV fusion operator.
 
 ## Complex Cube Operator Development
 
@@ -49,10 +55,10 @@ Complex Cube cases often come from attention, batched matmul, grouped matmul, or
 
 Recommended decomposition:
 
-1. Extract the pure matmul core first and verify tile shapes, dtypes, accumulator dtype, and output shape.
-2. Handle irregular memory access next. If K/V cache access is discrete in a low dimension and contiguous in a high dimension, load along the contiguous dimension and reorganize in UB with transpose or the Ascend extension API `extension.insert_slice`.
-3. Keep reductions and normalization at clear boundaries. If `max/sum/exp` or softmax is fused into the same kernel, follow the [CV Fusion Operator Development](./cv_fusion_operator.md) guidance.
-4. Use inner loops for long K or long sequence dimensions to control on-chip usage.
-5. Use autotune to manage candidate `BLOCK_M/N/K` and `multibuffer` configurations.
+1. **Extract the pure matmul core first**: confirm each `tl.dot`'s input tile shape, dtype, accumulator dtype, and output tile shape.
+2. **Handle irregular memory access next**: if K/V cache access is discrete in a low dimension and contiguous in a high dimension, a direct 2D load may degrade into scalar access. Load along the contiguous dimension into UB first, then reorganize with transpose or the Ascend extension API `extension.insert_slice` into the layout required by `tl.dot`.
+3. **Keep reductions and normalization at clear boundaries**: for example, `max/sum/exp` in attention is Vector logic; if it is placed in the same kernel as `tl.dot`, follow the [CV Fusion Operator Development](./cv_fusion_operator.md) guidance.
+4. **Design inner loops for long K or long sequences**: the K-dimension loop should control the on-chip footprint of each A/B tile, and the sequence-dimension loop should avoid loading an oversized K/V block at once.
+5. **Use Autotune to manage candidate tiles**: prepare multiple `BLOCK_M/N/K` and `multibuffer` configurations for common shapes and let the runtime choose the optimal combination.
 
 A common migration risk is directly keeping a GPU-style large grid. If the output tile count is far larger than the physical Cube Core count, let each program process multiple tiles in an inner loop, or set `TRITON_ALL_BLOCKS_PARALLEL=1` when logical programs are independent.

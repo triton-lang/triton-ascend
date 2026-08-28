@@ -47,11 +47,11 @@ void AnalyzeDataFlowPass::runOnOperation() {
 
   pm.addPass(createAnalyzeScopePass());
 
-  pm.addPass(createAnalyzeArgsPass());
-
   pm.addPass(createAnalyzeFlagPass());
 
   pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
+
+  pm.addPass(createAnalyzeWhileConditionArgsPass());
 
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
@@ -72,10 +72,10 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass() {
 
 void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeNamePass);
-  registerPass(createAnalyzeArgsPass);
   registerPass(createAnalyzeFlagPass);
   registerPass(createAnalyzeScopePass);
   registerPass(createAnalyzeDataFlowPass);
+  registerPass(createAnalyzeWhileConditionArgsPass);
   registerPass(createAnalyzeCubeContolFLowInputChainPass);
 }
 

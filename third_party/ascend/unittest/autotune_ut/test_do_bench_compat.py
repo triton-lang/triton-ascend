@@ -18,10 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from types import MethodType
+from types import MethodType, SimpleNamespace
 
 import pytest
 import triton
+import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 from triton.runtime.autotuner import Config
 from triton.backends.ascend.runtime.autotuner import AutoTilingTuner
 
@@ -41,6 +42,26 @@ def _make_tuner(do_bench):
 
     tuner._make_kernel_call = MethodType(_make_kernel_call, tuner)
     return tuner
+
+
+def _make_run_tuner(configs):
+    key = ("disk-cache-key", )
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.arg_names = []
+    tuner.cache = {}
+    tuner.is_simt_mode = False
+    tuner.simt_stack_limit = 8192
+    tuner.generate_key_and_configs = lambda *args, **kwargs: key
+    tuner.prune_configs = lambda kwargs: configs
+    tuner.enable_ubtuner = False
+    tuner.cache_results = True
+    tuner.print_autotuning = False
+    tuner.auto_profile_dir = None
+    tuner.nargs = {}
+    tuner.pre_hook = lambda kwargs, reset_only=False: None
+    tuner.run_kwargs = []
+    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: tuner.run_kwargs.append(kwargs) or "kernel-result")
+    return tuner, key
 
 
 def test_batch_bench_supports_do_bench_with_quantiles():
@@ -170,3 +191,75 @@ def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
     ascend_autotuner.autotune(configs=[object()], key=[], do_bench=my_do_bench)(_dummy_kernel)
 
     assert captured["do_bench"] is my_do_bench
+
+
+def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch):
+    configs = [Config({"BLOCK_SIZE": 16}), Config({"BLOCK_SIZE": 32})]
+    tuner, key = _make_run_tuner(configs)
+    gc_calls = []
+    profile_calls = []
+
+    def check_disk_cache(tuning_key, pruned_configs, benchmark):
+        assert tuning_key == key
+        tuner.cache[tuning_key] = pruned_configs[0]
+        return True
+
+    def unexpected_batch_bench(*args, **kwargs):
+        raise AssertionError("benchmark must not run on a disk-cache hit")
+
+    tuner.check_disk_cache = check_disk_cache
+    tuner._batch_bench = unexpected_batch_bench
+    tuner.auto_profile_dir = "profile-output"
+    tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
+
+    assert tuner.run() == "kernel-result"
+    assert gc_calls == []
+    assert profile_calls == []
+
+
+def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):
+    configs = [Config({"BLOCK_SIZE": 16}), Config({"BLOCK_SIZE": 32})]
+    tuner, key = _make_run_tuner(configs)
+    gc_calls = []
+    benchmark_calls = []
+    profile_calls = []
+
+    def check_disk_cache(tuning_key, pruned_configs, benchmark):
+        assert tuning_key == key
+        benchmark()
+        return False
+
+    def batch_bench(*args, configs, **kwargs):
+        benchmark_calls.append(configs)
+        return {configs[0]: 1.0, configs[1]: 2.0}
+
+    tuner.check_disk_cache = check_disk_cache
+    tuner._batch_bench = batch_bench
+    tuner.auto_profile_dir = "profile-output"
+    tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
+
+    assert tuner.run() == "kernel-result"
+    assert benchmark_calls == [configs]
+    assert gc_calls == [True]
+    assert profile_calls == [configs[0]]
+
+
+def test_run_keeps_gc_on_single_config_cache_miss(monkeypatch):
+    tuner, _ = _make_run_tuner([Config({"BLOCK_SIZE": 16, "compile_mode": "simt_only"})])
+    gc_calls = []
+    profile_calls = []
+
+    def unexpected_disk_cache(*args, **kwargs):
+        raise AssertionError("single-config path must not probe disk cache")
+
+    tuner.check_disk_cache = unexpected_disk_cache
+    tuner.auto_profile_dir = "profile-output"
+    tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
+
+    assert tuner.run() == "kernel-result"
+    assert tuner.run_kwargs[-1]["simt_stack_limit"] == 8192
+    assert gc_calls == [True]
+    assert profile_calls == []

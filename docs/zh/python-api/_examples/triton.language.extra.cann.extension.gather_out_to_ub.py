@@ -1,3 +1,4 @@
+import pytest
 import torch
 import triton
 import triton.language as tl
@@ -29,6 +30,8 @@ def kernel(src_ptr, index_ptr, out_ptr):
 
 
 def test_gather_out_to_ub():
+    if not is_compile_on_910_95():
+        pytest.skip("gather_out_to_ub is only supported on Ascend 950")
     # src(4,2) = [[1.,2.],[3.,4.],[5.,6.],[7.,8.]]
     src = torch.tensor([[1., 2.], [3., 4.], [5., 6.], [7., 8.]], device='npu')
     # index(2,2) = [[0,1],[2,3]]
@@ -49,7 +52,4 @@ def test_gather_out_to_ub():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95():
-        print("gather_out_to_ub is only supported on Ascend 950, skipping test.")
-    else:
-        test_gather_out_to_ub()
+    test_gather_out_to_ub()

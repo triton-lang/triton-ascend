@@ -308,7 +308,7 @@ Developers only need to provide a few base configurations (such as BLOCK_SIZE), 
 [Description] On the NPU, the UB or L1 size has an upper limit. When this error occurs, reduce the amount of data transferred at a time and use the for loop to process long sequences.
 
 ```diff
-E triton.compiler. errors.MLIRCompilationError:
+E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
 E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":2:1): error: Failed to run BishengHIR pipeline

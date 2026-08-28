@@ -39,6 +39,8 @@
 
 #include "llvm/ADT/STLExtras.h"
 
+#include <optional>
+
 #define DEBUG_TYPE "triton-unstructure-converter"
 
 using namespace mlir;
@@ -46,14 +48,262 @@ using namespace triton;
 
 #include "llvm/Support/Debug.h"
 
-bool forceSimtTemplateFlag = false;
+static triton::ascend::CompileMode unstructureCompileMode =
+    triton::ascend::CompileMode::Simd;
 
 namespace {
 
 constexpr int64_t kBitsPerByte = 8;
 
-static constexpr const char *kRouteDiscreteMaskToSimtAttrName =
-    "route_discrete_mask_to_simt";
+static triton::PointerType getScalarPointerType(Type type) {
+  if (auto tensorType = dyn_cast<RankedTensorType>(type))
+    type = tensorType.getElementType();
+  return dyn_cast<triton::PointerType>(type);
+}
+
+// Keep this deliberately narrow. These are the byte-buffer views used by the
+// paged-attention and KV-cache kernels covered by this canonicalization.
+static std::optional<int64_t>
+getSupportedPointerBitcastScale(triton::BitcastOp op) {
+  auto srcType = getScalarPointerType(op.getSrc().getType());
+  auto dstType = getScalarPointerType(op.getType());
+  if (!srcType || !dstType ||
+      srcType.getAddressSpace() != dstType.getAddressSpace() ||
+      !srcType.getPointeeType().isInteger(8))
+    return std::nullopt;
+
+  Type dstPointeeType = dstType.getPointeeType();
+  if (dstPointeeType.isF16() || dstPointeeType.isBF16())
+    return 2;
+  if (dstPointeeType.isF32() || dstPointeeType.isInteger(32))
+    return 4;
+  return std::nullopt;
+}
+
+static FailureOr<Value> scaleTensorPointerOffset(Value offset, int64_t divisor,
+                                                 IRRewriter &rewriter) {
+  auto offsetType = dyn_cast<RankedTensorType>(offset.getType());
+  if (!offsetType || !offsetType.hasStaticShape())
+    return failure();
+  auto elementType = dyn_cast<IntegerType>(offsetType.getElementType());
+  if (!elementType ||
+      (elementType.getWidth() != 32 && elementType.getWidth() != 64))
+    return failure();
+  auto divisorAttr = rewriter.getIntegerAttr(elementType, divisor);
+  Value divisorValue = rewriter.create<arith::ConstantOp>(
+      offset.getLoc(), DenseElementsAttr::get(offsetType, divisorAttr));
+  return rewriter.create<arith::DivSIOp>(offset.getLoc(), offset, divisorValue)
+      .getResult();
+}
+
+static bool isPublicKernelArgument(Value value) {
+  auto blockArgument = dyn_cast<BlockArgument>(value);
+  if (!blockArgument)
+    return false;
+  auto funcOp =
+      dyn_cast<triton::FuncOp>(blockArgument.getOwner()->getParentOp());
+  return funcOp && funcOp.getVisibility() == SymbolTable::Visibility::Public;
+}
+
+static FailureOr<Value> materializeScalarByteAddress(Value pointer,
+                                                     Location loc,
+                                                     IRRewriter &rewriter) {
+  SmallVector<Value> byteOffsets;
+  Value root = pointer;
+  while (auto addPtrOp = root.getDefiningOp<triton::AddPtrOp>()) {
+    auto offsetType = dyn_cast<IntegerType>(addPtrOp.getOffset().getType());
+    if (isa<RankedTensorType>(addPtrOp.getType()) || !offsetType ||
+        (offsetType.getWidth() != 32 && offsetType.getWidth() != 64))
+      return failure();
+    byteOffsets.push_back(addPtrOp.getOffset());
+    root = addPtrOp.getPtr();
+  }
+  if (!isPublicKernelArgument(root))
+    return failure();
+
+  Value address =
+      rewriter.create<triton::PtrToIntOp>(loc, rewriter.getI64Type(), root);
+  for (Value offset : llvm::reverse(byteOffsets)) {
+    auto offsetType = cast<IntegerType>(offset.getType());
+    if (offsetType.getWidth() < 64)
+      offset =
+          rewriter.create<arith::ExtSIOp>(loc, rewriter.getI64Type(), offset);
+    address = rewriter.create<arith::AddIOp>(loc, address, offset);
+  }
+  return address;
+}
+
+static bool hasOnlySupportedPointerUses(Value pointer) {
+  if (pointer.use_empty())
+    return false;
+  for (Operation *user : pointer.getUsers()) {
+    if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(user)) {
+      if (addPtrOp.getPtr() != pointer ||
+          !hasOnlySupportedPointerUses(addPtrOp.getResult()))
+        return false;
+      continue;
+    }
+    if (auto splatOp = dyn_cast<triton::SplatOp>(user)) {
+      if (splatOp.getSrc() != pointer ||
+          !hasOnlySupportedPointerUses(splatOp.getResult()))
+        return false;
+      continue;
+    }
+    if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(user)) {
+      if (expandDimsOp.getSrc() != pointer ||
+          !hasOnlySupportedPointerUses(expandDimsOp.getResult()))
+        return false;
+      continue;
+    }
+    if (auto broadcastOp = dyn_cast<triton::BroadcastOp>(user)) {
+      if (broadcastOp.getSrc() != pointer ||
+          !hasOnlySupportedPointerUses(broadcastOp.getResult()))
+        return false;
+      continue;
+    }
+    if (auto loadOp = dyn_cast<triton::LoadOp>(user)) {
+      if (loadOp.getPtr() != pointer)
+        return false;
+      continue;
+    }
+    if (auto storeOp = dyn_cast<triton::StoreOp>(user)) {
+      if (storeOp.getPtr() != pointer)
+        return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+static bool canRewriteSupportedPointerBitcast(triton::BitcastOp op) {
+  if (!getSupportedPointerBitcastScale(op) ||
+      !hasOnlySupportedPointerUses(op.getResult()))
+    return false;
+
+  Value current = op.getSrc();
+  while (Operation *producer = current.getDefiningOp()) {
+    if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(producer)) {
+      Type offsetType = addPtrOp.getOffset().getType();
+      if (isa<RankedTensorType>(current.getType())) {
+        auto pointerType = cast<RankedTensorType>(current.getType());
+        auto tensorType = dyn_cast<RankedTensorType>(offsetType);
+        if (!pointerType.hasStaticShape() || !tensorType ||
+            !tensorType.hasStaticShape() ||
+            pointerType.getShape() != tensorType.getShape())
+          return false;
+        auto elementType = dyn_cast<IntegerType>(tensorType.getElementType());
+        if (!elementType ||
+            (elementType.getWidth() != 32 && elementType.getWidth() != 64))
+          return false;
+      } else if (auto intType = dyn_cast<IntegerType>(offsetType);
+                 !intType ||
+                 (intType.getWidth() != 32 && intType.getWidth() != 64)) {
+        return false;
+      }
+      current = addPtrOp.getPtr();
+      continue;
+    }
+    if (auto splatOp = dyn_cast<triton::SplatOp>(producer)) {
+      if (isa<RankedTensorType>(splatOp.getSrc().getType()))
+        return false;
+      current = splatOp.getSrc();
+      continue;
+    }
+    return false;
+  }
+  return !isa<RankedTensorType>(current.getType()) &&
+         isPublicKernelArgument(current);
+}
+
+// Rewrite only the supported byte-buffer views into ordinary target-element
+// addptr operations. All later pointer and control-flow handling remains on the
+// existing main-dev paths.
+static LogicalResult
+rewriteSupportedPointerBitcast(triton::BitcastOp op, IRRewriter &rewriter,
+                               triton::BitcastOp &nextBitcast) {
+  auto divisor = getSupportedPointerBitcastScale(op);
+  if (!divisor)
+    return failure();
+
+  Value src = op.getSrc();
+  rewriter.setInsertionPoint(op);
+  if (!isa<RankedTensorType>(src.getType())) {
+    auto address = materializeScalarByteAddress(src, op.getLoc(), rewriter);
+    if (failed(address))
+      return failure();
+    auto targetPtr = rewriter.create<triton::IntToPtrOp>(
+        op.getLoc(), op.getType(), *address);
+    rewriter.replaceOp(op, targetPtr.getResult());
+    nextBitcast = nullptr;
+    return success();
+  }
+
+  if (src.getDefiningOp<triton::AddPtrOp>()) {
+    Value base = src;
+    Value byteOffset;
+    while (auto currentAddPtr = base.getDefiningOp<triton::AddPtrOp>()) {
+      Value currentOffset = currentAddPtr.getOffset();
+      auto offsetType = cast<RankedTensorType>(currentOffset.getType());
+      auto elementType = cast<IntegerType>(offsetType.getElementType());
+      if (elementType.getWidth() < 64) {
+        auto i64OffsetType =
+            RankedTensorType::get(offsetType.getShape(), rewriter.getI64Type());
+        currentOffset = rewriter.create<arith::ExtSIOp>(
+            op.getLoc(), i64OffsetType, currentOffset);
+      }
+      if (byteOffset)
+        byteOffset = rewriter.create<arith::AddIOp>(op.getLoc(), byteOffset,
+                                                    currentOffset);
+      else
+        byteOffset = currentOffset;
+      base = currentAddPtr.getPtr();
+    }
+    auto scaledOffset =
+        scaleTensorPointerOffset(byteOffset, *divisor, rewriter);
+    if (failed(scaledOffset))
+      return failure();
+    nextBitcast =
+        rewriter.create<triton::BitcastOp>(op.getLoc(), op.getType(), base);
+    auto newAddPtr = rewriter.create<triton::AddPtrOp>(
+        op.getLoc(), op.getType(), nextBitcast, *scaledOffset);
+    rewriter.replaceOp(op, newAddPtr.getResult());
+    return success();
+  }
+
+  if (auto splatOp = src.getDefiningOp<triton::SplatOp>()) {
+    auto resultType = dyn_cast<RankedTensorType>(op.getType());
+    if (!resultType)
+      return failure();
+    nextBitcast = rewriter.create<triton::BitcastOp>(
+        op.getLoc(), resultType.getElementType(), splatOp.getSrc());
+    auto newSplat = rewriter.create<triton::SplatOp>(op.getLoc(), resultType,
+                                                     nextBitcast.getResult());
+    rewriter.replaceOp(op, newSplat.getResult());
+    return success();
+  }
+
+  return failure();
+}
+
+static void canonicalizeSupportedPointerBitcasts(ModuleOp moduleOp) {
+  SmallVector<triton::BitcastOp> bitcasts;
+  moduleOp.walk([&](triton::BitcastOp op) {
+    if (canRewriteSupportedPointerBitcast(op))
+      bitcasts.push_back(op);
+  });
+
+  IRRewriter rewriter(moduleOp.getContext());
+  for (triton::BitcastOp bitcast : bitcasts) {
+    triton::BitcastOp current = bitcast;
+    while (current) {
+      triton::BitcastOp next;
+      if (failed(rewriteSupportedPointerBitcast(current, rewriter, next)))
+        break;
+      current = next;
+    }
+  }
+}
 
 static RankedTensorType resolvePtrTensorType(Value ptr) {
   auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
@@ -111,40 +361,11 @@ void normalizeDiscreteMaskAccessForFallback(MemAccOpTy &op,
   ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 }
 
-// ======================== 950 SIMT Indirect Fast-Path Lowering
+// ======================== 950 template-SIMT indirect fast-path lowering
 // ========================
-// 1. SIMT Fast-Path Gate
-//    The SIMT indirect lowering path is enabled only when:
-//      - compileOn91095Flag && forceSimtTemplateFlag
-//      - and the access is either:
-//          * unstructured, or has tag with 'route_discrete_mask_to_simt'
-//
-// 2. Op-Specific Lowering
-//    (1) tt.load / tt.store
-//        Entry requirements:
-//          - SIMT fast-path gate enabled
-//          - tensor rank <= 5, simt template only supports up to 5D tensors for
-//          now
-//        Lowering:
-//          - tt.load / tt.store  -> tt.indirect_load / tt.indirect_store
-//    (2) tt.atomic_rmw / tt.atomic_cas
-//        Entry requirements:
-//          - SIMT fast-path gate enabled
-//          - offset/value/mask tensors have static shape (required for
-//          flatten-to-1D lowering)
-//        Lowering:
-//          tt.atomic_rmw fadd, acq_rel, gpu, %src, %value, %mask
-//          -> flatten offsets/data/mask to 1D
-//          -> create a custom op:
-//              hivm.hir.custom {
-//                extra_attr = "operate=<atomic_op>"
-//              } "__builtin_indirect_atomic" ins(%ptr, %offset, %value, %mask)
-//              outs(%out)
-//          -> reshape the returned 1D result back to the original tensor shape
-//
-// 3. Fallback Behavior
-//    If SIMT indirect lowering cannot be formed for any operation,
-//    conversion gracefully falls back to the legacy scalar-loop lowering path
+// Load/store uses the established indirect-template ABI when its rank and
+// pointer requirements are met. Atomic operations use the same gate with their
+// indirect custom-op lowering. Other cases fall back to scalar-loop lowering.
 // ======================================================================================
 static bool canUseIndirectFastPath(Value srcPtr, Value ptrOffset) {
   if (!srcPtr || !ptrOffset)
@@ -181,17 +402,8 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
     Value mask = op.getMask();
     Value other = op.getOther();
     auto resultType = op.getType();
-    auto newPtr = srcPtr;
-    if (auto *defOp = srcPtr.getDefiningOp()) {
-      if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(defOp)) {
-        auto zeroOffset = rewriter.create<arith::ConstantOp>(
-            loc, rewriter.getZeroAttr(intToPtrOp.getSrc().getType()));
-        newPtr = rewriter.create<triton::AddPtrOp>(loc, srcPtr.getType(),
-                                                   srcPtr, zeroOffset);
-      }
-    }
     auto indirect = rewriter.create<triton::ascend::IndirectLoadOp>(
-        loc, resultType, newPtr, ptrOffset, mask, other,
+        loc, resultType, srcPtr, ptrOffset, mask, other,
         ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     rewriter.replaceOp(op, indirect.getResult());
     LLVM_DEBUG({
@@ -470,7 +682,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   auto ptr = op.getPtr();
   auto ptrType = resolvePtrTensorType(ptr);
-  auto routeDiscreteMaskToSimt = op->hasAttr(kRouteDiscreteMaskToSimtAttrName);
+  auto mixCompileDiscreteMask =
+      op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
@@ -482,7 +695,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
-  if (ptrOffsetInfo.isStructured() && !routeDiscreteMaskToSimt &&
+  if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
     return failure();
@@ -544,30 +757,32 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
        << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
-    os << "forceSimtTemplateFlag: " << forceSimtTemplateFlag << "\n";
+    os << "compileMode: " << static_cast<int>(unstructureCompileMode) << "\n";
   });
 
-  // SIMT Indirect Fast-Path Lowering in 950 seiries
-  bool indirectFastPathEnabled =
-      compileOn91095Flag && forceSimtTemplateFlag &&
+  bool templateIndirectFastPathEnabled =
+      compileOn91095Flag &&
+      triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       routeDiscreteMaskToSimt);
+       mixCompileDiscreteMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
-  if (indirectFastPathEnabled &&
+  if (templateIndirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
                                            resultShape, rewriter))) {
     return success();
   }
 
   LLVM_DEBUG({
-    if (sizeInByte >= 64) {
+    if (triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
+        sizeInByte >= 64) {
       auto &os = llvm::dbgs();
-      os << "Skip SIMT indirect fast path because continuous shape product is "
+      os << "Skip template-SIMT indirect fast path because continuous shape "
+            "product is "
          << sizeInByte << " (>=64)\n";
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {
-      if (indirectFastPathEnabled &&
+      if (templateIndirectFastPathEnabled &&
           !rankWithinIndirectLoadStoreFastPathLimit) {
         auto &os = llvm::dbgs();
         os << "Skip tt.indirect_load/store fast path because rank is "
@@ -861,17 +1076,27 @@ TritonToUnstructurePass::TritonToUnstructurePass(
 
 void TritonToUnstructurePass::runOnOperation() {
   compileOn91095Flag = this->compileOn91095;
-  forceSimtTemplateFlag = this->forceSimtTemplate;
+  auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
+  if (!compileMode) {
+    getOperation().emitError()
+        << "triton-to-unstructure compile-mode is invalid: "
+        << this->compileMode;
+    signalPassFailure();
+    return;
+  }
+  unstructureCompileMode = *compileMode;
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "TritonToUnstructurePass started with options:\n";
     os << "  compileOn91095: " << compileOn91095Flag << "\n";
-    os << "  forceSimtTemplate: " << forceSimtTemplateFlag << "\n";
+    os << "  compileMode: " << this->compileMode << "\n";
   });
 
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
+
+  canonicalizeSupportedPointerBitcasts(moduleOp);
 
   moduleOp->walk([this](triton::FuncOp funcOp) {
     replacePtrArguments(funcOp, offsetMapForLoopArgs);

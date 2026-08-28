@@ -1,9 +1,9 @@
 :orphan:
 
-triton.language.extra.extension.buffer.language
-=================================================
+triton.extension.buffer.language
+================================
 
-.. currentmodule:: triton.language.extra.extension.buffer.language
+.. currentmodule:: triton.extension.buffer.language
 
 Core Types
 ----------

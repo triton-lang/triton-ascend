@@ -15,3 +15,4 @@ protobuf==3.20
 scipy
 requests
 absl-py
+pyelftools>=0.29

@@ -24,7 +24,7 @@
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
 | **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
-| **编译错误 (MLIRCompileError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompileError`。 | 5.2 编译错误调试方法 |
+| **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2 编译错误调试方法 |
 
 ## 2 Triton-Ascend 编译流程概览
 
@@ -414,7 +414,7 @@ TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompileError`.
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`.
 需要进入 Triton-Ascend 代码层面定位问题。Triton-Ascend 包含 Python 和 C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
 ### 5.2.1 Python 代码调试方法

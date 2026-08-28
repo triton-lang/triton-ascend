@@ -292,7 +292,7 @@ triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 
 - x: `float32`
 
-返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 \[-1, 1]。
+返回值: `tl.tensor`, 返回输入参数的反双曲正切值，取值范围 (-∞, +∞)。
 
 返回类型：`float32`
 
@@ -2730,7 +2730,7 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 ### OP概述
 
-计算 1 / x 的倒数运算。
+计算 x 的倒数（即 1 / x）。
 
 原型:
 
@@ -2843,7 +2843,7 @@ triton.language.extra.cann.libdevice.rhypot(x, y, _builder=None)
 
 ### OP概述
 
-按最近偶数舍入模式计算 x 的最近邻整数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的最近邻整数。
 
 原型:
 
@@ -2914,7 +2914,7 @@ triton.language.extra.cann.libdevice.rnorm4d(x, y, z, w, _builder=None)
 
 ### OP概述
 
-按最近偶数舍入模式计算 x 的最近邻整数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的最近邻整数。
 
 原型:
 
@@ -2958,7 +2958,7 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 
 ### OP概述
 
-按最近偶数舍入模式计算 x 的平方根倒数。
+按银行家舍入模式（就近取整，.5时取就近偶数）计算 x 的平方根倒数。
 
 原型:
 

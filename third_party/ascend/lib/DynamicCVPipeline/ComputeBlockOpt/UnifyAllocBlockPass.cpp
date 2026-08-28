@@ -30,6 +30,7 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
@@ -172,21 +173,18 @@ static FillInfo findFillOpInSCFIf(Value allocResult) {
 }
 
 /**
- * @brief Check if scf.if needs to be split
+ * @brief Check if the scf.if containing linalg.fill has other operations
  *
- * Determines whether the scf.if operation containing linalg.fill needs to be
- * split. Split is needed when the if branch contains multiple operations (not
- * just linalg.fill).
+ * Determines whether the then region of the scf.if that contains linalg.fill
+ * also contains other operations besides linalg.fill. If it does, unification
+ * must be aborted, because the linalg.fill is mixed with unrelated operations
+ * and unifying the whole scf.if block_id would be incorrect.
  *
  * @param info FillInfo structure containing fillOp and parentIf
- * @return bool Returns true if split is needed, false otherwise
- *
- * @note Split logic:
- *       - If branch only has linalg.fill (+ scf.yield terminator), no split
- * needed
- *       - If branch has other operations besides linalg.fill, split needed
+ * @return bool Returns true if there are other ops besides linalg.fill in the
+ *         then region, false otherwise
  */
-static bool needsSplitIf(const FillInfo &info) {
+static bool hasOtherOpsInIf(const FillInfo &info) {
   if (!info.fillOp || !info.parentIf) {
     return false;
   }
@@ -200,70 +198,56 @@ static bool needsSplitIf(const FillInfo &info) {
   return opCount > 1;
 }
 
+/// Trace back along the view-like chain from \p copyOp's source and collect
+/// all ops. Only ops in the same Block as the copyOp are collected.
+static void traceViewChain(memref::CopyOp copyOp,
+                           SmallVectorImpl<Operation *> &result) {
+  for (Value v = copyOp.getSource(); auto *defOp = v.getDefiningOp();) {
+    if (defOp->getBlock() != copyOp->getBlock())
+      break;
+    if (auto viewOp = dyn_cast<ViewLikeOpInterface>(defOp))
+      result.push_back(viewOp), v = viewOp.getViewSource();
+    else if (auto sliceOp = dyn_cast<tensor::ExtractSliceOp>(defOp))
+      result.push_back(sliceOp), v = sliceOp.getSource();
+    else
+      break;
+  }
+}
+
 /**
- * @brief Split scf.if into two separate scf.if blocks
+ * @brief Collect source view chain ops from memref.copy's source operand
  *
- * When an scf.if branch contains multiple operations (linalg.fill + other ops),
- * this function splits it into two scf.if blocks:
- * - One containing only linalg.fill (will be unified)
- * - One containing other operations (keeps original block_id)
+ * For each memref.copy found by penetrating ViewLike direct users (subview of
+ * alloc), trace back the copy's source operand along the ViewLikeOpInterface /
+ * tensor.extract_slice chain (e.g., memref.subview -> memref.reinterpret_cast
+ * -> tensor.extract_slice), and collect all ops in the chain.
  *
- * @param info FillInfo structure containing fillOp and parentIf
- * @return FillInfo Updated FillInfo pointing to the new fill-only scf.if
+ * @param directUsers Direct users of alloc result (containing ViewLike ops
+ *                    whose users include memref.copy)
+ * @return SmallVector<Operation*> Collected source view chain ops
  *
- * @note Split pattern:
- *       Before:
- *         scf.if %cond {
- *           linalg.fill {block_id=8} ins(%v) outs(%alloc)  // keep
- *           arith.addf {block_id=12} %x, %y               // move to new scf.if
- *         } {hivm.unlikely_condition}
- *
- *       After:
- *         scf.if %cond {
- *           linalg.fill {block_id=8} ins(%v) outs(%alloc)  // keep
- *         } {hivm.unlikely_condition}
- *
- *         scf.if %cond {
- *           arith.addf {block_id=12} %x, %y               // new scf.if
- *         } {hivm.unlikely_condition}
  */
-static FillInfo splitSCFIfIfNeeded(FillInfo &info) {
-  Block *originalBlock = info.fillOp->getBlock();
-  Operation *fillOp = info.fillOp.getOperation();
-  scf::IfOp originalIf = info.parentIf;
-  Value cond = originalIf.getCondition();
-  Location loc = originalIf.getLoc();
-
-  SmallVector<Operation *> otherOps;
-  for (auto &op : originalBlock->without_terminator()) {
-    if (&op != fillOp) {
-      otherOps.push_back(&op);
+static SmallVector<Operation *>
+collectSourceViewChainOps(ArrayRef<Operation *> directUsers) {
+  SmallVector<Operation *> chainOps;
+  for (Operation *op : directUsers) {
+    if (!isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(op)) {
+      continue;
+    }
+    // Penetrate through view-like ops to find memref.copy users
+    SmallVector<Operation *> worklist = {op};
+    while (!worklist.empty()) {
+      Operation *cur = worklist.pop_back_val();
+      for (auto *user : cur->getUsers()) {
+        if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
+          traceViewChain(copyOp, chainOps);
+        } else if (isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(user)) {
+          worklist.push_back(user);
+        }
+      }
     }
   }
-
-  if (otherOps.empty()) {
-    return info;
-  }
-
-  DictionaryAttr originalAttrs = originalIf->getAttrDictionary();
-
-  OpBuilder builder(originalIf);
-
-  fillOp->moveBefore(originalIf.getOperation()->getNextNode());
-  builder.setInsertionPointAfter(fillOp);
-
-  auto newFillIf =
-      builder.create<scf::IfOp>(loc, cond, /*withElseRegion=*/false);
-  if (originalAttrs) {
-    for (auto attr : originalAttrs) {
-      newFillIf->setAttr(attr.getName(), attr.getValue());
-    }
-  }
-
-  fillOp->moveBefore(newFillIf.getThenRegion().front().getTerminator());
-
-  info.parentIf = newFillIf;
-  return info;
+  return chainOps;
 }
 
 /**
@@ -302,24 +286,25 @@ tryUnifyForAlloc(memref::AllocOp allocOp,
   }
   LOG_DEBUG("[getSameBlockId] GetSameBlockId: " << targetBlockId);
 
-  // Step4: Split if scf.if contains multiple operations
-  if (needsSplitIf(fillInfo)) {
-    LOG_DEBUG("[needsSplitIf] SCF.IF need split ");
-    fillInfo = splitSCFIfIfNeeded(fillInfo);
+  // Step4: If the scf.if has other operations besides linalg.fill, abort
+  if (hasOtherOpsInIf(fillInfo)) {
+    LOG_DEBUG("[warning] SCF.IF has other ops, failed to unify");
+    return success();
   }
 
-  // Step5: Cycle detection and block_id assignment
+  // Step5: collect allocOp, ifOp, fillOp, directUsers and ViewChainOps
   SmallVector<Operation *> coreOps = {
       allocOp.getOperation(),
       fillInfo.fillOp.getOperation(),
       fillInfo.parentIf.getOperation(),
   };
   coreOps.append(directUsers);
+  coreOps.append(collectSourceViewChainOps(directUsers));
 
+  // Step6: Cycle detection and block_id assignment
   if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
-    LOG_DEBUG(
-        "[Cycle detection] Find cycle, have unsupport IR! Should Check!!");
-    return success();
+    LOG_DEBUG("[error] Find cycle, have unsupport IR! Should Check!!");
+    return failure();
   }
   for (auto *op : coreOps) {
     bm.updateBlockId(op, targetBlockId);

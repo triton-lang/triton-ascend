@@ -323,5 +323,6 @@
   "rtol",
   "atol",
   "ffts",
-  "ctypes"
+  "ctypes",
+  "xdist"
 ]

@@ -3,8 +3,8 @@
 This example shows the basic costmodel backend flow:
 
 - generate TTIR from a Triton frontend kernel;
-- build `costmodel_bench` inputs for multiple candidate configs;
-- call `costmodel_bench` and get the predicted latency for each config.
+- build `costmodel_bench` items for multiple candidate configs;
+- call `costmodel_bench` once per item and collect the predicted latency for each config.
 
 This flow is useful for filtering out slow configs before autotuning. The example uses only a vector add kernel so that the focus stays on the costmodel input and return value.
 
@@ -48,7 +48,6 @@ def make_ttir(kernel, signature, constants):
             "debug": False,
             "multibuffer": False,
             "compile_mode": "simd",
-            "enable_costmodel_backend": True,
             **source.parse_options(),
         }
     )
@@ -85,7 +84,12 @@ for cfg in configs:
         }
     )
 
-latencies = costmodel_bench(items)
+latencies = {}
+for item in items:
+    config, latency_us = costmodel_bench(item)
+    if config is not None:
+        latencies[config] = latency_us
+
 for config, latency_us in sorted(latencies.items(), key=lambda item: item[1]):
     print(f"{config}: {latency_us:.3f} us")
 ```
@@ -100,12 +104,12 @@ block1024: 0.110 us
 block2048: 0.126 us
 ```
 
-`costmodel_bench` returns a dictionary whose keys are the `config` values passed in and whose values are predicted latencies in microseconds. An autotuning layer can sort by the returned values and keep the configs predicted to be faster.
+`costmodel_bench` evaluates one item and returns `(config, latency_us)`. An autotuning layer can call it once per item, aggregate the returned pairs into a dictionary, sort by latency, and keep the configs predicted to be faster.
 
 ## Key Points
 
 1. `ASTSource + ast_to_ttir` only generates TTIR. It does not compile or launch the kernel.
 2. `config` affects `tl.constexpr` values such as `BLOCK_SIZE`, so each candidate config needs its own TTIR.
-3. Each item passed to `costmodel_bench` should contain at least `config` and `ttir`, and may also include `arg_bindings`.
+3. Each `costmodel_bench` call handles exactly one item. The item should contain at least `config` and `ttir`, and may also include `arg_bindings`.
 4. `arg_bindings` binds runtime integer values to TTIR `%argN` arguments. In this example, `n_elements=98432` maps to `arg3=98432`.
 5. If the kernel uses `tl.program_id(0)`, usually pass `pid_x=0`. If it also uses `tl.num_programs(0)`, pass `num_programs_x=...` as well.

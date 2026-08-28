@@ -22,6 +22,7 @@
 
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -148,7 +149,8 @@ OpFoldResult BlockData::inferBlockOffset(const Location &loc,
                                          OpBuilder &builder) const {
   OpFoldResult retOffset = builder.getIndexAttr(0);
   for (auto ofr : offsets) {
-    retOffset = addOpFoldResult(retOffset, ofr, loc, builder);
+    retOffset =
+        addOpFoldResult(retOffset, ofr, loc, builder, builder.getIndexType());
   }
   return retOffset;
 }
@@ -192,8 +194,9 @@ void BlockData::addBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
   // 2. otherwise, both lhs and rhs are scalar type with rank 0
   // Except above, original `scalar` has been fused into `offset` under add.
   if (lBlock.isScalar() && rBlock.isScalar()) {
-    auto addScalar = addOpFoldResult(lBlock.getScalarRef(),
-                                     rBlock.getScalarRef(), loc, rewriter);
+    auto addScalar =
+        addOpFoldResult(lBlock.getScalarRef(), rBlock.getScalarRef(), loc,
+                        rewriter, rewriter.getIndexType());
     this->scalar = addScalar;
   } else if (lBlock.getRank() == 0) {
     // When both lhs and rhs are scalar type with rank 0, just try passing
@@ -204,12 +207,14 @@ void BlockData::addBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
 
   for (const auto &[lOffset, rOffset] :
        llvm::zip(lBlock.getOffsetsRef(), rBlock.getOffsetsRef())) {
-    this->offsets.push_back(addOpFoldResult(lOffset, rOffset, loc, rewriter));
+    this->offsets.push_back(addOpFoldResult(lOffset, rOffset, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   for (const auto &[lStride, rStride] :
        llvm::zip(lBlock.getStridesRef(), rBlock.getStridesRef())) {
-    this->strides.push_back(addOpFoldResult(lStride, rStride, loc, rewriter));
+    this->strides.push_back(addOpFoldResult(lStride, rStride, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   // Both sizes are same implicitly under `add`
@@ -267,8 +272,8 @@ void BlockData::mulBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
                    << " rBlbock.scalar:" << rBlock.getScalar() << "\n";
     });
 
-    auto scalar =
-        mulOpFoldResult(lBlock.getScalar(), rBlock.getScalar(), loc, rewriter);
+    auto scalar = mulOpFoldResult(lBlock.getScalar(), rBlock.getScalar(), loc,
+                                  rewriter, rewriter.getIndexType());
     this->scalar = scalar;
   }
 
@@ -286,11 +291,13 @@ void BlockData::mulBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
   // In mulBlock, `scalar` will be accumulated into `offset` and `stride`
   OpFoldResult rScalar = rb->getScalarRef();
   for (const auto &lOffset : lb->getOffsetsRef()) {
-    this->offsets.push_back(mulOpFoldResult(lOffset, rScalar, loc, rewriter));
+    this->offsets.push_back(mulOpFoldResult(lOffset, rScalar, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   for (const auto &lStride : lb->getStridesRef()) {
-    this->strides.push_back(mulOpFoldResult(lStride, rScalar, loc, rewriter));
+    this->strides.push_back(mulOpFoldResult(lStride, rScalar, loc, rewriter,
+                                            rewriter.getIndexType()));
   }
 
   this->sizes = lb->getSizesRef();
@@ -380,16 +387,11 @@ Value BlockDataParser::getScalarMemRef(Value ptr, Value memref,
                                        const Location &loc,
                                        ConversionPatternRewriter &rewriter) {
   assert(isa<triton::PointerType>(ptr.getType()) && "expect a scalar pointer");
-  if (ptr.getDefiningOp<triton::AddPtrOp>()) {
-    if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>()) {
-      return castOp.getResult();
-    } else {
-      llvm_unreachable("pointer value is defined by an unexpected op");
-    }
-  }
+  if (auto castOp = memref.getDefiningOp<memref::ReinterpretCastOp>())
+    return castOp.getResult();
 
-  assert(isa<BlockArgument>(ptr) &&
-         "pointer should be produced by addptr or block argument");
+  assert(isa<BaseMemRefType>(memref.getType()) &&
+         "converted scalar pointer should be a memref");
   BlockData data;
   data.setSource(memref);
   data.getOffsetsRef().push_back(rewriter.getIndexAttr(0));
@@ -606,6 +608,7 @@ void BlockDataParser::parseMakeRange(
     triton::MakeRangeOp op, BlockData &data, const Location &loc,
     ConversionPatternRewriter &rewriter,
     const llvm::SmallDenseMap<Value, BlockData> &known) {
+  insertDebugNop(op.getLoc(), rewriter);
   assert(data.isEmpty());
   auto shape = dyn_cast<ShapedType>(op.getType()).getShape();
 
@@ -1282,6 +1285,11 @@ void BlockDataParser::rewriteAddPtr(
   auto insertPoint = rewriter.saveInsertionPoint();
   rewriter.setInsertionPoint(op);
 
+  Location offLoc = op.getLoc();
+  if (Value off = op.getOffset())
+    if (Operation *defOp = off.getDefiningOp())
+      offLoc = defOp->getLoc();
+  insertDebugNop(offLoc, rewriter);
   BlockData data;
   parseAddPtr(op, data, op.getLoc(), rewriter, known);
 
@@ -1383,6 +1391,100 @@ void BlockDataParser::rewriteAddPtr(
   rewriter.restoreInsertionPoint(insertPoint);
 }
 
+FailureOr<Value> BlockDataParser::materializePointer(
+    Value ptr, ConversionPatternRewriter &rewriter,
+    llvm::SmallDenseMap<Value, BlockData> &known) {
+  SmallVector<int64_t> resultShape;
+  if (auto resultTy = dyn_cast<RankedTensorType>(ptr.getType())) {
+    if (!isa<triton::PointerType>(resultTy.getElementType()))
+      return failure();
+    resultShape.append(resultTy.getShape().begin(), resultTy.getShape().end());
+  } else if (auto pointerTy = dyn_cast<triton::PointerType>(ptr.getType())) {
+    // A pointer to a shaped value is a block pointer, not a scalar element
+    // pointer. It is materialized by the make_tensor_ptr path instead.
+    if (isa<ShapedType>(pointerTy.getPointeeType()))
+      return failure();
+    resultShape.push_back(1);
+  } else {
+    return failure();
+  }
+
+  Operation *defOp = ptr.getDefiningOp();
+  if (!defOp)
+    return failure();
+
+  ConversionPatternRewriter::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(defOp);
+
+  BlockData data;
+  parse(ptr, data, ptr.getLoc(), rewriter, known);
+  if (!data.hasSource() || data.getMemAccType().isUnstructured())
+    return failure();
+
+  if (data.getSizesRef().empty()) {
+    data.getSizesRef().push_back(rewriter.getIndexAttr(1));
+    data.getStridesRef().push_back(rewriter.getIndexAttr(0));
+    data.getOffsetsRef().push_back(data.getScalarRef().isNull()
+                                       ? OpFoldResult(rewriter.getIndexAttr(0))
+                                       : data.getScalarRef());
+  }
+
+  if (data.getRank() != static_cast<int64_t>(resultShape.size()))
+    return failure();
+
+  known[ptr] = data;
+
+  // A unit dimension with zero stride is represented as a normal contiguous
+  // unit dimension. Non-unit zero strides are intentional (for example a
+  // splatted base pointer) and must be preserved.
+  int64_t inferredSize = 1;
+  for (int64_t i = data.getRank() - 1; i >= 0; --i) {
+    auto strideConst = getConstantIntValue(data.getStridesRef()[i]);
+    auto sizeConst = getConstantIntValue(data.getSizesRef()[i]);
+    if (!sizeConst)
+      return failure();
+    if (sizeConst.value() == 1 && strideConst && strideConst.value() == 0)
+      data.getStridesRef()[i] = rewriter.getIndexAttr(inferredSize);
+    inferredSize *= sizeConst.value();
+  }
+
+  // Keep negative static offsets as SSA values. This mirrors rewriteAddPtr and
+  // avoids unsigned attribute handling in later reinterpret_cast lowering.
+  auto &offsets = data.getOffsetsRef();
+  for (OpFoldResult &offset : offsets) {
+    if (auto constVal = getConstantIntValue(offset);
+        constVal && constVal.value() < 0) {
+      offset =
+          rewriter
+              .create<arith::ConstantIndexOp>(ptr.getLoc(), constVal.value())
+              .getResult();
+    }
+  }
+
+  if (auto intToPtrOp = dyn_cast_or_null<triton::IntToPtrOp>(
+          data.getSourceRef().getDefiningOp())) {
+    auto pointerTy =
+        cast<triton::PointerType>(intToPtrOp.getResult().getType());
+    auto memrefTy =
+        MemRefType::get({ShapedType::kDynamic}, pointerTy.getPointeeType());
+    auto pointerCast = rewriter.create<hivm::PointerCastOp>(
+        intToPtrOp.getLoc(), memrefTy, ValueRange{intToPtrOp.getSrc()});
+    data.setSource(pointerCast.getResult());
+  }
+
+  if (data.hasResElemTy()) {
+    auto sourceTy = dyn_cast<BaseMemRefType>(data.getSourceRef().getType());
+    if (!sourceTy)
+      return failure();
+    auto castTy = sourceTy.cloneWith(std::nullopt, data.getResElemTyRef());
+    auto cast = rewriter.create<UnrealizedConversionCastOp>(
+        ptr.getLoc(), castTy, data.getSourceRef());
+    data.setSource(cast.getResult(0));
+  }
+
+  return data.createCastOp(resultShape, ptr.getLoc(), rewriter).getResult();
+}
+
 OpFoldResult
 accumulatePotentialOffsetOnBase(triton::MakeTensorPtrOp op, Value base,
                                 OpFoldResult offset,
@@ -1392,7 +1494,7 @@ accumulatePotentialOffsetOnBase(triton::MakeTensorPtrOp op, Value base,
            "base of MakeTensorPtrOp only comes from native ptr or AddPtrOp");
 
     return addOpFoldResult(offset, baseRecast.getConstifiedMixedOffset(),
-                           op.getLoc(), rewriter);
+                           op.getLoc(), rewriter, rewriter.getIndexType());
   }
 
   return offset;
@@ -1562,7 +1664,8 @@ void BlockDataParser::rewriteMakeTensorPtrOp(
   SmallVector<OpFoldResult> newOffsets;
   for (auto [offset, stride] :
        llvm::zip(data.getOffsetsRef(), data.getStridesRef()))
-    newOffsets.push_back(mulOpFoldResult(offset, stride, loc, rewriter));
+    newOffsets.push_back(mulOpFoldResult(offset, stride, loc, rewriter,
+                                         rewriter.getIndexType()));
 
   // 1. Consider that current base ptr may comes from `triton::AddPtrOp`,
   // which have been converted to `memref::ReinterpretCastOp` with 1D
@@ -1730,8 +1833,9 @@ void BlockDataParser::rewriteAdvanceOp(
        llvm::zip(incrementOffsets, blockData.getOffsetsRef(),
                  blockData.getStridesRef())) {
     auto curDimOffset =
-        addOpFoldResult(mulOpFoldResult(increment, stride, loc, rewriter),
-                        originalOffset, loc, rewriter);
+        addOpFoldResult(mulOpFoldResult(increment, stride, loc, rewriter,
+                                        rewriter.getIndexType()),
+                        originalOffset, loc, rewriter, rewriter.getIndexType());
 
     newOffsets.push_back(curDimOffset);
   }
@@ -2536,7 +2640,8 @@ void BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
             bLoc, bB.getIndexType(), scalarOffsetRaw);
         OpFoldResult baseOffset = bB.getIndexAttr(0);
         for (auto ofr : data.getOffsetsRef()) {
-          baseOffset = addOpFoldResult(baseOffset, ofr, bLoc, bB);
+          baseOffset =
+              addOpFoldResult(baseOffset, ofr, bLoc, bB, bB.getIndexType());
         }
         Value baseVal = getValueOrCreateConstantIndexOp(bB, bLoc, baseOffset);
         Value combinedOffset =

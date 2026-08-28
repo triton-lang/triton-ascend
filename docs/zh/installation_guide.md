@@ -66,11 +66,10 @@ pip install -e .
     git apply llvm_patch_f6ded0b.patch
     ```
 
-2. **构建LLVM**：路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
+2. **构建LLVM**：路径 `/path/llvm-install` 为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
 
     ```bash
-    # /path/to/llvm-install 路径为用户规划的llvm安装路径,需根据实际调整
-    export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+    export LLVM_INSTALL_PREFIX=/path/llvm-install
     cd {PATH_TO}/llvm-project
     mkdir build
     cd build
@@ -86,6 +85,8 @@ pip install -e .
         -DLLVM_ENABLE_LLD=ON \
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
+
+    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
 3. **编译Triton-Ascend**
@@ -98,14 +99,14 @@ pip install -e .
     TRITON_BUILD_PROTON=OFF \
     TRITON_WHEEL_NAME="triton-ascend" \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    python3 setup_ascend.py install
     ```
 
 ## 开发镜像
 
 ### 检查镜像版本
 
-**表2** CANN版本与镜像标签对照表。
+**表1** CANN版本与镜像标签对照表。
 <table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
   <tr style="height: 50px;">
     <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">CANN版本</th>
@@ -207,16 +208,16 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 运行样例
 
-**运行tutorials中向量加法实例验证结果**
+**运行tutorials中向量加法示例验证结果**
 
-向量加法实例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
+向量加法示例：<a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
 # 拉取triton-ascend源码仓及用例（使用源码安装Triton-Ascend的无需重复拉取）
 git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials实例
+# 运行tutorials示例
 python3 ./third_party/ascend/tutorials/01-vector-add.py
 ```
 
@@ -226,6 +227,50 @@ python3 ./third_party/ascend/tutorials/01-vector-add.py
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
+```
+
+## 运行Pytest UT
+
+源码仓中提供了单op测试用例，位于`third_party/ascend/unittest/pytest_ut`目录下。执行前需完成Triton-Ascend安装，并设置CANN环境变量。
+
+```bash
+# 设置CANN环境变量（默认安装路径`/usr/local/Ascend`为例）
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+# 安装pytest
+pip install pytest pytest-xdist
+```
+
+**运行单个测试用例**
+
+```bash
+# 以向量加法测试用例为例
+python -m pytest third_party/ascend/unittest/pytest_ut/test_add.py
+```
+
+**运行全部测试用例**
+
+```bash
+# 串行执行全部用例
+python -m pytest third_party/ascend/unittest/pytest_ut
+```
+
+如需加速测试，可通过`-n`指定并行worker数（并行执行需安装pytest-xdist）：
+
+```bash
+python -m pytest -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+如需要打印测试过程详细信息，添加`-sv`参数：
+
+```bash
+python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+执行完成后输出示例如下：
+
+```text
+collected 6 items
+third_party/ascend/unittest/pytest_ut/test_add.py ......
 ```
 
 ## 安装常见问题
@@ -257,11 +302,11 @@ endif()
 
 **根因分析**
 
- triton-ascend目录被triton覆盖,导致triton-ascend功能受损。
+triton-ascend目录被triton覆盖，导致triton-ascend功能受损。
 
 **解决措施**
 
- 卸载已损坏的triton-ascend,重新安装即可。以3.2.1 版本为例，可执行如下命令修复：
+卸载已损坏的triton-ascend，重新安装即可。以3.2.1 版本为例，可执行如下命令修复：
 
 ```bash
 pip uninstall triton-ascend triton
@@ -270,7 +315,7 @@ pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.c
 
 **问题四：Triton-Ascend 3.2.1版本为何新增依赖triton？**
 
-答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，在此安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。
+答复：Triton-Ascend是基于Triton进行的二次开发，与Triton安装目录同名。若用户安装Triton-Ascend之后，再次安装Triton或依赖Triton的三方件，会覆盖Triton目录，导致Triton-Ascend功能受损。
 因此通过增加Triton依赖，当Triton被覆盖安装时会有如下提醒。
 
 ```text

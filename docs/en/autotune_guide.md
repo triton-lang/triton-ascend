@@ -10,9 +10,14 @@ This guide is intended for users who already know how to write Triton kernels an
 
 ## Recommended Usage
 
-On Triton-Ascend, the recommended usage is to keep the community-style `@triton.autotune` interface and set `configs=[]` when you want the backend to generate and evaluate candidate configurations automatically:
+On Triton-Ascend, the recommended usage is to keep the community-style `@triton.autotune` interface and set `configs` to `[]` when you want the backend to generate and evaluate candidate configurations automatically:
 
 ```python
+"""
+Vector Add
+=============
+"""
+
 
 import torch
 import torch_npu
@@ -111,7 +116,7 @@ def kernel(...):
 
 `key` is effectively the autotune cache key. Any parameter included in `key` triggers autotune again when its value changes.
 
-In most cases, `key` contains shape parameters such as `M/N/K`, `seq_len`, or `hidden_size`, because they often have a significant impact on the optimal tiling choice. However, `key` is not limited to shape parameters. If another parameter affects configuration selection, it can also be included.
+In most cases, `key` contains shape parameters such as `M/N/K`, `seq_len`, or `hidden_size`, because they often have a significant impact on the optimal tiling choice. However, `key` is not limited to shape parameters. If another parameter affects configuration selection, it can also be included in `key`.
 
 ### 4. Do not fix parameters that should participate in automatic tuning too early
 
@@ -328,7 +333,7 @@ matmul_kernel[grid](a, b, M, N, K)
 This means:
 
 - tiling-related parameters are still generated automatically by Triton-Ascend;
-- non-tiling parameters or compilation parameters (such as GROUP_SIZE_M and multibuffer) are provided explicitly by the user through `hints`;
+- non-tiling parameters or compilation parameters (such as `GROUP_SIZE_M` and `multibuffer`) are provided explicitly by the user through `hints`;
 - autotune evaluates the combined search space of both parts.
 
 ## autotune tutorials
@@ -344,7 +349,7 @@ This means:
 The key extension of Triton-Ascend over community autotune is not a change in user-facing interfaces, but the addition of automatic tiling-candidate generation and tuning on top of the community interface. For most users, the recommended usage is:
 
 - keep the community-style `@triton.autotune` interface;
-- set `configs=[]`;
+- set `configs` to `[]`;
 - let the Ascend backend generate, filter, benchmark, and cache candidate configurations automatically based on the kernel DSL and runtime shapes.
 
 If your case is not suitable for automatic tiling, you can return to handwritten `triton.Config`.

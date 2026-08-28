@@ -266,6 +266,7 @@ flowchart TD
     classDef logic fill:#f0fff4,stroke:#52c41a
     classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
 
+    %% binding styles
     class A root
     class B1,C1,B3,C3,B5,B6 pass
     class B2,B4,C2,C4,C5 logic

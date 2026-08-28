@@ -13,7 +13,7 @@ Certain interfaces automatically add additional processing logic under specific 
 #### `propagate_nan` Parameter for `tl.maximum`, `tl.minimum`, and `tl.clamp` Interfaces
 
 **Issue Description:**
-When setting `propagate_nan=tl.PropagateNAN.NONE`, the system automatically adds NaN value detection and processing logic.
+When setting `propagate_nan=tl.PropagateNan.NONE`, the system automatically adds NaN value detection and processing logic.
 
 **Impact:**
 

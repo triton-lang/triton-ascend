@@ -1,26 +1,33 @@
+import torch
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
-import torch
 
 
 @triton.jit
-def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
-    offset = tl.program_id(0) * XBLOCK
-    base = tl.arange(0, XBLOCK_SUB)
-    loops: tl.constexpr = XBLOCK // XBLOCK_SUB
-    for loop in range(loops):
-        x0 = offset + (loop * XBLOCK_SUB) + base
-        mask = x0 < n_elements
-        tmp0 = tl.load(input + (x0), mask=mask)
-        tmp1 = tl.load(input2 + (x0), mask=mask)
+def triton_ldexp(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+    xoffset = tl.program_id(0) * XBLOCK
+    for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
+        x_index = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)[:]
+        xmask = x_index < xnumel
+        tmp0 = tl.load(in_ptr0 + x_index, xmask)
+        tmp1 = tl.load(in_ptr1 + x_index, xmask)
         tmp2 = libdevice.ldexp(tmp0, tmp1)
-        tl.store(output + (x0), tmp2, mask=mask)
+        tl.store(out_ptr0 + x_index, tmp2, xmask)
+
+
+def test_ldexp():
+    shape = (2, 256)
+    ncore, xblock, xblock_sub = 2, 1024, 512
+    x0 = torch.randn(size=shape, dtype=torch.float32).npu()
+    x1 = torch.randint(-126, 128, size=shape, dtype=torch.int32, device='npu')
+
+    torch_res = x0 * (2.0**x1.float())
+    triton_res = torch.empty_like(x0)
+    triton_ldexp[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub)
+
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    input2 = torch.randint(0, 10, shape, dtype=torch.int32).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, input2, output, xblock, xblock_sub)
+    test_ldexp()

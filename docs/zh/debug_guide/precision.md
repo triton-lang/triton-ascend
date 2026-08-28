@@ -50,7 +50,7 @@ def test_vector_add(n, dtype):
 ## 2. 精度对比函数
 
 ```python
-def compare_precision(cal, ref):
+def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
     """
     精度对比函数：根据数据类型选择合适的比对策略。
 
@@ -67,7 +67,7 @@ def compare_precision(cal, ref):
     tensor_dtype = cal.dtype
 
     if tensor_dtype == torch.float16:
-        torch.testing.assert_close(ref, cal, rtol=1e-3, atol=1e-3, equal_nan=True)
+        torch.testing.assert_close(ref, cal, rtol=rtol, atol=atol, equal_nan=True)
 
     elif tensor_dtype == torch.bfloat16:
         torch.testing.assert_close(ref, cal, rtol=5e-3, atol=5e-3, equal_nan=True)

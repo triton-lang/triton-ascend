@@ -23,10 +23,10 @@ on:
       - '.github/workflows/integration-tests-ascend.yml'
       - '.github/workflows/runner-preparation.yml'
   merge_group:
-    branches: [main, 'dev-**']
+    branches: [main, 'release/**', '**-dev']
     types: [checks_requested]
   push:
-    branches: [main, 'release/**']
+    branches: [main, 'release/**', '**-dev']
     paths: *ci-paths
 concurrency:
   group: ${{ github.ref }}

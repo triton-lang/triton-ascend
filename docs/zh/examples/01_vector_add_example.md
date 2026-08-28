@@ -49,8 +49,8 @@ def add_kernel(x_ptr,  # 指向第一个输入向量的指针。
 ```Python
 def add(x: torch.Tensor, y: torch.Tensor):
     # 需要预分配输出。
-    output = torch.empty_like(x)
-    n_elements = output.numel()
+    z = torch.empty_like(x)
+    n_elements = z.numel()
     # 启动网格表示并行运行的内核实例的数量。
     # 可以是 Tuple[int]，也可以是 Callable(metaparameters) -> Tuple[int]。
     # 在本case中，使用 1D 网格，其中大小是块的数量：
@@ -59,9 +59,9 @@ def add(x: torch.Tensor, y: torch.Tensor):
     #  - 每个 torch.tensor 对象都会隐式转换为其第一个元素的指针。
     #  - `triton.jit` 函数可以通过启动网格索引来获得可调用的 NPU 内核。
     #  - 不要忘记以keywords的方式传递meta-parameters。
-    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+    add_kernel[grid](x, y, z, n_elements, BLOCK_SIZE=1024)
     # 返回 z 的句柄。
-    return output
+    return z
 ```
 
 使用上述函数计算两个 `torch.tensor` 对象的 element-wise sum，并测试其正确性：

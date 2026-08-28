@@ -1,3 +1,4 @@
+import pytest
 import torch
 import triton
 import triton.language as tl
@@ -26,6 +27,8 @@ def kernel(value_ptr, index_ptr, dst_ptr):
 
 
 def test_index_put():
+    if not is_compile_on_910_95():
+        pytest.skip("index_put is only supported on Ascend 950")
     # dst: (4,2) of zeros
     dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value = [[1., 2.],
@@ -49,7 +52,4 @@ def test_index_put():
 
 
 if __name__ == "__main__":
-    if not is_compile_on_910_95():
-        print("index_put is only supported on Ascend 950, skipping test.")
-    else:
-        test_index_put()
+    test_index_put()

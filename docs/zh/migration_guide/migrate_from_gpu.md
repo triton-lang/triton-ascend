@@ -389,7 +389,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
         block_shape=(BT,), # 块大小
         order=(0,) # 连续访问
     )
-​)
+)
 ```
 
 优化思路

@@ -65,11 +65,10 @@ If you need to customize the LLVM build process, follow the steps below to compi
     git apply llvm_patch_f6ded0b.patch
     ```
 
-2. **Build LLVM**: The path `{PATH_TO}` is the path where you checked out the LLVM source code in step 1.
+2. **Build LLVM**: The path `/path/llvm-install` is the LLVM installation path planned by the user, which needs to be adjusted according to the actual situation; the path `{PATH_TO}` is the path where the user checked out the LLVM source code in step 1.
 
     ```bash
-    # /path/to/llvm-install is the user's planned LLVM installation path; adjust as needed
-    export LLVM_INSTALL_PREFIX=/path/to/llvm-install
+    export LLVM_INSTALL_PREFIX=/path/llvm-install
     cd {PATH_TO}/llvm-project
     mkdir build
     cd build
@@ -85,6 +84,8 @@ If you need to customize the LLVM build process, follow the steps below to compi
         -DLLVM_ENABLE_LLD=ON \
         -DCMAKE_INSTALL_PREFIX=${LLVM_INSTALL_PREFIX}
     ninja install
+
+    cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
 3. **Compile Triton-Ascend**
@@ -97,14 +98,14 @@ If you need to customize the LLVM build process, follow the steps below to compi
     TRITON_BUILD_PROTON=OFF \
     TRITON_WHEEL_NAME="triton-ascend" \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup.py install
+    python3 setup_ascend.py install
     ```
 
 ## Development Images
 
 ### Check Image Versions
 
-**Table 2** Mapping of CANN versions to image tags.
+**Table 1** Mapping of CANN versions to image tags.
 <table style="table-layout: fixed; width: 100%; border-collapse: collapse;">
   <tr style="height: 50px;">
     <th style="width: 20%; border: 1px solid #ddd; padding: 8px; text-align: left; background-color: #f5f5f5;">CANN Version</th>
@@ -225,6 +226,50 @@ If you see similar output, the environment is configured correctly:
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
+```
+
+## Running Pytest UT
+
+The source repository provides single-op test cases in the `third_party/ascend/unittest/pytest_ut` directory. Before running the tests, complete the Triton-Ascend installation and set the CANN environment variables.
+
+```bash
+# Set CANN environment variables (using the default installation path `/usr/local/Ascend` as an example)
+source /usr/local/Ascend/ascend-toolkit/set_env.sh
+# Install pytest
+pip install pytest pytest-xdist
+```
+
+**Run a Single Test Case**
+
+```bash
+# Taking the vector addition test case as an example
+python -m pytest third_party/ascend/unittest/pytest_ut/test_add.py
+```
+
+**Run All Test Cases**
+
+```bash
+# Run all test cases serially
+python -m pytest third_party/ascend/unittest/pytest_ut
+```
+
+To speed up the tests, specify the number of parallel workers with `-n` (parallel execution requires installing pytest-xdist):
+
+```bash
+python -m pytest -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+To print detailed test progress, add the `-sv` option:
+
+```bash
+python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
+```
+
+The output after execution is similar to the following:
+
+```text
+collected 6 items
+third_party/ascend/unittest/pytest_ut/test_add.py ......
 ```
 
 ## Installation FAQ

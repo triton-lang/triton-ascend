@@ -40,13 +40,17 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include <cassert>
+#include <limits>
+#include <optional>
 #include <utility>
 
 namespace mlir {
 namespace triton {
 // For origin MemRefType of ReinterpretCastOp under interleave state, here wanna
 // adjust its shape info by expanding last dimension double.
-MemRefType expandInterleaveMemRefType(MemRefType originType) {
+static MemRefType expandInterleaveMemRefType(
+    MemRefType originType,
+    std::optional<OpFoldResult> castOffset = std::nullopt) {
   // Double the last dimension shape
   SmallVector<int64_t> shape(originType.getShape());
   shape.back() = shape.back() * 2;
@@ -54,10 +58,20 @@ MemRefType expandInterleaveMemRefType(MemRefType originType) {
   // Adjuest layout attribute
   StridedLayoutAttr originLayout =
       llvm::dyn_cast<StridedLayoutAttr>(originType.getLayout());
-  // If offset is static, just reset it to 0
+  // If offset is static, just reset it to 0.
   auto offset = originLayout.getOffset() == ShapedType::kDynamic
                     ? originLayout.getOffset()
                     : 0;
+  // A reinterpret_cast result type must agree with its offset operand.  The
+  // original interleaved view can carry layout offset 0 while the normalized
+  // base is a non-zero static offset, so use the new cast offset whenever it
+  // is available.
+  if (castOffset) {
+    if (auto staticOffset = getConstantIntValue(*castOffset))
+      offset = staticOffset.value();
+    else
+      offset = ShapedType::kDynamic;
+  }
   // Set last dimension stride to 1
   SmallVector<int64_t> stride(originLayout.getStrides());
   stride.back() = 1;
@@ -67,103 +81,144 @@ MemRefType expandInterleaveMemRefType(MemRefType originType) {
       StridedLayoutAttr::get(originType.getContext(), offset, stride));
 }
 
-// *********************
-// **      NOTE       **
-// *********************
-// How to determine new offset is a little tricky and specific
-// Here just consider this state in triton language:
+// The last dimension of an interleaved view has stride 2.  The address can be
+// expressed as an arbitrary base plus a lane selector (0 for even, 1 for odd):
 //
-// dim_range = tl.arange(0, BLOCK // 2)
-// last_dim_even_range = dim_range * 2
-// last_dim_odd_range = dim_range * 2 + 1
+//   base + 2 * lane + {0, 1}
 //
-// Here `multiply two` represents that last dimension stride is 2, and
-// `add constant one` represents whether it's odd index part of
-// deinterleave result.
-//
-// Therefore, how to distinguish interleave/deinterleave on even index or odd
-// index is whether last dimension range explicitly `add constant one` without
-// any other operation. In IR it's shown that whether defining op of
-// `castOffset` is an arith::addOp, as this arith::addOp would contain above
-// `add constant one` opeartion after LegacyAddPtrConverter.
-//
-// Well, index mode should be passed to interleave/deinterleave, in other words,
-// `add constant one` should work on offset of next insert_slice/extract_slic.
-// The new reinterpretcast just wanna describe whole tensor, so new castOffset
-// is just from non-last diemsnion accumulation and remove `add constant one`
-bool checkIsCaseOffsetValid(OpFoldResult originOffset) {
-  // If offset is constant int(IndexAttr), the int value could only be 0 or 1
-  // if offset is a value from add constant operation and not from `add constant
-  // one` operation, it's invalid.
-  if (llvm::isa<Attribute>(originOffset)) {
-    int64_t intOffset = getConstantIntValue(originOffset).value();
-    return intOffset == 0 || intOffset == 1;
-  } else if (llvm::isa<Value>(originOffset)) {
-    auto op = cast<Value>(originOffset).getDefiningOp();
-    if (op && llvm::isa<arith::AddIOp>(op)) {
-      if (auto addOp = dyn_cast<arith::AddIOp>(op)) {
-        if (auto constLHS = addOp.getLhs().getDefiningOp<arith::ConstantOp>()) {
-          return dyn_cast<IntegerAttr>(constLHS.getValueAttr()).getInt() == 1;
-        }
-        if (auto constRHS = addOp.getRhs().getDefiningOp<arith::ConstantOp>()) {
-          return dyn_cast<IntegerAttr>(constRHS.getValueAttr()).getInt() == 1;
+// The base is allowed to contain static and dynamic offsets.  In particular,
+// a constant such as the RoPE region offset (+64) is part of the base, not an
+// odd-lane marker.  Keep the analysis side-effect free so callers can safely
+// return failure and use the normal lowering path.
+struct DeinterleaveOffsetInfo {
+  SmallVector<Value> baseTerms;
+  int64_t baseConstant = 0;
+  IndexMode indexMode = IndexMode::EVEN_MODE;
+  // Reuse the original SSA base whenever the outermost +1 unambiguously
+  // selects the odd lane. This preserves the existing offset def-use chain
+  // instead of recreating an equivalent arithmetic expression during type
+  // conversion.
+  std::optional<OpFoldResult> materializedBaseOffset;
+};
+
+static bool addStaticOffset(int64_t offset, int64_t &sum) {
+  if ((offset > 0 && sum > std::numeric_limits<int64_t>::max() - offset) ||
+      (offset < 0 && sum < std::numeric_limits<int64_t>::min() - offset))
+    return false;
+  sum += offset;
+  return true;
+}
+
+static bool collectDeinterleaveOffsetTerms(OpFoldResult offset,
+                                           SmallVectorImpl<Value> &baseTerms,
+                                           int64_t &staticOffset) {
+  if (auto constant = getConstantIntValue(offset))
+    return addStaticOffset(constant.value(), staticOffset);
+
+  auto value = llvm::dyn_cast<Value>(offset);
+  if (!value)
+    return false;
+
+  if (auto addOp = value.getDefiningOp<arith::AddIOp>()) {
+    return collectDeinterleaveOffsetTerms(addOp.getLhs(), baseTerms,
+                                          staticOffset) &&
+           collectDeinterleaveOffsetTerms(addOp.getRhs(), baseTerms,
+                                          staticOffset);
+  }
+
+  // The expression below this value is an opaque base term.  Do not recurse
+  // into it: a constant in a multiply/addptr/base-address subgraph is not a
+  // lane selector.
+  baseTerms.push_back(value);
+  return true;
+}
+
+static FailureOr<DeinterleaveOffsetInfo>
+normalizeDeinterleaveOffset(OpFoldResult originOffset) {
+  DeinterleaveOffsetInfo result;
+  int64_t staticOffset = 0;
+  if (!collectDeinterleaveOffsetTerms(originOffset, result.baseTerms,
+                                      staticOffset))
+    return failure();
+
+  for (Value term : result.baseTerms) {
+    if (!isa<IndexType>(term.getType()))
+      return failure();
+  }
+
+  // Keep the base pair-aligned relative to the original view.  This also
+  // supports folded constants, e.g. +65 becomes base +64 and ODD_MODE.
+  int64_t laneOffset = staticOffset % 2;
+  if (laneOffset < 0)
+    laneOffset += 2;
+  result.baseConstant = staticOffset - laneOffset;
+  result.indexMode =
+      laneOffset == 0 ? IndexMode::EVEN_MODE : IndexMode::ODD_MODE;
+
+  if (auto value = llvm::dyn_cast<Value>(originOffset)) {
+    Value base = value;
+    if (result.indexMode == IndexMode::ODD_MODE) {
+      auto addOp = value.getDefiningOp<arith::AddIOp>();
+      if (addOp) {
+        if (auto lhsConstant = getConstantIntValue(addOp.getLhs());
+            lhsConstant && lhsConstant.value() == 1) {
+          base = addOp.getRhs();
+          result.materializedBaseOffset = base;
+        } else if (auto rhsConstant = getConstantIntValue(addOp.getRhs());
+                   rhsConstant && rhsConstant.value() == 1) {
+          base = addOp.getLhs();
+          result.materializedBaseOffset = base;
         }
       }
+    } else {
+      result.materializedBaseOffset = base;
     }
+  }
+  return result;
+}
+
+static bool hasEquivalentDeinterleaveBase(const DeinterleaveOffsetInfo &lhs,
+                                          const DeinterleaveOffsetInfo &rhs) {
+  if (lhs.baseConstant != rhs.baseConstant ||
+      lhs.baseTerms.size() != rhs.baseTerms.size())
+    return false;
+
+  // Addition is commutative.  Compare the opaque terms as a multiset so that
+  // equivalent add trees with a different operand order remain optimizable.
+  SmallVector<bool> matched(rhs.baseTerms.size(), false);
+  for (Value lhsTerm : lhs.baseTerms) {
+    bool found = false;
+    for (auto [index, rhsTerm] : llvm::enumerate(rhs.baseTerms)) {
+      if (!matched[index] && lhsTerm == rhsTerm) {
+        matched[index] = true;
+        found = true;
+        break;
+      }
+    }
+    if (!found)
+      return false;
   }
   return true;
 }
 
-std::pair<OpFoldResult, IndexMode>
-recountReinterpretCastOffset(OpFoldResult originOffset, Builder &builder) {
-  // To trace value type offset
-  std::function<bool(Operation *)> traceOffset = [&](Operation *op) -> bool {
-    // Consider constant one in `add constant one` operation
-    if (llvm::isa<arith::ConstantOp>(op))
-      return false;
+static OpFoldResult
+materializeDeinterleaveBaseOffset(const DeinterleaveOffsetInfo &offsetInfo,
+                                  OpBuilder &builder, Location loc) {
+  if (offsetInfo.materializedBaseOffset)
+    return *offsetInfo.materializedBaseOffset;
+  if (offsetInfo.baseTerms.empty())
+    return builder.getIndexAttr(offsetInfo.baseConstant);
 
-    if (llvm::isa<arith::AddIOp>(op)) {
-      auto addOp = llvm::cast<arith::AddIOp>(op);
-      if (auto constLHS = addOp.getLhs().getDefiningOp<arith::ConstantOp>()) {
-        assert(dyn_cast<IntegerAttr>(constLHS.getValueAttr()).getInt() == 1 &&
-               "Arith::constant value of addi's operand must be 1 when "
-               "calculate deinterleave offset");
-        return false;
-      }
-      if (auto constRHS = addOp.getRhs().getDefiningOp<arith::ConstantOp>()) {
-        assert(dyn_cast<IntegerAttr>(constRHS.getValueAttr()).getInt() == 1 &&
-               "Arith::constant value of addi's operand must be 1 when "
-               "calculate deinterleave offset");
-        return false;
-      }
-    }
-    return true;
-  };
+  Value base = offsetInfo.baseTerms.front();
+  for (Value term : llvm::drop_begin(offsetInfo.baseTerms))
+    base = builder.create<arith::AddIOp>(loc, base, term);
 
-  IndexMode evenOrOdd = IndexMode::EVEN_MODE;
-  // Reuse origin offset if there's no 'add constant one'
-  OpFoldResult newOffset = originOffset;
-  if (llvm::isa<Attribute>(originOffset)) {
-    // If offset is constant int(IndexAttr),
-    // the int value could only be 0 or 1
-    int64_t intOffset = getConstantIntValue(originOffset).value();
-    assert((intOffset == 0 || intOffset == 1));
-    if (intOffset == 1) {
-      evenOrOdd = IndexMode::ODD_MODE;
-      newOffset = builder.getIndexAttr(0);
-    }
-  } else if (llvm::isa<Value>(originOffset)) {
-    if (!traceOffset(cast<Value>(originOffset).getDefiningOp())) {
-      evenOrOdd = IndexMode::ODD_MODE;
-      Operation *traceResult = findFirstMatchingOperandDef(
-          cast<Value>(originOffset).getDefiningOp(), traceOffset);
-      assert(traceResult->getNumResults() == 1 &&
-             "Offset defining operation must have one result");
-      newOffset = traceResult->getResult(0);
-    }
+  if (offsetInfo.baseConstant != 0) {
+    Value constant = builder.create<arith::ConstantOp>(
+        loc, builder.getIndexAttr(offsetInfo.baseConstant));
+    base = builder.create<arith::AddIOp>(loc, base, constant);
   }
-
-  return {newOffset, evenOrOdd};
+  return base;
 }
 
 LogicalResult
@@ -174,10 +229,7 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
 
-    // 1. Get new source memref type
-    auto srcType = expandInterleaveMemRefType(reinterpretCast.getType());
-
-    // 2. Create new ReinterpretCastOp
+    // 1. Normalize the original view offset, then create the expanded cast.
     auto originCastOffset = reinterpretCast.getConstifiedMixedOffset();
     auto castSize = reinterpretCast.getConstifiedMixedSizes();
     auto castStride = reinterpretCast.getConstifiedMixedStrides();
@@ -190,11 +242,13 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
     // Last element of castStride is also constant value as prerequisite
     // is that last dimension stride of casted memref type is always 2.
     castStride.back() = rewriter.getIndexAttr(1);
-    if (!checkIsCaseOffsetValid(originCastOffset)) {
+    auto offsetInfo = normalizeDeinterleaveOffset(originCastOffset);
+    if (failed(offsetInfo))
       return failure();
-    }
-    auto [castOffset, indexMode] =
-        recountReinterpretCastOffset(originCastOffset, rewriter);
+    OpFoldResult castOffset =
+        materializeDeinterleaveBaseOffset(*offsetInfo, rewriter, loc);
+    auto srcType =
+        expandInterleaveMemRefType(reinterpretCast.getType(), castOffset);
     auto newCastOp = rewriter.create<memref::ReinterpretCastOp>(
         loc, srcType, reinterpretCast.getViewSource(), castOffset, castSize,
         castStride);
@@ -223,7 +277,7 @@ DeinterleaveStatusOptimization(triton::LoadOp op,
         }));
 
     // Adjust extract_slice shape
-    switch (indexMode) {
+    switch (offsetInfo->indexMode) {
     case IndexMode::EVEN_MODE:
       extractOffsets.back() = rewriter.getIndexAttr(0);
       break;
@@ -251,10 +305,7 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
   if (auto reinterpretCast = ptr.getDefiningOp<memref::ReinterpretCastOp>()) {
     auto loc = op.getLoc();
 
-    // 1. Get new source memref type
-    auto srcType = expandInterleaveMemRefType(reinterpretCast.getType());
-
-    // 2. Create new ReinterpretCastOp
+    // 1. Normalize the original view offset, then create the expanded cast.
     auto originCastOffset = reinterpretCast.getConstifiedMixedOffset();
     auto castSize = reinterpretCast.getConstifiedMixedSizes();
     auto castStride = reinterpretCast.getConstifiedMixedStrides();
@@ -265,11 +316,13 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
       return failure();
     }
     castStride.back() = rewriter.getIndexAttr(1);
-    if (!checkIsCaseOffsetValid(originCastOffset)) {
+    auto offsetInfo = normalizeDeinterleaveOffset(originCastOffset);
+    if (failed(offsetInfo))
       return failure();
-    }
-    auto [castOffset, indexMode] =
-        recountReinterpretCastOffset(originCastOffset, rewriter);
+    OpFoldResult castOffset =
+        materializeDeinterleaveBaseOffset(*offsetInfo, rewriter, loc);
+    auto srcType =
+        expandInterleaveMemRefType(reinterpretCast.getType(), castOffset);
 
     auto newCastOp = rewriter.create<memref::ReinterpretCastOp>(
         loc, srcType, reinterpretCast.getViewSource(), castOffset, castSize,
@@ -346,7 +399,7 @@ LogicalResult DeinterleaveStatusWithMaskOptimization(
           return rewriter.getIndexAttr(dim);
         }));
 
-    switch (indexMode) {
+    switch (offsetInfo->indexMode) {
     case IndexMode::EVEN_MODE:
       extractOffsets.back() = rewriter.getIndexAttr(0);
       break;
@@ -383,7 +436,6 @@ InterleaveStatusOptimization(SmallVector<Operation *> materializeVec) {
           .getDefiningOp<memref::ReinterpretCastOp>();
 
   assert(firstReinterpretCastOp && secondReinterpretCastOp);
-
   // Judge whether two `ReinterpretCastOp` shape satisfy interleave state
   // a. both size are equal
   if (!isEqualConstantIntOrValueArray(
@@ -402,53 +454,22 @@ InterleaveStatusOptimization(SmallVector<Operation *> materializeVec) {
       firstReinterpretCastOp.getConstifiedMixedOffset();
   auto secondOriginCastOffset =
       secondReinterpretCastOp.getConstifiedMixedOffset();
-  if (!checkIsCaseOffsetValid(firstOriginCastOffset) ||
-      !checkIsCaseOffsetValid(secondOriginCastOffset)) {
+  auto firstOffsetInfo = normalizeDeinterleaveOffset(firstOriginCastOffset);
+  auto secondOffsetInfo = normalizeDeinterleaveOffset(secondOriginCastOffset);
+  if (failed(firstOffsetInfo) || failed(secondOffsetInfo) ||
+      !hasEquivalentDeinterleaveBase(*firstOffsetInfo, *secondOffsetInfo) ||
+      firstOffsetInfo->indexMode == secondOffsetInfo->indexMode)
     return failure();
-  }
 
-  std::pair<IndexMode, IndexMode> indexModeRecord;
-  OpFoldResult newCastOffset;
-  if (llvm::isa<Attribute>(firstOriginCastOffset) &&
-      llvm::isa<Attribute>(secondOriginCastOffset)) {
-    auto [firstCastOffset, firstIndexMode] =
-        recountReinterpretCastOffset(firstOriginCastOffset, builder);
-    auto [secondCastOffset, secondIndexMode] =
-        recountReinterpretCastOffset(secondOriginCastOffset, builder);
-
-    if (!(static_cast<int>(firstIndexMode) ^ static_cast<int>(secondIndexMode)))
-      return failure();
-    newCastOffset = builder.getIndexAttr(0);
-    indexModeRecord = {firstIndexMode, secondIndexMode};
-
-  } else if (llvm::isa<Value>(firstOriginCastOffset) &&
-             llvm::isa<Value>(secondOriginCastOffset)) {
-    auto [firstCastOffset, firstIndexMode] =
-        recountReinterpretCastOffset(firstOriginCastOffset, builder);
-    auto [secondCastOffset, secondIndexMode] =
-        recountReinterpretCastOffset(secondOriginCastOffset, builder);
-
-    if (!(static_cast<int>(firstIndexMode) ^
-          static_cast<int>(secondIndexMode)) ||
-        (llvm::dyn_cast<Value>(firstCastOffset) !=
-         llvm::dyn_cast<Value>(secondCastOffset)))
-      return failure();
-
-    if (firstIndexMode == IndexMode::EVEN_MODE) {
-      newCastOffset = llvm::dyn_cast<Value>(firstCastOffset);
-    }
-    if (secondIndexMode == IndexMode::EVEN_MODE) {
-      newCastOffset = llvm::dyn_cast<Value>(secondCastOffset);
-    }
-    indexModeRecord = {firstIndexMode, secondIndexMode};
-
-  } else {
-    return failure();
-  }
+  std::pair<IndexMode, IndexMode> indexModeRecord = {
+      firstOffsetInfo->indexMode, secondOffsetInfo->indexMode};
+  OpFoldResult newCastOffset =
+      materializeDeinterleaveBaseOffset(*firstOffsetInfo, builder, loc);
 
   // Create new op
   // 1. Get new destination memref type
-  auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType());
+  auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType(),
+                                            newCastOffset);
 
   // 2. New tensor::EmptyOp
   auto emptyTensor = builder.create<tensor::EmptyOp>(loc, dstType.getShape(),
@@ -582,54 +603,23 @@ InterleaveStatusWithMaskOptimization(SmallVector<Operation *> materializeVec) {
       firstReinterpretCastOp.getConstifiedMixedOffset();
   auto secondOriginCastOffset =
       secondReinterpretCastOp.getConstifiedMixedOffset();
-  if (!checkIsCaseOffsetValid(firstOriginCastOffset) ||
-      !checkIsCaseOffsetValid(secondOriginCastOffset)) {
+  auto firstOffsetInfo = normalizeDeinterleaveOffset(firstOriginCastOffset);
+  auto secondOffsetInfo = normalizeDeinterleaveOffset(secondOriginCastOffset);
+  if (failed(firstOffsetInfo) || failed(secondOffsetInfo) ||
+      !hasEquivalentDeinterleaveBase(*firstOffsetInfo, *secondOffsetInfo) ||
+      firstOffsetInfo->indexMode == secondOffsetInfo->indexMode)
     return failure();
-  }
 
-  std::pair<IndexMode, IndexMode> indexModeRecord;
-  OpFoldResult newCastOffset;
-  if (llvm::isa<Attribute>(firstOriginCastOffset) &&
-      llvm::isa<Attribute>(secondOriginCastOffset)) {
-    auto [firstCastOffset, firstIndexMode] =
-        recountReinterpretCastOffset(firstOriginCastOffset, builder);
-    auto [secondCastOffset, secondIndexMode] =
-        recountReinterpretCastOffset(secondOriginCastOffset, builder);
-
-    if (!(static_cast<int>(firstIndexMode) ^ static_cast<int>(secondIndexMode)))
-      return failure();
-    newCastOffset = builder.getIndexAttr(0);
-    indexModeRecord = {firstIndexMode, secondIndexMode};
-
-  } else if (llvm::isa<Value>(firstOriginCastOffset) &&
-             llvm::isa<Value>(secondOriginCastOffset)) {
-    auto [firstCastOffset, firstIndexMode] =
-        recountReinterpretCastOffset(firstOriginCastOffset, builder);
-    auto [secondCastOffset, secondIndexMode] =
-        recountReinterpretCastOffset(secondOriginCastOffset, builder);
-
-    if (!(static_cast<int>(firstIndexMode) ^
-          static_cast<int>(secondIndexMode)) ||
-        (llvm::dyn_cast<Value>(firstCastOffset) !=
-         llvm::dyn_cast<Value>(secondCastOffset)))
-      return failure();
-
-    if (firstIndexMode == IndexMode::EVEN_MODE) {
-      newCastOffset = llvm::dyn_cast<Value>(firstCastOffset);
-    }
-    if (secondIndexMode == IndexMode::EVEN_MODE) {
-      newCastOffset = llvm::dyn_cast<Value>(secondCastOffset);
-    }
-    indexModeRecord = {firstIndexMode, secondIndexMode};
-
-  } else {
-    return failure();
-  }
+  std::pair<IndexMode, IndexMode> indexModeRecord = {
+      firstOffsetInfo->indexMode, secondOffsetInfo->indexMode};
+  OpFoldResult newCastOffset = materializeDeinterleaveBaseOffset(
+      *firstOffsetInfo, builder, materializeVec[1]->getLoc());
   auto loc = materializeVec[1]->getLoc();
 
   // Create new op
   // 1. Get new destination memref type
-  auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType());
+  auto dstType = expandInterleaveMemRefType(firstReinterpretCastOp.getType(),
+                                            newCastOffset);
 
   // 2. New tensor::EmptyOp
   auto emptyTensor = builder.create<tensor::EmptyOp>(loc, dstType.getShape(),

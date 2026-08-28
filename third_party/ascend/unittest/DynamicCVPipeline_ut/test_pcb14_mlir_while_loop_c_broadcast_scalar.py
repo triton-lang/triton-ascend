@@ -56,7 +56,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions(arch="Ascend910_9589", compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
+        options = NPUOptions(arch="Ascend910_9589", enable_dynamic_cv_pipeline=True)
         # Register codegen_fns, including min_dot_size required by tl.dot.
         codegen_fns = {"min_dot_size": min_dot_size(None)}
         ttir = ast_to_ttir(kernel, src, context, options, codegen_fns, {})
@@ -223,7 +223,7 @@ def test_pcb14_tc01():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb14_tc01_while_matmul_scalar(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" not in mlir, "Fallback scenario: MLIR code unexpectedly contains the 'scope' keyword"
+    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
 
     # Output MLIR code to the specified path
 
@@ -246,7 +246,7 @@ def test_pcb14_tc02():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb14_tc02_while_matmul_scalar(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" not in mlir, "Fallback scenario: MLIR code unexpectedly contains the 'scope' keyword"
+    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
 
     # Output MLIR code to the specified path
 

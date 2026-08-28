@@ -57,63 +57,31 @@ using BufferMap = DenseMap<Value, SmallVector<BufferPair>>;
 // Buffer count constants
 constexpr int kBufferCountOne = 1;
 
-// Toggle: when true, producer / consumer buffer chains are inserted at the
-// boundary of the contiguous `ssbuffer.block_id = X` region instead of right
-// after the dep def op / right before the dep user op.
-//
-//   - producer chain: inserted AFTER the last op in depDefinedOp's block that
-//     carries the same `ssbuffer.block_id` as depDefinedOp. If depDefinedOp has
-//     no direct block_id attribute, falls back to "right after depDefinedOp".
-//   - consumer chain: inserted BEFORE the first op in depUser's block that
-//     carries the same `ssbuffer.block_id` as depUser. If depUser has no direct
-//     block_id attribute, falls back to "right before depUser".
-//
-// This keeps the producer/consumer chains grouped with their block_id region
-// rather than interleaved with intermediate compute ops.
-//
-// The toggle is read from a module-level attribute
-// `CVPipeline::kInsertionOptimization` (i.e. "ssbuffer.insertionOptimization").
-// Python callers set it via `set_enable_buffer_insert_optimization` in
-// `triton_ascend.cc`, which writes the attribute onto the ModuleOp. The
-// attribute is checked inline at each `processDepVal` call site below.
 namespace mlir {
 namespace triton {
 
-// Check if forOp has main_loop attribute
-static bool hasMainLoopAttr(scf::ForOp forOp) {
-  if (forOp->hasAttr(kMainLoop)) {
-    return true;
-  }
-  if (auto *term = forOp.getBody()->getTerminator())
-    return term->hasAttr(kMainLoop);
-  return false;
-}
-
-// Collect main_loop forOps in a single block
+// Collect main_loop loops (forOp / whileOp) in a single block
 static int collectMainLoopsInBlock(Block &block,
-                                   SmallVector<scf::ForOp> &mainLoopForOps) {
+                                   SmallVector<Operation *> &mainLoops) {
   int count = 0;
   for (Operation &op : block) {
-    if (auto forOp = dyn_cast<scf::ForOp>(&op)) {
-      if (hasMainLoopAttr(forOp)) {
-        mainLoopForOps.push_back(forOp);
-        count++;
-      }
+    if (isMainLoopOp(&op)) {
+      mainLoops.push_back(&op);
+      count++;
     }
   }
   return count;
 }
 
-// Recursively collect main_loop forOps, returns count of collected items
-static int
-collectMainLoopsRecursively(Region &region,
-                            SmallVector<scf::ForOp> &mainLoopForOps) {
+// Recursively collect main_loop loops, returns count of collected items
+static int collectMainLoopsRecursively(Region &region,
+                                       SmallVector<Operation *> &mainLoops) {
   int totalCount = 0;
   for (Block &block : region) {
-    totalCount += collectMainLoopsInBlock(block, mainLoopForOps);
+    totalCount += collectMainLoopsInBlock(block, mainLoops);
     for (Operation &op : block) {
       for (auto &nestedRegion : op.getRegions())
-        totalCount += collectMainLoopsRecursively(nestedRegion, mainLoopForOps);
+        totalCount += collectMainLoopsRecursively(nestedRegion, mainLoops);
     }
   }
   return totalCount;
@@ -124,22 +92,14 @@ struct InnerBlockInfo {
   SmallVector<Operation *> ops;
 };
 
-// Effective block_id for cross-block dep judgment: prefer the enclosing
-// multi-region op's block_id (inner ops are attributed to the op itself,
-// not their own innermost id), else the innermost recorded block_id walking
-// up to the main_loop boundary.
 static std::optional<int64_t> getOutermostSsbufferId(Operation *op) {
   std::optional<int64_t> result;
   for (Operation *current = op; current; current = current->getParentOp()) {
-    // Any multi-region op (scf.if, scf.while, ...) acts as a logical
-    // block boundary: its block_id overrides anything inside it.
-    if (current->getNumRegions() >= 2)
-      return getOpBlockId(current);
-
-    // main_loop is an attribute, not exclusive to forOp. Take the
-    // boundary's id only if nothing was recorded on the way up.
     if (current->hasAttr(kMainLoop))
       return result.has_value() ? result : -1;
+
+    if (current->getNumRegions() >= 2)
+      return getOpBlockId(current);
 
     // Otherwise remember the deepest id seen; the parent walk will
     // overwrite it if a closer-to-boundary op carries one.
@@ -242,6 +202,7 @@ static void collectDepValue(Value operand, Block *body, Operation *currentOp,
 
   auto currentOutermost = getOutermostSsbufferId(currentOp);
   auto operandOutermost = getOutermostSsbufferId(operand.getDefiningOp());
+
   if (currentOutermost.has_value() && currentOutermost == operandOutermost)
     return;
 
@@ -261,41 +222,27 @@ static void collectDepValue(Value operand, Block *body, Operation *currentOp,
     depValueMap[groupKey].push_back(operand);
 }
 
-// Recursively find nested main_loop
-static scf::ForOp findNestedMainloopInForOp(scf::ForOp forOp) {
+// Recursively find a nested main_loop (forOp / whileOp) inside `loop`'s body
+static Operation *findNestedMainloop(const MainLoop &loop) {
   SmallVector<Operation *> allOps;
-  collectNestedOps(forOp.getBody(), allOps);
+  collectNestedOps(loop.getBody(), allOps);
 
   for (Operation *op : allOps) {
-    auto nestedFor = dyn_cast<scf::ForOp>(op);
-    if (!nestedFor)
-      continue;
-    if (nestedFor->hasAttr(kMainLoop))
-      return nestedFor;
+    if (isa<scf::ForOp, scf::WhileOp>(op) && op->hasAttr(kMainLoop))
+      return op;
   }
   return {};
 }
 
 bool isInsideMainLoopForOp(Operation *op) {
-  Operation *parent = op->getParentOp();
-  if (!parent) {
-    return false;
-  }
-  if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-    return forOp->hasAttr(kMainLoop);
-  }
-  return false;
+  return isMainLoopOp(op->getParentOp());
 }
 
 bool isInsideMainLoopForOpTraverse(Operation *op) {
-  Operation *parent = op->getParentOp();
-  while (parent) {
-    if (auto forOp = dyn_cast<scf::ForOp>(parent)) {
-      if (forOp->hasAttr(kMainLoop)) {
-        return true;
-      }
-    }
-    parent = parent->getParentOp();
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (isMainLoopOp(parent))
+      return true;
   }
   return false;
 }
@@ -327,6 +274,14 @@ groupOpsBySsbufferId(SmallVector<Operation *> &allOps,
       continue;
     }
     opsById[*id].push_back(op);
+  }
+  // Also register ops that carry ssbuffer.block_id but have no results
+  for (Operation *op : allOps) {
+    auto id = getOpBlockId(op);
+    if (!id.has_value() || !op->getResults().empty())
+      continue;
+    if (seen.insert(op).second)
+      opsById[*id].push_back(op);
   }
   return 0;
 }
@@ -373,11 +328,12 @@ forEachYieldedCrossBlockDep(Operation *op,
 // dep collected here has element type i1; the caller is expected to abort and
 // trigger fallback in that case.
 static int
-collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInfo> &blocks,
+collectInnerBlockInfo(const MainLoop &loop,
+                      DenseMap<Value, InnerBlockInfo> &blocks,
                       DenseMap<Value, SmallVector<Value>> &depValueMap,
                       SmallVector<Operation *> &allOps, bool &i1Found) {
   depValueMap.clear();
-  Block *body = forOp.getBody();
+  Block *body = loop.getBody();
   if (!body)
     return 0;
 
@@ -400,7 +356,16 @@ collectInnerBlockInfo(scf::ForOp forOp, DenseMap<Value, InnerBlockInfo> &blocks,
   // (e.g. scf.if) are included so their scalar deps get tracked; cross-block
   // judgment still attributes them to the ifOp via getOutermostSsbufferId.
   for (auto &p : opsById) {
-    Value groupKey = p.second.front()->getResult(0);
+    Operation *keyOp = nullptr;
+    for (Operation *op : p.second) {
+      if (!op->getResults().empty()) {
+        keyOp = op;
+        break;
+      }
+    }
+    if (!keyOp)
+      continue;
+    Value groupKey = keyOp->getResult(0);
     InnerBlockInfo bi;
     bi.blockId = groupKey;
     bi.ops = p.second;
@@ -484,10 +449,7 @@ buildDepUserMap(DenseMap<Value, InnerBlockInfo> &blocks,
   return depUserMap;
 }
 
-// Check if depVal matches the special pattern: linalg::FillOp whose outs comes
-// from a tensor::EmptyOp. When this pattern is detected, the pass can avoid
-// allocating a multi-buffer (alloc + copy + select + to_tensor) by cloning
-// the empty+fill ops to the consumer's position instead.
+// Check if depVal matches the special pattern with linalg::FillOp
 static bool isEmptyFillPattern(Value depVal) {
   Operation *defOp = depVal.getDefiningOp();
   auto fillOp = dyn_cast<linalg::FillOp>(defOp);
@@ -498,14 +460,23 @@ static bool isEmptyFillPattern(Value depVal) {
     return false;
 
   Value outs = fillOp.getOutputs()[0];
-  if (!outs || !isa_and_nonnull<tensor::EmptyOp>(outs.getDefiningOp()))
+  if (!outs)
     return false;
+  Operation *outsDef = outs.getDefiningOp();
+  if (!outsDef)
+    return false;
+  return isa<tensor::EmptyOp>(outsDef) ||
+         isa<bufferization::AllocTensorOp>(outsDef);
+}
 
-  return true;
+// Check if depVal is the result of a bufferization.alloc_tensor
+static bool isAllocTensorPattern(Value depVal) {
+  return isa_and_nonnull<bufferization::AllocTensorOp>(depVal.getDefiningOp());
 }
 
 SmallVector<Value>
-collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap) {
+collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
+                    const DenseSet<Value> &clonedDepVals) {
   SmallVector<Value> valueList;
   SmallVector<Operation *> seenOps;
 
@@ -525,9 +496,12 @@ collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap) {
       if (isa<tensor::EmptyOp>(op))
         continue;
 
-      // Skip tensor::EmptyOp + linalg::FillOp pattern - it gets cloned
-      // to the consumer's position instead of being multi-buffered
-      if (isEmptyFillPattern(depVal))
+      // Skip depVals that were already cloned by cloneEmptyFillsInBlocks
+      if (clonedDepVals.contains(depVal))
+        continue;
+
+      // Skip bufferization.alloc_tensor
+      if (isa<bufferization::AllocTensorOp>(op))
         continue;
 
       valueList.push_back(depVal);
@@ -589,7 +563,7 @@ collectScalarDeps(DenseMap<Value, SmallVector<Value>> &depValueMap,
 }
 
 // True if op is nested strictly inside the main loop.
-static bool isOpInMainLoop(Operation *op, scf::ForOp mainLoop) {
+static bool isOpInMainLoop(Operation *op, const MainLoop &mainLoop) {
   return op && mainLoop.getOperation()->isProperAncestor(op);
 }
 
@@ -610,7 +584,7 @@ static void collectOpDependencies(Operation *op, SmallVector<Value> &deps) {
 
 // Depth-first build of the scalar op slice feeding `root`. Recursion stops at
 // tensor operands
-static void buildScalarSlice(Value root, scf::ForOp mainLoop,
+static void buildScalarSlice(Value root, const MainLoop &mainLoop,
                              SmallVector<Operation *> &sliceInOrder,
                              DenseSet<Operation *> &visited,
                              llvm::SetVector<Value> &boundaryTensors) {
@@ -651,7 +625,7 @@ static Operation *getAncestorInBlock(Operation *op, Block *block) {
 // consumer blocks and rewire those consumers to the local copy. Returns true on
 // rewrite.
 static bool
-rematerializeScalarDep(Value root, int producerId, scf::ForOp mainLoop,
+rematerializeScalarDep(Value root, int producerId, const MainLoop &mainLoop,
                        const SmallVector<Operation *> &sliceInOrder) {
   Block *body = mainLoop.getBody();
 
@@ -719,7 +693,7 @@ rematerializeScalarDep(Value root, int producerId, scf::ForOp mainLoop,
 // Scan the main loop for cross-block scalar dependencies whose data originates
 // from a tensor, and rematerialize the scalar portion into each consumer block
 // so the tensor part can use the normal tensor-dependency buffering.
-static void rematerializeTensorRootedScalarDeps(scf::ForOp mainLoop) {
+static void rematerializeTensorRootedScalarDeps(const MainLoop &mainLoop) {
   Block *body = mainLoop.getBody();
   if (!body) {
     return;
@@ -769,12 +743,18 @@ static void rematerializeTensorRootedScalarDeps(scf::ForOp mainLoop) {
   }
 }
 
-// Compute iteration index: (iv - lb) / step, used for buffer selection in
-// double buffering
-static Value getIterCount(OpBuilder &builder, mlir::scf::ForOp forOp,
+static Value getIterCount(OpBuilder &builder, const MainLoop &loop,
                           Location loc, SmallVector<Operation *> *newOps,
                           int blockId = -1) {
   auto i32Type = builder.getI32Type();
+
+  if (loop.isWhile()) {
+    assert(loop.iterCounter &&
+           "whileOp main_loop requires a global iteration counter");
+    return loop.iterCounter;
+  }
+
+  auto forOp = cast<scf::ForOp>(loop.getOperation());
   Value iv = forOp.getInductionVar();
   Value lb = forOp.getLowerBound();
   Value step = forOp.getStep();
@@ -1032,11 +1012,11 @@ buildIfChain(OpBuilder &builder, Location loc, Value indexVal,
 }
 
 // Compute buffer index: iterCount % N
-static Value computeBufferIndex(OpBuilder &builder, mlir::scf::ForOp forOp,
+static Value computeBufferIndex(OpBuilder &builder, const MainLoop &loop,
                                 Location loc, int N,
                                 SmallVector<Operation *> *newOps,
                                 int blockId = -1) {
-  Value iterCount = getIterCount(builder, forOp, loc, newOps, blockId);
+  Value iterCount = getIterCount(builder, loop, loc, newOps, blockId);
   Value Nval = builder.create<mlir::arith::ConstantIntOp>(loc, N, 32);
   Value bufIdx = builder.create<mlir::arith::RemSIOp>(loc, iterCount, Nval);
   if (newOps) {
@@ -1055,7 +1035,7 @@ static Value computeBufferIndex(OpBuilder &builder, mlir::scf::ForOp forOp,
 
 static SmallVector<Operation *>
 insertProducerLogic(OpBuilder &builder, Value depVal,
-                    SmallVector<BufferPair> &buffers, mlir::scf::ForOp forOp,
+                    SmallVector<BufferPair> &buffers, const MainLoop &loop,
                     int groupId = -1) {
   SmallVector<Operation *> newOps;
   int N = buffers.size();
@@ -1074,7 +1054,7 @@ insertProducerLogic(OpBuilder &builder, Value depVal,
     return newOps;
   }
 
-  Value bufIdx = computeBufferIndex(builder, forOp, loc, N, &newOps);
+  Value bufIdx = computeBufferIndex(builder, loop, loc, N, &newOps);
   SmallVector<Operation *> outIfOps;
   if (buildIfChain(
           builder, loc, bufIdx, buffers, newOps, outIfOps,
@@ -1121,7 +1101,7 @@ static mlir::bufferization::ToTensorOp createToTensorOp(OpBuilder &builder,
 
 static int insertConsumerLogic(OpBuilder &builder, Value depVal,
                                SmallVector<BufferPair> &buffers,
-                               mlir::scf::ForOp forOp,
+                               const MainLoop &loop,
                                SmallVector<Operation *> &outIfOps,
                                int groupId = -1, int blockId = -1) {
   SmallVector<Operation *> newOps;
@@ -1137,7 +1117,7 @@ static int insertConsumerLogic(OpBuilder &builder, Value depVal,
     return 0;
   }
 
-  Value readIdx = computeBufferIndex(builder, forOp, loc, N, &newOps, blockId);
+  Value readIdx = computeBufferIndex(builder, loop, loc, N, &newOps, blockId);
   auto memrefType = mlir::cast<mlir::MemRefType>(buffers[0].second.getType());
   auto tensorType = mlir::RankedTensorType::get(memrefType.getShape(),
                                                 memrefType.getElementType());
@@ -1170,15 +1150,14 @@ static void addBlockAttrForOps(SmallVector<Operation *> &newOps, int blockId,
 
 // Add dep_mark attribute to operation
 static void addDepMarkAttr(Operation *op, int depMark, OpBuilder &builder) {
-  if (auto existingAttr =
-          op->getAttrOfType<mlir::ArrayAttr>("ssbuffer.dep_mark")) {
+  if (auto existingAttr = op->getAttrOfType<mlir::ArrayAttr>(kDepMark)) {
     SmallVector<int> marks;
     for (auto attr : existingAttr)
       marks.push_back(cast<mlir::IntegerAttr>(attr).getInt());
     marks.push_back(depMark);
-    op->setAttr("ssbuffer.dep_mark", builder.getI32ArrayAttr(marks));
+    op->setAttr(kDepMark, builder.getI32ArrayAttr(marks));
   } else {
-    op->setAttr("ssbuffer.dep_mark", builder.getI32ArrayAttr({depMark}));
+    op->setAttr(kDepMark, builder.getI32ArrayAttr({depMark}));
   }
 }
 
@@ -1217,7 +1196,7 @@ collectCrossBlockUsers(Value depVal, int producerId,
 static Operation *
 insertBufferSelectionInRegion(OpBuilder &builder, Region &region, Location loc,
                               Value depVal, SmallVector<BufferPair> &buffers,
-                              mlir::scf::ForOp forOp, int blockId) {
+                              const MainLoop &loop, int blockId) {
   auto memrefType = mlir::cast<mlir::MemRefType>(buffers[0].second.getType());
   auto tensorType = mlir::RankedTensorType::get(memrefType.getShape(),
                                                 memrefType.getElementType());
@@ -1227,7 +1206,7 @@ insertBufferSelectionInRegion(OpBuilder &builder, Region &region, Location loc,
 
   // Compute buffer index
   Value readIdx =
-      computeBufferIndex(builder, forOp, loc, buffers.size(), nullptr, blockId);
+      computeBufferIndex(builder, loop, loc, buffers.size(), nullptr, blockId);
 
   // Build buffer selection if-else chain
   SmallVector<Operation *> newIfOps;
@@ -1308,12 +1287,12 @@ static bool isMultiRegionConsumerFromYield(Operation *depUser, Value depVal) {
 // among all ops in the block
 static int processNormalConsumerBlock(OpBuilder &consumedBuilder, Value depVal,
                                       SmallVector<BufferPair> &buffers,
-                                      mlir::scf::ForOp mainLoopForOp,
+                                      const MainLoop &loop,
                                       SmallVector<Operation *> &opsInBlock,
                                       int userBlockId, int groupId,
                                       OpBuilder &globalBuilder) {
   SmallVector<Operation *> resultIfOps;
-  int ret = insertConsumerLogic(consumedBuilder, depVal, buffers, mainLoopForOp,
+  int ret = insertConsumerLogic(consumedBuilder, depVal, buffers, loop,
                                 resultIfOps, groupId, userBlockId);
   if (ret != 0)
     return -1;
@@ -1352,9 +1331,8 @@ static int processNormalConsumerBlock(OpBuilder &consumedBuilder, Value depVal,
 // from index 1 onwards
 static int processMultiRegionAllYields(OpBuilder &consumedBuilder, Value depVal,
                                        SmallVector<BufferPair> &buffers,
-                                       mlir::scf::ForOp mainLoopForOp,
-                                       Operation *depUser, int userBlockId,
-                                       int groupId) {
+                                       const MainLoop &loop, Operation *depUser,
+                                       int userBlockId, int groupId) {
   // Generic: check if op has >= 2 regions
   if (depUser->getNumRegions() < 2)
     return 0;
@@ -1374,8 +1352,8 @@ static int processMultiRegionAllYields(OpBuilder &consumedBuilder, Value depVal,
         continue;
 
       Operation *selectIf = insertBufferSelectionInRegion(
-          consumedBuilder, region, yieldOp.getLoc(), depVal, buffers,
-          mainLoopForOp, userBlockId);
+          consumedBuilder, region, yieldOp.getLoc(), depVal, buffers, loop,
+          userBlockId);
       if (!selectIf)
         return -1;
 
@@ -1427,7 +1405,7 @@ static Operation *findFirstOpWithBlockIdInBlock(Operation *anchorOp,
 }
 
 // Process producer and consumer for a single dependency value
-static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
+static int processDepVal(Value depVal, const MainLoop &loop,
                          BufferMap &bufferMap,
                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
                          OpBuilder &globalBuilder, int producerId,
@@ -1446,12 +1424,12 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
   // Read the module-level `ssbuffer.insertionOptimization` attribute inline so
   // processDepVal can be called multiple times in the same pass run and stay
   // in sync with whatever the Python caller last wrote onto the ModuleOp.
-  bool enableOpt = false;
-  if (mlir::ModuleOp mod = mainLoopForOp->getParentOfType<mlir::ModuleOp>())
+  bool enableOpt = true;
+  if (mlir::ModuleOp mod = loop->getParentOfType<mlir::ModuleOp>())
     enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
 
   // Create producer
-  OpBuilder producedBuffers(mainLoopForOp.getContext());
+  OpBuilder producedBuffers(loop.getContext());
   // When enable_buffer_insert_optimization is on, place the producer chain at
   // the end of depDefinedOp's block_id=X region (after the last op with that
   // block_id). Otherwise keep the original "right after depDefinedOp" anchor.
@@ -1464,8 +1442,8 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
     }
   }
   producedBuffers.setInsertionPointAfter(producerAnchor);
-  SmallVector<Operation *> producerNewOps = insertProducerLogic(
-      producedBuffers, depVal, buffers, mainLoopForOp, groupId);
+  SmallVector<Operation *> producerNewOps =
+      insertProducerLogic(producedBuffers, depVal, buffers, loop, groupId);
   addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
   if (buffers.size() > kBufferCountOne) {
     for (auto *op : producerNewOps) {
@@ -1490,7 +1468,7 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
 
     if (isMultiRegionConsumerFromYield(depUser, depVal)) {
       // Multi-region op: process independently
-      OpBuilder consumedBuilder(mainLoopForOp.getContext());
+      OpBuilder consumedBuilder(loop.getContext());
       // When enable_buffer_insert_optimization is on, place the consumer chain
       // at the start of depUser's block_id=X region (before the first op with
       // that block_id). Otherwise keep "right before depUser".
@@ -1504,9 +1482,9 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
       }
       consumedBuilder.setInsertionPoint(consumerAnchor);
 
-      if (int ret = processMultiRegionAllYields(consumedBuilder, depVal,
-                                                buffers, mainLoopForOp, depUser,
-                                                *userBlockId, groupId))
+      if (int ret =
+              processMultiRegionAllYields(consumedBuilder, depVal, buffers,
+                                          loop, depUser, *userBlockId, groupId))
         return ret;
     } else {
       // Normal op: collect by block_id for batch processing
@@ -1538,7 +1516,7 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
         continue;
 
       Operation *firstOp = opsInRegion.front();
-      OpBuilder consumedBuilder(mainLoopForOp.getContext());
+      OpBuilder consumedBuilder(loop.getContext());
       // When enable_buffer_insert_optimization is on, place the consumer chain
       // at the start of the dep user's block_id=X region (before the first op
       // with that block_id). Otherwise keep "right before firstOp".
@@ -1552,9 +1530,9 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
       }
       consumedBuilder.setInsertionPoint(consumerAnchor);
 
-      if (int ret = processNormalConsumerBlock(
-              consumedBuilder, depVal, buffers, mainLoopForOp, opsInRegion,
-              userBlockId, groupId, globalBuilder))
+      if (int ret = processNormalConsumerBlock(consumedBuilder, depVal, buffers,
+                                               loop, opsInRegion, userBlockId,
+                                               groupId, globalBuilder))
         return ret;
     }
   }
@@ -1562,117 +1540,16 @@ static int processDepVal(Value depVal, mlir::scf::ForOp mainLoopForOp,
   return 0;
 }
 
-// Special handling for the tensor::EmptyOp + linalg::FillOp pattern:
-// Clone the empty+fill pair into each consumer block (different from
-// producerId), and replace depVal usage in those consumers with the new
-// linalg::FillOp result. Skips the normal multi-buffer (alloc + hivm.copy +
-// scf.if + to_tensor) path because cloning is cheaper for this pattern.
-//
-// When linalg.fill's `ins` operand's defining op lives in the same parentOp as
-// the tensor::EmptyOp (i.e. it is producer-side and not yet across blocks),
-// clone that defining op together so the cloned fill's `ins` references the
-// clone instead of leaving a cross-block reference.
-static int
-cloneEmptyFillToConsumers(Value depVal, int producerId,
-                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
-                          OpBuilder &builder) {
-  auto fillOp = cast<linalg::FillOp>(depVal.getDefiningOp());
-  auto origEmpty =
-      cast<tensor::EmptyOp>(fillOp.getOutputs()[0].getDefiningOp());
-
-  // Collect the `ins` operands whose defining op shares the parentOp with the
-  // tensor::EmptyOp. These will be cloned together with empty+fill so the
-  // cloned fill's `ins` becomes a local reference instead of a cross-block one.
-  SmallVector<Value> insToClone;
-  Operation *emptyParent = origEmpty->getParentOp();
-  for (Value insVal : fillOp.getInputs()) {
-    Operation *insDef = insVal.getDefiningOp();
-    if (!insDef)
-      continue;
-    if (insDef->getParentOp() != emptyParent)
-      continue;
-    insToClone.push_back(insVal);
-  }
-
-  auto userIt = depUserMap.find(depVal);
-  if (userIt == depUserMap.end())
-    return 0;
-
-  // Group users by their consumer block_id (skip users in the producer's own
-  // block)
-  DenseMap<int, SmallVector<Operation *>> opsByBlockId;
-  for (Operation *user : userIt->second) {
-    auto userBlockId = getOpBlockId(user);
-    if (!userBlockId.has_value() || *userBlockId == producerId)
-      continue;
-    // Only keep users that still use depVal (not already replaced)
-    bool stillUses = false;
-    for (OpOperand &opnd : user->getOpOperands()) {
-      if (opnd.get() == depVal) {
-        stillUses = true;
-        break;
-      }
-    }
-    if (!stillUses)
-      continue;
-    opsByBlockId[*userBlockId].push_back(user);
-  }
-
-  for (auto &p : opsByBlockId) {
-    int userBlockId = p.first;
-    auto &users = p.second;
-    if (users.empty())
-      continue;
-
-    Operation *firstUser = users.front();
-    builder.setInsertionPoint(firstUser);
-
-    // Clone tensor::EmptyOp and tag with consumer's block_id
-    IRMapping mapper;
-    Operation *newEmpty = builder.clone(*origEmpty, mapper);
-    newEmpty->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
-
-    // Map origEmpty's result to the new empty so the cloned fill's outs
-    // operand is rewired to point at the cloned empty.
-    mapper.map(origEmpty->getResult(0), newEmpty->getResult(0));
-
-    // Clone the `ins` defining ops that share the empty's parentOp, and
-    // pre-register their value mapping so the cloned fill uses the cloned
-    // scalar instead of leaving a cross-block reference.
-    for (Value insVal : insToClone) {
-      Operation *insDef = insVal.getDefiningOp();
-      Operation *newIns = builder.clone(*insDef, mapper);
-      newIns->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
-      mapper.map(insVal, newIns->getResult(0));
-    }
-
-    // Clone linalg::FillOp and tag with consumer's block_id
-    Operation *newFill = builder.clone(*fillOp, mapper);
-    newFill->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
-
-    // Replace depVal with the new fill's result for all users in this block
-    Value newResult = newFill->getResult(0);
-    for (Operation *user : users) {
-      user->replaceUsesOfWith(depVal, newResult);
-    }
-  }
-
-  return 0;
-}
-
-// First pass: clone tensor::EmptyOp + linalg::FillOp patterns to each
-// consumer block. Runs BEFORE the rest of dep collection because cloning
-// the fill can introduce fresh cross-block references (e.g. the cloned
-// fill's `ins` chain may now reach a producer-side tensor that needs
-// multi-buffering), and the second pass needs to see them.
-//
-// Returns 0 on success, -1 on failure.
-static int
-cloneEmptyFillsInBlocks(scf::ForOp mainLoopForOp,
-                        DenseMap<Value, InnerBlockInfo> &blocks,
-                        DenseMap<Value, SmallVector<Value>> &depValueMap,
-                        DenseMap<Value, SmallVector<Operation *>> &depUserMap,
-                        OpBuilder &globalBuilder) {
+// If `clonedDepVals` is non-null, depVals that were actually cloned
+static int cloneDepsToConsumers(
+    const MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
+    DenseMap<Value, SmallVector<Value>> &depValueMap,
+    DenseMap<Value, SmallVector<Operation *>> &depUserMap, OpBuilder &builder,
+    llvm::function_ref<bool(Value)> patternCheck,
+    llvm::function_ref<Value(IRMapping &, OpBuilder &, Value depVal,
+                             int userBlockId, ArrayRef<Operation *> users)>
+        cloneFn,
+    DenseSet<Value> *clonedDepVals = nullptr) {
   SmallVector<Operation *> seenOps;
 
   for (auto &blockPair : blocks) {
@@ -1680,42 +1557,141 @@ cloneEmptyFillsInBlocks(scf::ForOp mainLoopForOp,
     if (depIt == depValueMap.end())
       continue;
 
-    // Walk the dep list carefully: cloneEmptyFillToConsumers mutates
-    // depUserMap (via replaceUsesOfWith) but does not invalidate the
-    // depValueMap iterator (no insert/erase of depValueMap). We just
-    // dedupe by defining op to avoid re-processing the same fill.
     for (Value depVal : depIt->second) {
       Operation *defOp = depVal.getDefiningOp();
       if (!defOp || llvm::is_contained(seenOps, defOp))
         continue;
-
-      if (!isEmptyFillPattern(depVal))
+      if (!patternCheck(depVal))
         continue;
-
-      // Skip if parentOp is not the main_loop forOp (clone logic
-      // currently expects the empty/fill to be inside main_loop).
-      if (defOp->getParentOp() != mainLoopForOp.getOperation())
+      if (defOp->getParentOp() != loop.getOperation())
         continue;
 
       auto producerId = getOpBlockId(defOp);
       if (!producerId.has_value())
         continue;
-
       seenOps.push_back(defOp);
-      if (cloneEmptyFillToConsumers(depVal, *producerId, depUserMap,
-                                    globalBuilder) != 0)
-        return -1;
+
+      auto userIt = depUserMap.find(depVal);
+      if (userIt == depUserMap.end())
+        continue;
+
+      // Group users by their consumer block_id, skipping users in the
+      // producer's own block and users that no longer reference depVal.
+      DenseMap<int, SmallVector<Operation *>> opsByBlockId;
+      for (Operation *user : userIt->second) {
+        auto userBlockId = getOpBlockId(user);
+        if (!userBlockId.has_value() || *userBlockId == producerId)
+          continue;
+        bool stillUses = false;
+        for (OpOperand &opnd : user->getOpOperands()) {
+          if (opnd.get() == depVal) {
+            stillUses = true;
+            break;
+          }
+        }
+        if (!stillUses)
+          continue;
+        opsByBlockId[*userBlockId].push_back(user);
+      }
+
+      for (auto &p : opsByBlockId) {
+        int userBlockId = p.first;
+        auto &users = p.second;
+        if (users.empty())
+          continue;
+
+        Operation *firstUser = users.front();
+        builder.setInsertionPoint(firstUser);
+        IRMapping mapper;
+        Value newVal = cloneFn(mapper, builder, depVal, userBlockId, users);
+        if (!newVal)
+          continue;
+        if (clonedDepVals)
+          clonedDepVals->insert(depVal);
+        for (Operation *user : users) {
+          user->replaceUsesOfWith(depVal, newVal);
+        }
+      }
     }
   }
   return 0;
 }
 
-// Process cross-block tensor dependencies for double buffering
-static int processTensorDependencies(
-    mlir::scf::ForOp mainLoopForOp, DenseMap<Value, InnerBlockInfo> &blocks,
+// Phase 1: clone empty+fill (and any `ins` defining ops sharing the empty's
+// parentOp) to consumer blocks; runs before dep collection because the cloned
+// fill's `ins` chain may reach a producer-side tensor that Phase 2 must see.
+static int cloneEmptyFillsInBlocks(
+    const MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
     DenseMap<Value, SmallVector<Value>> &depValueMap,
-    DenseMap<Value, SmallVector<Operation *>> &depUserMap, BufferMap &bufferMap,
-    OpBuilder &globalBuilder, int &groupId) {
+    DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+    OpBuilder &globalBuilder, DenseSet<Value> *clonedDepVals = nullptr) {
+  return cloneDepsToConsumers(
+      loop, blocks, depValueMap, depUserMap, globalBuilder, isEmptyFillPattern,
+      [](IRMapping &mapper, OpBuilder &builder, Value depVal, int userBlockId,
+         ArrayRef<Operation *> users) -> Value {
+        auto fillOp = cast<linalg::FillOp>(depVal.getDefiningOp());
+        // outs may come from either tensor::EmptyOp (the original case) or
+        // bufferization.alloc_tensor (the new case). Both are "fresh tensor"
+        // sources and treated identically below.
+        Operation *origAllocLike = fillOp.getOutputs()[0].getDefiningOp();
+
+        // Collect the `ins` operands whose defining op shares the parentOp with
+        // the empty/alloc_tensor.
+        SmallVector<Value> insToClone;
+        Operation *allocParent = origAllocLike->getParentOp();
+        for (Value insVal : fillOp.getInputs()) {
+          Operation *insDef = insVal.getDefiningOp();
+          if (!insDef || insDef->getParentOp() != allocParent)
+            continue;
+          insToClone.push_back(insVal);
+        }
+
+        Operation *newAllocLike = builder.clone(*origAllocLike, mapper);
+        newAllocLike->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+        mapper.map(origAllocLike->getResult(0), newAllocLike->getResult(0));
+
+        for (Value insVal : insToClone) {
+          Operation *insDef = insVal.getDefiningOp();
+          Operation *newIns = builder.clone(*insDef, mapper);
+          newIns->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+          mapper.map(insVal, newIns->getResult(0));
+        }
+
+        Operation *newFill = builder.clone(*fillOp, mapper);
+        newFill->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+        return newFill->getResult(0);
+      },
+      clonedDepVals);
+}
+
+// Clone bufferization.alloc_tensor to each consumer block
+static int
+cloneAllocTensorsInBlocks(const MainLoop &loop,
+                          DenseMap<Value, InnerBlockInfo> &blocks,
+                          DenseMap<Value, SmallVector<Value>> &depValueMap,
+                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+                          OpBuilder &globalBuilder) {
+  return cloneDepsToConsumers(
+      loop, blocks, depValueMap, depUserMap, globalBuilder,
+      isAllocTensorPattern,
+      [](IRMapping &mapper, OpBuilder &builder, Value depVal, int userBlockId,
+         ArrayRef<Operation *> users) -> Value {
+        auto origAlloc =
+            cast<bufferization::AllocTensorOp>(depVal.getDefiningOp());
+        Operation *newAlloc = builder.clone(*origAlloc, mapper);
+        newAlloc->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+        return newAlloc->getResult(0);
+      });
+}
+
+// Process cross-block tensor dependencies for double buffering
+static int
+processTensorDependencies(const MainLoop &loop,
+                          DenseMap<Value, InnerBlockInfo> &blocks,
+                          DenseMap<Value, SmallVector<Value>> &depValueMap,
+                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+                          BufferMap &bufferMap, OpBuilder &globalBuilder,
+                          int &groupId, const DenseSet<Value> &clonedDepVals) {
   SmallVector<Operation *> seenOps;
 
   for (auto &blockPair : blocks) {
@@ -1743,15 +1719,16 @@ static int processTensorDependencies(
       if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
         continue;
 
-      // Check if definingOp's parentOp is the main_loop forOp
-      auto *parentOp = depVal.getDefiningOp()->getParentOp();
-      if (parentOp != mainLoopForOp.getOperation())
+      // Skip bufferization.alloc_tensor
+      if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
         continue;
 
-      // The empty+fill pattern has already been cloned by
-      // cloneEmptyFillsInBlocks (run before dep collection). Skip
-      // any remaining occurrences here.
-      if (isEmptyFillPattern(depVal))
+      auto *parentOp = depVal.getDefiningOp()->getParentOp();
+      if (parentOp != loop.getOperation())
+        continue;
+
+      // Skip depVals that were already cloned by cloneEmptyFillsInBlocks.
+      if (clonedDepVals.contains(depVal))
         continue;
 
       auto userIt = depUserMap.find(depVal);
@@ -1777,8 +1754,8 @@ static int processTensorDependencies(
         continue;
 
       // Process cross-block dependency with double buffering
-      if (processDepVal(depVal, mainLoopForOp, bufferMap, depUserMap,
-                        globalBuilder, *producerId, groupId) != 0)
+      if (processDepVal(depVal, loop, bufferMap, depUserMap, globalBuilder,
+                        *producerId, groupId) != 0)
         return -1;
       groupId++;
     }
@@ -1786,15 +1763,15 @@ static int processTensorDependencies(
   return 0;
 }
 
-static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp,
-                                        SmallVector<Value> &valueList,
-                                        OpBuilder &builder, int groupId) {
+static BufferMap insertBuffersBeforeLoop(const MainLoop &loop,
+                                         SmallVector<Value> &valueList,
+                                         OpBuilder &builder, int groupId) {
   BufferMap bufferMap;
-  Block *parentBlock = forOp->getBlock();
+  Block *parentBlock = loop.getBlock();
   OpBuilder insertedBuffers(builder.getContext());
-  insertedBuffers.setInsertionPoint(parentBlock, forOp->getIterator());
+  insertedBuffers.setInsertionPoint(parentBlock, loop.getIterator());
 
-  BufferCountManager bufferCountMgr(forOp);
+  BufferCountManager bufferCountMgr(loop.getOperation());
   int bufNum = bufferCountMgr.getBufferCountByType(
       BufferCountManager::DepType::IntraCore);
 
@@ -1810,13 +1787,13 @@ static BufferMap insertBuffersBeforeFor(mlir::scf::ForOp forOp,
           AddressSpaceAttr::get(insertedBuffers.getContext(), addrSpace));
 
       auto allocOp =
-          insertedBuffers.create<memref::AllocOp>(forOp.getLoc(), memrefType);
+          insertedBuffers.create<memref::AllocOp>(loop.getLoc(), memrefType);
 
       auto genericType = MemRefType::get(shapedType.getShape(), elemType,
                                          MemRefLayoutAttrInterface{}, 0u);
 
       auto casted = insertedBuffers.create<memref::MemorySpaceCastOp>(
-          forOp.getLoc(), genericType, allocOp.getResult());
+          loop.getLoc(), genericType, allocOp.getResult());
 
       buffers.push_back({casted.getResult(), casted.getResult()});
     }
@@ -1839,10 +1816,144 @@ hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap) {
   return false;
 }
 
-static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
-                               OpBuilder &builder, scope::ScopeOp vectorScope,
-                               int &groupId, bool &i1Found) {
-  OpBuilder globalBuilder(mainLoopForOp.getContext());
+// Build the before-region of the new whileOp
+static void buildBeforeRegion(scf::WhileOp oldWhile, OpBuilder &bb, Location bl,
+                              ValueRange iterArgs) {
+  Block *oldBefore = oldWhile.getBeforeBody();
+  IRMapping mapper;
+  unsigned numOrig = oldBefore->getNumArguments();
+  for (unsigned i = 0; i < numOrig; ++i)
+    mapper.map(oldBefore->getArgument(i), iterArgs[i]);
+
+  Operation *oldCond = nullptr;
+  for (Operation &op : *oldBefore) {
+    if (isa<scf::ConditionOp>(&op)) {
+      oldCond = &op;
+      continue;
+    }
+    bb.clone(op, mapper);
+  }
+  if (!oldCond)
+    return;
+
+  SmallVector<Value> newCondOps;
+  for (Value operand : oldCond->getOperands()) {
+    Value mapped = mapper.lookupOrNull(operand);
+    newCondOps.push_back(mapped ? mapped : operand);
+  }
+  newCondOps.push_back(iterArgs[numOrig]);
+  Value condValue = newCondOps.front();
+  ArrayRef<Value> carriedValues = ArrayRef<Value>(newCondOps).drop_front();
+  bb.create<scf::ConditionOp>(bl, condValue, carriedValues);
+}
+
+// Build the after-region of the new whileOp
+static void buildAfterRegion(scf::WhileOp oldWhile, OpBuilder &ab, Location al,
+                             ValueRange iterArgs, Value &counterIterArgOut) {
+  Block *oldAfter = oldWhile.getAfterBody();
+  unsigned numOrig = oldAfter->getNumArguments();
+  counterIterArgOut = iterArgs[numOrig];
+
+  IRMapping mapper;
+  for (unsigned i = 0; i < numOrig; ++i)
+    mapper.map(oldAfter->getArgument(i), iterArgs[i]);
+
+  Operation *oldYield = nullptr;
+  for (Operation &op : *oldAfter) {
+    if (isa<scf::YieldOp>(&op)) {
+      oldYield = &op;
+      continue;
+    }
+    ab.clone(op, mapper);
+  }
+  if (!oldYield)
+    return;
+
+  std::optional<int> counterBlockId;
+  if (Block *doBlock = ab.getInsertionBlock()) {
+    for (Operation &op : llvm::reverse(*doBlock)) {
+      if (auto id = getOpBlockId(&op); id.has_value()) {
+        counterBlockId = id;
+        break;
+      }
+    }
+  }
+  if (!counterBlockId)
+    counterBlockId = getOpBlockId(oldWhile);
+
+  Value one = ab.create<arith::ConstantIntOp>(al, 1, 32);
+  Value nextCounter = ab.create<arith::AddIOp>(al, counterIterArgOut, one);
+  nextCounter.getDefiningOp()->setAttr(kIterCounter, ab.getUnitAttr());
+
+  if (counterBlockId) {
+    one.getDefiningOp()->setAttr(kBlockId,
+                                 ab.getI32IntegerAttr(*counterBlockId));
+    nextCounter.getDefiningOp()->setAttr(kBlockId,
+                                         ab.getI32IntegerAttr(*counterBlockId));
+  }
+
+  SmallVector<Value> newYieldOps;
+  for (Value operand : oldYield->getOperands()) {
+    Value mapped = mapper.lookupOrNull(operand);
+    newYieldOps.push_back(mapped ? mapped : operand);
+  }
+  newYieldOps.push_back(nextCounter);
+  ab.create<scf::YieldOp>(al, newYieldOps);
+}
+
+// Create a pass-managed global iteration counter for a whileOp main_loop
+static std::pair<Value, scf::WhileOp>
+setupWhileIterArgCounter(const MainLoop &loop, OpBuilder &builder) {
+  auto oldWhile = cast<scf::WhileOp>(loop.getOperation());
+  Location loc = loop.getLoc();
+  MLIRContext *ctx = loop.getContext();
+  Type i32Type = builder.getI32Type();
+
+  // Init 0 for the new counter iter_arg, inserted before oldWhile so the
+  // new whileOp can replace it in-place.
+  OpBuilder preBuilder(ctx);
+  preBuilder.setInsertionPoint(oldWhile);
+  Value zero = preBuilder.create<arith::ConstantIntOp>(loc, 0, 32);
+
+  // Old inits/result-types + i32 counter appended at the end.
+  SmallVector<Value> newInits(oldWhile.getInits().begin(),
+                              oldWhile.getInits().end());
+  newInits.push_back(zero);
+  SmallVector<Type> newResultTypes(oldWhile.getResultTypes().begin(),
+                                   oldWhile.getResultTypes().end());
+  newResultTypes.push_back(i32Type);
+
+  // Captured by the after-builder when the do-region is constructed;
+  // returned to the caller as the live iteration count.
+  Value counterIterArg;
+
+  OpBuilder cb(ctx);
+  cb.setInsertionPoint(oldWhile);
+  auto newWhile = cb.create<scf::WhileOp>(
+      loc, newResultTypes, newInits,
+      [&](OpBuilder &bb, Location bl, ValueRange iterArgs) {
+        buildBeforeRegion(oldWhile, bb, bl, iterArgs);
+      },
+      [&](OpBuilder &ab, Location al, ValueRange iterArgs) {
+        buildAfterRegion(oldWhile, ab, al, iterArgs, counterIterArg);
+      });
+
+  // Move attrs
+  for (auto attr : oldWhile->getAttrs())
+    newWhile->setAttr(attr.getName(), attr.getValue());
+  newWhile->setAttr(kIterCounter, cb.getUnitAttr());
+
+  for (unsigned i = 0, e = oldWhile.getNumResults(); i < e; ++i)
+    oldWhile.getResult(i).replaceAllUsesWith(newWhile.getResult(i));
+  oldWhile.erase();
+
+  return {counterIterArg, newWhile};
+}
+
+static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
+                               scope::ScopeOp vectorScope, int &groupId,
+                               bool &i1Found) {
+  OpBuilder globalBuilder(mainLoop.getContext());
 
   // Two-phase dep collection for empty+fill cloning:
   //   Phase 1 (initial): collect deps, build user map, then clone the
@@ -1865,23 +1976,48 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
   DenseMap<Value, InnerBlockInfo> blocks;
   DenseMap<Value, SmallVector<Value>> depValueMap;
   SmallVector<Operation *> allOps;
-  if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps,
-                            i1Found) != 0)
+
+  // whileOp: bufNum>1 needs pre-created counter (no implicit iter count);
+  // bufNum==1 skips to avoid dead iter_arg.
+  if (mainLoop.isWhile()) {
+    BufferCountManager bufferCountMgr(mainLoop.getOperation());
+    int bufNum = bufferCountMgr.getBufferCountByType(
+        BufferCountManager::DepType::IntraCore);
+    if (bufNum > kBufferCountOne) {
+      auto [counter, newWhile] =
+          setupWhileIterArgCounter(mainLoop, globalBuilder);
+      // Update mainLoop so subsequent collections target the new whileOp
+      // (the old one was erased inside setupWhileIterArgCounter).
+      mainLoop.op = newWhile;
+      mainLoop.body = newWhile.getAfterBody();
+      mainLoop.iterCounter = counter;
+    }
+  }
+
+  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps, i1Found) !=
+      0)
     return -1;
 
   if (blocks.empty())
     return -1;
+
+  // Memref-type dep values are not supported here.
+  if (hasMemrefDepValue(depValueMap)) {
+    LDBG("ERROR: Memref type dependent values found in user IR, fallback");
+    return -1;
+  }
 
   // Phase 1: build initial depUserMap and clone empty+fill patterns. We use
   // a fresh user map built from the initial allOps so the clone can find
   // consumer-block users; the cloned fills will rewrite those users' uses.
   DenseMap<Value, SmallVector<Operation *>> initialDepUserMap =
       buildDepUserMap(blocks, allOps, depValueMap);
-  if (cloneEmptyFillsInBlocks(mainLoopForOp, blocks, depValueMap,
-                              initialDepUserMap, globalBuilder) != 0)
+  DenseSet<Value> phase1ClonedDepVals;
+  if (cloneEmptyFillsInBlocks(mainLoop, blocks, depValueMap, initialDepUserMap,
+                              globalBuilder, &phase1ClonedDepVals) != 0)
     return -1;
 
-  rematerializeTensorRootedScalarDeps(mainLoopForOp);
+  rematerializeTensorRootedScalarDeps(mainLoop);
 
   // Phase 2: re-collect deps now that cloned ops (and rematerialized scalar
   // chains) have created new cross-block references. depValueMap and allOps
@@ -1890,8 +2026,8 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
   blocks.clear();
   depValueMap.clear();
   allOps.clear();
-  if (collectInnerBlockInfo(mainLoopForOp, blocks, depValueMap, allOps,
-                            i1Found) != 0)
+  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps, i1Found) !=
+      0)
     return -1;
 
   // Phase 2 may surface i1 tensor deps that the clone introduced (e.g. a
@@ -1904,28 +2040,52 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp,
   if (blocks.empty())
     return -1;
 
-  // Memref-type dep values are not supported here; fail loudly so downstream
-  // passes don't see an unmarked-but-skipped scope.
-  if (hasMemrefDepValue(depValueMap)) {
-    LDBG("ERROR: Memref type dependent values found!");
-    return -1;
+  // Drop memref-typed deps from Phase 2's collection
+  int droppedMemrefDeps = 0;
+  for (auto &p : depValueMap) {
+    llvm::erase_if(p.second, [&droppedMemrefDeps](Value v) {
+      if (isa<MemRefType>(v.getType())) {
+        ++droppedMemrefDeps;
+        return true;
+      }
+      return false;
+    });
   }
+  if (droppedMemrefDeps > 0)
+    LDBG("Dropped " + std::to_string(droppedMemrefDeps) +
+         " clone-induced memref deps from Phase 2 depValueMap");
 
   auto depUserMap = buildDepUserMap(blocks, allOps, depValueMap);
 
-  auto valueList = collectBufferValues(depValueMap);
-  auto bufferMap =
-      insertBuffersBeforeFor(mainLoopForOp, valueList, builder, groupId);
+  // Clone bufferization.alloc_tensor deps to each consumer's block.
+  if (cloneAllocTensorsInBlocks(mainLoop, blocks, depValueMap, depUserMap,
+                                globalBuilder) != 0)
+    return -1;
+  auto valueList = collectBufferValues(depValueMap, phase1ClonedDepVals);
+  LLVM_DEBUG(
+      llvm::dbgs()
+      << "[addInnerMultiBuffer] before insertBuffersBeforeLoop, valueList.size="
+      << valueList.size() << "\n");
 
+  auto bufferMap =
+      insertBuffersBeforeLoop(mainLoop, valueList, builder, groupId);
+
+  LLVM_DEBUG(
+      llvm::dbgs() << "[addInnerMultiBuffer] before collectScalarDeps\n");
   auto scalarValueList = collectScalarDeps(depValueMap, depUserMap);
 
+  LLVM_DEBUG(llvm::dbgs() << "[addInnerMultiBuffer] before markScalarDeps\n");
   markScalarDeps(scalarValueList, depUserMap, globalBuilder, 1);
 
-  if (processTensorDependencies(mainLoopForOp, blocks, depValueMap, depUserMap,
-                                bufferMap, globalBuilder, groupId) != 0) {
+  LLVM_DEBUG(llvm::dbgs()
+             << "[addInnerMultiBuffer] before processTensorDependencies\n");
+  if (processTensorDependencies(mainLoop, blocks, depValueMap, depUserMap,
+                                bufferMap, globalBuilder, groupId,
+                                phase1ClonedDepVals) != 0) {
     return -1;
   }
 
+  LLVM_DEBUG(llvm::dbgs() << "[addInnerMultiBuffer] DONE\n");
   return 0;
 }
 
@@ -1947,6 +2107,19 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
 
   OpBuilder builder(module.getContext());
 
+  // Scan existing kIntraDeps to start groupId after the max already used
+  // (e.g. by InterCoreTransferAndSyncPass for C2C fixpipe transfers).
+  int groupId = 0;
+  module.walk([&](Operation *op) {
+    if (auto attr = op->getAttrOfType<ArrayAttr>(CVPipeline::kIntraDeps)) {
+      if (!attr.empty()) {
+        if (auto intAttr = dyn_cast<IntegerAttr>(attr[0])) {
+          groupId = std::max(groupId, static_cast<int>(intAttr.getInt()) + 1);
+        }
+      }
+    }
+  });
+
   LDBG("Enter pass.");
 
   auto walkResult = module.walk([&](scope::ScopeOp scope) -> WalkResult {
@@ -1963,10 +2136,10 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
       return WalkResult::advance();
     }
 
-    // Step 3: Collect all forOps with main_loop attribute
-    SmallVector<scf::ForOp> mainLoopForOps;
+    // Step 3: Collect all main_loop loops (forOp / whileOp) in the scope
+    SmallVector<Operation *> mainLoops;
     int foundCount =
-        collectMainLoopsRecursively(scope.getBodyRegion(), mainLoopForOps);
+        collectMainLoopsRecursively(scope.getBodyRegion(), mainLoops);
     if (foundCount < 0) {
       LDBG("collectMainLoopsRecursively failed");
       return WalkResult::interrupt();
@@ -1974,33 +2147,26 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
     if (foundCount == 0)
       return WalkResult::advance();
 
-    // Step 4: Process each main_loop forOp
-    int groupId = 0;
-    for (scf::ForOp mainLoopForOp : mainLoopForOps) {
-      scf::ForOp nestedMainloop = findNestedMainloopInForOp(mainLoopForOp);
-      if (nestedMainloop) {
+    // Step 4: Process each main_loop
+    for (Operation *loopOp : mainLoops) {
+      MainLoop mainLoop(loopOp);
+      if (findNestedMainloop(mainLoop)) {
         LDBG("Nested main_loop found, this is not allowed");
         return WalkResult::interrupt();
       }
       // i1Found is reset per main_loop so it only triggers fallback for
       // the current scope's deps.
       bool i1Found = false;
-      int ret =
-          addInnerMultiBuffer(mainLoopForOp, builder, scope, groupId, i1Found);
+      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found);
       if (i1Found) {
-        // i1 tensor deps are not safe to multi-buffer; mark the module
-        // with ERRCODE_IGNORED and bail out so downstream passes see the
-        // fallback attribute. Mirrors the AnalyzeName pass pattern:
-        // setFallbackAttr(module) + signalPassFailure() + return.
         LDBG("i1 tensor dep found, setting fallback attribute");
-        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-        signalPassFailure();
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
         return WalkResult::interrupt();
       }
       if (ret != 0) {
         LDBG(
             "addInnerMultiBuffer failed for main_loop; signaling pass failure");
-        signalPassFailure();
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
         return WalkResult::interrupt();
       }
     }

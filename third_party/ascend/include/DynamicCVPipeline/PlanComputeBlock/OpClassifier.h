@@ -77,11 +77,17 @@ private:
   // Map from operation to its core type
   llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
 
+  // Cache: value -> whether its defining chain reaches a VECTOR-only op.
+  // Memoizes hasVectorOnlyProducer during CUBE upstream propagation.
+  llvm::DenseMap<mlir::Value, bool> vectorOnlyProducerCache;
+
   // All operations in the module
   llvm::SmallVector<Operation *> allOps;
 
   // Seed operations for CUBE upstream propagation
   llvm::SmallVector<Operation *> cubeSeeds;
+  // if A*B+C's C from broadcast chain, they need to keep for Normalize.
+  llvm::DenseSet<Operation *> inBroadcastChain;
 
   std::shared_ptr<AliasAnalysis> aliasAnalysis;
   std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
@@ -97,6 +103,8 @@ private:
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
   void matchEmptyPattern(Operation *def);
+  void matchBroadcastPattern(Operation *def);
+  Value extractMmadBiasFromPotentialUnitDimExpand(Value bias);
 
   // Downstream pattern matching helpers
   void matchStorePattern(Operation *user);
@@ -108,6 +116,9 @@ private:
 
   // Propagate CUBE upstream for a specific operation
   void propagateCubeUpstreamForOp(Operation *startOp);
+
+  // Shared skip predicates for both CUBE upstream BFS paths.
+  bool shouldSkipCubeUpstream(Operation *op);
 
   // Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark
   // scf.if and propagate upstream
@@ -130,8 +141,9 @@ private:
   // results are consumed exclusively by CUBE ops.
   int penetrateCubeIntoForLoops();
 
-  // Helper: decide whether an scf.for is a pure cube-loader loop
+  // Helper: decide whether an scf.for or scf.while is a pure cube-loader loop
   bool isCubeLoaderForOp(scf::ForOp forOp);
+  bool isCubeLoaderForWhileOp(scf::WhileOp whileOp);
 
   // Initialize the pass
   void initializePass(ModuleOp module);

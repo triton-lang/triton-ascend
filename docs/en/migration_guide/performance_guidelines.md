@@ -46,6 +46,7 @@ When executing Triton operators, NPUs leverage parallel mechanisms such as multi
         M: tl.constexpr,                # len of the vector
         BLOCK_SIZE: tl.constexpr
     ):
+        N = BLOCK_SIZE
         idx = tl.arange(0, N)
         mask = idx < M
         # data = tl.load(input + idx, mask = mask) # Alternatively, specify a value such as other=-1.

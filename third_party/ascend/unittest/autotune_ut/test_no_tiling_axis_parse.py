@@ -71,7 +71,7 @@ def case_triton(x_cal, is_simt_only=False):
     output = torch.randint(1, (ynumel, xnumel), dtype=x_cal.dtype, device=x_cal.device)
     if is_simt_only:
         (triton_permute_2d[lambda meta: (triton.cdiv(xnumel, meta['XBLOCK']), triton.cdiv(ynumel, meta['YBLOCK']), 1)](
-            output, x_cal, xnumel, ynumel, force_simt_only=True))
+            output, x_cal, xnumel, ynumel, compile_mode="simt_only"))
     else:
         (triton_permute_2d[lambda meta:
                            (triton.cdiv(xnumel, meta['XBLOCK']), triton.cdiv(ynumel, meta['YBLOCK']), 1)](output, x_cal,
@@ -89,7 +89,10 @@ def test_permute(shape, dtype):
     torch.testing.assert_close(torch_output, triton_output, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 
-@pytest.mark.skipif(not is_compile_on_910_95(), reason="only support A5")
+@pytest.mark.skipif(
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="only support A5",
+)
 @pytest.mark.parametrize('shape', [(1024, 32)])
 @pytest.mark.parametrize('dtype', ['bfloat16'])
 def test_permute_simt(shape, dtype):

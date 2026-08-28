@@ -24,7 +24,7 @@ During development, issues can be classified into different types. The following
 | Issue Type| Typical Symptom/Description| Preferred Debugging Method|
 | :--- | :--- | :--- |
 | **Accuracy issue**| The NPU running result is different from the benchmark reference result (such as the PyTorch or Triton CPU interpreter).| 4. Interpreter mode<br> 5.1 Debugging by printing|
-| **Compilation error (MLIRCompileError)**| If the compilation fails in the conversion phase, `MLIRCompileError` is thrown on the Python side.| 5.2 Compilation error debugging|
+| **Compilation error (MLIRCompilationError)**| If the compilation fails in the conversion phase, `MLIRCompilationError` is thrown on the Python side.| 5.2 Compilation error debugging|
 
 ## 2 Triton-Ascend Compilation Process Overview
 
@@ -144,7 +144,7 @@ You can enable the dump file output by setting **TRITON_DEBUG=1** to obtain **ke
 - Run the test case.
 
 ```bash
-TRITON_DEBUG=1 python 01-vector-add.py
+TRITON_DEBUG=1 TRITON_ALWAYS_COMPILE=1 python 01-vector-add.py
 ```
 
 After the test case is executed, the dump file path is displayed. The default path is **~/.triton/dump**. The following information is displayed:
@@ -356,7 +356,7 @@ Setting the environment variable `TRITON_DEVICE_PRINT` to `1` can enable the `tl
 
 **Usage:**
 
-1.In the Triton kernel, add the `tl.device_print` statement for the variables to be printed.
+1. In the Triton kernel, add the `tl.device_print` statement for the variables to be printed.
 
 ```python
 import triton.language as tl
@@ -415,7 +415,7 @@ Description of environment variables:
 
 ### 5.2 Compilation Error Debugging
 
-When the `ttir.mlir` → `ttadapter.mlir` conversion fails, the `ttadapter.mlir` cannot be generated and the `MLIRCompileError` error is reported.
+When the `ttir.mlir` → `ttadapter.mlir` conversion fails, the `ttadapter.mlir` cannot be generated and the `MLIRCompilationError` error is reported.
 You need to locate the fault at the Triton-Ascend code layer. Triton-Ascend contains the Python and C++ code layers. You need to locate the error code segment based on the call stack information in the error log and use the corresponding debugging method.
 
 ### 5.2.1 Debugging Python Code

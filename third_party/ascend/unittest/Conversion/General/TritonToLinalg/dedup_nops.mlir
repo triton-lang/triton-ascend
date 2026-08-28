@@ -1,7 +1,7 @@
-// RUN: LLVM_EXTRACT_DI_LOCAL_VARIABLES=1 triton-opt %s \
+// RUN: env LLVM_EXTRACT_DI_LOCAL_VARIABLES=1 triton-opt %s \
 // RUN:   --deduplicate-debug-nops | FileCheck %s --check-prefix=DEDUP
 //
-// RUN: LLVM_EXTRACT_DI_LOCAL_VARIABLES=0 triton-opt %s \
+// RUN: env LLVM_EXTRACT_DI_LOCAL_VARIABLES=0 triton-opt %s \
 // RUN:   --deduplicate-debug-nops | FileCheck %s --check-prefix=NODEDUP
 
 // Four NOPs at line 40 (different columns). Three at line 42.

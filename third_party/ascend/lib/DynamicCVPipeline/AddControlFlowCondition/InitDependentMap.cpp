@@ -21,6 +21,7 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -394,7 +395,7 @@ static scf::IfOp findIfOpContainingOp(Operation *op) {
 // Compute producer buffer counts (max map size) from cross/intra-core maps;
 // falls back to BufferCountManager IntraCore when the intra-core map is empty.
 static void computeProducerBufferCount(ControlFlowConditionInfo *info,
-                                       ModuleOp module) {
+                                        ModuleOp module) {
   // Get cross-core buffer count (max size in the map)
   info->crossCoreBufferCount = 0;
   for (auto &entry : info->crossCoreDependentMap) {
@@ -403,26 +404,11 @@ static void computeProducerBufferCount(ControlFlowConditionInfo *info,
   }
   LDBG("Cross-core buffer count (max): " << info->crossCoreBufferCount);
 
-  // Get intra-core buffer count (max size across all main loops)
-  info->intraCoreBufferCount = 0;
-  for (auto &loopEntry : info->intraCoreDependentMap) {
-    auto &intraDepMap = loopEntry.second;
-    for (auto &entry : intraDepMap) {
-      info->intraCoreBufferCount =
-          std::max(info->intraCoreBufferCount, (int)entry.second.size());
-    }
-  }
-  LDBG("Intra-core buffer count (max across all main loops): "
-       << info->intraCoreBufferCount);
-
-  // If intra-core map is empty, use BufferCountManager's IntraCore value
-  if (info->intraCoreBufferCount == 0) {
-    BufferCountManager bufferCountMgr(module);
-    info->intraCoreBufferCount = bufferCountMgr.getBufferCountByType(
-        BufferCountManager::DepType::IntraCore);
-    LDBG("Intra-core map is empty, using BufferCountManager IntraCore value: "
-         << info->intraCoreBufferCount);
-  }
+  // Get intra-core buffer count from module attribute
+  int intraBufCount = getIntraCoreBufferCount(module);
+  info->intraCoreBufferCount = intraBufCount;
+  LDBG("Intra-core buffer count (from module attribute): "
+        << info->intraCoreBufferCount);
 }
 
 // Build if block DAG from crossCoreDependentMap

@@ -28,7 +28,8 @@ def kernel(x_ptr, x_size, **META):
 - `key (list[str])` - 参数名列表，当值发生改变时将触发对所有配置的解析。
 - `prune_configs_by (dict)` - 修剪配置的函数字典。包含以下字段：
   - `'perf_model'`: 性能模型，用于预测不同配置的运行时间，返回运行时间
-  - `'top_k'`: 要进行基准测试的配置数量
+  - `'top_k'`: 使用 `perf_model` 时要进行基准测试的配置数量
+  - `'costmodel'`（可选，Ascend）: 设置为 `True` 时使用默认配置，或传入包含 `top_k`、`hardware_config` 的字典，在真实 benchmark 前使用 Ascend Costmodel 预测并裁剪配置。`costmodel` 和 `perf_model` 不能同时使用
   - `'early_config_prune'`（可选）: 用于提前修剪配置的函数（例如，`num_stages`）。它接收 `configs: List[Config]` 作为输入，并返回修剪后的配置
 - `reset_to_zero (list[str])` - 参数名称列表，将在任何配置解析之前被重置为零。
 - `restore_value (list[str])` - 参数名称列表，这些参数的值将在解析任何配置之后恢复。

@@ -28,6 +28,7 @@ import functools
 import ast
 import gc
 import inspect
+import math
 import os
 import pprint
 import time
@@ -298,6 +299,23 @@ class AutoTilingTuner(Autotuner):
             do_bench,
             cache_results=cache_results,
         )
+        self.costmodel_options = None
+        self._costmodel_fallback_configs = []
+        if prune_configs_by:
+            raw_costmodel_options = prune_configs_by.get("costmodel")
+            if raw_costmodel_options is True:
+                self.costmodel_options = {}
+            elif raw_costmodel_options is None or raw_costmodel_options is False:
+                self.costmodel_options = None
+            elif isinstance(raw_costmodel_options, dict):
+                self.costmodel_options = dict(raw_costmodel_options)
+            else:
+                raise TypeError("`costmodel` must be a dict, True, False, or None")
+
+        if self.perf_model is not None and self.costmodel_options is not None:
+            raise ValueError(
+                "`perf_model` and `costmodel` are mutually exclusive performance pruners; configure only one.")
+
         self.user_defined_do_bench = do_bench is not None
         self.hints = reserved_hints
         self.config_hints = config_hints
@@ -2088,6 +2106,47 @@ class AutoTilingTuner(Autotuner):
         if isinstance(outermost, int) and outermost > 1:
             kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
 
+    def prune_configs(self, kwargs: Dict) -> List[Config]:
+        pruned_configs = super().prune_configs(kwargs)
+        self._costmodel_fallback_configs = []
+        if self.costmodel_options is None:
+            return pruned_configs
+
+        try:
+            from triton.compiler.compiler import make_backend
+            from triton.runtime.driver import driver
+
+            backend = make_backend(driver.active.get_current_target())
+            result = backend.prune_configs_by_costmodel(
+                fn=self.fn,
+                configs=pruned_configs,
+                named_args=self.nargs,
+                runtime_kwargs=kwargs,
+                options=self.costmodel_options,
+            )
+            if result is not None:
+                primary_configs, fallback_configs = result
+                if primary_configs:
+                    pruned_configs = list(primary_configs)
+                    self._costmodel_fallback_configs = list(fallback_configs or [])
+        except Exception as exc:
+            warnings.warn(
+                f"Costmodel pruning failed ({type(exc).__name__}: {exc}); "
+                "falling back to configs after early pruning.", RuntimeWarning, stacklevel=2)
+            self._costmodel_fallback_configs = []
+        return pruned_configs
+
+    @staticmethod
+    def _is_finite_timing(timing) -> bool:
+        if isinstance(timing, (tuple, list)):
+            if not timing:
+                return False
+            timing = timing[0]
+        try:
+            return math.isfinite(float(timing))
+        except (TypeError, ValueError):
+            return False
+
     def run(self, *args, **kwargs):
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
@@ -2099,13 +2158,25 @@ class AutoTilingTuner(Autotuner):
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
-            if self.enable_ubtuner or len(pruned_configs) > 1:
+            if self.enable_ubtuner or len(pruned_configs) > 1 or self.costmodel_options is not None:
 
                 def benchmark():
                     nonlocal did_benchmark
                     did_benchmark = True
                     bench_start = time.time()
-                    timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
+                    try:
+                        timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
+                    except RuntimeError:
+                        # Costmodel-selected primary configs all failed to compile or run;
+                        # fall back to the lower-ranked candidates instead of aborting.
+                        if not self._costmodel_fallback_configs:
+                            raise
+                        timings = self._batch_bench(*args, configs=self._costmodel_fallback_configs, **kwargs)
+                    else:
+                        if (self._costmodel_fallback_configs
+                                and not any(self._is_finite_timing(t) for t in timings.values())):
+                            timings.update(
+                                self._batch_bench(*args, configs=self._costmodel_fallback_configs, **kwargs))
                     bench_end = time.time()
                     self.bench_time = bench_end - bench_start
                     self.cache[key] = builtins.min(timings, key=timings.get)

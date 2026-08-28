@@ -127,6 +127,33 @@ grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]),)
 
 原因是 autotune 在评估不同候选配置时，`BLOCK_M` 这类参数的取值会变化；如果 grid 不随候选配置一起变化，就无法保证每个候选配置都以正确的发射方式执行。
 
+## 使用 Costmodel 减少实测配置数
+
+当候选配置较多时，可以在真实 NPU benchmark 前启用 Costmodel 预测剪枝：
+
+```python
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK_M": 64, "BLOCK_N": 64}),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 64}),
+        triton.Config({"BLOCK_M": 128, "BLOCK_N": 128}),
+    ],
+    key=["M", "N"],
+    prune_configs_by={
+        "costmodel": {
+            "top_k": 0.25,
+        },
+    },
+)
+@triton.jit
+def kernel(...):
+    ...
+```
+
+该选项既适用于手写的 `triton.Config`，也适用于 `configs=[]` 生成的候选配置。`top_k` 可以是保留数量，也可以是 `(0, 1]` 范围内的保留比例。也可以直接使用 `prune_configs_by={"costmodel": True}` 启用默认配置。
+
+Costmodel 只负责预筛选，最终 `best_config` 仍由真实硬件 benchmark 决定。`costmodel` 与社区的 `perf_model` 是二选一关系，不能同时配置；`early_config_prune` 如果存在，则在二者之前执行。完整选项、失败回退和底层接口示例请参见 [Costmodel 示例](./examples/09_costmodel_example.md)。
+
 ## 使用注意事项
 
 autotune 的 benchmark 语义与社区一致，会多次执行 kernel。如果 kernel 存在副作用，例如包含原子操作、inplace 写入，或会修改输入/输出 buffer 的累积状态，仍然需要通过社区已有的 hook 机制处理。

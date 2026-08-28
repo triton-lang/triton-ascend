@@ -123,6 +123,10 @@ Operation *createMainLoopOpWithExtras(Operation *oldOp,
 void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
                           llvm::StringRef header);
 
+// Get intra-core buffer count from module's ssbuffer.intra_buf_count attribute.
+// Returns the attribute value if present, otherwise returns -1 to indicate error.
+int getIntraCoreBufferCount(ModuleOp module);
+
 // Find the ssbuffer.if computation block that owns `op`. Returns nullptr when
 // op is null or is not nested in any scf.if carrying the ssbuffer.if attr.
 scf::IfOp findIfOpContainingOp(Operation *op);

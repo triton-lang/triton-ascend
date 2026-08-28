@@ -455,6 +455,20 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
   });
 }
 
+// Get intra-core buffer count from module's ssbuffer.intra_buf_count attribute.
+int getIntraCoreBufferCount(ModuleOp module) {
+  if (!module) {
+    return -1;
+  }
+
+  auto attr = module->getAttrOfType<IntegerAttr>(CVPipeline::kIntraBufCount);
+  if (!attr) {
+    return -1;
+  }
+
+  return static_cast<int>(attr.getInt());
+}
+
 // Find the ssbuffer.if computation block that owns `op`.
 scf::IfOp findIfOpContainingOp(Operation *op) {
   if (!op) {

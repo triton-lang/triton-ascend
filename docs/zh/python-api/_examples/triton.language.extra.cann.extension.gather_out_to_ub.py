@@ -3,7 +3,6 @@ import torch
 import triton
 import triton.language as tl
 from triton.language.extra.cann.extension import gather_out_to_ub
-from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -30,8 +29,12 @@ def kernel(src_ptr, index_ptr, out_ptr):
 
 
 def test_gather_out_to_ub():
-    if not is_compile_on_910_95():
-        pytest.skip("gather_out_to_ub is only supported on Ascend 950")
+    # TODO: re-enable once bisheng fixes the A5 library implementation.
+    # ConvertLinalgIRToBinary currently fails on a dynamic-size UB
+    # memref.alloc; see third_party/ascend/unittest/pytest_ut/
+    # test_cann_extension.py, which pins the same failure via
+    # pytest.raises(MLIRCompilationError).
+    pytest.skip("gather_out_to_ub is currently broken on Ascend 950")
     # src(4,2) = [[1.,2.],[3.,4.],[5.,6.],[7.,8.]]
     src = torch.tensor([[1., 2.], [3., 4.], [5., 6.], [7., 8.]], device='npu')
     # index(2,2) = [[0,1],[2,3]]

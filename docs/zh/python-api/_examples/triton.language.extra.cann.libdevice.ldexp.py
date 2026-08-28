@@ -1,7 +1,9 @@
+import pytest
 import torch
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -17,6 +19,10 @@ def triton_ldexp(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOC
 
 
 def test_ldexp():
+    if is_compile_on_910_95():
+        # TODO: re-enable once bisheng fixes __hmf_ldexpf on Ascend 950 — the
+        # intrinsic currently returns wrong values (results overflow to inf).
+        pytest.skip("ldexp is currently broken on Ascend 950")
     shape = (2, 256)
     ncore, xblock, xblock_sub = 2, 1024, 512
     x0 = torch.randn(size=shape, dtype=torch.float32).npu()

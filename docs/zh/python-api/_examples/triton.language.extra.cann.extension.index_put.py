@@ -3,7 +3,6 @@ import torch
 import triton
 import triton.language as tl
 from triton.language.extra.cann.extension import index_put
-from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -27,8 +26,12 @@ def kernel(value_ptr, index_ptr, dst_ptr):
 
 
 def test_index_put():
-    if not is_compile_on_910_95():
-        pytest.skip("index_put is only supported on Ascend 950")
+    # TODO: re-enable once bisheng fixes the A5 library implementation.
+    # ConvertLinalgIRToBinary currently fails on a dynamic-size UB
+    # memref.alloc; see third_party/ascend/unittest/pytest_ut/
+    # test_cann_extension.py, which pins the same failure via
+    # pytest.raises(MLIRCompilationError).
+    pytest.skip("index_put is currently broken on Ascend 950")
     # dst: (4,2) of zeros
     dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value = [[1., 2.],

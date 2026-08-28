@@ -400,22 +400,29 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
   for (int i = 0; i < shapedType.getRank(); ++i) {
+    OpFoldResult curStride = fullShapeReCast.getConstifiedMixedStrides()[i];
     if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
-      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
+      if (isZero(curStride)) {
+        emitWarning(loc)
+            << "getBoundarySizes() cannot reconstruct boundary on checked "
+               "zero-stride axis "
+            << i << "; keep current block size for this axis";
+        continue;
+      }
 
-      OpFoldResult curOffset = divOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+      OpFoldResult curOffset = divOpFoldResult(offsetShift, curStride, loc,
+                                               rewriter);
+      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
       OpFoldResult curLeftSize =
           maxOpFoldResult(subOpFoldResult(fullShape, curOffset, loc, rewriter),
                           rewriter.getIndexAttr(0), loc, rewriter);
 
       boundarySize[i] =
           minOpFoldResult(boundarySize[i], curLeftSize, loc, rewriter);
+    }
 
-      offsetShift = remOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+    if (!isZero(curStride)) {
+      offsetShift = remOpFoldResult(offsetShift, curStride, loc, rewriter);
     }
   }
 
@@ -986,8 +993,8 @@ OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::AddIOp>(loc, lhsValue, rhsValue).getResult();
@@ -1015,8 +1022,8 @@ OpFoldResult subOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::SubIOp>(loc, lhsValue, rhsValue).getResult();
@@ -1054,8 +1061,8 @@ OpFoldResult mulOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::MulIOp>(loc, lhsValue, rhsValue).getResult();
@@ -1095,8 +1102,8 @@ OpFoldResult divOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::DivSIOp>(loc, lhsValue, rhsValue).getResult();
@@ -1115,6 +1122,9 @@ OpFoldResult remOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (lhsInt && rhsInt)
     return b.getIndexAttr(lhsInt.value() % rhsInt.value());
 
+  if (rhsInt && rhsInt.value() == 1)
+    return b.getIndexAttr(0);
+
   if (lhsInt) {
     if (lhsInt.value() == 0)
       return lhs;
@@ -1131,8 +1141,8 @@ OpFoldResult remOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::RemSIOp>(loc, lhsValue, rhsValue).getResult();
@@ -1156,8 +1166,8 @@ OpFoldResult minOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
   if (rhsInt) {
     rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
   } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
+    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
+    assert(isa<IndexType>(rhsValue.getType()));
   }
 
   return b.create<arith::MinSIOp>(loc, lhsValue, rhsValue).getResult();

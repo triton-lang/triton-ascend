@@ -46,4 +46,9 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CHECK: %[[ATOMIC_PTR:.*]] = memref.reinterpret_cast %{{.*}} to offset: [%{{.*}}], sizes: [1], strides: [1] : memref<?xi32> to memref<1xi32, strided<[1], offset: ?>>
 // CHECK: %[[ATOMIC_VIEW:.*]] = memref.subview %[[ATOMIC_PTR]][0] [%[[MASK_SIZE]]] [1] : memref<1xi32, strided<[1], offset: ?>> to memref<?xi32, strided<[1], offset: ?>>
 // CHECK: %[[ATOMIC_VALUE:.*]] = tensor.extract_slice %{{.*}}[0] [%[[MASK_SIZE]]] [1] : tensor<1xi32> to tensor<?xi32>
-// CHECK: hivm.hir.store ins(%[[ATOMIC_VALUE]] : tensor<?xi32>) outs(%[[ATOMIC_VIEW]] : memref<?xi32, strided<[1], offset: ?>>) atomic = <add>
+// CHECK: %[[RESULT_VIEW:.*]] = memref.subview %{{.*}}[0] [%[[MASK_SIZE]]] [1] : memref<1xi32> to memref<?xi32, strided<[1]>>
+// CHECK: %[[LOCK:.*]] = hivm.hir.create_sync_block_lock : memref<1xi64>
+// CHECK: hivm.hir.sync_block_lock lock_var(%[[LOCK]] : memref<1xi64>)
+// CHECK: memref.copy %[[ATOMIC_VIEW]], %[[RESULT_VIEW]] :
+// CHECK: hivm.hir.store ins(%[[ATOMIC_VALUE]] : tensor<?xi32>) outs(%[[ATOMIC_VIEW]] : memref<?xi32, strided<[1], offset: ?>>) {already_sync} atomic = <add>
+// CHECK: hivm.hir.sync_block_unlock lock_var(%[[LOCK]] : memref<1xi64>)

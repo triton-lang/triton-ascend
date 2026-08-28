@@ -225,8 +225,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 🏘️ Community Activities
 
-1. [Meeting Calendar](https://meeting.osinfra.cn/ascend)
-2. [Meeting Minutes Board](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
+1. [Meeting Time, Link, and Minutes](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
 
 ## 🤝 Community and Contribution
 

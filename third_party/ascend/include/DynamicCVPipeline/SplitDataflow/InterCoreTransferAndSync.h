@@ -189,7 +189,8 @@ private:
                            mlir::Operation *consumedDataOp = nullptr,
                            bool isStoreDirectly = false);
   void insertMemDepSync(mlir::OpBuilder &builder, mlir::Operation *producerOp,
-                        mlir::Operation *consumerOp, int flag,
+                        mlir::Operation *consumerOp,
+                        mlir::Operation *consumerEndOp, int flag,
                         mlir::Location loc, bool isCubeToVector,
                         FlagIdReuseManager &flagIdReuseManager);
   // Match the CUBE -> VECTOR direct-store pattern inside the given SCF op:

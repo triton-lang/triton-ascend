@@ -54,6 +54,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 
 #include "DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
@@ -71,6 +72,8 @@ constexpr llvm::StringLiteral kMatmulAtLeastOnceHint = "matmul_at_least_once";
 
 namespace {
 
+enum class fixpipeDst { UB, GM, L1, L0C, Unknown };
+
 struct MatmulInputs {
   Value a;
   Value b;
@@ -82,8 +85,15 @@ struct SplitInfo {
   Value outerInValue;
   Value outerOutValue;
   bool shouldSplit;
-  bool supported = false;
+  fixpipeDst fixpipeDst = fixpipeDst::Unknown;
 };
+
+// SSBuffer manager for MNE counter address allocation
+static SSBufferManager ssbufManager;
+
+// Map to store matmul execution state variables for cascaded matmul support
+// Key: matmul operation, Value: execution state variable (i1)
+static llvm::DenseMap<Operation *, Value> matmulExecStateMap;
 
 } // namespace
 
@@ -318,74 +328,6 @@ traceChainUser(Value value, bool needSingle,
   return std::nullopt;
 }
 
-static bool hasCrossBlockCascadeL0CConsumer(Value result,
-                                            linalg::MatmulOp matmulOp) {
-  auto matchMatmulC = [](Operation *op, Value value) {
-    if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
-      auto inputs = parseMatmulInputs(nextMatmulOp);
-      return inputs.a != value && inputs.b != value && inputs.bias == value;
-    }
-    return false;
-  };
-  auto usedByL0C =
-      traceChainUser(result, true, matchMatmulC,
-                     [](Operation *op, Value value) { return false; });
-
-  // No cascade consumer, or the cascade consumer is in the same block as
-  // `result` (i.e. inside the current for-loop body).
-  if (!usedByL0C.has_value() ||
-      usedByL0C.value()->getBlock() == result.getParentBlock()) {
-    return false;
-  }
-
-  // Only support the cascade for in the same block
-  auto cascadeMatmul = llvm::dyn_cast<linalg::MatmulOp>(usedByL0C.value());
-  auto cascadeForOp = cascadeMatmul
-                          ? llvm::dyn_cast_if_present<scf::ForOp>(
-                                cascadeMatmul->getBlock()->getParentOp())
-                          : nullptr;
-  auto currentForOp = llvm::dyn_cast_if_present<scf::ForOp>(
-      matmulOp->getBlock()->getParentOp());
-  if (cascadeForOp && currentForOp &&
-      cascadeForOp->getBlock() != currentForOp->getBlock()) {
-    return false;
-  }
-  currentForOp->setAttr(CVPipeline::kMayNotExecNPU,
-                        BoolAttr::get(matmulOp.getContext(), true));
-  return true;
-}
-
-/**
- * Checks whether `initVal` is defined by a linalg::MatmulOp (L0C -> L0C
- * cascade producer) that lives in a different block than `matmulOp`'s
- * for-loop. Such a cascade scenario should be split.
- */
-static bool hasCrossBlockCascadeL0CProducer(Value initVal,
-                                            linalg::MatmulOp matmulOp) {
-  auto defMatmul = dyn_cast_if_present<linalg::MatmulOp>(
-      hivm::traceDefOp<linalg::MatmulOp>(initVal).value_or(nullptr));
-  if (!defMatmul) {
-    return false;
-  }
-  // Cascade producer must be outside `matmulOp`'s block to be considered
-  // a cascade scenario at all.
-  auto defInMatmulBlock =
-      CVPipeline::getAncestorInBlock(defMatmul, matmulOp->getBlock());
-  if (defInMatmulBlock) {
-    return false;
-  }
-  // Only support the cascade for in the same block
-  auto cascadeForOp = llvm::dyn_cast_if_present<scf::ForOp>(
-      defMatmul->getBlock()->getParentOp());
-  auto currentForOp = llvm::dyn_cast_if_present<scf::ForOp>(
-      matmulOp->getBlock()->getParentOp());
-  if (cascadeForOp && currentForOp &&
-      cascadeForOp->getBlock() != currentForOp->getBlock()) {
-    return false;
-  }
-  return true;
-}
-
 static bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp) {
   // Subview ops may be nested many layers deep through reinterpretation or
   // other subviews. like, subview (subview (reinterpret_cast (subview
@@ -425,6 +367,61 @@ static bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp) {
     return false;
   }
   return false;
+}
+
+// Determines the destination of matmul result for fixpipe: GM/L0C/L1/UB
+static fixpipeDst getFixpipeDst(Value outValue) {
+  // Check if result is stored to GM
+  auto matchStoreGm = [](Operation *op, Value value) {
+    if (auto nextStoreGM =
+            dyn_cast<bufferization::MaterializeInDestinationOp>(op)) {
+      Value dest = nextStoreGM.getDest();
+      auto viewOp = dest.getDefiningOp<ViewLikeOpInterface>();
+      return isSubviewFromGlobalMemory(viewOp);
+    } else if (auto hivmStore = dyn_cast<hivm::StoreOp>(op)) {
+      auto dest = hivmStore.getDst();
+      auto viewOp = dest.getDefiningOp<ViewLikeOpInterface>();
+      return isSubviewFromGlobalMemory(viewOp);
+    }
+    return false;
+  };
+  if (traceChainUser(outValue, false, matchStoreGm,
+                     [](Operation *op, Value value) { return false; })) {
+    // TODO: fixpipeDst::GM should use insertMNEGuardStore (Part B), for now
+    // treat as UB
+    return fixpipeDst::UB;
+  }
+
+  // Check if result is used as matmul C (bias)
+  auto matchMatmulC = [](Operation *op, Value value) {
+    if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+      auto inputs = parseMatmulInputs(nextMatmulOp);
+      return inputs.a != value && inputs.b != value && inputs.bias == value;
+    }
+    return false;
+  };
+  if (traceChainUser(outValue, true, matchMatmulC,
+                     [](Operation *op, Value value) { return false; })) {
+    return fixpipeDst::L0C;
+  }
+
+  // Check if result is used as matmul A or B (goes to L1)
+  auto matchMatmulAB = [](Operation *op, Value value) {
+    if (auto nextMatmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+      auto inputs = parseMatmulInputs(nextMatmulOp);
+      return inputs.a == value || inputs.b == value;
+    }
+    return false;
+  };
+  auto skipCubeop = [](Operation *op, Value value) {
+    return isa<linalg::TransposeOp>(op);
+  };
+  if (traceChainUser(outValue, false, matchMatmulAB, skipCubeop)) {
+    return fixpipeDst::L1;
+  }
+
+  // Default: result goes to UB
+  return fixpipeDst::UB;
 }
 
 /**
@@ -611,41 +608,6 @@ static bool verifyMatmul(linalg::MatmulOp matmulOp) {
   return true;
 }
 
-// Supports the most common case, where a loop-carried matmul is
-// directly under a not executed for-loop
-static std::optional<SplitInfo> handleMayNotExec(linalg::MatmulOp matmulOp,
-                                                 Value outerInValue) {
-  auto *parentOp = matmulOp->getBlock()->getParentOp();
-  auto forOp = llvm::dyn_cast<scf::ForOp>(parentOp);
-  auto inputs = parseMatmulInputs(matmulOp);
-  auto bias = inputs.bias;
-  if (!forOp || !scfMayNotExec(forOp)) {
-    return std::nullopt;
-  }
-  auto blockArg = llvm::dyn_cast<BlockArgument>(bias);
-  if (!blockArg || blockArg.getOwner()->getParentOp() != forOp) {
-    return std::nullopt;
-  }
-  auto initVal = forOp.getTiedLoopInit(blockArg)->get();
-  auto result = forOp.getTiedLoopResult(blockArg);
-
-  // only support the scenario that initVal is zero not broadcast
-  if (operationIsFillZero(outerInValue.getDefiningOp())) {
-    // Check if the current matmul is used by a subsequent cross-block
-    // cascade matmul (L0C -> L0C).
-    if (hasCrossBlockCascadeL0CConsumer(result, matmulOp)) {
-      return SplitInfo{false, initVal, result, false, false};
-    }
-  }
-
-  // Check if the current matmul's bias (L0C) is defined by a cross-block
-  // cascade matmul (L0C -> L0C).
-  if (hasCrossBlockCascadeL0CProducer(initVal, matmulOp)) {
-    return SplitInfo{true, initVal, result, false, true};
-  }
-
-  return SplitInfo{true, initVal, result, true, false};
-}
 
 /**
  * Determines whether a matmul operation should be split based on comprehensive
@@ -677,8 +639,7 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp,
   auto matmulInput = parseMatmulInputs(matmulOp);
   if (needSplitAll) {
     LOG_DEBUG("Split because needSplitAll is true. " << matmulOp);
-    return SplitInfo{false, matmulInput.bias, matmulOp.getResult(0), true,
-                     false};
+    return SplitInfo{false, matmulInput.bias, matmulOp.getResult(0), true};
   }
 
   bool argsLimitedInMatmul = true;
@@ -692,134 +653,115 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp,
   }
   if (!argsLimitedInMatmul) {
     LOG_DEBUG("Split because bias is not limited in args" << matmulOp); // S25
-    return SplitInfo{mayNotExec, outerInValue, outerOutValue, true, false};
-  }
-
-  if (mayNotExec) {
-    auto splitInfoOpt = handleMayNotExec(matmulOp, outerInValue);
-    if (splitInfoOpt.has_value()) {
-      return splitInfoOpt;
-    }
+    return SplitInfo{mayNotExec, outerInValue, outerOutValue, true};
   }
 
   if (!shouldSplitByInput(matmulOp, outerOutValue, outerInValue) &&
       !shouldSplitByOutput(matmulOp, outerOutValue, outerInValue)) {
-    return SplitInfo{mayNotExec, outerInValue, outerOutValue, false, false};
+    return SplitInfo{mayNotExec, outerInValue, outerOutValue, false};
   }
 
-  return SplitInfo{mayNotExec, outerInValue, outerOutValue, true, false};
+  return SplitInfo{mayNotExec, outerInValue, outerOutValue, true};
 }
 
-/**
- * Collects all the scf::ForOps that gate the execution of the current
- * matmul in a cascade scenario.
- */
-static SmallVector<scf::ForOp> collectCascadeForOps(const SplitInfo &splitInfo,
-                                                    scf::ForOp currentForOp) {
-  SmallVector<scf::ForOp> result;
-  if (!currentForOp) {
-    return result;
+static void insertMNEGuardUB(linalg::MatmulOp matmulOp,
+                             PatternRewriter &rewriter, SplitInfo &splitInfo,
+                             scf::ForOp forOp) {
+  Location loc = forOp.getLoc();
+  auto resultType =
+      dyn_cast<RankedTensorType>(splitInfo.outerOutValue.getType());
+  if (!resultType) {
+    LOG_DEBUG("MNE guard: result is not a RankedTensorType, skip");
+    return;
   }
-  result.push_back(currentForOp);
+  auto elmType = resultType.getElementType();
 
-  SmallPtrSet<Operation *, 8> seen;
-  seen.insert(currentForOp);
+  // Generate unique tag for this matmul-store pair
+  int coupledId = SplitMatmulPattern::getNextCoupledMatmulAndStoreId();
 
-  Value curIn = splitInfo.outerInValue;
-  while (true) {
-    auto defMatmul = dyn_cast_if_present<linalg::MatmulOp>(
-        hivm::traceDefOp<linalg::MatmulOp>(curIn).value_or(nullptr));
-    if (!defMatmul) {
-      break;
-    }
-    if (auto producerForOp = llvm::dyn_cast_if_present<scf::ForOp>(
-            defMatmul->getBlock()->getParentOp())) {
-      if (seen.insert(producerForOp).second) {
-        result.push_back(producerForOp);
-      }
-    }
-    // Continue tracing upward along the producer matmul's bias input.
-    auto inputs = parseMatmulInputs(defMatmul);
-    curIn = inputs.bias;
+  // Allocate MNE counter address (2560-3072 range)
+  auto addrResult = ssbufManager.allocateMNECounterAddr();
+  if (!addrResult) {
+    LOG_DEBUG("Failed to allocate MNE counter address for " << matmulOp);
+    return;
   }
+  int64_t counterAddr = addrResult.value();
 
-  return result;
-}
+  // Block 1: Create counter memref in SSBUF (addr=11)
+  rewriter.setInsertionPoint(forOp);
+  
+  auto [addrConst, pointerCastOp] = 
+      getSsbufConstAndPointerCast(rewriter, loc, counterAddr, rewriter.getI32Type());
+  Value counterMemref = pointerCastOp.getResult();
 
-/**
- * Handles the mayNotExec case by creating select operations.
- * This function creates a select operation to choose between the actual result
- * and a zero-filled result based on whether the loop will execute.
- *
- * Returns the select result if mayNotExec is handled, otherwise returns the
- * original outerOutValue.
- */
-static Value handleMayNotExecSelect(linalg::MatmulOp matmulOp,
-                                    PatternRewriter &rewriter,
-                                    SplitInfo &splitInfo,
-                                    bool replaceUses = true) {
-  auto forOp = llvm::dyn_cast_if_present<scf::ForOp>(
-      splitInfo.outerOutValue.getDefiningOp());
-  if (!forOp) {
-    return splitInfo.outerOutValue;
-  }
+  // Initialize counter to 0 before loop (no tag, won't be moved)
+  auto c0 = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
 
-  auto outputType =
-      dyn_cast<RankedTensorType>(parseMatmulInputs(matmulOp).bias.getType());
-  if (!outputType) {
-    return splitInfo.outerOutValue;
-  }
-  auto elmType = outputType.getElementType();
-  Location loc = matmulOp.getLoc();
+  // Store 0 with tag (will be moved to appropriate block by later passes)
+  auto store0Op = rewriter.create<memref::StoreOp>(loc, c0, counterMemref, ValueRange{});
+  store0Op->setAttr(mlir::CVPipeline::kMNEStore0, rewriter.getUnitAttr());
 
-  rewriter.setInsertionPointAfterValue(splitInfo.outerOutValue);
+  // Block 2: Inside loop - write 1 to counter after matmul executes
+  auto *forBody = forOp.getBody();
+  auto yieldOp = cast<scf::YieldOp>(forBody->getTerminator());
+  rewriter.setInsertionPoint(yieldOp);
+  auto c1 = rewriter.create<arith::ConstantIntOp>(loc, 1, 32);
+  auto storeC1Op = rewriter.create<memref::StoreOp>(
+      loc, c1, counterMemref, ValueRange{});
+  storeC1Op->setAttr(mlir::CVPipeline::kCoupledMatmulAndStore,
+                     rewriter.getI32IntegerAttr(coupledId));
+  matmulOp->setAttr(mlir::CVPipeline::kCoupledMatmulAndStore,
+                    rewriter.getI32IntegerAttr(coupledId));
 
-  SmallVector<scf::ForOp> cascadeForOps =
-      collectCascadeForOps(splitInfo, forOp);
+  // Block 3: After loop - read counter, create scf.if to select result or
+  // zero-fill
+  rewriter.setInsertionPointAfter(forOp);
+  auto loadCounter =
+      rewriter.create<memref::LoadOp>(loc, counterMemref, ValueRange{});
+  auto hasExec = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::ne,
+                                                loadCounter, c0);
 
-  Value executed = nullptr;
-  for (auto loopOp : cascadeForOps) {
-    auto lb = loopOp.getLowerBound();
-    auto ub = loopOp.getUpperBound();
-    Value cmp =
-        rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, ub, lb);
-    executed =
-        executed ? rewriter.create<arith::OrIOp>(loc, executed, cmp) : cmp;
-  }
-
-  Value zeroValue;
+  // Create zero fill value for else branch (same shape/type as output)
+  auto emptyOp = rewriter.create<tensor::EmptyOp>(loc, resultType.getShape(),
+                                                  resultType.getElementType());
+  Value zeroFill;
   if (auto floatType = dyn_cast<FloatType>(elmType)) {
     APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
-    zeroValue =
+    auto zeroVal =
         rewriter.create<arith::ConstantFloatOp>(loc, floatType, zeroAPFloat)
             .getResult();
+    auto fillOp =
+        rewriter.create<linalg::FillOp>(loc, zeroVal, emptyOp.getResult());
+    zeroFill = fillOp.getResult(0);
   } else if (auto intType = dyn_cast<IntegerType>(elmType)) {
-    zeroValue =
+    auto zeroVal =
         rewriter.create<arith::ConstantIntOp>(loc, intType, 0).getResult();
-  }
-  auto fillOp =
-      rewriter.create<linalg::FillOp>(loc, zeroValue, splitInfo.outerOutValue);
-  auto selectOp = rewriter.create<arith::SelectOp>(
-      loc, executed, splitInfo.outerOutValue, fillOp.getResult(0));
-
-  if (replaceUses) {
-    // Replace uses of outerOutValue with select result, except for the select
-    // and fill operations
-    splitInfo.outerOutValue.replaceUsesWithIf(
-        selectOp.getResult(), [&](OpOperand &operand) {
-          return operand.getOwner() != selectOp && operand.getOwner() != fillOp;
-        });
+    auto fillOp =
+        rewriter.create<linalg::FillOp>(loc, zeroVal, emptyOp.getResult());
+    zeroFill = fillOp.getResult(0);
   }
 
-  forOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
+  // Create if: then returns real result, else returns zero fill
+  auto ifOp = rewriter.create<scf::IfOp>(loc, resultType, hasExec, true);
+  rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+  rewriter.create<scf::YieldOp>(loc, splitInfo.outerOutValue);
+  rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+  rewriter.create<scf::YieldOp>(loc, zeroFill);
+
+  // Replace uses of outerOutValue except yields
+  splitInfo.outerOutValue.replaceUsesWithIf(
+      ifOp.getResult(0),
+      [&](OpOperand &opnd) { return !isa<scf::YieldOp>(opnd.getOwner()); });
+
+  // Mark for loop with matmul limited to CUBE
+  forOp->setAttr(mlir::CVPipeline::kHIVMMatmulLimitedInCubeAttr,
                  rewriter.getUnitAttr());
-
-  return selectOp.getResult();
 }
 
 static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
                                  PatternRewriter &rewriter,
-                                 SplitInfo splitInfo) {
+                                 SplitInfo &splitInfo,
+                                 scf::ForOp forOp = nullptr) {
   auto outputType =
       dyn_cast<RankedTensorType>(parseMatmulInputs(matmulOp).bias.getType());
   if (!outputType) {
@@ -861,30 +803,27 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
   splitInfo.outerInValue.replaceUsesWithIf(
       zeroVal, [&](OpOperand &opop) { return opop.getOwner() == outerDefOp; });
 
-  auto forOp = llvm::dyn_cast_if_present<scf::ForOp>(
-      splitInfo.outerOutValue.getDefiningOp());
-  if (!splitInfo.mayNotExec || !forOp) {
-    // [Step 2] Create new matmul using zero-filled tensor as accumulator
-    // New matmul runs entirely on CUBE with no VECTOR dependency
-    auto inputs = parseMatmulInputs(matmulOp);
-    auto a = inputs.a;
-    auto b = inputs.b;
-    auto bias = inputs.bias;
-    rewriter.setInsertionPoint(matmulOp);
-    auto newMatmul = rewriter.create<linalg::MatmulOp>(loc, ValueRange{a, b},
-                                                       ValueRange{bias});
-    NamedAttrList attrs(matmulOp->getAttrDictionary());
-    constexpr StringLiteral kShouldRemoveAttrs[] = {"operandSegmentSizes",
-                                                    "res_attrs", "arg_attrs"};
-    for (auto attr : kShouldRemoveAttrs) {
-      attrs.erase(attr);
-    }
-    newMatmul->setAttrs(attrs);
-    if (splitInfo.outerOutValue == matmulOp.getResult(0)) {
-      splitInfo.outerOutValue = newMatmul.getResult(0);
-    }
-    rewriter.replaceOp(matmulOp, newMatmul);
+
+  // [Step 2] Create new matmul using zero-filled tensor as accumulator
+  // New matmul runs entirely on CUBE with no VECTOR dependency
+  auto inputs = parseMatmulInputs(matmulOp);
+  auto a = inputs.a;
+  auto b = inputs.b;
+  auto bias = inputs.bias;
+  rewriter.setInsertionPoint(matmulOp);
+  auto newMatmul = rewriter.create<linalg::MatmulOp>(loc, ValueRange{a, b},
+                                                      ValueRange{bias});
+  NamedAttrList attrs(matmulOp->getAttrDictionary());
+  constexpr StringLiteral kShouldRemoveAttrs[] = {"operandSegmentSizes",
+                                                  "res_attrs", "arg_attrs"};
+  for (auto attr : kShouldRemoveAttrs) {
+    attrs.erase(attr);
   }
+  newMatmul->setAttrs(attrs);
+  if (splitInfo.outerOutValue == matmulOp.getResult(0)) {
+    splitInfo.outerOutValue = newMatmul.getResult(0);
+  }
+  rewriter.replaceOp(matmulOp, newMatmul);
 
   auto newOutValue = splitInfo.outerOutValue;
 
@@ -894,34 +833,6 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
 
   constexpr size_t kMaxPreservedUsers = 2;
   SmallPtrSet<Operation *, kMaxPreservedUsers> preservedUsers;
-  if (splitInfo.mayNotExec && forOp) {
-    auto lb = forOp.getLowerBound();
-    auto ub = forOp.getUpperBound();
-
-    Value executed =
-        rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt, ub, lb);
-    Value zeroValue;
-    if (auto floatType = dyn_cast<FloatType>(elmType)) {
-      APFloat zeroAPFloat = APFloat::getZero(floatType.getFloatSemantics());
-      zeroValue =
-          rewriter.create<arith::ConstantFloatOp>(loc, floatType, zeroAPFloat)
-              .getResult();
-    } else if (auto intType = dyn_cast<IntegerType>(elmType)) {
-      zeroValue =
-          rewriter.create<arith::ConstantIntOp>(loc, intType, 0).getResult();
-    }
-    auto fillOp = rewriter.create<linalg::FillOp>(loc, zeroValue,
-                                                  splitInfo.outerOutValue);
-    auto selectOp = rewriter.create<arith::SelectOp>(
-        loc, executed, splitInfo.outerOutValue, fillOp.getResult(0));
-    fillOp->setAttr(CVPipeline::kForMayNotExec, rewriter.getUnitAttr());
-    selectOp->setAttr(CVPipeline::kForMayNotExec, rewriter.getUnitAttr());
-    newOutValue = selectOp.getResult();
-    preservedUsers.insert(selectOp);
-    preservedUsers.insert(fillOp);
-    forOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
-                   rewriter.getUnitAttr());
-  }
 
   Operation *addOp;
   if (isa<FloatType>(elmType)) {
@@ -937,6 +848,7 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
     preservedUsers.insert(addOp);
   }
   addOp->setAttr(CVPipeline::kAddFromMatmul, rewriter.getUnitAttr());
+  splitInfo.fixpipeDst = fixpipeDst::UB;
   splitInfo.outerOutValue.replaceUsesWithIf(
       addOp->getResult(0), [&](OpOperand &operand) {
         return !preservedUsers.contains(operand.getOwner());
@@ -972,25 +884,32 @@ SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp,
       markOpOpt.has_value()) {
     auto markOp = markOpOpt.value();
     markOp->removeAttr(kMatmulAtLeastOnceHint);
-    if (markOp->getAttrs().empty() ||
-        (markOp->getAttrs().size() == 1 &&
-         markOp->getAttrs().front().getName() == "effects")) {
-      rewriter.eraseOp(markOp);
+    if (markOp->getAttrs().empty()) {
+      rewriter.eraseOp(markOpOpt.value());
     }
     matmulOp->getParentOp()->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
                                      rewriter.getUnitAttr());
   }
 
+  auto forOp =
+      dyn_cast_if_present<scf::ForOp>(splitInfo.outerOutValue.getDefiningOp());
+
   if (splitInfo.shouldSplit) {
-    return splitMatmul(matmulOp, rewriter, splitInfo);
+    if (failed(splitMatmul(matmulOp, rewriter, splitInfo, forOp))) {
+      return failure();
+    }
+  }
+
+  if (splitInfo.mayNotExec && forOp) {
+    splitInfo.fixpipeDst = getFixpipeDst(splitInfo.outerOutValue);
+    if (splitInfo.fixpipeDst == fixpipeDst::UB) {
+      insertMNEGuardUB(matmulOp, rewriter, splitInfo, forOp);
+      return success();
+    }
   }
 
   if (splitInfo.mayNotExec) {
-    if (splitInfo.supported) {
-      handleMayNotExecSelect(matmulOp, rewriter, splitInfo);
-    } else {
-      matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
-    }
+    matmulOp->setAttr(CVPipeline::kMayNotExec, rewriter.getUnitAttr());
   }
 
   return success();

@@ -842,11 +842,8 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
 
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
-      loc, mlir::TypeRange{},    // No return value
-      srcValue,                  // src
-      cubeAllocOp->getResult(0), // dst
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      loc, mlir::TypeRange{}, srcValue, cubeAllocOp->getResult(0),
+      dmaModeAttr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, CVPipeline::kCoreTypeCube,
                      transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
@@ -1700,9 +1697,8 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
 
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{}, fixpipeSrcValue, allocOp->getResult(0),
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
-      builder.getBoolAttr(channelSplit), nullptr, nullptr, mlir::ArrayAttr{},
-      nullptr);
+      dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      builder.getBoolAttr(channelSplit), nullptr, nullptr);
   attachCommonTags(fixpipeOp, prodBlockId, CVPipeline::kCoreTypeCube);
   // Tag C2C fixpipe as kIntraDeps producer.
   fixpipeOp->setAttr(CVPipeline::kIntraDeps,

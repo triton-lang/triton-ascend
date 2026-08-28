@@ -377,6 +377,84 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
     yieldOp->setOperands(newOperands);
 }
 
+// Process cross-block tensor dependencies for double buffering
+static int
+processTensorDependencies(const MainLoop &loop,
+                          DenseMap<Value, InnerBlockInfo> &blocks,
+                          DenseMap<Value, SmallVector<Value>> &depValueMap,
+                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+                          BufferMap &bufferMap, OpBuilder &globalBuilder,
+                          int &groupId, const DenseSet<Value> &clonedDepVals) {
+  // Dedupe by depVal instead of op
+  llvm::DenseSet<Value> seenVals;
+
+  for (auto &blockPair : blocks) {
+    Value blockKey = blockPair.first;
+    auto depIt = depValueMap.find(blockKey);
+    if (depIt == depValueMap.end())
+      continue;
+
+    SmallVector<Value> &depValues = depIt->second;
+
+    for (Value depVal : depValues) {
+      // Skip if already processed
+      if (!seenVals.insert(depVal).second)
+        continue;
+
+      // Validate dependency value (skip BlockArgument, null definingOp,
+      // non-ShapedType)
+      if (isa<BlockArgument>(depVal) || !depVal.getDefiningOp() ||
+          !isa<ShapedType>(depVal.getType()))
+        continue;
+
+      // Skip tensor::EmptyOp - it carries no producer-consumer value flow
+      if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
+        continue;
+
+      // Skip bufferization.alloc_tensor
+      if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
+        continue;
+
+      auto *parentOp = depVal.getDefiningOp()->getParentOp();
+      if (parentOp != loop.getOperation())
+        continue;
+
+      // Skip depVals that were already cloned by cloneEmptyFillsInBlocks.
+      if (clonedDepVals.contains(depVal))
+        continue;
+
+      auto userIt = depUserMap.find(depVal);
+      if (userIt == depUserMap.end())
+        continue;
+      SmallVector<Operation *> depUsers = userIt->second;
+
+      auto producerId = getOpBlockId(depVal.getDefiningOp());
+      if (!producerId.has_value()) {
+        continue;
+      }
+
+      // Check if all users are in the same block
+      bool allUsersSameBlock = true;
+      for (Operation *depUser : depUsers) {
+        auto userId = getOutermostSsbufferId(depUser);
+        if (!userId.has_value() || *userId != *producerId) {
+          allUsersSameBlock = false;
+          break;
+        }
+      }
+      if (allUsersSameBlock)
+        continue;
+
+      // Process cross-block dependency with double buffering
+      if (processDepVal(depVal, loop, bufferMap, depUserMap, globalBuilder,
+                        *producerId, groupId) != 0)
+        return -1;
+      groupId++;
+    }
+  }
+  return 0;
+}
+
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
                                scope::ScopeOp vectorScope, int &groupId,
                                bool &i1Found, bool &memrefFound) {

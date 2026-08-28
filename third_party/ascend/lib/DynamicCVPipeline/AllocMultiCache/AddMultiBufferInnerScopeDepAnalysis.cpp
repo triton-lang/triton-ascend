@@ -367,11 +367,10 @@ forEachYieldedCrossBlockDep(Operation *op,
 // empty), -1=invalid negative block id. i1Found is set to true when any tensor
 // dep collected here has element type i1; the caller is expected to abort and
 // trigger fallback in that case.
-int
-collectInnerBlockInfo(const MainLoop &loop,
-                      DenseMap<Value, InnerBlockInfo> &blocks,
-                      DenseMap<Value, SmallVector<Value>> &depValueMap,
-                      SmallVector<Operation *> &allOps, bool &i1Found) {
+int collectInnerBlockInfo(const MainLoop &loop,
+                          DenseMap<Value, InnerBlockInfo> &blocks,
+                          DenseMap<Value, SmallVector<Value>> &depValueMap,
+                          SmallVector<Operation *> &allOps, bool &i1Found) {
   depValueMap.clear();
   Block *body = loop.getBody();
   if (!body)
@@ -652,12 +651,11 @@ static int cloneEmptyFillsInBlocks(
 }
 
 // Clone bufferization.alloc_tensor to each consumer block
-int
-cloneAllocTensorsInBlocks(const MainLoop &loop,
-                          DenseMap<Value, InnerBlockInfo> &blocks,
-                          DenseMap<Value, SmallVector<Value>> &depValueMap,
-                          DenseMap<Value, SmallVector<Operation *>> &depUserMap,
-                          OpBuilder &globalBuilder) {
+int cloneAllocTensorsInBlocks(
+    const MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
+    DenseMap<Value, SmallVector<Value>> &depValueMap,
+    DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+    OpBuilder &globalBuilder) {
   return cloneDepsToConsumers(
       loop, blocks, depValueMap, depUserMap, globalBuilder,
       isAllocTensorPattern,
@@ -675,12 +673,12 @@ cloneAllocTensorsInBlocks(const MainLoop &loop,
 // rematerialize scalar deps rooted in a tensor. Mirrors the original inline
 // sequence in addInnerMultiBuffer lines 1999-2022; exposed here so the main
 // file can call it as a single unit.
-int runDepAnalysisAndClone(
-    MainLoop &mainLoop, OpBuilder &globalBuilder, bool &i1Found,
-    DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap,
-    SmallVector<Operation *> &allOps,
-    DenseSet<Value> &phase1ClonedDepVals) {
+int runDepAnalysisAndClone(MainLoop &mainLoop, OpBuilder &globalBuilder,
+                           bool &i1Found,
+                           DenseMap<Value, InnerBlockInfo> &blocks,
+                           DenseMap<Value, SmallVector<Value>> &depValueMap,
+                           SmallVector<Operation *> &allOps,
+                           DenseSet<Value> &phase1ClonedDepVals) {
   if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps, i1Found) !=
       0)
     return -1;

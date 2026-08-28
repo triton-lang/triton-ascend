@@ -94,11 +94,10 @@ inline void collectNestedOps(Block *block, SmallVector<Operation *> &ops) {
 // rematerialize; Phase 2 picks up the new cross-block refs the clone
 // introduced. Returns 0 on success, -1 when an invalid (negative) block id
 // surfaces from an upstream pass.
-int collectInnerBlockInfo(
-    const CVPipeline::MainLoop &loop,
-    DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap,
-    SmallVector<Operation *> &allOps, bool &i1Found);
+int collectInnerBlockInfo(const CVPipeline::MainLoop &loop,
+                          DenseMap<Value, InnerBlockInfo> &blocks,
+                          DenseMap<Value, SmallVector<Value>> &depValueMap,
+                          SmallVector<Operation *> &allOps, bool &i1Found);
 
 // Build the dependency-user map by scanning block ops and the yield operands
 // of any multi-region op (scf.if, scf.while, ...) whose depVal is not a direct
@@ -114,8 +113,7 @@ buildDepUserMap(DenseMap<Value, InnerBlockInfo> &blocks,
 // pipeline can wrap it. Called from Phase-2 orchestration in
 // AddMultiBufferInnerScope.cpp.
 int cloneAllocTensorsInBlocks(
-    const CVPipeline::MainLoop &loop,
-    DenseMap<Value, InnerBlockInfo> &blocks,
+    const CVPipeline::MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
     DenseMap<Value, SmallVector<Value>> &depValueMap,
     DenseMap<Value, SmallVector<Operation *>> &depUserMap,
     OpBuilder &globalBuilder);
@@ -131,12 +129,12 @@ int cloneAllocTensorsInBlocks(
 // set whenever an i1 tensor dep surfaces; mirroring the original driver,
 // callers check `i1Found` after Phase 2's second dep collection rather than
 // here.
-int runDepAnalysisAndClone(
-    CVPipeline::MainLoop &mainLoop, OpBuilder &globalBuilder, bool &i1Found,
-    DenseMap<Value, InnerBlockInfo> &blocks,
-    DenseMap<Value, SmallVector<Value>> &depValueMap,
-    SmallVector<Operation *> &allOps,
-    DenseSet<Value> &phase1ClonedDepVals);
+int runDepAnalysisAndClone(CVPipeline::MainLoop &mainLoop,
+                           OpBuilder &globalBuilder, bool &i1Found,
+                           DenseMap<Value, InnerBlockInfo> &blocks,
+                           DenseMap<Value, SmallVector<Value>> &depValueMap,
+                           SmallVector<Operation *> &allOps,
+                           DenseSet<Value> &phase1ClonedDepVals);
 
 } // namespace triton
 } // namespace mlir

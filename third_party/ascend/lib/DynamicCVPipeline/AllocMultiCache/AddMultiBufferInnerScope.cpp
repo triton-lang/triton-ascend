@@ -860,27 +860,26 @@ static int processDepVal(Value depVal, const MainLoop &loop,
     enableOpt = mod->hasAttr(CVPipeline::kInsertionOptimization);
 
   // Create producer.
-  // When enable_buffer_insert_optimization is on, the select chain goes at the
-  // start of depDefinedOp's block_id=X region (BEFORE firstInRegion) and the
-  // materialize_in_destination goes at the end of that region (AFTER
-  // lastInRegion). Otherwise both anchors fall back to depDefinedOp, which
-  // keeps the original "tightly around the defining op" behavior.
+  // When enable_buffer_insert_optimization is on:
+  //   - select chain stays tightly before depDefinedOp (no region-start
+  //     relocation — firstAnchor remains depDefinedOp).
+  //   - materialize_in_destination is moved to the END of depDefinedOp's
+  //     block_id=X region (after lastInRegion) — i.e. "childish" behavior.
+  // Otherwise both anchors fall back to depDefinedOp, keeping the original
+  // "tightly around the defining op" behavior.
   Operation *firstAnchor = depDefinedOp;
   Operation *producerAnchor = depDefinedOp;
   if (enableOpt) {
     if (auto prodId = getOpBlockId(depDefinedOp); prodId.has_value()) {
-      if (Operation *f =
-              findFirstOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        firstAnchor = f;
-      if (Operation *l =
-              findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
-        producerAnchor = l;
+      // firstAnchor = depDefinedOp;  // select chain stays tight, do NOT move
+      if (Operation *l = findLastOpWithBlockIdInBlock(depDefinedOp, *prodId))
+        producerAnchor = l; // materialize moves to region end (childish)
     }
   }
   OpBuilder producedBuffers(loop.getContext());
-  SmallVector<Operation *> producerNewOps = insertProducerLogic(
-      producedBuffers, depVal, buffers, firstAnchor, producerAnchor, loop,
-      groupId);
+  SmallVector<Operation *> producerNewOps =
+      insertProducerLogic(producedBuffers, depVal, buffers, firstAnchor,
+                          producerAnchor, loop, groupId);
   addBlockAttrForOps(producerNewOps, producerId, globalBuilder);
   // intra_buffer is no longer emitted for the producer side — there's no
   // scf.if wrapper anymore (the select chain + materialize op replaces it).

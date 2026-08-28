@@ -351,6 +351,28 @@ class AutoTilingTuner(Autotuner):
         self._source_module_ast_cache: Optional[ast.Module] = None
         self._source_module_ast_resolved = False
 
+    def _autotune_stage_start(self, stage: str, **details) -> Optional[float]:
+        if not self.print_autotuning:
+            return None
+
+        self._print_autotune_stage(stage, "start", **details)
+        return time.perf_counter()
+
+    def _autotune_stage_end(self, stage: str, start_time: Optional[float], **details) -> None:
+        if start_time is None:
+            return
+
+        elapsed_ms = (time.perf_counter() - start_time) * 1000
+        self._print_autotune_stage(stage, "end", elapsed_ms=f"{elapsed_ms:.3f}", **details)
+
+    def _print_autotune_stage(self, stage: str, status: str, **details) -> None:
+        function_name = getattr(self.base_fn, "__name__", type(self.base_fn).__name__)
+        details_text = "".join(f", {name}={value}" for name, value in details.items())
+        print(
+            f"Triton autotuning stage: function={function_name}, stage={stage}, status={status}{details_text}",
+            flush=True,
+        )
+
     @staticmethod
     def _parse_explicit_tunable_params(raw_value) -> List[str]:
         if raw_value is None:
@@ -2007,6 +2029,8 @@ class AutoTilingTuner(Autotuner):
         return {cfg: run_fns[cfg] for cfg in valid_configs}
 
     def generate_key_and_configs(self, *args, **kwargs):
+        stage_timing = getattr(self, "print_autotuning", False)
+        key_start = self._autotune_stage_start("generate_tuning_key") if stage_timing else None
         self.nargs = dict(zip(self.arg_names, args))
         compile_mode = kwargs.get("compile_mode", _DEFAULT_COMPILE_MODE)
         self.is_simt_mode = compile_mode == "simt_only"
@@ -2039,15 +2063,42 @@ class AutoTilingTuner(Autotuner):
         key.append(("compile_mode", compile_mode))
 
         key = tuple(key)
+        memory_cache_status = "hit" if key in self.cache else "miss"
+        if stage_timing:
+            self._autotune_stage_end(
+                "generate_tuning_key",
+                key_start,
+                memory_cache=memory_cache_status,
+            )
         if key not in self.cache:
             if self.auto_gen_config:
+                parse_start = self._autotune_stage_start("parse_autotune_axes") if stage_timing else None
                 self.cv_parse_result = self._autoparse_axis_params(all_args)
+                if stage_timing:
+                    self._autotune_stage_end(
+                        "parse_autotune_axes",
+                        parse_start,
+                        parser_mode=getattr(self, "parser_mode", "vector"),
+                    )
                 _kv_dict = {
                     axis: _args[arg_name]
                     for axis, arg_name in self.axis_arg_names.items()
                     if arg_name in _args
                 }
+                generate_start = self._autotune_stage_start("generate_candidate_configs") if stage_timing else None
                 self._gen_tile_configs(_kv_dict, dtype, all_args)
+                if stage_timing:
+                    self._autotune_stage_end(
+                        "generate_candidate_configs",
+                        generate_start,
+                        generated_configs=len(self.gen_configs),
+                    )
+            expand_start = (self._autotune_stage_start(
+                "expand_config_hints",
+                generated_configs=len(self.gen_configs),
+                user_configs=len(self.user_configs),
+            ) if stage_timing else None)
+            if self.auto_gen_config:
                 self.gen_configs = _expand_configs_with_hints(
                     self.fn,
                     self.gen_configs,
@@ -2067,6 +2118,12 @@ class AutoTilingTuner(Autotuner):
                 )]
             else:
                 self.configs = self.gen_configs + expanded_user_configs
+            if stage_timing:
+                self._autotune_stage_end(
+                    "expand_config_hints",
+                    expand_start,
+                    candidate_configs=len(self.configs),
+                )
         return key
 
     @staticmethod
@@ -2089,6 +2146,7 @@ class AutoTilingTuner(Autotuner):
             kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
 
     def run(self, *args, **kwargs):
+        stage_timing = self.print_autotuning
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
@@ -2096,25 +2154,42 @@ class AutoTilingTuner(Autotuner):
         _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
         did_benchmark = False
         disk_cache_hit = False
+        disk_cache_status = "not_checked"
         if cache_miss:
             # prune configs
+            prune_start = self._autotune_stage_start(
+                "prune_configs",
+                candidate_configs=len(self.configs),
+            )
             pruned_configs = self.prune_configs(kwargs)
+            self._autotune_stage_end(
+                "prune_configs",
+                prune_start,
+                candidate_configs=len(self.configs),
+                pruned_configs=len(pruned_configs),
+            )
             if self.enable_ubtuner or len(pruned_configs) > 1:
 
                 def benchmark():
                     nonlocal did_benchmark
                     did_benchmark = True
-                    bench_start = time.time()
+                    bench_start = time.perf_counter()
                     timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
-                    bench_end = time.time()
-                    self.bench_time = bench_end - bench_start
+                    self.bench_time = time.perf_counter() - bench_start
+                    select_start = self._autotune_stage_start("select_best_config")
                     self.cache[key] = builtins.min(timings, key=timings.get)
                     full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
                     self.pre_hook(full_nargs, reset_only=True)
                     self.configs_timings = timings
+                    self._autotune_stage_end(
+                        "select_best_config",
+                        select_start,
+                        benchmarked_configs=len(timings),
+                    )
 
                 if self.cache_results:
                     if self.enable_ubtuner:
+                        disk_cache_status = "disabled_by_ubtuner"
                         warnings.warn(
                             "Autotune disk cache is disabled because UB-tuner is enabled "
                             "(TRITON_ENABLE_UBTUNER is set). UB-tuner may dynamically add "
@@ -2125,12 +2200,25 @@ class AutoTilingTuner(Autotuner):
                         )
                         benchmark()
                     else:
+                        disk_cache_start = self._autotune_stage_start(
+                            "disk_cache_check_and_update",
+                            candidate_configs=len(pruned_configs),
+                        )
                         disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
+                        disk_cache_status = "hit" if disk_cache_hit else "miss"
+                        self._autotune_stage_end(
+                            "disk_cache_check_and_update",
+                            disk_cache_start,
+                            disk_cache=disk_cache_status,
+                            benchmark_included=not disk_cache_hit,
+                        )
                 else:
+                    disk_cache_status = "disabled"
                     benchmark()
 
                 config = self.cache[key]
             else:
+                disk_cache_status = "not_needed"
                 config = pruned_configs[0]
         else:
             config = self.cache[key]
@@ -2142,13 +2230,22 @@ class AutoTilingTuner(Autotuner):
                   f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
 
         if did_benchmark and self.auto_profile_dir is not None:
+            profile_start = self._autotune_stage_start("profile_best_config")
             self._profile(*args, config=self.best_config, **kwargs)
+            self._autotune_stage_end("profile_best_config", profile_start)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
         _inject_default_simt_stack_limit(final_kwargs, self.simt_stack_limit)
         if config.pre_hook is not None:
+            pre_hook_start = self._autotune_stage_start("best_config_pre_hook")
             config.pre_hook({**self.nargs, **final_kwargs})
+            self._autotune_stage_end("best_config_pre_hook", pre_hook_start)
+        launch_start = (self._autotune_stage_start(
+            "launch_best_config",
+            memory_cache="miss" if cache_miss else "hit",
+            disk_cache=disk_cache_status,
+        ) if stage_timing else None)
         try:
             ret = self.fn.run(
                 *args,
@@ -2156,10 +2253,15 @@ class AutoTilingTuner(Autotuner):
             )
             return ret
         finally:
+            if stage_timing:
+                self._autotune_stage_end("launch_best_config", launch_start)
             self.nargs = None
             if cache_miss and not disk_cache_hit:
                 # workaround for memory leak when some configs fail to compile
+                gc_start = self._autotune_stage_start("garbage_collect") if stage_timing else None
                 gc.collect()
+                if stage_timing:
+                    self._autotune_stage_end("garbage_collect", gc_start)
 
     def _try_ubtuner(self, *args, config, excp, run_fns, **kwargs):
         if not (self.enable_ubtuner and "ub overflow" in str(excp).lower()):
@@ -2184,11 +2286,26 @@ class AutoTilingTuner(Autotuner):
         from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
         from triton.runtime.errors import OutOfResources
 
+        prepare_start = self._autotune_stage_start(
+            "prepare_kernel_calls",
+            candidate_configs=len(configs),
+        )
         kernels_call = {config: self._make_kernel_call(*args, config=config, **kwargs) for config in configs}
+        self._autotune_stage_end(
+            "prepare_kernel_calls",
+            prepare_start,
+            candidate_configs=len(kernels_call),
+        )
         run_fns = {}
         self._compile_failed_configs = []
         exc = None
         exc_stack = ""
+        max_workers = 1
+        compile_start = self._autotune_stage_start(
+            "compile_configs",
+            candidate_configs=len(kernels_call),
+            parallel=self.compile_parallel,
+        )
 
         if self.compile_parallel:
             import psutil
@@ -2233,17 +2350,50 @@ class AutoTilingTuner(Autotuner):
                     self._try_ubtuner(*args, config=config, excp=e, run_fns=run_fns, **kwargs)
                     self._compile_failed_configs.append(config)
 
+        self._autotune_stage_end(
+            "compile_configs",
+            compile_start,
+            candidate_configs=len(kernels_call),
+            valid_configs=len(run_fns),
+            failed_configs=len(self._compile_failed_configs),
+            parallel=self.compile_parallel,
+            workers=max_workers,
+        )
+
         if len(run_fns) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc} \nStack trace: {exc_stack}")
 
         if len(run_fns) == 1:
             # we ignore expensive profiling method when only single config is left
-            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            benchmark_start = self._autotune_stage_start(
+                "benchmark_configs",
+                benchmark_method="default",
+                benchmark_configs=1,
+            )
+            timings = {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            self._autotune_stage_end(
+                "benchmark_configs",
+                benchmark_start,
+                benchmark_method="default",
+                benchmark_configs=1,
+            )
+            return timings
 
         parser_mode = getattr(self, "parser_mode", None) or "vector"
         cv_parse_result = getattr(self, "cv_parse_result", None)
         if parser_mode in ("cube", "mix") and cv_parse_result is not None:
+            rough_benchmark_start = self._autotune_stage_start(
+                "rough_benchmark_prune",
+                candidate_configs=len(run_fns),
+            )
+            before_prune = len(run_fns)
             run_fns = self._prune_by_time_limit(run_fns)
+            self._autotune_stage_end(
+                "rough_benchmark_prune",
+                rough_benchmark_start,
+                candidate_configs=before_prune,
+                benchmark_configs=len(run_fns),
+            )
 
         use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
         # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
@@ -2256,6 +2406,13 @@ class AutoTilingTuner(Autotuner):
             active = getattr(self, "cv_repeat", 30) if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
             try:
+                benchmark_start = self._autotune_stage_start(
+                    "benchmark_configs",
+                    benchmark_method="npu",
+                    benchmark_configs=len(run_fns),
+                    warmup=warmup,
+                    active=active,
+                )
                 time_cost = do_bench_npu(
                     list(run_fns.values()),
                     warmup=warmup,
@@ -2264,8 +2421,23 @@ class AutoTilingTuner(Autotuner):
                     target_kernel_name=target_kernel_name,
                 )
                 assert len(time_cost) == len(run_fns)
+                self._autotune_stage_end(
+                    "benchmark_configs",
+                    benchmark_start,
+                    benchmark_method="npu",
+                    benchmark_configs=len(run_fns),
+                    warmup=warmup,
+                    active=active,
+                )
                 return {config: cost for config, cost in zip(run_fns.keys(), time_cost)}
             except ProfilerResultMismatchError as exc:
+                self._autotune_stage_end(
+                    "benchmark_configs",
+                    benchmark_start,
+                    benchmark_method="npu",
+                    benchmark_configs=len(run_fns),
+                    result="profiler_result_mismatch",
+                )
                 warnings.warn(
                     "Filtered profiler rows do not match the expected count for autotune benchmarking; "
                     f"target_kernel_name={exc.target_kernel_name!r}, expected_rows={exc.expected_rows}, "
@@ -2273,9 +2445,33 @@ class AutoTilingTuner(Autotuner):
                     RuntimeWarning,
                     stacklevel=2,
                 )
-                return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+                fallback_start = self._autotune_stage_start(
+                    "benchmark_configs",
+                    benchmark_method="default_fallback",
+                    benchmark_configs=len(run_fns),
+                )
+                timings = {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+                self._autotune_stage_end(
+                    "benchmark_configs",
+                    fallback_start,
+                    benchmark_method="default_fallback",
+                    benchmark_configs=len(run_fns),
+                )
+                return timings
         else:
-            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            benchmark_start = self._autotune_stage_start(
+                "benchmark_configs",
+                benchmark_method="default",
+                benchmark_configs=len(run_fns),
+            )
+            timings = {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            self._autotune_stage_end(
+                "benchmark_configs",
+                benchmark_start,
+                benchmark_method="default",
+                benchmark_configs=len(run_fns),
+            )
+            return timings
 
     def _resolve_target_kernel_name(self, kernels_call, configs) -> Optional[str]:
         for config in configs:
@@ -2613,8 +2809,9 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
            resets the value of the provided tensor to `zero` before running any configuration.
 
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
-    :code:`"1"`, Triton will print a message to stdout after autotuning each
-    kernel, including the time spent autotuning and the best configuration.
+    :code:`"1"`, Triton will print start/end markers and elapsed wall time for
+    each autotuning stage, followed by the total benchmark time and best
+    configuration.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]

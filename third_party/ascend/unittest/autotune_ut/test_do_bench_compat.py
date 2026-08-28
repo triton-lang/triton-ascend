@@ -32,6 +32,7 @@ def _make_tuner(do_bench):
     tuner.compile_parallel = False
     tuner.do_bench = do_bench
     tuner.user_defined_do_bench = True
+    tuner.print_autotuning = False
 
     def _make_kernel_call(self, *args, config, **meta):
 
@@ -48,6 +49,7 @@ def _make_run_tuner(configs):
     key = ("disk-cache-key", )
     tuner = object.__new__(AutoTilingTuner)
     tuner.arg_names = []
+    tuner.configs = configs
     tuner.cache = {}
     tuner.is_simt_mode = False
     tuner.simt_stack_limit = 8192
@@ -170,6 +172,93 @@ def test_autotilingtuner_marks_user_defined_do_bench():
     assert marker["called"] is False
 
 
+def test_autotune_stage_timing_prints_start_and_elapsed_time(monkeypatch, capsys):
+
+    def _dummy_kernel():
+        return None
+
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    perf_counter_values = iter((10.0, 10.125))
+    monkeypatch.setattr(ascend_autotuner.time, "perf_counter", lambda: next(perf_counter_values))
+
+    start_time = tuner._autotune_stage_start("compile_configs", candidate_configs=2)
+    tuner._autotune_stage_end("compile_configs", start_time, valid_configs=1)
+
+    assert capsys.readouterr().out.splitlines() == [
+        "Triton autotuning stage: function=_dummy_kernel, stage=compile_configs, status=start, "
+        "candidate_configs=2",
+        "Triton autotuning stage: function=_dummy_kernel, stage=compile_configs, status=end, "
+        "elapsed_ms=125.000, valid_configs=1",
+    ]
+
+
+def test_autotune_stage_timing_is_disabled_without_print_flag(monkeypatch, capsys):
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = False
+    monkeypatch.setattr(
+        ascend_autotuner.time,
+        "perf_counter",
+        lambda: pytest.fail("perf_counter must not run when stage timing is disabled"),
+    )
+
+    start_time = tuner._autotune_stage_start("compile_configs")
+    tuner._autotune_stage_end("compile_configs", start_time)
+
+    assert start_time is None
+    assert capsys.readouterr().out == ""
+
+
+def test_batch_bench_prints_compile_and_benchmark_stages(monkeypatch, capsys):
+
+    def _dummy_kernel():
+        return None
+
+    tuner = _make_tuner(lambda fn, quantiles: fn() or (1.0, 1.0, 1.0))
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    configs = [Config({"ID": 0}), Config({"ID": 1})]
+    monkeypatch.delenv("TRITON_BENCH_METHOD", raising=False)
+
+    timings = tuner._batch_bench(configs=configs)
+
+    assert list(timings) == configs
+    output = capsys.readouterr().out
+    assert "stage=prepare_kernel_calls, status=end" in output
+    assert "stage=compile_configs, status=end" in output
+    assert "valid_configs=2, failed_configs=0, parallel=False, workers=1" in output
+    assert "stage=benchmark_configs, status=end" in output
+    assert "benchmark_method=default, benchmark_configs=2" in output
+
+
+def test_run_prints_prune_selection_launch_and_gc_stages(monkeypatch, capsys):
+
+    def _dummy_kernel():
+        return None
+
+    selected = Config({"BLOCK_SIZE": 16})
+    other = Config({"BLOCK_SIZE": 32})
+    tuner, _ = _make_run_tuner([selected, other])
+    tuner.cache_results = False
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    tuner._batch_bench = lambda *args, configs, **kwargs: {
+        selected: 1.0,
+        other: 2.0,
+    }
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: None)
+
+    assert tuner.run() == "kernel-result"
+
+    output = capsys.readouterr().out
+    assert "stage=prune_configs, status=end" in output
+    assert "candidate_configs=2, pruned_configs=2" in output
+    assert "stage=select_best_config, status=end" in output
+    assert "stage=launch_best_config, status=start, memory_cache=miss, disk_cache=disabled" in output
+    assert "stage=garbage_collect, status=end" in output
+
+
 def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
     import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 
@@ -193,9 +282,15 @@ def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
     assert captured["do_bench"] is my_do_bench
 
 
-def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch):
+def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch, capsys):
+
+    def _dummy_kernel():
+        return None
+
     configs = [Config({"BLOCK_SIZE": 16}), Config({"BLOCK_SIZE": 32})]
     tuner, key = _make_run_tuner(configs)
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
     gc_calls = []
     profile_calls = []
 
@@ -216,6 +311,10 @@ def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch):
     assert tuner.run() == "kernel-result"
     assert gc_calls == []
     assert profile_calls == []
+    output = capsys.readouterr().out
+    assert "stage=disk_cache_check_and_update, status=end" in output
+    assert "disk_cache=hit, benchmark_included=False" in output
+    assert "stage=launch_best_config, status=start, memory_cache=miss, disk_cache=hit" in output
 
 
 def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):

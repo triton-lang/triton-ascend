@@ -13,6 +13,7 @@ These labels track where an issue stands in the workflow.
 | `triage review` | Newly filed or unseen issue awaiting initial assessment by a maintainer                                                          |
 | `triaged`       | Assessment complete; type, priority, and module have been determined                                                             |
 | `wait-feedback` | Blocked on an external dependency or awaiting a response before work can proceed                                                 |
+| `tracking`      | Long-lived issue for ongoing or routine work (e.g., phased deprecation, upstream alignment) |
 | `resolved`      | Issue has been closed — either via a merged PR, or through non-code resolution (e.g., answered question, configuration guidance) |
 | `stale`         | No activity for an extended period; parties have been notified and the issue will be auto-closed if there is no response         |
 | `duplicated`    | A duplicate of an existing open issue or merged PR                                                                               |
@@ -75,5 +76,6 @@ After a thorough review of the issue content:
 After triage, the issue moves into tracking and implementation:
 
 - Keep the issue in progress until it is resolved through a merged PR or another confirmed resolution path.
+- For work that spans multiple releases or is handled incrementally (e.g., API deprecation, upstream alignment), apply `tracking` so maintainers can mark progress without closing the issue prematurely.
 - Once the issue is resolved, apply `resolved` and close it, ideally with a reference to the merged PR or a short explanation of the resolution.
-- If the issue remains inactive for an extended period, apply `stale` as the final state before auto-closure.
+- If the issue remains inactive for an extended period, apply `stale` as the final state before auto-closure. Issues labeled `tracking` are exempt from stale auto-close.

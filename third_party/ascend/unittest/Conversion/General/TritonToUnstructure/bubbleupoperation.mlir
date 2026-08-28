@@ -69,6 +69,18 @@ tt.func @test_addptr_extract_bubbleup(%a: tensor<128x!tt.ptr<f32>>, %b: tensor<1
     tt.return %1 : !tt.ptr<f32>
 }
 
+// CHECK-LABEL: tt.func @test_select_pointer_extract_bubbleup
+// CHECK: %[[CONDITION:.*]] = tensor.extract %{{.*}}[%{{.*}}] {DiscreteMemAccess} : tensor<4xi1>
+// CHECK: %[[TRUE_VALUE:.*]] = tensor.extract %{{.*}}[%{{.*}}] {DiscreteMemAccess} : tensor<4x!tt.ptr<f32>>
+// CHECK: %[[FALSE_VALUE:.*]] = tensor.extract %{{.*}}[%{{.*}}] {DiscreteMemAccess} : tensor<4x!tt.ptr<f32>>
+// CHECK: arith.select %[[CONDITION]], %[[TRUE_VALUE]], %[[FALSE_VALUE]] : !tt.ptr<f32>
+tt.func @test_select_pointer_extract_bubbleup(
+    %condition: tensor<4xi1>, %true_value: tensor<4x!tt.ptr<f32>>,
+    %false_value: tensor<4x!tt.ptr<f32>>, %i: index) -> !tt.ptr<f32> {
+    %selected = arith.select %condition, %true_value, %false_value : tensor<4xi1>, tensor<4x!tt.ptr<f32>>
+    %pointer = tensor.extract %selected[%i] : tensor<4x!tt.ptr<f32>>
+    tt.return %pointer : !tt.ptr<f32>
+}
 
 // CHECK-LABEL: tt.func @test_ceil_extract_bubbleup
 tt.func @test_ceil_extract_bubbleup(%a: tensor<128xf32>, %i: index, %c: f32) -> f32 {

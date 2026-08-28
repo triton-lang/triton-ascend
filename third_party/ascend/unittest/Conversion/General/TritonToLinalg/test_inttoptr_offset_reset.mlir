@@ -1,20 +1,22 @@
 // RUN: triton-opt "--triton-to-linalg=global-kernel=false named-ops=True" --split-input-file %s | FileCheck %s
 
-// Test that ReinterpretCastOp's result type has offset: 0 after the
-// "Calculate size of PointerCastOp precisely" optimization.
+// Test the positive static offset representation selected when a scalar
+// pointer reaches the layout-sensitive memref.copy boundary.
 //
 // When a scalar tt.addptr adds a constant offset to a tt.int_to_ptr result,
-// the conversion creates a hivm.pointer_cast + memref.reinterpret_cast with
-// the original offset in the result type. The optimization then bakes the
-// offset into the base address (realAddr = addr + offset * elemSize) and
-// creates a new ReinterpretCastOp with offset 0. The result type's strided
-// layout must also have offset 0, otherwise the op offset and type offset
-// are inconsistent.
+// the conversion retains that offset in the memref view and expands the raw
+// pointer capacity to cover both the leading offset and the eight-element
+// extent. The copy must consume that exact offset-bearing view.
 
 // CHECK-LABEL: func.func @test_inttoptr_offset_reset
-// The optimized ReinterpretCastOp must have offset 0 in the result type.
-// CHECK: memref.reinterpret_cast {{.*}} strided<[1]>
-// CHECK-NOT: memref.reinterpret_cast {{.*}} strided<[1], offset: 4>
+// CHECK: %[[EXTENT:.*]] = arith.constant 8 : index
+// CHECK: %[[LEADING_OFFSET:.*]] = arith.constant 4 : index
+// CHECK: %[[CAPACITY:.*]] = arith.addi %[[EXTENT]], %[[LEADING_OFFSET]] : index
+// CHECK: %[[POINTER:.*]] = hivm.hir.pointer_cast(%{{.*}}) [%[[CAPACITY]]] : memref<?xi32>
+// CHECK: %[[OFFSET_VIEW:.*]] = memref.reinterpret_cast %[[POINTER]] to offset: [4], sizes: [8], strides: [1]
+// CHECK-SAME: to memref<8xi32, strided<[1], offset: 4>>
+// CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<8xi32>
+// CHECK: memref.copy %[[OFFSET_VIEW]], %[[ALLOC]] : memref<8xi32, strided<[1], offset: 4>> to memref<8xi32>
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @test_inttoptr_offset_reset(%addr_ptr: !tt.ptr<i64> {tt.divisibility = 16 : i32}, %out_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {

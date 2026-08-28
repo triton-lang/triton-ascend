@@ -473,10 +473,16 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteForAddPtr(
   // 4. Rewrite the loop body
   if (failed(rewriteLoopBody(forOp, newForOp, pointerArgsInfo, indexMap,
                              rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   // 5. Replace original loop results
-  return replaceResults(forOp, newForOp, pointerArgsInfo, indexMap, rewriter);
+  if (failed(replaceResults(forOp, newForOp, pointerArgsInfo, indexMap,
+                            rewriter))) {
+    rewriter.eraseOp(newForOp);
+    return failure();
+  }
+  return success();
 }
 
 // Transform a for loop that uses pointer iteration arguments into one that uses
@@ -530,6 +536,7 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteAdvancePtr(
   // 5. Rewrite the loop body
   if (failed(rewriteLoopBodyForAdvancePtr(forOp, newForOp, pointerArgsInfo,
                                           indexMap, rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   rewriter.replaceOp(forOp, newForOp);
@@ -1799,7 +1806,7 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(
     scf::ForOp oldFor = forOp;
     if (failed(rewriteForWithRelayCandidates(newFor, oldFor, relayCandidates,
                                              rewriter))) {
-      newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+      rewriter.eraseOp(newFor);
       return failure();
     }
     return success();
@@ -1953,7 +1960,7 @@ SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidates(
   newFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> LogicalResult {
-    newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newFor);
     return failure();
   };
 
@@ -2240,9 +2247,6 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
     return failure();
   }
 
-  constexpr llvm::StringLiteral kFailedAttr =
-      "tts.simplify_tensor_iter_args.failed";
-
   Block &oldOuterBody = *outerFor.getBody();
   if (!oldOuterBody.mightHaveTerminator()) {
     return failure();
@@ -2273,7 +2277,7 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
   newOuterFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> FailureOr<scf::ForOp> {
-    newOuterFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newOuterFor);
     return failure();
   };
 

@@ -2096,6 +2096,7 @@ class AutoTilingTuner(Autotuner):
         _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
         did_benchmark = False
         disk_cache_hit = False
+        single_config_cache_pending = False
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
@@ -2132,6 +2133,7 @@ class AutoTilingTuner(Autotuner):
                 config = self.cache[key]
             else:
                 config = pruned_configs[0]
+                single_config_cache_pending = True
         else:
             config = self.cache[key]
 
@@ -2154,10 +2156,12 @@ class AutoTilingTuner(Autotuner):
                 *args,
                 **final_kwargs,
             )
+            if single_config_cache_pending:
+                self.cache[key] = config
             return ret
         finally:
             self.nargs = None
-            if cache_miss and not disk_cache_hit:
+            if did_benchmark and not disk_cache_hit:
                 # workaround for memory leak when some configs fail to compile
                 gc.collect()
 

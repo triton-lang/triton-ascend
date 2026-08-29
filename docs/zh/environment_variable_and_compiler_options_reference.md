@@ -28,7 +28,7 @@ python run_kernel.py
 | **调试与日志** | TRITON_LLVM_DEBUG_ONLY | 未设置 | 功能等同于 LLVM 的`-debug-only`命令行选项。该参数可将 LLVM 调试输出限定到特定的优化通道或组件名称（这些名称通过 LLVM 和 Triton 中的`#define DEBUG_TYPE`宏定义），从而有效减少调试信息的冗余输出。用户可指定一个或多个逗号分隔的值，例如：`TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions"`或`TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions,regalloc"`。 | 逗号分隔值：通道或组件名称 | |
 | **调试与日志** | USE_IR_LOC | 0 或未设置 | 控制是否在生成的中间表示（IR）中包含位置信息（如文件名、行号等）。这些信息对调试很有帮助，但可能会增加生成的IR的大小。设置为1，会重新解析中间表示(IR)，将位置信息映射为具有特定扩展名的IR文件行号（而非Python源文件行号）。这能建立从IR到LLVM IR/PTX的直接映射关系。配合性能分析工具使用时，可实现对IR指令的细粒度性能剖析。 | 0：不包含位置信息<br>1：包含位置信息 | |
 | **调试与日志** | TRITON_DISABLE_LINE_INFO | true | 控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`，即是否在生成的内核可执行文件中包含行号等调试信息。**注意**：triton-ascend 默认值为`true`（默认**关闭**行号信息，与社区 Triton 默认开启相反）。行号信息可用于定位精度/性能问题及 profiling 分析，但会增加编译产物大小。 | 0/false：启用行号信息<br>1/true：禁用行号信息 | 配合性能分析使用时，请参考[算子性能调优方法](./debug_guide/profiling.md)。 |
-| **调试与日志** | TRITON_PRINT_AUTOTUNING | 0 或未设置 | 输出自动调优各阶段的开始/结束标记及墙钟耗时，并在完成后输出每个内核的最佳配置及 benchmark 总耗时。 | 0：不输出<br>1：输出 | |
+| **调试与日志** | TRITON_PRINT_AUTOTUNING | 0 或未设置 | 输出自动调优各阶段的开始/结束标记及墙钟耗时，并在完成后输出每个内核的最佳配置及 benchmark 总耗时。使用多配置 NPU profiling 时，还会按配置输出预热、入队、同步、profiling 墙钟/设备耗时及 profiler 阶段汇总。 | 0：不输出<br>1：输出 | |
 | **调试与日志** | MLIR_ENABLE_REMARK | 0 或未设置 | 启用MLIR 编译过程中的备注信息输出，包括以备注形式输出的性能警告。 | 0：不启用<br>1：启用 | |
 | **调试与日志** | TRITON_KERNEL_DUMP | 0 或未设置 | 启用或禁用 Triton 内核的转储功能，当启用时，Triton 会将生成的内核代码（各编译阶段IR及最终PTX）保存到指定目录。 | 0：不启用<br>1：启用 | |
 | **调试与日志** | TRITON_DUMP_DIR | ~/.triton/dump | 指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。 | "path"：保存路径 | |

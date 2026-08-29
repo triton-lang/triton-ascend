@@ -2405,31 +2405,45 @@ class AutoTilingTuner(Autotuner):
             warmup = getattr(self, "cv_warmup", 5) if cv_mode else 5
             active = getattr(self, "cv_repeat", 30) if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
+            benchmark_configs = list(run_fns.keys())
+
+            diagnostic_callback = None
+            diagnostic_labels = None
+            if self.print_autotuning:
+                diagnostic_labels = [str(config) for config in benchmark_configs]
+
+                def report_diagnostic(stage, details):
+                    self._print_autotune_stage(stage, "summary", **details)
+
+                diagnostic_callback = report_diagnostic
+
             try:
                 benchmark_start = self._autotune_stage_start(
                     "benchmark_configs",
                     benchmark_method="npu",
-                    benchmark_configs=len(run_fns),
+                    benchmark_configs=len(benchmark_configs),
                     warmup=warmup,
                     active=active,
                 )
                 time_cost = do_bench_npu(
-                    list(run_fns.values()),
+                    [run_fns[config] for config in benchmark_configs],
                     warmup=warmup,
                     active=active,
                     clear_l2_cache=False,
                     target_kernel_name=target_kernel_name,
+                    diagnostic_callback=diagnostic_callback,
+                    diagnostic_labels=diagnostic_labels,
                 )
-                assert len(time_cost) == len(run_fns)
+                assert len(time_cost) == len(benchmark_configs)
                 self._autotune_stage_end(
                     "benchmark_configs",
                     benchmark_start,
                     benchmark_method="npu",
-                    benchmark_configs=len(run_fns),
+                    benchmark_configs=len(benchmark_configs),
                     warmup=warmup,
                     active=active,
                 )
-                return {config: cost for config, cost in zip(run_fns.keys(), time_cost)}
+                return {config: cost for config, cost in zip(benchmark_configs, time_cost)}
             except ProfilerResultMismatchError as exc:
                 self._autotune_stage_end(
                     "benchmark_configs",
@@ -2811,7 +2825,9 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
     :code:`"1"`, Triton will print start/end markers and elapsed wall time for
     each autotuning stage, followed by the total benchmark time and best
-    configuration.
+    configuration. Multi-configuration NPU profiling also prints per-config
+    prewarm, enqueue, synchronization, profiling wall/device timing, and a
+    profiler phase summary.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]

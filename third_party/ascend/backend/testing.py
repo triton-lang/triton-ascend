@@ -21,6 +21,7 @@
 import builtins
 import multiprocessing
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -47,17 +48,45 @@ def do_bench_npu(
     prof_dir=None,
     keep_res=False,
     target_kernel_name: Optional[str] = None,
+    diagnostic_callback=None,
+    diagnostic_labels=None,
 ):
     import torch
     import torch_npu
 
     if not isinstance(funcs, list):
         funcs = [funcs]
+    if diagnostic_labels is not None and len(diagnostic_labels) != len(funcs):
+        raise ValueError(f"Expected one diagnostic label per benchmark function, got {len(diagnostic_labels)} labels "
+                         f"for {len(funcs)} functions")
+
+    collect_diagnostics = diagnostic_callback is not None
+    benchmark_start = time.perf_counter() if collect_diagnostics else None
+    config_metrics = None
+    if collect_diagnostics:
+        config_metrics = [{
+            "prewarm_enqueue_ms": 0.0,
+            "prewarm_synchronize_ms": 0.0,
+            "profile_enqueue_ms": 0.0,
+            "profile_synchronize_ms": 0.0,
+            "profile_l2_clear_ms": 0.0,
+            "profile_wall_ms": 0.0,
+        } for _ in funcs]
 
     # warmup kernel
-    for fn in funcs:
-        fn()
-        torch.npu.synchronize()
+    if collect_diagnostics:
+        for func_idx, fn in enumerate(funcs):
+            enqueue_start = time.perf_counter()
+            fn()
+            enqueue_end = time.perf_counter()
+            torch.npu.synchronize()
+            synchronize_end = time.perf_counter()
+            config_metrics[func_idx]["prewarm_enqueue_ms"] = (enqueue_end - enqueue_start) * 1e3
+            config_metrics[func_idx]["prewarm_synchronize_ms"] = (synchronize_end - enqueue_end) * 1e3
+    else:
+        for fn in funcs:
+            fn()
+            torch.npu.synchronize()
 
     experimental_config = torch_npu.profiler._ExperimentalConfig(
         aic_metrics=torch_npu.profiler.AiCMetrics.PipeUtilization,
@@ -83,37 +112,147 @@ def do_bench_npu(
         torch.npu.synchronize()  # shake out of any npu error
 
     total = warmup + active
-    with torch_npu.profiler.profile(
-            activities=[torch_npu.profiler.ProfilerActivity.NPU],
-            on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(torch_path),
-            record_shapes=False,
-            profile_memory=False,
-            with_stack=False,
-            with_flops=False,
-            with_modules=False,
-            experimental_config=experimental_config,
-    ) as prof:
-        for fn in funcs:
-            for _ in builtins.range(total):
-                if clear_l2_cache:
-                    buffer.sum()  # use buffer read to clear l2 cache
+    profile_create_start = time.perf_counter() if collect_diagnostics else None
+    npu_profiler = torch_npu.profiler.profile(
+        activities=[torch_npu.profiler.ProfilerActivity.NPU],
+        on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(torch_path),
+        record_shapes=False,
+        profile_memory=False,
+        with_stack=False,
+        with_flops=False,
+        with_modules=False,
+        experimental_config=experimental_config,
+    )
+    if collect_diagnostics:
+        profile_create_ms = (time.perf_counter() - profile_create_start) * 1e3
+        profile_enter_start = time.perf_counter()
+        with npu_profiler:
+            profile_enter_ms = (time.perf_counter() - profile_enter_start) * 1e3
+            profile_loop_start = time.perf_counter()
+            for func_idx, fn in enumerate(funcs):
+                config_start = time.perf_counter()
+                for _ in builtins.range(total):
+                    if clear_l2_cache:
+                        l2_clear_start = time.perf_counter()
+                        buffer.sum()  # use buffer read to clear l2 cache
+                        torch.npu.synchronize()
+                        config_metrics[func_idx]["profile_l2_clear_ms"] += (time.perf_counter() - l2_clear_start) * 1e3
+                    enqueue_start = time.perf_counter()
+                    fn()
+                    enqueue_end = time.perf_counter()
                     torch.npu.synchronize()
-                fn()
-                torch.npu.synchronize()
+                    synchronize_end = time.perf_counter()
+                    config_metrics[func_idx]["profile_enqueue_ms"] += (enqueue_end - enqueue_start) * 1e3
+                    config_metrics[func_idx]["profile_synchronize_ms"] += (synchronize_end - enqueue_end) * 1e3
+                config_metrics[func_idx]["profile_wall_ms"] = (time.perf_counter() - config_start) * 1e3
+            profile_loop_ms = (time.perf_counter() - profile_loop_start) * 1e3
+            profile_finalize_start = time.perf_counter()
+        profile_finalize_ms = (time.perf_counter() - profile_finalize_start) * 1e3
+    else:
+        with npu_profiler:
+            for fn in funcs:
+                for _ in builtins.range(total):
+                    if clear_l2_cache:
+                        buffer.sum()  # use buffer read to clear l2 cache
+                        torch.npu.synchronize()
+                    fn()
+                    torch.npu.synchronize()
     if clear_l2_cache:
         del buffer
 
+    collect_start = time.perf_counter() if collect_diagnostics else None
+    time_cost = None
+    profiled_device_total_ms = None
+    collect_error = None
     try:
-        return _collect_prof_result(
-            torch_path,
-            funcs,
-            warmup,
-            active,
-            target_kernel_name=target_kernel_name,
-            clear_l2_cache=clear_l2_cache,
-        )
+        if collect_diagnostics:
+            time_cost, profiled_device_total_ms = _collect_prof_result(
+                torch_path,
+                funcs,
+                warmup,
+                active,
+                target_kernel_name=target_kernel_name,
+                clear_l2_cache=clear_l2_cache,
+                return_diagnostics=True,
+            )
+        else:
+            time_cost = _collect_prof_result(
+                torch_path,
+                funcs,
+                warmup,
+                active,
+                target_kernel_name=target_kernel_name,
+                clear_l2_cache=clear_l2_cache,
+            )
+    except Exception as exc:
+        collect_error = type(exc).__name__
+        raise
     finally:
-        _rm_dic(keep_res, torch_path)
+        collect_results_ms = (time.perf_counter() - collect_start) * 1e3 if collect_diagnostics else None
+        cleanup_start = time.perf_counter() if collect_diagnostics else None
+        try:
+            _rm_dic(keep_res, torch_path)
+        finally:
+            if collect_diagnostics:
+                cleanup_ms = (time.perf_counter() - cleanup_start) * 1e3
+                benchmark_total_ms = (time.perf_counter() - benchmark_start) * 1e3
+                active_time_cost = time_cost if isinstance(time_cost, list) else [time_cost]
+                prewarm_wall_ms = sum(metrics["prewarm_enqueue_ms"] + metrics["prewarm_synchronize_ms"]
+                                      for metrics in config_metrics)
+                measured_phase_ms = (prewarm_wall_ms + profile_create_ms + profile_enter_ms + profile_loop_ms +
+                                     profile_finalize_ms + collect_results_ms + cleanup_ms)
+
+                for func_idx, metrics in enumerate(config_metrics):
+                    device_total_ms = (profiled_device_total_ms[func_idx]
+                                       if profiled_device_total_ms is not None else None)
+                    device_active_mean_ms = (active_time_cost[func_idx] if func_idx < len(active_time_cost)
+                                             and active_time_cost[func_idx] is not None else None)
+                    details = {
+                        "config_index":
+                        func_idx,
+                        "profile_calls":
+                        total,
+                        "prewarm_enqueue_ms":
+                        f'{metrics["prewarm_enqueue_ms"]:.3f}',
+                        "prewarm_synchronize_ms":
+                        f'{metrics["prewarm_synchronize_ms"]:.3f}',
+                        "profile_enqueue_ms":
+                        f'{metrics["profile_enqueue_ms"]:.3f}',
+                        "profile_synchronize_ms":
+                        f'{metrics["profile_synchronize_ms"]:.3f}',
+                        "profile_l2_clear_ms":
+                        f'{metrics["profile_l2_clear_ms"]:.3f}',
+                        "profile_wall_ms":
+                        f'{metrics["profile_wall_ms"]:.3f}',
+                        "target_device_total_ms":
+                        (f"{device_total_ms:.3f}" if device_total_ms is not None else "unavailable"),
+                        "target_device_active_mean_ms":
+                        (f"{device_active_mean_ms:.3f}" if device_active_mean_ms is not None else "unavailable"),
+                        "unaccounted_profile_ms": (f'{metrics["profile_wall_ms"] - device_total_ms:.3f}'
+                                                   if device_total_ms is not None else "unavailable"),
+                        "config": (diagnostic_labels[func_idx] if diagnostic_labels is not None else str(func_idx)),
+                    }
+                    diagnostic_callback("benchmark_config", details)
+
+                diagnostic_callback(
+                    "benchmark_profiler", {
+                        "result": collect_error or "success",
+                        "configs": len(funcs),
+                        "prewarm_calls": len(funcs),
+                        "profile_calls": len(funcs) * total,
+                        "profile_create_ms": f"{profile_create_ms:.3f}",
+                        "profile_enter_ms": f"{profile_enter_ms:.3f}",
+                        "profile_loop_ms": f"{profile_loop_ms:.3f}",
+                        "profile_finalize_ms": f"{profile_finalize_ms:.3f}",
+                        "collect_results_ms": f"{collect_results_ms:.3f}",
+                        "cleanup_ms": f"{cleanup_ms:.3f}",
+                        "other_ms": f"{max(0.0, benchmark_total_ms - measured_phase_ms):.3f}",
+                        "total_ms": f"{benchmark_total_ms:.3f}",
+                        "target_kernel_name": target_kernel_name,
+                        "profile_results_retained": keep_res,
+                    })
+
+    return time_cost
 
 
 def _rm_dic(keep_res, torch_path):
@@ -132,6 +271,7 @@ def _collect_prof_result(
     num_active: int,
     target_kernel_name: Optional[str] = None,
     clear_l2_cache: bool = False,
+    return_diagnostics: bool = False,
 ):
     """
     Collect kernel performance from kernel_details.csv, returned in millisecond.
@@ -147,6 +287,8 @@ def _collect_prof_result(
     :type num_active: int
     :param target_kernel_name: target triton kernel name reported by profiler
     :type target_kernel_name: Optional[str]
+    :param return_diagnostics: also return the total profiled target-kernel duration for each function
+    :type return_diagnostics: bool
     """
 
     import numpy as np
@@ -160,10 +302,10 @@ def _collect_prof_result(
                 break
     num_funcs = len(funcs)
     if kernel_details_file is None:
-        if num_funcs == 1:
-            return float("inf")
-        else:
-            return [float("inf")] * num_funcs
+        time_cost = float("inf") if num_funcs == 1 else [float("inf")] * num_funcs
+        if return_diagnostics:
+            return time_cost, [float("inf")] * num_funcs
+        return time_cost
 
     df = pd.read_csv(kernel_details_file)
     # filter out l2 cache clearing operation
@@ -178,13 +320,18 @@ def _collect_prof_result(
         raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
 
     time_cost = [0] * num_funcs
+    profiled_device_total = [0] * num_funcs
     for func_idx in np.arange(0, num_funcs):
-        for active_index in np.arange(0, num_active):
-            row_index = func_idx * (num_warmup + num_active) + num_warmup + active_index
-            time_cost[func_idx] += filter_df.iloc[row_index]["Duration(us)"]
+        for profile_index in np.arange(0, num_warmup + num_active):
+            row_index = func_idx * (num_warmup + num_active) + profile_index
+            duration_us = filter_df.iloc[row_index]["Duration(us)"]
+            profiled_device_total[func_idx] += duration_us
+            if profile_index >= num_warmup:
+                time_cost[func_idx] += duration_us
     time_cost = [x / num_active / 1e3 for x in time_cost]
+    profiled_device_total = [x / 1e3 for x in profiled_device_total]
 
-    if num_funcs == 1:
-        return time_cost[0]
-    else:
-        return time_cost
+    result = time_cost[0] if num_funcs == 1 else time_cost
+    if return_diagnostics:
+        return result, profiled_device_total
+    return result

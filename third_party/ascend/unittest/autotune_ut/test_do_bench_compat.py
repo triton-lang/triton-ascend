@@ -18,10 +18,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import sys
 from types import MethodType, SimpleNamespace
 
 import pytest
 import triton
+import triton.backends.ascend.testing as ascend_testing
 import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 from triton.runtime.autotuner import Config
 from triton.backends.ascend.runtime.autotuner import AutoTilingTuner
@@ -144,6 +146,176 @@ def test_batch_bench_npu_env_uses_do_bench_npu_without_user_do_bench(monkeypatch
     assert calls["do_bench_npu"] == 1
     assert result[cfg0] == 1.0
     assert result[cfg1] == 2.0
+
+
+def test_batch_bench_npu_diagnostics_include_config_labels(monkeypatch, capsys):
+
+    def _dummy_kernel():
+        return None
+
+    def _do_bench(fn, quantiles):
+        raise AssertionError("self.do_bench should not be used when NPU profiling is enabled")
+
+    cfg0 = Config({"ID": 0})
+    cfg1 = Config({"ID": 1})
+
+    def _do_bench_npu(
+        funcs,
+        clear_l2_cache=False,
+        warmup=5,
+        active=30,
+        target_kernel_name=None,
+        diagnostic_callback=None,
+        diagnostic_labels=None,
+        **kwargs,
+    ):
+        assert len(funcs) == 2
+        assert diagnostic_labels == [str(cfg0), str(cfg1)]
+        assert diagnostic_callback is not None
+        diagnostic_callback("benchmark_config", {
+            "config_index": 0,
+            "profile_wall_ms": "12.000",
+            "config": diagnostic_labels[0],
+        })
+        return [1.0, 2.0]
+
+    tuner = _make_tuner(_do_bench)
+    tuner.user_defined_do_bench = False
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    monkeypatch.setenv("TRITON_BENCH_METHOD", "npu")
+    monkeypatch.setattr("triton.backends.ascend.testing.do_bench_npu", _do_bench_npu)
+
+    result = tuner._batch_bench(configs=[cfg0, cfg1])
+
+    assert result == {cfg0: 1.0, cfg1: 2.0}
+    assert ("stage=benchmark_config, status=summary, config_index=0, profile_wall_ms=12.000" in capsys.readouterr().out)
+
+
+def test_do_bench_npu_reports_per_config_wall_and_device_timings(monkeypatch):
+    clock = {"value": 0.0}
+
+    def advance(seconds):
+        clock["value"] += seconds
+
+    def perf_counter():
+        return clock["value"]
+
+    def synchronize():
+        advance(0.3)
+
+    def func0():
+        advance(0.1)
+
+    def func1():
+        advance(0.2)
+
+    class FakeProfile:
+
+        def __enter__(self):
+            advance(0.01)
+            return self
+
+        def __exit__(self, exc_type, exc_value, traceback):
+            advance(0.04)
+
+    def profile(**kwargs):
+        advance(0.02)
+        return FakeProfile()
+
+    fake_profiler = SimpleNamespace(
+        _ExperimentalConfig=lambda **kwargs: object(),
+        AiCMetrics=SimpleNamespace(PipeUtilization=object()),
+        ProfilerLevel=SimpleNamespace(Level1=object()),
+        ProfilerActivity=SimpleNamespace(NPU=object()),
+        tensorboard_trace_handler=lambda path: object(),
+        profile=profile,
+    )
+    monkeypatch.setitem(sys.modules, "torch", SimpleNamespace(npu=SimpleNamespace(synchronize=synchronize)))
+    monkeypatch.setitem(sys.modules, "torch_npu", SimpleNamespace(profiler=fake_profiler))
+    monkeypatch.setattr(ascend_testing.time, "perf_counter", perf_counter)
+
+    def collect_prof_result(*args, return_diagnostics=False, **kwargs):
+        assert return_diagnostics is True
+        advance(0.05)
+        return [250.0, 350.0], [500.0, 700.0]
+
+    def remove_profile(keep_res, torch_path):
+        advance(0.03)
+
+    monkeypatch.setattr(ascend_testing, "_collect_prof_result", collect_prof_result)
+    monkeypatch.setattr(ascend_testing, "_rm_dic", remove_profile)
+    diagnostics = []
+
+    result = ascend_testing.do_bench_npu(
+        [func0, func1],
+        warmup=1,
+        active=1,
+        prof_dir="/tmp/fake-npu-profile",
+        target_kernel_name="kernel",
+        diagnostic_callback=lambda stage, details: diagnostics.append((stage, details)),
+        diagnostic_labels=["config-0", "config-1"],
+    )
+
+    assert result == [250.0, 350.0]
+    assert diagnostics[0] == ("benchmark_config", {
+        "config_index": 0,
+        "profile_calls": 2,
+        "prewarm_enqueue_ms": "100.000",
+        "prewarm_synchronize_ms": "300.000",
+        "profile_enqueue_ms": "200.000",
+        "profile_synchronize_ms": "600.000",
+        "profile_l2_clear_ms": "0.000",
+        "profile_wall_ms": "800.000",
+        "target_device_total_ms": "500.000",
+        "target_device_active_mean_ms": "250.000",
+        "unaccounted_profile_ms": "300.000",
+        "config": "config-0",
+    })
+    assert diagnostics[1][0] == "benchmark_config"
+    assert diagnostics[1][1]["profile_wall_ms"] == "1000.000"
+    assert diagnostics[1][1]["unaccounted_profile_ms"] == "300.000"
+    assert diagnostics[2] == ("benchmark_profiler", {
+        "result": "success",
+        "configs": 2,
+        "prewarm_calls": 2,
+        "profile_calls": 4,
+        "profile_create_ms": "20.000",
+        "profile_enter_ms": "10.000",
+        "profile_loop_ms": "1800.000",
+        "profile_finalize_ms": "40.000",
+        "collect_results_ms": "50.000",
+        "cleanup_ms": "30.000",
+        "other_ms": "0.000",
+        "total_ms": "2850.000",
+        "target_kernel_name": "kernel",
+        "profile_results_retained": False,
+    })
+
+
+def test_collect_prof_result_can_return_profiled_device_totals(tmp_path):
+    kernel_details = tmp_path / "kernel_details.csv"
+    kernel_details.write_text(
+        "Name,Type,Duration(us)\n"
+        "kernel,AI_CORE,1000\n"
+        "kernel,AI_CORE,2000\n"
+        "kernel,AI_CORE,3000\n"
+        "kernel,AI_CORE,4000\n",
+        encoding="utf-8",
+    )
+    funcs = [lambda: None, lambda: None]
+
+    time_cost, profiled_device_total = ascend_testing._collect_prof_result(
+        str(tmp_path),
+        funcs,
+        num_warmup=1,
+        num_active=1,
+        target_kernel_name="kernel",
+        return_diagnostics=True,
+    )
+
+    assert time_cost == [2.0, 4.0]
+    assert profiled_device_total == [3.0, 7.0]
 
 
 def test_autotilingtuner_marks_user_defined_do_bench():

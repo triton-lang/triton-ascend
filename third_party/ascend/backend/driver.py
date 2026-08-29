@@ -152,7 +152,11 @@ class NPUUtils(object):
                     f"not equal device properties vector_core_num/cube_core_num({num_aiv}/{num_aic}={quotient_decimal}) ratio."
                 )
             else:
-                print(f"[INFO]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aiv_env}).")
+                debug = os.getenv("TRITON_DEBUG", 'false').lower() in ('true', '1')
+                if debug:
+                    print(
+                        f"[DEBUG]NPU_DEVICE_LIMIT from env: cube_core_num={num_aic_env},vector_core_num={num_aiv_env})."
+                    )
                 return num_aic_env, num_aiv_env
         else:
             raise ValueError(f"[ERROR]NPU_DEVICE_LIMIT={npu_device_limit_str}, which has invalid format: "

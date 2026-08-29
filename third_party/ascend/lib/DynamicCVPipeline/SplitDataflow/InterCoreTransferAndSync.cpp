@@ -26,7 +26,6 @@
 #include <algorithm>
 #include <memory>
 #include <optional>
-#include <set>
 
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -1025,23 +1024,6 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
   return;
 }
 
-bool hasMemDepSyncWhitelistKernel(ModuleOp module) {
-  std::vector<std::string> whitelist{
-      "_hstu_attn_fwd",
-      "parallel_path_fwd_kernel",
-  };
-
-  // Check if any func name matches the whitelist
-  bool hasWhitelistedKernel = false;
-  for (auto func : module.getOps<func::FuncOp>()) {
-    if (llvm::is_contained(whitelist, func.getName().str())) {
-      hasWhitelistedKernel = true;
-      break;
-    }
-  }
-  return hasWhitelistedKernel;
-}
-
 void InterCoreTransferAndSyncPass::insertMemDepSync(
     OpBuilder &builder, Operation *producerOp, Operation *consumerOp,
     Operation *consumerEndOp, int flag, Location loc, bool isCubeToVector,
@@ -1079,52 +1061,51 @@ void InterCoreTransferAndSyncPass::insertMemDepSync(
 
   auto prodBlockIdOpt = CVPipeline::getOpBlockId(producerOp);
   auto consBlockIdOpt = CVPipeline::getOpBlockId(consumerOp);
+  if (!prodBlockIdOpt || !consBlockIdOpt) {
+    LOG_DEBUG("Failed to get block IDs for producer or consumer operation.\n");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
   StringRef prodCoreType =
       isCubeToVector ? CVPipeline::kCoreTypeCube : CVPipeline::kCoreTypeVector;
   StringRef consCoreType =
       isCubeToVector ? CVPipeline::kCoreTypeVector : CVPipeline::kCoreTypeCube;
-  if (prodBlockIdOpt) {
-    attachCommonTags(setOp, *prodBlockIdOpt, prodCoreType);
-  }
-  if (consBlockIdOpt) {
-    attachCommonTags(waitOp, *consBlockIdOpt, consCoreType);
-  }
+  attachCommonTags(setOp, *prodBlockIdOpt, prodCoreType);
+  attachCommonTags(waitOp, *consBlockIdOpt, consCoreType);
   attachAnalyzeFlagIdTag(setOp);
   attachAnalyzeFlagIdTag(waitOp);
   flagIdReuseManager.insertRelationBetweenSetAndWait(setOp, waitOp);
-  if (hasMemDepSyncWhitelistKernel(module)) {
-    Operation *mainLoopOp = findMainLoopforTransfer(producerOp, consumerOp);
-    if (mainLoopOp) {
-      builder.setInsertionPoint(producerOp);
-      auto waitOpForWrite = builder.create<SyncBlockWaitOp>(
-          loc, srcCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
-      attachCommonTags(waitOpForWrite, *prodBlockIdOpt, prodCoreType);
 
-      builder.setInsertionPointAfter(consumerEndOp);
-      auto setOpForWrite = builder.create<SyncBlockSetOp>(
-          loc, dstCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
-      attachCommonTags(setOpForWrite, *consBlockIdOpt, consCoreType);
+  if (Operation *mainLoopOp = findMainLoopforTransfer(producerOp, consumerOp)) {
+    builder.setInsertionPoint(producerOp);
+    auto waitOpForWrite = builder.create<SyncBlockWaitOp>(
+        loc, srcCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
+    attachCommonTags(waitOpForWrite, *prodBlockIdOpt, prodCoreType);
 
-      builder.setInsertionPoint(mainLoopOp);
-      auto setOpForStart = builder.create<SyncBlockSetOp>(
-          loc, dstCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
-      builder.setInsertionPointAfter(mainLoopOp);
-      auto waitOpForEnd = builder.create<SyncBlockWaitOp>(
-          loc, srcCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
+    builder.setInsertionPointAfter(consumerEndOp);
+    auto setOpForWrite = builder.create<SyncBlockSetOp>(
+        loc, dstCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
+    attachCommonTags(setOpForWrite, *consBlockIdOpt, consCoreType);
 
-      int startEndBlockId = CVPipeline::getOpBlockId(mainLoopOp).value_or(-1);
-      attachCommonTags(setOpForStart, startEndBlockId, consCoreType);
-      attachCommonTags(waitOpForEnd, startEndBlockId, prodCoreType);
+    builder.setInsertionPoint(mainLoopOp);
+    auto setOpForStart = builder.create<SyncBlockSetOp>(
+        loc, dstCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
+    builder.setInsertionPointAfter(mainLoopOp);
+    auto waitOpForEnd = builder.create<SyncBlockWaitOp>(
+        loc, srcCoreAttr, dstPipeAttr, srcPipeAttr, flagId);
 
-      attachAnalyzeFlagIdTag(waitOpForWrite);
-      attachAnalyzeFlagIdTag(setOpForWrite);
-      attachAnalyzeFlagIdTag(setOpForStart);
-      attachAnalyzeFlagIdTag(waitOpForEnd);
-      flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite,
-                                                         waitOpForWrite);
-      flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart,
-                                                         waitOpForEnd);
-    }
+    int startEndBlockId = CVPipeline::getOpBlockId(mainLoopOp).value_or(-1);
+    attachCommonTags(setOpForStart, startEndBlockId, consCoreType);
+    attachCommonTags(waitOpForEnd, startEndBlockId, prodCoreType);
+
+    attachAnalyzeFlagIdTag(waitOpForWrite);
+    attachAnalyzeFlagIdTag(setOpForWrite);
+    attachAnalyzeFlagIdTag(setOpForStart);
+    attachAnalyzeFlagIdTag(waitOpForEnd);
+    flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForWrite,
+                                                       waitOpForWrite);
+    flagIdReuseManager.insertRelationBetweenSetAndWait(setOpForStart,
+                                                       waitOpForEnd);
   }
   LOG_DEBUG("[PIPE_MTE2 setOp]: " << *setOp << "\n");
   LOG_DEBUG("[PIPE_MTE2 waitOp]: " << *waitOp << "\n");

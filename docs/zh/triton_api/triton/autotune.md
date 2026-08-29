@@ -19,7 +19,7 @@ def kernel(x_ptr, x_size, **META):
 ```
 
 - 注：当所有配置都被解析时，内核将运行多次。也就是说内核更新的任何值都会进行多次更新。为了避免这种不希望出现的行为，可以使用 `reset_to_zero` 参数，该参数会在运行任何配置之前将提供的张量值重置为零。
-- 注：如果环境变量 `TRITON_PRINT_AUTOTUNING` 设置为 `"1"`，Triton 会在每次自动调优内核后向标准输出 (stdout) 打印一条消息，包括自动调优所花费的时间和最佳配置。
+- 注：如果环境变量 `TRITON_PRINT_AUTOTUNING` 设置为 `"1"`，Triton 会向标准输出 (stdout) 打印自动调优各阶段的开始/结束标记及墙钟耗时，并在完成后打印 benchmark 总耗时和最佳配置。使用多配置 NPU profiling 时，还会按配置汇总预热、入队、同步、profiling 墙钟/设备耗时，并打印 profiler 各阶段耗时。
 
 **参数：**
 

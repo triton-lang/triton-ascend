@@ -29,7 +29,7 @@ def _make_metadata():
         target=driver.GPUTarget("npu", "Ascend910B3", 0),
         workspace_size=0,
         lock_init_value=0,
-        lock_num=0,
+        sync_block_lock_layout=0,
         bs_task_type=0,
         mix_mode="aiv",
         shared=0,
@@ -300,7 +300,7 @@ def test_merged_code_sync_block_lock_appears_in_both_paths(
     mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     metadata = _make_metadata()
-    metadata.lock_num = 2
+    metadata.sync_block_lock_layout = 2
 
     src = driver.make_launcher(
         constants={},

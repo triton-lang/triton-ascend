@@ -438,17 +438,20 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Turn off auto-blockify only for the ORDERED (token-ring) sync_block_lock:
     if re.search(SYNC_BLOCK_LOCK_REGEX, linalg) and not re.search(r"sync_block_lock_unordered", linalg):
         metadata["has_auto_blockify_blacklist_op"] = True
-    # The unordered (Bakery) discrete-mask lock cannot coexist with CV sub-tiling
-    # (auto-bind-sub-block)
+    # Mixed kernels use (block, subblock) as the unordered-lock participant
+    # identity. Pure AIV kernels keep subblock tiling disabled: they neither
+    # need it nor necessarily have the FFTS runtime resource it requires.
     has_unordered_sync_block_lock = re.search(r"sync_block_lock_unordered", linalg) is not None
     metadata["has_unordered_sync_block_lock"] = has_unordered_sync_block_lock
     if has_unordered_sync_block_lock:
-        metadata["auto_tile_and_bind_subblock"] = False
+        mix_mode = re.search(MIX_MODE_REGEX, linalg).group(1)
+        if mix_mode != "mix":
+            metadata["auto_tile_and_bind_subblock"] = False
         # One metadata cache line for runtime participant_num, plus one
         # choosing and one ticket cache line per participant. Each cache line is
         # 8 i64. This fallback is for one lock; the bishengir callback supplies
         # the exact total after lowering.
-        metadata["lock_num"] = (1 + 2 * 1024) * 8
+        metadata["sync_block_lock_layout"] = 1 << 32
         metadata["lock_init_val"] = 0
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish
     metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
@@ -500,6 +503,23 @@ def get_common_bishengir_compile_options(metadata):
     bishengir_target = metadata['target'].arch
     bishengir_target_opt = f"--target={bishengir_target}"
     return [bishengir_target_opt]
+
+
+def _needs_lib_call_no_inline(metadata):
+    """Return whether the target needs the CANN 9.1 hacc.noinline workaround."""
+    arch = metadata['target'].arch
+    return arch.startswith("Ascend950")
+
+
+@functools.lru_cache()
+def _npu_compiler_supports_option(compiler_path: str, option: str) -> bool:
+    """Check an optional BiShengIR flag instead of assuming toolchain parity."""
+    try:
+        result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return option in result.stdout
 
 
 def get_auto_bind_sub_block_option(metadata):
@@ -715,6 +735,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
+            if (_needs_lib_call_no_inline(metadata)
+                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
+                _compile_option_list += ["--enable-lib-call-no-inline=false"]
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
@@ -770,7 +793,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             lib = ctypes.CDLL(callback_path)
             __get_metadata_attr_by_callback(lib, "_infer_task_type_function", metadata, "bs_task_type")
             __get_metadata_attr_by_callback(lib, "_infer_workspace_shape_function", metadata, "workspace_size")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata, "lock_num")
+            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata,
+                                            "sync_block_lock_layout")
             __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_init_function", metadata, "lock_init_val")
 
         return Path(bin_path).read_bytes()
@@ -924,6 +948,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 bishengir_hivm_opt,
                 "--enable-triton-kernel-compile=true",
             ]
+            if (_needs_lib_call_no_inline(metadata)
+                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
+                _compile_option_list += ["--enable-lib-call-no-inline=false"]
 
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
@@ -962,7 +989,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             lib = ctypes.CDLL(callback_path)
             __get_metadata_attr_by_callback(lib, "_infer_task_type_function", metadata, "bs_task_type")
             __get_metadata_attr_by_callback(lib, "_infer_workspace_shape_function", metadata, "workspace_size")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata, "lock_num")
+            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata,
+                                            "sync_block_lock_layout")
             __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_init_function", metadata, "lock_init_val")
 
         return Path(bin_path).read_bytes()

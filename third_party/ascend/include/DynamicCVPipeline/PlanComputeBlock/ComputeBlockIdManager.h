@@ -48,7 +48,7 @@ public:
                         llvm::DenseMap<Operation *, int> &indegree);
 
   llvm::LogicalResult markOpBlockId(Operation *op);
-  llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
+  llvm::LogicalResult markOpsWithNewId(llvm::ArrayRef<Operation *> ops);
   void updateBlockId(Operation *op, int blockId);
 
   bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
@@ -68,8 +68,8 @@ public:
   ~ComputeBlockIdManager() = default;
   ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;
   ComputeBlockIdManager &operator=(const ComputeBlockIdManager &) = delete;
-  ComputeBlockIdManager(ComputeBlockIdManager &&) = delete;
-  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = delete;
+  ComputeBlockIdManager(ComputeBlockIdManager &&) = default;
+  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = default;
 
 private:
   int cntComputeBlockId = 0;

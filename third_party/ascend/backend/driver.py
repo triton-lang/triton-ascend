@@ -693,20 +693,37 @@ def make_launcher(constants, signature, metadata):
                           if hasattr(metadata, 'workspace_size') else -1
     lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
                           lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
-    lock_num = int(metadata.lock_num) \
-                          if hasattr(metadata, 'lock_num') else -1
-    has_unordered_sync_block_lock = bool(getattr(metadata, "has_unordered_sync_block_lock", False))
-    unordered_sync_block_lock_stride_i64 = (1 + 2 * 1024) * 8
-    # Zero the sync_block_lock buffer ON THE COMPUTE STREAM.
-    if has_unordered_sync_block_lock and lock_num > 0:
+    sync_block_lock_layout = int(getattr(metadata, "sync_block_lock_layout", 0))
+    ordered_sync_block_lock_count = sync_block_lock_layout & 0xFFFFFFFF
+    unordered_sync_block_lock_count = (sync_block_lock_layout >> 32) & 0xFFFFFFFF
+    has_sync_block_lock = (ordered_sync_block_lock_count + unordered_sync_block_lock_count) > 0
+    unordered_sync_block_participant_factor = (2 if unordered_sync_block_lock_count > 0 and metadata.mix_mode == "mix"
+                                               and getattr(metadata, "auto_tile_and_bind_subblock", False) else 1)
+    sync_block_lock_layout_stmt = f"""
+    constexpr uint64_t syncBlockLockCacheLineI64 = 8;
+    constexpr uint64_t syncBlockLockOrderedCount = {ordered_sync_block_lock_count};
+    constexpr uint64_t syncBlockLockUnorderedCount = {unordered_sync_block_lock_count};
+    constexpr uint64_t syncBlockLockParticipantFactor = {unordered_sync_block_participant_factor};
+    const uint64_t syncBlockLockParticipantNum =
+        blockNum * syncBlockLockParticipantFactor;
+    const uint64_t syncBlockLockUnorderedStrideI64 =
+        (1 + 2 * syncBlockLockParticipantNum) * syncBlockLockCacheLineI64;
+    const uint64_t syncBlockLockOrderedI64Count =
+        syncBlockLockOrderedCount * syncBlockLockCacheLineI64;
+    const uint64_t syncBlockLockI64Count = syncBlockLockOrderedI64Count +
+        syncBlockLockUnorderedCount * syncBlockLockUnorderedStrideI64;
+    const uint64_t syncBlockLockSize = syncBlockLockI64Count * sizeof(int64_t);"""
+    # Initialize on the compute stream. Each unordered lock stores its exact
+    # participant count at the first cache line of its dynamic region.
+    if unordered_sync_block_lock_count > 0:
         lock_init_stmt = f"""
-    std::vector<int64_t> lockInitData({lock_num}, 0);
-    constexpr uint64_t syncBlockLockStrideI64 = {unordered_sync_block_lock_stride_i64};
-    int64_t syncBlockLockParticipantNum = static_cast<int64_t>(
-        std::min(blockNum, static_cast<uint32_t>(1024)));
-    for (uint64_t lockOffset = 0; lockOffset < {lock_num};
-         lockOffset += syncBlockLockStrideI64) {{
-      lockInitData[lockOffset] = syncBlockLockParticipantNum;
+    std::vector<int64_t> lockInitData(syncBlockLockI64Count, 0);
+    for (uint64_t lockIndex = 0; lockIndex < syncBlockLockUnorderedCount;
+         ++lockIndex) {{
+      const uint64_t lockOffset = syncBlockLockOrderedI64Count +
+          lockIndex * syncBlockLockUnorderedStrideI64;
+      lockInitData[lockOffset] =
+          static_cast<int64_t>(syncBlockLockParticipantNum);
     }}
     ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize,
                    reinterpret_cast<void *>(lockInitData.data()),
@@ -715,7 +732,7 @@ def make_launcher(constants, signature, metadata):
         lock_init_stmt = ("ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
                           "syncBlockLockSize, stream);")
     else:
-        lock_init_stmt = (f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
+        lock_init_stmt = (f"std::vector<int64_t> lockInitData(syncBlockLockI64Count, {lock_init_value});\n"
                           "    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize, "
                           "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
                           "CANN_MEMCPY_HOST_TO_DEVICE);")
@@ -1161,7 +1178,7 @@ static void release_npu_tensor_handle(void* handle) {{
     void *syncBlockLock_handle = nullptr;
     uint16_t ModuleId = 0;
     {f'''
-    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
+    {sync_block_lock_layout_stmt}
     {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
     std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
     if (!syncBlockLock_ptr) {{
@@ -1171,7 +1188,7 @@ static void release_npu_tensor_handle(void* handle) {{
     if (ret != CANN_SUCCESS) {{
       return {'ret' if enable_taskqueue else ''};
     }}
-    ''' if lock_num > 0 else ''}
+    ''' if has_sync_block_lock else ''}
     {'if (ret != CANN_SUCCESS) {{ return ret; }}' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != CANN_SUCCESS) {{ return; }}' if (workspace_size > 0 and not enable_taskqueue) else ''}"""
 
     _launch_lambda_post = f"""
@@ -1310,7 +1327,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
-      {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
+      {('static_cast<void*>(syncBlockLock_ptr),' if has_sync_block_lock else 'nullptr,') if not metadata.is_pure_simt else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]

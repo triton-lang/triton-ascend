@@ -92,11 +92,11 @@ func.return loc("glue.py":5:3)
 // source_line_write_anchor
 //
 // Verifies the main write-anchor normalization case modeled after the loop
-// reordering problem. Address/view computations that uniquely feed a
-// user-visible store are retargeted to the store source location, while pure
-// value/tensor preparation remains synthetic and is moved to
-// loop_reordering.py:0:0. The test also covers NameLoc preservation for the
-// ticket load and retargeting through tensor.insert for the next-ticket store.
+// reordering problem. Address/view computations are retargeted only when their
+// original source line matches the user-visible store line. The ticket index is
+// produced on line 23 and must therefore remain synthetic instead of being
+// retargeted to the store on line 24. Same-line view and tensor.insert paths may
+// still be retargeted. The test also covers NameLoc preservation for the load.
 //===----------------------------------------------------------------------===//
 
 module {
@@ -129,16 +129,16 @@ func.return loc("loop_reordering.py":26:3)
 // CHECK-SAME: loc(#[[$LOOP_TICKET_LOC]])
 
 // CHECK: %[[LOOP_TICKET_IDX:[A-Za-z0-9_]+]] = arith.index_cast %[[LOOP_TICKET]]
-// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: triton.debug_line.class = "synthetic"
 // CHECK-SAME: triton.debug_line.origin = #[[$LOOP_TICKET_LOC]]
 // CHECK-SAME: : i32 to index
-// CHECK-SAME: loc(#[[$LOOP_WRITE_LOC]])
+// CHECK-SAME: loc(#[[LOOP_SYNTH_LOC:[A-Za-z0-9_]+]])
 
 // CHECK: %[[LOOP_C200:[A-Za-z0-9_]+]] = arith.constant
 // CHECK-SAME: triton.debug_line.class = "synthetic"
 // CHECK-SAME: triton.debug_line.origin = #[[$LOOP_WRITE_LOC]]
 // CHECK-SAME: 200 : i32
-// CHECK-SAME: loc(#[[LOOP_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK-SAME: loc(#[[LOOP_SYNTH_LOC]])
 
 // CHECK: %[[LOOP_EMPTY:[A-Za-z0-9_]+]] = tensor.empty
 // CHECK-SAME: triton.debug_line.class = "synthetic"
@@ -185,6 +185,103 @@ func.return loc("loop_reordering.py":26:3)
 
 // CHECK-DAG: #[[LOOP_SYNTH_LOC]] = loc("loop_reordering.py":0:0)
 // CHECK-DAG: #[[LOOP_NEXT_STORE_LOC]] = loc("loop_reordering.py":25:26)
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// relocate_unique_load_debug_nop
+//
+// Verifies that a debug NOP is moved immediately before the unique memref.copy
+// carrying the same source line. The helper constant originally between the
+// NOP and the copy remains in place and becomes synthetic.
+//===----------------------------------------------------------------------===//
+
+module {
+func.func @relocate_unique_load_debug_nop(%src: memref<4xf32>, %dst: memref<4xf32>) {
+llvm.inline_asm has_side_effects asm_dialect = att "nop", "" : () -> () loc("load.py":10:5)
+%c0 = arith.constant 0 : i32 loc("load.py":10:10)
+memref.copy %src, %dst : memref<4xf32> to memref<4xf32> loc("load.py":10:20)
+func.return loc("load.py":11:3)
+}
+}
+
+// CHECK-LABEL: func.func @relocate_unique_load_debug_nop
+// CHECK: arith.constant
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-NEXT: llvm.inline_asm
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[LOAD_NOP_LOC:[A-Za-z0-9_]+]])
+// CHECK-NEXT: memref.copy
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[LOAD_COPY_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[LOAD_NOP_LOC]] = loc("load.py":10:5)
+// CHECK-DAG: #[[LOAD_COPY_LOC]] = loc("load.py":10:20)
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// keep_ambiguous_load_debug_nop
+//
+// Verifies that a debug NOP is not moved when multiple memref.copy anchors use
+// the same source line. Relocation is skipped because the matching load anchor
+// is ambiguous.
+//===----------------------------------------------------------------------===//
+
+module {
+func.func @keep_ambiguous_load_debug_nop(%src0: memref<4xf32>, %src1: memref<4xf32>, %dst0: memref<4xf32>, %dst1: memref<4xf32>) {
+llvm.inline_asm has_side_effects asm_dialect = att "nop", "" : () -> () loc("ambiguous_load.py":20:5)
+%c0 = arith.constant 0 : i32 loc("ambiguous_load.py":20:10)
+memref.copy %src0, %dst0 : memref<4xf32> to memref<4xf32> loc("ambiguous_load.py":20:20)
+memref.copy %src1, %dst1 : memref<4xf32> to memref<4xf32> loc("ambiguous_load.py":20:30)
+func.return loc("ambiguous_load.py":21:3)
+}
+}
+
+// CHECK-LABEL: func.func @keep_ambiguous_load_debug_nop
+// CHECK: llvm.inline_asm
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[AMBIGUOUS_LOAD_NOP_LOC:[A-Za-z0-9_]+]])
+// CHECK-NEXT: arith.constant
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-NEXT: memref.copy
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-NEXT: memref.copy
+// CHECK-SAME: triton.debug_line.class = "semantic"
+
+// CHECK-DAG: #[[AMBIGUOUS_LOAD_NOP_LOC]] = loc("ambiguous_load.py":20:5)
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// demote_redundant_store_debug_nop
+//
+// Verifies that a debug NOP becomes synthetic when the same source line already
+// has a materialize_in_destination store anchor. The store remains semantic and
+// the redundant NOP is moved to store.py:0:0.
+//===----------------------------------------------------------------------===//
+
+module {
+func.func @demote_redundant_store_debug_nop(%src: tensor<4xf32>, %dst: memref<4xf32>) {
+llvm.inline_asm has_side_effects asm_dialect = att "nop", "" : () -> () loc("store.py":30:5)
+bufferization.materialize_in_destination %src in writable %dst : (tensor<4xf32>, memref<4xf32>) -> () loc("store.py":30:20)
+func.return loc("store.py":31:3)
+}
+}
+
+// CHECK-DAG: #[[$STORE_NOP_ORIGIN:[A-Za-z0-9_]+]] = loc("store.py":30:5)
+
+// CHECK-LABEL: func.func @demote_redundant_store_debug_nop
+// CHECK: llvm.inline_asm
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$STORE_NOP_ORIGIN]]
+// CHECK-SAME: loc(#[[STORE_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: bufferization.materialize_in_destination
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[STORE_ANCHOR_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[STORE_SYNTH_LOC]] = loc("store.py":0:0)
+// CHECK-DAG: #[[STORE_ANCHOR_LOC]] = loc("store.py":30:20)
 
 // -----
 
@@ -678,11 +775,11 @@ func.return loc("cross_path_ambiguity.py":63:3)
 //===----------------------------------------------------------------------===//
 // matching_destination_view_and_tensor_insert_candidates
 //
-// Verifies the positive cross-path case. The same index_cast feeds both a
-// destination-view store path and a tensor.insert store path, but all collected
-// candidates canonicalize to cross_path_unique.py:71:20. Because there is
-// exactly one distinct canonical store location, the index_cast is classified
-// as semantic and retargeted to that store anchor.
+// Verifies that uniqueness alone does not allow cross-line retargeting. The
+// index_cast feeds both a destination-view store path and a tensor.insert store
+// path, and all candidates canonicalize to cross_path_unique.py:71:20. However,
+// the index_cast originates on line 70, so it remains synthetic. The destination
+// view originates on line 71 and may still be retargeted to the store anchor.
 //===----------------------------------------------------------------------===//
 
 module {
@@ -701,14 +798,17 @@ func.return loc("cross_path_unique.py":72:3)
 
 // CHECK-LABEL: func.func @matching_destination_view_and_tensor_insert_candidates
 // CHECK: %[[CROSS_PATH_UNIQUE_IDX:[A-Za-z0-9_]+]] = arith.index_cast
-// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: triton.debug_line.class = "synthetic"
 // CHECK-SAME: triton.debug_line.origin = #[[$CROSS_PATH_UNIQUE_ORIGIN]]
-// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE:[A-Za-z0-9_]+]])
+// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_SYNTH_LOC:[A-Za-z0-9_]+]])
 // CHECK: %[[CROSS_PATH_UNIQUE_VIEW:[A-Za-z0-9_]+]] = memref.subview {{.*}}[%[[CROSS_PATH_UNIQUE_IDX]]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE:[A-Za-z0-9_]+]])
 // CHECK: bufferization.materialize_in_destination %{{.*}} in writable %[[CROSS_PATH_UNIQUE_VIEW]]
 // CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE]])
 // CHECK: %[[CROSS_PATH_UNIQUE_INSERTED:[A-Za-z0-9_]+]] = tensor.insert %[[CROSS_PATH_UNIQUE_IDX]]
 // CHECK: bufferization.materialize_in_destination %[[CROSS_PATH_UNIQUE_INSERTED]]
 // CHECK-SAME: loc(#[[CROSS_PATH_UNIQUE_STORE]])
 
+// CHECK-DAG: #[[CROSS_PATH_UNIQUE_SYNTH_LOC]] = loc("cross_path_unique.py":0:0)
 // CHECK-DAG: #[[CROSS_PATH_UNIQUE_STORE]] = loc("cross_path_unique.py":71:20)

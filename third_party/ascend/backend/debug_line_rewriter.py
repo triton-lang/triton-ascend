@@ -128,20 +128,30 @@ class RewriteResult:
 # ── LEB128 ────────────────────────────────────────────────────────────────────
 
 
-def _uleb(data: bytes, off: int) -> Tuple[int, int]:
+def _uleb(data: bytes, off: int, limit: Optional[int] = None) -> Tuple[int, int]:
+    """Decode ULEB128 without reading past ``limit``."""
+    limit = len(data) if limit is None else min(limit, len(data))
     result = shift = 0
     while True:
+        if off >= limit:
+            raise ValueError(f"truncated ULEB128 at .debug_line+{off:#x} (limit {limit:#x})")
         byte = data[off]
         off += 1
         result |= (byte & 0x7F) << shift
         shift += 7
         if not byte & 0x80:
             return result, off
+        if shift > 128:
+            raise ValueError(f"overlong ULEB128 ending near .debug_line+{off:#x}")
 
 
-def _sleb(data: bytes, off: int) -> Tuple[int, int]:
+def _sleb(data: bytes, off: int, limit: Optional[int] = None) -> Tuple[int, int]:
+    """Decode SLEB128 without reading past ``limit``."""
+    limit = len(data) if limit is None else min(limit, len(data))
     result = shift = 0
     while True:
+        if off >= limit:
+            raise ValueError(f"truncated SLEB128 at .debug_line+{off:#x} (limit {limit:#x})")
         byte = data[off]
         off += 1
         result |= (byte & 0x7F) << shift
@@ -150,6 +160,8 @@ def _sleb(data: bytes, off: int) -> Tuple[int, int]:
             if shift < 64 and byte & 0x40:
                 result |= -(1 << shift)
             return result, off
+        if shift > 128:
+            raise ValueError(f"overlong SLEB128 ending near .debug_line+{off:#x}")
 
 
 # ── ELF access (navigation only; the DWARF resolver is never invoked because it
@@ -176,36 +188,76 @@ def _read_sections(stream) -> Tuple[Dict[str, dict], bool]:
 # ── line-program header ───────────────────────────────────────────────────────
 
 
-def _parse_header(data: bytes, little: bool) -> dict:
+def _require(data: bytes, off: int, size: int, limit: int, what: str) -> None:
+    if off < 0 or size < 0 or off + size > min(limit, len(data)):
+        raise ValueError(f"truncated {what} at .debug_line+{off:#x}: "
+                         f"need {size} byte(s), limit {min(limit, len(data)):#x}")
+
+
+def _cstring(data: bytes, off: int, limit: int, what: str) -> Tuple[str, int]:
+    _require(data, off, 1, limit, what)
+    end = data.find(b"\0", off, limit)
+    if end < 0:
+        raise ValueError(f"unterminated {what} at .debug_line+{off:#x}")
+    return data[off:end].decode("utf-8", "replace"), end + 1
+
+
+def _parse_header(data: bytes, little: bool, unit_offset: int = 0) -> dict:
+    """Parse one line-table unit beginning at ``unit_offset``.
+
+    The initial length supplies a hard ``unit_end`` boundary.  Linked Ascend
+    kernels commonly contain several line units (user code plus libdevice), so
+    replaying until the end of the whole section is incorrect.
+    """
     endian = "<" if little else ">"
-    off = 0
+    off = unit_offset
+    _require(data, off, 4, len(data), "initial length")
     unit_length, = struct.unpack_from(endian + "I", data, off)
     off += 4
     is_dwarf64 = unit_length == 0xFFFFFFFF
     if is_dwarf64:
+        _require(data, off, 8, len(data), "64-bit unit length")
         unit_length, = struct.unpack_from(endian + "Q", data, off)
         off += 8
+    elif unit_length >= 0xFFFFFFF0:
+        raise ValueError(f"reserved DWARF initial length {unit_length:#x} at .debug_line+{unit_offset:#x}")
+
+    unit_end = off + unit_length
+    if unit_end > len(data):
+        raise ValueError(f"line unit at .debug_line+{unit_offset:#x} ends at {unit_end:#x}, "
+                         f"past section size {len(data):#x}")
+
+    _require(data, off, 2, unit_end, "DWARF version")
     version, = struct.unpack_from(endian + "H", data, off)
     off += 2
+    if version < 2 or version > 5:
+        raise ValueError(f"unsupported DWARF line version {version} at .debug_line+{unit_offset:#x}")
 
     address_size = 8
+    segment_selector_size = 0
     if version >= 5:
+        _require(data, off, 2, unit_end, "DWARF v5 address sizes")
         address_size = data[off]
         off += 1
-        off += 1  # segment selector size
+        segment_selector_size = data[off]
+        off += 1
 
-    if is_dwarf64:
-        header_length, = struct.unpack_from(endian + "Q", data, off)
-        off += 8
-    else:
-        header_length, = struct.unpack_from(endian + "I", data, off)
-        off += 4
+    length_size = 8 if is_dwarf64 else 4
+    _require(data, off, length_size, unit_end, "header length")
+    header_length, = struct.unpack_from(endian + ("Q" if is_dwarf64 else "I"), data, off)
+    off += length_size
     program_start = off + header_length
+    if program_start > unit_end:
+        raise ValueError(f"line header at .debug_line+{unit_offset:#x} ends at {program_start:#x}, "
+                         f"past unit end {unit_end:#x}")
 
+    _require(data, off, 1, program_start, "minimum_instruction_length")
     min_inst_len = data[off]
     off += 1
     if version >= 4:
-        off += 1  # maximum_operations_per_instruction
+        _require(data, off, 1, program_start, "maximum_operations_per_instruction")
+        off += 1
+    _require(data, off, 4, program_start, "line header fields")
     default_is_stmt = data[off]
     off += 1
     line_base = struct.unpack_from("b", data, off)[0]
@@ -214,36 +266,48 @@ def _parse_header(data: bytes, little: bool) -> dict:
     off += 1
     opcode_base = data[off]
     off += 1
+    if line_range == 0:
+        raise ValueError(f"zero line_range in unit at .debug_line+{unit_offset:#x}")
+    if opcode_base == 0:
+        raise ValueError(f"zero opcode_base in unit at .debug_line+{unit_offset:#x}")
+    _require(data, off, opcode_base - 1, program_start, "standard opcode lengths")
     standard_opcode_lengths = [0] + [data[off + i] for i in range(opcode_base - 1)]
     off += opcode_base - 1
 
     include_dirs = [""]
-    while data[off] != 0:
-        end = data.index(0, off)
-        include_dirs.append(data[off:end].decode("utf-8", "replace"))
-        off = end + 1
-    off += 1
-
     file_names = [""]
     if version <= 4:
-        while data[off] != 0:
-            end = data.index(0, off)
-            file_names.append(data[off:end].decode("utf-8", "replace"))
-            off = end + 1
-            _, off = _uleb(data, off)  # dir index
-            _, off = _uleb(data, off)  # mtime
-            _, off = _uleb(data, off)  # size
-        off += 1
+        while True:
+            directory, off = _cstring(data, off, program_start, "include directory")
+            if not directory:
+                break
+            include_dirs.append(directory)
+        while True:
+            filename, off = _cstring(data, off, program_start, "file name")
+            if not filename:
+                break
+            file_names.append(filename)
+            _, off = _uleb(data, off, program_start)
+            _, off = _uleb(data, off, program_start)
+            _, off = _uleb(data, off, program_start)
+    # DWARF v5 has format-described directory/file tables.  Their extent is
+    # already known from header_length; do not parse them as legacy C strings.
 
     return {
+        "unit_start": unit_offset,
+        "unit_end": unit_end,
+        "is_dwarf64": is_dwarf64,
+        "little": little,
         "version": version,
         "address_size": address_size,
+        "segment_selector_size": segment_selector_size,
         "min_inst_len": min_inst_len,
         "default_is_stmt": default_is_stmt,
         "line_base": line_base,
         "line_range": line_range,
         "opcode_base": opcode_base,
         "standard_opcode_lengths": standard_opcode_lengths,
+        "include_dirs": include_dirs,
         "file_names": file_names,
         "program_start": program_start,
     }
@@ -259,9 +323,11 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
     lb = hdr["line_base"]
     lr = hdr["line_range"]
     mil = hdr["min_inst_len"]
-    addr_size = hdr["address_size"]
     sol = hdr["standard_opcode_lengths"]
     default_stmt = bool(hdr["default_is_stmt"])
+    unit_end = hdr.get("unit_end", len(data))
+    little = hdr.get("little", True)
+    endian = "<" if little else ">"
 
     def fresh() -> dict:
         return dict(addr=0, file=1, line=1, col=0, is_stmt=default_stmt, end_sequence=False)
@@ -271,13 +337,17 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
     state = fresh()
     off = hdr["program_start"]
 
-    while off < len(data):
+    while off < unit_end:
         op_off = off
         opcode = data[off]
         off += 1
 
         if opcode == 0:  # extended
-            length, off = _uleb(data, off)
+            length, off = _uleb(data, off, unit_end)
+            if length < 1:
+                raise ValueError(f"zero-length extended opcode at .debug_line+{op_off:#x}")
+            payload_end = off + length
+            _require(data, off, length, unit_end, "extended opcode payload")
             sub = data[off]
             off += 1
             if sub == DW_LNE_END_SEQUENCE:
@@ -290,21 +360,25 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
                 current = []
                 state = fresh()
             elif sub == DW_LNE_SET_ADDRESS:
-                if addr_size == 8:
-                    state["addr"], = struct.unpack_from("<Q", data, off)
-                    off += 8
-                else:
-                    state["addr"], = struct.unpack_from("<I", data, off)
-                    off += 4
+                # Trust the extended-op length.  Bisheng may advertise
+                # address_size=0 while carrying an 8-byte relocated operand.
+                operand_size = payload_end - off
+                if operand_size <= 0:
+                    raise ValueError(f"empty set_address at .debug_line+{op_off:#x}")
+                advertised_size = hdr["address_size"]
+                if advertised_size not in (0, operand_size):
+                    log.debug("debug-line: unit %#x set_address has %d byte(s), header advertises %d",
+                              hdr.get("unit_start", 0), operand_size, advertised_size)
+                state["addr"] = int.from_bytes(data[off:payload_end], "little" if little else "big")
             elif sub == DW_LNE_SET_DISCRIMINATOR:
-                _, off = _uleb(data, off)
+                _, off = _uleb(data, off, payload_end)
             elif sub == DW_LNE_DEFINE_FILE:
-                end = data.index(0, off)
-                off = end + 1
+                _, off = _cstring(data, off, payload_end, "DW_LNE_define_file name")
                 for _ in range(3):
-                    _, off = _uleb(data, off)
-            else:
-                off += length - 1
+                    _, off = _uleb(data, off, payload_end)
+            # Known and unknown extended opcodes both end at the declared
+            # payload boundary; any producer padding is skipped here.
+            off = payload_end
         elif opcode < ob:  # standard
             if opcode == DW_LNS_COPY:
                 row = copy.copy(state)
@@ -312,15 +386,15 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
                 row["emit_kind"] = "copy"
                 current.append(row)
             elif opcode == DW_LNS_ADVANCE_PC:
-                operand, off = _uleb(data, off)
+                operand, off = _uleb(data, off, unit_end)
                 state["addr"] += operand * mil
             elif opcode == DW_LNS_ADVANCE_LINE:
-                operand, off = _sleb(data, off)
+                operand, off = _sleb(data, off, unit_end)
                 state["line"] += operand
             elif opcode == DW_LNS_SET_FILE:
-                state["file"], off = _uleb(data, off)
+                state["file"], off = _uleb(data, off, unit_end)
             elif opcode == DW_LNS_SET_COLUMN:
-                state["col"], off = _uleb(data, off)
+                state["col"], off = _uleb(data, off, unit_end)
             elif opcode == DW_LNS_NEGATE_STMT:
                 state["is_stmt"] = not state["is_stmt"]
             elif opcode == DW_LNS_SET_BASIC_BLOCK:
@@ -328,16 +402,17 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
             elif opcode == DW_LNS_CONST_ADD_PC:
                 state["addr"] += ((255 - ob) // lr) * mil
             elif opcode == DW_LNS_FIXED_ADVANCE_PC:
-                operand, = struct.unpack_from("<H", data, off)
+                _require(data, off, 2, unit_end, "fixed_advance_pc operand")
+                operand, = struct.unpack_from(endian + "H", data, off)
                 off += 2
                 state["addr"] += operand
             elif opcode in (DW_LNS_SET_PROLOGUE_END, DW_LNS_SET_EPILOGUE_BEGIN):
                 pass
             elif opcode == DW_LNS_SET_ISA:
-                _, off = _uleb(data, off)
+                _, off = _uleb(data, off, unit_end)
             else:  # unknown standard opcode: skip its ULEB operands
                 for _ in range(sol[opcode] if opcode < len(sol) else 0):
-                    _, off = _uleb(data, off)
+                    _, off = _uleb(data, off, unit_end)
         else:  # special
             adj = opcode - ob
             state["line"] += lb + (adj % lr)
@@ -350,6 +425,23 @@ def _simulate(data: bytes, hdr: dict) -> List[List[dict]]:
     if current:
         sequences.append(current)
     return sequences
+
+
+def _decode_units(data: bytes, little: bool) -> List[Tuple[dict, List[List[dict]]]]:
+    """Parse and replay every DWARF line unit in section order."""
+    units: List[Tuple[dict, List[List[dict]]]] = []
+    off = 0
+    while off < len(data):
+        # Some linkers leave all-zero padding at the end of debug sections.
+        if not any(data[off:]):
+            break
+        hdr = _parse_header(data, little, off)
+        units.append((hdr, _simulate(data, hdr)))
+        next_off = hdr["unit_end"]
+        if next_off <= off:
+            raise ValueError(f"non-advancing line unit at .debug_line+{off:#x}")
+        off = next_off
+    return units
 
 
 # ── source analysis ───────────────────────────────────────────────────────────
@@ -440,23 +532,43 @@ def rewrite_debug_line_blob(blob: bytes, src_path: Optional[str] = None) -> Tupl
         return blob, RewriteResult(False, reason="no .debug_line section")
 
     debug_line = sections[".debug_line"]["data"]
-    hdr = _parse_header(debug_line, little)
-    sequences = _simulate(debug_line, hdr)
+    units = _decode_units(debug_line, little)
+    if not units:
+        return blob, RewriteResult(False, reason="empty .debug_line section")
+    log.debug("debug-line: parsed %d unit(s): %s", len(units), [
+        f"{hdr['unit_start']:#x}-{hdr['unit_end']:#x}/v{hdr['version']}/addr{hdr['address_size']}" for hdr, _ in units
+    ])
 
-    src = src_path or _auto_detect_source(hdr["file_names"])
+    src = src_path
+    if not src:
+        for hdr, _ in units:
+            src = _auto_detect_source(hdr["file_names"])
+            if src:
+                break
     protected = _loop_header_lines(src) if src and os.path.isfile(src) else set()
-    user_files = _user_file_indices(hdr["file_names"], src) if src else None
-    # If the source matches no file in the line table the foreign-file rule would
-    # demote every row; that is almost certainly a wrong source path, so disable
-    # the rule rather than wipe all stops.
-    if user_files is not None and not user_files:
-        log.warning("debug-line: source %s matches no file in the line table %s; "
-                    "skipping foreign-file rule", src, hdr["file_names"][1:])
-        user_files = None
     src_lines = _source_length(src) if src and os.path.isfile(src) else None
 
-    before = [r["line"] for s in sequences for r in s if r["is_stmt"] and not r["end_sequence"]]
-    demote, kept, counts = _plan_demotions(sequences, protected, user_files, src_lines)
+    before: List[int] = []
+    demote: List[dict] = []
+    kept: List[int] = []
+    counts = {"dup": 0, "foreign": 0, "line0": 0, "over": 0, "special_skip": 0}
+    for hdr, sequences in units:
+        user_files = _user_file_indices(hdr["file_names"], src) if src else None
+        # A source mismatch (or an unresolved v5 file table) must not cause all
+        # rows in this unit to be classified as foreign.
+        if user_files is not None and not user_files:
+            log.warning("debug-line: source %s matches no file in unit %#x table %s; skipping foreign-file rule", src,
+                        hdr["unit_start"], hdr["file_names"][1:])
+            user_files = None
+        before.extend(row["line"]
+                      for sequence in sequences
+                      for row in sequence
+                      if row["is_stmt"] and not row["end_sequence"])
+        unit_demote, unit_kept, unit_counts = _plan_demotions(sequences, protected, user_files, src_lines)
+        demote.extend(unit_demote)
+        kept.extend(unit_kept)
+        for key in counts:
+            counts[key] += unit_counts[key]
 
     if not demote:
         return blob, RewriteResult(False, before=before, after=kept, counts=counts, reason="nothing to demote")
@@ -473,8 +585,12 @@ def rewrite_debug_line_blob(blob: bytes, src_path: Optional[str] = None) -> Tupl
         patched[file_off] = DW_LNS_SET_BASIC_BLOCK
 
     # Verify against the patched bytes (length-preserving, so offsets are stable).
-    verify_sections, _ = _read_sections(io.BytesIO(bytes(patched)))
-    survivors = _surviving_is_stmt_lines(verify_sections[".debug_line"]["data"], hdr)
+    verify_sections, verify_little = _read_sections(io.BytesIO(bytes(patched)))
+    verify_debug_line = verify_sections[".debug_line"]["data"]
+    survivors = [
+        line for verify_hdr, _ in _decode_units(verify_debug_line, verify_little)
+        for line in _surviving_is_stmt_lines(verify_debug_line, verify_hdr)
+    ]
     if survivors != kept:
         return blob, RewriteResult(False, before=before, after=kept, counts=counts,
                                    reason=f"verify mismatch: survivors={survivors} kept={kept}")

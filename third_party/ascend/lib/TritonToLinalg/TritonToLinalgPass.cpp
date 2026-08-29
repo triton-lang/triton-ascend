@@ -159,6 +159,7 @@ static bool isCustomOpOperandTypesLegal(TypeRange types)
     });
 }
 
+// Check if the op is a SIMT op.
 static bool isSIMTOp(Operation *op)
 {
   if (auto custom_op = dyn_cast<hivm::CustomOp>(op)) {

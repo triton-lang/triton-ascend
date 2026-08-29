@@ -35,10 +35,13 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <memory>
 #include <optional>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -392,9 +395,17 @@ public:
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
     if (std::optional<RowCandidate> candidate =
-            analyzeRow(context.getFunction()))
+            analyzeRow(context.getFunction())) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[" DEBUG_TYPE "] matched graph optimization rule "
+                 << static_cast<unsigned>(getId()) << " ("
+                 << getGraphOptimizationRuleName(getId()) << ") in @"
+                 << candidate->function.getName()
+                 << ": axis=" << candidate->axis
+                 << " rowsPerProgram=" << candidate->rowsPerProgram << "\n");
       plans.push_back(
           std::make_unique<RowCoalescingPlan>(*candidate, context.getEpoch()));
+    }
     return success();
   }
 };

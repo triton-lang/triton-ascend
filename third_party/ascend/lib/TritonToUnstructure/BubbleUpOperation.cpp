@@ -60,6 +60,21 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
     return failure();
   }
 
+  // Keep the vector mask attached to discrete memory accesses. Depending on
+  // which mask conversion produced the select, the marker is either on the
+  // select itself or on the generated load loop that supplies its value.
+  if (auto selectOp = dyn_cast<arith::SelectOp>(parentOp);
+      selectOp && isa<ShapedType>(selectOp.getCondition().getType())) {
+    auto isDiscreteLoadResult = [](Value value) {
+      auto forOp = value.getDefiningOp<scf::ForOp>();
+      return forOp && forOp->hasAttr("ExtractedLoadOrStore");
+    };
+    if (selectOp->hasAttr(ConverterUtils::discreteAttrName) ||
+        isDiscreteLoadResult(selectOp.getTrueValue()) ||
+        isDiscreteLoadResult(selectOp.getFalseValue()))
+      return failure();
+  }
+
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "Before bubble up\n" << op << '\n' << funcOp << "\n";

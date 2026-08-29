@@ -98,12 +98,14 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
         return SimpleNamespace(
             get_aivector_core_num=lambda: 40,
             get_aicore_num=lambda: 20,
-            npu_utils_mod=SimpleNamespace(__file__=f"{cache_root}/{cache_key}/npu_utils.so"),
+            get_so_path=lambda: f"{cache_root}/{cache_key}/npu_utils.so",
         )
 
     producer_utils = make_utils("/producer/cache")
     consumer_utils = make_utils("/consumer/cache")
-    mock_npu_utils.side_effect = [producer_utils, consumer_utils]
+    # make_launcher currently reads NPUUtils once for core counts and once for
+    # the shared-object path.
+    mock_npu_utils.side_effect = [producer_utils, producer_utils, consumer_utils, consumer_utils]
 
     producer_src = driver.make_launcher(
         constants={},
@@ -124,6 +126,9 @@ def test_make_launcher_resolves_npu_utils_from_active_cache_root(
     assert f'npu_utils_path = std::string(cache_root) + "/{cache_key}/npu_utils.so";' in producer_src
     assert 'const char* triton_home = std::getenv("TRITON_HOME");' in producer_src
     assert f'npu_utils_path = std::string(base) + "/.triton/cache/{cache_key}/npu_utils.so";' in producer_src
+    module_init = producer_src.split("PyMODINIT_FUNC PyInit___triton_launcher", maxsplit=1)[1]
+    assert "init_npu_utils();" in module_init
+    assert "set_npu_utils_path" not in producer_src
 
 
 @patch.object(driver, "NPUUtils")

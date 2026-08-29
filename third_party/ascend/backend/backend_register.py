@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.util
 import os
 from typing import Callable, Dict
 
@@ -73,19 +74,6 @@ class _LazyBackendStrategyRegister:
 
 
 backend_strategy_registry = _LazyBackendStrategyRegister()
-
-
-@backend_strategy_registry.register("mindspore", "version_hash")
-def version_hash():
-    import mindspore
-    return [str(mindspore.version)]
-
-
-@backend_strategy_registry.register("torch_npu", "version_hash")
-def version_hash():
-    import torch
-    import torch_npu
-    return [torch.version.git_version, torch_npu.version.git_version]
 
 
 @backend_strategy_registry.register("mindspore", "cxx_abi")
@@ -195,12 +183,21 @@ def get_cc_cmd():
     ]
 
 
+def _get_package_dir(package_name):
+    spec = importlib.util.find_spec(package_name)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{package_name}'")
+    if spec.submodule_search_locations:
+        return os.path.realpath(next(iter(spec.submodule_search_locations)))
+    if spec.origin is None:
+        raise ModuleNotFoundError(f"Cannot locate module '{package_name}'")
+    return os.path.dirname(os.path.realpath(spec.origin))
+
+
 @backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
 def get_cc_cmd_npu_utils():
-    import torch
-    import torch_npu
-    torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
+    torch_path = _get_package_dir("torch")
+    torch_npu_path = _get_package_dir("torch_npu")
     cc_cmd = [
         f"-I{os.path.join(torch_path, 'include')}",
         f"-I{os.path.join(torch_npu_path, 'include')}",

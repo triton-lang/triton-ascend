@@ -23,6 +23,7 @@
 __all__ = ["custom", "custom_semantic", "register_custom_op", "SyncEventSlot"]
 
 import inspect
+from warnings import warn
 import types
 import typing
 import itertools
@@ -384,6 +385,9 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     name = _unwrap_constexpr(name)
     # Get op class according the name.
     op_class = _get_op_class(name)
+    deprecated_message = getattr(op_class, "_deprecated_message", None)
+    if deprecated_message:
+        warn(deprecated_message, FutureWarning, stacklevel=3)
     # Convert constexpr to value in arguments.
     args = _unwrap_constexpr(args)
     kwargs = _unwrap_constexpr(kwargs)

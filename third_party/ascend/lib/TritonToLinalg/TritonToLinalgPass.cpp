@@ -1275,6 +1275,47 @@ void TritonToLinalgPass::addDynamicLegal(
       isArithOrMathOpLegal);
 }
 
+namespace {
+
+/// Route the specific `splat(base) -> addptr(scan) -> addptr(constant) ->
+/// store` form through the existing indirect-store operation before use
+/// analysis. Lowering either addptr independently would materialize a memref
+/// while the remaining operation still expects tensor<ptr>.
+class FoldScanOffsetAddPtrChain : public OpRewritePattern<triton::AddPtrOp> {
+public:
+  using OpRewritePattern<triton::AddPtrOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::AddPtrOp op,
+                                PatternRewriter &rewriter) const override {
+    if (!op->hasOneUse() || !op.getOffset().getDefiningOp<triton::ScanOp>())
+      return failure();
+    auto nextAddPtr = dyn_cast<triton::AddPtrOp>(*op->user_begin());
+    if (!nextAddPtr ||
+        !nextAddPtr.getOffset().getDefiningOp<arith::ConstantOp>() ||
+        op.getOffset().getType() != nextAddPtr.getOffset().getType() ||
+        !nextAddPtr->hasOneUse())
+      return failure();
+    auto store = dyn_cast<triton::StoreOp>(*nextAddPtr->user_begin());
+    auto baseSplat = op.getPtr().getDefiningOp<triton::SplatOp>();
+    if (!store || !baseSplat ||
+        !isa<triton::PointerType>(baseSplat.getSrc().getType()))
+      return failure();
+
+    rewriter.setInsertionPoint(nextAddPtr);
+    Value combinedOffset = rewriter.create<arith::AddIOp>(
+        nextAddPtr.getLoc(), op.getOffset(), nextAddPtr.getOffset());
+    rewriter.create<triton::ascend::IndirectStoreOp>(
+        store.getLoc(), baseSplat.getSrc(), combinedOffset, store.getValue(),
+        store.getMask());
+    rewriter.eraseOp(store);
+    rewriter.eraseOp(nextAddPtr);
+    rewriter.eraseOp(op);
+    return success();
+  }
+};
+
+} // namespace
+
 void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
     RewritePatternSet &patterns) {
   patterns.add<LoadStoreConverter::LoadStoreCanonicalizer<triton::LoadOp>,
@@ -1282,6 +1323,7 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
                LoadStoreConverter::LoadStoreCanonicalizer<triton::AtomicRMWOp>,
                LoadStoreConverter::LoadStoreCanonicalizer<triton::AtomicCASOp>>(
       patterns.getContext());
+  patterns.add<FoldScanOffsetAddPtrChain>(patterns.getContext());
   patterns.add<TTOpConverters::BitcastCanonicalizer>(patterns.getContext());
   patterns.add<TTOpConverters::FpToFpCanonicalizer>(patterns.getContext());
   patterns.add<LoadStoreConverter::ScalarStoreCanonicalizer>(
@@ -1446,12 +1488,12 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry
-      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-              tensor::TensorDialect, bufferization::BufferizationDialect,
-              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
-              annotation::AnnotationDialect, LLVM::LLVMDialect>();
+  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+                  tensor::TensorDialect, bufferization::BufferizationDialect,
+                  memref::MemRefDialect, hfusion::HFusionDialect,
+                  hivm::HIVMDialect, annotation::AnnotationDialect,
+                  LLVM::LLVMDialect, triton::ascend::TritonAscendDialect>();
 }
 
 LogicalResult

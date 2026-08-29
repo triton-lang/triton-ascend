@@ -57,6 +57,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -64,6 +65,8 @@
 #include <limits>
 #include <memory>
 #include <optional>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -516,9 +519,16 @@ public:
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
     context.getFunction().walk([&](triton::ReduceOp reduce) {
-      if (std::optional<DiagonalCandidate> candidate = analyzeDiagonal(reduce))
+      if (std::optional<DiagonalCandidate> candidate =
+              analyzeDiagonal(reduce)) {
+        LLVM_DEBUG(llvm::dbgs()
+                   << "[" DEBUG_TYPE "] matched graph optimization rule "
+                   << static_cast<unsigned>(getId()) << " ("
+                   << getGraphOptimizationRuleName(getId()) << ") at "
+                   << reduce.getLoc() << "\n");
         plans.push_back(std::make_unique<DiagonalMaskRemovalPlan>(
             *candidate, context.getEpoch()));
+      }
     });
     return success();
   }

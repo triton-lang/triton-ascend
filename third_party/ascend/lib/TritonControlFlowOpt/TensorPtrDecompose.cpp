@@ -851,6 +851,23 @@ static FailureOr<RankedTensorType> getIntegerTensorType(Value value) {
   return type;
 }
 
+// Sign-extension preserves the affine provenance of a tensor offset when it
+// only changes the integer element width.  Keep this check shared by
+// analysis and materialization so an extension is never classified as
+// Structured in one phase and rebuilt as Opaque in the other.
+static bool isCompatibleIntegerExtension(Value source,
+                                         RankedTensorType resultType) {
+  auto sourceType = dyn_cast<RankedTensorType>(source.getType());
+  if (!sourceType || sourceType.getRank() != resultType.getRank() ||
+      sourceType.getShape() != resultType.getShape() ||
+      sourceType.getEncoding() != resultType.getEncoding())
+    return false;
+  auto sourceElement = dyn_cast<IntegerType>(sourceType.getElementType());
+  auto resultElement = dyn_cast<IntegerType>(resultType.getElementType());
+  return sourceElement && resultElement &&
+         sourceElement.getWidth() < resultElement.getWidth();
+}
+
 static bool hasAnyOpaqueAxis(ArrayRef<AxisKind> kinds) {
   return llvm::is_contained(kinds, AxisKind::Opaque);
 }
@@ -938,6 +955,30 @@ static FailureOr<AnalyzedTensorOffset> analyzeTensorOffset(Value value) {
     if (!dense->value.isZero())
       result.uniformOffset.identity =
           ComponentIdentity::fromValue(value, getUniformOffsetComponent(rank));
+    return result;
+  }
+
+  if (auto extension = value.getDefiningOp<arith::ExtSIOp>()) {
+    Value source = extension.getIn();
+    if (!isCompatibleIntegerExtension(source, *tensorType))
+      return getOpaqueAnalyzedOffset(value);
+    FailureOr<AnalyzedTensorOffset> sourceInfo = analyzeTensorOffset(source);
+    if (failed(sourceInfo) || sourceInfo->strides.size() != rank)
+      return getOpaqueAnalyzedOffset(value);
+
+    AnalyzedTensorOffset result = makeStructuredZero();
+    result.axisKinds = sourceInfo->axisKinds;
+    for (unsigned axis = 0; axis < rank; ++axis) {
+      if (!isZeroIdentity(sourceInfo->strides[axis].identity))
+        result.strides[axis].identity =
+            ComponentIdentity::fromValue(value, getStrideComponent(axis));
+    }
+    if (!isZeroIdentity(sourceInfo->uniformOffset.identity))
+      result.uniformOffset.identity =
+          ComponentIdentity::fromValue(value, getUniformOffsetComponent(rank));
+    if (!isZeroIdentity(sourceInfo->opaqueContribution.identity))
+      result.opaqueContribution.identity = ComponentIdentity::fromValue(
+          value, getOpaqueContributionComponent(rank));
     return result;
   }
 
@@ -1215,6 +1256,37 @@ materializeTensorOffsetFields(Value value, OpBuilder &builder, Location loc) {
     if (!uniform)
       return failure();
     result->uniformOffset = uniform;
+    return result;
+  }
+
+  if (auto extension = value.getDefiningOp<arith::ExtSIOp>()) {
+    if (!isCompatibleIntegerExtension(extension.getIn(), *tensorType))
+      return fallback();
+    FailureOr<TensorOffsetValues> source =
+        materializeTensorOffsetFields(extension.getIn(), builder, loc);
+    if (failed(source) || source->strides.size() != rank)
+      return fallback();
+
+    FailureOr<TensorOffsetValues> result = makeZero(AxisKind::Structured);
+    if (failed(result))
+      return failure();
+    result->axisKinds = source->axisKinds;
+    for (unsigned axis = 0; axis < rank; ++axis) {
+      FailureOr<Value> stride =
+          castIntegerLike(builder, loc, source->strides[axis], scalarType);
+      if (failed(stride))
+        return fallback();
+      result->strides[axis] = *stride;
+    }
+    FailureOr<Value> uniform =
+        castIntegerLike(builder, loc, source->uniformOffset, scalarType);
+    if (failed(uniform))
+      return fallback();
+    result->uniformOffset = *uniform;
+    if (!isConstantZero(source->opaqueContribution)) {
+      result->opaqueContribution = builder.create<arith::ExtSIOp>(
+          loc, *tensorType, source->opaqueContribution);
+    }
     return result;
   }
 

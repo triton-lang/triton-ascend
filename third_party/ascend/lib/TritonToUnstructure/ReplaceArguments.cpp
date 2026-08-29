@@ -114,11 +114,35 @@ static bool hasScalarPointerBase(const PtrOffsetInfo &info) {
   return info.getPtr() && isScalarPointerType(info.getPtr().getType());
 }
 
+// A function argument is a stable pointer base: it dominates the enclosing
+// loop and carries no control-flow-selected address.  Offset analysis records
+// this base with `ptr == value` and a zero displacement, so that identity is
+// valid for a loop init but must not be confused with a loop phi or an
+// int_to_ptr result elsewhere.
+static bool isStableFunctionScalarPointerBase(Value value) {
+  auto blockArg = dyn_cast<BlockArgument>(value);
+  if (!blockArg || !isScalarPointerType(value.getType()))
+    return false;
+  Operation *owner = blockArg.getOwner()->getParentOp();
+  return owner && isa<FunctionOpInterface>(owner);
+}
+
+// Offset analysis deliberately represents a scalar pointer selected by
+// scf.if as an opaque complete address. If such a value is a loop backedge,
+// the loop must choose the complete-address protocol before any edge is
+// rewritten; otherwise the init/region argument can become i64 while the
+// yield remains a pointer.
+static bool isOpaqueScalarPointerIfResult(Value value) {
+  return isScalarPointerType(value.getType()) &&
+         value.getDefiningOp<scf::IfOp>();
+}
+
 // A scalar pointer can use the established T2U offset representation only if
 // analysis found both a source pointer and a displacement.  An entry whose
-// source is the value itself is an opaque complete address (for example a
-// control-flow phi or a function argument), so choosing an offset for only
-// one edge would change the meaning of the other edges.
+// source is the value itself is normally an opaque complete address (for
+// example a control-flow phi).  A function argument is the one exception when
+// it is examined as the init anchor of an ordinary loop; the loop conversion
+// must then materialize a zero offset for that anchor.
 static bool
 canRewriteScalarPointer(Value value, RewriterBase &rewriter,
                         llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
@@ -140,33 +164,49 @@ canRewriteScalarPointer(Value value, RewriterBase &rewriter,
 static bool
 shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
                              llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  SmallVector<Value> boundaryValues;
+  auto canRewriteBoundary = [&](Value value, bool allowStableBase) {
+    if (!isScalarPointerType(value.getType()))
+      return true;
+    if (allowStableBase && isStableFunctionScalarPointerBase(value))
+      return true;
+    return canRewriteScalarPointer(value, rewriter, offsetMap);
+  };
+
   if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
-    boundaryValues.append(whileOp.getInits().begin(), whileOp.getInits().end());
-    boundaryValues.append(whileOp.getBeforeArguments().begin(),
-                          whileOp.getBeforeArguments().end());
-    boundaryValues.append(whileOp.getAfterArguments().begin(),
-                          whileOp.getAfterArguments().end());
+    for (Value init : whileOp.getInits())
+      if (!canRewriteBoundary(init, /*allowStableBase=*/true))
+        return true;
+    for (Value arg : whileOp.getBeforeArguments())
+      if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
+        return true;
+    for (Value arg : whileOp.getAfterArguments())
+      if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
+        return true;
+    return false;
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
-    boundaryValues.append(loopOp.getInits().begin(), loopOp.getInits().end());
-    boundaryValues.append(loopOp.getRegionIterArgs().begin(),
-                          loopOp.getRegionIterArgs().end());
+    for (Value init : loopOp.getInits())
+      if (!canRewriteBoundary(init, /*allowStableBase=*/true))
+        return true;
+    for (Value arg : loopOp.getRegionIterArgs())
+      if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
+        return true;
+    for (Value value : loopOp.getYieldedValues())
+      if (isOpaqueScalarPointerIfResult(value))
+        return true;
+    return false;
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
-    boundaryValues.append(ifOp->getResults().begin(), ifOp->getResults().end());
-    boundaryValues.append(ifOp.thenYield().getResults().begin(),
-                          ifOp.thenYield().getResults().end());
+    for (Value value : ifOp->getResults())
+      if (!canRewriteBoundary(value, /*allowStableBase=*/false))
+        return true;
+    for (Value value : ifOp.thenYield().getResults())
+      if (!canRewriteBoundary(value, /*allowStableBase=*/false))
+        return true;
     if (ifOp.elseBlock())
-      boundaryValues.append(ifOp.elseYield().getResults().begin(),
-                            ifOp.elseYield().getResults().end());
+      for (Value value : ifOp.elseYield().getResults())
+        if (!canRewriteBoundary(value, /*allowStableBase=*/false))
+          return true;
   } else {
     return false;
-  }
-
-  for (Value value : boundaryValues) {
-    if (!isScalarPointerType(value.getType()))
-      continue;
-    if (!canRewriteScalarPointer(value, rewriter, offsetMap))
-      return true;
   }
   return false;
 }
@@ -250,7 +290,8 @@ static void invalidateScalarPointerBoundaryAnalysis(
 
 void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
                      llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
-                     bool preserveScalarPointers) {
+                     bool preserveScalarPointers,
+                     bool allowStableBaseInit = false) {
   for (auto it = oprs.begin(); it != oprs.end(); ++it) {
     auto &opr = *it;
     auto operand = opr.get();
@@ -271,6 +312,14 @@ void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
       if (preserveScalarPointers && isScalarPointerType(operand.getType()))
         continue;
       parse(operand, operand.getLoc(), rewriter, offsetMap);
+      if (allowStableBaseInit && isStableFunctionScalarPointerBase(operand)) {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(opr.getOwner());
+        Value zero =
+            rewriter.create<arith::ConstantIntOp>(operand.getLoc(), 0, 64);
+        opr.set(zero);
+        continue;
+      }
       if (auto tensorType =
               dyn_cast<RankedTensorType>(ptrType.getPointeeType())) {
         for (auto offset : offsetMap.at(operand).getOffsets()) {
@@ -389,7 +438,8 @@ void convertTensorPtrPre(Operation *op, RewriterBase &rewriter,
     replaceArgs(whileOp.getBeforeArguments(), rewriter, offsetMap,
                 preserveScalarPointers);
     replaceOperands(whileOp.getInitsMutable(), rewriter, offsetMap,
-                    preserveScalarPointers);
+                    preserveScalarPointers,
+                    /*allowStableBaseInit=*/true);
     replaceArgs(whileOp.getAfterArguments(), rewriter, offsetMap,
                 preserveScalarPointers);
     replaceArgs(whileOp->getResults(), rewriter, offsetMap,
@@ -405,7 +455,8 @@ void convertTensorPtrPre(Operation *op, RewriterBase &rewriter,
     replaceArgs(loopOp.getRegionIterArgs(), rewriter, offsetMap,
                 preserveScalarPointers);
     replaceOperands(loopOp.getInitsMutable(), rewriter, offsetMap,
-                    preserveScalarPointers);
+                    preserveScalarPointers,
+                    /*allowStableBaseInit=*/true);
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
     if (preserveScalarPointers && hasScalarPointerResult(ifOp))
       ifOp->setAttr(kScalarPointerCarrierBoundaryAttr,

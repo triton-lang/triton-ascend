@@ -36,6 +36,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -43,6 +44,8 @@
 #include <memory>
 #include <optional>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -2165,6 +2168,14 @@ public:
       std::optional<LayoutPermutationCandidate> candidate =
           matchLoopCandidate(loop);
       if (candidate) {
+        LLVM_DEBUG({
+          llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                       << static_cast<unsigned>(getId()) << " ("
+                       << getGraphOptimizationRuleName(getId()) << ") at loop "
+                       << candidate->anchor->getLoc() << ": perm=[";
+          llvm::interleaveComma(candidate->permutation, llvm::dbgs());
+          llvm::dbgs() << "] endpoints=" << candidate->endpointCount << "\n";
+        });
         plans.push_back(std::make_unique<LayoutPermutationPlan>(
             std::move(*candidate), context.getEpoch()));
       }
@@ -2184,6 +2195,14 @@ public:
       std::optional<LayoutPermutationCandidate> candidate =
           matchBlockCandidate(block);
       if (candidate) {
+        LLVM_DEBUG({
+          llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                       << static_cast<unsigned>(getId()) << " ("
+                       << getGraphOptimizationRuleName(getId()) << ") at block "
+                       << candidate->anchor->getLoc() << ": perm=[";
+          llvm::interleaveComma(candidate->permutation, llvm::dbgs());
+          llvm::dbgs() << "] endpoints=" << candidate->endpointCount << "\n";
+        });
         plans.push_back(std::make_unique<LayoutPermutationPlan>(
             std::move(*candidate), context.getEpoch()));
       }

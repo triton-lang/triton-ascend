@@ -2504,6 +2504,26 @@ bool isLoopCarriedValueUsedWithCondition(
   return isUsedWithCondition(loopOp->getResult(index), condition);
 }
 
+// The legacy BlockData route only needs address uses reached from inside the
+// loop. Reuse the established traversal for the region arguments, but do not
+// start another traversal from the loop result: a numerical carrier can feed
+// an unrelated reduction after the loop and eventually reach an address use.
+static bool isLoopCarriedAddressValueUsed(
+    LoopLikeOpInterface loopOp, unsigned index,
+    const std::function<bool(OpOperand *)> &condition) {
+  if (index >= loopOp.getRegionIterArgs().size() ||
+      index >= loopOp->getNumResults())
+    return false;
+  if (isUsedWithCondition(loopOp.getRegionIterArgs()[index], condition))
+    return true;
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation())) {
+    if (index < whileOp.getAfterArguments().size() &&
+        isUsedWithCondition(whileOp.getAfterArguments()[index], condition))
+      return true;
+  }
+  return false;
+}
+
 bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp) {
   auto hasPointerValue = [&](auto values) {
     return llvm::any_of(values, [&](Value value) {
@@ -2562,7 +2582,7 @@ bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp) {
     auto integerType = dyn_cast<IntegerType>(tensorType.getElementType());
     if (!integerType || integerType.getWidth() == 1)
       continue;
-    if (isLoopCarriedValueUsedWithCondition(loopOp, index, [](OpOperand *use) {
+    if (isLoopCarriedAddressValueUsed(loopOp, index, [](OpOperand *use) {
           Operation *user = use->getOwner();
           return isa<triton::AddPtrOp>(user) ||
                  (isa<triton::LoadOp>(user) && use->getOperandNumber() == 1) ||

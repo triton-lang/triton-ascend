@@ -33,6 +33,7 @@
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -40,6 +41,8 @@
 #include <memory>
 #include <optional>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -741,6 +744,13 @@ public:
         &context.getEntryArgPointerAliasAnalysis();
     for (const StoreCoalescingRun &run :
          findRuns(context.getFunction(), ubCapacityBytes, entryAliases)) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[" DEBUG_TYPE "] matched graph optimization rule "
+                 << static_cast<unsigned>(getId()) << " ("
+                 << getGraphOptimizationRuleName(getId()) << ") at "
+                 << run.anchor->getLoc()
+                 << ": stores=" << run.programOrderStores.size() << " elements="
+                 << run.totalElements << " bytes=" << run.totalBytes << "\n");
       plans.push_back(std::make_unique<StoreCoalescingPlan>(
           run, context.getFunction(), entryAliases, ubCapacityBytes,
           context.getEpoch()));

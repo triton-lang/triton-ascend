@@ -82,6 +82,39 @@ tt.func @test_select_pointer_extract_bubbleup(
     tt.return %pointer : !tt.ptr<f32>
 }
 
+// CHECK-LABEL: tt.func @test_discrete_masked_select_extract_not_bubbled
+// CHECK: %[[SELECTED:.*]] = arith.select %{{.*}}, %{{.*}}, %{{.*}} {DiscreteMemAccess} : tensor<4xi1>, tensor<4xf32>
+// CHECK: %[[VALUE:.*]] = tensor.extract %[[SELECTED]][%{{.*}}] : tensor<4xf32>
+// CHECK: tt.return %[[VALUE]] : f32
+tt.func @test_discrete_masked_select_extract_not_bubbled(
+    %condition: tensor<4xi1>, %true_value: tensor<4xf32>,
+    %false_value: tensor<4xf32>, %i: index) -> f32 {
+    %selected = arith.select %condition, %true_value, %false_value {DiscreteMemAccess} : tensor<4xi1>, tensor<4xf32>
+    %value = tensor.extract %selected[%i] : tensor<4xf32>
+    tt.return %value : f32
+}
+
+// CHECK-LABEL: tt.func @test_discrete_load_loop_select_extract_not_bubbled
+// CHECK: %[[LOADED:.*]] = scf.for
+// CHECK: } {ExtractedLoadOrStore}
+// CHECK: %[[SELECTED:.*]] = arith.select %{{.*}}, %[[LOADED]], %{{.*}} : tensor<4xi1>, tensor<4xf32>
+// CHECK: %[[VALUE:.*]] = tensor.extract %[[SELECTED]][%{{.*}}] : tensor<4xf32>
+// CHECK: tt.return %[[VALUE]] : f32
+tt.func @test_discrete_load_loop_select_extract_not_bubbled(
+    %condition: tensor<4xi1>, %initial: tensor<4xf32>,
+    %other: tensor<4xf32>, %loaded_element: f32, %i: index) -> f32 {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c4 = arith.constant 4 : index
+    %loaded = scf.for %iv = %c0 to %c4 step %c1 iter_args(%result = %initial) -> tensor<4xf32> {
+      %inserted = tensor.insert %loaded_element into %result[%iv] : tensor<4xf32>
+      scf.yield %inserted : tensor<4xf32>
+    } {ExtractedLoadOrStore}
+    %selected = arith.select %condition, %loaded, %other : tensor<4xi1>, tensor<4xf32>
+    %value = tensor.extract %selected[%i] : tensor<4xf32>
+    tt.return %value : f32
+}
+
 // CHECK-LABEL: tt.func @test_ceil_extract_bubbleup
 tt.func @test_ceil_extract_bubbleup(%a: tensor<128xf32>, %i: index, %c: f32) -> f32 {
     %0 = math.ceil %a : tensor<128xf32>

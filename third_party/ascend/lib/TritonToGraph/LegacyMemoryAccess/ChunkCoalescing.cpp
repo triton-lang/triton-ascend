@@ -22,6 +22,7 @@
 
 #include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"
 
+#include "TritonToGraph/GraphOptimization.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -34,7 +35,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
-#define DEBUG_TYPE "chunk-coalescing"
+#define DEBUG_TYPE "graph-optimize"
 
 #include <algorithm>
 #include <functional>
@@ -394,6 +395,17 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
     }
     return RankedTensorType::get({H}, t);
   };
+
+  LLVM_DEBUG(llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                          << static_cast<unsigned>(
+                                 cfg::GraphOptimizationRuleId::ChunkCoalescing)
+                          << " ("
+                          << cfg::getGraphOptimizationRuleName(
+                                 cfg::GraphOptimizationRuleId::ChunkCoalescing)
+                          << ") at " << ploc << ": tileLen=" << seed->tileLen
+                          << " bound=" << seed->bound
+                          << " numTiles=" << numTiles << " maxH=" << maxH
+                          << " H=" << H << "\n");
 
   rw.setInsertionPointAfter(seed->pid);
   Value cH = rw.create<arith::ConstantIntOp>(ploc, H, 32);

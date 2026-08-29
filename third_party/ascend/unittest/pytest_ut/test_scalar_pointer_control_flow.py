@@ -59,6 +59,20 @@ def scalar_pointer_while_kernel(x, out, steps_ptr):
 
 
 @triton.jit
+def scalar_pointer_while_from_function_args_kernel(x, out, steps_ptr):
+    """Keep function-argument bases outside the loop and carry only offsets."""
+    steps = tl.load(steps_ptr)
+    input_pointer = x
+    output_pointer = out
+    iteration = 0
+    while iteration < steps:
+        input_pointer = input_pointer + 2
+        output_pointer = output_pointer + 3
+        iteration += 1
+    tl.store(output_pointer, tl.load(input_pointer))
+
+
+@triton.jit
 def scalar_pointer_nested_if_for_kernel(x, out, predicate_ptr, steps_ptr):
     predicate = tl.load(predicate_ptr)
     steps = tl.load(steps_ptr)
@@ -166,6 +180,21 @@ def test_scalar_pointer_while_carried(steps):
 
     expected_index = 1 + 2 * steps
     _assert_output(out, x0_cpu[expected_index:expected_index + 1])
+
+
+@pytest.mark.parametrize("steps", [0, 1, 5])
+def test_scalar_pointer_while_from_function_args(steps):
+    x0_cpu, _, x0, _ = _inputs()
+    out_cpu = torch.zeros(INPUT_SIZE, dtype=torch.float32)
+    out = out_cpu.npu()
+
+    scalar_pointer_while_from_function_args_kernel[(1, )](x0, out, _device_i32(steps))
+
+    expected_input_index = 2 * steps
+    expected_output_index = 3 * steps
+    expected = torch.zeros_like(out_cpu)
+    expected[expected_output_index] = x0_cpu[expected_input_index]
+    _assert_output(out, expected)
 
 
 @pytest.mark.parametrize("predicate", [0, 1])

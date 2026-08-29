@@ -531,8 +531,9 @@ public:
       }
     }
 
-    LLVM_DEBUG(llvm::dbgs() << "Merging concat load buffers:\n  "
-                            << infoA->alloc << "\n  " << infoB->alloc << "\n");
+    LLVM_DEBUG(llvm::dbgs() << "[" DEBUG_TYPE "] matched at "
+                            << insertOp.getLoc() << ": fillDead=" << fillDead
+                            << " keepSingleFill=" << keepSingleFill << "\n");
 
     if (fillDead) {
       eraseFill(rewriter, infoA->fill);

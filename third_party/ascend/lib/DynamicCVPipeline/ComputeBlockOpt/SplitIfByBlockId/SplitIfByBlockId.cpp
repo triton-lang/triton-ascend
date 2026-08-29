@@ -69,6 +69,8 @@ static constexpr llvm::StringLiteral kSkippedDeltaformerKernel =
     "parallel_deltaformer_fwd_kernel";
 static constexpr llvm::StringLiteral kSkippedChunkwiseKernel =
     "chunkwise_fwd_kernel";
+static constexpr llvm::StringLiteral kSkippedParallelNsaFwdKernel =
+    "parallel_nsa_fwd_kernel";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -1675,7 +1677,8 @@ void SplitIfByBlockIdPass::runOnOperation() {
   auto mainRes = walkMainLoop(module, [&](Operation *op) {
     auto funcOp = op->getParentOfType<func::FuncOp>();
     if (funcOp && (funcOp.getSymName() == kSkippedDeltaformerKernel ||
-                   funcOp.getSymName() == kSkippedChunkwiseKernel)) {
+                   funcOp.getSymName() == kSkippedChunkwiseKernel ||
+                   funcOp.getSymName() == kSkippedParallelNsaFwdKernel)) {
       LDBG("Skip kernel: " << funcOp.getSymName());
       return llvm::success();
     }

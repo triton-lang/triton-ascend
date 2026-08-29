@@ -22,6 +22,7 @@
 
 #include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
 
+#include "TritonToGraph/GraphOptimization.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
@@ -34,10 +35,13 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <functional>
 #include <optional>
+
+#define DEBUG_TYPE "graph-optimize"
 
 namespace RowCoalescing {
 
@@ -620,6 +624,16 @@ static void rewriteModule(ModuleOp moduleOp, IRRewriter &rw) {
 
   if (!rewriteMatchedRow(moduleOp, *seed, ordered, rw, rowsPerProgram))
     return;
+
+  LLVM_DEBUG(llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                          << static_cast<unsigned>(
+                                 cfg::GraphOptimizationRuleId::RowCoalescing)
+                          << " ("
+                          << cfg::getGraphOptimizationRuleName(
+                                 cfg::GraphOptimizationRuleId::RowCoalescing)
+                          << ") at " << seed->pid.getLoc()
+                          << ": axis=" << seed->axis
+                          << " rowsPerProgram=" << rowsPerProgram << "\n");
 
   auto i32Ty = IntegerType::get(moduleOp.getContext(), 32);
   moduleOp->setAttr(kCoalesceFactorAttr,

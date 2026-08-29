@@ -32,10 +32,13 @@
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <memory>
 #include <optional>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -386,6 +389,12 @@ public:
       for (unsigned operandIndex : {0u, 1u}) {
         std::optional<MatchedChain> chain = matchCandidate(dot, operandIndex);
         if (chain) {
+          LLVM_DEBUG(llvm::dbgs()
+                     << "[" DEBUG_TYPE "] matched graph optimization rule "
+                     << static_cast<unsigned>(getId()) << " ("
+                     << getGraphOptimizationRuleName(getId()) << ") at "
+                     << dot.getLoc() << ": operand=" << operandIndex
+                     << " pointwiseOps=" << chain->unaryOps.size() << "\n");
           plans.push_back(std::make_unique<TransposePointwiseReorderPlan>(
               std::move(*chain), context.getEpoch()));
         }

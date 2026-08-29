@@ -33,6 +33,7 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
 #include <algorithm>
 #include <cstddef>
@@ -41,6 +42,8 @@
 #include <memory>
 #include <optional>
 #include <utility>
+
+#define DEBUG_TYPE "graph-optimize"
 
 using namespace mlir;
 using namespace triton;
@@ -540,9 +543,17 @@ public:
     context.getFunction().walk([&](Operation *op) {
       if (!isa<arith::RemSIOp, arith::SubIOp>(op))
         return;
-      if (std::optional<ModuloCandidate> candidate = analyzeModulo(op))
+      if (std::optional<ModuloCandidate> candidate = analyzeModulo(op)) {
+        LLVM_DEBUG(llvm::dbgs()
+                   << "[" DEBUG_TYPE "] matched graph optimization rule "
+                   << static_cast<unsigned>(getId()) << " ("
+                   << getGraphOptimizationRuleName(getId()) << ") at "
+                   << op->getLoc() << ": " << op->getName()
+                   << " tileSize=" << candidate->tileSize
+                   << " maskedLoads=" << candidate->loads.size() << "\n");
         plans.push_back(std::make_unique<ConvertModuloToMaskPlan>(
             std::move(*candidate), context.getEpoch()));
+      }
     });
     return success();
   }

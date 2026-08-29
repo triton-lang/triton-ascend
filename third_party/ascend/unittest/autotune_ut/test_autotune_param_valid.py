@@ -67,6 +67,9 @@ def _load_autotuner_methods(*method_names):
         "Sequence": Sequence,
         "valid_axis_names": VALID_AXIS_NAMES,
         "VectorAxes": _load_vector_axes_module().VectorAxes,
+        "_InternalNPUOptionInt": ascend_autotuner._InternalNPUOptionInt,
+        "_DEFAULT_COMPILE_MODE": ascend_autotuner._DEFAULT_COMPILE_MODE,
+        "_inject_default_simt_stack_limit": ascend_autotuner._inject_default_simt_stack_limit,
     }
     exec(compile(extracted_module, str(AUTOTUNER_PATH), "exec"), namespace)
     return namespace
@@ -606,7 +609,14 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
         17,
     )
 
-    assert key == (17, "float16")
+    assert key == (17, "float16", ("compile_mode", "simd_simt_template"))
+    simt_key = _normalize_loaded_method(namespace["generate_key_and_configs"])(
+        tuner,
+        FakeArg(),
+        17,
+        compile_mode="simt_only",
+    )
+    assert simt_key == (17, "float16", ("compile_mode", "simt_only"))
     assert captured["kv_dict"] == {"x": 17}
 
 
@@ -1614,3 +1624,79 @@ def test_autoparse_reduction_axes_rejects_prefixed_parser_output():
     assert promoted_axes == []
     assert tuner.reduction_axes == []
     assert refresh_calls == []
+
+
+def test_inject_grid_num_tiles_uses_only_static_grid_and_preserves_internal_value():
+    namespace = _load_autotuner_methods("_inject_grid_num_tiles")
+    inject_grid_num_tiles = _normalize_loaded_method(namespace["_inject_grid_num_tiles"])
+
+    static_grid = {"grid": (2, 16)}
+    inject_grid_num_tiles(static_grid)
+    assert static_grid["grid_num_tiles"] == 16
+    assert isinstance(static_grid["grid_num_tiles"], ascend_autotuner._InternalNPUOptionInt)
+
+    # Only the first three launch dimensions are visible to the compiler; use
+    # the outermost one among those, matching the ChunkCoalescing contract.
+    four_dim_grid = {"grid": [2, 3, 32, 64]}
+    inject_grid_num_tiles(four_dim_grid)
+    assert four_dim_grid["grid_num_tiles"] == 32
+
+    callable_grid = {"grid": lambda _: (2, 16)}
+    inject_grid_num_tiles(callable_grid)
+    assert "grid_num_tiles" not in callable_grid
+
+    internal_hint = {
+        "grid": (2, 16),
+        "grid_num_tiles": ascend_autotuner._InternalNPUOptionInt(99),
+    }
+    inject_grid_num_tiles(internal_hint)
+    assert internal_hint["grid_num_tiles"] == 99
+
+
+def test_make_kernel_call_extracts_name_from_jit_run():
+    namespace = _load_autotuner_methods("_make_kernel_call")
+    _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
+
+    @triton.jit
+    def test_kernel_jit(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        tl.store(x_ptr + offsets, x, mask=mask)
+
+    fake_self = SimpleNamespace(fn=test_kernel_jit, pre_hook=lambda full_nargs: None,
+                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
+    fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
+
+    x = torch.zeros(128, dtype=torch.float32, device="npu")
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
+
+    assert kernel_call_closure.target_kernel_name == "test_kernel_jit"
+
+
+def test_make_kernel_call_extracts_name_from_libentry_tuple():
+    namespace = _load_autotuner_methods("_make_kernel_call")
+    _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
+
+    from triton.runtime.libentry import libentry
+
+    @libentry()
+    @triton.jit
+    def test_kernel_libentry(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        tl.store(x_ptr + offsets, x, mask=mask)
+
+    fake_self = SimpleNamespace(fn=test_kernel_libentry, pre_hook=lambda full_nargs: None,
+                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
+    fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
+
+    x = torch.zeros(128, dtype=torch.float32, device="npu")
+    kernel_call_closure = _make_kernel_call(fake_self, x, x.numel(), config=fake_config, grid=(1, ))
+    kernel_call_closure(warmup=False)
+
+    assert kernel_call_closure.target_kernel_name == "test_kernel_libentry"

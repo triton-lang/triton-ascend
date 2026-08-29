@@ -70,7 +70,6 @@ class _Config:
 # UB Option Metadata - Single source of truth for all UB tuning options
 # =============================================================================
 UB_OPTION_METADATA: Dict[str, Dict[str, Any]] = {
-    'enable_storage_align': {'type': bool, 'default': False, 'npu_option': 'storage_align'},
     'auto_multi_buffer': {'type': bool, 'default': False, 'npu_option': 'multibuffer'},
     'vf_fusion_mode':
     {'type': str, 'default': 'ub-aware-op', 'npu_option': 'vf_fusion_mode', 'values': ['ub-aware-op', 'max-parallel']},
@@ -90,10 +89,7 @@ UB_TO_NPU_OPTION_MAP = {k: v['npu_option'] for k, v in UB_OPTION_METADATA.items(
 DEFAULT_UB_MEMORY_LIMIT = _Config.DEFAULT_UB_MEMORY_LIMIT
 
 UB_OPTION_COST_BENEFIT: Dict[str, Dict[str, float]] = {
-    'enable_storage_align': {'cost': 4, 'benefit': 1.2},
     'auto_multi_buffer': {'cost': 8, 'benefit': 1.5},
-    'enable_ops_reorder': {'cost': 2, 'benefit': 1.1},
-    'enable_code_motion': {'cost': 1, 'benefit': 1.05},
 
     # Str options: each possible value has its own cost/benefit entry
     'vf_fusion_mode#ub-aware-op': {'cost': 2, 'benefit': 1.0},
@@ -309,10 +305,7 @@ def run_mode_get_benefit_cost(available_options: List[str], fn: Callable, args: 
 
 # Legacy Option weights (kept for backward compatibility)
 OPTION_WEIGHTS: Dict[str, float] = {
-    'enable_storage_align': 5.0,
     'auto_multi_buffer': 5.0,
-    'enable_ops_reorder': 2.0,
-    'enable_code_motion': 1.0,
 }
 
 
@@ -397,10 +390,7 @@ class UBConfig:
     """
 
     # Compiler options that affect UB usage (generated from UB_OPTION_METADATA)
-    enable_storage_align: Optional[bool] = None
     auto_multi_buffer: Optional[bool] = None
-    enable_ops_reorder: Optional[bool] = None
-    enable_code_motion: Optional[bool] = None
     ubuf_saving: Optional[bool] = None
     auto_bind_sub_block: Optional[bool] = None
     auto_blockify_loop: Optional[bool] = None
@@ -553,7 +543,7 @@ class UBTuner(KernelInterface):
             if npu_options is None:
                 return UBConfig()
 
-            asm_key = 'bcmlir' if metadata.get('use_bytecode') else 'ttadapter'
+            asm_key = 'bcmlir'
             linalg_ir = compiled_kernel.asm.get(asm_key) if hasattr(compiled_kernel, 'asm') else None
             if linalg_ir is None:
                 _log_debug("Could not get linalg IR, using default config")
@@ -575,9 +565,14 @@ class UBTuner(KernelInterface):
         """Create NPUOptions from metadata."""
         from triton.backends.ascend.compiler import NPUOptions
         try:
-            npu_option_keys = {f.name for f in NPUOptions.__dataclass_fields__.values()}
+            npu_option_keys = {
+                field.name
+                for field in NPUOptions.__dataclass_fields__.values()
+                if field.init and field.name not in {"arch", "compile_on_910_95"}
+            }
             opts_dict = {k: v for k, v in metadata.items() if k in npu_option_keys}
-            return NPUOptions(**opts_dict)
+            target_arch = metadata.get("target_arch", metadata.get("arch", ""))
+            return NPUOptions(arch=target_arch, **opts_dict)
         except Exception as e:
             _log_debug(f"Failed to create NPUOptions: {e}")
             return None

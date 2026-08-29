@@ -42,7 +42,8 @@ from torch import Tensor
 
 import triton
 from triton.runtime.autotuner import Autotuner, Config
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
+                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -71,13 +72,39 @@ _RESERVED_HINT_KEYS = {
     "vv_parser_v2_mode",
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
+_DEFAULT_COMPILE_MODE = "simd_simt_template"
+
+
+def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: int) -> None:
+    if options.get("compile_mode") == "simt_only" and options.get("simt_stack_limit") is None:
+        options["simt_stack_limit"] = stack_limit
+
+
+def _format_autotune_timing(timing) -> str:
+    """Format the timing returned by the active autotune benchmarker."""
+    if isinstance(timing, (tuple, list)):
+        labels = ("p50", "p20", "p80")
+        return ", ".join(f"{label}={value:.4f} ms" for label, value in zip(labels, timing))
+    return f"mean={timing:.4f} ms"
 
 
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
     """
     Returns all constexpr parameter names from the kernel function definition.
     """
-    func_ast = fn.parse()
+    current_fn = fn
+    visited = set()
+    while current_fn is not None and id(current_fn) not in visited:
+        visited.add(id(current_fn))
+        parse = getattr(current_fn, "parse", None)
+        if callable(parse):
+            func_ast = parse()
+            break
+        jit_function = getattr(current_fn, "jit_function", None)
+        current_fn = jit_function if jit_function is not None else getattr(current_fn, "fn", None)
+    else:
+        return []
+
     constexpr_names = []
     for node in ast.walk(func_ast):
         if not isinstance(node, ast.FunctionDef):
@@ -109,6 +136,28 @@ def _clone_config_with_kwargs(
         pre_hook=config.pre_hook,
         ir_override=config.ir_override,
     )
+
+
+def _normalize_user_configs(configs):
+    if not configs:
+        return configs
+    normalized_configs = []
+    for config in configs:
+        normalized_kwargs = _remove_deprecated_npu_options(config.kwargs)
+        if normalized_kwargs == config.kwargs:
+            normalized_configs.append(config)
+            continue
+        normalized_config = copy.copy(config)
+        normalized_config.kwargs = normalized_kwargs
+        normalized_configs.append(normalized_config)
+    return normalized_configs
+
+
+def _validate_reserved_npu_option_names(arg_names) -> None:
+    conflicts = sorted(set(arg_names) & _RESERVED_NPU_OPTION_NAMES)
+    if conflicts:
+        raise ValueError("Kernel parameters cannot use reserved Ascend compile-option names: {}.".format(
+            ", ".join(conflicts)))
 
 
 def _split_hints(hints: Optional[Dict[str, object]]):
@@ -222,6 +271,7 @@ class AutoTilingTuner(Autotuner):
         rep=None,
         use_cuda_graph=False,
         do_bench=None,
+        cache_results=False,
         auto_profile_dir=None,
         hints=None,
     ):
@@ -230,6 +280,9 @@ class AutoTilingTuner(Autotuner):
             and trigger re-evaluation of candidate configs.
         :type key: List[str]
         """
+        _validate_reserved_npu_option_names(arg_names)
+        hints = _remove_deprecated_npu_options(hints or {})
+        configs = _normalize_user_configs(configs)
         _validate_user_hints(fn, hints)
         reserved_hints, config_hints = _split_hints(hints)
         config_hints = _normalize_config_hints(
@@ -251,6 +304,7 @@ class AutoTilingTuner(Autotuner):
             rep,
             use_cuda_graph,
             do_bench,
+            cache_results=cache_results,
         )
         self.user_defined_do_bench = do_bench is not None
         self.hints = reserved_hints
@@ -285,7 +339,8 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_warps = None
         self.user_specified_num_stages = None
         self.user_specified_multibuffer = None
-        self.default_multibuffer = not is_compile_on_910_95()
+        target_arch = triton.runtime.driver.active.get_current_target().arch
+        self.default_multibuffer = not is_compile_on_910_95(target_arch)
         self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
 
         # Mark the original function so ubtuner can detect autotune was applied
@@ -1961,7 +2016,8 @@ class AutoTilingTuner(Autotuner):
 
     def generate_key_and_configs(self, *args, **kwargs):
         self.nargs = dict(zip(self.arg_names, args))
-        self.is_simt_mode = (kwargs.get("force_simt_only", False) or kwargs.get("compile_mode") == "simt_only")
+        compile_mode = kwargs.get("compile_mode", _DEFAULT_COMPILE_MODE)
+        self.is_simt_mode = compile_mode == "simt_only"
         if 'num_warps' in kwargs and kwargs['num_warps'] is not None:
             self.user_specified_warps = kwargs['num_warps']
         else:
@@ -1988,6 +2044,7 @@ class AutoTilingTuner(Autotuner):
                 dtype = (arg.dtype if get_byte_per_numel(arg.dtype) >= get_byte_per_numel(dtype) else dtype)
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
+        key.append(("compile_mode", compile_mode))
 
         key = tuple(key)
         if key not in self.cache:
@@ -2020,55 +2077,89 @@ class AutoTilingTuner(Autotuner):
                 self.configs = self.gen_configs + expanded_user_configs
         return key
 
+    @staticmethod
+    def _inject_grid_num_tiles(kwargs):
+        # ChunkCoalescing hint: when the launch grid is a static tuple, the
+        # outermost grid dim is the tile count along the chunk axis. Exposing it
+        # as grid_num_tiles lets the compiler safely coalesce small chunks for
+        # unmasked kernels (compile-time known bound). Skipped for callable grids
+        # (dynamic, unknown at compile time) so the pass safely bails.
+        if "grid_num_tiles" in kwargs:
+            return
+        grid = kwargs.get("grid", None)
+        if callable(grid) or not isinstance(grid, (tuple, list)):
+            return
+        glen = min(len(grid), 3)
+        if glen <= 0:
+            return
+        outermost = grid[glen - 1]
+        if isinstance(outermost, int) and outermost > 1:
+            kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
+
     def run(self, *args, **kwargs):
+        kwargs = _remove_deprecated_npu_options(kwargs)
+        self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
         cache_miss = key not in self.cache
-        if self.is_simt_mode and kwargs.get('simt_stack_limit', None) is None:
-            kwargs['simt_stack_limit'] = self.simt_stack_limit
-        used_cached_result = True
+        _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
+        did_benchmark = False
+        disk_cache_hit = False
+        single_config_cache_pending = False
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
             if self.enable_ubtuner or len(pruned_configs) > 1:
-                used_cached_result = False
-                bench_start = time.time()
-                timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
-                bench_end = time.time()
-                self.bench_time = bench_end - bench_start
-                self.cache[key] = builtins.min(timings, key=timings.get)
-                full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
-                self.pre_hook(full_nargs, reset_only=True)
-                self.configs_timings = timings
+
+                def benchmark():
+                    nonlocal did_benchmark
+                    did_benchmark = True
+                    bench_start = time.time()
+                    timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
+                    bench_end = time.time()
+                    self.bench_time = bench_end - bench_start
+                    self.cache[key] = builtins.min(timings, key=timings.get)
+                    full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
+                    self.pre_hook(full_nargs, reset_only=True)
+                    self.configs_timings = timings
+
+                if self.cache_results:
+                    disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
+                else:
+                    benchmark()
+
                 config = self.cache[key]
             else:
                 config = pruned_configs[0]
+                single_config_cache_pending = True
         else:
             config = self.cache[key]
 
         self.best_config = config
 
-        if self.print_autotuning and not used_cached_result:
+        if self.print_autotuning and did_benchmark:
             print(f"Triton autotuning for function {self.base_fn.__name__} finished after "
                   f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
+            self._print_benchmark_results(self.configs_timings)
 
-        if not used_cached_result and self.auto_profile_dir is not None:
+        if did_benchmark and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
-        if config.pre_hook is not None:
-            full_nargs = {**self.nargs, **kwargs, **config.all_kwargs()}
-            full_nargs.update(ub_cfg)
-            config.pre_hook(full_nargs)
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
+        _inject_default_simt_stack_limit(final_kwargs, self.simt_stack_limit)
+        if config.pre_hook is not None:
+            config.pre_hook({**self.nargs, **final_kwargs})
         try:
             ret = self.fn.run(
                 *args,
                 **final_kwargs,
             )
+            if single_config_cache_pending:
+                self.cache[key] = config
             return ret
         finally:
             self.nargs = None
-            if cache_miss:
+            if did_benchmark and not disk_cache_hit:
                 # workaround for memory leak when some configs fail to compile
                 gc.collect()
 
@@ -2090,6 +2181,15 @@ class AutoTilingTuner(Autotuner):
         except Exception as e:
             if self.print_autotuning:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
+
+    def _print_benchmark_results(self, timings) -> None:
+        if not self.print_autotuning:
+            return
+
+        print(f"Triton autotuning benchmark results for function {self.base_fn.__name__}:")
+        for config, timing in timings.items():
+            selected = " [selected]" if config == self.best_config else ""
+            print(f"  config={config}; {_format_autotune_timing(timing)}{selected}")
 
     def _batch_bench(self, *args, configs, **kwargs):
         from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
@@ -2171,7 +2271,7 @@ class AutoTilingTuner(Autotuner):
                     list(run_fns.values()),
                     warmup=warmup,
                     active=active,
-                    clear_l2_cache=False,
+                    clear_l2_cache=True,
                     target_kernel_name=target_kernel_name,
                 )
                 assert len(time_cost) == len(run_fns)
@@ -2210,6 +2310,7 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if ub_cfg:
             current.update(ub_cfg)
+        _inject_default_simt_stack_limit(current, self.simt_stack_limit)
         full_nargs = {**self.nargs, **current}
 
         def kernel_call(warmup):
@@ -2222,6 +2323,8 @@ class AutoTilingTuner(Autotuner):
                     *args,
                     **current,
                 )
+                if isinstance(res, tuple):
+                    res = res[0]
                 packed_metadata = getattr(res, "packed_metadata", None)
                 if isinstance(packed_metadata, dict):
                     kernel_call.target_kernel_name = packed_metadata.get("kernel_name")
@@ -2240,9 +2343,17 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
+        kwargs = _remove_deprecated_npu_options(kwargs)
+        self._inject_grid_num_tiles(kwargs)
         _ = self.generate_key_and_configs(*args, **kwargs)
         pruned_configs = self.prune_configs(kwargs)
         ret = []
+
+        def warmup_config(config):
+            compile_options = dict(config.all_kwargs(), **kwargs)
+            _inject_default_simt_stack_limit(compile_options, self.simt_stack_limit)
+            return self.fn.warmup(*args, **compile_options)
+
         if self.compile_parallel:
             import psutil
 
@@ -2252,10 +2363,10 @@ class AutoTilingTuner(Autotuner):
                     triton.AsyncCompileMode(executor),
             ):
                 for config in pruned_configs:
-                    ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                    ret.append(warmup_config(config))
         else:
             for config in pruned_configs:
-                ret.append(self.fn.warmup(*args, **kwargs, **config.all_kwargs()))
+                ret.append(warmup_config(config))
         self.nargs = None
         return ret
 
@@ -2489,7 +2600,8 @@ class AutoTilingTuner(Autotuner):
 
 
 def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_value=None, pre_hook=None, post_hook=None,
-             warmup=None, rep=None, use_cuda_graph=False, do_bench=None, *, auto_prof_dir=None, hints=None):
+             warmup=None, rep=None, use_cuda_graph=False, do_bench=None, cache_results=False, *, auto_prof_dir=None,
+             hints=None):
     """
     Decorator for auto-tuning a :code:`triton.jit`'d function.
 
@@ -2513,7 +2625,8 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
 
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
     :code:`"1"`, Triton will print a message to stdout after autotuning each
-    kernel, including the time spent autotuning and the best configuration.
+    kernel, including the benchmark timing for each valid configuration, the
+    time spent autotuning, and the best configuration.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]
@@ -2543,6 +2656,8 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     :type rep: int
     :param do_bench: a benchmark function to measure the time of each run.
     :type do_bench: lambda fn, quantiles
+    :param cache_results: whether to cache autotune timings to disk.  Defaults to False.
+    :type cache_results: bool
     :param auto_prof_dir: the specified directory to store the profiling results of the best config.
         If this parameter is None or the best config is retrieved from cache, the profiling process will be ignored.
     :type auto_prof_dir: str
@@ -2552,333 +2667,8 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     def decorator(fn):
         return AutoTilingTuner(fn, fn.arg_names, configs, key, reset_to_zero, restore_value, pre_hook=pre_hook,
                                post_hook=post_hook, prune_configs_by=prune_configs_by, warmup=warmup, rep=rep,
-                               use_cuda_graph=use_cuda_graph, do_bench=do_bench, auto_profile_dir=auto_prof_dir,
-                               hints=hints)
-
-    return decorator
-
-
-_ALL_PARAMS = {
-    "num_stages",
-    "unit_flag",
-    "limit_auto_multi_buffer_only_for_local_buffer",
-    "limit_auto_multi_buffer_of_local_buffer",
-    "set_workspace_multibuffer",
-    "enable_hivm_auto_cv_balance",
-    "tile_mix_vector_loop",
-    "tile_mix_cube_loop",
-    "enable_ubuf_saving",
-}
-
-_DEFAULTS = {
-    "num_stages": [2],
-    "unit_flag": [False],
-    "limit_auto_multi_buffer_only_for_local_buffer": [False],
-    "limit_auto_multi_buffer_of_local_buffer": ["no-l0c"],
-    "set_workspace_multibuffer": [2, 4],
-    "enable_hivm_auto_cv_balance": [True],
-    "tile_mix_vector_loop": [2, 4],
-    "tile_mix_cube_loop": [2, 4],
-    "enable_ubuf_saving": [True],
-}
-
-_VALID_VALUES = {
-    "num_stages": [1, 2],
-    "limit_auto_multi_buffer_of_local_buffer": ["no-limit", "no-l0c"],
-    "set_workspace_multibuffer": [2, 4],
-    "tile_mix_vector_loop": [2, 4, 8],
-    "tile_mix_cube_loop": [2, 4, 8],
-}
-
-_CUBE_PARAMS = {"num_stages", "unit_flag", "limit_auto_multi_buffer_of_local_buffer"}
-
-_MIXCV_PARAMS = {
-    "num_stages",
-    "unit_flag",
-    "limit_auto_multi_buffer_only_for_local_buffer",
-    "limit_auto_multi_buffer_of_local_buffer",
-    "set_workspace_multibuffer",
-    "enable_hivm_auto_cv_balance",
-    "tile_mix_vector_loop",
-    "tile_mix_cube_loop",
-    "enable_ubuf_saving",
-}
-
-_VECTOR_PARAMS = {
-    "num_stages",
-    "enable_ubuf_saving",
-}
-
-
-def _check_boolean_list(val, param_name):
-    return isinstance(val, (list, tuple)) and len(val) > 0 and all(isinstance(x, bool) for x in val)
-
-
-def _check_string_in_set(val, valid_set, param_name):
-    return isinstance(val, (list, tuple)) and len(val) > 0 and all(v in valid_set for v in val)
-
-
-def _check_int_in_set(val, valid_set, param_name):
-    return isinstance(val, (list, tuple)) and len(val) > 0 and all(isinstance(v, int) and v in valid_set for v in val)
-
-
-_VALIDATION_RULES = {
-    "num_stages": {
-        "desc": f"must be one or more of: {_VALID_VALUES['num_stages']}", "check":
-        lambda val, p: _check_int_in_set(val, _VALID_VALUES['num_stages'], p)
-    },
-    "unit_flag": {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list},
-    "limit_auto_multi_buffer_only_for_local_buffer":
-    {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list},
-    "limit_auto_multi_buffer_of_local_buffer": {
-        "desc": f"must be one or more of: {_VALID_VALUES['limit_auto_multi_buffer_of_local_buffer']}", "check":
-        lambda val, p: _check_string_in_set(val, _VALID_VALUES['limit_auto_multi_buffer_of_local_buffer'], p)
-    },
-    "set_workspace_multibuffer": {
-        "desc": f"must be one or more of: {_VALID_VALUES['set_workspace_multibuffer']}", "check":
-        lambda val, p: _check_int_in_set(val, _VALID_VALUES['set_workspace_multibuffer'], p)
-    },
-    "enable_hivm_auto_cv_balance":
-    {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list},
-    "tile_mix_vector_loop": {
-        "desc": f"must be one or more of: {_VALID_VALUES['tile_mix_vector_loop']}", "check":
-        lambda val, p: _check_int_in_set(val, _VALID_VALUES['tile_mix_vector_loop'], p)
-    },
-    "tile_mix_cube_loop": {
-        "desc": f"must be one or more of: {_VALID_VALUES['tile_mix_cube_loop']}", "check":
-        lambda val, p: _check_int_in_set(val, _VALID_VALUES['tile_mix_cube_loop'], p)
-    },
-    "enable_ubuf_saving": {"desc": "must be non-empty list/tuple of boolean values", "check": _check_boolean_list},
-}
-
-
-class BaseAutotuner:
-    """
-    Base class for generating auto-tuning configurations without block dimensions.
-    Users must provide fixed dimension parameters when calling the kernel.
-    """
-
-    def __init__(self, operator_name, supported_params, default_params, validation_rules):
-        self.operator_name = operator_name
-        self.supported_params = supported_params
-        self.default_params = default_params
-        self.validation_rules = validation_rules
-
-    def validate_parameters(self, **kwargs):
-        # Check for unsupported parameters
-        invalid_params = [k for k in kwargs.keys() if k not in _ALL_PARAMS]
-        if invalid_params:
-            print(f"[ERROR] Invalid parameters for {self.operator_name}: {invalid_params}")
-            return False
-
-        for param, rule in self.validation_rules.items():
-            if param in kwargs:
-                if not rule["check"](kwargs[param], param):
-                    print(f"[ERROR] Invalid value for '{param}' in {self.operator_name}: {kwargs[param]}")
-                    print(f"        Expected: {rule['desc']}")
-                    return False
-        return True
-
-    def get_configs(self, **kwargs):
-        """
-        Generate a list of Config objects.
-        Each parameter must be provided as a list (even for a single value).
-        The function produces the Cartesian product of all parameter lists.
-        - num_stages: each value will be set as Config.num_stages (not placed in kwargs)
-        - other parameters: each value will be placed in Config.kwargs
-        Returns a list of Config objects.
-        """
-        if not self.validate_parameters(**kwargs):
-            return []
-
-        # Collect parameter values, using defaults for missing ones
-        param_values = {}
-        for p in sorted(self.supported_params):
-            if p in kwargs:
-                param_values[p] = kwargs[p]
-            else:
-                param_values[p] = self.default_params.get(p, [None])
-
-        keys = list(param_values.keys())
-        values = list(param_values.values())
-        combos = list(itertools.product(*values))
-
-        configs = []
-        for combo in combos:
-            config_kwargs = {}
-            num_stages_val = None
-            for i, pname in enumerate(keys):
-                val = combo[i]
-                if pname == "num_stages":
-                    num_stages_val = val
-                else:
-                    config_kwargs[pname] = val
-
-            configs.append(Config(kwargs=config_kwargs, num_stages=num_stages_val if num_stages_val is not None else 2))
-        return configs
-
-
-CubeAutotuner = BaseAutotuner(operator_name="cube", supported_params=_CUBE_PARAMS, default_params=_DEFAULTS,
-                              validation_rules=_VALIDATION_RULES)
-
-MixAutotuner = BaseAutotuner(operator_name="mix", supported_params=_MIXCV_PARAMS, default_params=_DEFAULTS,
-                             validation_rules=_VALIDATION_RULES)
-
-VectorAutotuner = BaseAutotuner(operator_name="vector", supported_params=_VECTOR_PARAMS, default_params=_DEFAULTS,
-                                validation_rules=_VALIDATION_RULES)
-
-
-def get_autotune_cube_config(**kwargs: Any) -> List[triton.Config]:
-    """
-    Generate autotune configuration for the cube operator.
-    Supported parameters: num_stages, unit_flag, limit_auto_multi_buffer_of_local_buffer.
-    """
-    import triton
-    return CubeAutotuner.get_configs(**kwargs)
-
-
-def get_autotune_cv_config(**kwargs: Any) -> List[triton.Config]:
-    """
-    Generate autotune configuration for the mix operator.
-    Supported parameters: num_stages, unit_flag, limit_auto_multi_buffer_only_for_local_buffer,
-                limit_auto_multi_buffer_of_local_buffer, set_workspace_multibuffer,
-                enable_hivm_auto_cv_balance, tile_mix_vector_loop, tile_mix_cube_loop, enable_ubuf_saving
-    """
-    import triton
-    return MixAutotuner.get_configs(**kwargs)
-
-
-def get_autotune_vector_config(**kwargs: Any) -> List[triton.Config]:
-    """
-    Generate autotune configuration for the vector operator.
-    Supported parameters: num_stages, enable_ubuf_saving
-    """
-    import triton
-    return VectorAutotuner.get_configs(**kwargs)
-
-
-def get_max_configs(config, kernel_type="mix", **kwargs):
-    """
-    Expand a single base Config by combining it with tuning parameters.
-
-    :param config: A triton.Config object serving as the base.
-    :param kernel_type: Operator type, one of "cube", "mix", "vector". Default "mix".
-    :param kwargs: Tuning parameters, each provided as a list (e.g., enable_hivm_auto_cv_balance=[True, False]).
-                   If a parameter is not provided, its value is taken from the base config (if present)
-                   or from the defaults.
-    :return: List of expanded Config objects.
-    """
-    # Determine the set of parameters supported by the current kernel_type
-    if kernel_type == "cube":
-        supported = _CUBE_PARAMS
-    elif kernel_type == "vector":
-        supported = _VECTOR_PARAMS
-    else:
-        supported = _MIXCV_PARAMS
-
-    # Warn about unsupported parameters provided in kwargs
-    unsupported = [k for k in kwargs if k not in supported and k in _ALL_PARAMS]
-    if unsupported:
-        print(
-            f"[WARNING] The following parameters are not supported for kernel_type '{kernel_type}': {unsupported}. They will be ignored."
-        )
-
-    # Build value lists for each parameter (priority: kwargs > base config > defaults)
-    param_values = {}
-    base_kwargs = config.kwargs
-    base_num_stages = config.num_stages
-
-    for param in sorted(supported):
-        if param in kwargs:
-            # User-provided list via tuning_params takes precedence
-            val_list = kwargs[param]
-        elif param == "num_stages":
-            # num_stages is an attribute of Config, not part of kwargs.
-            # If not provided in tuning_params, use the value from the base config as a fixed single-element list.
-            val_list = [base_num_stages]
-        elif param in base_kwargs:
-            # Parameter present in base config's kwargs -> fix to that single value
-            val_list = [base_kwargs[param]]
-        else:
-            # Otherwise fall back to defaults
-            val_list = _DEFAULTS.get(param, [None])
-
-        # Validate the value list
-        if param in _VALIDATION_RULES:
-            rule = _VALIDATION_RULES[param]
-            if not rule["check"](val_list, param):
-                raise ValueError(f"Invalid value for '{param}': {val_list}. Expected: {rule['desc']}")
-        param_values[param] = val_list
-
-    # Cartesian product of all parameter lists
-    keys = list(param_values.keys())
-    values = list(param_values.values())
-    combos = list(itertools.product(*values))
-
-    new_configs = []
-    for combo in combos:
-        # Start with a copy of the original config's kwargs
-        new_kwargs = config.kwargs.copy()
-        num_stages_val = None
-
-        for i, pname in enumerate(keys):
-            val = combo[i]
-            if pname == "num_stages":
-                num_stages_val = val
-            else:
-                # Overwrite or add the parameter to kwargs
-                new_kwargs[pname] = val
-
-        new_config = Config(kwargs=new_kwargs, num_warps=config.num_warps,
-                            num_stages=num_stages_val if num_stages_val is not None else config.num_stages,
-                            num_ctas=config.num_ctas, maxnreg=config.maxnreg, pre_hook=config.pre_hook)
-        new_configs.append(new_config)
-
-    return new_configs
-
-
-def max_autotune(configs, key, kernel_type="mix", prune_configs_by=None, reset_to_zero=None, restore_value=None,
-                 pre_hook=None, post_hook=None, warmup=None, rep=None, use_cuda_graph=False, do_bench=None,
-                 **tuning_params):
-    """
-    Decorator that expands each base Config with tuning parameters before auto-tuning.
-
-    Usage is similar to @triton.autotune, but allows automatic expansion of
-    additional tuning parameters (e.g., enable_hivm_auto_cv_balance, tile_mix_vector_loop, ...)
-    for each provided base configuration.
-
-    :param configs: List of base triton.Config objects.
-    :param key: List of argument names whose change triggers re-tuning.
-    :param kernel_type: Operator type, one of "cube", "mix", "vector". Default "mix".
-    :param prune_configs_by: Same as in autotune.
-    :param reset_to_zero: Same as in autotune.
-    :param restore_value: Same as in autotune.
-    :param pre_hook: Same as in autotune.
-    :param post_hook: Same as in autotune.
-    :param warmup: Deprecated.
-    :param rep: Deprecated.
-    :param use_cuda_graph: Deprecated.
-    :param do_bench: Same as in autotune.
-    :param tuning_params: Additional tuning parameters as keyword arguments.
-                          Each value must be a list; the Cartesian product of these lists
-                          will be combined with each base config.
-    """
-
-    def decorator(fn):
-        if not configs or len(configs) == 0:
-            raise ValueError("[max_autotune] The argument 'configs' cannot be empty. "
-                             "Please provide at least one base config. ")
-        # Expand each base config with the provided tuning parameters
-        expanded_configs = []
-        for cfg in configs:
-            expanded = get_max_configs(cfg, kernel_type=kernel_type, **tuning_params)
-            expanded_configs.extend(expanded)
-
-        # Call the original autotune decorator with the expanded configs
-        return autotune(configs=expanded_configs, key=key, prune_configs_by=prune_configs_by,
-                        reset_to_zero=reset_to_zero, restore_value=restore_value, pre_hook=pre_hook,
-                        post_hook=post_hook, warmup=warmup, rep=rep, use_cuda_graph=use_cuda_graph,
-                        do_bench=do_bench)(fn)
+                               use_cuda_graph=use_cuda_graph, do_bench=do_bench, cache_results=cache_results,
+                               auto_profile_dir=auto_prof_dir, hints=hints)
 
     return decorator
 
@@ -2895,9 +2685,6 @@ _ALL_PARAMS = {
     "tile_mix_cube_loop",
     "enable_ubuf_saving",
 }
-
-[1, 2],
-num_warps = []
 
 _DEFAULTS = {
     "num_stages": [2],
@@ -3097,6 +2884,8 @@ def get_max_configs(config, kernel_type="mixcv", **kwargs):
                    or from the defaults.
     :return: List of expanded Config objects.
     """
+    kwargs = _remove_deprecated_npu_options(kwargs)
+
     # Determine the set of parameters supported by the current kernel_type
     if kernel_type == "cube":
         supported = _CUBE_PARAMS
@@ -3193,6 +2982,8 @@ def max_autotune(configs, key, kernel_type="mixcv", prune_configs_by=None, reset
                           Each value must be a list; the Cartesian product of these lists
                           will be combined with each base config.
     """
+
+    tuning_params = _remove_deprecated_npu_options(tuning_params)
 
     def decorator(fn):
         if not configs or len(configs) == 0:

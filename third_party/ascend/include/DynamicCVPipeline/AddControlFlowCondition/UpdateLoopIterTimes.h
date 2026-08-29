@@ -73,6 +73,9 @@ private:
 
   int replaceForOpCounterInIfOps();
 
+  int UpdateWhileLoopCondition(
+      DenseMap<int, SmallVector<Operation *>> &mainLoopIdMap);
+
   // Calculate factor = requiredBuffers / x
   std::pair<int, int> calculateFactor(scf::ForOp forOp);
 
@@ -125,6 +128,11 @@ private:
 
   int updateCntArgsAfterClone(scf::ForOp oldForOp, IRMapping &mapper,
                               SmallVector<scf::IfOp> &ifOpsInThisFor);
+
+  void updateMainLoopMaps(Operation *oldForOp, Operation *newForOp,
+                          DenseMap<int, SmallVector<Operation *>> &cmap,
+                          DenseMap<int, SmallVector<Operation *>> &vmap,
+                          DenseMap<Operation *, IterationTimesInfo> &infoMap);
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createUpdateLoopIterTimesPass();

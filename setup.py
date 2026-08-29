@@ -11,8 +11,6 @@ import tarfile
 import zipfile
 import urllib.request
 import json
-import glob
-
 from io import BytesIO
 from distutils.command.clean import clean
 from pathlib import Path
@@ -46,14 +44,6 @@ except ImportError:
 sys.path.insert(0, os.path.dirname(__file__))
 
 from python.build_helpers import get_base_dir, get_cmake_dir
-
-triton_dir = os.path.dirname(os.path.abspath(__file__))
-
-os.environ.setdefault("TRITON_BUILD_WITH_CCACHE", "true")
-os.environ.setdefault("TRITON_BUILD_WITH_CLANG_LLD", "true")
-os.environ.setdefault("TRITON_BUILD_PROTON", "OFF")
-os.environ.setdefault("TRITON_WHEEL_NAME", "triton-ascend")
-os.environ.setdefault("TRITON_APPEND_CMAKE_ARGS", "-DTRITON_BUILD_UT=OFF")
 
 
 def is_git_repo():
@@ -195,31 +185,12 @@ def get_json_package_info():
     return Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
 
 
-def is_linux_os(os_id):
+def is_linux_os(id):
     if os.path.exists("/etc/os-release"):
         with open("/etc/os-release", "r") as f:
             os_release_content = f.read()
-            return f'ID="{os_id}"' in os_release_content
+            return f'ID="{id}"' in os_release_content
     return False
-
-
-def get_llvm_patch_hash():
-    """Compute a hash of LLVM patch files under third_party/ascend/patch."""
-    patch_dir = os.path.join(get_base_dir(), "third_party", "ascend", "patch")
-    if os.path.isdir(patch_dir):
-        patch_files = sorted(
-            f for f in os.listdir(patch_dir)
-            if f.startswith("llvm_patch_") and f.endswith(".patch") and os.path.isfile(os.path.join(patch_dir, f)))
-    else:
-        patch_files = []
-    if not patch_files:
-        return "00000000"
-    import hashlib
-    h = hashlib.sha256()
-    for pf in patch_files:
-        with open(os.path.join(patch_dir, pf), "rb") as f:
-            h.update(f.read())
-    return h.hexdigest()[:8]
 
 
 # llvm
@@ -236,7 +207,7 @@ def get_llvm_package_info():
     elif system == "Linux":
         if arch == 'arm64' and is_linux_os('almalinux'):
             system_suffix = 'almalinux-arm64'
-        elif arch == "arm64":
+        elif arch == 'arm64':
             system_suffix = 'ubuntu-arm64'
         elif arch == 'x64':
             vglibc = tuple(map(int, platform.libc_ver()[1].split('.')))
@@ -265,11 +236,10 @@ def get_llvm_package_info():
     llvm_hash_path = os.path.join(get_base_dir(), "cmake", "llvm-hash.txt")
     with open(llvm_hash_path, "r") as llvm_hash_file:
         rev = llvm_hash_file.read(8)
-    patch_hash = get_llvm_patch_hash()
-    name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
+    name = f"llvm-{rev}-{system_suffix}"
     # Create a stable symlink that doesn't include revision
     sym_name = f"llvm-{system_suffix}"
-    url = f"https://triton-ascend-artifacts.obs.myhuaweicloud.com/llvm-builds/{name}.tar.gz"
+    url = f"https://oaitriton.blob.core.windows.net/public/llvm-builds/{name}.tar.gz"
     return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH", sym_name=sym_name)
 
 
@@ -423,6 +393,7 @@ class CMakeExtension(Extension):
 
 
 class CMakeBuild(build_ext):
+
     user_options = build_ext.user_options + \
         [('base-dir=', None, 'base directory of Triton')]
 
@@ -433,66 +404,8 @@ class CMakeBuild(build_ext):
     def finalize_options(self):
         build_ext.finalize_options(self)
 
-    def setup_coverage_env(self):
-        """Setting environment variables required for the hitest coverage tool"""
-        # To enable the hitest cov tool, you need to set the following three environment variables.
-        hitest_home = os.getenv('HITEST_HOME', '/opt/hitest/linux_avatar_x86_64')
-        hitest_user_account = os.getenv('HITEST_USER_ACCOUNT', 'a00000000')
-        lltcov_rootpath = os.getenv('LLTCOV_ROOTPATH', '/opt/covdata')  # Path to the output coverage binary file
-
-        # hitest default environment variables
-        coverage_env_vars = {
-            'HitestHome': hitest_home,
-            'isOverlappedCompile': '0',
-            'PlatformToken': 'BOARD',
-            'gcovmode': '0',
-            'TimerPolicy': '1',
-            'TimeInterval': '60',
-            'SignalPolicy': '1',
-            'SignalNUM': '34',
-            'lltwrapper_cfg': '0',
-            'HITEST_AGENT_INSIDE': '1',
-            'USE_HLLT_COVERAGE': '1',
-            'USE_HLLT_TESTCASE': '0',
-            'simplemode': '0',
-            'ncs_coverage_stub_mold': '1',
-            'HITEST_ENABLE_SOKCET': '0',
-            'hitest_disable_cfg': '0',
-            'hitest_disable_dfg': '1',
-            'hitest_disable_ir': '1',
-            'HITEST_DISABLE_MACRO': '0',
-            'HITEST_REMOVE_INCLUDE_DIR': '0',
-            'HITEST_AGENT_SET_THREADNAME_PRCTL': '1',
-            'HITEST_INST_HEADER_FILE': '0',
-            'HITEST_USER_ACCOUNT': hitest_user_account,
-            'lltcovRootpath': lltcov_rootpath,
-            'HITEST_COVSTUB_ROOT_DIR': f'{hitest_home}/apache-tomcat-8.0.39/webapps/datasource/Container_Default/base',
-            'HITEST_EXEC_CMD_WITH_FILE': '1',
-            'HITEST_PRINT_LOG_ENABLE': '1',
-        }
-
-        for key, value in coverage_env_vars.items():
-            os.environ[key] = value
-
-        current_path = os.environ.get('PATH', '')
-        os.environ['PATH'] = f'{hitest_home}:{current_path}'
-
-        current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-        os.environ['LD_LIBRARY_PATH'] = f'{hitest_home}:{current_ld_path}'
-
-        print(f"The currently set environment variables for the hitest coverage tool are read.")
-        print(f"  HitestHome: {hitest_home} (environment variables HITEST_HOME)")
-        print(f"  HITEST_USER_ACCOUNT: {hitest_user_account} (environment variables HITEST_USER_ACCOUNT)")
-        print(f"  lltcovRootpath: {lltcov_rootpath} (environment variables LLTCOV_ROOTPATH)")
-
-        current_path = os.environ.get('PATH', '')
-        os.environ['PATH'] = f'{hitest_home}:{current_path}'
-        current_ld_path = os.environ.get('LD_LIBRARY_PATH', '')
-        os.environ['LD_LIBRARY_PATH'] = f'{hitest_home}:{current_ld_path}'
-
     def run(self):
         download_and_copy_dependencies()
-        apply_triton_ascend_patch()
 
         try:
             out = subprocess.check_output(["cmake", "--version"])
@@ -504,21 +417,6 @@ class CMakeBuild(build_ext):
         cmake_major, cmake_minor = int(match.group("major")), int(match.group("minor"))
         if (cmake_major, cmake_minor) < (3, 20):
             raise RuntimeError("CMake >= 3.20 is required")
-
-        # To enable the hitest coverage tool, you need to set the environment variable TRITON_ENABLE_COVERAGE_HITEST=1
-        enable_hitest = os.getenv('TRITON_ENABLE_COVERAGE_HITEST', '0').lower() in ('1', 'on', 'true')
-        if enable_hitest:
-            self.setup_coverage_env()
-            current_append = os.environ.get('TRITON_APPEND_CMAKE_ARGS', '')
-            if current_append:
-                os.environ['TRITON_APPEND_CMAKE_ARGS'] = current_append + " -DTRITON_ENABLE_COVERAGE_HITEST=ON"
-            else:
-                os.environ['TRITON_APPEND_CMAKE_ARGS'] = "-DTRITON_ENABLE_COVERAGE_HITEST=ON"
-        else:
-            # clean up existing HITEST_* environment variables to avoid pollution.
-            for key in list(os.environ.keys()):
-                if key.startswith('HITEST_') or key in ['HitestHome', 'lltcovRootpath']:
-                    del os.environ[key]
 
         for ext in self.extensions:
             self.build_extension(ext)
@@ -567,7 +465,7 @@ class CMakeBuild(build_ext):
             "-DPython3_EXECUTABLE:FILEPATH=" + sys.executable, "-DPython3_INCLUDE_DIR=" + python_include_dir,
             "-DTRITON_CODEGEN_BACKENDS=" + ';'.join([b.name for b in backends if not b.is_external]),
             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
-            "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
+            "-DTRITON_WHEEL_DIR=" + wheeldir
         ]
         if lit_dir is not None:
             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
@@ -623,11 +521,6 @@ class CMakeBuild(build_ext):
             # unit test builds fetch googletests from GitHub
             cmake_args += ["-DTRITON_BUILD_UT=OFF"]
 
-        # Allow specifying AscendNPU-IR tag/commit via environment variable
-        ascendnpu_ir_tag = os.getenv("ASCENDNPU_IR_TAG")
-        if ascendnpu_ir_tag is not None:
-            cmake_args += [f"-DASCENDNPU_IR_TAG={ascendnpu_ir_tag}"]
-
         cmake_args_append = os.getenv("TRITON_APPEND_CMAKE_ARGS")
         if cmake_args_append is not None:
             cmake_args += shlex.split(cmake_args_append)
@@ -638,42 +531,6 @@ class CMakeBuild(build_ext):
         update_symlink(Path(self.base_dir) / "compile_commands.json", cmake_dir / "compile_commands.json")
         subprocess.check_call(["cmake", "--build", "."] + build_args, cwd=cmake_dir)
         subprocess.check_call(["cmake", "--build", ".", "--target", "mlir-doc"], cwd=cmake_dir)
-
-        # Copy triton-mlir-opt tool to extdir for runtime use
-        # This tool is needed for converting MLIR to Bytecode
-        triton_mlir_opt_src = os.path.join(cmake_dir, "third_party", "ascend", "bin", "triton-mlir-opt")
-        if os.path.exists(triton_mlir_opt_src):
-            triton_mlir_opt_dst = os.path.join(extdir, "triton-mlir-opt")
-            shutil.copy2(triton_mlir_opt_src, triton_mlir_opt_dst)
-            # Make it executable (Unix-like systems)
-            if platform.system() != "Windows":
-                os.chmod(triton_mlir_opt_dst, 0o755)
-                # Strip debug symbols to reduce binary size (can reduce size by ~80%)
-                try:
-                    subprocess.check_call(["strip", "--strip-all", triton_mlir_opt_dst])
-                    print(f"Stripped triton-mlir-opt to reduce size")
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    # strip command not available or failed, continue without stripping
-                    pass
-            print(f"Copied triton-mlir-opt to {triton_mlir_opt_dst}")
-
-        # Copy triton-opt tool to extdir for runtime use
-        # This tool is needed for converting ttir to ttadapter
-        triton_opt_src = os.path.join(cmake_dir, "bin", "triton-opt")
-        if os.path.exists(triton_opt_src):
-            triton_opt_dst = os.path.join(extdir, "triton-opt")
-            shutil.copy2(triton_opt_src, triton_opt_dst)
-            # Make it executable (Unix-like systems)
-            if platform.system() != "Windows":
-                os.chmod(triton_opt_dst, 0o755)
-                # Strip debug symbols to reduce binary size (can reduce size by ~80%)
-                try:
-                    subprocess.check_call(["strip", "--strip-all", triton_opt_dst])
-                    print(f"Stripped triton-opt to reduce size")
-                except (subprocess.CalledProcessError, FileNotFoundError):
-                    # strip command not available or failed, continue without stripping
-                    pass
-            print(f"Copied triton-opt to {triton_opt_dst}")
 
 
 def download_and_copy_dependencies():
@@ -762,7 +619,7 @@ def download_and_copy_dependencies():
     )
 
 
-backends = [*BackendInstaller.copy(["ascend", "nvidia", "amd"]), *BackendInstaller.copy_externals()]
+backends = [*BackendInstaller.copy(["nvidia", "amd"]), *BackendInstaller.copy_externals()]
 
 
 def get_package_dirs():
@@ -881,34 +738,6 @@ class plugin_egg_info(egg_info):
         super().run()
 
 
-class BuildWheel(bdist_wheel):
-
-    def run(self):
-        add_links(external_only=True)
-        bdist_wheel.run(self)
-
-        if is_manylinux:
-            file = glob.glob(os.path.join(self.dist_dir, "*-linux_*.whl"))[0]
-
-            auditwheel_cmd = [
-                "auditwheel",
-                "-v",
-                "repair",
-                "--plat",
-                f"manylinux_2_27_{platform.machine()}",
-                "--plat",
-                f"manylinux_2_28_{platform.machine()}",
-                "-w",
-                self.dist_dir,
-                file,
-            ]
-
-            try:
-                subprocess.run(auditwheel_cmd, check=True, stdout=subprocess.PIPE)
-            finally:
-                os.remove(file)
-
-
 class plugin_install(install):
 
     def run(self):
@@ -962,53 +791,6 @@ def get_git_version_suffix():
         return get_git_commit_hash()
 
 
-def apply_patch(patch_path):
-    try:
-        subprocess.run(["git", "apply", patch_path], check=True, stdout=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        raise RuntimeError(f"patch({patch_path}) failed")
-    except FileNotFoundError:
-        raise RuntimeError(f"patch({patch_path}) not found.")
-
-
-def checkout_file(files):
-    try:
-        subprocess.run(["git", "checkout", "--"] + files, check=True, stdout=subprocess.DEVNULL)
-    except subprocess.CalledProcessError:
-        raise RuntimeError(f"init code failed,list:{files}")
-
-
-def apply_triton_ascend_patch():
-    patch_path = os.path.join("third_party", "ascend", "patch")
-    dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
-    patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
-    patch_files = [
-        "CMakeLists.txt",
-        "include/triton/Dialect/Triton/IR/TritonAttrDefs.td",
-        "lib/Dialect/Triton/IR/Traits.cpp",
-        "python/src/ir.cc",
-        "python/triton/_utils.py",
-        "python/triton/compiler/code_generator.py",
-        "python/triton/compiler/compiler.py",
-        "python/triton/compiler/errors.py",
-        "python/triton/language/math.py",
-        "python/triton/language/semantic.py",
-        "python/triton/language/standard.py",
-        "python/triton/runtime/interpreter.py",
-        "python/triton/runtime/jit.py",
-        "bin/RegisterTritonDialects.h",
-        "bin/triton-opt.cpp",
-        "bin/CMakeLists.txt",
-    ]
-    dev_patch_files = [
-        "python/triton/runtime/autotuner.py",
-    ]
-    checkout_file(dev_patch_files)
-    apply_patch(dev_patch)
-    checkout_file(patch_files)
-    apply_patch(patch)
-
-
 def get_triton_version_suffix():
     # Either "" or "+<githash>", "<githash>" itself does not contain any plus-characters.
     git_sfx = get_git_version_suffix()
@@ -1021,7 +803,7 @@ def get_triton_version_suffix():
 
 
 # keep it separate for easy substitution
-TRITON_VERSION = "3.6.0-dev" + get_triton_version_suffix()
+TRITON_VERSION = "3.6.0" + get_triton_version_suffix()
 
 # Dynamically define supported Python versions and classifiers
 MIN_PYTHON = (3, 10)
@@ -1039,95 +821,23 @@ PYTHON_CLASSIFIERS = [
 ]
 CLASSIFIERS = BASE_CLASSIFIERS + PYTHON_CLASSIFIERS
 
-
-# temporary design
-# Using version.txt containing version and commitid will be better and
-# the version.txt will be converted to versin.py when compilation.
-def get_default_version():
-    version_file = Path(__file__).parent / "version.txt"
-    if version_file.exists():
-        return version_file.read_text().strip()
-    return "3.6.0-dev"
-
-
-def get_version():
-    version = os.environ.get("TRITON_VERSION", get_default_version()) + os.environ.get(
-        "TRITON_WHEEL_VERSION_SUFFIX", "")
-    if not is_manylinux:
-        version += get_git_commit_hash()
-
-    return version
-
-
-def get_package_name():
-    return os.environ.get("TRITON_WHEEL_NAME", "triton_ascend")
-
-
-ARCHITECTURE_ALIASES = {
-    "x86_64": "x86_64",
-    "amd64": "x86_64",
-    "i386": "x86_64",
-    "i686": "x86_64",
-    "arm64": "arm",
-    "aarch64": "arm",
-    "armv7l": "arm",
-    "armv8l": "arm",
-    "arm": "arm",
-}
-
-ARCHITECTURE_DEPENDENCIES = {
-    "x86_64": ["triton==3.6.0"],
-    "arm": ["triton==3.6.0"],
-}
-
-
-def get_architecture():
-    arch = platform.machine().lower()
-    try:
-        return ARCHITECTURE_ALIASES[arch]
-    except KeyError as exc:
-        raise RuntimeError(f"Unsupported CPU architecture: {arch}") from exc
-
-
-def get_install_requirements():
-    install_requires = [
-        "attrs==24.2.0",
-        "numpy==1.26.4",
-        "scipy==1.13.1;python_version<'3.13'",
-        "scipy==1.15.1;python_version>='3.13'",
-        "decorator==5.1.1",
-        "psutil==6.0.0",
-        "pytest==8.3.2",
-        "pytest-xdist==3.6.1",
-        "pyyaml",
-        "pybind11",
-        "pandas",
-    ]
-    arch = get_architecture()
-    return [*install_requires, *ARCHITECTURE_DEPENDENCIES[arch]]
-
-
-is_manylinux = check_env_flag("IS_MANYLINUX", "FALSE")
-readme = os.path.join(triton_dir, "README.md")
-if not os.path.exists(readme):
-    raise FileNotFoundError("Unable to find 'README.md'")
-with open(readme, encoding="utf-8") as fdesc:
-    long_description = fdesc.read()
-
 setup(
-    name=get_package_name(),
-    version=get_version(),
+    name=os.environ.get("TRITON_WHEEL_NAME", "triton"),
+    version=TRITON_VERSION,
     author="Philippe Tillet",
     author_email="phil@openai.com",
     description="A language and compiler for custom Deep Learning operations",
-    long_description=long_description,
+    long_description="",
+    install_requires=[
+        "importlib-metadata; python_version < '3.10'",
+    ],
     packages=list(get_packages()),
     package_dir=dict(get_package_dirs()),
     entry_points=get_entry_points(),
     include_package_data=True,
     ext_modules=[CMakeExtension("triton", "triton/_C/")],
     cmdclass={
-        "bdist_wheel": BuildWheel,
+        "bdist_wheel": plugin_bdist_wheel,
         "build_ext": CMakeBuild,
         "build_py": CMakeBuildPy,
         "clean": CMakeClean,
@@ -1140,11 +850,10 @@ setup(
     zip_safe=False,
     # for PyPI
     keywords=["Compiler", "Deep Learning"],
-    url="https://gitcode.com/Ascend/triton-ascend/",
+    url="https://github.com/triton-lang/triton/",
     python_requires=PYTHON_REQUIRES,
     classifiers=CLASSIFIERS,
     test_suite="tests",
-    install_requires=get_install_requirements(),
     extras_require={
         "build": [
             "cmake>=3.20,<4.0",

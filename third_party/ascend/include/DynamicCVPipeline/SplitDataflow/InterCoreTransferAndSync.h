@@ -28,14 +28,17 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/FlagIdReuse.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include <optional>
 
 namespace mlir {
 namespace triton {
@@ -49,6 +52,21 @@ struct TransferPipeConfig {
   hivm::TCoreTypeAttr dstCoreAttr;
   llvm::StringRef srcCoreType;
   llvm::StringRef dstCoreType;
+};
+
+// Information found while matching a VECTOR to_tensor yielded from an SCF op.
+struct VectorToTensorInfo {
+  bufferization::ToTensorOp toTensor;
+  scf::YieldOp yield;
+  int tightlyCoupledBufferId;
+};
+
+// Result of matching a CUBE -> VECTOR direct-store pattern: CUBE data is
+// transferred through UB and directly stored by VECTOR, without VECTOR tensor
+// computation.
+struct CubeToVectorDirectStoreInfo {
+  std::optional<int> tightlyCoupledBufferId;
+  Operation *storeOp = nullptr;
 };
 
 // Define pass
@@ -84,6 +102,7 @@ private:
   mlir::ModuleOp module;
   int transferIndex = 0;
   int markAllocIndex = 0;
+  int intraDepsGroupId = 0;
 
   llvm::DenseMap<mlir::Value, mlir::Value> ndnzValueMapping;
   SSBufferManager ssbufferManager;
@@ -99,6 +118,8 @@ private:
   handleCubeToVector(mlir::OpBuilder &builder, DependencyInfo &dep,
                      FlagIdManager &flagManager,
                      FlagIdReuseManager &flagIdReuseManager);
+  mlir::LogicalResult handleCubeToCube(mlir::OpBuilder &builder,
+                                       DependencyInfo &dep);
   mlir::LogicalResult handleMemoryDependency(
       mlir::OpBuilder &builder, DependencyInfo &dep, size_t depIndex,
       llvm::SmallVector<DependencyInfo> memDependencies,
@@ -126,6 +147,12 @@ private:
                                                 mlir::Location loc);
   mlir::Operation *findMainLoopforTransfer(mlir::Operation *endOp,
                                            mlir::Operation *startOp);
+  mlir::Operation *createC2CSharedL1Buffer(mlir::OpBuilder &builder,
+                                           mlir::Location loc,
+                                           llvm::ArrayRef<int64_t> shape,
+                                           mlir::Type elemType, int prodBlockId,
+                                           mlir::Operation *prodEnd,
+                                           mlir::Operation *consStart);
   std::pair<mlir::Operation *, mlir::Operation *>
   createTransferAllocs(mlir::OpBuilder &builder, mlir::Location loc,
                        llvm::ArrayRef<int64_t> shape, mlir::Type elemType,
@@ -136,17 +163,21 @@ private:
   mlir::Operation *analyzeConsumerReadInsertPoint(Value srcValue,
                                                   int iniConsumerId);
   mlir::Operation *getConsumerWaitPoint(int transferIndex);
+  mlir::Operation *getCopyPointBeforeStore(Value depValue,
+                                           Operation *vectorEndOp,
+                                           int iniProducerBlockId);
   mlir::Operation *insertVectorToCubeTransfer(
       mlir::OpBuilder &builder, mlir::Value srcValue,
       mlir::Value normalizedValue, mlir::Operation *vectorEndOp,
       mlir::Operation *cubeStartOp, mlir::Location loc, int transferIndex,
-      int iniConsumerId, bool isScaler, bool is1DTensor,
+      DependencyInfo &dep, bool is1DTensor,
       mlir::Operation **consumedDataOp = nullptr);
-  mlir::Operation *insertCubeToVectorTransfer(
-      mlir::OpBuilder &builder, mlir::Value srcValue,
-      mlir::Operation *cubeEndOp, mlir::Operation *vectorStartOp,
-      mlir::Location loc, int transferIndex, int iniConsumerId,
-      bool isAllTranspoesd, mlir::Operation **consumedDataOp = nullptr);
+  mlir::Operation *
+  insertCubeToVectorTransfer(mlir::OpBuilder &builder, mlir::Value srcValue,
+                             mlir::Operation *cubeEndOp,
+                             mlir::Operation *vectorStartOp, mlir::Location loc,
+                             int transferIndex, DependencyInfo &dep,
+                             mlir::Operation **consumedDataOp = nullptr);
   TransferPipeConfig getTransferPipeConfig(Operation *transferOp,
                                            bool isStoreDirectly = false);
   void insertInterCoreSync(mlir::OpBuilder &builder,
@@ -158,9 +189,25 @@ private:
                            mlir::Operation *consumedDataOp = nullptr,
                            bool isStoreDirectly = false);
   void insertMemDepSync(mlir::OpBuilder &builder, mlir::Operation *producerOp,
-                        mlir::Operation *consumerOp, int flag,
+                        mlir::Operation *consumerOp,
+                        mlir::Operation *consumerEndOp, int flag,
                         mlir::Location loc, bool isCubeToVector,
                         FlagIdReuseManager &flagIdReuseManager);
+  // Match the CUBE -> VECTOR direct-store pattern inside the given SCF op:
+  // CUBE data reaches VECTOR through UB and is stored without VECTOR tensor
+  // computation (`scf.for` / `scf.while` / `scf.if`).
+  static std::optional<CubeToVectorDirectStoreInfo>
+  matchCubeToVectorDirectStorePattern(Operation *scfOp);
+  // Detect SCF ops whose yielded data flows out via fixpipe and is then
+  // stored by a post-loop materialize_in_destination. Insert a
+  // CUBE.PIPE_FIX -> VECTOR.PIPE_MTE3 sync pair to guard the store.
+  void
+  processCubeToVectorDirectStoreSync(mlir::OpBuilder &builder,
+                                     FlagIdManager &flagManager,
+                                     FlagIdReuseManager &flagIdReuseManager);
+  // Remove VECTOR add-from-matmul pseudo-ops so the SCF yield points at the
+  // real data source.
+  void removeVectorPseudoOps();
   void sortDependencies(llvm::SmallVector<DependencyInfo> &dependencies,
                         mlir::ModuleOp module);
   llvm::SmallVector<mlir::Operation *>

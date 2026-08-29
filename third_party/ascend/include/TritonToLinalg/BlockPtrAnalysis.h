@@ -35,6 +35,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 
 #include <set>
 namespace mlir {
@@ -43,7 +44,38 @@ class ConversionPatternRewriter;
 
 namespace triton {
 
+/// Temporary provenance for memref carriers materialized from complete scalar
+/// pointer addresses. Address round-trip folding is valid only for casts with
+/// this marker; ordinary HIVM PointerCast operations retain their baseline
+/// descriptor semantics. TritonToLinalg removes the marker after conversion.
+inline constexpr llvm::StringLiteral kScalarPointerCarrierAttr =
+    "ScalarPointerCarrier";
+
+/// Returns true when a loop still carries Triton pointer state, or when a
+/// loop-carried integer tensor participates in legacy address computation.
+/// Ordinary memrefs, including fixed-layout memrefs created by
+/// memref.reinterpret_cast, are complete SSA values and do not require the
+/// legacy BlockData loop expansion solely because of their producer.
+bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp);
+
+/// Returns the non-descriptor loop slots that carry a make-range integer
+/// tensor through a CFO-owned SCF boundary. These slots are safe to lower with
+/// the legacy BlockData mask path; pointer descriptor slots and opaque tensor
+/// carriers are deliberately excluded.
+SmallVector<unsigned>
+getMarkedMakeRangeCarrierSlots(LoopLikeOpInterface loopOp);
+
 enum class MemAccVal { Undefined = 0, StrucMemAcc = 1, UnstrucMemAcc = 2 };
+
+/// Creates a verifier-valid HIVM pointer cast for a scalar Triton pointer
+/// represented by an integer address. Triton scalar pointers do not carry an
+/// extent, while their downstream carrier is normally `memref<?xT>` and every
+/// dynamic memref dimension requires a size operand. Use one element as the
+/// conservative carrier extent; reinterpret-cast lowering replaces it with a
+/// precise access range when a larger descriptor is materialized.
+hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
+                                            MemRefType resultType,
+                                            Value address);
 
 struct MemAccType {
 
@@ -102,8 +134,8 @@ public:
   void removeSource();
 
   int64_t getRank() const;
-  MemRefType getResultMemrefType(int64_t offset,
-                                 ArrayRef<int64_t> resultShape) const;
+  FailureOr<MemRefType>
+  getResultMemrefType(int64_t offset, ArrayRef<int64_t> resultShape) const;
 
   void addBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
                 ConversionPatternRewriter &rewriter);
@@ -114,9 +146,9 @@ public:
   void divBlock(BlockData &lBlock, BlockData &rBlock, Location loc,
                 ConversionPatternRewriter &rewriter);
 
-  memref::ReinterpretCastOp createCastOp(ArrayRef<int64_t> resultShape,
-                                         const Location &loc,
-                                         OpBuilder &builder) const;
+  FailureOr<memref::ReinterpretCastOp>
+  createCastOp(ArrayRef<int64_t> resultShape, const Location &loc,
+               OpBuilder &builder) const;
 
   void setResElemTy(const Type &);
   void setSource(const Value &);
@@ -147,32 +179,43 @@ private:
 
 class BlockDataParser {
 public:
-  static Value getScalarMemRef(Value ptr, Value memref, const Location &loc,
-                               ConversionPatternRewriter &rewriter);
+  /// Materialize the rank-one memref used by a scalar load only when the
+  /// pointer producer has already been converted to a compatible memref.
+  /// Returning failure lets a consumer reject an unconverted producer without
+  /// asserting or creating partial IR.
+  static FailureOr<Value> getScalarMemRef(Value ptr, Value memref,
+                                          const Location &loc,
+                                          ConversionPatternRewriter &rewriter);
 
-  static void parse(Value operand, BlockData &data, const Location &loc,
-                    ConversionPatternRewriter &rewriter,
-                    const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parse(Value operand, BlockData &data, const Location &loc,
+        ConversionPatternRewriter &rewriter,
+        const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseAdd(arith::AddIOp op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseAdd(arith::AddIOp op, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseSub(arith::SubIOp op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseSub(arith::SubIOp op, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseMul(arith::MulIOp op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseMul(arith::MulIOp op, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseDiv(arith::DivSIOp op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseDiv(arith::DivSIOp op, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseRem(arith::RemSIOp op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseRem(arith::RemSIOp op, BlockData &data, const Location &loc,
+           ConversionPatternRewriter &rewriter,
+           const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   parseUnrealizedCast(UnrealizedConversionCastOp op, BlockData &data,
@@ -189,30 +232,30 @@ public:
       ConversionPatternRewriter &rewriter,
       const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
+  static LogicalResult
   parseExpandDims(triton::ExpandDimsOp op, BlockData &data, const Location &loc,
                   ConversionPatternRewriter &rewriter,
                   const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseBitcast(triton::BitcastOp op, BlockData &data,
-                           const Location &loc,
-                           ConversionPatternRewriter &rewriter,
-                           const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseBitcast(triton::BitcastOp op, BlockData &data, const Location &loc,
+               ConversionPatternRewriter &rewriter,
+               const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseExtSI(arith::ExtSIOp op, BlockData &data,
-                         const Location &loc,
-                         ConversionPatternRewriter &rewriter,
-                         const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseExtSI(arith::ExtSIOp op, BlockData &data, const Location &loc,
+             ConversionPatternRewriter &rewriter,
+             const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
+  static LogicalResult
   parseBroadcast(triton::BroadcastOp op, BlockData &data, const Location &loc,
                  ConversionPatternRewriter &rewriter,
                  const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseSplat(triton::SplatOp op, BlockData &data,
-                         const Location &loc,
-                         ConversionPatternRewriter &rewriter,
-                         const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseSplat(triton::SplatOp op, BlockData &data, const Location &loc,
+             ConversionPatternRewriter &rewriter,
+             const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   parseConstSplat(arith::ConstantOp op, BlockData &data, const Location &loc,
@@ -221,17 +264,18 @@ public:
 
   template <typename T>
   static std::enable_if_t<std::is_same_v<T, triton::MakeTensorPtrOp> ||
-                          std::is_same_v<T, triton::AdvanceOp>>
+                              std::is_same_v<T, triton::AdvanceOp>,
+                          LogicalResult>
   parseTensorPtr(T op, BlockData &data, const Location &loc,
                  ConversionPatternRewriter &rewriter,
                  const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseAddPtr(triton::AddPtrOp op, BlockData &data,
-                          const Location &loc,
-                          ConversionPatternRewriter &rewriter,
-                          const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseAddPtr(triton::AddPtrOp op, BlockData &data, const Location &loc,
+              ConversionPatternRewriter &rewriter,
+              const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
+  static LogicalResult
   parseExtractSlice(tensor::ExtractSliceOp op, BlockData &data,
                     const Location &loc, ConversionPatternRewriter &rewriter,
                     const llvm::SmallDenseMap<Value, BlockData> &known);
@@ -241,24 +285,25 @@ public:
                        const Location &loc, ConversionPatternRewriter &rewriter,
                        const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseReduce(triton::ReduceOp op, BlockData &data,
-                          const Location &loc,
-                          ConversionPatternRewriter &rewriter,
-                          const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseReduce(triton::ReduceOp op, BlockData &data, const Location &loc,
+              ConversionPatternRewriter &rewriter,
+              const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void
   parseAtomicRmw(triton::AtomicRMWOp op, BlockData &data, const Location &loc,
                  ConversionPatternRewriter &rewriter,
                  const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseFill(linalg::FillOp op, BlockData &data, const Location &loc,
-                        ConversionPatternRewriter &rewriter,
-                        const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseFill(linalg::FillOp op, BlockData &data, const Location &loc,
+            ConversionPatternRewriter &rewriter,
+            const llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void parseSelect(arith::SelectOp op, BlockData &data,
-                          const Location &loc,
-                          ConversionPatternRewriter &rewriter,
-                          const llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  parseSelect(arith::SelectOp op, BlockData &data, const Location &loc,
+              ConversionPatternRewriter &rewriter,
+              const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static void parseCustomOp(hivm::CustomOp op, BlockData &data,
                             const Location &loc,
@@ -266,7 +311,7 @@ public:
                             const llvm::SmallDenseMap<Value, BlockData> &known,
                             unsigned resultIdx);
 
-  static void
+  static LogicalResult
   parseStructuredCustomOp(Operation *op, BlockData &data, const Location &loc,
                           ConversionPatternRewriter &rewriter,
                           const llvm::SmallDenseMap<Value, BlockData> &known,
@@ -283,28 +328,33 @@ public:
   static void rewriteStructuredCustomOp(Operation *op,
                                         ConversionPatternRewriter &rewriter);
 
-  static void rewriteAddPtr(triton::AddPtrOp op,
-                            triton::AddPtrOp::Adaptor &adaptor,
-                            ConversionPatternRewriter &rewriter,
-                            llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  rewriteAddPtr(triton::AddPtrOp op, triton::AddPtrOp::Adaptor &adaptor,
+                ConversionPatternRewriter &rewriter,
+                llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
-  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value base,
+  static FailureOr<Value>
+  materializePointer(Value ptr, ConversionPatternRewriter &rewriter,
+                     llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static LogicalResult
+  rewriteMakeTensorPtrOp(triton::MakeTensorPtrOp op, Value convertedBase,
                          ConversionPatternRewriter &rewriter,
                          llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void rewriteAdvanceOp(triton::AdvanceOp op,
-                               ConversionPatternRewriter &rewriter,
-                               llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  rewriteAdvanceOp(triton::AdvanceOp op, ConversionPatternRewriter &rewriter,
+                   llvm::SmallDenseMap<Value, BlockData> &known);
 
-  static void
+  static LogicalResult
   rewriteCustomOp(hivm::CustomOp op, hivm::CustomOp::Adaptor &adaptor,
                   ConversionPatternRewriter &rewriter,
                   const llvm::SmallDenseMap<Value, BlockData> &known);
 
   template <typename T>
   static std::enable_if_t<std::is_same_v<T, scf::YieldOp> ||
-                          std::is_same_v<T, scf::ConditionOp>>
+                              std::is_same_v<T, scf::ConditionOp>,
+                          LogicalResult>
   rewriteTerminator(T op, ConversionPatternRewriter &rewriter,
                     const llvm::SmallDenseSet<size_t> &blockArgIdxSet,
                     ArrayRef<int64_t> iterArgIdxMap,
@@ -312,14 +362,14 @@ public:
 
   /// @param known is mainly designed for `rewriteLoop`, and is just non-const
   /// in `rewriteLoop`, `rewriteAddPtr` and `rewriteAdvance`
-  static void rewriteLoopOp(LoopLikeOpInterface op,
-                            ConversionPatternRewriter &rewriter,
-                            llvm::SmallDenseMap<Value, BlockData> &known);
+  static LogicalResult
+  rewriteLoopOp(LoopLikeOpInterface op, ConversionPatternRewriter &rewriter,
+                llvm::SmallDenseMap<Value, BlockData> &known,
+                ArrayRef<unsigned> onlyIndexTensorSlots = {});
 
-  static void rewriteAddPtrToUnstrucMemAcc(triton::AddPtrOp op,
-                                           triton::AddPtrOp::Adaptor &adaptor,
-                                           ConversionPatternRewriter &rewriter,
-                                           BlockData &data);
+  static LogicalResult rewriteAddPtrToUnstrucMemAcc(
+      triton::AddPtrOp op, triton::AddPtrOp::Adaptor &adaptor,
+      ConversionPatternRewriter &rewriter, BlockData &data);
 };
 
 template <typename OpTy>

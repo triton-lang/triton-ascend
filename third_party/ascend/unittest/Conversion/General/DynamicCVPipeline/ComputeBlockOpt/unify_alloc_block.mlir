@@ -195,4 +195,116 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     }
     return
   }
+
+  //===----------------------------------------------------------------------===//
+  // Test Case: @test_copy_source_subview_traceback
+  //===----------------------------------------------------------------------===//
+  // Pattern: trace back memref.copy's source subview to memref.reinterpret_cast
+  // Key scenario: The copy's source operand (%subview_src) is a subview of
+  //   %reinterpret_cast, which has a DIFFERENT block_id (5) from the copy (2).
+  //   The pass should trace back from the copy's source subview through the
+  //   view-like chain to the reinterpret_cast, and unify them to the copy's
+  //   block_id (2).
+  // Before:
+  //   %reinterpret_cast {block_id=5}                        // source base
+  //   %subview_src = subview %reinterpret_cast {block_id=5} // source subview
+  //   %subview_dst = subview %alloc {block_id=5}            // dst subview
+  //   memref.copy %subview_src, %subview_dst {block_id=2}
+  // After (source view chain unified to block_id=2):
+  //   %reinterpret_cast {block_id=2}
+  //   %subview_src {block_id=2}
+  //   %subview_dst {block_id=2}
+  //   memref.copy {block_id=2}
+  //   (alloc, fill, scf.if, condition deps also unified to block_id=2)
+  //===----------------------------------------------------------------------===//
+  // CHECK-LABEL: func.func @test_copy_source_subview_traceback
+  func.func @test_copy_source_subview_traceback(%arg0: memref<?xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %cst = arith.constant 0.000000e+00 : f16
+
+    scf.for %arg17 = %c0 to %c32 step %c1 iter_args(%arg19 = %c0) -> (index) {
+      %c128 = arith.constant {ssbuffer.block_id = 4 : i32, ssbuffer.core_type = "CUBE"} 128 : index
+      %cond = arith.cmpi slt, %arg19, %c32 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
+      %alloc = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
+      %140 = arith.addi %arg19, %c128 {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : index
+      scf.if %cond {
+        linalg.fill {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : f16) outs(%alloc : memref<32x32xf16>)
+      } {hivm.unlikely_condition}
+
+      // Source view chain: reinterpret_cast and subview_src have block_id=5,
+      // should be unified to block_id=2 by tracing copy's source subview.
+      // CHECK: %{{.*}} = memref.reinterpret_cast {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [%140], sizes: [32, 32], strides: [%c32, %c1] {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<?xf16> to memref<32x32xf16, strided<[?, ?], offset: ?>>
+      // CHECK: %{{.*}} = memref.subview {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      %subview_src = memref.subview %reinterpret_cast[0, 0] [%c32, %c32] [1, 1] {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[?, ?], offset: ?>>
+      // CHECK: %{{.*}} = memref.subview {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      %subview_dst = memref.subview %alloc[0, 0] [%c32, %c32] [1, 1] {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1]>>
+
+      // CHECK: memref.copy{{.*}}{ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      memref.copy %subview_src, %subview_dst {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[32, 1]>>
+
+      scf.yield %140 : index
+    }
+    return
+  }
+
+  //===----------------------------------------------------------------------===//
+  // Test Case: @test_block_boundary_source_chain
+  //===----------------------------------------------------------------------===//
+  // Verify that when the source view chain of a memref.copy spans across MLIR
+  // Block boundaries, only ops in the same Block as the copyOp are collected
+  // and unified. Ops in different Blocks are skipped.
+  //
+  // Scenario:
+  //   - arg_subview/reinterpret_cast from external arg, defined in parent block
+  //   - outer memref.copy (block_id=15) in the same parent block
+  //   - inner memref.copy (block_id=2) inside scf.for, also using arg_subview
+  // Expected:
+  //   - arg_subview/reinterpret_cast unified to block_id=15 (same block as
+  //     outer copy)
+  //   - inner copy does NOT affect arg_subview (different block -> skipped)
+  //===----------------------------------------------------------------------===//
+  // CHECK-LABEL: func.func @test_block_boundary_source_chain
+  func.func @test_block_boundary_source_chain(%arg0: memref<?xf16>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %cst = arith.constant 0.000000e+00 : f16
+
+    %reinterpret_cast = memref.reinterpret_cast %arg0 to offset: [%c0], sizes: [32, 32], strides: [%c32, %c1] {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"} : memref<?xf16> to memref<32x32xf16, strided<[?, ?], offset: ?>>
+    // CHECK: %{{.*}} = memref.subview {{.*}} {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"}
+    %arg_subview = memref.subview %reinterpret_cast[0, 0] [%c32, %c32] [1, 1] {ssbuffer.block_id = 10 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[?, ?], offset: ?>>
+
+    %outer_cond = arith.constant 1 : i1
+    // CHECK: %{{.*}} = memref.alloc() {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
+    %alloc = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
+    // CHECK: scf.if {{.*}} {
+    // CHECK:   linalg.fill {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"}
+    scf.if %outer_cond {
+      linalg.fill {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : f16) outs(%alloc : memref<32x32xf16>)
+    } {hivm.unlikely_condition}
+    // CHECK: %{{.*}} = memref.subview {{.*}} {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"}
+    %dst_subview = memref.subview %alloc[0, 0] [%c32, %c32] [1, 1] {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1]>>
+    // CHECK: memref.copy{{.*}}{ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"}
+    memref.copy %arg_subview, %dst_subview {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[32, 1]>>
+
+    scf.for %iv = %c0 to %c1 step %c1 {
+      %inner_cond = arith.constant 1 : i1
+      // CHECK: %{{.*}} = memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
+      %inner_alloc = memref.alloc() {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
+      // CHECK: scf.if {{.*}} {
+      // CHECK:   linalg.fill {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      scf.if %inner_cond {
+        linalg.fill {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : f16) outs(%inner_alloc : memref<32x32xf16>)
+      } {hivm.unlikely_condition}
+      // CHECK: %{{.*}} = memref.subview {{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      %inner_dst = memref.subview %inner_alloc[0, 0] [%c32, %c32] [1, 1] {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16> to memref<?x?xf16, strided<[32, 1]>>
+      // CHECK: memref.copy{{.*}}{ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"}
+      memref.copy %arg_subview, %inner_dst {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "CUBE"} : memref<?x?xf16, strided<[?, ?], offset: ?>> to memref<?x?xf16, strided<[32, 1]>>
+      scf.yield
+    }
+    return
+  }
 }

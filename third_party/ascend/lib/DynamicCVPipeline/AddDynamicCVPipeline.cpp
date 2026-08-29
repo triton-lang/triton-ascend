@@ -38,6 +38,8 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 
+#include "DynamicCVPipeline/Common/FallbackHelper.h"
+
 static constexpr const char *DEBUG_TYPE = "AddDynamicCVPipeline";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
@@ -48,22 +50,6 @@ namespace triton {
 #include "ascend/include/DynamicCVPipeline/Passes.h.inc"
 } // namespace triton
 } // namespace mlir
-
-namespace {
-
-void restoreModuleFromBackup(ModuleOp moduleOp, ModuleOp moduleBackup) {
-  Operation *moduleOperation = moduleOp.getOperation();
-  Operation *backupOperation = moduleBackup.getOperation();
-
-  moduleOperation->setLoc(backupOperation->getLoc());
-  moduleOperation->setAttrs(backupOperation->getAttrs());
-  if (moduleOperation->getPropertiesStorageSize() != 0) {
-    moduleOperation->copyProperties(backupOperation->getPropertiesStorage());
-  }
-  moduleOp.getBodyRegion().takeBody(moduleBackup.getBodyRegion());
-}
-
-} // namespace
 
 AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
@@ -82,7 +68,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     return;
   }
 
-  ModuleOp moduleBackup(moduleOp->clone());
+  CVPipeline::FallbackHelper fallback(moduleOp);
   PassManager pm(&getContext(), moduleOp.getOperationName());
 
   pm.addPass(createPreCheckAvailablePass());
@@ -114,14 +100,12 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt())
                               : CVPipeline::ERRCODE_FAILED;
-    restoreModuleFromBackup(moduleOp, moduleBackup);
-    moduleBackup->destroy();
+    fallback.restore();
     moduleOp->setAttr(CVPipeline::ERRCODE_ATTR,
                       builder.getI32IntegerAttr(errCode));
     return;
   }
 
-  moduleBackup->destroy();
   LDBG("Process successfully");
 }
 

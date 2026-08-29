@@ -44,21 +44,39 @@ void MarkMainLoopPass::runOnOperation() {
   }
 
   int mainLoopIdCounter = 0;
-  SmallVector<scf::ForOp> mainLoops;
+  SmallVector<Operation *> mainLoops;
 
-  // Find all candidate main loops
+  // Find all candidate main loops (ForOp + WhileOp)
+  auto isL1Fixpipe = [](Operation *op) -> bool {
+    auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
+    if (!fixpipeOp)
+      return false;
+    auto dstType = dyn_cast<MemRefType>(fixpipeOp.getDst().getType());
+    if (!dstType)
+      return false;
+    auto addrSpaceAttr =
+        dyn_cast_or_null<hivm::AddressSpaceAttr>(dstType.getMemorySpace());
+    return addrSpaceAttr &&
+           addrSpaceAttr.getAddressSpace() == hivm::AddressSpace::L1;
+  };
+
   module.walk([&](Operation *op) {
-    if (isa<hivm::FixpipeOp, hivm::CopyOp>(op)) {
-      if (auto forOp = op->getParentOfType<scf::ForOp>()) {
-        mainLoops.push_back(forOp);
-      }
-    }
+    if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op))
+      return;
+
+    if (isL1Fixpipe(op))
+      return;
+
+    if (auto forOp = op->getParentOfType<scf::ForOp>())
+      mainLoops.push_back(forOp);
+    if (auto whileOp = op->getParentOfType<scf::WhileOp>())
+      mainLoops.push_back(whileOp);
   });
 
-  for (scf::ForOp forOp : mainLoops) {
-    if (!forOp->hasAttr(CVPipeline::kMainLoop)) {
+  for (Operation *loopOp : mainLoops) {
+    if (!loopOp->hasAttr(CVPipeline::kMainLoop)) {
       // Add attribute with integer value (current counter ID)
-      forOp->setAttr(
+      loopOp->setAttr(
           CVPipeline::kMainLoop,
           Builder(module.getContext()).getI32IntegerAttr(mainLoopIdCounter));
       mainLoopIdCounter++;
@@ -67,24 +85,24 @@ void MarkMainLoopPass::runOnOperation() {
 
   // Remove main_loop attribute from outer loops if nested loops both have it
   // Keep only the innermost main_loop
-  SmallVector<scf::ForOp> allMainLoops;
-  module.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr(CVPipeline::kMainLoop)) {
-      allMainLoops.push_back(forOp);
+  SmallVector<Operation *> allMainLoops;
+  module.walk([&](Operation *loopOp) {
+    if (CVPipeline::isMainLoopOp(loopOp)) {
+      allMainLoops.push_back(loopOp);
     }
   });
 
-  for (scf::ForOp forOp : allMainLoops) {
-    // Check if there's any nested for loop with main_loop attribute
+  for (Operation *loopOp : allMainLoops) {
+    // Check if there's any nested loop with main_loop attribute
     bool hasNestedMainLoop = false;
-    forOp.walk([&](scf::ForOp nestedForOp) {
-      if (nestedForOp != forOp && nestedForOp->hasAttr(CVPipeline::kMainLoop)) {
+    loopOp->walk([&](Operation *nestedLoopOp) {
+      if (nestedLoopOp != loopOp && CVPipeline::isMainLoopOp(nestedLoopOp)) {
         hasNestedMainLoop = true;
       }
     });
     // Remove attribute from outer loop if inner loop also has it
     if (hasNestedMainLoop) {
-      forOp->removeAttr(CVPipeline::kMainLoop);
+      loopOp->removeAttr(CVPipeline::kMainLoop);
     }
   }
 

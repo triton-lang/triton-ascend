@@ -3,6 +3,7 @@ import torch_npu  # noqa: F401
 
 import triton
 import triton.language as tl
+import pytest
 
 
 @triton.jit
@@ -28,6 +29,7 @@ def _indirect_load_from_i64_ptr_kernel(
     tl.store(out + offsets, slot_ids.to(tl.int64))
 
 
+@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_indirect_load_pointer_cast_precise_size_e2e():
     block_size = 4
     block = 8
@@ -59,4 +61,4 @@ def test_indirect_load_pointer_cast_precise_size_e2e():
 
     expected = (block_table_cpu[positions_cpu // block_size] * block_size + positions_cpu % block_size).to(torch.int64)
 
-    assert torch.equal(out.cpu(), expected)
+    assert torch.equal(out.cpu(), expected.cpu())

@@ -542,4 +542,50 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
     let hasVerifier = 1;
 }
 
+//
+// Dot Op
+//
+def DotOp : TT_Ascend_Op<"dot", [
+    Pure,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+    let summary = "Matmul D = A * B with per-operand fractal (zN) control";
+    let description = [{
+        Computes `D = A * B`, declaring per operand whether it is stored in a
+        fractal (zN) layout: `fractal_a` / `fractal_b` mark input A / B as
+        fractal (converted to ND before the multiply); `fractal_c` produces D in
+        fractal layout. The result carries the cube accumulator dtype (f32 for
+        float inputs, i32 for int8), and its type is inferred from A, B and
+        these flags.
+
+        zN convention (non-transpose; inner block [16, b], b = 32 / elem_bytes,
+        i.e. f16/bf16 -> b=16, f32 -> b=8, int8 -> b=32):
+          A [M,K] <-> [K1, M1, 16, b]     (ND = [d1*d2, d0*d3])
+          B [K,N] <-> [N1, K1, 16, b]     (ND = [d1*d2, d0*d3])
+          C [M,N] <-> [N1, M1, 16, 16]    (L0C accumulator, block 16x16)
+
+        Example (fractal_a + fractal_c, f16 in -> f32 accumulator out):
+        ```mlir
+        %d = ascend.dot %a, %b {fractal_a = true, fractal_c = true}
+             : tensor<1x1x16x16xf16>, tensor<16x16xf16> -> tensor<1x1x16x16xf32>
+        ```
+    }];
+
+    let arguments = (ins
+        TT_Tensor:$a,
+        TT_Tensor:$b,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_a,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_b,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_c
+    );
+
+    let results = (outs TT_Tensor:$d);
+
+    let assemblyFormat = [{
+        $a `,` $b attr-dict `:` type($a) `,` type($b) `->` type($d)
+    }];
+
+    let hasVerifier = 1;
+}
+
 #endif // TRITON_ASCEND_OPS

@@ -42,4 +42,46 @@ def BuildCFG : Pass<"build-cfg", "mlir::ModuleOp"> {
   ];
 }
 
+def MergeConcatLoadBuffer : Pass<"merge-concat-load-buffer", "mlir::ModuleOp"> {
+  let summary = "Merge disjoint masked-load UB buffers concatenated by insert_slice";
+  let description = [{
+    After triton-to-linalg, each masked tt.load allocates a full-tile UB buffer,
+    fills it with the padding value, and copies only the masked subview. A
+    subsequent cat/join is lowered to extract_slice + insert_slice, so two
+    allocs that write disjoint regions of the same static shape can be merged
+    into one memref.alloc.
+
+    If the union of copy destinations is proven to cover every later read of
+    the concatenated tensor, both linalg.fill ops are deleted. Otherwise a
+    single fill is kept (when both fills are bare and use the same value), or
+    the rewrite is abandoned.
+
+    A fill only counts as padding when it runs before the copies that overwrite
+    it, so a fill placed after them is what the concatenated value observes and
+    the rewrite is abandoned. The fill that survives a merge must additionally
+    precede the copies of both buffers, since it initialises the shared one.
+
+    The merged buffer ends up written by two disjoint memref.copy ops. On
+    910_9362 the generated code only makes the copy next to the surviving
+    to_tensor visible and the rest of the tile reads back the padding value, so
+    the pipeline only enables this pass on 910_95/950.
+  }];
+  let constructor = "mlir::triton::cfg::createMergeConcatLoadBufferPass()";
+}
+
+def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
+  let summary = "Optimize Triton IR with graph analyses";
+  let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
+  let options = [
+    Option<"ruleMask", "rule-mask", "uint64_t", "511",
+           "Bitmask of registered graph rule identities; this pass executes only native graph-rule phases">,
+    Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
+           "64", "Maximum graph rewrites per function">,
+    Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",
+           "Unified-buffer capacity available to StoreCoalescing">,
+    Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
+           "Compilation mode; RowCoalescing is enabled only for simt_only">,
+  ];
+}
+
 #endif // TRITON_TO_CFG_PASSES

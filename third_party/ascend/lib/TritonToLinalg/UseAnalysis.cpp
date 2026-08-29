@@ -24,6 +24,7 @@
 #include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"
@@ -340,7 +341,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
         }
       }
       if (!isa<mlir::scf::IfOp, mlir::scf::ForOp, mlir::scf::WhileOp,
-               triton::ReduceOp>(op)) {
+               scope::ScopeOp, triton::ReduceOp>(op)) {
         assert(op->getNumResults() == 1 &&
                "Ops used for meta computation are expected to have one result");
       }
@@ -505,8 +506,8 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             // We need to ensure the intermediate ops are marked MixUse
             // so that they will be replaced instead of be erased without
             // conversion.
-            return (isa<triton::LoadOp>(curOp) || isa<triton::StoreOp>(curOp) ||
-                    isa<triton::ascend::IndirectStoreOp>(curOp)) &&
+            return (isa<triton::LoadOp, triton::StoreOp,
+                        triton::ascend::IndirectStoreOp>(curOp)) &&
                    !isMetaUse(curOp);
           },
           /*actionFn*/
@@ -553,6 +554,24 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
       op->removeAttr("MetaUse");
     }
   });
+  // Masked load with non-scalar tensor `other` lowers as
+  // arith.select(mask, loaded, other) so the mask SSA must stay live.
+  funcOp.walk([&](triton::LoadOp load) {
+    Value mask = load.getMask();
+    Value other = load.getOther();
+    if (!mask || !other)
+      return;
+    if (other.getDefiningOp<triton::SplatOp>())
+      return;
+    if (auto c = other.getDefiningOp<arith::ConstantOp>()) {
+      if (auto dense = dyn_cast<DenseElementsAttr>(c.getValue())) {
+        if (dense.isSplat())
+          return;
+      }
+    }
+    if (auto *def = mask.getDefiningOp())
+      setMixUseRecursively(def);
+  });
   // hivm.custom present library call, shouldn't be metause
   funcOp.walk([&](hivm::CustomOp op) {
     if (isMetaUse(op)) {
@@ -568,6 +587,20 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
     os << "[UseAnalysis] After post-process, funcOp is " << *funcOp << "\n";
   });
   return success();
+}
+
+static bool isScalarI1ToI8PointerBitcast(Operation *op) {
+  auto bitcast = dyn_cast<triton::BitcastOp>(op);
+  if (!bitcast)
+    return false;
+
+  auto sourceType = dyn_cast<triton::PointerType>(bitcast.getSrc().getType());
+  auto resultType = dyn_cast<triton::PointerType>(bitcast.getType());
+  if (!sourceType || !resultType)
+    return false;
+
+  return sourceType.getPointeeType().isInteger(1) &&
+         resultType.getPointeeType().isInteger(8);
 }
 
 MetaUseEraser::MetaUseEraser(MLIRContext *context)
@@ -586,6 +619,9 @@ LogicalResult MetaUseEraser::matchAndRewrite(Operation *op,
     return rewriter.notifyMatchFailure(op,
                                        "AddPtrOp will be handled separately");
   }
+  if (isScalarI1ToI8PointerBitcast(op))
+    return rewriter.notifyMatchFailure(
+        op, "scalar i1-to-i8 pointer bitcast requires conversion");
   if (isMetaUse(op)) {
     rewriter.eraseOp(op);
     return success();

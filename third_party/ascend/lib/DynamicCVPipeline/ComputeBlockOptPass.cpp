@@ -25,6 +25,7 @@
 #include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 
 #include "mlir/Pass/PassManager.h"
@@ -51,16 +52,27 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createMergeVectorIfBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
-
-  pm.addPass(createUnifyStoreBlockPass());
-
   pm.addPass(createMergeCubeForBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createUBUsageOptPass());
+  pm.addPass(createBroadcastUBOptPass());
+  pm.addPass(createPosMaskPatternPass());
+  pm.addPass(createMergeSameSourceAxisPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+  pm.addPass(createMergeSmallBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+
+  pm.addPass(createSinkI1ProducersIntoUsersPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createFixpipeOptPass());
+  pm.addPass(createSplitIfByBlockIdPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+  pm.addPass(createMoveLoadIntoUserPass());
+  pm.addPass(createUnifyStoreBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+  pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
@@ -83,11 +95,18 @@ void registerComputeBlockOptPasses() {
     return createComputeBlockOptPass();
   });
   registerPass(createUBUsageOptPass);
+  registerPass(createMergeSameSourceAxisPass);
   registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
   registerPass(createMergeCubeForBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
+  registerPass(createSinkI1ProducersIntoUsersPass);
+  registerPass(createBroadcastUBOptPass);
+  registerPass(createMoveLoadIntoUserPass);
+  registerPass(createPosMaskPatternPass);
+  registerPass(createMergeSmallBlockPass);
+  registerPass(createSplitIfByBlockIdPass);
 }
 
 } // namespace triton

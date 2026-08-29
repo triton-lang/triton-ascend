@@ -61,6 +61,7 @@ struct TritonHistogramToHFusionConversion
                                 PatternRewriter &rewriter) const final {
     auto loc = op.getLoc();
     Value input = op.getSrc();
+    Value mask = op.getMask();
     auto resultType = op.getResult().getType();
 
     int64_t numBins = 256; // 256 is default fallback.
@@ -71,7 +72,7 @@ struct TritonHistogramToHFusionConversion
     auto numBinsAttr = rewriter.getI64IntegerAttr(numBins);
 
     auto newOp = rewriter.create<hfusion::HistogramOp>(loc, resultType, input,
-                                                       numBinsAttr, Value());
+                                                       numBinsAttr, mask);
 
     rewriter.replaceOp(op, newOp.getResult());
     return success();
@@ -87,21 +88,22 @@ struct TritonFpToFpToHFusionConversion : OpRewritePattern<triton::FpToFpOp> {
     Value input = op.getSrc();
     auto resultType = op.getResult().getType();
 
-    // Only handle float-to-float conversions with non-RTNE rounding modes
-    // RTNE (default) rounding is handled by TritonToLinalg pass using
-    // arith.truncf/extf
-    auto srcType = cast<TensorType>(input.getType());
-    auto dstType = cast<TensorType>(resultType);
-    if (!srcType.getElementType().isIntOrFloat() ||
-        !dstType.getElementType().isIntOrFloat()) {
-      return failure();
-    }
-
-    // Check if this has a non-RTNE rounding mode
+    // RTNE (default) rounding is handled by TritonToLinalg using
+    // arith.truncf/extf. Check this before querying tensor-only properties:
+    // scalar fp_to_fp operations are valid Triton IR too.
     auto roundingMode = op.getRounding();
     if (!roundingMode.has_value() ||
         roundingMode.value() == triton::RoundingMode::RTNE) {
       // RTNE or no rounding mode specified: let TritonToLinalg handle it
+      return failure();
+    }
+
+    // HFusion owns only non-RTNE tensor conversions. Keep the tensor
+    // precondition checked here; a scalar must not silently fall through.
+    auto srcType = cast<TensorType>(input.getType());
+    auto dstType = cast<TensorType>(resultType);
+    if (!srcType.getElementType().isIntOrFloat() ||
+        !dstType.getElementType().isIntOrFloat()) {
       return failure();
     }
 

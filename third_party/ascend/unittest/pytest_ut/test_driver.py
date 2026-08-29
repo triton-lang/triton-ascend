@@ -41,7 +41,7 @@ def _make_mock_npu_utils():
     mock = MagicMock()
     # _get_npu_device_limit_form_env calls self.get_device_aicore(); configure it
     # to return a fixed int instead of binding the real lru_cached method.
-    mock.get_device_aicore.return_value = _MOCK_AICORE_NUM
+    mock.get_device_core.return_value = _MOCK_AICORE_NUM, _MOCK_AIVECTOR_NUM
     # Bind real methods (not lru_cached) so the actual parsing/property logic runs.
     mock._get_npu_device_limit_form_env = types.MethodType(NPUUtils._get_npu_device_limit_form_env, mock)
     mock.get_device_properties = types.MethodType(NPUUtils.get_device_properties, mock)
@@ -81,15 +81,24 @@ def test_npu_device_limit_env_var_valid(monkeypatch, env_value, expected_aic, ex
     "env_value",
     [
         # non-positive values
-        "0,48", "24,0", "0,0",
+        "0,48",
+        "24,0",
+        "0,0",
         # exceeds device limit
-        f"{_MOCK_AICORE_NUM + 1},{_MOCK_AIVECTOR_NUM}", f"{_MOCK_AICORE_NUM},{_MOCK_AIVECTOR_NUM + 1}", "100,200",
+        f"{_MOCK_AICORE_NUM + 1},"
+        f"{_MOCK_AIVECTOR_NUM}",
+        f"{_MOCK_AICORE_NUM},"
+        f"{_MOCK_AIVECTOR_NUM + 1}",
+        "100,200",
         # invalid format
-        "abc", "12",  # missing second value
+        "abc",
+        "12",  # missing second value
         "12,24,36",  # too many values
         "12.5,24",  # float not matched
         "",  # empty string
         "-1,48",  # negative sign not matched
+        "2,6",
+        "2,5",
     ],
 )
 def test_npu_device_limit_env_var_invalid(monkeypatch, env_value):

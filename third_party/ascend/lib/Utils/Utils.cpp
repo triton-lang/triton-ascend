@@ -423,22 +423,29 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
   for (int i = 0; i < shapedType.getRank(); ++i) {
+    OpFoldResult curStride = fullShapeReCast.getConstifiedMixedStrides()[i];
     if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
-      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
+      if (isZero(curStride)) {
+        emitWarning(loc)
+            << "getBoundarySizes() cannot reconstruct boundary on checked "
+               "zero-stride axis "
+            << i << "; keep current block size for this axis";
+        continue;
+      }
 
-      OpFoldResult curOffset = divOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+      OpFoldResult curOffset =
+          divOpFoldResult(offsetShift, curStride, loc, rewriter);
+      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
       OpFoldResult curLeftSize =
           maxOpFoldResult(subOpFoldResult(fullShape, curOffset, loc, rewriter),
                           rewriter.getIndexAttr(0), loc, rewriter);
 
       boundarySize[i] =
           minOpFoldResult(boundarySize[i], curLeftSize, loc, rewriter);
+    }
 
-      offsetShift = remOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+    if (!isZero(curStride)) {
+      offsetShift = remOpFoldResult(offsetShift, curStride, loc, rewriter);
     }
   }
 

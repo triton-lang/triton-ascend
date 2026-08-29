@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 try:
@@ -149,6 +150,34 @@ def _apply_triton_ascend_patch():
         _apply_patch(str(patch))
 
 
+def _print_patch_restore_warning():
+    """Warn that the build left patched (dirty) source files in the worktree.
+
+    ``_apply_triton_ascend_patch`` modifies in-tree Triton sources, so a
+    subsequent ``git pull`` would fail with local changes. Users can restore
+    those files with ``python3 init_code.py`` (which runs ``git checkout --``
+    on the patched file list).
+    """
+    if not _is_git_repo():
+        return
+    if sys.stdout.isatty():
+        highlight = "\033[1;93m"
+        reset = "\033[0m"
+    else:
+        highlight = ""
+        reset = ""
+    print("")
+    print("=" * 72)
+    print("WARNING: Ascend patches were applied to the in-tree Triton sources")
+    print("         during this build. Your working tree is now dirty, which")
+    print("         will cause `git pull` to fail with local changes.")
+    print("")
+    print("         To restore the source files, run:")
+    print(f"            >>> {highlight}python3 init_code.py{reset} <<<")
+    print("=" * 72)
+    print("")
+
+
 def _get_default_version():
     version_file = _THIS_DIR / "version.txt"
     if version_file.exists():
@@ -234,22 +263,51 @@ def add_git_safe_dir(path: str):
         ], cwd=_THIS_DIR)
 
 
+def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
+    """Run a git network command (clone/fetch) with retries.
+
+    Network operations against the remote may fail intermittently; retry up to
+    ``retries`` times, waiting ``interval`` seconds between attempts.
+    """
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            subprocess.check_call(cmd, cwd=cwd)
+            return
+        except subprocess.CalledProcessError as e:
+            last_error = e
+            if attempt < retries:
+                print(f"Command '{' '.join(cmd)}' failed (attempt {attempt}/{retries}), "
+                      f"retrying in {interval}s...")
+                time.sleep(interval)
+            else:
+                print(f"Command '{' '.join(cmd)}' failed after {retries} attempts.")
+    raise last_error
+
+
 def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _THIS_DIR / "third_party" / "ascend" / "Triton-distributed-ascend"
     commit_id = "7786ae06d5cf16fc232d3ccfeb4a18f5d6a9e26e"
     if not distributed_dir.is_dir():
-        subprocess.check_call([
-            "git",
-            "clone",
-            "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
-            "-b",
-            "master",
-        ], cwd=_THIS_DIR / "third_party" / "ascend")
+        try:
+            _git_check_call_with_retry([
+                "git",
+                "clone",
+                "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
+                "-b",
+                "master",
+            ], cwd=_THIS_DIR / "third_party" / "ascend")
+        except Exception:
+            # A clone interrupted by a network failure leaves a partially
+            # populated directory; remove it so the next build retries cleanly.
+            if distributed_dir.is_dir():
+                shutil.rmtree(distributed_dir, ignore_errors=True)
+            raise
     if _is_git_repo():
         add_git_safe_dir(str(distributed_dir))
-        subprocess.check_call([
+        _git_check_call_with_retry([
             "git",
             "fetch",
             "origin",
@@ -552,6 +610,7 @@ def main():
 
     kwargs = _build_setup_kwargs(mod, captured["kwargs"])
     _real_setup(**kwargs)
+    _print_patch_restore_warning()
 
 
 if __name__ == "__main__":

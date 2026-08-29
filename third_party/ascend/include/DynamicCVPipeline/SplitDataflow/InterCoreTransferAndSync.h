@@ -188,8 +188,10 @@ private:
                            FlagIdReuseManager &flagIdReuseManager,
                            mlir::Operation *consumedDataOp = nullptr,
                            bool isStoreDirectly = false);
-  void insertMemDepSync(mlir::OpBuilder &builder, mlir::Operation *producerOp,
-                        mlir::Operation *consumerOp,
+  void insertMemDepSync(mlir::OpBuilder &builder,
+                        mlir::Operation *producerStartOp,
+                        mlir::Operation *producerEndOp,
+                        mlir::Operation *consumerStartOp,
                         mlir::Operation *consumerEndOp, int flag,
                         mlir::Location loc, bool isCubeToVector,
                         FlagIdReuseManager &flagIdReuseManager);

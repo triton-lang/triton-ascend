@@ -9,21 +9,21 @@ on:
 
 jobs:
   integration-tests-ascend:
-    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.python_version }})
+    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.config.python_version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
     timeout-minutes: 300
     strategy:
       matrix:
+        # Each config entry carries its full environment (cann_version,
+        # chip_type, os, python_version) because chips differ: a3 uses
+        # cann8.5.0/py3.10+3.11 while a5 (Ascend 950) uses cann9.1.0/py3.12.
         config: ${{ fromJson(inputs.matrix) }}
-        cann_version: ["8.5.0"]
-        os: [ubuntu22.04]
-        python_version: ["3.10", "3.11"]
       fail-fast: false
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
-      PYTHON: "python${{ matrix.python_version }}"
+      PYTHON: "python${{ matrix.config.python_version }}"
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
       PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
@@ -45,8 +45,8 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
       - name: Download and install Bisheng compiler
         shell: bash
@@ -56,17 +56,25 @@ jobs:
             exit 0
           fi
 
+          # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
+          # x86_64 (a5) each have their own; select by the container's arch.
+          ARCH=$(uname -m)
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
 
           if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
             exit 1
           fi
 
-          echo "Downloading: ${BISHENG_FILENAME}"
-          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+          echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
+          # Retry with resume: this download has been killed mid-flight
+          # (exit 137, k8s memory limit / node OOM) and can drop on flaky
+          # networks; -C - resumes from where the previous attempt stopped.
+          curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
+            --retry-delay 10 -C - \
+            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
 
           if [ -n "${BISHENG_SHA256}" ]; then
             echo "Verifying SHA256 checksum..."
@@ -87,6 +95,7 @@ jobs:
           TRITON_DISABLE_LINE_INFO: 1
           CCACHE_COMPRESS: "true"
           TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_TD: ON
           TRITON_BUILD_PROTON: OFF
           TRITON_WHEEL_NAME: triton-ascend
           TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"

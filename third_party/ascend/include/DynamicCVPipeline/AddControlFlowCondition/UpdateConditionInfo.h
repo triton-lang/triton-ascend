@@ -183,10 +183,13 @@ private:
   // Dispatch yield update for scf.for / scf.while main_loop.
   int updateLoopYield(Operation *loopOp);
 
+  // Pre-allocate cntArgs for all ifOps in a main_loop for loop.
+  int preAllocateCntArgs(Operation *loopOp, SmallVectorImpl<scf::IfOp> &ifOps);
+
   // loopOp is scf.for or scf.while main_loop.
   int combineConditions(ModuleOp module, Value crossCoreCond,
                         Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp,
-                        Operation *loopOp, size_t &usedCounterNum,
+                        Operation *loopOp,
                         DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int setCrossCoreCondition(

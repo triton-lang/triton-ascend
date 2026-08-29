@@ -1642,7 +1642,7 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value intraCoreCond,
     Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
-    size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes) {
+    DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
   Value counter;
@@ -1670,35 +1670,14 @@ int UpdateConditionInfoPass::combineConditions(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    SmallVector<int> &counterIndices = info->blockCounters[forOp];
-
-    if (info->cntArgs.count(ifOp)) {
-      counter = info->cntArgs[ifOp];
-      updateCounterArg = true;
-    } else {
-      if (usedCounterNum >= counterIndices.size()) {
-        LDBG("Not enough counters for ssbuffer if ops: used "
-             << usedCounterNum << ", counters " << counterIndices.size()
-             << ", forOp=" << forOp << ", ifOp=" << ifOp << "\n");
-        return UPDATE_CONDITION_INFO_FAILED;
-      }
-
-      int argIdx = counterIndices[usedCounterNum];
-      int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
-      if (argIdx < 0 || argIdx >= iterArgNum) {
-        LDBG("Invalid counter arg index: " << argIdx << ", iter args "
-                                           << iterArgNum << ", forOp=" << forOp
-                                           << ", ifOp=" << ifOp << "\n");
-        return UPDATE_CONDITION_INFO_FAILED;
-      }
-
-      counter = forOp.getRegionIterArgs()[argIdx];
-      updateCounterArg = true;
-      info->cntArgs[ifOp] = counter;
-      usedCounterNum++;
-      LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op."
-                                            << "\n");
+    // Counter should already be pre-allocated
+    if (!info->cntArgs.count(ifOp)) {
+      LDBG("combineConditions: Counter not found in cntArgs for ifOp="
+           << ifOp << ", forOp=" << forOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
     }
+    counter = info->cntArgs[ifOp];
+    updateCounterArg = true;
 
     LDBG("this ifop used counter is: " << counter << "\n");
     Value upperBound = forOp.getUpperBound();
@@ -1782,6 +1761,59 @@ int UpdateConditionInfoPass::combineConditions(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
+// Pre-allocate cntArgs for all ifOps in a main_loop for loop.
+int UpdateConditionInfoPass::preAllocateCntArgs(
+    Operation *loopOp, SmallVectorImpl<scf::IfOp> &ifOps) {
+  auto forOp = dyn_cast<scf::ForOp>(loopOp);
+  if (!forOp) {
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  if (!info->blockCounters.count(forOp)) {
+    LDBG("preAllocateCntArgs: Missing block counters for forOp=" << forOp
+                                                                 << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  SmallVector<int> &counterIndices = info->blockCounters[forOp];
+  size_t preAllocatedNum = 0;
+
+  for (scf::IfOp ifOp : ifOps) {
+    if (info->cntArgs.count(ifOp)) {
+      LDBG("preAllocateCntArgs: ifOp already has counter, this is "
+           "unexpected. ifOp=" << ifOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    if (preAllocatedNum >= counterIndices.size()) {
+      LDBG("preAllocateCntArgs: Not enough counters for ssbuffer if "
+           "ops. preAllocated "
+           << preAllocatedNum << ", counters " << counterIndices.size()
+           << ", forOp=" << forOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    int argIdx = counterIndices[preAllocatedNum];
+    int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
+    if (argIdx < 0 || argIdx >= iterArgNum) {
+      LDBG("preAllocateCntArgs: Invalid counter arg index: "
+           << argIdx << ", iter args " << iterArgNum << ", forOp=" << forOp
+           << ", ifOp=" << ifOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    Value counter = forOp.getRegionIterArgs()[argIdx];
+    info->cntArgs[ifOp] = counter;
+    LDBG("preAllocateCntArgs: pre-allocate counter iter arg index "
+         << argIdx << " to ssbuffer if op." << " ifOp=" << ifOp << "\n");
+    preAllocatedNum++;
+  }
+
+  LDBG("preAllocateCntArgs: Successfully pre-allocated "
+       << preAllocatedNum << " cntArgs for forOp.\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
 // Update the conditions of ifOp.
 int UpdateConditionInfoPass::updateIfConds(
     ModuleOp module, SmallVector<SmallVector<Value>> ssbufferPtrs) {
@@ -1839,13 +1871,17 @@ int UpdateConditionInfoPass::updateIfConds(
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
-    size_t usedCounterNum = 0;
     SmallVector<scf::IfOp> ifOps;
     if (collectSSBufferIfOps(loopOp, ifOps) == UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
     if (validateBlockCounters(loopOp, ifOps.size()) ==
         UPDATE_CONDITION_INFO_FAILED) {
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    // Pre-allocate cntArgs for all ifOps in this loop op.
+    if (preAllocateCntArgs(loopOp, ifOps) == UPDATE_CONDITION_INFO_FAILED) {
       return UPDATE_CONDITION_INFO_FAILED;
     }
 
@@ -1892,7 +1928,7 @@ int UpdateConditionInfoPass::updateIfConds(
       // Step6:Combine the conditions: crossCore + intraCore + counter +
       // flowOpt
       if (combineConditions(module, crossCoreCond, intraCoreCond, flowOptCond,
-                            ifOp, loopOp, usedCounterNum,
+                            ifOp, loopOp,
                             varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }

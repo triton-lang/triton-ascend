@@ -159,6 +159,7 @@ static bool isCustomOpOperandTypesLegal(TypeRange types)
     });
 }
 
+// Check if the op is a SIMT op.
 static bool isSIMTOp(Operation *op)
 {
   if (auto custom_op = dyn_cast<hivm::CustomOp>(op)) {
@@ -181,6 +182,11 @@ static bool isSIMTOp(Operation *op)
       return isSimt1DCumsum(scan);
     }
   }
+
+  LLVM_DEBUG({
+        llvm::dbgs() << "[TritonTypeConverter] isSIMTOp.\n";
+      });
+
   return isa<
       triton::ascend::IndexPutOp,
       triton::ascend::GatherOutToUbOp,

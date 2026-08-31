@@ -58,6 +58,24 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
                      ComputeBlockIdManager &bm);
 
 /**
+ * @brief Detect if unifying a set of ops into one block_id group would make
+ * that group straddle a synchronization op.
+ *
+ * A block_id group must never have members on both sides of a sync, otherwise
+ * the fence in ReorderOpsByBlockId adds both (group -> sync) and
+ * (sync -> group) edges and scheduling fails. This checks the union of @p
+ * opsToUnify and the existing members of @p targetBlockId in every block they
+ * share.
+ *
+ * @param opsToUnify Operations to add to the block_id group
+ * @param targetBlockId Target block_id after unification
+ * @param bm Block-id manager used to query the existing group members
+ * @return bool True if the post-merge group would straddle a sync
+ */
+bool groupWouldStraddleSync(llvm::ArrayRef<Operation *> opsToUnify,
+                            int targetBlockId, ComputeBlockIdManager &bm);
+
+/**
  * @brief Clone scalar-producing ops shared between a pattern and other blocks
  *
  * Walks the pattern's scalar-producing ops in reverse topological order. If

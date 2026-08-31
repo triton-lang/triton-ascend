@@ -20,30 +20,41 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
-#define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
-
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/STLFunctionalExtras.h"
+#ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_SYNC_WALL_H
+#define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_SYNC_WALL_H
 
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/IR/Value.h"
-
-#include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 
 namespace mlir {
 namespace CVPipeline {
 
-Operation *getAncestorInBlock(Operation *inner, Block *block);
-void initializeIndegreeForBlock(Block *block,
-                                llvm::DenseMap<Operation *, int> &indegree,
-                                const DependencyHelper &depHelper,
-                                ComputeBlockIdManager &bm);
+class SyncWall {
+public:
+  explicit SyncWall(Block *block);
+
+  // Source-order position of a block-level op inside the block (0-based).
+  // Ops not owned by the block report position 0.
+  unsigned positionOf(Operation *op) const;
+
+  // True iff a synchronization op is strictly between @p a and @p b in the
+  // block's linear source order.
+  bool hasSyncBetween(Operation *a, Operation *b) const;
+
+  // Number of synchronization ops strictly preceding @p op in source order.
+  // Ops separated by at least one sync belong to different segments.
+  unsigned segmentOf(Operation *op) const;
+
+  bool sameSegment(Operation *a, Operation *b) const;
+
+private:
+  llvm::DenseMap<Operation *, unsigned> ordinal;
+  llvm::DenseSet<unsigned> syncPositions;
+};
 
 } // namespace CVPipeline
 } // namespace mlir
 
-#endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMMON_H
+#endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_SYNC_WALL_H

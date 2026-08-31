@@ -24,6 +24,7 @@
 #include "DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
@@ -574,7 +575,14 @@ static void processOpsInblock(Operation *parentOp, int targetId,
   });
 
   if (allSame) {
-    parentOp->walk([&](Operation *op) { bm.updateBlockId(op, targetId); });
+    parentOp->walk([&](Operation *op) {
+      // Never fold a sync into a compute block: it must keep its own unique
+      // block id so the fence between before/after ops survives.
+      if (CVPipeline::isSyncOp(op)) {
+        return;
+      }
+      bm.updateBlockId(op, targetId);
+    });
   }
 }
 

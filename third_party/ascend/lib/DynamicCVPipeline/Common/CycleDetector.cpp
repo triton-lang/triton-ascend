@@ -36,6 +36,11 @@ bool DependencyCycleDetector::detectCycleFrom(Operation *cur) {
   bool createsCycle = false;
 
   depHelper.forEachUserInSameBlock(cur, [&](Operation *user) {
+    // A sync is not a data-dependency link and following it would walk into
+    // the ops sharing its block id on the other side of the barrier.
+    if (isSyncOp(user)) {
+      return;
+    }
     if (createsCycle)
       return;
     createsCycle =

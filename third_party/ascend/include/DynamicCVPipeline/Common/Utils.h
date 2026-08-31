@@ -128,6 +128,7 @@ bool hasFallbackAttr(ModuleOp module);
 bool isScfOp(Operation *op);
 bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);
+bool isSyncOp(Operation *op);
 
 // Wrapper around a "main loop" — either scf.for or scf.while carrying the
 // ssbuffer.main_loop attribute. Lets downstream code treat both uniformly.
@@ -170,7 +171,7 @@ inline bool isMainLoopOp(Operation *op) {
 CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
 
 inline bool isCubeSimpleOpOrCf(Operation *op) {
-  return getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
+  return !isSyncOp(op) && getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
 }
 
 inline bool isVectorSimpleOpOrCf(Operation *op) {

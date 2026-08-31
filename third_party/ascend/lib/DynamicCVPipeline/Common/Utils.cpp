@@ -9,9 +9,11 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -129,6 +131,11 @@ bool isVectorOnlyOp(Operation *op) {
         return isa<RankedTensorType>(op->getResult(0).getType());
       })
       .Default([](auto) { return false; });
+}
+
+bool isSyncOp(Operation *op) {
+  return isa<gpu::BarrierOp, hivm::SyncBlockOp, hivm::SyncBlockWaitOp,
+             hivm::SyncBlockSetOp>(op);
 }
 
 bool isScfOp(Operation *op) {

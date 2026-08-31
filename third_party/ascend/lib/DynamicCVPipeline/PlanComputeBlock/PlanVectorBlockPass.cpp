@@ -21,6 +21,7 @@
  */
 
 #include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
@@ -52,6 +53,9 @@ using namespace triton;
 using namespace CVPipeline;
 
 static bool isFusableOp(Operation *op) {
+  if (CVPipeline::isSyncOp(op)) {
+    return false;
+  }
   if (isVectorSimpleOpOrCf(op)) {
     // skip terminators
     if (op->getBlock()->mightHaveTerminator() &&
@@ -540,6 +544,11 @@ planVectorBlockId(Block *block,
   llvm::DenseMap<Operation *, bool> visited; // has been visited in search
   initializeIndegreeForBlock(block, indegree, DependencyHelper{memGraph}, bm);
 
+  // Source-order sync walls of this block; used to keep every vector group on
+  // a single side of each sync, otherwise the ReorderOpsByBlockId fence adds
+  // both (group -> sync) and (sync -> group) edges and scheduling fails.
+  SyncWall wall(block);
+
   // 2. initialize visited and find initial candidates
   block->walk([&](Operation *op) {
     if (op->getBlock() == block) {
@@ -579,8 +588,17 @@ planVectorBlockId(Block *block,
       for (auto op : nowFuseGroup) {
         LOG_DEBUG("fuseing: " << *op << "\n");
       }
-      if (llvm::failed(bm.markOpsWithNewId(nowFuseGroup))) {
-        return llvm::failure();
+      // Assign one fresh block id per sync-free segment. A topo wave of
+      // mutually independent ready ops may span several segments separated by
+      // syncs; splitting here guarantees no block_id group straddles a sync.
+      llvm::DenseMap<unsigned, llvm::SmallVector<Operation *>> segmentGroups;
+      for (auto *op : nowFuseGroup) {
+        segmentGroups[wall.segmentOf(op)].push_back(op);
+      }
+      for (auto &segGroup : segmentGroups) {
+        if (llvm::failed(bm.markOpsWithNewId(segGroup.second))) {
+          return llvm::failure();
+        }
       }
       nowFuseGroup.clear();
       // reset queue

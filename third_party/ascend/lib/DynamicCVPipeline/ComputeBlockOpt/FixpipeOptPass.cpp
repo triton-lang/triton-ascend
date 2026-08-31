@@ -376,9 +376,15 @@ bool FixpipeOptPass::applyFixpipeOpt(
   for (Operation *op : matchedOps) {
     if (isa<scf::SCFDialect>(op->getDialect())) {
       op->walk([&](Operation *nestedOp) {
+        // Never fold a sync into a compute block: it must keep its own unique
+        // block id so the fence between before/after ops survives.
+        if (CVPipeline::isSyncOp(nestedOp)) {
+          return WalkResult::advance();
+        }
         bm.updateBlockId(nestedOp, targetBlockId);
         nestedOp->setAttr(CVPipeline::kCoreType,
                           StringAttr::get(op->getContext(), "CUBE"));
+        return WalkResult::advance();
       });
     } else {
       bm.updateBlockId(op, targetBlockId);

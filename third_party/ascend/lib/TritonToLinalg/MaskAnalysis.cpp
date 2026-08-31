@@ -665,6 +665,27 @@ LogicalResult MaskState::parseSplat(triton::SplatOp splatOp,
 
   if (src.getType().isInteger(1) && !splatOp->use_empty() &&
       llvm::all_of(splatOp->getUsers(), splatAsMask)) {
+    // A runtime i1 scalar (e.g. `mask = is_valid & (idx < N)` where is_valid
+    // is a comparison of kernel arguments) is an all-or-nothing condition.
+    // When the splat carries a non-unit dim, folding the scalar into per-dim
+    // subview sizes produces dynamic sizes like min(4, 4 * zext(i1)), which
+    // reach BiSheng's hivm-recognize-discontinuous-store and crash on A2/A3
+    // (see test_complex_mask_permute_copy). Bail so the discrete-mask
+    // conversion handles it via predicated scalarized stores (A2/A3) or SIMT
+    // indirect stores (950).
+    //
+    // All-unit splats (e.g. a 1-element guard in moe_align_block_size_stage4)
+    // keep the old path: broadcast replaces their dims with static sizes in
+    // parseBroadcast, so no dynamic subview sizes reach BiSheng. Constant i1
+    // splats also keep the static-dim fast path.
+    bool hasNonUnitDim =
+        llvm::any_of(dstShape, [](int64_t s) { return s != 1; });
+    if (hasNonUnitDim && !getConstantIntValue(this->scalar)) {
+      emitWarning(loc)
+          << "MaskAnalysis: dynamic scalar splat mask cannot be represented "
+             "with static subview sizes; deferring to discrete-mask path";
+      return failure();
+    }
     for (auto s : dstShape) {
       auto currentDim =
           mulOpFoldResult(builder.getIndexAttr(s), this->scalar, loc, builder);

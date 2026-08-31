@@ -571,12 +571,15 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                 std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+    // Mirror the SimdSimtTemplate long-axis exclusion: a trailing structured
+    // run of >= 64 bytes ("long axis") is cheaper as a plain structured
+    // access (parallel-loop copy) than as an indirect gather/scatter.
     bool useUnstructuredOp =
         compileOn91095Flag &&
         ((unstructureCompileModeFlag == triton::ascend::CompileMode::SimdSimt &&
           simtRouteRequested &&
-          (ptrOffsetInfo.hasUnstructuredDim() || mixCompileDiscreteMask ||
-           routeDiscreteMaskToSimt)) ||
+          ((ptrOffsetInfo.hasUnstructuredDim() && sizeInByte < 64) ||
+           mixCompileDiscreteMask || routeDiscreteMaskToSimt)) ||
          (unstructureCompileModeFlag ==
               triton::ascend::CompileMode::SimdSimtTemplate &&
           simtTemplateLoadStoreFastPathEnabled && rankWithinSimtTemplateLimit));

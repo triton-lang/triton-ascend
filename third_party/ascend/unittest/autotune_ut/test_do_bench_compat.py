@@ -47,11 +47,16 @@ def _make_tuner(do_bench):
 def _make_run_tuner(configs):
     key = ("disk-cache-key", )
     tuner = object.__new__(AutoTilingTuner)
+
+    def generate_key_and_configs(*args, **kwargs):
+        tuner.nargs = {}
+        return key
+
     tuner.arg_names = []
     tuner.cache = {}
     tuner.is_simt_mode = False
     tuner.simt_stack_limit = 8192
-    tuner.generate_key_and_configs = lambda *args, **kwargs: key
+    tuner.generate_key_and_configs = generate_key_and_configs
     tuner.prune_configs = lambda kwargs: configs
     tuner.enable_ubtuner = False
     tuner.cache_results = True
@@ -128,6 +133,7 @@ def test_batch_bench_npu_env_uses_do_bench_npu_without_user_do_bench(monkeypatch
     def _do_bench_npu(funcs, clear_l2_cache=False, warmup=5, active=30, target_kernel_name=None, **kwargs):
         calls["do_bench_npu"] += 1
         assert len(funcs) == 2
+        assert clear_l2_cache is True
         return [1.0, 2.0]
 
     tuner = _make_tuner(_do_bench)
@@ -168,6 +174,62 @@ def test_autotilingtuner_marks_user_defined_do_bench():
 
     assert tuner.user_defined_do_bench is True
     assert marker["called"] is False
+
+
+def test_print_benchmark_results_formats_quantiles_and_selected_config(capsys):
+
+    def _dummy_kernel():
+        return None
+
+    selected = Config({"BLOCK_SIZE": 128}, num_warps=4)
+    other = Config({"BLOCK_SIZE": 256}, num_warps=8)
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    tuner.best_config = selected
+
+    tuner._print_benchmark_results({
+        selected: (1.23456, 1.0, 1.8),
+        other: 2.34567,
+    })
+
+    output = capsys.readouterr().out
+    assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
+    assert "config=BLOCK_SIZE: 128, num_warps: 4" in output
+    assert "p50=1.2346 ms, p20=1.0000 ms, p80=1.8000 ms [selected]" in output
+    assert "config=BLOCK_SIZE: 256, num_warps: 8" in output
+    assert "mean=2.3457 ms" in output
+
+
+def test_print_benchmark_results_is_disabled_without_debug_flag(capsys):
+    tuner = object.__new__(AutoTilingTuner)
+    tuner.print_autotuning = False
+
+    tuner._print_benchmark_results({Config({"BLOCK_SIZE": 128}): 1.0})
+
+    assert capsys.readouterr().out == ""
+
+
+def test_run_prints_benchmark_results_after_tuning(capsys):
+
+    def _dummy_kernel():
+        return None
+
+    selected = Config({"BLOCK_SIZE": 128}, num_warps=4)
+    other = Config({"BLOCK_SIZE": 256}, num_warps=8)
+    tuner, _ = _make_run_tuner([selected, other])
+    tuner.cache_results = False
+    tuner.print_autotuning = True
+    tuner.base_fn = _dummy_kernel
+    tuner._batch_bench = lambda *args, configs, **kwargs: {
+        selected: (1.0, 0.9, 1.1),
+        other: (2.0, 1.8, 2.2),
+    }
+
+    assert tuner.run() == "kernel-result"
+    output = capsys.readouterr().out
+    assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
+    assert "p50=1.0000 ms, p20=0.9000 ms, p80=1.1000 ms [selected]" in output
 
 
 def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
@@ -245,21 +307,110 @@ def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):
     assert gc_calls == [True]
     assert profile_calls == [configs[0]]
 
+    assert tuner.run() == "kernel-result"
+    assert benchmark_calls == [configs]
+    assert gc_calls == [True]
+    assert profile_calls == [configs[0]]
 
-def test_run_keeps_gc_on_single_config_cache_miss(monkeypatch):
-    tuner, _ = _make_run_tuner([Config({"BLOCK_SIZE": 16, "compile_mode": "simt_only"})])
+
+def test_run_caches_single_config_and_skips_gc(monkeypatch):
+    config = Config({"BLOCK_SIZE": 16, "compile_mode": "simt_only"})
+    tuner, key = _make_run_tuner([config])
     gc_calls = []
     profile_calls = []
+    prune_calls = []
+
+    def prune_configs(kwargs):
+        prune_calls.append(kwargs)
+        return [config]
 
     def unexpected_disk_cache(*args, **kwargs):
         raise AssertionError("single-config path must not probe disk cache")
 
+    def unexpected_batch_bench(*args, **kwargs):
+        raise AssertionError("single-config path must not benchmark")
+
+    tuner.prune_configs = prune_configs
     tuner.check_disk_cache = unexpected_disk_cache
+    tuner._batch_bench = unexpected_batch_bench
     tuner.auto_profile_dir = "profile-output"
     tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
     monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
+    assert tuner.cache[key] is config
+    assert tuner.run() == "kernel-result"
+    assert len(prune_calls) == 1
+    assert len(tuner.run_kwargs) == 2
     assert tuner.run_kwargs[-1]["simt_stack_limit"] == 8192
-    assert gc_calls == [True]
+    assert gc_calls == []
     assert profile_calls == []
+
+
+def test_run_does_not_cache_failed_single_config(monkeypatch):
+    config = Config({"BLOCK_SIZE": 16})
+    tuner, key = _make_run_tuner([config])
+    gc_calls = []
+    prune_calls = []
+    run_calls = []
+
+    def prune_configs(kwargs):
+        prune_calls.append(kwargs)
+        return [config]
+
+    def run(*args, **kwargs):
+        run_calls.append(kwargs)
+        if len(run_calls) == 1:
+            raise RuntimeError("kernel failed")
+        return "kernel-result"
+
+    def unexpected_disk_cache(*args, **kwargs):
+        raise AssertionError("single-config path must not probe disk cache")
+
+    def unexpected_batch_bench(*args, **kwargs):
+        raise AssertionError("single-config path must not benchmark")
+
+    tuner.prune_configs = prune_configs
+    tuner.fn = SimpleNamespace(run=run)
+    tuner.check_disk_cache = unexpected_disk_cache
+    tuner._batch_bench = unexpected_batch_bench
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
+
+    with pytest.raises(RuntimeError, match="kernel failed"):
+        tuner.run()
+    assert key not in tuner.cache
+
+    assert tuner.run() == "kernel-result"
+    assert tuner.cache[key] is config
+    assert tuner.run() == "kernel-result"
+    assert len(prune_calls) == 2
+    assert len(run_calls) == 3
+    assert gc_calls == []
+
+
+def test_run_caches_single_config_after_pruning(monkeypatch):
+    config = Config({"BLOCK_SIZE": 16})
+    tuner, key = _make_run_tuner([config, Config({"BLOCK_SIZE": 32})])
+    gc_calls = []
+    prune_calls = []
+
+    def prune_configs(kwargs):
+        prune_calls.append(kwargs)
+        return [config]
+
+    def unexpected_disk_cache(*args, **kwargs):
+        raise AssertionError("single-config path must not probe disk cache")
+
+    def unexpected_batch_bench(*args, **kwargs):
+        raise AssertionError("single-config path must not benchmark")
+
+    tuner.prune_configs = prune_configs
+    tuner.check_disk_cache = unexpected_disk_cache
+    tuner._batch_bench = unexpected_batch_bench
+    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
+
+    assert tuner.run() == "kernel-result"
+    assert tuner.cache[key] is config
+    assert tuner.run() == "kernel-result"
+    assert len(prune_calls) == 1
+    assert gc_calls == []

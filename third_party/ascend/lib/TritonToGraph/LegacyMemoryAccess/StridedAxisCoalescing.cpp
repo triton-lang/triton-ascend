@@ -22,14 +22,18 @@
 
 #include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"
 
+#include "TritonToGraph/GraphOptimization.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
+#include "llvm/Support/Debug.h"
 
 #include <functional>
+
+#define DEBUG_TYPE "graph-optimize"
 
 namespace StridedAxisCoalescing {
 
@@ -564,6 +568,17 @@ void rewriteStridedAxisCoalesce(ModuleOp moduleOp) {
       }
     }
   }
+
+  LLVM_DEBUG(
+      llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                   << static_cast<unsigned>(
+                          cfg::GraphOptimizationRuleId::StridedAxisCoalescing)
+                   << " ("
+                   << cfg::getGraphOptimizationRuleName(
+                          cfg::GraphOptimizationRuleId::StridedAxisCoalescing)
+                   << ") at " << seeds.front().getLoc() << ": stride=" << S
+                   << " tileLen=" << BT << " axis=" << coalesceAxis << " loads="
+                   << seeds.size() << " stores=" << sinks.size() << "\n");
 
   // Erase the original chain (sinks, then region in reverse order, then seeds).
   for (auto st : sinks)

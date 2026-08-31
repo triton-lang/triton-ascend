@@ -27,6 +27,7 @@
 #include "Utils/Utils.h"
 
 #include "Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "TritonToGraph/GraphOptimization.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
@@ -35,8 +36,10 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Matchers.h"
 
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/Debug.h"
 
+#include <cstdint>
 #include <cstdlib>
 #include <functional>
 
@@ -52,6 +55,21 @@ namespace {
 // V1 fast-path supports up to 5D tensors, mirroring
 // UnstructureConversionPass::tryRewriteIndirectFastPath.
 constexpr size_t kFastPathRankLimit = 5;
+
+// Funnel for the eight rewrite variants, which differ only in how the pointer
+// was formed and which op they produce.
+static void logMatch(Location loc, const llvm::Twine &pointerKind,
+                     const llvm::Twine &rewrite, int64_t lastStride) {
+  LLVM_DEBUG(
+      llvm::dbgs() << "[" DEBUG_TYPE "] matched graph optimization rule "
+                   << static_cast<unsigned>(
+                          cfg::GraphOptimizationRuleId::StridedLoadStoreRewrite)
+                   << " ("
+                   << cfg::getGraphOptimizationRuleName(
+                          cfg::GraphOptimizationRuleId::StridedLoadStoreRewrite)
+                   << ") at " << loc << ": [" << pointerKind << "] " << rewrite
+                   << " lastStride=" << lastStride << "\n");
+}
 
 // Returns true iff `v` is a static integer constant with |v| > 1.
 static bool isStaticConstAbsGtOne(Value v) {
@@ -755,14 +773,7 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
       if (!strideLoadResult)
         return markInspectedAndReturn();
 
-      LLVM_DEBUG({
-        llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> "
-                        "ttasc.stride_load\n";
-        llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-        llvm::dbgs() << strideLoadResult.getDefiningOp() << "\n";
-        llvm::dbgs() << "----------------------------------------------\n";
-      });
+      logMatch(loc, "AddPtr", "tt.load -> ttasc.stride_load", lastStride);
       rewriter.replaceOp(op, strideLoadResult);
       return success();
     }
@@ -790,14 +801,7 @@ static LogicalResult tryRewriteAddPtrLoad(triton::LoadOp op,
   indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                         UnitAttr::get(rewriter.getContext()));
 
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr]: tt.load -> "
-                    "tt.indirect_load\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectLoad << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
+  logMatch(loc, "AddPtr", "tt.load -> tt.indirect_load", lastStride);
   rewriter.replaceOp(op, indirectLoad.getResult());
   return success();
 }
@@ -930,15 +934,8 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
       if (!strideLoadResult)
         return failure();
 
-      LLVM_DEBUG({
-        llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                     << (advance ? "+Advance" : "")
-                     << "]: tt.load -> ttasc.stride_load\n";
-        llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-        llvm::dbgs() << strideLoadResult.getDefiningOp() << "\n";
-        llvm::dbgs() << "----------------------------------------------\n";
-      });
+      logMatch(loc, llvm::Twine("BlockPtr") + (advance ? "+Advance" : ""),
+               "tt.load -> ttasc.stride_load", lastStride);
       rewriter.replaceOp(op, strideLoadResult);
       return success();
     }
@@ -1003,16 +1000,10 @@ static LogicalResult tryRewriteBlockPtrLoad(triton::LoadOp op,
   indirectLoad->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                         UnitAttr::get(rewriter.getContext()));
 
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                 << (advance ? "+Advance" : "")
-                 << (boundaryCheck.empty() ? "" : "+Boundary")
-                 << "]: tt.load -> tt.indirect_load\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectLoad << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
+  logMatch(loc,
+           llvm::Twine("BlockPtr") + (advance ? "+Advance" : "") +
+               (boundaryCheck.empty() ? "" : "+Boundary"),
+           "tt.load -> tt.indirect_load", lastStride);
   rewriter.replaceOp(op, indirectLoad.getResult());
   return success();
 }
@@ -1103,14 +1094,7 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
       if (!strideStore)
         return markInspectedAndReturn();
 
-      LLVM_DEBUG({
-        llvm::dbgs() << "----------------------------------------------\n";
-        llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr/Store]: "
-                        "tt.store -> ttasc.stride_store\n";
-        llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-        llvm::dbgs() << *strideStore << "\n";
-        llvm::dbgs() << "----------------------------------------------\n";
-      });
+      logMatch(loc, "AddPtr", "tt.store -> ttasc.stride_store", lastStride);
       rewriter.eraseOp(op);
       return success();
     }
@@ -1137,14 +1121,7 @@ static LogicalResult tryRewriteAddPtrStore(triton::StoreOp op,
   indirectStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                          UnitAttr::get(rewriter.getContext()));
 
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [AddPtr/Store]: tt.store -> "
-                    "tt.indirect_store\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectStore << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
+  logMatch(loc, "AddPtr", "tt.store -> tt.indirect_store", lastStride);
   rewriter.eraseOp(op);
   return success();
 }
@@ -1246,16 +1223,10 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
           createStrideStoreOp(loc, valueType, src, op.getValue(), scalarBase,
                               strideOperands, *numels, rewriter);
       if (strideStore) {
-        LLVM_DEBUG({
-          llvm::dbgs() << "----------------------------------------------\n";
-          llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                       << (advance ? "+Advance" : "")
-                       << (boundaryCheck.empty() ? "" : "+Boundary")
-                       << "/Store]: tt.store -> ttasc.stride_store\n";
-          llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-          llvm::dbgs() << *strideStore << "\n";
-          llvm::dbgs() << "----------------------------------------------\n";
-        });
+        logMatch(loc,
+                 llvm::Twine("BlockPtr") + (advance ? "+Advance" : "") +
+                     (boundaryCheck.empty() ? "" : "+Boundary"),
+                 "tt.store -> ttasc.stride_store", lastStride);
         rewriter.eraseOp(op);
         return success();
       }
@@ -1308,16 +1279,10 @@ static LogicalResult tryRewriteBlockPtrStore(triton::StoreOp op,
   indirectStore->setAttr(RewrittenByStridedLoadStoreRewriteTAG,
                          UnitAttr::get(rewriter.getContext()));
 
-  LLVM_DEBUG({
-    llvm::dbgs() << "----------------------------------------------\n";
-    llvm::dbgs() << "StridedLoadStoreRewrite [BlockPtr"
-                 << (advance ? "+Advance" : "")
-                 << (boundaryCheck.empty() ? "" : "+Boundary")
-                 << "/Store]: tt.store -> tt.indirect_store\n";
-    llvm::dbgs() << "  last_stride = " << lastStride << "\n";
-    llvm::dbgs() << indirectStore << "\n";
-    llvm::dbgs() << "----------------------------------------------\n";
-  });
+  logMatch(loc,
+           llvm::Twine("BlockPtr") + (advance ? "+Advance" : "") +
+               (boundaryCheck.empty() ? "" : "+Boundary"),
+           "tt.store -> tt.indirect_store", lastStride);
   rewriter.eraseOp(op);
   return success();
 }

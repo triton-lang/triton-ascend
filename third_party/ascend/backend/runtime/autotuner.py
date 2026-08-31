@@ -80,6 +80,14 @@ def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: in
         options["simt_stack_limit"] = stack_limit
 
 
+def _format_autotune_timing(timing) -> str:
+    """Format the timing returned by the active autotune benchmarker."""
+    if isinstance(timing, (tuple, list)):
+        labels = ("p50", "p20", "p80")
+        return ", ".join(f"{label}={value:.4f} ms" for label, value in zip(labels, timing))
+    return f"mean={timing:.4f} ms"
+
+
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
     """
     Returns all constexpr parameter names from the kernel function definition.
@@ -2096,6 +2104,7 @@ class AutoTilingTuner(Autotuner):
         _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
         did_benchmark = False
         disk_cache_hit = False
+        single_config_cache_pending = False
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
@@ -2114,24 +2123,14 @@ class AutoTilingTuner(Autotuner):
                     self.configs_timings = timings
 
                 if self.cache_results:
-                    if self.enable_ubtuner:
-                        warnings.warn(
-                            "Autotune disk cache is disabled because UB-tuner is enabled "
-                            "(TRITON_ENABLE_UBTUNER is set). UB-tuner may dynamically add "
-                            "compile-time fixes to configs that cannot be safely cached to disk. "
-                            "To enable disk caching, unset TRITON_ENABLE_UBTUNER.",
-                            RuntimeWarning,
-                            stacklevel=2,
-                        )
-                        benchmark()
-                    else:
-                        disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
+                    disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
                 else:
                     benchmark()
 
                 config = self.cache[key]
             else:
                 config = pruned_configs[0]
+                single_config_cache_pending = True
         else:
             config = self.cache[key]
 
@@ -2140,6 +2139,7 @@ class AutoTilingTuner(Autotuner):
         if self.print_autotuning and did_benchmark:
             print(f"Triton autotuning for function {self.base_fn.__name__} finished after "
                   f"{self.bench_time:.2f}s; best config selected: {self.best_config};")
+            self._print_benchmark_results(self.configs_timings)
 
         if did_benchmark and self.auto_profile_dir is not None:
             self._profile(*args, config=self.best_config, **kwargs)
@@ -2154,10 +2154,12 @@ class AutoTilingTuner(Autotuner):
                 *args,
                 **final_kwargs,
             )
+            if single_config_cache_pending:
+                self.cache[key] = config
             return ret
         finally:
             self.nargs = None
-            if cache_miss and not disk_cache_hit:
+            if did_benchmark and not disk_cache_hit:
                 # workaround for memory leak when some configs fail to compile
                 gc.collect()
 
@@ -2179,6 +2181,15 @@ class AutoTilingTuner(Autotuner):
         except Exception as e:
             if self.print_autotuning:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
+
+    def _print_benchmark_results(self, timings) -> None:
+        if not self.print_autotuning:
+            return
+
+        print(f"Triton autotuning benchmark results for function {self.base_fn.__name__}:")
+        for config, timing in timings.items():
+            selected = " [selected]" if config == self.best_config else ""
+            print(f"  config={config}; {_format_autotune_timing(timing)}{selected}")
 
     def _batch_bench(self, *args, configs, **kwargs):
         from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
@@ -2260,7 +2271,7 @@ class AutoTilingTuner(Autotuner):
                     list(run_fns.values()),
                     warmup=warmup,
                     active=active,
-                    clear_l2_cache=False,
+                    clear_l2_cache=True,
                     target_kernel_name=target_kernel_name,
                 )
                 assert len(time_cost) == len(run_fns)
@@ -2614,7 +2625,8 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
 
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
     :code:`"1"`, Triton will print a message to stdout after autotuning each
-    kernel, including the time spent autotuning and the best configuration.
+    kernel, including the benchmark timing for each valid configuration, the
+    time spent autotuning, and the best configuration.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]

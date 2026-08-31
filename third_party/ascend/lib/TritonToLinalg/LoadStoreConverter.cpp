@@ -76,6 +76,42 @@ using namespace triton;
 
 const std::string MayImplicitTransposeWithLastAxisTAG =
     "MayImplicitTransposeWithLastAxis";
+static constexpr llvm::StringLiteral kAlreadySyncAttr = "already_sync";
+
+// During dialect conversion the adaptor may expose the converted memref
+// directly, while a failed rewrite later leaves a one-input, one-output UCC in
+// the diagnostic IR. Accept both representations, but only for the canonical
+// i1-to-i8 scalar pointer normalization.
+static Value
+unwrapCanonicalI8ScalarPointerMaterialization(Value originalPointer,
+                                              Value convertedPointer) {
+  auto bitcastOp = originalPointer.getDefiningOp<triton::BitcastOp>();
+  if (!bitcastOp)
+    return nullptr;
+
+  auto sourceType = dyn_cast<triton::PointerType>(bitcastOp.getSrc().getType());
+  auto resultType = dyn_cast<triton::PointerType>(originalPointer.getType());
+  if (!sourceType || !resultType || !sourceType.getPointeeType().isInteger(1) ||
+      !resultType.getPointeeType().isInteger(8))
+    return nullptr;
+
+  Value memref = convertedPointer;
+  if (auto castOp = memref.getDefiningOp<UnrealizedConversionCastOp>()) {
+    if (castOp.getInputs().size() != 1 || castOp.getOutputs().size() != 1 ||
+        castOp.getOutputs().front() != memref)
+      return nullptr;
+    memref = castOp.getInputs().front();
+  }
+
+  auto memrefType = dyn_cast<MemRefType>(memref.getType());
+  if (!memrefType || memrefType.getRank() != 1 ||
+      !memrefType.getElementType().isInteger(8) ||
+      !memrefType.getLayout().isIdentity() || memrefType.getMemorySpace() ||
+      memrefType.getDimSize(0) != ShapedType::kDynamic)
+    return nullptr;
+
+  return memref;
+}
 
 static bool shouldMaterializeCustomPointer(Value ptr) {
   auto result = dyn_cast<OpResult>(ptr);
@@ -116,8 +152,7 @@ AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
   Location loc = op.getLoc();
   insertDebugNop(loc, rewriter);
   llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
-  return success();
+  return BlockDataParser::rewriteAddPtr(op, adaptor, rewriter, known);
 }
 
 LogicalResult LoadConverter::toTensorAndReplace(
@@ -409,16 +444,34 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   auto loc = op.getLoc();
   insertDebugNopForMask(mask, rewriter);
 
-  FailureOr<Value> resolvedPtr =
-      resolveMemoryPointer(op.getPtr(), ptr, rewriter);
-  if (failed(resolvedPtr))
-    return rewriter.notifyMatchFailure(
-        op, "unable to materialize the load pointer as a memref");
-  ptr = *resolvedPtr;
+  bool isScalarLoad = !isa<ShapedType>(op.getResult().getType());
+  Value normalizedScalarMemref;
+  if (isScalarLoad && op.getResult().getType().isInteger(8))
+    normalizedScalarMemref =
+        unwrapCanonicalI8ScalarPointerMaterialization(op.getPtr(), ptr);
+
+  if (normalizedScalarMemref) {
+    ptr = normalizedScalarMemref;
+  } else {
+    FailureOr<Value> resolvedPtr =
+        resolveMemoryPointer(op.getPtr(), ptr, rewriter);
+    if (failed(resolvedPtr))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize the load pointer as a memref");
+    ptr = *resolvedPtr;
+  }
   // handling scalar
-  if (!isa<ShapedType>(op.getResult().getType())) {
-    auto scalarMemref =
-        BlockDataParser::getScalarMemRef(op.getPtr(), ptr, loc, rewriter);
+  if (isScalarLoad) {
+    Value scalarMemref = normalizedScalarMemref;
+    if (!scalarMemref) {
+      FailureOr<Value> resolvedScalarMemref =
+          BlockDataParser::getScalarMemRef(op.getPtr(), ptr, loc, rewriter);
+      if (failed(resolvedScalarMemref))
+        return rewriter.notifyMatchFailure(
+            op, "scalar pointer operand has not been converted to a memref");
+      scalarMemref = *resolvedScalarMemref;
+    }
+
     auto resTy = op.getResult().getType();
     auto idxZero =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
@@ -842,19 +895,22 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
        elementType.isInteger(32));
 
   bool isDiscreteMask = false;
+  bool hasContinuousMaskSubview = false;
+  bool hasUsedReturn = !op.getResult().use_empty();
+  MaskState mstate;
   if (mask) {
     auto constantMask = mask.getDefiningOp<arith::ConstantOp>();
     if (constantMask && !isConstantMaskTrue(mask)) {
       rewriter.eraseOp(op);
       return success();
     }
-    MaskState mstate;
     isDiscreteMask = mstate.parse(mask, loc, rewriter).failed();
     if (!constantMask && !isDiscreteMask) {
       // For dstMemref (store output), use subview to maintain reference to
       // original memref. For inputVal (store input), use tensor.extract_slice
       // to keep tensor semantics.
       dstMemref = mstate.getSubview(ptr, loc, rewriter);
+      hasContinuousMaskSubview = true;
       if (isHardwareSupported) {
         auto inputTensorType = RankedTensorType::get(
             inputMemrefType.getShape(), inputMemrefType.getElementType());
@@ -868,12 +924,30 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     }
   }
 
-  if (!op.getResult().use_empty()) {
+  bool needsReturnValueLock =
+      hasUsedReturn && hasContinuousMaskSubview && isHardwareSupported;
+  Value returnValueLock;
+  if (hasUsedReturn) {
     auto tensorType =
         RankedTensorType::get(ptrType.getShape(), ptrType.getElementType());
     auto alloc = rewriter.create<memref::AllocOp>(
         loc, MemRefType::get(ptrType.getShape(), ptrType.getElementType()));
-    rewriter.create<memref::CopyOp>(loc, ptr, alloc);
+    Value copySrc = ptr;
+    Value copyDst = alloc;
+    if (hasContinuousMaskSubview) {
+      // Masked-off atomic results are undefined. Copy only the active region
+      // so the old-value read and the atomic store use the same address view.
+      copySrc = dstMemref;
+      copyDst = mstate.getSubview(alloc, loc, rewriter);
+    }
+    if (needsReturnValueLock) {
+      auto lockType = MemRefType::get({1}, rewriter.getI64Type());
+      auto lockVar =
+          rewriter.create<hivm::CreateSyncBlockLockOp>(loc, lockType, Value());
+      returnValueLock = lockVar.getResult();
+      rewriter.create<hivm::SyncBlockLockOp>(loc, returnValueLock);
+    }
+    rewriter.create<memref::CopyOp>(loc, copySrc, copyDst);
     Value tensorToReplace = rewriter.create<bufferization::ToTensorOp>(
         loc, tensorType, alloc, true /* restrict */, true /* writable */);
     rewriter.replaceOp(op, tensorToReplace);
@@ -895,10 +969,16 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
   } else {
-    if (isHardwareSupported)
-      rewriter.create<hivm::StoreOp>(op.getLoc(), TypeRange{}, inputVal,
-                                     dstMemref, atomicKind);
-    else if (rmwOp == RMWOp::XCHG)
+    if (isHardwareSupported) {
+      auto storeOp = rewriter.create<hivm::StoreOp>(
+          op.getLoc(), TypeRange{}, inputVal, dstMemref, atomicKind);
+      if (needsReturnValueLock) {
+        // The return-value copy and the atomic update must be one critical
+        // section. Mark the store so HIVM does not add another lock.
+        storeOp->setAttr(kAlreadySyncAttr, rewriter.getUnitAttr());
+        rewriter.create<hivm::SyncBlockUnlockOp>(loc, returnValueLock);
+      }
+    } else if (rmwOp == RMWOp::XCHG)
       rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                              inputMemref, dstMemref);
     else {

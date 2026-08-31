@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.metadata
 from pathlib import Path
 import tempfile
 import os
@@ -47,32 +48,57 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
+        # NPUUtils is a singleton, but __init__ must refresh the cached shared
+        # object path on every construction. PyTorch Inductor may set
+        # TRITON_CACHE_DIR after the driver first initializes, so keeping the
+        # first path would make the launcher look for npu_utils.so in a newer
+        # cache root where it was never built.
+        self._cache_path = self._build_or_get_cached_so()
+        if not hasattr(self, "npu_utils_mod"):
+            self.npu_utils_mod = None
+
+    def get_so_path(self):
+        if self._cache_path is None:
+            self._cache_path = self._build_or_get_cached_so()
+        return self._cache_path
+
+    def _build_or_get_cached_so(self):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        version_info = get_backend_func("version_hash")
         cann_version = get_cann_version()
         cann_version_str = ".".join(map(str, cann_version)) if cann_version else ""
-        key = hashlib.md5((src + "_".join(version_info) + "_" + cann_version_str).encode("utf-8")).hexdigest()
+        torch_npu_version = importlib.metadata.version("torch_npu")
+        key_parts = [cann_version_str, torch_npu_version, src]
+        key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
-        if cache_path is None or not os.path.exists(cache_path):
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
-                with open(tmp_src_path, "w") as f:
-                    f.write(src)
-                so = _build_npu_ext("npu_utils", tmp_src_path)
-                with open(so, "rb") as f:
-                    cache_path = cache.put(f.read(), fname, binary=True)
+        if cache_path is not None and os.path.exists(cache_path):
+            return cache_path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
+            with open(tmp_src_path, "w") as f:
+                f.write(src)
+            so = _build_npu_ext("npu_utils", tmp_src_path)
+            with open(so, "rb") as f:
+                cache_path = cache.put(f.read(), fname, binary=True)
+        return cache_path
+
+    def _load_mod(self):
+        if self.npu_utils_mod is not None:
+            return self.npu_utils_mod
+
         import importlib.util
-        spec = importlib.util.spec_from_file_location("npu_utils", cache_path)
+        spec = importlib.util.spec_from_file_location("npu_utils", self.get_so_path())
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         self.npu_utils_mod = mod
+        return self.npu_utils_mod
 
     def load_binary(self, name, kernel, shared, device, mix_mode):
-        return self.npu_utils_mod.load_kernel_binary(name, kernel, shared, device, mix_mode)
+        return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     def _get_npu_device_limit_form_env(self) -> tuple[int, int]:
         """Read and validate the NPU_DEVICE_LIMIT env var, return the capped AICore and AIVector counts.
@@ -156,7 +182,7 @@ class NPUUtils(object):
 
     def get_arch(self):
         # temporarily return empty arch descriptor
-        return self.npu_utils_mod.get_arch()
+        return self._load_mod().get_arch()
 
     def get_aicore_num(self):
         # temporarily return empty arch descriptor
@@ -693,20 +719,37 @@ def make_launcher(constants, signature, metadata):
                           if hasattr(metadata, 'workspace_size') else -1
     lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
                           lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
-    lock_num = int(metadata.lock_num) \
-                          if hasattr(metadata, 'lock_num') else -1
-    has_unordered_sync_block_lock = bool(getattr(metadata, "has_unordered_sync_block_lock", False))
-    unordered_sync_block_lock_stride_i64 = (1 + 2 * 1024) * 8
-    # Zero the sync_block_lock buffer ON THE COMPUTE STREAM.
-    if has_unordered_sync_block_lock and lock_num > 0:
+    sync_block_lock_layout = int(getattr(metadata, "sync_block_lock_layout", 0))
+    ordered_sync_block_lock_count = sync_block_lock_layout & 0xFFFFFFFF
+    unordered_sync_block_lock_count = (sync_block_lock_layout >> 32) & 0xFFFFFFFF
+    has_sync_block_lock = (ordered_sync_block_lock_count + unordered_sync_block_lock_count) > 0
+    unordered_sync_block_participant_factor = (2 if unordered_sync_block_lock_count > 0 and metadata.mix_mode == "mix"
+                                               and getattr(metadata, "auto_tile_and_bind_subblock", False) else 1)
+    sync_block_lock_layout_stmt = f"""
+    constexpr uint64_t syncBlockLockCacheLineI64 = 8;
+    constexpr uint64_t syncBlockLockOrderedCount = {ordered_sync_block_lock_count};
+    constexpr uint64_t syncBlockLockUnorderedCount = {unordered_sync_block_lock_count};
+    constexpr uint64_t syncBlockLockParticipantFactor = {unordered_sync_block_participant_factor};
+    const uint64_t syncBlockLockParticipantNum =
+        blockNum * syncBlockLockParticipantFactor;
+    const uint64_t syncBlockLockUnorderedStrideI64 =
+        (1 + 2 * syncBlockLockParticipantNum) * syncBlockLockCacheLineI64;
+    const uint64_t syncBlockLockOrderedI64Count =
+        syncBlockLockOrderedCount * syncBlockLockCacheLineI64;
+    const uint64_t syncBlockLockI64Count = syncBlockLockOrderedI64Count +
+        syncBlockLockUnorderedCount * syncBlockLockUnorderedStrideI64;
+    const uint64_t syncBlockLockSize = syncBlockLockI64Count * sizeof(int64_t);"""
+    # Initialize on the compute stream. Each unordered lock stores its exact
+    # participant count at the first cache line of its dynamic region.
+    if unordered_sync_block_lock_count > 0:
         lock_init_stmt = f"""
-    std::vector<int64_t> lockInitData({lock_num}, 0);
-    constexpr uint64_t syncBlockLockStrideI64 = {unordered_sync_block_lock_stride_i64};
-    int64_t syncBlockLockParticipantNum = static_cast<int64_t>(
-        std::min(blockNum, static_cast<uint32_t>(1024)));
-    for (uint64_t lockOffset = 0; lockOffset < {lock_num};
-         lockOffset += syncBlockLockStrideI64) {{
-      lockInitData[lockOffset] = syncBlockLockParticipantNum;
+    std::vector<int64_t> lockInitData(syncBlockLockI64Count, 0);
+    for (uint64_t lockIndex = 0; lockIndex < syncBlockLockUnorderedCount;
+         ++lockIndex) {{
+      const uint64_t lockOffset = syncBlockLockOrderedI64Count +
+          lockIndex * syncBlockLockUnorderedStrideI64;
+      lockInitData[lockOffset] =
+          static_cast<int64_t>(syncBlockLockParticipantNum);
     }}
     ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize,
                    reinterpret_cast<void *>(lockInitData.data()),
@@ -715,7 +758,7 @@ def make_launcher(constants, signature, metadata):
         lock_init_stmt = ("ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
                           "syncBlockLockSize, stream);")
     else:
-        lock_init_stmt = (f"std::vector<int64_t> lockInitData({lock_num}, {lock_init_value});\n"
+        lock_init_stmt = (f"std::vector<int64_t> lockInitData(syncBlockLockI64Count, {lock_init_value});\n"
                           "    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize, "
                           "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
                           "CANN_MEMCPY_HOST_TO_DEVICE);")
@@ -915,8 +958,7 @@ def make_launcher(constants, signature, metadata):
     alloc_success_code = 'return 1;'
     sync_lock_fail_code = 'fprintf(stderr, "Error: syncBlockLock allocation failed\\n"); return;'
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
-    npu_utils_mod = getattr(npu_utils, "npu_utils_mod", None)
-    npu_utils_so_path = getattr(npu_utils_mod, "__file__", "")
+    npu_utils_so_path = NPUUtils().get_so_path()
     # The generated launcher source is part of its cache key. Preserve only the
     # deterministic cache-key directory so the launcher can be reused after the
     # cache root changes.
@@ -1161,7 +1203,7 @@ static void release_npu_tensor_handle(void* handle) {{
     void *syncBlockLock_handle = nullptr;
     uint16_t ModuleId = 0;
     {f'''
-    uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
+    {sync_block_lock_layout_stmt}
     {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
     std::shared_ptr<void> syncBlockLock_handle_guard(syncBlockLock_handle, release_npu_tensor_handle);
     if (!syncBlockLock_ptr) {{
@@ -1171,7 +1213,7 @@ static void release_npu_tensor_handle(void* handle) {{
     if (ret != CANN_SUCCESS) {{
       return {'ret' if enable_taskqueue else ''};
     }}
-    ''' if lock_num > 0 else ''}
+    ''' if has_sync_block_lock else ''}
     {'if (ret != CANN_SUCCESS) {{ return ret; }}' if (workspace_size > 0 and enable_taskqueue) else 'if (ret != CANN_SUCCESS) {{ return; }}' if (workspace_size > 0 and not enable_taskqueue) else ''}"""
 
     _launch_lambda_post = f"""
@@ -1310,7 +1352,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
-      {('static_cast<void*>(syncBlockLock_ptr),' if lock_num > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
+      {('static_cast<void*>(syncBlockLock_ptr),' if has_sync_block_lock else 'nullptr,') if not metadata.is_pure_simt else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]

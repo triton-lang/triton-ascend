@@ -20,13 +20,18 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/BuiltinTypes.h"
-#include "llvm/ADT/StringRef.h"
+#include <optional>
+
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+
+#include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/BuiltinTypes.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -174,14 +179,13 @@ llvm::LogicalResult ComputeBlockIdManager::markOpBlockId(Operation *op) {
   return markAndRecord(op, blockId);
 }
 
-llvm::LogicalResult ComputeBlockIdManager::markOpsWithNewId(
-    llvm::SmallVectorImpl<Operation *> &ops) {
+llvm::LogicalResult
+ComputeBlockIdManager::markOpsWithNewId(llvm::ArrayRef<Operation *> ops) {
   if (ops.empty()) {
     return llvm::success();
   }
   int id = getNextId();
   for (Operation *op : ops) {
-
     if (llvm::failed(markAndRecord(op, id))) {
       return llvm::failure();
     }

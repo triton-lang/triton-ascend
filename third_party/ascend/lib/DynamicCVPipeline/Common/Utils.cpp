@@ -2,13 +2,13 @@
 #include <optional>
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -209,8 +209,11 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
   if (funcOp) {
     constexpr llvm::StringLiteral regionalDisabledOps[]{
         "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64",
-        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64", "backward_dkdv",
-        "pcb10_tc01_kernel"};
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+        "backward_dkdv",
+        "pcb10_tc01_kernel",
+        "chunk_ttt_linear_fwd_kernel_h",
+        "chunk_ttt_linear_bwd_kernel_h"};
     if (llvm::is_contained(regionalDisabledOps, funcOp.getSymName())) {
       return CoreType::UNDETERMINED;
     }
@@ -492,6 +495,27 @@ std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
   if (inElemType.isInteger(32) && outElemType.isInteger(8))
     return hivm::FixpipePreQuantMode::S322I8;
   return std::nullopt;
+}
+CoreType getValueCoreType(Value value) {
+  auto result = llvm::dyn_cast_if_present<OpResult>(value);
+  if (!result) {
+    return UNDETERMINED;
+  }
+  Operation *defOp = result.getOwner();
+  if (defOp->getNumResults() == 1) {
+    return getOpCoreType(defOp);
+  }
+  auto attr = defOp->getAttrOfType<StringAttr>(kCoreType);
+  if (!attr) {
+    return UNDETERMINED;
+  }
+  llvm::SmallVector<llvm::StringRef> coreTypeStrs;
+  attr.getValue().split(coreTypeStrs, ", ");
+  auto resultIdx = result.getResultNumber();
+  if (coreTypeStrs.size() <= resultIdx) {
+    return UNDETERMINED;
+  }
+  return fromStrCoreType(coreTypeStrs[resultIdx]);
 }
 
 } // namespace CVPipeline

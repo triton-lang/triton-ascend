@@ -947,6 +947,48 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 }
 
 // -----
+// CHECK-LABEL: func.func @indirect_load_broadcast_loop_carried_different_root
+// CHECK: call @triton_indirect_load{{.*}}(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xf32>, tensor<4x8xi64>, tensor<4x8xi1>, tensor<4x8xf32>) -> tensor<4x8xf32>
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @indirect_load_broadcast_loop_carried_different_root(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                                      %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+                                                                      %trip: i32) {
+    %c0_i32 = arith.constant 0 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %row_stride = arith.constant dense<8> : tensor<4x1xi32>
+    %advance = arith.constant dense<32> : tensor<4x8xi32>
+    %zero = arith.constant dense<0.000000e+00> : tensor<4x8xf32>
+    %mask = arith.constant dense<true> : tensor<4x8xi1>
+    %rows = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
+    %rows_2d = tt.expand_dims %rows {axis = 1 : i32} : tensor<4xi32> -> tensor<4x1xi32>
+    %row_offsets = arith.muli %rows_2d, %row_stride : tensor<4x1xi32>
+    %cols = tt.make_range {end = 8 : i32, start = 0 : i32} : tensor<8xi32>
+    %cols_2d = tt.expand_dims %cols {axis = 0 : i32} : tensor<8xi32> -> tensor<1x8xi32>
+    %col_offsets = tt.broadcast %cols_2d : tensor<1x8xi32> -> tensor<4x8xi32>
+    %src_base_1d = tt.splat %arg0 : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+    %src_base = tt.expand_dims %src_base_1d {axis = 1 : i32} : tensor<4x!tt.ptr<f32>> -> tensor<4x1x!tt.ptr<f32>>
+    %src_rows = tt.addptr %src_base, %row_offsets : tensor<4x1x!tt.ptr<f32>>, tensor<4x1xi32>
+    %src_broadcast = tt.broadcast %src_rows : tensor<4x1x!tt.ptr<f32>> -> tensor<4x8x!tt.ptr<f32>>
+    %src_ptr = tt.addptr %src_broadcast, %col_offsets : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+    %dst_base_1d = tt.splat %arg1 : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
+    %dst_base = tt.expand_dims %dst_base_1d {axis = 1 : i32} : tensor<4x!tt.ptr<f32>> -> tensor<4x1x!tt.ptr<f32>>
+    %dst_rows = tt.addptr %dst_base, %row_offsets : tensor<4x1x!tt.ptr<f32>>, tensor<4x1xi32>
+    %dst_broadcast = tt.broadcast %dst_rows : tensor<4x1x!tt.ptr<f32>> -> tensor<4x8x!tt.ptr<f32>>
+    %dst_ptr = tt.addptr %dst_broadcast, %col_offsets : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+    %result:2 = scf.for %i = %c0_i32 to %trip step %c1_i32
+        iter_args(%src_iter = %src_ptr, %dst_iter = %dst_ptr)
+        -> (tensor<4x8x!tt.ptr<f32>>, tensor<4x8x!tt.ptr<f32>>) : i32 {
+      %value = tt.load %src_iter, %mask, %zero {MixCompileDiscreteMask} : tensor<4x8x!tt.ptr<f32>>
+      tt.store %dst_iter, %value, %mask : tensor<4x8x!tt.ptr<f32>>
+      %src_next = tt.addptr %src_iter, %advance : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+      %dst_next = tt.addptr %dst_iter, %advance : tensor<4x8x!tt.ptr<f32>>, tensor<4x8xi32>
+      scf.yield %src_next, %dst_next : tensor<4x8x!tt.ptr<f32>>, tensor<4x8x!tt.ptr<f32>>
+    }
+    tt.return
+  }
+}
+
+// -----
 // V1 guard (make_tensor_ptr Load): only one tt.advance layer is supported.
 // A nested advance must stay on the legacy block-pointer lowering path.
 // CHECK-LABEL: func.func @mtpt_nested_advance_bails

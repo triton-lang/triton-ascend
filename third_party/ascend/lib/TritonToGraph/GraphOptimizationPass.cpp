@@ -231,8 +231,14 @@ void GraphOptimizePass::runOnOperation() {
         for (std::unique_ptr<RewritePlan> &plan : plans) {
           if (plan->getCreationEpoch() != context.getEpoch())
             continue;
-          if (failed(plan->revalidate(context)))
+          if (failed(plan->revalidate(context))) {
+            LLVM_DEBUG(
+                llvm::dbgs()
+                << "[" DEBUG_TYPE "] dropped stale graph optimization rule "
+                << static_cast<unsigned>(plan->getRuleId()) << " ("
+                << getGraphOptimizationRuleName(plan->getRuleId()) << ")\n");
             continue;
+          }
 
           selectedPlan = std::move(plan);
           break;

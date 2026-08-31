@@ -619,6 +619,16 @@ InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
   return consumerWaitPoint;
 }
 
+mlir::Operation *InterCoreTransferAndSyncPass::getFixpipePointAfterProducer(
+    Value srcValue, int producerBlockId) {
+  mlir::Operation *fixpipePoint = srcValue.getDefiningOp();
+  int blockId = CVPipeline::getOpBlockId(fixpipePoint).value_or(-1);
+  if (blockId != producerBlockId) {
+    return nullptr;
+  }
+  return fixpipePoint;
+}
+
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     OpBuilder &builder, Value srcValue, Value normalizedValue,
     Operation *vectorEndOp, Operation *cubeStartOp, Location loc,
@@ -1496,6 +1506,13 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   LOG_DEBUG("[newConsStart]" << *consStart << "\n");
   LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
 
+  if (dep.iniProducerBlockId == dep.producerBlockId) {
+    auto producerPoint =
+        getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
+    if (producerPoint) {
+      prodEnd = producerPoint;
+    }
+  }
   Operation *consumedDataOp = nullptr;
   Operation *transferOp =
       insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc,

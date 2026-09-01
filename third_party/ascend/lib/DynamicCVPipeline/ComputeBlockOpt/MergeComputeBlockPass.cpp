@@ -55,7 +55,7 @@ static constexpr const char *DEBUG_TYPE = "merge-compute-block";
 static constexpr llvm::StringLiteral kEnableMergeComputeBlockKernels[] = {
     "flex_attention_backward_dkdv_kernel",
     "flex_attention_backward_dkdv_kernel_tasklist", "_swa_bwd_dkdv_kernel",
-    "kernel_sdpa_bwd_kv"};
+    "kernel_sdpa_bwd_kv", "kernel_da_bwd_kv_ul"};
 
 using namespace mlir;
 using namespace triton;

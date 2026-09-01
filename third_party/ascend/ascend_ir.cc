@@ -916,6 +916,47 @@ void init_ascend_ir(py::module &&m) {
           },
           py::arg("a"), py::arg("b"), py::arg("fractal_a"),
           py::arg("fractal_b"), py::arg("fractal_c"))
+      // conv2d operation
+      .def(
+          "create_conv2d",
+          [](AscendNPUIROpBuilder &self, Value input, Value weight,
+             py::object bias, py::object stride, py::object padding,
+             py::object dilation, int64_t groups, Type output_type) -> Value {
+            Value biasValue;
+            if (!bias.is_none()) {
+              biasValue = bias.cast<Value>();
+            } else {
+              biasValue = Value();
+            }
+            auto &builder = self.getBuilder();
+            // Keep ints as IntegerAttr and sequences as DenseI32ArrayAttr.
+            // padding = [pad_top, pad_bottom, pad_left, pad_right] or a
+            // 2-element [pad_h, pad_w].
+            auto buildConvParamAttr = [&](py::object param,
+                                          const std::string &name,
+                                          bool allowFour) -> Attribute {
+              if (py::isinstance<py::int_>(param)) {
+                return builder.getI64IntegerAttr(param.cast<int64_t>());
+              }
+              py::sequence seq = param.cast<py::sequence>();
+              size_t len = py::len(seq);
+              SmallVector<int32_t> values;
+              for (auto item : seq)
+                values.push_back(item.cast<int32_t>());
+              return builder.getDenseI32ArrayAttr(values);
+            };
+            auto strideAttr = buildConvParamAttr(stride, "stride", false);
+            auto paddingAttr = buildConvParamAttr(padding, "padding", true);
+            auto dilationAttr = buildConvParamAttr(dilation, "dilation", false);
+            auto groupsAttr = builder.getI64IntegerAttr(groups);
+            auto op = self.create<triton::ascend::Conv2dOp>(
+                output_type, input, weight, biasValue, strideAttr, paddingAttr,
+                dilationAttr, groupsAttr);
+            return op.getResult();
+          },
+          py::arg("input"), py::arg("weight"), py::arg("bias"),
+          py::arg("stride"), py::arg("padding"), py::arg("dilation"),
+          py::arg("groups"), py::arg("output_type"))
       // Add sort
       .def("create_sort",
            [](AscendNPUIROpBuilder &self, Value src, int64_t dim,

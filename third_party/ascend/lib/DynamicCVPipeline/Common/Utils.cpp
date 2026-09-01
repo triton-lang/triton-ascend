@@ -208,8 +208,7 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
   auto funcOp = op->getParentOfType<func::FuncOp>();
   if (funcOp) {
     constexpr llvm::StringLiteral regionalDisabledOps[]{
-        "pcb10_tc01_kernel", "chunk_ttt_linear_fwd_kernel_h",
-        "chunk_ttt_linear_bwd_kernel_h"};
+        "chunk_ttt_linear_fwd_kernel_h", "chunk_ttt_linear_bwd_kernel_h"};
     if (llvm::is_contained(regionalDisabledOps, funcOp.getSymName())) {
       return CoreType::UNDETERMINED;
     }

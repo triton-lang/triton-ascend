@@ -1315,7 +1315,9 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
     size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
-    {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else ''}
+    {'reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
+    {'reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
+    {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else 'reserve_slot(sizeof(void*), 8);'}
     size_t total_size = args_offset;
 
     std::vector<char> launch_args(total_size, 0);
@@ -1353,7 +1355,9 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
       {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
-      {'void* DTData __attribute__((aligned(8)));' if enable_device_print else ''}
+      {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
+      {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
+      {'void* DTData __attribute__((aligned(8)));'}
     }} args = {{
       {'static_cast<void*>(ffts_addr),' if target_support_ffts else ''}
       {('static_cast<void*>(syncBlockLock_ptr),' if has_sync_block_lock else 'nullptr,') if not metadata.is_pure_simt else ''}
@@ -1362,7 +1366,9 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
       {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
-      {', static_cast<void*>(DTData)' if enable_device_print else ''}
+      {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
+      {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
+      {', static_cast<void*>(DTData)' if enable_device_print else ', static_cast<void*>(nullptr)'}
     }};
 {_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch_local)}
 

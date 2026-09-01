@@ -92,6 +92,7 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
   if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
     auto parentOp = blockArgument.getOwner()->getParentOp();
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
+      return failure(); // temporarily disable loop
       OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
       if (initArgOperand) {
         Value initArg = initArgOperand->get();

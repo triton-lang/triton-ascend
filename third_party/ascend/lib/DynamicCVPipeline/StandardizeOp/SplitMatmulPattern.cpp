@@ -613,7 +613,8 @@ static bool verifyMatmul(linalg::MatmulOp matmulOp) {
 
 // Supports the most common case, where a loop-carried matmul is
 // directly under a not executed for-loop
-static std::optional<SplitInfo> handleMayNotExec(linalg::MatmulOp matmulOp) {
+static std::optional<SplitInfo> handleMayNotExec(linalg::MatmulOp matmulOp,
+                                                 Value outerInValue) {
   auto *parentOp = matmulOp->getBlock()->getParentOp();
   auto forOp = llvm::dyn_cast<scf::ForOp>(parentOp);
   auto inputs = parseMatmulInputs(matmulOp);
@@ -629,7 +630,7 @@ static std::optional<SplitInfo> handleMayNotExec(linalg::MatmulOp matmulOp) {
   auto result = forOp.getTiedLoopResult(blockArg);
 
   // only support the scenario that initVal is zero not broadcast
-  if (operationIsFillZero(initVal.getDefiningOp())) {
+  if (operationIsFillZero(outerInValue.getDefiningOp())) {
     // Check if the current matmul is used by a subsequent cross-block
     // cascade matmul (L0C -> L0C).
     if (hasCrossBlockCascadeL0CConsumer(result, matmulOp)) {
@@ -695,7 +696,7 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp,
   }
 
   if (mayNotExec) {
-    auto splitInfoOpt = handleMayNotExec(matmulOp);
+    auto splitInfoOpt = handleMayNotExec(matmulOp, outerInValue);
     if (splitInfoOpt.has_value()) {
       return splitInfoOpt;
     }

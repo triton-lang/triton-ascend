@@ -118,15 +118,6 @@ jobs:
                 "cann_version": "8.5.0",
                 "os": "ubuntu22.04",
                 "python_version": "3.11"
-              },
-              {
-                "name": "linux-amd64-a5-4",
-                "runner_type": "linux-amd64-a5-4",
-                "runs_on": ["linux-amd64-a5-4"],
-                "chip_type": "950",
-                "cann_version": "9.1.0",
-                "os": "ubuntu22.04",
-                "python_version": "3.12"
               }
             ]' >> $GITHUB_OUTPUT
             echo 'MATRIX_EOF' >> $GITHUB_OUTPUT

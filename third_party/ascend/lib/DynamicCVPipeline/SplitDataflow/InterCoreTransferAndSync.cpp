@@ -1577,7 +1577,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   LOG_DEBUG("[newConsStart]" << *consStart << "\n");
   LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
 
-  if (dep.iniProducerBlockId == dep.producerBlockId) {
+  if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(srcValue.getDefiningOp())) {
     auto producerPoint =
         getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
     if (producerPoint) {

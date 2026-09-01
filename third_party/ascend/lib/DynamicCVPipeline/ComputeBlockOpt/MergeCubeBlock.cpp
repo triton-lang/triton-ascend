@@ -44,8 +44,11 @@ static constexpr const char *DEBUG_TYPE = "merge-cube-block";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
-static constexpr llvm::StringLiteral kDisnbleMergeCubeKernel =
-    "flex_attention_backward_dq_kernel";
+static const llvm::DenseSet<llvm::StringRef> kDisnbleMergeCubeKernel = {
+    "flex_attention_backward_dq_kernel",
+    "parallel_deltaformer_bwd_kernel_qk",
+    "_parallel_hstu_attn_bwd",
+};
 
 void MergeCubeBlockPass::findInnermostLoopBlocksWithMatmul(
     ModuleOp moduleOp, llvm::SmallVectorImpl<Block *> &innermostBlocks) {
@@ -133,7 +136,7 @@ void MergeCubeBlockPass::runOnOperation() {
   }
 
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
-    if (funcOp.getSymName() == kDisnbleMergeCubeKernel) {
+    if (kDisnbleMergeCubeKernel.contains(funcOp.getSymName())) {
       LDBG("Found unsupport kernel: " << funcOp.getSymName());
       return;
     }

@@ -1623,6 +1623,34 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   CloneOpMap[vectorOp] = op;      // record for laterClone map
 
   // ------------------------------------------------------------------
+  // Phase 3.5: Split fills that write this buffer outside the SSA chain
+  // ------------------------------------------------------------------
+  // Bug: Vector clone of a masked load is not zero-filled (NaNs in padding).
+  // Cause: tl.load(..., other=0) -> fill + partial copy. Fill has no SSA
+  // result, so Cube/Vector split clones alloc+copy and skips the fill.
+  // Fix: clone CUBE-only linalg.fill writers of this alloc onto Vector.
+  // Do not split VECTOR fills; Phase 4 already retargets those.
+  if (auto allocOp = dyn_cast<memref::AllocOp>(op)) {
+    llvm::SmallVector<linalg::FillOp> fillsToSplit;
+    for (Operation *user : allocOp->getUsers()) {
+      auto fillOp = dyn_cast<linalg::FillOp>(user);
+      if (!fillOp || fillOp.getDpsInits().size() != 1 ||
+          fillOp.getDpsInits()[0] != allocOp.getResult())
+        continue;
+      // VECTOR fills that write this alloc are redirected in Phase 4.
+      // Forcing them through split recolors the original CUBE_ONLY and
+      // breaks VECTOR control-flow / block-id inheritance.
+      if (opCoreTypes[fillOp] != OP_CUBE_ONLY)
+        continue;
+      fillsToSplit.push_back(fillOp);
+    }
+    for (linalg::FillOp fillOp : fillsToSplit) {
+      opCoreTypes[fillOp] = OP_CUBE_AND_VECTOR;
+      splitOperationForCubeAndVector(fillOp, processedOps, opToVectorClone);
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Phase 4: Redirect VECTOR-only users to the cloned result
   // ------------------------------------------------------------------
   // VECTOR users of the original result must now use the cloned result.

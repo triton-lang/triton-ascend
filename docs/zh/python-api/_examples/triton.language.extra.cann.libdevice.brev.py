@@ -42,7 +42,7 @@ def _brev(x):
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_brev():
     x0 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    expected = torch.tensor([_brev(*v) for v in zip(x0.tolist())], dtype=torch.int32).npu()
+    expected = torch.tensor([_brev(v) & 0xFFFFFFFF for v in x0.tolist()], dtype=torch.int64).to(torch.int32).npu()
     output = torch.empty(8, dtype=torch.int32, device='npu')
     triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
     torch.testing.assert_close(output, expected, rtol=0, atol=0)

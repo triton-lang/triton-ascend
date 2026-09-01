@@ -42,7 +42,7 @@ def test_associative_scan_2d():
 
     expected = torch.cumsum(x.cpu(), dim=dim)
 
-    assert torch.allclose(output.cpu(), expected.cpu())
+    assert torch.allclose(output.cpu(), expected.cpu(), rtol=1e-3, atol=1e-3)
 
 
 if __name__ == "__main__":

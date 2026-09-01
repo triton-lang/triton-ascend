@@ -25,7 +25,7 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
         x0 = offset + (loop * XBLOCK_SUB) + base
         mask = x0 < n_elements
         tmp0 = tl.load(input0 + (x0), mask=mask)
-        tmp1 = libdevice.uint2float_rz(tmp0)
+        tmp1 = libdevice.uint2float_rz(tmp0.to(tl.uint32))
         tl.store(output + (x0), tmp1, mask=mask)
 
 

@@ -778,8 +778,10 @@ SplitMatmulPattern::matchAndRewrite(linalg::MatmulOp matmulOp,
       markOpOpt.has_value()) {
     auto markOp = markOpOpt.value();
     markOp->removeAttr(kMatmulAtLeastOnceHint);
-    if (markOp->getAttrs().empty()) {
-      rewriter.eraseOp(markOpOpt.value());
+    if (markOp->getAttrs().empty() ||
+        (markOp->getAttrs().size() == 1 &&
+         markOp->getAttrs().front().getName() == "effects")) {
+      rewriter.eraseOp(markOp);
     }
     matmulOp->getParentOp()->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
                                      rewriter.getUnitAttr());

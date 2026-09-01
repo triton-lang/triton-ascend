@@ -511,8 +511,8 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
         prunedSeeds.push_back(seed);
       }
     }
-    std::remove_if(dotSeeds.begin(), dotSeeds.end(), [&](Operation *seed) {
-      return wall.sameSegment(seed, dot);
+    llvm::erase_if(dotSeeds, [&](Operation *seed) {
+      return !wall.sameSegment(seed, dot);
     });
     if (willCreateCycle(dotSeeds, depHelper.memGraph, temBlockId, bm)) {
       LOG_DEBUG("Cube Seed already have a cycle!!");

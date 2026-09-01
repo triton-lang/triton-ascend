@@ -107,6 +107,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_gather_out_to_ub',
         'create_scatter_ub_to_out',
         'create_conv1d',
+        'create_conv2d',
         'create_sort',
         'create_flip',
         'create_tanh',

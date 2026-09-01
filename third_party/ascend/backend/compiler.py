@@ -182,7 +182,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
         if distributed is not None:
-            distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
+            distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm, opt.core_ratio)
         ascend.passes.ttir.add_auto_blockify(
             pm,
             auto_blockify_size
@@ -1024,6 +1024,7 @@ class NPUOptions:
     # When compile_mode is provided, it automatically sets other fields
     compile_mode: str = "unstructured_in_simt"
     mix_mode: str = ""
+    core_ratio: str = ""
     simt_stack_limit: int = None
     # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
     enable_simt_reorder_instruction: bool = False

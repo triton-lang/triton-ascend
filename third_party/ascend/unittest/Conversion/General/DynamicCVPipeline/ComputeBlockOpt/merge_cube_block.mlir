@@ -104,17 +104,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %vec_tensor1 = bufferization.to_tensor %vec_alloc1 restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x128xbf16> to tensor<128x128xbf16>
 
         // Cube block 1 (block_id=2) - uses vec_tensor1
-        // CHECK: memref.alloc() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"}
+        // CHECK: memref.alloc() {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"}
         %cube_alloc1 = memref.alloc() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xbf16>
         %cube_cond1 = arith.constant 1 : i1
         // CHECK: scf.if %{{.*}} {
-        // CHECK:   linalg.fill {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"}
+        // CHECK:   linalg.fill {ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"}
         scf.if %cube_cond1 {
           linalg.fill {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : bf16) outs(%cube_alloc1 : memref<128x128xbf16>)
         } {hivm.unlikely_condition, ssbuffer.block_id = 6 : i32}
         %cube_tensor1 = bufferization.to_tensor %cube_alloc1 restrict writable {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xbf16> to tensor<128x128xbf16>
         %cube_out1 = tensor.empty() {ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} : tensor<128x128xf32>
-        // CHECK: linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"}
+        // CHECK: linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 7 : i32, ssbuffer.core_type = "CUBE"}
         %cube_matmul1 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 6 : i32, ssbuffer.core_type = "CUBE"} ins(%vec_tensor1, %cube_tensor1 : tensor<128x128xbf16>, tensor<128x128xbf16>) outs(%cube_out1 : tensor<128x128xf32>) -> tensor<128x128xf32>
 
         // Extra vector block (block_id=5) - only used by cube block 2
@@ -225,6 +225,18 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %vec_add = arith.addf %cube_matmul1, %cube_matmul2 {ssbuffer.block_id = 18 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
       %vec_tensor2 = bufferization.to_tensor %vec_alloc2 restrict writable {ssbuffer.block_id = 18 : i32, ssbuffer.core_type = "VECTOR"} : memref<128x128xf32> to tensor<128x128xf32>
 
+
+      %cube_alloc3 = memref.alloc() {ssbuffer.block_id = 19 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf32>
+      %cube_cond3 = arith.constant 1 : i1
+      scf.if %cube_cond3 {
+        linalg.fill {ssbuffer.block_id = 19 : i32, ssbuffer.core_type = "CUBE"} ins(%cst : bf16) outs(%cube_alloc3 : memref<128x128xf32>)
+      } {hivm.unlikely_condition, ssbuffer.block_id = 19 : i32}
+      %cube_tensor3 = bufferization.to_tensor %cube_alloc3 restrict writable {ssbuffer.block_id = 19 : i32, ssbuffer.core_type = "CUBE"} : memref<128x128xf32> to tensor<128x128xf32>
+      %cube_out3 = tensor.empty() {ssbuffer.block_id = 19 : i32, ssbuffer.core_type = "CUBE"} : tensor<128x128xf32>
+      %cube_matmul3 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 19 : i32, ssbuffer.core_type = "CUBE"} ins(%vec_tensor2, %cube_tensor3 : tensor<128x128xf32>, tensor<128x128xf32>) outs(%cube_out3 : tensor<128x128xf32>) -> tensor<128x128xf32>
+
+
+      %vec_add3 = arith.addf %cube_matmul2, %cube_matmul3 {ssbuffer.block_id = 20 : i32, ssbuffer.core_type = "VECTOR"} : tensor<128x128xf32>
       scf.yield
     }
 

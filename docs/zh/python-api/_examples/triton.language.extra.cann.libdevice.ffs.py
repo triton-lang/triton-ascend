@@ -30,11 +30,11 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
 
 
 def _ffs(x):
-    """Index of the least significant set bit (0-based), 32 if none."""
+    """1-based index of the least significant set bit; 0 if none (CUDA ffs)."""
     v = int(x) & 0xFFFFFFFF
     if v == 0:
-        return 32
-    return (v & -v).bit_length() - 1
+        return 0
+    return (v & -v).bit_length()
 
 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)

@@ -32,7 +32,7 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_erfcinv():
     x0 = (torch.rand((8, )) * 0.9 + 0.05).to(torch.float32).npu()
-    expected = (torch.erfc(torch.erfcinv(x0))).to(torch.float32).npu()
+    expected = torch.erfinv(1.0 - x0).to(torch.float32).npu()
     output = torch.empty(8, dtype=torch.float32, device='npu')
     triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
     torch.testing.assert_close(output, expected, rtol=1e-03, atol=1e-03, equal_nan=True)

@@ -34,7 +34,7 @@ def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLO
 def test_rhadd():
     x0 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
     x1 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    expected = ((x0 + x1) // 2).to(torch.int32).npu()
+    expected = ((x0.to(torch.int64) + x1.to(torch.int64) + 1) // 2).to(torch.int32).npu()
     output = torch.empty(8, dtype=torch.int32, device='npu')
     triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
     torch.testing.assert_close(output, expected, rtol=0, atol=0)

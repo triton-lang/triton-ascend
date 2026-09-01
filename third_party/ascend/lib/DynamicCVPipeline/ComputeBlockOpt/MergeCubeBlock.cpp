@@ -303,21 +303,28 @@ bool MergeCubeBlockPass::canMergeBlocks(
   }
 
   // Step 2: Check if they have same source and sink with no other nodes
-  if (!checkSameSourceAndSink(blockId1, blockId2, graph)) {
+  if (checkSameSourceAndSink(blockId1, blockId2, graph)) {
     LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << " cannot merge: different source or sink\n");
-    return false;
-  }
-
-  // Step 3: Check if merging would create a cycle
-  if (checkNoCycle(blockId1, blockId2, graph, memGraph, bm)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << " can merge: no cycle detected\n");
+                   << " can merge: same source or sink\n");
     return true;
   }
 
+  // Step 3: Check if merging would create a cycle
+  if (!checkNoCycle(blockId1, blockId2, graph, memGraph, bm)) {
+    LDBG("Blocks " << blockId1 << " and " << blockId2
+                   << "cannot merge: would create cycle\n");
+    return false;
+  }
+
+  // Step 4: cube block in the same depth
+  if (hasSameDepth(blockId1, blockId2, graph)) {
+    LDBG("Blocks " << blockId1 << " and " << blockId2
+                    << " can merge: cube blocks have same depth\n");
+    return true;
+    }
+
   LDBG("Blocks " << blockId1 << " and " << blockId2
-                 << " cannot merge: would create cycle\n");
+                 << " cannot merge: unsupport scenario\n");
   return false;
 }
 
@@ -366,6 +373,20 @@ bool MergeCubeBlockPass::checkSameSourceAndSink(int blockId1, int blockId2,
   }
 
   return true;
+}
+
+bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
+                                      BlockDependencyGraph &graph) {
+
+  // Get block nodes
+  BlockNode *node1 = graph.getBlockNode(blockId1);
+  BlockNode *node2 = graph.getBlockNode(blockId2);
+
+  if (!node1 || !node2) {
+    return false;
+  }
+
+  return node1->depth == node2->depth;
 }
 
 llvm::SmallVector<int> MergeCubeBlockPass::filterBlocksByType(

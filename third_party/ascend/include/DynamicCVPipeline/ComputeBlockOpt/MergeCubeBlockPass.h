@@ -99,6 +99,7 @@ private:
                               BlockDependencyGraph &graph);
   bool checkSameSourceAndSink(int blockId1, int blockId2,
                               BlockDependencyGraph &graph);
+  bool hasSameDepth(int blockId1, int blockId2, BlockDependencyGraph &graph);
   bool checkNoCycle(int blockId1, int blockId2, BlockDependencyGraph &graph,
                     const MemoryDependenceGraph &memGraph,
                     ComputeBlockIdManager &bm);

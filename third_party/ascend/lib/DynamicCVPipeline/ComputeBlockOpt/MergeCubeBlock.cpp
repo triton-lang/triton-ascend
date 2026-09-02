@@ -303,21 +303,28 @@ bool MergeCubeBlockPass::canMergeBlocks(
   }
 
   // Step 2: Check if they have same source and sink with no other nodes
-  if (!checkSameSourceAndSink(blockId1, blockId2, graph)) {
+  if (checkSameSourceAndSink(blockId1, blockId2, graph)) {
     LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << " cannot merge: different source or sink\n");
-    return false;
-  }
-
-  // Step 3: Check if merging would create a cycle
-  if (checkNoCycle(blockId1, blockId2, graph, memGraph, bm)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << " can merge: no cycle detected\n");
+                   << " can merge: same source or sink\n");
     return true;
   }
 
+  // Step 3: Check if merging would create a cycle
+  if (!checkNoCycle(blockId1, blockId2, graph, memGraph, bm)) {
+    LDBG("Blocks " << blockId1 << " and " << blockId2
+                   << "cannot merge: would create cycle\n");
+    return false;
+  }
+
+  // Step 4: cube block in the same depth
+  if (hasSameDepth(blockId1, blockId2, graph)) {
+    LDBG("Blocks " << blockId1 << " and " << blockId2
+                    << " can merge: cube blocks have same depth\n");
+    return true;
+    }
+
   LDBG("Blocks " << blockId1 << " and " << blockId2
-                 << " cannot merge: would create cycle\n");
+                 << " cannot merge: unsupport scenario\n");
   return false;
 }
 
@@ -366,6 +373,44 @@ bool MergeCubeBlockPass::checkSameSourceAndSink(int blockId1, int blockId2,
   }
 
   return true;
+}
+
+bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
+                                      BlockDependencyGraph &graph) {
+
+  // Get block nodes
+  BlockNode *node1 = graph.getBlockNode(blockId1);
+  BlockNode *node2 = graph.getBlockNode(blockId2);
+
+  if (!node1 || !node2) {
+    return false;
+  }
+
+  if (node1->depth != node2->depth) {
+    return false;
+  }
+
+  // Check that the max depth among successors of both blocks is the same
+  auto getMaxSuccDepth = [&](int blockId) {
+    int maxDepth = -1;
+    for (int succId : graph.getSuccessors(blockId)) {
+      BlockNode *succNode = graph.getBlockNode(succId);
+      if (succNode && succNode->depth > maxDepth) {
+        maxDepth = succNode->depth;
+      }
+    }
+    return maxDepth;
+  };
+
+  int maxSuccDepth1 = getMaxSuccDepth(blockId1);
+  int maxSuccDepth2 = getMaxSuccDepth(blockId2);
+
+  // If either block has no successors, still mergeable
+  if (maxSuccDepth1 == -1 || maxSuccDepth2 == -1) {
+    return true;
+  }
+
+  return maxSuccDepth1 == maxSuccDepth2;
 }
 
 llvm::SmallVector<int> MergeCubeBlockPass::filterBlocksByType(

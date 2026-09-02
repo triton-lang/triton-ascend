@@ -24,7 +24,7 @@ on:
       - 'version.txt'
       # CI itself
       - '.github/workflows/Ascend950-ci.yml'
-
+#test
 concurrency:
   # PR runs key on PR number (cancel earlier pushes); branch-push runs key on
   # SHA so distinct merges don't cancel each other.

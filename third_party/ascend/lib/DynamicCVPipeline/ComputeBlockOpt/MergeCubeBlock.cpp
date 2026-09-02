@@ -386,7 +386,31 @@ bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
     return false;
   }
 
-  return node1->depth == node2->depth;
+  if (node1->depth != node2->depth) {
+    return false;
+  }
+
+  // Check that the max depth among successors of both blocks is the same
+  auto getMaxSuccDepth = [&](int blockId) {
+    int maxDepth = -1;
+    for (int succId : graph.getSuccessors(blockId)) {
+      BlockNode *succNode = graph.getBlockNode(succId);
+      if (succNode && succNode->depth > maxDepth) {
+        maxDepth = succNode->depth;
+      }
+    }
+    return maxDepth;
+  };
+
+  int maxSuccDepth1 = getMaxSuccDepth(blockId1);
+  int maxSuccDepth2 = getMaxSuccDepth(blockId2);
+
+  // If either block has no successors, still mergeable
+  if (maxSuccDepth1 == -1 || maxSuccDepth2 == -1) {
+    return true;
+  }
+
+  return maxSuccDepth1 == maxSuccDepth2;
 }
 
 llvm::SmallVector<int> MergeCubeBlockPass::filterBlocksByType(

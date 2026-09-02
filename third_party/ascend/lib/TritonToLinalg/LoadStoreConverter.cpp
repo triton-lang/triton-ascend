@@ -253,6 +253,38 @@ LogicalResult LoadConverter::continueModifyFromAddPtrConverter(
   return success();
 }
 
+// insert_slice pad only when some mask dim is a compile-time prefix shorter
+// than the tile (GLA: K=32, BK=64). Dynamic remainder masks (matmul K, cat N)
+// keep dest-alloc fill: A3 cannot plan tensor<?x> slices, and insert_slice of
+// a full CUBE tile overflows UB / crashes GSS.
+static bool buildStaticPrefixSlice(const MaskState &mstate,
+                                   RankedTensorType tensorTy,
+                                   ConversionPatternRewriter &rewriter,
+                                   SmallVector<OpFoldResult> &outOffsets,
+                                   SmallVector<OpFoldResult> &outDims) {
+  outOffsets.clear();
+  outDims.clear();
+  if (!tensorTy.hasStaticShape() || mstate.getRank() != tensorTy.getRank())
+    return false;
+  bool hasStaticPad = false;
+  for (int64_t i = 0, e = mstate.getRank(); i < e; ++i) {
+    auto off = getConstantIntValue(mstate.offsets[i]);
+    auto dim = getConstantIntValue(mstate.dims[i]);
+    int64_t tile = tensorTy.getShape()[i];
+    if (off && dim && *off >= 0 && *dim > 0 && *off + *dim <= tile) {
+      outOffsets.push_back(rewriter.getIndexAttr(*off));
+      outDims.push_back(rewriter.getIndexAttr(*dim));
+      if (*off == 0 && *dim < tile)
+        hasStaticPad = true;
+    } else {
+      // Dynamic dim: do not emit tensor<?x>. Use the full static tile.
+      outOffsets.push_back(rewriter.getIndexAttr(0));
+      outDims.push_back(rewriter.getIndexAttr(tile));
+    }
+  }
+  return hasStaticPad;
+}
+
 void LoadConverter::fillTensorWithOtherForMaskScenario(
     Value other, Value localMem, ArrayRef<OpFoldResult> maskDim,
     ConversionPatternRewriter &rewriter) const {
@@ -263,12 +295,10 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
          "shape and mask must have same rank");
   (void)originalType;
 
-  // Boundary-pad path only (make_tensor_ptr + padding).
-  // Scalar other=0 does not use this. That path is insert_slice below.
-  //
+  // Dest-alloc fill for boundary-pad and for scalar-other when the mask is
+  // not a compile-time prefix (matmul remainder, cat N, softmax).
   // Always fill. Do not wrap this in scf.if.
   // MIX deletes a result-less fill tagged hivm.unlikely_condition.
-  // Then pad is garbage.
   rewriter.create<linalg::FillOp>(loc, ValueRange{other}, ValueRange{localMem});
 }
 
@@ -692,10 +722,6 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
     if (scalarOther) {
-      // GLA: K=32, BK=64. Pad lanes go into exp2 then tl.dot.
-      // Old: linalg.fill the dest alloc. No SSA result. MIX drops it. NaNs.
-      // New: copy live lanes, insert_slice into SSA zeros. Pad is an SSA value.
-      // Do not to_buffer(fill) as dest. merge-concat then aliases Q and K.
       scalarOtherVal = scalarOther;
     } else if (isa<RankedTensorType>(other.getType())) {
       tensorOtherBase = other;
@@ -712,6 +738,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   //
   // The basis is that last dimension range comparison would generate
   // unaccepted discontinuous mask.
+  SmallVector<OpFoldResult> sliceOffsets;
+  SmallVector<OpFoldResult> sliceDims;
+  bool useInsertSlicePad = false;
+  if (scalarOtherVal)
+    useInsertSlicePad = buildStaticPrefixSlice(mstate, tensorType, rewriter,
+                                               sliceOffsets, sliceDims);
+  if (scalarOtherVal && !useInsertSlicePad)
+    fillTensorWithOtherForMaskScenario(scalarOtherVal, allocOp, mstate.dims,
+                                       rewriter);
+
   if (!tensorOtherBase && !scalarOtherVal &&
       mstate.getRank() == memRefType.getRank() &&
       isConstantIntValue(mstate.offsets.back(), 0) &&
@@ -760,25 +796,28 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     }
   }
 
-  if (scalarOtherVal) {
-    // 1. to_tensor the copy dest (live lanes only are defined)
-    // 2. extract_slice those live lanes
-    // 3. insert_slice them into zeros
-    // Pad = fill result. MIX cannot drop that without breaking SSA.
+  if (useInsertSlicePad) {
+    // Static prefix pad (GLA K=32/BK=64). Copy live lanes, insert_slice into
+    // SSA zeros. MIX cannot drop that without breaking SSA.
+    // Dynamic masks already filled alloc above.
     Value loadedTensor = rewriter.create<bufferization::ToTensorOp>(
         loc, tensorType, allocOp, true, true);
     propagateWasBoolToInt8Attr(op.getOperation(), loadedTensor.getDefiningOp(),
                                rewriter);
-    Value active =
-        mstate.getExtractSlice(loadedTensor, loc, rewriter).getResult();
+    Value active = mstate
+                       .getExtractSlice(loadedTensor, loc, rewriter,
+                                        sliceOffsets, sliceDims)
+                       .getResult();
     auto empty = rewriter.create<tensor::EmptyOp>(loc, tensorType.getShape(),
                                                   tensorType.getElementType());
     Value zeros = rewriter
                       .create<linalg::FillOp>(loc, ValueRange{scalarOtherVal},
                                               ValueRange{empty})
                       .getResult(0);
-    Value result =
-        mstate.getInsertSlice(active, zeros, loc, rewriter).getResult();
+    Value result = mstate
+                       .getInsertSlice(active, zeros, loc, rewriter,
+                                       sliceOffsets, sliceDims)
+                       .getResult();
     if (mayImplicitTransposeWithLastAxis) {
       auto markOp = rewriter.create<annotation::MarkOp>(loc, result);
       markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,

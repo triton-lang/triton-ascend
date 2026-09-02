@@ -256,6 +256,16 @@ def install() -> None:
             _stub_cls = type(_name, (), {"__doc__": f"MLIR {_name} type."})
             setattr(_cann_ext, _name, _stub_cls)
 
+    # ``SYNC_HINT`` and ``EVENT_ID`` are public aliases defined in core.py,
+    # while their enum classes live in semantic.py.  The source parser above
+    # intentionally extracts only top-level functions and classes, so provide
+    # lightweight public stubs for these two aliases in mock builds.
+    for _name in ["SYNC_HINT", "EVENT_ID"]:
+        if not hasattr(_cann_ext, _name):
+            _stub_cls = type(_name, (), {"__doc__": f"Ascend {_name} enum."})
+            _stub_cls.__module__ = _cann_ext.__name__
+            setattr(_cann_ext, _name, _stub_cls)
+
     # ------------------------------------------------------------------ #
     # Optional runtime deps                                               #
     # ------------------------------------------------------------------ #

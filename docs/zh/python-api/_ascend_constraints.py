@@ -848,6 +848,128 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
     },
+    "triton.language.extra.cann.extension.CORE": {
+        "replace_docstring": [
+            "Selects the Ascend core type that executes a CustomOp or CustomMacro.",
+            "",
+            "Use this enumeration in a registration class so the compiler knows which core type the device function uses.",
+            "",
+            "* ``VECTOR`` targets a Vector Core.",
+            "* ``CUBE`` targets a Cube Core.",
+            "* ``CUBE_OR_VECTOR`` allows either a Cube Core or a Vector Core.",
+            "* ``CUBE_AND_VECTOR`` uses both Cube and Vector Core types.",
+        ],
+        "constraints": [
+            "The ``core`` field is required on classes decorated with ``@al.register_custom_op``.",
+            "A CustomOp or CustomMacro whose core is not exactly ``al.CORE.CUBE`` must also specify an ``al.MODE`` value.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.CORE",
+    },
+    "triton.language.extra.cann.extension.EVENT_ID": {
+        "replace_docstring": [
+            "Enumeration of fixed event identifiers for CustomMacro synchronization slots.",
+            "",
+            "The available values are ``EVENT_ID0`` through ``EVENT_ID7``.",
+        ],
+        "constraints": [
+            "Use an ``EVENT_ID`` value only for a CustomMacro synchronization slot, normally as the ``event`` field of ``al.SyncEventSlot``.",
+            "When ``event`` is omitted, no fixed ``EVENT_ID`` is attached to the slot.",
+            "When ``event`` is specified, it must match the device-side implementation.",
+            "These values are different from the integer IDs in the range [0, 15] accepted by ``sync_block_set``, ``sync_block_wait``, and ``sync_block_all``.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.EVENT_ID",
+    },
+    "triton.language.extra.cann.extension.IteratorType": {
+        "replace_docstring": [
+            "Describes the role of each logical iteration dimension of a CustomOp or CustomMacro.",
+            "",
+            "Use the values in ``iterator_types`` to record the logical loop structure; they do not perform the computation.",
+            "",
+            "* ``Parallel`` marks independent iterations; ``Reduction`` marks a reduction dimension.",
+            "* ``Broadcast`` and ``Transpose`` mark broadcast and transpose dimensions.",
+            "* ``Interleave`` and ``Deinterleave`` mark interleaving and deinterleaving dimensions.",
+            "* ``Inverse``, ``Pad``, and ``Concat`` mark reverse-order, padding, and concatenation dimensions.",
+            "* ``Gather`` and ``Cumulative`` mark indexed-gather and cumulative dimensions.",
+            "* ``Opaque`` marks a dimension without one of the generic meanings above.",
+        ],
+        "constraints": [
+            "Use ``IteratorType`` values in the optional ``iterator_types`` list of a registered CustomOp or CustomMacro.",
+            "List the values in the same order as the custom operation's logical iteration dimensions.",
+            "When ``iterator_types`` is omitted, the frontend does not add a default list.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.IteratorType",
+    },
+    "triton.language.extra.cann.extension.MODE": {
+        "replace_docstring": [
+            "Selects the execution mode of a CustomOp or CustomMacro whose core is not exactly ``al.CORE.CUBE``.",
+            "",
+            "``SIMD`` means single instruction, multiple data; ``SIMT`` means single instruction, multiple threads; ``MIX`` selects mixed execution.",
+        ],
+        "constraints": [
+            "The ``mode`` field is required when ``core`` is not exactly ``al.CORE.CUBE``.",
+            "When ``core`` is exactly ``al.CORE.CUBE``, ``mode`` is not required.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.MODE",
+    },
+    "triton.language.extra.cann.extension.PIPE": {
+        "replace_docstring": [
+            "Identifies the Ascend execution pipeline used by a CustomOp, CustomMacro, or synchronization primitive.",
+            "",
+            "The enumeration describes a pipeline; selecting a value does not itself run computation or move data.",
+            "",
+            "* ``PIPE_S``, ``PIPE_V``, and ``PIPE_M`` identify scalar, vector, and matrix-compute pipelines.",
+            "* ``PIPE_MTE1`` identifies on-chip transfer, while ``PIPE_MTE2`` and ``PIPE_MTE3`` typically identify data-in and data-out transfer.",
+            "* ``PIPE_ALL`` identifies all pipelines, and ``PIPE_FIX`` identifies the Cube-result output pipeline.",
+        ],
+        "constraints": [
+            "A single ``PIPE`` value configures an ordinary CustomOp.",
+            "A two-element tuple or list of ``PIPE`` values configures a CustomMacro input and output pipeline.",
+            "The configured pipelines must match the device-side implementation.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.PIPE",
+    },
+    "triton.language.extra.cann.extension.SYNC_HINT": {
+        "replace_docstring": [
+            "Enumeration describing synchronization already performed inside a CustomMacro implementation.",
+            "",
+            "``WAIT`` means the device function performs the wait, ``SET`` means it performs the set, and ``INTERNAL`` means it handles the synchronization internally.",
+        ],
+        "constraints": [
+            "Use ``SYNC_HINT`` for a CustomMacro synchronization slot, normally as the ``sync`` field of ``al.SyncEventSlot``.",
+            "The default value is ``SYNC_HINT.WAIT`` when ``sync`` is omitted.",
+            "The selected hint and pipelines must match the device-side synchronization behavior.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.SYNC_HINT",
+    },
+    "triton.language.extra.cann.extension.SyncEventSlot": {
+        "replace_docstring": [
+            "Describes one pipeline synchronization slot of a CustomMacro.",
+            "",
+            "The slot's set and wait pipelines describe the synchronization inside the device function and may differ from the CustomMacro input and output pipelines.",
+            "",
+            ":param set_pipe: pipeline that sets the synchronization event.",
+            ":type set_pipe: al.PIPE, optional",
+            ":param wait_pipe: pipeline that waits for the synchronization event.",
+            ":type wait_pipe: al.PIPE, optional",
+            ":param sync: synchronization action performed by the device-side implementation. Defaults to ``SYNC_HINT.WAIT``.",
+            ":type sync: al.SYNC_HINT, optional",
+            ":param event: fixed event identifier used by the device-side implementation.",
+            ":type event: al.EVENT_ID, optional",
+        ],
+        "constraints": [
+            "``SyncEventSlot`` is supported only by a CustomMacro whose ``pipe`` contains two ``al.PIPE`` values.",
+            "For ``WAIT`` or ``SET`` synchronization, provide both ``set_pipe`` and ``wait_pipe``.",
+            "The slot configuration must match the synchronization implemented by the device function.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.SyncEventSlot",
+    },
     "triton.language.extra.cann.extension.ascend_address_space": {
         "constraints": [
             "Provides UB, L1, L0A, L0B, L0C address space constants for use with bl.alloc.",
@@ -870,6 +992,29 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.copy_from_ub_to_l1",
+    },
+    "triton.language.extra.cann.extension.custom": {
+        "replace_docstring": [
+            "Connects an existing device function to a Triton JIT kernel by invoking its registered CustomOp or CustomMacro configuration.",
+            "",
+            "Register the configuration class first with ``@al.register_custom_op``, then pass its registration name to ``al.custom``.",
+            "",
+            ":param name: registered CustomOp or CustomMacro name.",
+            ":type name: str",
+            ":param args: positional inputs accepted by the registered configuration class.",
+            ":param kwargs: keyword inputs accepted by the registered configuration class.",
+            ":param out: output placeholder or placeholders whose types and shapes define the results.",
+            ":type out: tl.tensor or sequence of tl.tensor, optional",
+            ":returns: no value when ``out`` is omitted, one tensor for one output, or a tuple for multiple outputs.",
+        ],
+        "constraints": [
+            "Call ``al.custom`` only inside a function decorated with ``@triton.jit``.",
+            "A user-defined ``name`` must identify a CustomOp or CustomMacro registered with ``@al.register_custom_op``.",
+            "Arguments must match the registered class constructor when it defines ``__init__``.",
+            "The ``out`` value determines the number and types of returned tensors.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.custom",
     },
     "triton.language.extra.cann.extension.debug_barrier": {
         "constraints": [
@@ -949,6 +1094,28 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.extension.parallel",
     },
+    "triton.language.extra.cann.extension.register_custom_op": {
+        "replace_docstring": [
+            "Registers a Python configuration class so ``al.custom`` can lower a call to a device-side CustomOp or CustomMacro.",
+            "",
+            "The class describes the target core, execution mode, pipeline, and the device implementation's symbol and bitcode file.",
+            "",
+            "A single ``pipe`` value produces an ordinary CustomOp; two ``PIPE`` values produce a CustomMacro.",
+            "",
+            ":param op: custom-operation configuration class.",
+            ":returns: the registered configuration class.",
+        ],
+        "constraints": [
+            "The decorator accepts a class, and each registered name must be unique; the class name is used when ``name`` is omitted.",
+            "The ``core`` field is required and must be an ``al.CORE`` value.",
+            "The ``pipe`` field is required: use one ``al.PIPE`` value for a CustomOp, or a two-element list or tuple of ``al.PIPE`` values for a CustomMacro.",
+            "The ``mode`` field is required when ``core`` is not ``al.CORE.CUBE`` and must be an ``al.MODE`` value.",
+            "A user-defined CustomOp or CustomMacro must provide an existing ``bitcode`` file and the matching device-function ``symbol`` before it is lowered.",
+            "``sync_event_slots`` is supported only when ``pipe`` contains exactly two ``al.PIPE`` values.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.register_custom_op",
+    },
     "triton.language.extra.cann.extension.scope": {
         "constraints": [
             "core_mode: must be 'vector', 'cube', 'SIMT', or 'SIMD'.",
@@ -965,6 +1132,23 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.sub_vec_id",
+    },
+    "triton.language.extra.cann.extension.sub_vec_num": {
+        "replace_docstring": [
+            "Returns the compile-time integer quotient of the AIV (AI Vector Core) count divided by the AIC (AI Cube Core) count.",
+            "",
+            "Use this API when a kernel needs the current AIV-to-AIC core ratio instead of assuming a device-specific value.",
+            "In a mixed AIC+AIV kernel, it can be combined with :func:`sub_vec_id` to divide work between Vector Core partitions.",
+            "",
+            ":returns: integer quotient of the AIV Core count divided by the AIC Core count.",
+            ":rtype: tl.constexpr",
+        ],
+        "constraints": [
+            "Call ``sub_vec_num`` only inside a function decorated with ``@triton.jit``.",
+            "The result depends on the AIV/AIC ratio visible during JIT compilation; do not assume that every device returns 2.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.sub_vec_num",
     },
     "triton.language.extra.cann.extension.subview": {
         "constraints": [

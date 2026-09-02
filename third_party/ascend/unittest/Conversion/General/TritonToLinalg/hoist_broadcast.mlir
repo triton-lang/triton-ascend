@@ -71,6 +71,6 @@ tt.func public @copy_all_layer_kv_cache2(%arg0: !tt.ptr<i64> {tt.divisibility = 
 // CHECK: memref.alloc
 // CHECK: memref.copy
 // CHECK: scf.for
-// CHECK: linalg.fill
-// CHECK: memref.subview
+// CHECK: memref.copy
+// CHECK: tensor.extract_slice
 // CHECK: bufferization.materialize_in_destination

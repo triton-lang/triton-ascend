@@ -13,12 +13,11 @@
 // CHECK: tt.store
 //
 // CHECK-LINALG-LABEL: func.func @desc_copy_device
-// CHECK-LINALG: %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK-LINALG: %[[ALLOC:.*]] = memref.alloc() : memref<16x32xf32>
-// CHECK-LINALG: scf.if
-// CHECK-LINALG: linalg.fill ins(%[[ZERO]] : f32) outs(%[[ALLOC]] : memref<16x32xf32>)
 // CHECK-LINALG: memref.copy
 // CHECK-LINALG: bufferization.to_tensor %[[ALLOC]]
+// CHECK-LINALG: tensor.extract_slice
+// CHECK-LINALG-NOT: hivm.unlikely_condition
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @desc_copy_device(%in_ptr: !tt.ptr<f32>, %out_ptr: !tt.ptr<f32>, %M: i32, %N: i32) {
@@ -43,14 +42,11 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
 // CHECK: tt.store
 //
 // CHECK-LINALG-LABEL: func.func @host_desc_load
-// CHECK-LINALG-DAG: %[[ZERO:.*]] = arith.constant 0.000000e+00 : f32
-// CHECK-LINALG-DAG: %[[NAN:.*]] = arith.constant 0x7FC00000 : f32
-// CHECK-LINALG-DAG: %[[ALLOC:.*]] = memref.alloc() : memref<16x32xf32>
-// CHECK-LINALG: %[[PAD:.*]] = arith.select %{{.*}}, %[[NAN]], %[[ZERO]] : f32
-// CHECK-LINALG: scf.if
-// CHECK-LINALG: linalg.fill ins(%[[PAD]] : f32) outs(%[[ALLOC]] : memref<16x32xf32>)
+// CHECK-LINALG: %[[ALLOC:.*]] = memref.alloc() : memref<16x32xf32>
 // CHECK-LINALG: memref.copy
 // CHECK-LINALG: bufferization.to_tensor %[[ALLOC]]
+// CHECK-LINALG: tensor.extract_slice
+// CHECK-LINALG-NOT: hivm.unlikely_condition
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @host_desc_load(

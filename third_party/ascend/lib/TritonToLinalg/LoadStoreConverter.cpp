@@ -261,38 +261,15 @@ void LoadConverter::fillTensorWithOtherForMaskScenario(
   assert(originalType.hasStaticShape() && "only support static shape");
   assert(originalType.getRank() == maskDim.size() &&
          "shape and mask must have same rank");
+  (void)originalType;
 
-  auto fillFlag =
-      rewriter.create<arith::ConstantOp>(loc, rewriter.getBoolAttr(false))
-          .getResult();
-
-  for (size_t i = 0; i < originalType.getShape().size(); ++i) {
-    // Use dynamic value to judge whether overstep boundary
-    auto shapeVal = rewriter.create<arith::ConstantOp>(
-        loc, rewriter.getIndexAttr(originalType.getDimSize(i)));
-
-    Value maskDimVal;
-    if (isa<Attribute>(maskDim[i]))
-      maskDimVal = rewriter.create<arith::ConstantOp>(
-          loc, cast<IntegerAttr>(cast<Attribute>(maskDim[i])));
-    else
-      maskDimVal = cast<Value>(maskDim[i]);
-
-    auto curCmp = rewriter.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
-                                                 maskDimVal, shapeVal);
-
-    fillFlag = rewriter.create<arith::OrIOp>(loc, fillFlag, curCmp.getResult())
-                   .getResult();
-  }
-  auto ifOp = rewriter.create<scf::IfOp>(loc, fillFlag);
-  {
-    OpBuilder::InsertionGuard guard(rewriter);
-    rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
-    rewriter.create<linalg::FillOp>(loc, ValueRange{other},
-                                    ValueRange{localMem});
-  }
-  ifOp->setAttr(rewriter.getStringAttr("hivm.unlikely_condition"),
-                UnitAttr::get(rewriter.getContext()));
+  // Boundary-pad path only (make_tensor_ptr + padding).
+  // Scalar other=0 does not use this. That path is insert_slice below.
+  //
+  // Always fill. Do not wrap this in scf.if.
+  // MIX deletes a result-less fill tagged hivm.unlikely_condition.
+  // Then pad is garbage.
+  rewriter.create<linalg::FillOp>(loc, ValueRange{other}, ValueRange{localMem});
 }
 
 LoadConverter::LoadConverter(MLIRContext *context)
@@ -710,12 +687,16 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
 
   Value tensorOtherBase;
+  Value scalarOtherVal;
   if (other) {
     auto scalarOther =
         mlir::ConverterUtils::getScalarValue(other, loc, rewriter);
     if (scalarOther) {
-      fillTensorWithOtherForMaskScenario(scalarOther, allocOp, mstate.dims,
-                                         rewriter);
+      // GLA: K=32, BK=64. Pad lanes go into exp2 then tl.dot.
+      // Old: linalg.fill the dest alloc. No SSA result. MIX drops it. NaNs.
+      // New: copy live lanes, insert_slice into SSA zeros. Pad is an SSA value.
+      // Do not to_buffer(fill) as dest. merge-concat then aliases Q and K.
+      scalarOtherVal = scalarOther;
     } else if (isa<RankedTensorType>(other.getType())) {
       tensorOtherBase = other;
     } else {
@@ -731,7 +712,8 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   //
   // The basis is that last dimension range comparison would generate
   // unaccepted discontinuous mask.
-  if (!tensorOtherBase && mstate.getRank() == memRefType.getRank() &&
+  if (!tensorOtherBase && !scalarOtherVal &&
+      mstate.getRank() == memRefType.getRank() &&
       isConstantIntValue(mstate.offsets.back(), 0) &&
       isConstantIntValue(mstate.dims.back(), memRefType.getShape().back())) {
     auto [ptrStrides, ptrOffsets] = memRefType.getStridesAndOffset();
@@ -776,6 +758,35 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
       markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
                       UnitAttr::get(rewriter.getContext()));
     }
+  }
+
+  if (scalarOtherVal) {
+    // 1. to_tensor the copy dest (live lanes only are defined)
+    // 2. extract_slice those live lanes
+    // 3. insert_slice them into zeros
+    // Pad = fill result. MIX cannot drop that without breaking SSA.
+    Value loadedTensor = rewriter.create<bufferization::ToTensorOp>(
+        loc, tensorType, allocOp, true, true);
+    propagateWasBoolToInt8Attr(op.getOperation(), loadedTensor.getDefiningOp(),
+                               rewriter);
+    Value active =
+        mstate.getExtractSlice(loadedTensor, loc, rewriter).getResult();
+    auto empty = rewriter.create<tensor::EmptyOp>(
+        loc, tensorType.getShape(), tensorType.getElementType());
+    Value zeros =
+        rewriter
+            .create<linalg::FillOp>(loc, ValueRange{scalarOtherVal},
+                                    ValueRange{empty})
+            .getResult(0);
+    Value result =
+        mstate.getInsertSlice(active, zeros, loc, rewriter).getResult();
+    if (mayImplicitTransposeWithLastAxis) {
+      auto markOp = rewriter.create<annotation::MarkOp>(loc, result);
+      markOp->setAttr(MayImplicitTransposeWithLastAxisTAG,
+                      UnitAttr::get(rewriter.getContext()));
+    }
+    rewriter.replaceOp(op, result);
+    return success();
   }
 
   if (!tensorOtherBase) {

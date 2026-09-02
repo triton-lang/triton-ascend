@@ -138,6 +138,11 @@ bool isSyncOp(Operation *op) {
              hivm::SyncBlockSetOp>(op);
 }
 
+bool isExternalSyncOp(Operation *op) {
+  return isSyncOp(op) &&
+         op->getAttrOfType<IntegerAttr>(CVPipeline::kExternalSync);
+}
+
 bool isScfOp(Operation *op) {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
 }

@@ -36,7 +36,7 @@ SyncWall::SyncWall(Block *block) {
     if (!ordinal.contains(owner)) {
       ordinal[owner] = idx++;
     }
-    if (isSyncOp(op)) {
+    if (isExternalSyncOp(op)) {
       syncPositions.insert(ordinal[owner]);
     }
   });

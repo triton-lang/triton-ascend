@@ -48,8 +48,9 @@ using namespace mlir;
 namespace mlir {
 namespace CVPipeline {
 
-bool groupWouldStraddleSync(llvm::ArrayRef<Operation *> opsToUnify,
-                            int targetBlockId, ComputeBlockIdManager &bm) {
+static bool groupWouldStraddleSync(llvm::ArrayRef<Operation *> opsToUnify,
+                                   int targetBlockId,
+                                   ComputeBlockIdManager &bm) {
   llvm::DenseMap<Block *, llvm::SmallVector<Operation *>> opsByBlock;
   for (auto *op : opsToUnify) {
     if (op && op->getBlock()) {

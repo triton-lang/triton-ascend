@@ -1820,6 +1820,8 @@ llvm::LogicalResult OpClassifierPass::markSynchronizationOp() {
     }
     LOG_DEBUG("======== Assigned unique block_id for synchronization op "
               << *op << "\n");
+    op->setAttr(CVPipeline::kExternalSync,
+                IntegerAttr::get(IntegerType::get(op->getContext(), 32), 1));
   }
 
   return success();

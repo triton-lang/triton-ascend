@@ -41,6 +41,7 @@ namespace CVPipeline {
 
 inline constexpr llvm::StringLiteral kCoreType = "ssbuffer.core_type";
 inline constexpr llvm::StringLiteral kBlockId = "ssbuffer.block_id";
+inline constexpr llvm::StringLiteral kExternalSync = "ssbuffer.external_sync";
 inline constexpr llvm::StringLiteral kTransferId = "ssbuffer.transfer_id";
 inline constexpr llvm::StringLiteral kCubeFirst = "ssbuffer.cube_first";
 inline constexpr llvm::StringLiteral kVectorFirst = "ssbuffer.vector_first";
@@ -130,6 +131,7 @@ bool isScfOp(Operation *op);
 bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);
 bool isSyncOp(Operation *op);
+bool isExternalSyncOp(Operation *op);
 
 // Wrapper around a "main loop" — either scf.for or scf.while carrying the
 // ssbuffer.main_loop attribute. Lets downstream code treat both uniformly.

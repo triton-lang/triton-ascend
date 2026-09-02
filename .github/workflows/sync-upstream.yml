@@ -1,0 +1,272 @@
+# GitHub Actions workflow: Sync upstream Triton into triton-ascend fork.
+#
+# This is a THIN wrapper around the TA_main2main_workflow package. All the real
+# logic (detect gap → merge → AI resolve conflicts → build → NPU test → AI fix
+# retry loop → push branch → open PR) lives inside `ta-kickoff --mode=full`.
+# The Action only provisions the environment and runs that one command, exactly
+# like running it locally:
+#
+#   PUSH_TO_GITHUB=true \
+#   GITHUB_REPO=triton-lang/triton-ascend \
+#   AI_BACKEND=claude \
+#   ta-kickoff --mode=full
+#
+# Because --mode=full builds and runs pytest on Ascend NPU, the whole job runs
+# on the self-hosted NPU runner inside the ascend CI container (same image as
+# integration-tests-ascend.yml).
+#
+# Required GitHub Secrets (Settings → Secrets and variables → Actions):
+#   ANTHROPIC_API_KEY  — DeepSeek API key (used via Anthropic-compatible API)
+#   SYNC_PAT           — PAT with `repo` + `workflow` scope, used to push the
+#                        work branch and open the PR (falls back to GITHUB_TOKEN)
+
+name: Sync Upstream Triton
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_commit:
+        description: 'Upstream triton commit SHA (leave empty for latest)'
+        required: false
+        default: ''
+  schedule:
+    # Weekly, Monday 03:17 UTC — off the :00 mark on purpose.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: linux-aarch64-a3-4
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-a3-ubuntu22.04-py3.10-latest
+    timeout-minutes: 600
+    env:
+      PYTHON: "python3.10"
+      PROTON_SKIP_PC_SAMPLING_TEST: 1
+      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
+    steps:
+      # ── Checkout triton-ascend (full history + tags + submodules) ──────────
+      - name: Checkout triton-ascend
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          submodules: "true"
+          token: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Configure git
+        run: |
+          git config user.name  "TA Sync Bot"
+          git config user.email "ta-sync-bot@users.noreply.github.com"
+
+      # ── GitHub CLI (needed by ta-kickoff for gh pr create) ─────────────────
+      - name: Install GitHub CLI
+        shell: bash
+        run: |
+          if command -v gh &>/dev/null; then
+            echo "gh already installed: $(gh --version | head -1)"
+            exit 0
+          fi
+          apt-get update
+          apt-get install -y gh
+          echo "gh installed: $(gh --version | head -1)"
+
+      # ── Upstream triton remote (the flow fetches `upstream-triton`) ────────
+      - name: Add upstream triton remote
+        run: |
+          if ! git remote get-url upstream-triton 2>/dev/null; then
+            git remote add upstream-triton https://github.com/triton-lang/triton.git
+          fi
+          git fetch upstream-triton --prune --tags
+
+      # ── Clone upstream triton for commit scanning / diff generation ─────────
+      - name: Clone upstream triton
+        shell: bash
+        run: |
+          if [ ! -d ~/triton-upstream/.git ]; then
+            git clone --bare https://github.com/triton-lang/triton.git ~/triton-upstream
+          else
+            git -C ~/triton-upstream fetch origin --prune --tags
+          fi
+          echo "upstream triton ready at ~/triton-upstream ($(git -C ~/triton-upstream rev-parse --short HEAD))"
+
+      # ── Build toolchain (Bisheng compiler), same as integration tests ─────
+      - name: Download and install Bisheng compiler
+        shell: bash
+        run: |
+          if [ ! -f cmake/bisheng-version.txt ]; then
+            echo "cmake/bisheng-version.txt not found, skipping"
+            exit 0
+          fi
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
+          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            exit 1
+          fi
+          echo "Downloading: ${BISHENG_FILENAME}"
+          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+          if [ -n "${BISHENG_SHA256}" ]; then
+            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          else
+            echo "Warning: No SHA256 checksum provided, skipping verification"
+          fi
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-
+
+      # ── Install the sync workflow package + Claude Code CLI ────────────────
+      - name: Install TA_main2main_workflow
+        run: |
+          git clone https://github.com/TecJesh/main2main_workflow.git /tmp/ta-workflow
+          cd /tmp/ta-workflow
+          ${PYTHON} -m pip install -e .
+          echo "TA workflow installed: $(ta-kickoff --help 2>&1 | head -1)"
+
+      - name: Install Claude Code
+        shell: bash
+        run: |
+          set -e
+          if command -v npm >/dev/null 2>&1; then
+            echo "Node already present: node=$(node -v 2>/dev/null) npm=$(npm -v 2>/dev/null)"
+          else
+            # The ascend CI container has no nodejs in apt; fetch the arm64
+            # prebuilt Node from the same Huawei mirror we already trust.
+            NODE_VER="v20.18.0"
+            NODE_DIR="node-${NODE_VER}-linux-arm64"
+            echo "Installing ${NODE_DIR} from Huawei mirror..."
+            curl -fL "https://repo.huaweicloud.com/nodejs/${NODE_VER}/${NODE_DIR}.tar.xz" -o /tmp/node.tar.xz
+            mkdir -p /usr/local/lib/nodejs
+            tar -xJf /tmp/node.tar.xz -C /usr/local/lib/nodejs
+            # Add to PATH for this step AND all later steps (ta-kickoff needs `claude`).
+            echo "/usr/local/lib/nodejs/${NODE_DIR}/bin" >> "$GITHUB_PATH"
+            export PATH="/usr/local/lib/nodejs/${NODE_DIR}/bin:$PATH"
+            echo "Installed node=$(node -v) npm=$(npm -v)"
+          fi
+          npm install -g @anthropic-ai/claude-code
+          echo "claude: $(command -v claude || echo '<not found>')"
+
+      # ── Clone llvm-project to ~ for IR patch generation ──────────────────
+      - name: Clone llvm-project
+        shell: bash
+        timeout-minutes: 30
+        run: |
+          # llvm-project is huge — bump postBuffer and disable low-speed
+          # timeouts to avoid fetch-pack / early-EOF disconnects.
+          git config --global http.postBuffer 524288000
+          git config --global http.maxRequestBuffer 524288000
+          git config --global http.lowSpeedLimit 0
+          git config --global http.lowSpeedTime 999999
+          git config --global pack.windowMemory 256m
+          git config --global pack.packSizeLimit 2g
+          git config --global protocol.version 2
+
+          # Retry helper: retry a command up to 6 times with 20s waits.
+          # If the repo is corrupted, delete it so the next attempt re-clones.
+          retry() {
+            for i in 1 2 3 4 5 6; do
+              echo "[attempt $i/6]" "$@"
+              if "$@"; then
+                return 0
+              fi
+              if ! git status &>/dev/null; then
+                echo "Repo corrupted, removing ~/llvm-project for fresh clone"
+                cd / && rm -rf ~/llvm-project
+                return 1
+              fi
+              echo "Retrying in 20s..."
+              sleep 20
+            done
+            echo "ERROR: command failed after 6 attempts: $*" >&2
+            return 1
+          }
+
+          if [ ! -d ~/llvm-project/.git ]; then
+            retry git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
+          fi
+          cd ~/llvm-project
+          echo "llvm-project ready at ~/llvm-project ($(git rev-parse --short HEAD))"
+      - name: Prepare LLVM install prefix
+        shell: bash
+        run: mkdir -p ~/llvm-install-sync
+
+      # ── Run the full sync flow (this is the local command) ─────────────────
+      - name: Run ta-kickoff --mode=full
+        shell: bash
+        env:
+          # Repo paths — full mode uses the same checkout for both.
+          TRITON_ASCEND_PATH: ${{ github.workspace }}
+          TRITON_PATH: ~/triton-upstream
+          TRITON_TARGET_COMMIT: ${{ inputs.target_commit }}
+          TA_MAIN2MAIN_WORKSPACE: /tmp/ta-workspace
+          # LLVM paths for baseline build + IR patch rebuild (single-step mode).
+          LLVM_PROJECT_PATH: ~/llvm-project
+          LLVM_INSTALL_PREFIX_SYNC: ~/llvm-install-sync
+          # Enable single-step per-commit merge → build → test → fix pipeline.
+          TA_SINGLE_STEP_MODE: "true"
+          # Push branch + open PR when everything passes.
+          PUSH_TO_GITHUB: "true"
+          GITHUB_REPO: triton-lang/triton-ascend
+          TA_BASE_BRANCH: upstream-sync
+          PR_AUTHOR: TA
+          PR_TYPE: sync
+          GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
+          # AI backend: Claude Code CLI wired to DeepSeek's Anthropic-compatible API.
+          AI_BACKEND: claude
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-pro[1m]
+          ANTHROPIC_DEFAULT_HAIKU_MODEL: deepseek-v4-flash
+          CLAUDE_CODE_SUBAGENT_MODEL: deepseek-v4-flash
+          CLAUDE_CODE_EFFORT_LEVEL: max
+          AUTO_STASH: "true"
+          # Build parity with integration-tests-ascend.yml. build_test.py does
+          # os.environ.copy() before its own overrides, so any key it does NOT
+          # force is inherited from here. (DEBUG / TRITON_BUILD_UT are forced by
+          # build_test.py and CANNOT be overridden from the workflow.)
+          TRITON_DISABLE_LINE_INFO: "1"
+          CCACHE_COMPRESS: "true"
+          TRITON_BUILD_WITH_O1: "true"
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh || echo "warn: CANN set_env.sh not sourced"
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          npu-smi info || true
+          # Limit build parallelism (nproc/3) and NPU pytest workers (nproc/9)
+          # to match integration-tests-ascend.yml and avoid build / NPU OOM.
+          MAX_JOBS=$(( $(nproc) / 3 )); [ "$MAX_JOBS" -lt 1 ] && MAX_JOBS=1
+          NUM_PROCS=$(( $(nproc) / 9 )); [ "$NUM_PROCS" -lt 1 ] && NUM_PROCS=1
+          export MAX_JOBS NUM_PROCS
+          echo "MAX_JOBS=$MAX_JOBS  NUM_PROCS=$NUM_PROCS"
+          ta-kickoff --mode=full
+
+      # ── Always surface the workspace (logs, patches, summaries) ────────────
+      - name: Upload sync workspace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ta-sync-workspace
+          path: /tmp/ta-workspace/
+          retention-days: 7

@@ -13,10 +13,9 @@ on:
     types: [opened, synchronize, reopened]
     paths:
       - 'docs/**'
-      - '**/*.rst'
-      - '**/*.md'
-      - '**/requirements*.txt'
-      - '**/setup.cfg'
+      - '*.md'
+      - '.github/workflows/scripts/readthedocs_checkout.sh'
+      - '.github/workflows/docs-rtd-preview.yml'
       - '.readthedocs.yaml'
 
 permissions:

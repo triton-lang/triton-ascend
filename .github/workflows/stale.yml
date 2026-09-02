@@ -17,7 +17,7 @@ jobs:
         with:
           # Issues
           days-before-issue-stale: 30
-          days-before-issue-close: 14
+          days-before-issue-close: 7
           stale-issue-label: "stale"
           stale-issue-message: >
             This issue has been automatically marked as **stale** because it has not had
@@ -42,7 +42,7 @@ jobs:
             If it still needs to be merged, feel free to reopen.
 
           # Labels to exempt from stale checks
-          exempt-issue-labels: "P0,bug,enhancement,community-task"
+          exempt-issue-labels: "P0,bug,enhancement,community-task,tracking"
           exempt-pr-labels: "P0,WIP"
 
           # Auto-remove stale label when activity occurs

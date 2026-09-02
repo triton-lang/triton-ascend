@@ -1,21 +1,23 @@
 name: LLVM Build
 
-# TEMPORARILY DISABLED — all triggers commented out so this workflow never
-# starts and never occupies a runner. Uncomment to re-enable.
 on:
-  # push:
-  #   paths:
-  #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/patch/**
-  #     - .github/workflows/llvm-build.yml
-  #     - .github/workflows/llvm-build/**
-  # pull_request:
-  #   paths:
-  #     - cmake/llvm-hash.txt
-  #     - third_party/ascend/patch/**
-  #     - .github/workflows/llvm-build.yml
-  #     - .github/workflows/llvm-build/**
+  push:
+    paths:
+      - cmake/llvm-hash.txt
+      - third_party/ascend/patch/llvm_patch_*.patch
+      - .github/workflows/llvm-build.yml
+      - .github/workflows/build/almalinux.Dockerfile
+  pull_request:
+    paths:
+      - cmake/llvm-hash.txt
+      - third_party/ascend/patch/llvm_patch_*.patch
+      - .github/workflows/llvm-build.yml
+      - .github/workflows/build/almalinux.Dockerfile
   workflow_dispatch:
+
+concurrency:
+  group: llvm-build-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   SCCACHE_DIR: ${{ github.workspace }}/sccache
@@ -29,29 +31,42 @@ jobs:
   build:
     name: Build on ${{ matrix.config.runner }}
     runs-on: ${{ matrix.config.runs_on }}
+    # Cann container provides buildx remote builder config for AlmaLinux.
+    # Ubuntu native builds also work inside this container.
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 240
+    env:
+      PIP_INDEX_URL: http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
+      PIP_TRUSTED_HOST: cache-service.nginx-pypi-cache.svc.cluster.local
 
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
         config:
-        - {runner: 'Ubuntu 22.04', runs_on: 'ubuntu-22.04', target-os: 'ubuntu', arch: 'x64'}
-        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'ubuntu', arch: 'arm64'}
-        - {runner: 'CentOS 7', runs_on: 'ubuntu-22.04', target-os: 'centos', arch: 'x64'}
-        - {runner: 'AlmaLinux 8', runs_on: 'ubuntu-22.04', target-os: 'almalinux', arch: 'x64'}
-        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'ubuntu-22.04-arm', target-os: 'almalinux', arch: 'arm64'}
+        - {runner: 'Ubuntu 22.04', runs_on: 'linux-amd64-cpu-4', target-os: 'ubuntu', arch: 'x64'}
+        - {runner: 'Ubuntu 22.04 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'ubuntu', arch: 'arm64'}
+        - {runner: 'AlmaLinux 8', runs_on: 'linux-amd64-cpu-4', target-os: 'almalinux', arch: 'x64'}
+        - {runner: 'AlmaLinux 8 ARM64', runs_on: 'linux-aarch64-cpu-4', target-os: 'almalinux', arch: 'arm64'}
 
     steps:
-
     - name: Checkout Repo
       uses: actions/checkout@v5
-      with:
-        path: llvm-build
+
+    - name: Config mirrors & install build tools
+      if: matrix.config.target-os == 'ubuntu'
+      shell: bash
+      run: |
+        sed -i 's|http://archive.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
+        sed -i 's|http://ports.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
+        sed -i 's|http://security.ubuntu.com|http://cache-service.nginx-pypi-cache.svc.cluster.local:8081|g' /etc/apt/sources.list 2>/dev/null || true
+        apt-get update
+        apt-get install -y --no-install-recommends clang lld
 
     - name: Fetch LLVM Commit Hash
       shell: bash
       run: |
-        LLVM_COMMIT_HASH="$(cat llvm-build/cmake/llvm-hash.txt)"
+        LLVM_COMMIT_HASH="$(cat cmake/llvm-hash.txt)"
         echo "Found LLVM commit hash: ${LLVM_COMMIT_HASH}"
         echo "llvm_commit_hash=${LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
 
@@ -62,7 +77,7 @@ jobs:
     - name: Compute Patch Hash
       shell: bash
       run: |
-        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        PATCH_DIR="third_party/ascend/patch"
         if [ -d "${PATCH_DIR}" ] && find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print -quit | grep -q .; then
           PATCH_HASH=$(
             LC_ALL=C find "${PATCH_DIR}" -maxdepth 1 -type f -name 'llvm_patch_*.patch' -print0 \
@@ -93,7 +108,7 @@ jobs:
       shell: bash
       run: |
         LLVM_SHORT="${{ env.short_llvm_commit_hash }}"
-        PATCH_DIR="llvm-build/third_party/ascend/patch"
+        PATCH_DIR="third_party/ascend/patch"
         if [ -d "${PATCH_DIR}" ]; then
           cd llvm-project
           for patchfile in ${GITHUB_WORKSPACE}/${PATCH_DIR}/llvm_patch_*.patch; do
@@ -106,9 +121,17 @@ jobs:
         fi
 
     - name: Set up Python
-      uses: actions/setup-python@v6
-      with:
-        python-version: 3.11
+      shell: bash
+      run: |
+        if command -v python3 2>/dev/null; then
+          python3 --version
+        elif command -v apt-get 2>/dev/null; then
+          apt-get update && apt-get install -y python3 python3-pip
+          python3 --version
+        else
+          echo "ERROR: cannot find or install python3"
+          exit 1
+        fi
 
     - name: Install Prerequisites
       shell: bash
@@ -116,6 +139,16 @@ jobs:
         python3 -m pip install cmake ninja sccache
         mkdir -p ${{ env.SCCACHE_DIR }}
         rm -rf ${{ env.SCCACHE_DIR }}/*
+
+    - name: Install lld (Ubuntu)
+      # Linking mlir-opt with GNU ld needs 6-10GB and gets OOM-killed on the
+      # 4-CPU pods.  lld uses far less memory and is required by
+      # -DCMAKE_LINKER=lld in the configure step below.
+      if: matrix.config.target-os == 'ubuntu'
+      shell: bash
+      run: |
+        apt-get install -y lld-15
+        update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100
 
     - name: Enable Cache
       uses: actions/cache@v4
@@ -126,6 +159,9 @@ jobs:
 
     - name: Configure, Build, and Install LLVM (Ubuntu)
       if: matrix.config.target-os == 'ubuntu'
+      shell: bash
+      env:
+        LLVM_INSTALL_DIR: ${{ env.llvm_install_dir }}
       run: >
         python3 -m pip install -r llvm-project/mlir/python/requirements.txt
 
@@ -133,7 +169,7 @@ jobs:
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
         -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
-        -DCMAKE_INSTALL_PREFIX="${{ env.llvm_install_dir }}"
+        -DCMAKE_INSTALL_PREFIX="${LLVM_INSTALL_DIR}"
         -DCMAKE_LINKER=lld
         -DLLVM_BUILD_UTILS=ON
         -DLLVM_BUILD_TOOLS=ON
@@ -144,59 +180,46 @@ jobs:
         -DLLVM_TARGETS_TO_BUILD="host;NVPTX;AMDGPU"
         -DLLVM_ENABLE_TERMINFO=OFF
         -DLLVM_ENABLE_ZSTD=OFF
+        -DLLVM_PARALLEL_LINK_JOBS=1
         llvm-project/llvm
 
         ninja -C llvm-project/build install
 
-        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
+        tar czf "${LLVM_INSTALL_DIR}.tar.gz" "${LLVM_INSTALL_DIR}"
 
-    - name: Configure, Build, Test, and Install LLVM (CentOS)
-      if: matrix.config.target-os == 'centos'
-      run: |
-        # if this step crashes, it can leave behind a stale docker container
-        docker container prune -f
-        docker rmi -f $(docker images -q) 2>/dev/null || true
-
-        docker build --tag llvm-build --build-arg llvm_dir=llvm-project \
-          -f llvm-build/.github/workflows/llvm-build/centos.Dockerfile .
-
-        # Create temporary container to copy cache and installed artifacts.
-        CONTAINER_ID=$(docker create llvm-build)
-        docker cp "${CONTAINER_ID}:/install" "${{ env.llvm_install_dir }}"
-        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
-
-        # We remove the existing directory, otherwise docker will
-        # create a subdirectory inside the existing directory.
-        rm -rf "${{ env.SCCACHE_DIR }}"
-        docker cp "${CONTAINER_ID}:/sccache" "${{ env.SCCACHE_DIR }}"
-        sudo chown -R "$(id -u -n):$(id -g -n)" "${{ env.SCCACHE_DIR }}"
-
-        docker rm "${CONTAINER_ID}"
-
-    - name: Configure, Build, Test, and Install LLVM (AlmaLinux)
+    - name: Ensure sccache dir exists
       if: matrix.config.target-os == 'almalinux'
+      env:
+        SCCACHE_DIR_PATH: ${{ env.SCCACHE_DIR }}
       run: |
-        # if this step crashes, it can leave behind a stale docker container
-        docker container prune -f
-        docker rmi -f $(docker images -q) 2>/dev/null || true
+        mkdir -p "${SCCACHE_DIR_PATH}"
+        touch "${SCCACHE_DIR_PATH}/.gitkeep"
 
-        docker build --tag llvm-build --build-arg llvm_dir=llvm-project \
-          -f llvm-build/.github/workflows/llvm-build/almalinux.Dockerfile .
+    - name: Build LLVM Image (AlmaLinux)
+      if: matrix.config.target-os == 'almalinux'
+      uses: docker/build-push-action@v7
+      with:
+        context: .
+        file: .github/workflows/build/almalinux.Dockerfile
+        build-args: |
+          BASE_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/almalinux:8.10-20250411
+          llvm_dir=llvm-project
+        target: output
+        outputs: type=local,dest=.
 
-        # Create temporary container to copy cache and installed artifacts.
-        CONTAINER_ID=$(docker create llvm-build)
-
-        # We remove the existing directories, otherwise docker cp will
-        # create a subdirectory inside the existing directory.
-        rm -rf "${{ env.SCCACHE_DIR }}" "${{ env.llvm_install_dir }}"
-
-        docker cp "${CONTAINER_ID}:/install" "${{ env.llvm_install_dir }}"
-        tar czf "${{ env.llvm_install_dir }}.tar.gz" "${{ env.llvm_install_dir }}"
-
-        docker cp "${CONTAINER_ID}:/sccache" "${{ env.SCCACHE_DIR }}"
-        sudo chown -R "$(id -u -n):$(id -g -n)" "${{ env.SCCACHE_DIR }}"
-
-        docker rm "${CONTAINER_ID}"
+    - name: Extract LLVM Artifacts (AlmaLinux)
+      if: matrix.config.target-os == 'almalinux'
+      shell: bash
+      env:
+        SCCACHE_DIR_PATH: ${{ env.SCCACHE_DIR }}
+        LLVM_INSTALL_DIR: ${{ env.llvm_install_dir }}
+      run: |
+        rm -rf "${SCCACHE_DIR_PATH}" "${LLVM_INSTALL_DIR}"
+        tar xzf llvm.tar.gz
+        mv install "${LLVM_INSTALL_DIR}"
+        tar czf "${LLVM_INSTALL_DIR}.tar.gz" "${LLVM_INSTALL_DIR}"
+        tar xzf sccache.tar.gz
+        rm -f llvm.tar.gz sccache.tar.gz
 
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4

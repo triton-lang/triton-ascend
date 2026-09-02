@@ -771,13 +771,12 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                rewriter);
     Value active =
         mstate.getExtractSlice(loadedTensor, loc, rewriter).getResult();
-    auto empty = rewriter.create<tensor::EmptyOp>(
-        loc, tensorType.getShape(), tensorType.getElementType());
-    Value zeros =
-        rewriter
-            .create<linalg::FillOp>(loc, ValueRange{scalarOtherVal},
-                                    ValueRange{empty})
-            .getResult(0);
+    auto empty = rewriter.create<tensor::EmptyOp>(loc, tensorType.getShape(),
+                                                  tensorType.getElementType());
+    Value zeros = rewriter
+                      .create<linalg::FillOp>(loc, ValueRange{scalarOtherVal},
+                                              ValueRange{empty})
+                      .getResult(0);
     Value result =
         mstate.getInsertSlice(active, zeros, loc, rewriter).getResult();
     if (mayImplicitTransposeWithLastAxis) {

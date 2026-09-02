@@ -36,7 +36,7 @@ Triton-Ascend
 <summary>更多最新消息</summary>
 
 - [2025.11.14]Triton-Ascend3.2.0rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
-- [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、sglang开源仓中重点Triton算子适配
+- [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、SGLang开源仓中重点Triton算子适配
 - [2025.09.19]支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取
 - [2025.08.15]完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例
 - [2025.06.30]支持85% Triton Python API，支持连续访存，覆盖基本使用场景需求
@@ -53,11 +53,11 @@ Triton-Ascend
 
 #### 硬件要求
 
-支持的操作系统: linux(arch64/x86_64)
+支持的操作系统：Linux(aarch64/x86_64)
 
-支持的Ascend产品:Atlas A2/A3/950系列
+支持的Ascend产品：Atlas A2/A3/950系列
 
-最小硬件配置: 单卡32GB显存（推荐）
+最小硬件配置：单卡32GB显存（推荐）
 
 #### 软件依赖
 
@@ -71,7 +71,7 @@ Triton-Ascend
 
 ### 访问昇腾NPU
 
-如果您需要访问昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的 [HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro) 页面申请并使用算力。
+若需要访问昇腾NPU算力资源进行开发或测试，请进入HiDevLab平台的[HiDevLab-在线开发](https://hidevlab.huawei.com/online-develop-intro)页面申请并使用算力。
 
 ### 快速安装
 
@@ -156,11 +156,11 @@ python3 setup_ascend.py install
 <details>
 <summary>更多镜像使用</summary>
 
-- 我们提供了Dockerfile帮助您安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。
+- Triton-Ascend提供了Dockerfile帮助开发者安装Docker环境镜像。构建过程使用`quay.io/ascend/cann`预构建镜像作为基础镜像，跳过CANN安装步骤，显著加快构建速度。
 
-- 您需要通过`--build-arg`指定`CANN_BASE_IMAGE`参数来选择适合您机器的CANN基础镜像。可用的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。
+- 通过`--build-arg`指定`CANN_BASE_IMAGE`参数来选择适配的CANN基础镜像。适配的CANN基础镜像标签可在[quay.io/ascend/cann](https://quay.io/repository/ascend/cann?tab=tags)查看。
 
-- 您可以通过npu-smi命令查看系统上的NPU型号。
+- 可通过npu-smi命令查看系统上的NPU型号。
 
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
@@ -201,7 +201,7 @@ docker exec -u root -it triton-ascend_container /bin/bash
 </details>
 </div>
 
-## ✏️文档入口
+## ✏️ 文档入口
 
 - [快速开始](./docs/zh/quick_start.md)
 
@@ -231,4 +231,4 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 - 欢迎参与Triton-Ascend的开发及代码贡献，详情请参阅 [贡献指南](./docs/zh/community/CONTRIBUTING_zh.md)
 
-- 请通过[Issue](https://github.com/triton-lang/triton-ascend/issues)来告知我们您遇到的任何Bug。
+- 请通过[Issue](https://github.com/triton-lang/triton-ascend/issues)来反馈遇到的任何Bug。

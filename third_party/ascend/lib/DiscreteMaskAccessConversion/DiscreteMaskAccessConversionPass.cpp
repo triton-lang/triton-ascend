@@ -286,6 +286,24 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
+
+    if (compileOn91095Flag &&
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
+      rewriter.modifyOpInPlace(op, [&]() {
+        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                    rewriter.getUnitAttr());
+      });
+      return success();
+    }
+
+    if (compileOn91095Flag &&
+        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate &&
+        rankWithinIndirectFastPathLimit) {
+      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                  rewriter.getUnitAttr());
+      return failure();
+    }
+
     const bool legacyMixedRoute =
         compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
         compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate;
@@ -367,6 +385,24 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     op->setAttr(routeDiscreteMaskToSimtAttrName, rewriter.getUnitAttr());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
+
+    if (compileOn91095Flag &&
+        compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
+      rewriter.modifyOpInPlace(op, [&]() {
+        op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                    rewriter.getUnitAttr());
+      });
+      return success();
+    }
+
+    if (compileOn91095Flag &&
+        compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate &&
+        rankWithinIndirectFastPathLimit) {
+      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                  rewriter.getUnitAttr());
+      return failure();
+    }
+
     const bool legacyMixedRoute =
         compileModeFlag == triton::ascend::CompileMode::SimdSimt ||
         compileModeFlag == triton::ascend::CompileMode::SimdSimtTemplate;

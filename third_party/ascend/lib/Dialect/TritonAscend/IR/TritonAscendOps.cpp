@@ -13,6 +13,7 @@
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/ADT/STLExtras.h"
 #include <cstdint>
+#include <optional>
 
 using namespace mlir;
 using namespace mlir::triton;
@@ -296,6 +297,175 @@ LogicalResult Conv1dOp::inferReturnTypes(
   }
   outputShape.push_back(weightShape[0]);
   outputShape.push_back(L_out);
+
+  Type elementType = inputType.getElementType();
+  auto returnType = RankedTensorType::get(outputShape, elementType);
+  inferredReturnTypes.push_back(returnType);
+  return success();
+}
+
+//-- Conv2dOp --
+
+// Parse a conv2d parameter attribute: an integer (uniform scalar) or an
+// integer array. Returns the raw values, or std::nullopt for an invalid
+// attribute.
+static std::optional<SmallVector<int64_t>>
+parseConv2dParamAttr(Attribute attr) {
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+    return SmallVector<int64_t>{intAttr.getInt()};
+  if (auto arrayAttr = dyn_cast<DenseI32ArrayAttr>(attr)) {
+    SmallVector<int64_t> values;
+    for (int32_t v : arrayAttr.asArrayRef())
+      values.push_back(static_cast<int64_t>(v));
+    return values;
+  }
+  return std::nullopt;
+}
+
+LogicalResult Conv2dOp::verify() {
+  auto inputType = dyn_cast<RankedTensorType>(getInput().getType());
+  auto weightType = dyn_cast<RankedTensorType>(getWeight().getType());
+
+  constexpr int64_t dim3 = 3;
+  constexpr int64_t dim4 = 4;
+  auto inputRank = inputType.getShape().size();
+  if (inputRank != dim3 && inputRank != dim4) {
+    return emitOpError(
+               "input tensor must be 3D (C,H,W) or 4D (N,C,H,W), but got rank ")
+           << inputRank;
+  }
+  if (weightType.getShape().size() != dim4) {
+    return emitOpError("weight tensor must be 4D (C_out, C_in/groups, kH, kW), "
+                       "but got rank ")
+           << weightType.getShape().size();
+  }
+
+  Value biasValue = getBias();
+  if (biasValue) {
+    auto biasType = dyn_cast<RankedTensorType>(biasValue.getType());
+    if (!biasType || biasType.getRank() != 1) {
+      return emitOpError("bias must be a 1D ranked tensor");
+    }
+    if (biasType.getElementType() != inputType.getElementType()) {
+      return emitOpError(
+          "bias must have the same element type as input and weight");
+    }
+    if (biasType.getShape()[0] != weightType.getShape()[0]) {
+      return emitOpError(
+          "bias size must match weight's output channel dimension");
+    }
+  }
+
+  auto stride = parseConv2dParamAttr(getStride());
+  auto padding = parseConv2dParamAttr(getPadding());
+  auto dilation = parseConv2dParamAttr(getDilation());
+  if (!stride || stride->empty() || stride->size() > 2) {
+    return emitOpError(
+        "stride must be an integer or a 2-element array [stride_h, stride_w]");
+  }
+  if (!padding || padding->empty() || padding->size() > 4) {
+    return emitOpError(
+        "padding must be an integer, a 2-element array [pad_h, pad_w], or a "
+        "4-element array [pad_top, pad_bottom, pad_left, pad_right]");
+  }
+  if (!dilation || dilation->empty() || dilation->size() > 2) {
+    return emitOpError(
+        "dilation must be an integer or a 2-element array [dil_h, dil_w]");
+  }
+  // Uniform scalar or pair: front/back covers both forms.
+  if (stride->front() == 0 || stride->back() == 0) {
+    return emitOpError("stride elements must be > 0");
+  }
+
+  int64_t C_in = inputType.getShape()[inputRank - 3];
+  int64_t C_out = weightType.getShape()[0];
+  int64_t weight_C_in = weightType.getShape()[1];
+
+  if (C_in % getGroups() != 0) {
+    return emitOpError("input channels must be divisible by groups");
+  }
+  if (C_out % getGroups() != 0) {
+    return emitOpError("output channels must be divisible by groups");
+  }
+  if (weight_C_in != C_in / getGroups()) {
+    return emitOpError(
+        "weight's input channel dimension must equal input channels / groups");
+  }
+
+  return success();
+}
+
+LogicalResult Conv2dOp::inferReturnTypes(
+    MLIRContext *context, std::optional<Location> location, ValueRange operands,
+    DictionaryAttr attributes, OpaqueProperties properties, RegionRange regions,
+    SmallVectorImpl<Type> &inferredReturnTypes) {
+  Conv2dOpAdaptor adaptor(operands, attributes, properties, regions);
+
+  auto inputType = dyn_cast<RankedTensorType>(adaptor.getInput().getType());
+  auto weightType = dyn_cast<RankedTensorType>(adaptor.getWeight().getType());
+  if (!inputType || !weightType) {
+    return failure();
+  }
+
+  ArrayRef<int64_t> inputShape = inputType.getShape();
+  bool isBatched = inputShape.size() == 4;
+  int64_t C_in = inputShape[isBatched ? 1 : 0];
+  int64_t H_in = inputShape[isBatched ? 2 : 1];
+  int64_t W_in = inputShape[isBatched ? 3 : 2];
+
+  ArrayRef<int64_t> weightShape = weightType.getShape();
+  int64_t C_out = weightShape[0];
+  int64_t kH = weightShape[2];
+  int64_t kW = weightShape[3];
+
+  auto strideAttr = parseConv2dParamAttr(adaptor.getStride());
+  auto paddingAttr = parseConv2dParamAttr(adaptor.getPadding());
+  auto dilationAttr = parseConv2dParamAttr(adaptor.getDilation());
+  if (!strideAttr || strideAttr->empty() || strideAttr->size() > 2 ||
+      !paddingAttr || paddingAttr->empty() || paddingAttr->size() > 4 ||
+      !dilationAttr || dilationAttr->empty() || dilationAttr->size() > 2) {
+    return failure();
+  }
+  auto &stride = *strideAttr;
+  auto &padding = *paddingAttr;
+  auto &dilation = *dilationAttr;
+
+  auto computeOutDim = [](int64_t in_size, int64_t pad_before,
+                          int64_t pad_after, int64_t dil, int64_t k,
+                          int64_t str) -> int64_t {
+    double val = static_cast<double>(in_size + pad_before + pad_after -
+                                     dil * (k - 1) - 1) /
+                     str +
+                 1;
+    return static_cast<int64_t>(std::floor(val));
+  };
+
+  // Expand padding to [pad_top, pad_bottom, pad_left, pad_right].
+  SmallVector<int64_t, 4> pads;
+  if (padding.size() == 1) {
+    pads.assign(4, padding[0]);
+  } else if (padding.size() == 2) {
+    pads = {padding[0], padding[0], padding[1], padding[1]};
+  } else {
+    pads.assign(padding.begin(), padding.end());
+  }
+  // Uniform scalar or pair: front/back covers both forms.
+  int64_t strideH = stride.front();
+  int64_t strideW = stride.back();
+  int64_t dilH = dilation.front();
+  int64_t dilW = dilation.back();
+
+  // pads = [pad_top, pad_bottom, pad_left, pad_right]
+  int64_t H_out = computeOutDim(H_in, pads[0], pads[1], dilH, kH, strideH);
+  int64_t W_out = computeOutDim(W_in, pads[2], pads[3], dilW, kW, strideW);
+
+  SmallVector<int64_t, 4> outputShape;
+  if (isBatched) {
+    outputShape.push_back(inputShape[0]);
+  }
+  outputShape.push_back(weightShape[0]);
+  outputShape.push_back(H_out);
+  outputShape.push_back(W_out);
 
   Type elementType = inputType.getElementType();
   auto returnType = RankedTensorType::get(outputShape, elementType);

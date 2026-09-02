@@ -20,16 +20,15 @@
 """
 Gather kernel optimized for Ascend NPU.
 """
-__all__ = ["gather_2d_simd"]
 
 import triton
 import triton.language as tl
-from triton.language.core import constexpr
+import torch
 
 
 @triton.jit
-def gather_2d_simd(src_ptr, idx_ptr, out_ptr, M: constexpr, N: constexpr, K: constexpr, XBLOCK: constexpr,
-                   XBLOCK_SUB: constexpr):
+def gather_2d_simd(src_ptr, idx_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, XBLOCK: tl.constexpr,
+                   XBLOCK_SUB: tl.constexpr):
     """
     2D gather kernel for axis=1 (tail axis) with SIMD-style vectorization.
 
@@ -62,10 +61,6 @@ def gather_2d_simd(src_ptr, idx_ptr, out_ptr, M: constexpr, N: constexpr, K: con
         gather_2d_simd[grid](src, indices, output, M, N, K,
                              XBLOCK=32, XBLOCK_SUB=4)
     """
-    tl.static_print("[UserWarning: `gather_2d_simd` kernel is deprecated and will be removed "
-                    "from `third_party/ascend/language/kernels/gather.py`. "
-                    "It has been moved to `third_party/ascend/tutorials/` as an example kernel. "
-                    "Please update your imports accordingly.]")
     pid = tl.program_id(0)
     m_start = pid * XBLOCK
     m_end = min(m_start + XBLOCK, M)
@@ -90,3 +85,24 @@ def gather_2d_simd(src_ptr, idx_ptr, out_ptr, M: constexpr, N: constexpr, K: con
 
         # Store results
         tl.store(out_ptr + m_offs[:, None] * K + k_offs[None, :], gathered_values, mask=m_mask[:, None])
+
+
+def test_gather_2d_simd(M, N, K):
+    """Test gather_2d_simd with various tensor sizes."""
+    src = torch.randn(M, N, dtype=torch.float32, device='npu')
+    indices = torch.randint(0, N, (M, K), dtype=torch.int32, device='npu')
+    output = torch.empty((M, K), dtype=src.dtype, device='npu')
+
+    grid = (triton.cdiv(M, 32), )
+    gather_2d_simd[grid](src, indices, output, M, N, K, XBLOCK=32, XBLOCK_SUB=4)
+
+    ref = torch.gather(src, 1, indices.long())
+    assert torch.allclose(output, ref, rtol=1e-5, atol=1e-5)
+
+
+if __name__ == "__main__":
+    M = 32
+    N = 128
+    K = 64
+    test_gather_2d_simd(M, N, K)
+    print("======Persistent Gather Test Passed!======")

@@ -59,7 +59,7 @@
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
-#include "Common.h"
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
@@ -67,8 +67,6 @@
 static constexpr const char *DEBUG_TYPE = "SplitIfByBlockId";
 static constexpr llvm::StringLiteral kSkippedDeltaformerKernel =
     "parallel_deltaformer_fwd_kernel";
-static constexpr llvm::StringLiteral kSkippedChunkwiseKernel =
-    "chunkwise_fwd_kernel";
 static constexpr llvm::StringLiteral kSkippedParallelNsaFwdKernel =
     "parallel_nsa_fwd_kernel";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -162,9 +160,11 @@ struct CandidateIf {
   // value-level cross-group + yield plan
   YieldAugmentation yieldAug;
 
-  bool needsSplit() const {
-    return thenGroups.size() >= 2 || elseGroups.size() >= 2;
-  }
+  // Pre-computed split decisions: ≥2 groups AND mixed matmul/VECTOR
+  bool shouldSplitThen = false;
+  bool shouldSplitElse = false;
+
+  bool needsSplit() const { return shouldSplitThen || shouldSplitElse; }
 };
 
 } // namespace
@@ -181,6 +181,89 @@ static bool hasNestedIfs(const CandidateIf &c) {
     }
   }
   return false;
+}
+
+/// Check whether a BlockGroup contains a linalg.matmul op.
+/// Only linalg::MatmulOp is considered CUBE for the mixed-type filter.
+static bool groupHasMatmul(const BlockGroup &group) {
+  for (auto *op : group.ops) {
+    if (isa<linalg::MatmulOp>(op)) {
+      return true;
+    }
+    auto found =
+        op->walk([](linalg::MatmulOp) { return WalkResult::interrupt(); });
+    if (found.wasInterrupted()) {
+      return true;
+    }
+  }
+  for (auto nestedIf : group.nestedIfs) {
+    auto found = nestedIf->walk(
+        [](linalg::MatmulOp) { return WalkResult::interrupt(); });
+    if (found.wasInterrupted()) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Check whether a list of groups forms a splittable CVC/VCV pattern.
+/// Only linalg.matmul defines CUBE for this check.
+/// - Exactly 1 matmul group: must be CVC (VECTOR groups on both sides).
+/// - 2 or more matmul groups (VCV, CVCVC, ...): splittable as long as a
+///   VECTOR group exists.
+static bool hasMixedCoreTypes(const SmallVector<BlockGroup, 0> &groups) {
+  unsigned matmulCount = 0;
+  size_t lastMatmulIdx = 0;
+  for (size_t i = 0; i < groups.size(); ++i) {
+    if (groupHasMatmul(groups[i])) {
+      ++matmulCount;
+      lastMatmulIdx = i;
+    }
+  }
+
+  if (matmulCount == 0) {
+    return false;
+  }
+
+  if (matmulCount == 1) {
+    // CVC: the single CUBE group must have VECTOR groups on both sides.
+    return lastMatmulIdx > 0 && lastMatmulIdx + 1 < groups.size();
+  }
+
+  // matmulCount >= 2 (VCV, CVCVC, ...): split as long as a VECTOR group
+  // exists.
+  for (auto &g : groups) {
+    if (!groupHasMatmul(g)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// Merge consecutive groups that share the same core_type
+/// (both CUBE or both VECTOR). This ensures splits follow core_type
+/// transitions: one scf.if per merged segment (3 for CVC/VCV,
+/// 5 for CVCVC, ...).
+static SmallVector<BlockGroup>
+mergeConsecutiveSameCoreType(SmallVector<BlockGroup> groups) {
+  if (groups.size() < 2) {
+    return groups;
+  }
+  SmallVector<BlockGroup> merged;
+  merged.push_back(std::move(groups[0]));
+  for (size_t i = 1; i < groups.size(); ++i) {
+    bool prevHasMatmul = groupHasMatmul(merged.back());
+    bool curHasMatmul = groupHasMatmul(groups[i]);
+    if (prevHasMatmul == curHasMatmul) {
+      auto &prev = merged.back();
+      prev.ops.append(groups[i].ops.begin(), groups[i].ops.end());
+      prev.nestedIfs.append(groups[i].nestedIfs.begin(),
+                            groups[i].nestedIfs.end());
+    } else {
+      merged.push_back(std::move(groups[i]));
+    }
+  }
+  return merged;
 }
 
 static inline void dumpCandidate(CandidateIf &candidate) {
@@ -296,14 +379,20 @@ static CandidateIf getCandidate(scf::IfOp ifOp) {
   auto selfBlockId = CVPipeline::getOpBlockId(ifOp);
   cand.selfBlockId = selfBlockId.value_or(-1);
 
-  // Group then region
-  cand.thenGroups = groupOpsInBlock(*ifOp.thenBlock());
+  // Group then region, merge consecutive same-core-type groups
+  cand.thenGroups =
+      mergeConsecutiveSameCoreType(groupOpsInBlock(*ifOp.thenBlock()));
 
-  // Group else region
+  // Group else region, merge consecutive same-core-type groups
   Block *elseBlk = ifOp.elseBlock();
   if (elseBlk) {
-    cand.elseGroups = groupOpsInBlock(*elseBlk);
+    cand.elseGroups = mergeConsecutiveSameCoreType(groupOpsInBlock(*elseBlk));
   }
+
+  // Pre-compute split decisions: only split when groups contain both
+  // matmul (CUBE) and non-matmul (VECTOR) computation.
+  cand.shouldSplitThen = hasMixedCoreTypes(cand.thenGroups);
+  cand.shouldSplitElse = hasMixedCoreTypes(cand.elseGroups);
 
   return cand;
 }
@@ -370,7 +459,7 @@ static void preprocessScalarDependencies(CandidateIf &cand) {
 // Part4 consumes the resulting YieldAugmentation plan.
 static void dumpYieldAugmentation(const CandidateIf &c) {
   auto &ya = c.yieldAug;
-  bool splitThen = c.thenGroups.size() >= 2;
+  bool splitThen = c.shouldSplitThen;
   auto &groups = splitThen ? c.thenGroups : c.elseGroups;
   const char *region = splitThen ? "then" : "else";
 
@@ -719,11 +808,11 @@ static void analyzeDependencies(CandidateIf &candidate) {
   // Step 2.3: Plan yield augmentation for the active region
   // Groups are in natural discovery order (block_ids appear in
   // dependency order within a sequential basic block).
-  bool splitThen = candidate.thenGroups.size() >= 2;
+  bool splitThen = candidate.shouldSplitThen;
   if (splitThen) {
     planYield(candidate, /*splitThen=*/true, ArrayRef(candidate.thenGroups),
               opToThenGroup, thenValueMap);
-  } else if (candidate.elseGroups.size() >= 2) {
+  } else if (candidate.shouldSplitElse) {
     planYield(candidate, /*splitThen=*/false, ArrayRef(candidate.elseGroups),
               opToElseGroup, elseValueMap);
   }
@@ -1409,7 +1498,7 @@ materializeCandidate(CandidateIf &c, CVPipeline::ComputeBlockIdManager &bm) {
 
   LDBG("[Part3] enter materializeCandidate hasYield=" << c.hasYield);
 
-  bool splitThen = c.thenGroups.size() >= 2;
+  bool splitThen = c.shouldSplitThen;
   auto &groups = splitThen ? c.thenGroups : c.elseGroups;
   unsigned nGroups = groups.size();
   if (nGroups < 2) {
@@ -1677,7 +1766,6 @@ void SplitIfByBlockIdPass::runOnOperation() {
   auto mainRes = walkMainLoop(module, [&](Operation *op) {
     auto funcOp = op->getParentOfType<func::FuncOp>();
     if (funcOp && (funcOp.getSymName() == kSkippedDeltaformerKernel ||
-                   funcOp.getSymName() == kSkippedChunkwiseKernel ||
                    funcOp.getSymName() == kSkippedParallelNsaFwdKernel)) {
       LDBG("Skip kernel: " << funcOp.getSymName());
       return llvm::success();

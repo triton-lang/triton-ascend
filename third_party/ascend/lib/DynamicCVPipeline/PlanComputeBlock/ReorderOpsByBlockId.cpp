@@ -59,7 +59,7 @@ using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
 
 #define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
-#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace triton;
 using namespace CVPipeline;

@@ -133,6 +133,11 @@ from .random import (
     randn4x,
     uint_to_uniform_float,
 )
+from .extra.cann.extension import (
+    extract_slice,
+    get_element,
+    insert_slice,
+)
 from . import target_info
 
 __all__ = [
@@ -185,6 +190,7 @@ __all__ = [
     "erf",
     "exp",
     "exp2",
+    "extract_slice",
     "expand_dims",
     "extra",
     "fdiv",
@@ -201,10 +207,12 @@ __all__ = [
     "fma",
     "full",
     "gather",
+    "get_element",
     "histogram",
     "inline_asm_elementwise",
     "interleave",
     "int1",
+    "insert_slice",
     "int16",
     "int32",
     "int64",

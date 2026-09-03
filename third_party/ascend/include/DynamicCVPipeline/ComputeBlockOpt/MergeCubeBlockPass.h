@@ -28,6 +28,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include <utility>
 
 namespace mlir {
 namespace CVPipeline {
@@ -35,6 +36,7 @@ namespace CVPipeline {
 class BlockDependencyGraph;
 class MemoryDependenceGraph;
 class ComputeBlockIdManager;
+struct BlockNode;
 
 class MergeCubeBlockPass
     : public PassWrapper<MergeCubeBlockPass, OperationPass<ModuleOp>> {
@@ -49,67 +51,47 @@ public:
   void runOnOperation() override;
 
 private:
-  void findInnermostLoopBlocksWithMatmul(
-      ModuleOp moduleOp, llvm::SmallVectorImpl<Block *> &innermostBlocks);
-
   llvm::LogicalResult processBlock(Block *block,
                                    const MemoryDependenceGraph &memGraph,
                                    ComputeBlockIdManager &bm);
 
-  // Collect loaded data for each block
-  llvm::LogicalResult collectLoadedValues(
-      BlockDependencyGraph &graph, ComputeBlockIdManager &bm,
-      llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues);
-
   // Find merge candidates (only for cube blocks)
   llvm::LogicalResult findMergeCandidates(
       BlockDependencyGraph &graph,
-      llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues,
-      llvm::SmallVectorImpl<std::pair<int, int>> &candidates);
+      llvm::SmallVectorImpl<std::pair<BlockNode *, BlockNode *>> &candidates);
 
   bool
-  canMergeBlocks(int blockId1, int blockId2, BlockDependencyGraph &graph,
+  canMergeBlocks(std::pair<BlockNode *, BlockNode *> pair,
+                 BlockDependencyGraph &graph,
                  const MemoryDependenceGraph &memGraph,
-                 ComputeBlockIdManager &bm,
-                 llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues);
+                 ComputeBlockIdManager &bm);
 
   // Execute merge
-  llvm::LogicalResult mergeBlocks(int targetBlockId, int sourceBlockId,
+  llvm::LogicalResult mergeBlocks(BlockNode *target, BlockNode *source,
                                   ComputeBlockIdManager &bm);
 
-  // Update loadedValues
-  llvm::LogicalResult updateLoadedValues(
-      int targetBlockId, int sourceBlockId,
-      llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues);
-
   // Perform iterative merging
-  llvm::LogicalResult
-  performMerging(BlockDependencyGraph &graph,
-                 const MemoryDependenceGraph &memGraph,
-                 ComputeBlockIdManager &bm,
-                 llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues,
-                 llvm::SmallVectorImpl<std::pair<int, int>> &candidates);
+  llvm::LogicalResult performMerging(
+      BlockDependencyGraph &graph,
+      const MemoryDependenceGraph &memGraph,
+      ComputeBlockIdManager &bm,
+      llvm::SmallVectorImpl<std::pair<BlockNode *, BlockNode *>> &candidates);
 
   // Print graph structure
-  void
-  printGraph(BlockDependencyGraph &graph,
-             llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues);
+  void printGraph(BlockDependencyGraph &graph);
 
-  bool hasCommonInputOrOutput(int blockId1, int blockId2,
+  bool hasCommonInputOrOutput(BlockNode *node1, BlockNode *node2,
                               BlockDependencyGraph &graph);
-  bool checkSameSourceAndSink(int blockId1, int blockId2,
-                              BlockDependencyGraph &graph);
-  bool hasSameDepth(int blockId1, int blockId2, BlockDependencyGraph &graph);
-  bool checkNoCycle(int blockId1, int blockId2, BlockDependencyGraph &graph,
+  bool hasSameDepth(BlockNode *node1, BlockNode *node2,
+                    BlockDependencyGraph &graph);
+  bool checkNoCycle(BlockNode *node1, BlockNode *node2,
+                    BlockDependencyGraph &graph,
                     const MemoryDependenceGraph &memGraph,
                     ComputeBlockIdManager &bm);
-  bool checkSameLoadedData(
-      int blockId1, int blockId2,
-      llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues);
 
-  llvm::SmallVector<int> filterBlocksByType(int blockId,
-                                            llvm::SmallVector<int> blocks,
-                                            BlockDependencyGraph &graph);
+  llvm::SmallVector<BlockNode *>
+  filterBlocksByType(BlockNode *currentNode,
+                     llvm::SmallVector<BlockNode *> blocks);
 };
 
 } // namespace CVPipeline

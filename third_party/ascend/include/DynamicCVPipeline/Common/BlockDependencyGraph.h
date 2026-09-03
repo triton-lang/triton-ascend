@@ -54,18 +54,15 @@ public:
   llvm::LogicalResult buildGraph();
 
   BlockNode *getBlockNode(int blockId);
-  llvm::SmallVector<int> getPredecessors(int blockId);
-  llvm::SmallVector<int> getSuccessors(int blockId);
+  llvm::SmallVector<BlockNode *> getPredecessors(BlockNode *node);
+  llvm::SmallVector<BlockNode *> getSuccessors(BlockNode *node);
 
   // computeDepth
   void computeDepths();
   int getDepth(int blockId);
 
-  // detect cycle
-  bool wouldCreateCycle(int blockId1, int blockId2);
-
   // rebuildgraph
-  void rebuildAfterMerge(int targetBlockId, int sourceBlockId);
+  llvm::LogicalResult rebuildAfterMerge(BlockNode *target, BlockNode *source);
 
   llvm::DenseMap<int, BlockNode> blockNodes;
 
@@ -74,12 +71,17 @@ private:
   const MemoryDependenceGraph &memGraph;
   ComputeBlockIdManager &bm;
 
-  llvm::DenseMap<int, llvm::SmallVector<int>> predecessors;
-  llvm::DenseMap<int, llvm::SmallVector<int>> successors;
+  llvm::DenseMap<BlockNode *, llvm::DenseSet<BlockNode *>> predecessors;
+  llvm::DenseMap<BlockNode *, llvm::DenseSet<BlockNode *>> successors;
 
-  void addEdge(int from, int to);
+  void addEdge(BlockNode *from, BlockNode *to);
 
   bool isInCurrentBlock(Operation *op);
+
+  // Recompute depths starting from `start` and propagating forward through
+  // its successor chain. Assumes predecessors of `start` already hold
+  // correct depths.
+  void recomputeDepthsFrom(BlockNode *start);
 };
 
 } // namespace CVPipeline

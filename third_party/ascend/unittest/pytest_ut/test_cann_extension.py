@@ -23,7 +23,7 @@ import pytest
 import triton
 import torch
 import triton.language as tl
-import triton.extension.buffer.language as bl
+import triton.language.extra.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
 from triton.language.extra.cann.extension import index_put, gather_out_to_ub, scatter_ub_to_out
 from triton.compiler.compiler import ASTSource

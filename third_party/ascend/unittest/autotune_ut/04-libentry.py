@@ -29,7 +29,7 @@ import torch_npu
 import triton
 import triton.language as tl
 import triton.backends.ascend.runtime
-from triton.runtime.libentry import libentry
+from triton.language.extra.runtime.libentry import libentry
 from triton.backends.ascend.testing import do_bench_npu
 
 

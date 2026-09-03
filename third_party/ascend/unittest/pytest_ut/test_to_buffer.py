@@ -23,7 +23,7 @@ import torch
 import triton
 import triton.language as tl
 from triton.compiler import ASTSource
-import triton.extension.buffer.language as bl
+import triton.language.extra.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
 
 target = triton.runtime.driver.active.get_current_target()

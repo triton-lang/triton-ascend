@@ -57,3 +57,31 @@ tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
+
+## 下一步：从样例到完整开发
+
+本页帮助您完成安装与首个样例验证。若希望继续上手算子开发全流程，可按下面路径推进：
+
+1. **算子开发**：按算子类型阅读 Vector / Cube / 融合开发教程，再对照典型样例修改 Kernel，完成开发、编译、验证闭环。
+2. **自动调优**：使用 Autotune 选择合适的 Tiling 配置。
+3. **调试与调优**：掌握打印调试与性能采集方法。
+4. **迁移与进阶**：从 GPU Triton 迁移到 Ascend，或查阅环境变量与编译选项。
+
+### 开发指南
+
+| 文档 | 说明 |
+|------|------|
+| [Triton-Ascend 算子开发](./programming_guide/index.md) | 分核、片上内存、访存、Tiling 等通用开发原则 |
+| [Triton-Ascend 算子迁移](./migration_guide/index.md) | GPU Triton 算子迁移到昇腾 NPU |
+| [Triton-Ascend 算子调试与调优](./debug_guide/index.md) | 调试、性能分析与精度排查 |
+| [环境变量与编译选项](./environment_variable_and_compiler_options_reference.md) | 运行与编译相关配置说明 |
+
+### 教程与样例
+
+| 文档 | 说明 |
+|------|------|
+| [Vector 算子开发](./programming_guide/vector_operator.md) | 逐元素、归约、Gather/Scatter 等 Vector Core 算子 |
+| [Cube 算子开发](./programming_guide/cube_operator.md) | 以 `tl.dot`、矩阵乘为核心的 Cube 算子 |
+| [融合算子开发](./programming_guide/cv_fusion_operator.md) | 同一 Kernel 中 Cube + Vector 协同的 CV 融合场景 |
+| [Triton-Ascend autotune](./autotune_guide.md) | Autotune 推荐用法与自动 Tiling 适用边界 |
+| [典型算子样例](./examples/index.md) | Softmax、LayerNorm、Attention、Matmul 等端到端样例 |

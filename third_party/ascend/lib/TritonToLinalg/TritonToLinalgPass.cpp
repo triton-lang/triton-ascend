@@ -39,7 +39,6 @@
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
-#include "ascend/include/TritonToLinalg/UseAnalysis.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
 #include "ascend/include/TritonToUnstructure/UnstructureConversionPass.h"
 #include "ascend/include/Utils/InterleaveOptimization.h"
@@ -53,7 +52,6 @@
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -109,7 +107,7 @@ static bool containsTritonPointer(Type type) {
   return shapedType && isa<triton::PointerType>(shapedType.getElementType());
 }
 
-static bool hasPointerFreeTypes(TypeRange types) {
+template <typename RangeT> static bool hasPointerFreeTypes(RangeT types) {
   return llvm::none_of(types, containsTritonPointer);
 }
 
@@ -141,83 +139,9 @@ static bool hasPointerFreeControlFlowBoundary(LoopLikeOpInterface loopOp) {
   return false;
 }
 
-// Adds only the values that can produce one SSA result. Structured control
-// flow is followed by result index so preserving one descriptor slot does not
-// retain unrelated loop accumulators or sibling results.
-static LogicalResult
-appendProducerOperands(Value value, SmallVectorImpl<Value> &producerWorklist) {
-  if (auto argument = dyn_cast<BlockArgument>(value)) {
-    Operation *parent = argument.getOwner()->getParentOp();
-    unsigned argumentIndex = argument.getArgNumber();
-    if (auto forOp = dyn_cast_or_null<scf::ForOp>(parent)) {
-      if (argumentIndex == 0)
-        return success();
-      unsigned iterIndex = argumentIndex - 1;
-      if (iterIndex >= forOp.getInitArgs().size())
-        return failure();
-      producerWorklist.push_back(forOp.getInitArgs()[iterIndex]);
-      producerWorklist.push_back(forOp.getYieldedValues()[iterIndex]);
-      return success();
-    }
-    if (auto whileOp = dyn_cast_or_null<scf::WhileOp>(parent)) {
-      if (argumentIndex >= whileOp.getInits().size())
-        return failure();
-      if (argument.getOwner() == whileOp.getBeforeBody()) {
-        producerWorklist.push_back(whileOp.getInits()[argumentIndex]);
-        producerWorklist.push_back(
-            whileOp.getYieldOp().getOperand(argumentIndex));
-        return success();
-      }
-      if (argument.getOwner() == whileOp.getAfterBody()) {
-        producerWorklist.push_back(
-            whileOp.getConditionOp().getArgs()[argumentIndex]);
-        return success();
-      }
-    }
-    return success();
-  }
-
-  Operation *producer = value.getDefiningOp();
-  if (!producer)
-    return success();
-
-  auto result = dyn_cast<OpResult>(value);
-  if (auto forOp = dyn_cast<scf::ForOp>(producer)) {
-    if (!result || result.getResultNumber() >= forOp.getNumResults())
-      return failure();
-    unsigned index = result.getResultNumber();
-    producerWorklist.push_back(forOp.getInitArgs()[index]);
-    producerWorklist.push_back(forOp.getYieldedValues()[index]);
-    return success();
-  }
-  if (auto whileOp = dyn_cast<scf::WhileOp>(producer)) {
-    if (!result || result.getResultNumber() >= whileOp.getNumResults())
-      return failure();
-    unsigned index = result.getResultNumber();
-    producerWorklist.push_back(whileOp.getInits()[index]);
-    producerWorklist.push_back(whileOp.getConditionOp().getArgs()[index]);
-    producerWorklist.push_back(whileOp.getYieldOp().getOperand(index));
-    return success();
-  }
-  if (auto ifOp = dyn_cast<scf::IfOp>(producer)) {
-    if (!result || result.getResultNumber() >= ifOp.getNumResults() ||
-        !ifOp.elseBlock())
-      return failure();
-    unsigned index = result.getResultNumber();
-    producerWorklist.push_back(ifOp.thenYield().getOperand(index));
-    producerWorklist.push_back(ifOp.elseYield().getOperand(index));
-    return success();
-  }
-
-  producerWorklist.append(producer->operand_begin(), producer->operand_end());
-  return success();
-}
-
 // Visits every structural value represented by one dynamic descriptor slot.
 // The result type is the slot contract; init values, region arguments and
-// terminator operands must all agree with it exactly. Keeping this traversal
-// shared prevents entry validation and later MetaUse preservation from
-// interpreting PointerDescriptorBoundary differently.
+// terminator operands must all agree with it exactly.
 template <typename VisitorT>
 static LogicalResult
 visitPointerDescriptorBoundarySlotValues(Operation *loop, int32_t slot,
@@ -311,29 +235,9 @@ static LogicalResult validatePointerDescriptorRebuild(Operation *op) {
                  isa<triton::PointerType>(baseSplat.getSrc().getType()));
 }
 
-// Returns true when a pointer consumer is reached through ordinary addptr
-// operations from a CFO descriptor reconstruction root. The walk is purposely
-// limited to addptr: following arbitrary pointer-producing operations would
-// make the handoff contract retain computations it does not own.
-static bool hasPointerDescriptorRebuildProvenance(Value pointer) {
-  llvm::DenseSet<Value> visited;
-  while (pointer && visited.insert(pointer).second) {
-    Operation *producer = pointer.getDefiningOp();
-    if (!producer)
-      return false;
-    if (producer->hasAttr(controlflow::kPointerDescriptorRebuildAttr))
-      return true;
-    auto addPtr = dyn_cast<triton::AddPtrOp>(producer);
-    if (!addPtr)
-      return false;
-    pointer = addPtr.getPtr();
-  }
-  return false;
-}
-
 // Checks the complete CFO-to-TritonToLinalg handoff before any rewrite can
 // fold away a malformed marker. This function is deliberately read-only so it
-// can run at pass entry, before UseAnalysis has produced MetaUse attributes.
+// can run at pass entry, before memory conversion consumes the handoff.
 static LogicalResult
 validatePointerDescriptorHandoffMetadata(ModuleOp moduleOp) {
   bool valid = true;
@@ -351,91 +255,12 @@ validatePointerDescriptorHandoffMetadata(ModuleOp moduleOp) {
   return success(valid);
 }
 
-// PointerDescriptorBoundary identifies the dynamic loop slots used to rebuild
-// pointers. PointerDescriptorRebuild operands are the complete descriptor
-// roots, including invariant components omitted from an empty or minimal slot
-// list. After UseAnalysis, preserve exactly those producer chains so
-// MetaUseEraser cannot discard values required by conversion.
-static LogicalResult preservePointerDescriptorComputations(ModuleOp moduleOp) {
-  if (failed(validatePointerDescriptorHandoffMetadata(moduleOp)))
-    return failure();
-
-  bool valid = true;
-  SmallVector<Value> producerWorklist;
-  moduleOp.walk([&](Operation *loop) {
-    Attribute marker =
-        loop->getAttr(controlflow::kPointerDescriptorBoundaryAttr);
-    if (!marker)
-      return;
-    auto descriptorSlots = cast<DenseI32ArrayAttr>(marker);
-
-    loop->removeAttr("MetaUse");
-    for (int32_t slot : descriptorSlots.asArrayRef()) {
-      if (failed(visitPointerDescriptorBoundarySlotValues(
-              loop, slot,
-              [&](Value value) { producerWorklist.push_back(value); })))
-        valid = false;
-    }
-  });
-
-  moduleOp.walk([&](Operation *op) {
-    if (!op->hasAttr(controlflow::kPointerDescriptorRebuildAttr))
-      return;
-
-    // The rebuild operation itself and each of its operands are exact live
-    // conversion roots. This includes an invariant opaque tensor base as well
-    // as a scalar address behind int_to_ptr+splat. UseAnalysis has already
-    // propagated MetaUse by this point; preserving only the offset would leave
-    // a live ptr operand's producer eligible for erasure. This operand-local
-    // closure is still narrower than retaining all loop operands/terminators.
-    op->removeAttr("MetaUse");
-    producerWorklist.append(op->operand_begin(), op->operand_end());
-  });
-
-  // UseAnalysis classifies load/store masks and load fallback values as
-  // pointer metadata. A descriptor rebuild, however, is converted to a memref
-  // while its consumer still needs those tensor values to form subviews and
-  // padding. Preserve these exact consumer operands when the pointer is owned
-  // by the CFO handoff; otherwise MetaUseEraser can leave an unconvertible
-  // memref-to-pointer materialization at the live memory operation.
-  moduleOp.walk([&](triton::LoadOp load) {
-    if (!hasPointerDescriptorRebuildProvenance(load.getPtr()))
-      return;
-    if (Value mask = load.getMask())
-      producerWorklist.push_back(mask);
-    if (Value other = load.getOther())
-      producerWorklist.push_back(other);
-  });
-  moduleOp.walk([&](triton::StoreOp store) {
-    if (hasPointerDescriptorRebuildProvenance(store.getPtr()) &&
-        store.getMask())
-      producerWorklist.push_back(store.getMask());
-  });
-  moduleOp.walk([&](triton::AtomicRMWOp atomic) {
-    if (hasPointerDescriptorRebuildProvenance(atomic.getPtr()) &&
-        atomic.getMask())
-      producerWorklist.push_back(atomic.getMask());
-  });
-
-  llvm::DenseSet<Value> visitedValues;
-  while (!producerWorklist.empty()) {
-    Value value = producerWorklist.pop_back_val();
-    if (!value || !visitedValues.insert(value).second)
-      continue;
-    if (Operation *producer = value.getDefiningOp())
-      producer->removeAttr("MetaUse");
-    if (failed(appendProducerOperands(value, producerWorklist)))
-      valid = false;
-  }
-  return success(valid);
-}
-
 // The generic canonicalizer may remove forwarded scf.for/scf.while iter-args,
 // which changes a marker loop's positional signature without updating its
 // external descriptor-slot metadata. Marker-bearing modules therefore use this
 // narrow pre-clean: CSE remains enabled, and only constant scf.if regions are
-// inlined so use analysis does not visit unreachable branches.
-class FoldConstantIfBeforeUseAnalysis final
+// inlined so memory conversion does not visit unreachable branches.
+class FoldConstantIfBeforeMemoryConversion final
     : public OpRewritePattern<scf::IfOp> {
 public:
   using OpRewritePattern::OpRewritePattern;
@@ -471,7 +296,7 @@ public:
 // Inspect Operation directly so discovery cannot silently miss an SCF marker
 // or an if-only rebuild root. Any surviving handoff attribute disables generic
 // pre-clean canonicalization because its validated slot positions and rebuild
-// operands must remain stable until MetaUse preservation.
+// operands must remain stable until memory conversion.
 static bool containsPointerDescriptorHandoff(ModuleOp moduleOp) {
   bool found = false;
   moduleOp.walk([&](Operation *op) {
@@ -624,7 +449,7 @@ static void eraseDeadRangeCarriers(ModuleOp moduleOp) {
   }
 }
 
-static LogicalResult preCleanBeforeUseAnalysis(ModuleOp moduleOp) {
+static LogicalResult preCleanBeforeMemoryConversion(ModuleOp moduleOp) {
   bool hasPointerDescriptorHandoff = containsPointerDescriptorHandoff(moduleOp);
 
   PassManager csePipeline(moduleOp.getContext(), moduleOp.getOperationName());
@@ -637,7 +462,7 @@ static LogicalResult preCleanBeforeUseAnalysis(ModuleOp moduleOp) {
   if (!hasPointerDescriptorHandoff)
     return success();
   RewritePatternSet patterns(moduleOp.getContext());
-  patterns.add<FoldConstantIfBeforeUseAnalysis>(moduleOp.getContext());
+  patterns.add<FoldConstantIfBeforeMemoryConversion>(moduleOp.getContext());
   return applyPatternsGreedily(moduleOp, std::move(patterns));
 }
 
@@ -827,21 +652,65 @@ static bool isSIMTOp(Operation *op) {
              triton::ascend::IndirectStoreOp>(op);
 }
 
+namespace {
+
+static Type normalizeMemoryElementType(Type elementType, MLIRContext *context) {
+  if (auto intType = dyn_cast<IntegerType>(elementType);
+      intType && intType.getWidth() == 1)
+    return IntegerType::get(context, 8);
+  return elementType;
+}
+
+static MemRefType convertPointerType(triton::PointerType pointerType) {
+  Type elementType = normalizeMemoryElementType(pointerType.getPointeeType(),
+                                                pointerType.getContext());
+  return MemRefType::get({ShapedType::kDynamic}, elementType);
+}
+
+static MemRefType convertPointerTensorType(TensorType tensorType,
+                                           triton::PointerType pointerType) {
+  Type elementType = normalizeMemoryElementType(pointerType.getPointeeType(),
+                                                tensorType.getContext());
+  return MemRefType::get(tensorType.getShape(), elementType);
+}
+
+// The first conversion stage changes only pointer-bearing types. Numerical
+// tensors intentionally remain tensors so operations that are used both for
+// address calculation and for stored data stay shared until memory operations
+// have consumed their address use.
+class MemoryTypeConverter final : public TypeConverter {
+public:
+  MemoryTypeConverter() {
+    addConversion([](Type type) { return type; });
+
+    addConversion([](triton::PointerType pointerType) {
+      return convertPointerType(pointerType);
+    });
+
+    addConversion([](TensorType tensorType) -> Type {
+      auto pointerType =
+          dyn_cast<triton::PointerType>(tensorType.getElementType());
+      if (!pointerType)
+        return tensorType;
+      return convertPointerTensorType(tensorType, pointerType);
+    });
+  }
+};
+
+} // namespace
+
 TritonTypeConverter::TritonTypeConverter() {
   addConversion([](Type type) { return type; });
 
-  addConversion([](triton::PointerType ptrType) {
-    Type elem = ptrType.getPointeeType();
-    // Handling special case: ptr<i1> -> memref<?x i8>
-    if (auto it = dyn_cast<IntegerType>(elem); it && it.getWidth() == 1) {
-      elem = IntegerType::get(ptrType.getContext(), 8);
-      LLVM_DEBUG({
+  addConversion([](triton::PointerType pointerType) {
+    MemRefType convertedType = convertPointerType(pointerType);
+    LLVM_DEBUG({
+      if (pointerType.getPointeeType().isInteger(1))
         llvm::dbgs() << "[TritonTypeConverter] Normalize i1 pointer to i8 "
                         "memref. elemType="
-                     << elem << "\n";
-      });
-    }
-    return MemRefType::get({ShapedType::kDynamic}, elem);
+                     << convertedType.getElementType() << "\n";
+    });
+    return convertedType;
   });
 
   addConversion([](TensorType tensorType) -> Type {
@@ -850,14 +719,14 @@ TritonTypeConverter::TritonTypeConverter() {
       elemType = ptrType.getPointeeType();
     }
     // Handling special case: tensor<i1> -> memref<?x i8>
-    if (auto it = dyn_cast<IntegerType>(elemType); it && it.getWidth() == 1) {
-      elemType = IntegerType::get(tensorType.getContext(), 8);
-      LLVM_DEBUG({
+    Type originalElemType = elemType;
+    elemType = normalizeMemoryElementType(elemType, tensorType.getContext());
+    LLVM_DEBUG({
+      if (elemType != originalElemType)
         llvm::dbgs() << "[TritonTypeConverter] Normalize i1 tensor to i8 "
                         "memref. elemType="
                      << elemType << "\n";
-      });
-    }
+    });
     return MemRefType::get(tensorType.getShape(), elemType);
   });
 
@@ -1263,9 +1132,6 @@ void TritonToLinalgPass::addDynamicLegal(
       controlFlowTerminatorLegal);
 
   auto isArithOrMathOpLegal = [this](Operation *op) {
-    if (op->hasAttr("MetaUse"))
-      return false;
-
     if (isa<arith::ConstantOp>(op))
       return true;
 
@@ -1289,11 +1155,141 @@ void TritonToLinalgPass::addDynamicLegal(
       isArithOrMathOpLegal);
 }
 
+static void addMemoryConversionLegalities(ConversionTarget &target,
+                                          MemoryTypeConverter &typeConverter) {
+  target.addLegalOp<ModuleOp>();
+
+  // Partial conversion is intentionally opt-in. Supporting operations such as
+  // tensor.empty may temporarily carry a pointer element type but are owned by
+  // the converter of their consuming structured custom op, not by a standalone
+  // pointer conversion pattern.
+  target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
+
+  // Check whether pointer conversion is needed without running the type
+  // converter: isLegal() would try to form memref<?xtensor<...>> for a block
+  // pointer. The block-pointer patterns materialize its memref using the
+  // pointer's shape, offsets and strides instead.
+  target.addDynamicallyLegalDialect<triton::TritonDialect,
+                                    triton::ascend::TritonAscendDialect>(
+      [](Operation *op) {
+        return hasPointerFreeTypes(op->getOperandTypes()) &&
+               hasPointerFreeTypes(op->getResultTypes());
+      });
+
+  // These operations are the semantic boundary of the first stage. Most of
+  // them also carry a Triton pointer and would be selected by the generic type
+  // rule above; listing them explicitly makes the invariant robust if an
+  // earlier pass has already adapted the pointer operand to a memref.
+  target.addIllegalOp<
+      triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp, triton::AtomicCASOp,
+      triton::ascend::IndirectLoadOp, triton::ascend::IndirectStoreOp,
+      triton::ascend::StrideLoadOp, triton::ascend::StrideStoreOp,
+      triton::ascend::GatherOutToUbOp, triton::ascend::ScatterUbToOutOp,
+      triton::ascend::IndexSelectSimdOp, triton::ascend::IndexPutOp>();
+
+  target.addDynamicallyLegalOp<triton::FuncOp>([&](triton::FuncOp op) {
+    return typeConverter.isSignatureLegal(op.getFunctionType());
+  });
+  target.addDynamicallyLegalOp<hivm::CustomOp>([](hivm::CustomOp op) {
+    return isCustomOpOperandTypesLegal(op->getOperandTypes());
+  });
+  target.addDynamicallyLegalOp<hivm::CustomMacroOp>([](hivm::CustomMacroOp op) {
+    return isCustomOpOperandTypesLegal(op->getOperandTypes());
+  });
+  target.addDynamicallyLegalOp<arith::SelectOp>([](arith::SelectOp op) {
+    return !TTOpConverters::isScalarPointerSelect(op);
+  });
+  target.addDynamicallyLegalOp<scf::IfOp>(
+      [](scf::IfOp op) { return !TTOpConverters::hasScalarPointerResult(op); });
+
+  auto controlFlowTerminatorLegal = [](Operation *op) {
+    Operation *parent = op->getParentOp();
+    if (parent &&
+        parent->hasAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr)) {
+      if (auto parentIf = dyn_cast<scf::IfOp>(parent))
+        return llvm::equal(op->getOperandTypes(), parentIf.getResultTypes());
+    }
+    if (parent && parent->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
+      return hasPointerFreeControlFlowBoundary(
+          cast<LoopLikeOpInterface>(parent));
+    return hasPointerFreeTypes(op->getOperandTypes());
+  };
+  target.addDynamicallyLegalOp<scf::YieldOp, scf::ConditionOp>(
+      controlFlowTerminatorLegal);
+
+  auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
+    Operation *op = loopOp.getOperation();
+    if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr)) {
+      if (!getMarkedMakeRangeCarrierSlots(loopOp).empty())
+        return false;
+      return hasPointerFreeControlFlowBoundary(loopOp);
+    }
+    return !op->hasAttr("UnhandledLoopOp");
+  };
+  target.addDynamicallyLegalOp<scf::ForOp>(loopOpLegalFn);
+  target.addDynamicallyLegalOp<scf::WhileOp>(loopOpLegalFn);
+
+  // Numerical TTIR is legal under the dialect rule above. Keeping it intact is
+  // what lets ordinary DCE decide whether an address producer is dead after
+  // the memory operations have disappeared.
+}
+
+static void removePointerConversionHandoffAttrs(ModuleOp moduleOp) {
+  moduleOp.walk([](LoopLikeOpInterface loopOp) {
+    loopOp->removeAttr(controlflow::kPointerDescriptorBoundaryAttr);
+  });
+  moduleOp.walk([](Operation *op) {
+    op->removeAttr(controlflow::kPointerDescriptorRebuildAttr);
+    op->removeAttr(controlflow::kPointerDescriptorOffsetFormAttr);
+    op->removeAttr(controlflow::kPointerDescriptorStructuredAxesAttr);
+    op->removeAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr);
+  });
+}
+
+static LogicalResult cleanAfterMemoryConversion(ModuleOp moduleOp) {
+  // Pointer/control-flow handoff metadata has no consumers after the memory
+  // stage. Drop it before canonicalization so SCF can safely remove dead
+  // iter_args and results in addition to ordinary trivially-dead operations.
+  removePointerConversionHandoffAttrs(moduleOp);
+
+  PassManager cleanupPipeline(moduleOp.getContext(),
+                              moduleOp.getOperationName());
+  cleanupPipeline.addPass(createCSEPass());
+  cleanupPipeline.addPass(createCanonicalizerPass());
+  if (failed(cleanupPipeline.run(moduleOp)))
+    return failure();
+
+  bool valid = true;
+  moduleOp.walk([&](Operation *op) {
+    if (!hasPointerFreeTypes(op->getOperandTypes()) ||
+        !hasPointerFreeTypes(op->getResultTypes())) {
+      op->emitError("pointer-bearing operation survived memory conversion");
+      valid = false;
+    }
+    if (auto func = dyn_cast<triton::FuncOp>(op);
+        func && (!hasPointerFreeTypes(func.getFunctionType().getInputs()) ||
+                 !hasPointerFreeTypes(func.getFunctionType().getResults()))) {
+      func.emitError("pointer-bearing signature survived memory conversion");
+      valid = false;
+    }
+    for (Region &region : op->getRegions()) {
+      for (Block &block : region) {
+        if (!hasPointerFreeTypes(block.getArgumentTypes())) {
+          op->emitError(
+              "pointer-bearing region argument survived memory conversion");
+          valid = false;
+        }
+      }
+    }
+  });
+  return success(valid);
+}
+
 namespace {
 
 /// Route the specific `splat(base) -> addptr(scan) -> addptr(constant) ->
-/// store` form through the existing indirect-store operation before use
-/// analysis. Lowering either addptr independently would materialize a memref
+/// store` form through the existing indirect-store operation before memory
+/// conversion. Lowering either addptr independently would materialize a memref
 /// while the remaining operation still expects tensor<ptr>.
 class FoldScanOffsetAddPtrChain : public OpRewritePattern<triton::AddPtrOp> {
 public:
@@ -1409,7 +1405,6 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   populateFunctionOpInterfaceTypeConversionPattern<triton::FuncOp>(
       patterns, typeConverter);
 
-  patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
   patterns.add<LoadStoreConverter::AddPtrConverter>(patterns.getContext());
   patterns
@@ -1570,9 +1565,6 @@ TritonToLinalgPass::processPtrBroadcastOperations(ModuleOp moduleOp) {
   target.addLegalOp<triton::SplatOp>();
   target.addLegalOp<triton::AddPtrOp>();
   target.addDynamicallyLegalOp<triton::BroadcastOp>([](triton::BroadcastOp op) {
-    if (op->hasAttr("MetaUse")) {
-      return true;
-    }
     auto resultType = dyn_cast<RankedTensorType>(op.getType());
     HoistBroadcast::BroadcastHoister hoister(op);
     return !(isa<triton::PointerType>(resultType.getElementType()) &&
@@ -1786,79 +1778,42 @@ void TritonToLinalgPass::runOnOperation() {
     return;
   }
 
-  // Stage-1 may legitimately delete an unused, already validated boundary.
-  // Revalidate every surviving handoff so later phases never consume a marker
-  // whose structural edges were changed without updating its slot contract.
+  // Canonicalization may legitimately delete an unused, already validated
+  // boundary. Revalidate every surviving handoff so later phases never consume
+  // a marker whose structural edges changed without updating its slot contract.
   if (failed(validatePointerDescriptorHandoffMetadata(moduleOp))) {
     moduleOp->emitError("invalid pointer descriptor handoff metadata");
     signalPassFailure();
     return;
   }
 
-  // 2.1 Pre-clean dead control flow before use analysis. Descriptor handoff
-  // attributes require stable loop positions and rebuild operands, so marked
-  // modules use a restricted cleanup that cannot rewrite either contract.
-  if (failed(preCleanBeforeUseAnalysis(moduleOp))) {
+  // 2. Pre-clean genuinely dead TTIR. Descriptor handoff attributes require
+  // stable loop positions and rebuild operands, so marked modules use a
+  // restricted cleanup until the memory stage has consumed that contract.
+  // This remains ordinary side-effect-aware DCE; it does not infer liveness
+  // backwards from stores or discard memory reads on its own.
+  if (failed(preCleanBeforeMemoryConversion(moduleOp))) {
     moduleOp->emitError(
-        "failed to pre-clean dead control-flow before use analysis");
+        "failed to pre-clean dead control-flow before memory conversion");
     signalPassFailure();
     return;
   }
 
-  // 2. Perform use analysis on FuncOp.
-  moduleOp.walk([this](triton::FuncOp op) {
-    if (failed(runUseAnalysis(op))) {
-      signalPassFailure();
-    }
-  });
-
-  if (failed(preservePointerDescriptorComputations(moduleOp))) {
-    moduleOp->emitError("invalid pointer descriptor handoff metadata");
-    signalPassFailure();
-    return;
-  }
-
-  RewritePatternSet patterns(&getContext());
-  ConversionTarget target(getContext());
-  TritonTypeConverter tritonTypeConverter{};
-
-  // 3. Mark legal dialects and operations.
-  this->addDynamicLegal(target, tritonTypeConverter);
-
-  // 4. Mark ops that must be converted explicitly (e.g. tt.scan).
-  auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
-    Operation *op = loopOp.getOperation();
-    if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr)) {
-      // CFO descriptor loops may still carry a non-descriptor make_range
-      // tensor used by a load/store mask. Route only those loops through the
-      // narrow legacy mask-carrier rewrite; descriptor and opaque slots remain
-      // on the normal pointer-free boundary path.
-      if (!getMarkedMakeRangeCarrierSlots(loopOp).empty())
-        return false;
-      return hasPointerFreeControlFlowBoundary(loopOp);
-    }
-    return !op->hasAttr("UnhandledLoopOp");
-  };
-
-  target.addIllegalOp<triton::ScanOp>();
-  target.addIllegalOp<triton::MapElementwiseOp>();
-  target.addDynamicallyLegalOp<scf::ForOp>(loopOpLegalFn);
-  target.addDynamicallyLegalOp<scf::WhileOp>(loopOpLegalFn);
-
-  // 5. Register converters for all illegal Triton ops.
-  // Execute ptr broadcast operations conversion
+  // 3. Normalize pointer broadcasts before the pointer-only type conversion.
   if (failed(processPtrBroadcastOperations(moduleOp))) {
     signalPassFailure();
+    return;
   }
-  this->populateTritonToLinalgConversionPatterns(tritonTypeConverter, patterns,
-                                                 LAUNCH_GRID_RANK);
 
-  // 6. Inject program id / number of programs arguments into each Triton kernel
-  // function.
+  // 4. Inject program id / number of programs arguments before the first
+  // function signature conversion so both conversion stages observe the same
+  // kernel ABI.
   for (auto func : getOperation().getOps<triton::FuncOp>()) {
     addProgramInfo(func, globalKernel);
   }
 
+  // 5. Mark the control-flow boundaries that must be structurally rewritten
+  // while pointer values and address-only tensor carriers are still present.
   moduleOp.walk([this](LoopLikeOpInterface loopOp) {
     auto *op = loopOp.getOperation();
     // CFO-expanded pointer loops already carry policy-owned descriptor
@@ -1890,37 +1845,65 @@ void TritonToLinalgPass::runOnOperation() {
     }
   });
 
-  // 7. Convert ops.
-  LogicalResult conversionResult =
-      applyPartialConversion(moduleOp, target, std::move(patterns));
+  // 6. Convert memory operations and every pointer-bearing transport first.
+  // Numerical tensor operations remain TTIR. Once a load/store/atomic has
+  // consumed its pointer, mask and fallback operands, ordinary DCE can tell
+  // which original producers are still needed for the data path.
+  {
+    RewritePatternSet memoryPatterns(&getContext());
+    ConversionTarget memoryTarget(getContext());
+    MemoryTypeConverter memoryTypeConverter;
+    addMemoryConversionLegalities(memoryTarget, memoryTypeConverter);
+    this->populateTritonToLinalgConversionPatterns(
+        memoryTypeConverter, memoryPatterns, LAUNCH_GRID_RANK);
 
-  if (failed(conversionResult)) {
-    moduleOp->emitError("failed to apply Conversion Patterns");
+    if (failed(applyPartialConversion(moduleOp, memoryTarget,
+                                      std::move(memoryPatterns)))) {
+      moduleOp->emitError("failed to convert memory operations");
+      signalPassFailure();
+      return;
+    }
+  }
+
+  // 7. This cleanup replaces the legacy use-role analysis: converted memory
+  // operations no longer keep the old address/mask SSA uses alive, while
+  // shared data/address producers remain live through their real data uses.
+  if (failed(cleanAfterMemoryConversion(moduleOp))) {
+    moduleOp->emitError("failed to clean up after memory conversion");
     signalPassFailure();
     return;
   }
 
-  // These markers are contracts with this conversion pass. Remove them only
-  // after successful conversion so failure reproducers retain ownership,
-  // exact dynamic descriptor slots, and complete rebuild roots.
-  moduleOp.walk([](LoopLikeOpInterface loopOp) {
-    loopOp->removeAttr(controlflow::kPointerDescriptorBoundaryAttr);
-  });
-  moduleOp.walk([](Operation *op) {
-    op->removeAttr(controlflow::kPointerDescriptorRebuildAttr);
-    op->removeAttr(controlflow::kPointerDescriptorOffsetFormAttr);
-    op->removeAttr(controlflow::kPointerDescriptorStructuredAxesAttr);
-  });
-  moduleOp.walk([](Operation *op) {
-    op->removeAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr);
-  });
+  // 8. Convert the remaining numerical TTIR with the existing full type
+  // converter. No use-role annotations or metadata eraser are involved.
+  RewritePatternSet patterns(&getContext());
+  ConversionTarget target(getContext());
+  TritonTypeConverter tritonTypeConverter{};
+  this->addDynamicLegal(target, tritonTypeConverter);
+
+  auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
+    return !loopOp->hasAttr("UnhandledLoopOp");
+  };
+
+  target.addIllegalOp<triton::ScanOp>();
+  target.addIllegalOp<triton::MapElementwiseOp>();
+  target.addDynamicallyLegalOp<scf::ForOp>(loopOpLegalFn);
+  target.addDynamicallyLegalOp<scf::WhileOp>(loopOpLegalFn);
+  this->populateTritonToLinalgConversionPatterns(tritonTypeConverter, patterns,
+                                                 LAUNCH_GRID_RANK);
+
+  if (failed(applyPartialConversion(moduleOp, target, std::move(patterns)))) {
+    moduleOp->emitError("failed to convert remaining Triton operations");
+    signalPassFailure();
+    return;
+  }
 
   // Conversion can expose a make_range carrier whose loop result is already
   // dead. Remove only the proven dead range/update chain before generic
   // canonicalization; live tensor carriers and scalar address state remain.
   eraseDeadRangeCarriers(moduleOp);
 
-  // 7.1 Workaround: fold duplicated one-hot reconstruction emitted after
+  // 8.1 Workaround: fold duplicated one-hot reconstruction emitted after
   // ArgMax lowering. The issue is not in triton::ReduceOp semantics themselves;
   // redundant value reconstruction is materialized later and can lower to
   // incorrect code on Ascend, so this is fixed post-conversion on
@@ -1942,14 +1925,14 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
   }
 
-  // 8. Convert function prologue/epilogue.
+  // 9. Convert function prologue/epilogue.
   moduleOp.walk([&](triton::FuncOp func) {
     this->convertTTFunc(func, existDot, existSIMTOp);
   });
 
   rewriteDevicePrintOffsets(moduleOp);
 
-  // 9. Clean up dead code and simplify IR.
+  // 10. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());
   pm.addPass(createCSEPass());
   pm.addPass(createCanonicalizerPass());
@@ -1957,7 +1940,7 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
   }
 
-  // 10. Collapses call-site locations whose callee is an inlined Triton stdlib
+  // 11. Collapses call-site locations whose callee is an inlined Triton stdlib
   // helper (under site-packages) down to their caller (user-file) frame
   //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
   {
@@ -1968,7 +1951,7 @@ void TritonToLinalgPass::runOnOperation() {
     }
   }
 
-  // 11. Deduplicate debug NOPs inserted by converters.
+  // 12. Deduplicate debug NOPs inserted by converters.
   //     Opt-in via LLVM_EXTRACT_DI_LOCAL_VARIABLES=1.
   {
     PassManager pm(&getContext(), moduleOp.getOperationName());

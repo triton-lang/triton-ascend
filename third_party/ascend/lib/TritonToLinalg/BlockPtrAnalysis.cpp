@@ -2002,6 +2002,10 @@ LogicalResult BlockDataParser::rewriteMakeTensorPtrOp(
 
   data.getOffsetsRef() =
       std::move(llvm::map_to_vector(op.getOffsets(), [&](Value v) {
+        if (auto constVal = getConstantIntValue(v)) {
+          if (constVal.value() >= 0)
+            return getOpFoldResultOfLayoutInfo(v, rewriter);
+        }
         auto zeroVal = rewriter.create<arith::ConstantOp>(
             loc, rewriter.getI32IntegerAttr(0));
         v = rewriter.create<arith::MaxSIOp>(loc, v, zeroVal);

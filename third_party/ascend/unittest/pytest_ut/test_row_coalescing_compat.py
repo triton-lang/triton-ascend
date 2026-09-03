@@ -112,21 +112,15 @@ def _row_module(
         store_value = "%out"
     elif body in ("auto_overflow_assert", "user_tensor_assert"):
         marker = " {tt.auto_overflow_assert}" if body == "auto_overflow_assert" else ""
-        message = (
-            "int32 overflow detected for operation add"
-            if body == "auto_overflow_assert"
-            else "user tensor assertion"
-        )
+        message = ("int32 overflow detected for operation add"
+                   if body == "auto_overflow_assert" else "user tensor assertion")
         pre_load = f"""    %overflow_ok = arith.cmpi sle, %offsets, %offsets : tensor<{width}xi32>
     tt.assert %overflow_ok, "{message}"{marker} : tensor<{width}xi1>
 """
     elif body in ("auto_scalar_assert", "user_scalar_assert"):
         marker = " {tt.auto_overflow_assert}" if body == "auto_scalar_assert" else ""
-        message = (
-            "int32 overflow detected for operation add"
-            if body == "auto_scalar_assert"
-            else "user scalar assertion"
-        )
+        message = ("int32 overflow detected for operation add"
+                   if body == "auto_scalar_assert" else "user scalar assertion")
         pre_load = f"""    %scalar_ok = arith.cmpi slt, {pid_in_work}, %count : i32
     tt.assert %scalar_ok, "{message}"{marker} : i1
 """
@@ -268,9 +262,7 @@ def test_row_coalescing_lifts_user_tensor_assert_with_tail_guard(tmp_path):
         ("user_scalar_assert", "user scalar assertion", False),
     ),
 )
-def test_row_coalescing_lifts_scalar_assert_with_tail_guard(
-    body, message, has_auto_marker, tmp_path
-):
+def test_row_coalescing_lifts_scalar_assert_with_tail_guard(body, message, has_auto_marker, tmp_path):
     text = _run_row(_row_module(f"row_{body}", 16, body=body), tmp_path)
 
     _assert_row_hit(text)

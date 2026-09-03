@@ -201,8 +201,8 @@ static bool isInWorkRegion(Operation *operation, Block *workBlock) {
 // Row masking semantics, so keep them in the work block or reject the match.
 static bool isExternalPidDefinitionLiftable(Operation *operation) {
   if (!operation || operation->getNumRegions() != 0 ||
-      isa<triton::LoadOp, triton::StoreOp, triton::AssertOp,
-          triton::ReduceOp, triton::ScanOp, scf::ForOp>(operation))
+      isa<triton::LoadOp, triton::StoreOp, triton::AssertOp, triton::ReduceOp,
+          triton::ScanOp, scf::ForOp>(operation))
     return false;
   return isRowLiftable(operation) && isMemoryEffectFree(operation);
 }

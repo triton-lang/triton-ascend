@@ -583,7 +583,7 @@ def _is_ascend_sanitizer_enabled() -> bool:
 
 
 def _is_debug_line_info_disabled() -> bool:
-    return os.getenv("TRITON_DISABLE_LINE_INFO", "true").lower() in ("true", "1")
+    return os.getenv("TRITON_DISABLE_LINE_INFO", "false").lower() in ("true", "1")
 
 
 def _is_auto_map_parallel_blocks_enabled() -> bool:

@@ -7,6 +7,10 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   integration-tests-ascend:
     name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.config.python_version }})
@@ -37,8 +41,23 @@ jobs:
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - name: Cache build dependencies
-        uses: actions/cache@v4
+      - name: Configure Huawei Cloud Credentials
+        id: creds
+        uses: ascend-gha-runners/configure-hwcloud-credentials@3be5794f565c38f9719ef1f6bec28351c929be3c
+        with:
+          region: ap-southeast-1
+          audience: hw-vllm-ascend-audience
+          idp-id: github-vllm-ascend
+          duration-seconds: 3600
+
+      - name: Restore build dependencies cache
+        id: cache-deps
+        uses: runs-on/cache/restore@v5
+        env:
+          RUNS_ON_S3_BUCKET_CACHE: triton-ascend-artifacts
+          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-southwest-2.myhuaweicloud.com
+          RUNS_ON_S3_FORCE_PATH_STYLE: "true"
+          RUNS_ON_AWS_REGION: cn-southwest-2
         with:
           path: |
             ~/.triton/llvm
@@ -166,3 +185,19 @@ jobs:
             fi
             exit 1
           fi
+
+      - name: Save build dependencies cache
+        if: ${{ steps.cache-deps.outputs.cache-hit != 'true' }}
+        uses: runs-on/cache/save@v5
+        env:
+          RUNS_ON_S3_BUCKET_CACHE: triton-ascend-artifacts
+          RUNS_ON_S3_BUCKET_ENDPOINT: https://obs.cn-southwest-2.myhuaweicloud.com
+          RUNS_ON_S3_FORCE_PATH_STYLE: "true"
+          RUNS_ON_AWS_REGION: cn-southwest-2
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.cann_version }}-${{ matrix.os }}-${{ matrix.config.chip_type }}-py${{ matrix.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}

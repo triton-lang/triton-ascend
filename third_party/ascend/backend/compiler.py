@@ -1103,6 +1103,10 @@ def ttir_to_npubin(mod, metadata, opt):
                     _compile_option_list += [
                         f"--append-bisheng-options={bisheng_options}"
                     ]
+            if _is_auto_map_parallel_blocks_enabled() and not metadata.get(
+                "has_auto_blockify_blacklist_op", False
+            ):
+                _compile_option_list += ["--enable-auto-blockify-loop"]
 
             # Enable SIMT auto-blockify when TRITON_ALL_BLOCKS_PARALLEL is set,
             # mirroring the SIMD compile paths. driver.py's runtime block-count

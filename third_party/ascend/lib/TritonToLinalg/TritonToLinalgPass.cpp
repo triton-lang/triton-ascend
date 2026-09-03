@@ -1829,10 +1829,11 @@ void TritonToLinalgPass::runOnOperation() {
   auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
     Operation *op = loopOp.getOperation();
     if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr)) {
-      // CFO descriptor loops may still carry a non-descriptor make_range
-      // tensor used by a load/store mask. Route only those loops through the
-      // narrow legacy mask-carrier rewrite; descriptor and opaque slots remain
-      // on the normal pointer-free boundary path.
+      // CFO descriptor loops may still carry a non-descriptor affine tensor
+      // derived from make_range and used by an address or load/store mask.
+      // Route only those proven slots through the narrow legacy rewrite;
+      // descriptor and opaque numerical slots remain on the normal
+      // pointer-free boundary path.
       if (!getMarkedMakeRangeCarrierSlots(loopOp).empty())
         return false;
       return hasPointerFreeControlFlowBoundary(loopOp);

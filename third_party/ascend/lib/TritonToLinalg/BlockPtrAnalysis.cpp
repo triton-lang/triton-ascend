@@ -2593,15 +2593,107 @@ bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp) {
   return false;
 }
 
-static bool isMakeRangeCarrier(Value value) {
+enum class MakeRangeCarrierKind { Unsupported, Uniform, Affine };
+
+// Classify the narrow integer expression subset that BlockDataParser can
+// losslessly turn into offsets and strides. Affine means that the expression
+// contains a make_range lane coordinate; Uniform means that every lane has
+// the same value and can therefore be used as an affine coefficient or
+// displacement. Unknown and lane-varying producers stay Unsupported so a CFO
+// descriptor loop never sends ordinary numerical tensors through BlockData.
+static MakeRangeCarrierKind analyzeMakeRangeCarrier(
+    Value value,
+    llvm::SmallDenseMap<Value, MakeRangeCarrierKind> &classification) {
+  if (auto cached = classification.find(value); cached != classification.end())
+    return cached->second;
+
+  auto remember = [&](MakeRangeCarrierKind kind) {
+    classification.try_emplace(value, kind);
+    return kind;
+  };
+  auto isIntegerLike = [](Type type) {
+    if (type.isIndex() || isa<IntegerType>(type))
+      return true;
+    auto shapedType = dyn_cast<ShapedType>(type);
+    return shapedType && isa<IntegerType>(shapedType.getElementType());
+  };
+  if (!isIntegerLike(value.getType()))
+    return remember(MakeRangeCarrierKind::Unsupported);
+
   Operation *producer = value.getDefiningOp();
-  if (!producer)
-    return false;
+  if (!producer) {
+    // A scalar block/function argument is lane-uniform. A tensor argument has
+    // unknown per-lane contents and cannot establish affine provenance.
+    return remember(value.getType().isIndex() ||
+                            isa<IntegerType>(value.getType())
+                        ? MakeRangeCarrierKind::Uniform
+                        : MakeRangeCarrierKind::Unsupported);
+  }
+
   if (isa<triton::MakeRangeOp>(producer))
-    return true;
-  if (auto cast = dyn_cast<tensor::CastOp>(producer))
-    return isMakeRangeCarrier(cast.getSource());
-  return false;
+    return remember(MakeRangeCarrierKind::Affine);
+
+  // Program identifiers are scalar and therefore uniform across the tensor
+  // lanes. They can participate in an affine carrier through splat, cast, and
+  // integer arithmetic without introducing an unknown per-lane value.
+  if (isa<triton::GetProgramIdOp, triton::GetNumProgramsOp>(producer))
+    return remember(MakeRangeCarrierKind::Uniform);
+
+  if (auto constant = dyn_cast<arith::ConstantOp>(producer)) {
+    Attribute attr = constant.getValue();
+    if (isa<IntegerAttr>(attr))
+      return remember(MakeRangeCarrierKind::Uniform);
+    auto elements = dyn_cast<DenseElementsAttr>(attr);
+    return remember(elements && elements.isSplat() &&
+                            isa<IntegerType>(elements.getElementType())
+                        ? MakeRangeCarrierKind::Uniform
+                        : MakeRangeCarrierKind::Unsupported);
+  }
+
+  // These operations preserve whether their only input is uniform or affine.
+  if (isa<tensor::CastOp, arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
+          triton::BroadcastOp>(producer))
+    return remember(
+        analyzeMakeRangeCarrier(producer->getOperand(0), classification));
+
+  auto combineLinear = [&](Value lhs, Value rhs) {
+    MakeRangeCarrierKind lhsKind = analyzeMakeRangeCarrier(lhs, classification);
+    MakeRangeCarrierKind rhsKind = analyzeMakeRangeCarrier(rhs, classification);
+    if (lhsKind == MakeRangeCarrierKind::Unsupported ||
+        rhsKind == MakeRangeCarrierKind::Unsupported)
+      return MakeRangeCarrierKind::Unsupported;
+    if (lhsKind == MakeRangeCarrierKind::Affine ||
+        rhsKind == MakeRangeCarrierKind::Affine)
+      return MakeRangeCarrierKind::Affine;
+    return MakeRangeCarrierKind::Uniform;
+  };
+  if (auto add = dyn_cast<arith::AddIOp>(producer))
+    return remember(combineLinear(add.getLhs(), add.getRhs()));
+  if (auto sub = dyn_cast<arith::SubIOp>(producer))
+    return remember(combineLinear(sub.getLhs(), sub.getRhs()));
+  if (auto mul = dyn_cast<arith::MulIOp>(producer)) {
+    MakeRangeCarrierKind lhsKind =
+        analyzeMakeRangeCarrier(mul.getLhs(), classification);
+    MakeRangeCarrierKind rhsKind =
+        analyzeMakeRangeCarrier(mul.getRhs(), classification);
+    if (lhsKind == MakeRangeCarrierKind::Unsupported ||
+        rhsKind == MakeRangeCarrierKind::Unsupported ||
+        (lhsKind == MakeRangeCarrierKind::Affine &&
+         rhsKind == MakeRangeCarrierKind::Affine))
+      return remember(MakeRangeCarrierKind::Unsupported);
+    return remember(lhsKind == MakeRangeCarrierKind::Affine ||
+                            rhsKind == MakeRangeCarrierKind::Affine
+                        ? MakeRangeCarrierKind::Affine
+                        : MakeRangeCarrierKind::Uniform);
+  }
+
+  return remember(MakeRangeCarrierKind::Unsupported);
+}
+
+static bool isMakeRangeCarrier(Value value) {
+  llvm::SmallDenseMap<Value, MakeRangeCarrierKind> classification;
+  return analyzeMakeRangeCarrier(value, classification) ==
+         MakeRangeCarrierKind::Affine;
 }
 
 SmallVector<unsigned>

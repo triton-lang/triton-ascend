@@ -524,7 +524,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
     guard,
     source_pairs,
 ):
-    """Compare both generated launcher paths for all E x B x R cap cases."""
+    """Preserve the legacy cap except for Row's explicit no-blockify contract."""
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
@@ -562,7 +562,8 @@ def test_895_launcher_coalescing_and_block_cap_closure(
         baseline_paths = _launcher_paths(baseline_src)
         target_paths = _launcher_paths(target_src)
         assert len(baseline_paths) == len(target_paths) == 2, case
-        expected_cap_count = 1 if env_enabled and not blacklisted else 0
+        expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
+        expected_target_cap_count = (1 if env_enabled and not blacklisted and not row_applied else 0)
         for baseline_path, target_path in zip(baseline_paths, target_paths):
             assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
             assert baseline_path.count(assignment) == target_path.count(assignment) == 1, case
@@ -571,7 +572,8 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 assert "ChunkCoalescing: grid[2] not divisible" not in target_path, case
             else:
                 assert baseline_path.count(guard) == target_path.count(guard) == 1, case
-            assert baseline_path.count(cap) == target_path.count(cap) == expected_cap_count, case
+            assert baseline_path.count(cap) == expected_baseline_cap_count, case
+            assert target_path.count(cap) == expected_target_cap_count, case
 
 
 def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
@@ -619,7 +621,8 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                     f"E={env_enabled}, B={blacklisted}, R={row_applied}")
             expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
                                    if ceil_div else f"{grid} = {grid} / {factor};")
-            expected_cap_count = 1 if env_enabled and not blacklisted else 0
+            expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
+            expected_target_cap_count = (1 if env_enabled and not blacklisted and not row_applied else 0)
             for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
                 assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
                 assert baseline_path.count(expected_assignment) == 1, case
@@ -632,8 +635,8 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                              f"coalesce_factor {factor}")
                     assert baseline_path.count(guard) == 1, case
                     assert target_path.count(guard) == 1, case
-                assert baseline_path.count(cap) == expected_cap_count, case
-                assert target_path.count(cap) == expected_cap_count, case
+                assert baseline_path.count(cap) == expected_baseline_cap_count, case
+                assert target_path.count(cap) == expected_target_cap_count, case
 
 
 def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):

@@ -35,6 +35,8 @@ def _row_module(
     axis="x",
     reads_num_programs=False,
     pid_derived_outside_work=False,
+    bound_before_pid=False,
+    multiply_pid_in_work=False,
     has_direct_call=False,
     body="copy",
 ):
@@ -57,6 +59,19 @@ def _row_module(
     %pid_base = arith.addi %pid, %one : i32
 """
         pid_in_work = "%pid_base"
+    work_pid_prefix = ""
+    if multiply_pid_in_work:
+        work_pid_prefix = f"""    %block = arith.constant {width} : i32
+    %pid_scaled = arith.muli %pid, %block : i32
+"""
+        pid_in_work = "%pid_scaled"
+    bound_prefix = ""
+    count_definition = "    %count = tt.load %valid : !tt.ptr<i32>\n"
+    guard_count = "%count"
+    if bound_before_pid:
+        bound_prefix = "    %bound = arith.constant 32768 : i32\n"
+        count_definition = ""
+        guard_count = "%bound"
     load = f"    %value = tt.load %src_ptr : tensor<{width}x!tt.ptr<f32>>"
     post_load = ""
     store_value = "%value"
@@ -97,6 +112,19 @@ def _row_module(
     }}
 """
         store_value = "%out"
+    elif body == "for_pid_lower_bound":
+        # Candidate discovery intentionally accepts this shape, but the
+        # legacy materializer cannot use a Row-lifted loop bound.  It must
+        # decline in its detached sandbox rather than fail the whole pass or
+        # publish a partial launch contract.
+        post_load = f"""    %pid_index = arith.index_cast %pid : i32 to index
+    %for_step = arith.constant 1 : index
+    %for_ub = arith.constant 2 : index
+    %out = scf.for %i = %pid_index to %for_ub step %for_step iter_args(%acc = %value) -> (tensor<{width}xf32>) {{
+      scf.yield %acc : tensor<{width}xf32>
+    }}
+"""
+        store_value = "%out"
     elif body == "non_whitelisted_y_num_programs":
         post_load = "    %not_whitelisted = tt.get_num_programs y : i32\n"
     elif body != "copy":
@@ -105,14 +133,13 @@ def _row_module(
     return f"""
 module {{
   tt.func public @{name}(%src: !tt.ptr<f32>, %dst: !tt.ptr<f32>, %valid: !tt.ptr<i32>) {{
-{pre_pid}    %pid = tt.get_program_id {axis} : i32
-{num_programs}{pid_prefix}    %count = tt.load %valid : !tt.ptr<i32>
-    %past_end = arith.cmpi sge, %pid, %count : i32
+{pre_pid}{bound_prefix}    %pid = tt.get_program_id {axis} : i32
+{num_programs}{pid_prefix}{count_definition}    %past_end = arith.cmpi sge, %pid, {guard_count} : i32
     cf.cond_br %past_end, ^bb_return, ^bb_work
   ^bb_return:
     tt.return
   ^bb_work:
-    %pid_splat = tt.splat {pid_in_work} : i32 -> tensor<{width}xi32>
+{work_pid_prefix}    %pid_splat = tt.splat {pid_in_work} : i32 -> tensor<{width}xi32>
     %range = tt.make_range {{end = {width} : i32, start = 0 : i32}} : tensor<{width}xi32>
     %offsets = arith.addi %pid_splat, %range : tensor<{width}xi32>
     %src_splat = tt.splat %src : !tt.ptr<f32> -> tensor<{width}x!tt.ptr<f32>>
@@ -171,6 +198,26 @@ def test_row_coalescing_graph_rule_preserves_h_selection(width, factor, tmp_path
     assert "cf.cond_br" not in text
 
 
+def test_row_coalescing_scaffold_follows_pid_when_bound_is_hoisted(tmp_path):
+    text = _run_row(
+        _row_module(
+            "row_bound_before_pid",
+            16,
+            bound_before_pid=True,
+            multiply_pid_in_work=True,
+        ),
+        tmp_path,
+    )
+
+    _assert_row_hit(text)
+    # This source order used to make Row insert pidH between bound and pid,
+    # producing an SSA dominance error.  The transformed module is verified by
+    # the pass, and its scaffold must now follow the pid definition.
+    assert text.index("arith.constant 32768") < text.index("tt.get_program_id")
+    assert text.index("tt.get_program_id") < text.index("tt.make_range")
+    assert "cf.cond_br" not in text
+
+
 def test_row_coalescing_rejects_visible_num_programs_on_row_axis(tmp_path):
     text = _run_row(
         _row_module("row_reads_num_programs", 16, reads_num_programs=True),
@@ -222,6 +269,17 @@ def test_row_coalescing_clones_scf_for_with_lifted_iter_args(tmp_path):
     assert "iter_args" in text
     assert "-> (tensor<8x16xf32>)" in text
     assert "scf.yield" in text
+
+
+def test_row_coalescing_declines_late_sandbox_failure_without_committing(tmp_path):
+    text = _run_row(
+        _row_module("row_late_sandbox_decline", 16, body="for_pid_lower_bound"),
+        tmp_path,
+    )
+
+    _assert_row_bailout(text)
+    assert "arith.index_cast" in text
+    assert "scf.for" in text
 
 
 def test_row_coalescing_rejects_non_whitelisted_y_num_programs(tmp_path):

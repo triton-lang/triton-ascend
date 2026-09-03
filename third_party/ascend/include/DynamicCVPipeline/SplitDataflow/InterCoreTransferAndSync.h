@@ -104,9 +104,14 @@ private:
   int markAllocIndex = 0;
   int intraDepsGroupId = 0;
 
+  llvm::DenseMap<int, llvm::SmallVector<LoopLikeOpInterface>> loopInclusions;
+  llvm::DenseSet<int> singleLoopSet;
+
   llvm::DenseMap<mlir::Value, mlir::Value> ndnzValueMapping;
   SSBufferManager ssbufferManager;
 
+  void analyzeLoopInclusion();
+  void moveStartEndSync(mlir::OpBuilder &builder);
   mlir::LogicalResult
   processDependencies(FlagIdManager &flagManager,
                       FlagIdReuseManager &flagIdReuseManager);

@@ -114,6 +114,13 @@ static void attachTransferTags(Operation *op, int blockId, StringRef coreType,
       IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), transferId));
 }
 
+static void attachLoopIdTag(Operation *op, int loopId) {
+  MLIRContext *ctx = op->getContext();
+  op->setAttr(
+      CVPipeline::kLoopId,
+      IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), loopId));
+}
+
 static void attachMemCrossDeps(Operation *op, int tid, int seqId,
                                OpBuilder &builder) {
   op->setAttr(CVPipeline::kMemCrossDeps,
@@ -1067,6 +1074,11 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     attachAnalyzeFlagIdTag(setOpForWrite);
     attachAnalyzeFlagIdTag(setOpForStart);
     attachAnalyzeFlagIdTag(waitOpForEnd);
+
+    auto loopId =
+        mainLoopOp->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
+    attachLoopIdTag(setOpForStart, loopId);
+    attachLoopIdTag(waitOpForEnd, loopId);
     // E2: register every set->wait pair of this transfer, not just the
     // loop start/end pair. Each pair is the only proof of cross-core
     // ordering for the sync ops it connects.
@@ -2006,6 +2018,89 @@ void InterCoreTransferAndSyncPass::sortDependencies(
             });
 }
 
+void InterCoreTransferAndSyncPass::analyzeLoopInclusion() {
+  loopInclusions.clear();
+  int maxLoopId = -1;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    auto loopOp = dyn_cast<LoopLikeOpInterface>(op);
+    if (!loopOp) {
+      return;
+    }
+
+    int loopId = 0;
+    Operation *parentLoop =
+        loopOp.getOperation()->getParentOfType<LoopLikeOpInterface>();
+    while (parentLoop) {
+      ++loopId;
+      parentLoop = parentLoop->getParentOfType<LoopLikeOpInterface>();
+    }
+    loopOp->setAttr(
+        CVPipeline::kLoopId,
+        IntegerAttr::get(
+            IntegerType::get(loopOp->getContext(), kIntegerBitWidth), loopId));
+    loopInclusions[loopId].push_back(loopOp);
+    maxLoopId = std::max(maxLoopId, loopId);
+  });
+  for (int loopId = 0; loopId <= maxLoopId; ++loopId) {
+    if (loopInclusions[loopId].size() != 1) {
+      continue;
+    }
+    bool allSingle = true;
+    for (int outerId = loopId - 1; outerId >= 0; --outerId) {
+      if (loopInclusions[outerId].size() != 1) {
+        allSingle = false;
+        break;
+      }
+    }
+    if (allSingle) {
+      singleLoopSet.insert(loopId);
+    }
+  }
+}
+
+void InterCoreTransferAndSyncPass::moveStartEndSync(OpBuilder &builder) {
+  llvm::SmallVector<Operation *> startSyncOps;
+  llvm::SmallVector<Operation *> endSyncOps;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kLoopId) ||
+        !(isa<hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp>(op))) {
+      return;
+    }
+    auto loopId = op->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
+    auto it = singleLoopSet.find(loopId);
+    if (it != singleLoopSet.end()) {
+      if (isa<hivm::SyncBlockSetOp>(op)) {
+        startSyncOps.push_back(op);
+      } else if (isa<hivm::SyncBlockWaitOp>(op)) {
+        endSyncOps.push_back(op);
+      }
+    }
+  });
+
+  if (loopInclusions.count(0) == 0 || loopInclusions[0].empty()) {
+    return;
+  }
+  Operation *outerLoop = loopInclusions[0][0];
+  if (!outerLoop) {
+    return;
+  }
+  // move startSyncOps and endSyncOps to the outer loop
+  builder.setInsertionPoint(outerLoop);
+  for (auto it = startSyncOps.begin(); it != startSyncOps.end(); ++it) {
+    builder.clone(**it);
+  }
+  builder.setInsertionPointAfter(outerLoop);
+  for (auto op : endSyncOps) {
+    builder.clone(*op);
+  }
+  for (auto op : startSyncOps) {
+    op->erase();
+  }
+  for (auto op : endSyncOps) {
+    op->erase();
+  }
+}
+
 // Main Processing
 LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager) {
@@ -2017,6 +2112,9 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     LOG_DEBUG("Error: Data dependency analysis failed.\n");
     return failure();
   }
+
+  // Analyze loop nesting before inserting inter-core transfer/sync.
+  analyzeLoopInclusion();
 
   llvm::SmallVector<DependencyInfo> &V2CDependencies =
       info.getV2CDependencies();
@@ -2130,6 +2228,9 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   // Synchronize CUBE's fixpipe with VECTOR's direct MTE3 store. No VECTOR
   // tensor computation occurs between the transfer and the store.
   processCubeToVectorDirectStoreSync(builder, flagManager, flagIdReuseManager);
+
+  // move start/end sync ops
+  moveStartEndSync(builder);
 
   LOG_DEBUG("InterCoreTransferAndSyncPass success!\n");
 

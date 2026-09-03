@@ -97,6 +97,11 @@ def _row_module(
     }}
 """
         store_value = "%out"
+    elif body in ("auto_overflow_assert", "unmarked_overflow_assert"):
+        marker = " {tt.auto_overflow_assert}" if body == "auto_overflow_assert" else ""
+        pre_load = f"""    %overflow_ok = arith.cmpi sle, %offsets, %offsets : tensor<{width}xi32>
+    tt.assert %overflow_ok, "int32 overflow detected for operation add"{marker} : tensor<{width}xi1>
+"""
     elif body == "non_whitelisted_y_num_programs":
         post_load = "    %not_whitelisted = tt.get_num_programs y : i32\n"
     elif body != "copy":
@@ -193,6 +198,35 @@ def test_row_coalescing_adds_tail_mask_to_masked_load_and_store(tmp_path):
     lifted_stores = [line for line in text.splitlines() if "tt.store" in line and "tensor<8x16x!tt.ptr<f32>>" in line]
     assert len(lifted_loads) == 1 and lifted_loads[0].count(",") >= 2
     assert len(lifted_stores) == 1 and lifted_stores[0].count(",") >= 2
+
+
+def test_row_coalescing_lifts_automatic_overflow_assert_with_tail_guard(tmp_path):
+    text = _run_row(
+        _row_module("row_auto_overflow_assert", 16, body="auto_overflow_assert"),
+        tmp_path,
+    )
+
+    _assert_row_hit(text)
+    assert text.count("tt.assert") == 1
+    assert "tt.auto_overflow_assert" in text
+    assert "arith.xori" in text
+    assert "arith.ori" in text
+    assert "tensor<8x16xi1>" in text
+
+
+def test_row_coalescing_rejects_unmarked_overflow_assert(tmp_path):
+    text = _run_row(
+        _row_module(
+            "row_unmarked_overflow_assert",
+            16,
+            body="unmarked_overflow_assert",
+        ),
+        tmp_path,
+    )
+
+    _assert_row_bailout(text)
+    assert "tt.assert" in text
+    assert "tt.auto_overflow_assert" not in text
 
 
 def test_row_coalescing_lifts_reduce_along_original_row_axis(tmp_path):

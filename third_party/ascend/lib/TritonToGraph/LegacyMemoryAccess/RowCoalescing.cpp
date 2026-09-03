@@ -94,6 +94,24 @@ static bool isScalarIntegerLike(Value value) {
   return intTy && intTy.getWidth() > 1;
 }
 
+static bool isRankedI1Tensor(Value value) {
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type)
+    return false;
+  auto elementType = dyn_cast<IntegerType>(type.getElementType());
+  return elementType && elementType.getWidth() == 1;
+}
+
+static bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  // The frontend gives only sanitize_overflow assertions this marker.  The
+  // text by itself is not provenance: a user device_assert can use it too.
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 // Match the canonical rowwise guard:
 //
 //   %pid = tt.get_program_id x
@@ -151,6 +169,9 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
 static bool isRowLiftable(Operation *op) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(op))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(op))
+    return isAutomaticOverflowAssert(assertOp) &&
+           isRankedI1Tensor(assertOp.getCondition());
   if (auto *dialect = op->getDialect()) {
     StringRef ns = dialect->getNamespace();
     if (ns == arith::ArithDialect::getDialectNamespace() ||
@@ -467,6 +488,33 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       }
       rw.create<triton::StoreOp>(opLoc, ptr, val, mask, st.getBoundaryCheck(),
                                  st.getCache(), st.getEvict());
+      return true;
+    }
+
+    if (auto assertOp = dyn_cast<triton::AssertOp>(op)) {
+      if (!isAutomaticOverflowAssert(assertOp) ||
+          !isRankedI1Tensor(assertOp.getCondition()))
+        return false;
+      Value condition = liftOperand(assertOp.getCondition(), localMap);
+      auto conditionType = dyn_cast<RankedTensorType>(condition.getType());
+      if (!conditionType)
+        return false;
+      Value activeMask = maskForType(opLoc, condition.getType());
+      if (!activeMask || activeMask.getType() != condition.getType())
+        return false;
+
+      // ceil-div Row launches create inactive tail rows that did not execute
+      // in the original kernel.  Make those lanes vacuously satisfy the
+      // frontend-generated check while preserving it on every active row.
+      auto oneAttr = rw.getIntegerAttr(conditionType.getElementType(), 1);
+      Value allTrue = rw.create<arith::ConstantOp>(
+          opLoc, DenseElementsAttr::get(conditionType, oneAttr));
+      Value inactiveMask = rw.create<arith::XOrIOp>(opLoc, activeMask, allTrue);
+      Value guardedCondition =
+          rw.create<arith::OrIOp>(opLoc, inactiveMask, condition);
+      auto rewrittenAssert = rw.create<triton::AssertOp>(
+          assertOp.getLoc(), guardedCondition, assertOp.getMessage());
+      copyAttrs(assertOp, rewrittenAssert);
       return true;
     }
 

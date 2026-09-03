@@ -124,9 +124,30 @@ bool isInWorkRegion(Operation *operation, Block *workBlock) {
   return false;
 }
 
+bool isRankedI1Tensor(Value value) {
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type)
+    return false;
+  auto elementType = dyn_cast<IntegerType>(type.getElementType());
+  return elementType && elementType.getWidth() == 1;
+}
+
+bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  // The frontend gives only sanitize_overflow assertions this marker.  The
+  // text by itself is not provenance: a user device_assert can use it too.
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 bool isRowLiftable(Operation *operation) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(operation))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(operation))
+    return isAutomaticOverflowAssert(assertOp) &&
+           isRankedI1Tensor(assertOp.getCondition());
   if (Dialect *dialect = operation->getDialect()) {
     StringRef dialectNamespace = dialect->getNamespace();
     if (dialectNamespace == arith::ArithDialect::getDialectNamespace() ||

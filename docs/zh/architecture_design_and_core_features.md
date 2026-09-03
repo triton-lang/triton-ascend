@@ -19,14 +19,14 @@
 - **`compiler`**
   接收来自上层 Triton compiler 生成的中间表示文件 `TTIR`（Triton IR），执行一系列适配昇腾硬件的转换。
 
-  ```python
+  ```text
   Triton IR → Linalg IR → AscendNPU IR → triton_xxx_kernel.o
   ```
 
-  Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件  `triton_xxx_kernel.o`。
+  Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件 `triton_xxx_kernel.o`。
 
 - **`driver`**
-  提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力， 加载由 BiSheng Compiler 生成的设备侧可执行内核 `triton_xxx_kernel.o` 。
+  提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力，加载由 BiSheng Compiler 生成的设备侧可执行内核 `triton_xxx_kernel.o`。
 
 ## 2.代码结构
 
@@ -70,7 +70,7 @@
 
 |序号| NPUOptions                                    | 硬件平台     | 用途 |
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune Option: Enable or disable ping-pong pipeline. Enabled by default. |
+| 1   | multibuffer                                   | NPU        | Autotune option: Enable or disable ping-pong pipeline. Enabled by default. |
 | 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only): Enable or disable auto-binding of sub-blocks. |
 | 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable automatic CV balancing. |
 | 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only): Enable or disable the synchronization solver. |
@@ -86,7 +86,7 @@
 | 14  | stream                                        | NPU        | Optional: Inform the compiler about the NPU stream to use. |
 | 15  | enable_linearize                              | NPU        | Autotune option: Enable or disable the linearization pass. |
 | 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only): Enable or disable the ND (n-dimensional) to NZ (non-zero) layout transformation. |
-| 17  | auto_blockify_size                            | NPU        | Autotune option: Enable or disable AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
+| 17  | auto_blockify_size                            | NPU        | Autotune option: Enable or disable AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set. |
 | 18  | compile_mode                                  | NPU (950)  | Compilation mode: `"unstructured_in_simt"` (default) / `"simd"` / `"simt_only"`. |
 
 #### 3.2.2 SIMD compiler
@@ -111,7 +111,7 @@
 | CreateLoad               | 使用由 `CreateAddPtr` 生成的新指针表达式和由 `BuildMask` 生成的新掩码表达式，重新创建（替换）原始的 `tl.load` 操作，完成指令重写。                                                                                                                                                               | 依赖于 `RewriteAddPtrOp`, `CreateAddPtr`, `RewriteLoadOp`, `BuildMask` 等前置步骤均成功执行。                                                                |
 | RewriteStoreOp           | 分析 `tl.store` 操作中的掩码 (`mask`) 表达式。其功能与 `RewriteLoadOp` 类似，将包含整除/取余的复杂掩码条件分解并建模为 `MaskState` 对象。                                                                                                                                                       | 与 `RewriteLoadOp` 相同。                                                                                                                                    |
 | CreateStore              | 使用由 `CreateAddPtr` 生成的新指针表达式和由 `BuildMask` 生成的新掩码表达式，重新创建（替换）原始的 `tl.store` 操作，完成指令重写。                                                                                                                                                              | 依赖于 `RewriteAddPtrOp`, `CreateAddPtr`, `RewriteStoreOp`, `BuildMask` 等前置步骤均成功执行。                                                               |
-| RewriteAtomicRWMOp       | 处理原子读写修改操作（如 `atomic.add`, `atomic.max` 等）中的指针问题。                                                                                                                | 通常继承与 `RewriteAddPtrOp` 相同的局限性。对于某些特殊的、非连续或条件性的原子操作模式可能不支持。                                                           |
+| RewriteAtomicRWMOp       | 处理原子读写修改操作（如 `atomic.add`, `atomic.max` 等）中的指针问题。                                                                                                                | 通常继承自 `RewriteAddPtrOp` 相同的局限性。对于某些特殊的、非连续或条件性的原子操作模式可能不支持。                                                           |
 | RewriteAtomicCASOp       | 处理原子比较并交换操作 (`atomic.cas`) 中的指针线性化问题。分析其指针表达式，通过升维方法消除整除和取余操作，以匹配硬件原子指令的寻址要求。                                                                                                                                                      |                         |
 | RewriteWhile             | 处理 `while` 循环体内的指针叠加操作。                                                          | 不支持循环体内包含条件分支 (`if`) 的复杂指针路径变换。                                         |
 | RewriteFor               | 处理 `for` 循环体内的指针叠加操作。                        |                                              |
@@ -202,9 +202,9 @@ TritonToLinalg converts ttir to linalg ir.
 | Pass名称 | 功能描述 | 核心转换器 | 转换器描述 |
 |---|---|---|---|
 | triton-to-annotation | 处理Ascend NPU特有的编译提示指令 (`tl.compile_hint`)，将其转换为后端的Annotation方言，用于指导后续的硬件特定优化或资源配置。 | TritonAnnotationConversion | 将 `triton::AnnotationOp` 转换为 `annotation::MarkOp`，实现高级编译提示信息向底层注释标记的传递。 |
-| triton-to-hfusion | 将Triton中的`TTIR`转换为Ascend NPU硬件加速器`HFusion`方言中的对应操作 | TritonHistogramToHFusionConversion | 将 `triton::HistogramOp` 转换为 `hfusion::HistogramOp`，使能在NPU的专用硬件上高效执行。 |
+| triton-to-hfusion | 将Triton中的`TTIR`转换为Ascend NPU硬件加速器`HFusion`方言中的对应操作。 | TritonHistogramToHFusionConversion | 将 `triton::HistogramOp` 转换为 `hfusion::HistogramOp`，使其能在NPU的专用硬件上高效执行。 |
 | triton-to-hivm | 处理Triton的块同步操作 (`tl.sync_block_all`, `tl.sync_block_set`, `tl.sync_block_wait`)，将其转换为Ascend NPU的`HIVM`方言中的跨核心同步指令。这些指令用于管理多核流水线中的同步与数据依赖，是流水优化的关键。 | TritonCustomOpToHIVMSyncOpConversion | 实现Triton同步指令到HIVM同步指令的转换：<br>• `sync_block_all`：全局块同步<br>• `sync_block_set`：设置同步点<br>• `sync_block_wait`：等待同步点 |
-| triton-to-llvm | 将Triton中的内联汇编操作 (`tl.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` |
+| triton-to-llvm | 将Triton中的内联汇编操作 (`tl.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` 。|
 
 #### 3.2.3 SIMT Compiler（Ascend 950）
 
@@ -304,7 +304,7 @@ flowchart TD
 
 | 序号 | Operator | 功能描述 |
 |---|---|---|
-| 1 | tl.custom_op | Ascend NPU扩展的自定义算子集，用于支持硬件特定的内存访问与数据搬运模式，例如：<br>• `index_select`: 基于索引选择数据<br>• `index_put`: 基于索引放置数据<br>• `gather_out_to_ub`: 将外部数据收集到Unified Buffer (UB)<br>• `scatter_ub_to_out`: 将UB中的数据分散输出<br>• `indirect_load`: 间接地址加载<br>• `indirect_store`: 间接地址存储 |
+| 1 | tl.custom_op | Ascend NPU扩展的自定义算子集，用于支持硬件特定的内存访问与数据搬运模式，例如：<br>• `index_select`：基于索引选择数据<br>• `index_put`：基于索引放置数据<br>• `gather_out_to_ub`：将外部数据收集到Unified Buffer (UB)<br>• `scatter_ub_to_out`：将UB中的数据分散输出<br>• `indirect_load`：间接地址加载<br>• `indirect_store`：间接地址存储 |
 | 2 | tl.compile_hint | 向编译器传递硬件特定的编译提示信息，用于指导后端优化策略、资源分配或内核配置。 |
 | 3 | tl.sync_block_wait(`sender, receiver, event_id`) | 块同步等待操作。指定接收核 (`receiver`) 等待由发送核 (`sender`) 发出的事件信号 (`event_id`)，用于管理跨核流水线中的数据依赖与执行顺序。 |
 | 4 | tl.sync_block_set(`sender, receiver, event_id`) | 块同步设置操作。指定发送核 (`sender`) 向接收核 (`receiver`) 发出一个事件信号 (`event_id`)，表明某个执行阶段或数据已准备就绪。 |

@@ -432,11 +432,19 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
+  // Get intra-core buffer count from module attribute
+  ModuleOp module = getOperation();
+  int intraBufCount = getIntraCoreBufferCount(module);
+  if (intraBufCount == -1) {
+    LDBG("[Error]: Failed to get intra-core buffer count from module attribute!");
+    return {-1, -1};
+  }
+
   // Iterate all dependencies and calculate required buffer count
   for (auto &entry : deps) {
     Operation *consumerOp = entry.first;                 // Consumer operation
     SmallVector<Operation *> producerOps = entry.second; // Producer op list
-    int x = producerOps.size();                          // Producer op count
+    int x = intraBufCount;                               // Producer op count
 
     // Find the IfOp index that consumer belongs to (ConsumerIdx)
     int ConsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);

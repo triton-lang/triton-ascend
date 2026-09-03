@@ -52,6 +52,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVMInterfaces.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Pass/PassManager.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateConditionInfoPass";
@@ -891,7 +892,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
 
 // Collect the conditions for intra-core producer values.
 int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
-    OpBuilder &builder, Location loc,
+    ModuleOp module, OpBuilder &builder, Location loc,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
@@ -908,8 +909,17 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
                         outputGroups) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
+
+  // Get intra-core buffer count from module attribute
+  int intraBufCount = getIntraCoreBufferCount(module);
+  if (intraBufCount == -1) {
+    LDBG("[Error]: Failed to get intra-core buffer count from module attribute!"
+         << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
   for (auto &group : outputGroups) {
-    int size = group.outputs.size();
+    int size = intraBufCount;
     Value limitVal =
         builder.create<arith::ConstantIntOp>(loc, size, CONST_INT_TYPE);
     for (Value var : group.inputVars) {
@@ -1096,7 +1106,7 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
                                   conditions, usedVarsSet, varUpdateTypes);
   // Collect the conditions for intra-core producer values.
   if (collectIntraCoreOutputConditions(
-          builder, loc, intraCoreBuffers, intraCoreOutputValues, idxToVar,
+          module, builder, loc, intraCoreBuffers, intraCoreOutputValues, idxToVar,
           conditions, usedVarsSet,
           varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;

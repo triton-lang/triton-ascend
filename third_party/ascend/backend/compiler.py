@@ -236,6 +236,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         if distributed is not None:
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
+        ascend.passes.ttir.add_hoist_pointer_chains(pm)
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)

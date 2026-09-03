@@ -3,6 +3,7 @@ add_triton_library(TritonControlFlowOpt
         CFGStructuring.cpp
         ControlFlowAnalysis.cpp
         ControlFlowRewrite.cpp
+        HoistPointerChains.cpp
         TensorPtrDecompose.cpp
         TritonControlFlowOptPass.cpp
 

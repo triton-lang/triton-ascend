@@ -3,6 +3,11 @@
 
 include "mlir/Pass/PassBase.td"
 
+def TritonHoistPointerChains : Pass<"triton-hoist-pointer-chains", "mlir::ModuleOp"> {
+  let summary = "Hoist tt.ptr chains out of scope regions before control-flow optimization";
+  let constructor = "triton::createTritonHoistPointerChainsPass()";
+}
+
 def TritonControlFlowOpt : Pass<"triton-control-flow-opt", "mlir::ModuleOp"> {
   let summary = "Normalize Triton control flow before pointer analysis";
   let constructor = "triton::createTritonControlFlowOptPass()";

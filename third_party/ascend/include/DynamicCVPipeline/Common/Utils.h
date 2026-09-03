@@ -177,10 +177,6 @@ inline bool isMainLoopOp(Operation *op) {
 
 CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
 
-inline bool isCubeSimpleOpOrCf(Operation *op) {
-  return !isSyncOp(op) && getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
-}
-
 inline bool isVectorSimpleOpOrCf(Operation *op) {
   return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;
 }

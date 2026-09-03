@@ -123,15 +123,16 @@ def test_batch_bench_npu_env_respects_user_do_bench(monkeypatch):
     assert result[cfg1] == (3.0, 3.0, 3.0)
 
 
-def test_batch_bench_npu_env_uses_do_bench_npu_without_user_do_bench(monkeypatch):
+def test_batch_bench_npu_env_uses_internal_profiler_without_user_do_bench(monkeypatch):
 
     def _do_bench(fn, quantiles):
         raise AssertionError("self.do_bench should not be used when no user do_bench is provided")
 
-    calls = {"do_bench_npu": 0}
+    calls = {"do_bench_npu_profiler": 0}
 
-    def _do_bench_npu(funcs, clear_l2_cache=False, warmup=5, active=30, target_kernel_name=None, **kwargs):
-        calls["do_bench_npu"] += 1
+    def _do_bench_npu_profiler(funcs, clear_l2_cache=False, warmup=5, active=30, target_kernel_name=None,
+                               **kwargs):
+        calls["do_bench_npu_profiler"] += 1
         assert len(funcs) == 2
         assert clear_l2_cache is True
         return [1.0, 2.0]
@@ -141,11 +142,11 @@ def test_batch_bench_npu_env_uses_do_bench_npu_without_user_do_bench(monkeypatch
     cfg0 = Config({"ID": 0})
     cfg1 = Config({"ID": 1})
     monkeypatch.setenv("TRITON_BENCH_METHOD", "npu")
-    monkeypatch.setattr("triton.backends.ascend.testing.do_bench_npu", _do_bench_npu)
+    monkeypatch.setattr("triton.backends.ascend.testing._do_bench_npu_profiler", _do_bench_npu_profiler)
 
     result = tuner._batch_bench(configs=[cfg0, cfg1])
 
-    assert calls["do_bench_npu"] == 1
+    assert calls["do_bench_npu_profiler"] == 1
     assert result[cfg0] == 1.0
     assert result[cfg1] == 2.0
 

@@ -252,10 +252,10 @@ def _measure_option_cost_onboard(fn: Callable, args: Tuple[Any, ...], kwargs: Di
     if metadata is None:
         raise RuntimeError("No metadata found in kernel")
 
-    from ..testing import do_bench_npu
+    from ..testing import _do_bench_npu_profiler
     test_kwargs.update({"warmup": False})
     bench_fn = functools.partial(fn.run, *args, **test_kwargs)
-    opt_time = do_bench_npu(bench_fn, clear_l2_cache=False)
+    opt_time = _do_bench_npu_profiler(bench_fn, clear_l2_cache=False)
 
     return metadata.get('required_ub_bits', 0), -opt_time * 1000
 

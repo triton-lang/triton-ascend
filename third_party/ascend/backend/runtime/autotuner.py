@@ -2260,14 +2260,14 @@ class AutoTilingTuner(Autotuner):
         # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
         use_npu_profiling = use_profiling and not self.user_defined_do_bench
         if use_npu_profiling:
-            from ..testing import ProfilerResultMismatchError, do_bench_npu
+            from ..testing import ProfilerResultMismatchError, _do_bench_npu_profiler
 
             cv_mode = parser_mode in ("cube", "mix") and cv_parse_result is not None
             warmup = getattr(self, "cv_warmup", 5) if cv_mode else 5
             active = getattr(self, "cv_repeat", 30) if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
             try:
-                time_cost = do_bench_npu(
+                time_cost = _do_bench_npu_profiler(
                     list(run_fns.values()),
                     warmup=warmup,
                     active=active,
@@ -2371,11 +2371,11 @@ class AutoTilingTuner(Autotuner):
         return ret
 
     def _profile(self, *args, config, **meta):
-        from ..testing import do_bench_npu
+        from ..testing import _do_bench_npu_profiler
 
         kernel_call = self._make_kernel_call(*args, config=config, **meta)
         fn = functools.partial(kernel_call, warmup=False)
-        do_bench_npu(fn, prof_dir=self.auto_profile_dir, keep_res=True)
+        _do_bench_npu_profiler(fn, prof_dir=self.auto_profile_dir, keep_res=True)
 
     def _autoparse_split_params(self, candidates_params: List[str]) -> Dict[str, str]:
         """

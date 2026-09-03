@@ -1,3 +1,8 @@
+import triton
+import triton.language as tl
+import triton.language.extra.cann.extension as al
+
+
 @triton.jit
 def kernel_sync_cube_to_vector():
     with al.scope(core_mode="cube"):

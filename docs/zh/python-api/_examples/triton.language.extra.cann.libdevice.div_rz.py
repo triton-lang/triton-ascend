@@ -1,3 +1,4 @@
+import pytest
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
@@ -18,9 +19,17 @@ def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOC
         tl.store(output + (x0), tmp2, mask=mask)
 
 
+def test_div_rz():
+    x0 = torch.tensor([10.0, -10.0, 7.5, -7.5], dtype=torch.float32, device='npu')
+    x1 = torch.tensor([3.0, 3.0, 2.0, 2.0], dtype=torch.float32, device='npu')
+    n = x0.numel()
+    out = torch.empty(n, dtype=torch.float32, device='npu')
+
+    triton_kernel[(1, )](x0, x1, out, n, XBLOCK=n, XBLOCK_SUB=n)
+
+    expected = x0 / x1
+    torch.testing.assert_close(out, expected, rtol=1e-03, atol=1e-03)
+
+
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    input2 = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, input2, output, xblock, xblock_sub)
+    test_div_rz()

@@ -1,3 +1,8 @@
+import triton
+import triton.language as tl
+import triton.language.extra.cann.extension as al
+
+
 @triton.jit
 def verify_sub_vec_id_kernel(out_ptr, N: tl.constexpr):
     with al.scope(core_mode="vector"):

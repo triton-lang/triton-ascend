@@ -1,3 +1,8 @@
+import triton
+import triton.language as tl
+import triton.language.extra.cann.extension as al
+
+
 @triton.jit
 def kernel_scope_vector(x_ptr, y_ptr, out_ptr, n, BLOCK: tl.constexpr):
     i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)

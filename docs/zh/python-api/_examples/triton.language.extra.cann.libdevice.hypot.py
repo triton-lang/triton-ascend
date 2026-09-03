@@ -18,9 +18,18 @@ def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOC
         tl.store(output + (x0), tmp2, mask=mask)
 
 
+def test_hypot():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.randn(size=shape, dtype=torch.float32).npu() * 0.5
+    x1 = (torch.randn(size=shape, dtype=torch.float32) * 0.5 + 1).npu()
+
+    torch_res = torch.hypot(x0, x1)
+    triton_res = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, x1, triton_res, x0.numel(), xblock, xblock_sub)
+
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
+
+
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    input2 = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, input2, output, xblock, xblock_sub)
+    test_hypot()

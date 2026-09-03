@@ -17,8 +17,17 @@ def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         tl.store(output + (x0), tmp1, mask=mask)
 
 
+def test_log10():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = (torch.rand(size=shape, dtype=torch.float32) * 5 + 0.1).npu()
+
+    torch_res = torch.log10(x0)
+    triton_res = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub)
+
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
+
+
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub)
+    test_log10()

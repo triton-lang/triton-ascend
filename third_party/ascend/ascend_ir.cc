@@ -177,26 +177,28 @@ void installTritonContextManager()
   }
   installed = true;
 
-  py::module_ tritonIr = py::module_::import("triton._C.libtriton.ir");
-  py::object ctxClass = tritonIr.attr("context");
-  if (py::hasattr(ctxClass, "__enter__")) {
-    return;
-  }
-
-  const char *patch = R"PY(
-import triton._C.libtriton.ir as _triton_ir
-if not hasattr(_triton_ir.context, '__enter__'):
-    def _mlir_context_enter(self):
-        return self
-    def _mlir_context_exit(self, exc_type, exc_val, exc_tb):
-        return False
-    _triton_ir.context.__enter__ = _mlir_context_enter
-    _triton_ir.context.__exit__ = _mlir_context_exit
-)PY";
+  // Patch the ir.context class directly through the object reference held
+  // here. We must NOT re-import via PyRun_SimpleString("import triton..."),
+  // because this runs during libtriton's own module initialization: the
+  // top-level `triton` package is only half-initialized and re-importing it
+  // triggers a circular import that aborts loading the whole extension.
   PyGILState_STATE gil = PyGILState_Ensure();
-  if (PyRun_SimpleString(patch) != 0) {
-    PyGILState_Release(gil);
-    throw std::runtime_error("failed to install MLIRContext context manager");
+  try {
+    py::module_ tritonIr =
+        py::module_::import("triton._C.libtriton.ir");
+    py::object ctxClass = tritonIr.attr("context");
+    if (!py::hasattr(ctxClass, "__enter__")) {
+      ctxClass.attr("__enter__") =
+          py::cpp_function([](py::object self) { return self; });
+      ctxClass.attr("__exit__") = py::cpp_function(
+          [](py::object self, py::object excType, py::object excVal,
+             py::object excTb) { return false; });
+    }
+  } catch (const std::exception &) {
+    // Non-fatal: the context-manager protocol is only a convenience for
+    // tests and examples. If it cannot be installed, leave the class as-is
+    // rather than failing the entire library import.
+    PyErr_Clear();
   }
   PyGILState_Release(gil);
 }

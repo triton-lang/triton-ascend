@@ -20,11 +20,14 @@
  * THE SOFTWARE.
  */
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 
+#include "DynamicCVPipeline/Common/BufferCountManager.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/PassManager.h"
-#include "mlir/Pass/PassRegistry.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
@@ -32,8 +35,13 @@
 using namespace mlir;
 using namespace triton;
 
-static constexpr const char *DEBUG_TYPE =
-    "pre-check-dynamic-cv-pipeline-available";
+// Functions that should use at most double buffering.
+static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
+    "chunk_gated_delta_rule_fwd_h_blockdim128_fused",
+    "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
+    "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64"};
+
+static constexpr const char *DEBUG_TYPE = "pre-check-disable-preload";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -41,41 +49,45 @@ static constexpr const char *DEBUG_TYPE =
     llvm::dbgs() << __VA_ARGS__ << "\n";                                       \
   })
 
-void PreCheckAvailablePass::runOnOperation() {
+void PreCheckDisablePreload::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
     return;
   }
 
-  LDBG("Enter PreCheckAvailable pass.");
-  PassManager pm(&getContext(), module.getOperationName());
+  func::FuncOp foundBlacklistFunc = nullptr;
 
-  LDBG("Before PreCheck:\n" << module);
-  pm.addPass(createPreCheckBlacklistPass());
-  pm.addPass(createPreCheckMatmulPass());
-  pm.addPass(createPreCheckDisablePreloadPass());
+  // Check for all blacklist operations
+  module.walk([&](func::FuncOp func) -> WalkResult {
+    llvm::StringRef funcName = func.getSymName();
+    if (llvm::is_contained(kBlacklistFuncNames, funcName)) {
+      foundBlacklistFunc = func;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
 
-  if (failed(runPipeline(pm, module))) {
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+  if (!foundBlacklistFunc) {
+    LDBG("No preload blacklist func found, passed.");
     return;
   }
 
-  LDBG("Exit PreCheckAvailable pass.");
+  LDBG("3-preload will be disabled because "
+       << foundBlacklistFunc.getSymName()
+       << " function was found, which is not supported by 3-preload now.");
+
+  // This setting will disable the 3-preload feature.
+  BufferCountManager bufferCountManager(module);
+  bufferCountManager.setBufferCount(BufferCountManager::DepType::IntraCore, 2);
+  bufferCountManager.setBufferCount(BufferCountManager::DepType::InterCore, 1);
 }
 
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createPreCheckAvailablePass() {
-  return std::make_unique<PreCheckAvailablePass>();
-}
-
-void registerPreCheckAvailablePasses() {
-  registerPass(createPreCheckBlacklistPass);
-  registerPass(createPreCheckMatmulPass);
-  registerPass(createPreCheckDisablePreloadPass);
-  registerPass(createPreCheckAvailablePass);
+std::unique_ptr<OperationPass<ModuleOp>> createPreCheckDisablePreloadPass() {
+  return std::make_unique<PreCheckDisablePreload>();
 }
 
 } // namespace triton

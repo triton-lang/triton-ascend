@@ -1,0 +1,59 @@
+{
+  "accuracy": {
+    "public": {
+      "max_diff": 0.001953125,
+      "max_mare": 0.004999998720000328,
+      "max_mere": 1.7438611607144e-07,
+      "max_rmse": 1.1534560333533545e-05,
+      "torch_npu_passed": 16,
+      "torch_passed": 20,
+      "total": 20,
+      "total_mismatch_count": 0,
+      "triton_passed": 20
+    },
+    "random_generalization": {
+      "max_diff": 0.0078125,
+      "max_mare": 0.007194243279333612,
+      "max_mere": 1.2545764647275413e-07,
+      "max_rmse": 1.7059844799040144e-05,
+      "torch_npu_passed": 33,
+      "torch_passed": 40,
+      "total": 40,
+      "total_mismatch_count": 0,
+      "triton_passed": 40
+    }
+  },
+  "benchmark": true,
+  "benchmark_torch": true,
+  "main_speed_active_speedup_geomean": 3.7650786496640625,
+  "main_speed_candidate_active_geomean_us": 4.519980645067939,
+  "main_speed_case_count": 60,
+  "main_speed_gate": "PASS",
+  "main_speed_sample": "torch_npu_runnable_all",
+  "main_speed_torch_npu_active_geomean_us": 17.018082623640087,
+  "notes": [
+    "Each implementation accuracy record includes RMSE computed by the local checker.",
+    "Torch semantic timing is collected only when --benchmark-torch is set and remains an auxiliary comparison.",
+    "Random generalization cases are fixed-seed reproducible non-public shape samples."
+  ],
+  "public_cases": 20,
+  "random_category_counts": {
+    "docs_standard_value_variation": 40
+  },
+  "random_generalization_cases": 40,
+  "random_seed": 20260613,
+  "schema_version": 4,
+  "shape_policy": "seeded_non_public_docs_standard_shapes_v3",
+  "source_jsonl": "logs/add_rms_norm_validation.jsonl",
+  "timing_source": "kernel_details.csv.active_window_median",
+  "torch_npu_accuracy_passed": 49,
+  "torch_npu_runnable": 60,
+  "torch_npu_runnable_all_active_speedup_geomean": 3.7650786496640625,
+  "torch_npu_runnable_all_speed_gate": "PASS",
+  "torch_semantic_active_speedup_geomean": 58.69707213975108,
+  "torch_semantic_baseline_active_geomean_us": 264.42864740682364,
+  "torch_semantic_candidate_active_geomean_us": 4.504971675201256,
+  "torch_speedup_sample": 59,
+  "torch_timed": 59,
+  "total_cases": 60
+}

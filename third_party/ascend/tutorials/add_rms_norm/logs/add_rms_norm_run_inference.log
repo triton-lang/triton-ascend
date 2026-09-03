@@ -1,0 +1,11 @@
+/mnt/model/lcw/triton-ascend/third_party/ascend/tutorials/add_rms_norm/add_rms_norm.py:172: UserWarning: Cannot create tensor with interal format while allow_internel_format=False, tensor will be created with base format. (Triggered internally at ../torch_npu/csrc/aten/common/TensorFactories.cpp:340.)
+  y = torch.empty_like(x1)
+[PASS] 060/060 random_generalization shape=(8, 1, 8192) triton_active=4.000 us triton_kernel=4.060 us torch_active=335.500 us torch_kernel=58.720 us torch_npu_active=19.000 us torch_npu_kernel=18.900 us speedup_vs_torch_active=83.875000x speedup_vs_torch_kernel=14.463054x speedup_vs_torch_npu_active=4.750000x speedup_vs_torch_npu_kernel=4.655172x triton_accuracy=PASS torch_accuracy=PASS torch_npu_accuracy=PASS MERE=0.000e+00 MARE=0.000e+00 RMSE=0.000e+00 max_diff=0.000e+00 triton_source=kernel_details.csv.active_window_median triton_kernel_source=kernel_details.csv.active_window_median torch_source=kernel_details.csv.active_window_median torch_kernel_source=kernel_details.csv.active_window_median torch_npu_source=kernel_details.csv.active_window_median torch_npu_kernel_source=kernel_details.csv.active_window_median
+SUMMARY passed=60/60 threshold=0.00781250 max_rmse=1.706e-05 torch_accuracy_pass=60/60 torch_npu_accuracy_pass=49/60 selected_task_npu_baseline=49 selected_torch_baseline=11 triton_strategy=kernel_details triton_scope=timing_matrix.active_window_score baseline_strategy=kernel_details baseline_scope=timing_matrix.active_window_score
+SUMMARY_KIND kind=public passed=20/20
+SUMMARY_KIND kind=random_generalization passed=40/40
+LATENCY_ACTIVE triton_geomean=4.520 us triton_min=2.500 us triton_max=9.250 us torch_npu_geomean=17.018 us
+LATENCY_KERNEL triton_geomean=4.536 us triton_min=2.600 us triton_max=9.300 us torch_npu_geomean=17.008 us
+SPEEDUP_MATRIX torch_npu_pass_active_vs_active=3.518410x torch_npu_pass_kernel_vs_kernel=3.500503x selected_active_vs_active=5.577419x selected_kernel_vs_kernel=4.150837x
+TORCH_SEMANTIC_AUX torch_timed=59 torch_speedup_sample=59 active_vs_active=58.697072x
+TORCH_NPU_RUNNABLE_ALL_GATE active_vs_active=3.765079x gate=PASS threshold=1.200000x

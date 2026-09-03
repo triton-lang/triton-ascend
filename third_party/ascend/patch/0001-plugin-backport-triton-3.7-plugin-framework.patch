@@ -1,0 +1,821 @@
+From cf807cc559e38ef2d2902452881e2274277fde88 Mon Sep 17 00:00:00 2001
+From: zaq15csdn <zhangaiqiang1@huawei.com>
+Date: Tue, 7 Jul 2026 22:33:36 +0800
+Subject: [PATCH 1/2] [plugin] backport triton 3.7 plugin framework
+
+Backport the pull-based plugin mechanism from upstream triton 3.7:
+- PluginUtils.h/cpp: PluginInfo/OpInfo/PassInfo/DialectInfo structs,
+  loadPlugins() (TRITON_PLUGIN_PATHS/dlopen), tritonGetPluginInfo entry
+- ir.cc: loadPlugins() loop registers ops via builderClass.def;
+  load_dialects iterates plugins for dialect registration;
+  getBuilderClass()/builderClassPtr expose builder class for extensions
+- passes.cc: init_plugin_passes registers plugin passes via m.def
+- knobs.py: backport PipelineStagesHook + add_stages_inspection_hook
+- compiler.py/jit.py: invoke add_stages_inspection_hook() with no args
+  for cache key/specialization (3.7 style)
+- ir.h/ir_binding.h: move pybind11 dependency out of ir.h so lib/Tools
+  can include it without pybind; triton_ascend.cc includes ir_binding.h
+- CMakeLists: TRITON_EXT_ENABLED option for symbol exposure;
+  setup.py passes -DTRITON_EXT_ENABLED and packages include/ headers
+  for downstream compilation
+
+PluginUtils.cpp matches upstream 3.7 with zero diff; PluginUtils.h
+differs only by triton/Version.h include (3.5 lacks Version.h). No
+push-based extension yet (follow-up commit).
+---
+ CMakeLists.txt                         |  14 +-
+ include/triton/Tools/PluginUtils.h     | 200 +++++++++++++++++++++++++
+ lib/Tools/CMakeLists.txt               |   6 +
+ lib/Tools/PluginUtils.cpp              | 192 ++++++++++++++++++++++++
+ python/src/ir.cc                       |  20 ++-
+ python/src/ir.h                        |  37 ++---
+ python/src/ir_binding.h                |  15 ++
+ python/src/passes.cc                   |  18 +++
+ python/triton/compiler/compiler.py     |   3 +
+ python/triton/runtime/jit.py           |   4 +
+ setup.py                               |   5 +
+ third_party/ascend/backend/compiler.py |   6 +
+ third_party/ascend/triton_ascend.cc    |   3 +-
+ 13 files changed, 494 insertions(+), 29 deletions(-)
+ create mode 100644 include/triton/Tools/PluginUtils.h
+ create mode 100644 lib/Tools/PluginUtils.cpp
+ create mode 100644 python/src/ir_binding.h
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index a74981ddd..48deae175 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -22,6 +22,7 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/safe_compile.cmake)
+ option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
+ option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
+ option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
++option(TRITON_EXT_ENABLED "Build with default visibility for Triton+LLVM symbol exposure to plugin extensions" OFF)
+ option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
+ set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
+ 
+@@ -158,7 +159,11 @@ endfunction()
+ 
+ # Disable warnings that show up in external code (gtest;pybind11)
+ if(NOT MSVC)
+-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
++  if(NOT TRITON_EXT_ENABLED)
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
++  else()
++    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -DTRITON_EXT_ENABLED=1")
++  endif()
+ else()
+   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
+ endif()
+@@ -246,6 +251,11 @@ if(TRITON_BUILD_PYTHON_MODULE)
+ 
+   get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
+   get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
++  # TritonPluginUtils is a STATIC lib: loadPlugins()/registerInfo() are called
++  # by libtriton.so (ir.cc/passes.cc), so the linker keeps PluginUtils.o.
++  # Plugins inject via TritonPlugin::registerInfo and refresh passes from
++  # Python (passes.refresh_plugin_passes).
++  list(APPEND triton_libs TritonPluginUtils)
+   set(TRITON_LIBRARIES
+     ${triton_libs}
+     ${triton_plugins}
+@@ -353,7 +363,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
+ 
+ endif()
+ 
+-if (UNIX AND NOT APPLE)
++if (UNIX AND NOT APPLE AND NOT TRITON_EXT_ENABLED)
+   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--exclude-libs,ALL")
+ endif()
+ 
+diff --git a/include/triton/Tools/PluginUtils.h b/include/triton/Tools/PluginUtils.h
+new file mode 100644
+index 000000000..f9bf9eaef
+--- /dev/null
++++ b/include/triton/Tools/PluginUtils.h
+@@ -0,0 +1,200 @@
++// Defines the external and internal interface for Triton plugins.
++//
++// This is largely meant to follow the plugin pattern outlined in upstream MLIR
++// ([DialectPlugin], [PassPlugin]); use those as references for further
++// additions.
++//
++// [DialectPlugin]:
++// https://github.com/llvm/llvm-project/blob/80d6e0b8/mlir/include/mlir/Tools/Plugins/DialectPlugin.h
++// [PassPlugin]:
++// https://github.com/llvm/llvm-project/blob/80d6e0b8/mlir/include/mlir/Tools/Plugins/PassPlugin.h
++
++#ifndef TRITON_PLUGIN_UTILS_H
++#define TRITON_PLUGIN_UTILS_H
++
++#include "mlir/IR/DialectRegistry.h"
++#include "mlir/Pass/PassManager.h"
++#include "mlir/Tools/Plugins/DialectPlugin.h"
++#include "python/src/ir.h"
++#include "llvm/ADT/StringRef.h"
++#include "llvm/Support/DynamicLibrary.h"
++#include "llvm/Support/Error.h"
++#include <cstdint>
++#include <vector>
++
++/// Identifies the API version understood by this plugin.
++///
++/// This version should be incremented for ABI-breaking changes in the structs
++/// below; we check this version when loading a new \c TritonPlugin. See
++/// similar: [MLIR_PLUGIN_API_VERSION].
++///
++/// [MLIR_PLUGIN_API_VERSION]:
++/// https://github.com/llvm/llvm-project/blob/80d6e0b8/mlir/include/mlir/Tools/Plugins/PassPlugin.h#L32
++#define TRITON_PLUGIN_API_VERSION 2
++
++/// Use this helper macro on the public entry point for a Triton plugin.
++#define TRITON_PLUGIN_API extern "C" __attribute__((visibility("default")))
++
++namespace mlir::triton::plugin {
++
++// Types for plugin callback functions.
++using AddPassCallback = void (*)(mlir::PassManager *,
++                                 const std::vector<std::string> &);
++using RegisterPassCallback = void (*)();
++using RegisterDialectCallback = void (*)(mlir::DialectRegistry *);
++using AddOpCallback = void (*)(TritonOpBuilder &, std::vector<mlir::Value> &);
++
++/// Information provided by a plugin for loading its passes.
++struct PassInfo {
++  const char *name;
++  const char *version;
++  AddPassCallback addPass;
++  RegisterPassCallback registerPass;
++};
++
++/// Information provided by a plugin for loading its dialects.
++struct DialectInfo {
++  const char *name;
++  const char *version;
++  RegisterDialectCallback registerDialect;
++};
++
++/// Information provided by a plugin for loading its custom ops.
++struct OpInfo {
++  const char *name;
++  AddOpCallback addOp;
++};
++
++/// Container for all plugin information; this is returned by the plugin
++/// library's public entry point, @ref tritonGetPluginInfo.
++struct PluginInfo {
++  /// The API version used by this plugin, see \c TRITON_PLUGIN_API_VERSION.
++  uint32_t apiVersion;
++
++  /// A meaningful name of the plugin.
++  const char *pluginName;
++  /// The version of the plugin.
++  const char *pluginVersion;
++
++  /// The list of passes.
++  PassInfo *passes;
++  size_t numPasses;
++
++  /// The list of dialects.
++  DialectInfo *dialects;
++  size_t numDialects;
++
++  /// The list of custom ops.
++  OpInfo *ops;
++  size_t numOps;
++
++  /// Triton Version
++  const char *tritonVersion;
++};
++
++/// A helper structure for storing information about a pass registered by a
++/// plugin.
++struct Pass {
++  Pass(const char *name, AddPassCallback addPass)
++      : name(name), addPass(addPass) {}
++
++  const char *name;
++  const AddPassCallback addPass;
++};
++
++/// A helper structure for storing information about a pass registered by a
++/// plugin.
++struct Op {
++  Op(const char *name, AddOpCallback addOp) : name(name), addOp(addOp) {}
++
++  const char *name;
++  const AddOpCallback addOp;
++};
++
++/// A loaded Triton plugin.
++///
++/// An instance of this class wraps a loaded dialect plugin and gives access
++/// to its interface defined by the \c PluginInfo it exposes.
++class TritonPlugin {
++public:
++  /// Attempts to load a Triton plugin from a given file.
++  ///
++  /// \returns Returns an error if either the library cannot be found or
++  /// loaded, there is no public entry point, or the plugin implements the
++  /// wrong API version.
++  static llvm::Expected<TritonPlugin> load(const std::string &filename);
++
++  /// Get the filename of the loaded plugin.
++  llvm::StringRef getFilename() const { return filename; }
++
++  /// Get the plugin name.
++  llvm::StringRef getPluginName() const { return info->pluginName; }
++
++  /// Get the plugin version.
++  llvm::StringRef getPluginVersion() const { return info->pluginVersion; }
++
++  /// Get the plugin API version.
++  uint32_t getAPIVersion() const { return info->apiVersion; }
++
++  /// List the available passes; this allows us invoke the \c AddPassCallback
++  /// while knowing the pass name. This function will crash with an LLVM usage
++  /// error if the plugin provides invalid \c PluginInfo.
++  const std::vector<Pass> listPasses() const;
++
++  /// Invoke the \c RegisterPassCallback for each pass registered in this
++  /// plugin. This function will crash with an LLVM usage
++  /// error if the plugin provides invalid \c PluginInfo.
++  void registerPasses() const;
++
++  /// Invoke the \c RegisterDialectCallback for each dialect registered in
++  /// this plugin. This function will crash with an LLVM usage
++  /// error if the plugin provides invalid \c PluginInfo.
++  void registerDialects(DialectRegistry &dialectRegistry) const;
++
++  /// List the custom operations; this allows us invoke the \c
++  /// AddOpCallback while knowing the operation name. This function will crash
++  /// with an LLVM usage error if the plugin provides invalid \c PluginInfo.
++  const std::vector<Op> listOps() const;
++
++private:
++  TritonPlugin(const std::string &filename,
++               const llvm::sys::DynamicLibrary &library)
++      : filename(filename), library(library), info() {}
++
++  std::string filename;
++  llvm::sys::DynamicLibrary library;
++  PluginInfo *info;
++};
++
++/// Load all plugins specified in the `TRITON_PLUGIN_PATHS` environment
++/// variable. This variable should contain a colon-separated list of paths to
++/// plugin shared libraries.
++///
++/// \returns Returns the list of successfully loaded plugins. If any plugin
++/// fails to load, it crashes with an LLVM usage error.
++const std::vector<TritonPlugin> &loadPlugins();
++
++} // namespace mlir::triton::plugin
++
++/// The public entry point for loading a Triton plugin.
++///
++/// When a plugin is loaded by the driver, Triton will call this entry point to
++/// obtain information about the plugin and how to load it. This function must
++/// to be implemented by the plugin.
++///
++/// Triton expects this function to return a pointer to a valid \c PluginInfo
++/// struct. Because plugins are loaded in-process permanently, the \c PluginInfo
++/// struct has a lifetime spanning the duration of the program; thus, no
++/// deallocation function is required from the plugin. As an extra precaution
++/// against leaks, return a pointer to a static struct:
++///
++/// ```
++/// mlir::triton::plugin::PluginInfo *tritonGetPluginInfo() {
++///   static mlir::triton::plugin::PluginInfo info = { ... };
++///   return &info;
++/// }
++/// ```
++extern "C" mlir::triton::plugin::PluginInfo *LLVM_ATTRIBUTE_WEAK
++tritonGetPluginInfo();
++
++#endif // TRITON_PLUGIN_UTILS_H
+diff --git a/lib/Tools/CMakeLists.txt b/lib/Tools/CMakeLists.txt
+index a2f9f8aea..8a5ded52d 100644
+--- a/lib/Tools/CMakeLists.txt
++++ b/lib/Tools/CMakeLists.txt
+@@ -2,6 +2,7 @@ add_triton_library(TritonTools
+   GenericSwizzling.cpp
+   LayoutUtils.cpp
+   LinearLayout.cpp
++  PluginUtils.cpp
+ 
+   DEPENDS
+ 
+@@ -10,3 +11,8 @@ add_triton_library(TritonTools
+   MLIRLLVMDialect
+   f2reduce
+ )
++
++# triton-ascend 3.5 lacks triton/Version.h (upstream 3.7 generates it via
++# CMake configure_file). Define TRITON_VERSION here so PluginUtils.cpp's
++# plugin version checks compile.
++target_compile_definitions(TritonTools PRIVATE TRITON_VERSION="3.5.0")
+diff --git a/lib/Tools/PluginUtils.cpp b/lib/Tools/PluginUtils.cpp
+new file mode 100644
+index 000000000..05bbcc89f
+--- /dev/null
++++ b/lib/Tools/PluginUtils.cpp
+@@ -0,0 +1,192 @@
++#include "triton/Tools/PluginUtils.h"
++#include "triton/Tools/Sys/GetEnv.hpp"
++#include "llvm/Support/Debug.h"
++#include "llvm/Support/Error.h"
++
++#define DEBUG_TYPE "triton-plugins"
++
++using namespace mlir::triton::plugin;
++
++static bool isTritonAndPluginsVersionsMatch(const std::string &pluginVersion) {
++  // Here, if TRITON_PLUGIN_VERSION_CHECK is unset, then we simply do a default
++  // version check. However, if it is set then we either do a full (git hash)
++  // check or we skip all checking.
++  auto doCheck =
++      mlir::triton::tools::isEnvValueBool("TRITON_PLUGIN_VERSION_CHECK");
++
++  // Skip check when TRITON_PLUGIN_VERSION_CHECK is set false
++  if (doCheck.has_value() && !doCheck.value())
++    return true;
++
++  // Check full version string when TRITON_PLUGIN_VERSION_CHECK is set true
++  if (doCheck.has_value() && doCheck.value())
++    return pluginVersion == TRITON_VERSION;
++
++  // Do partial release version check when TRITON_PLUGIN_VERSION_CHECK unset
++  assert(!doCheck.has_value() && "Expected TRITON_PLUGIN_VERSION_CHECK unset");
++  return llvm::StringRef(pluginVersion).split('+').first ==
++         llvm::StringRef(TRITON_VERSION).split('+').first;
++}
++
++llvm::Expected<TritonPlugin> TritonPlugin::load(const std::string &filename) {
++  std::string error;
++  auto library =
++      llvm::sys::DynamicLibrary::getPermanentLibrary(filename.c_str(), &error);
++  if (!library.isValid())
++    return llvm::make_error<llvm::StringError>(
++        Twine("Could not load library '") + filename + "': " + error,
++        llvm::inconvertibleErrorCode());
++
++  TritonPlugin plugin{filename, library};
++
++  // tritonGetPluginInfo should be resolved to the definition from the
++  // plugin we are currently loading.
++  intptr_t getInfoFn =
++      (intptr_t)library.getAddressOfSymbol("tritonGetPluginInfo");
++  if (!getInfoFn)
++    return llvm::make_error<llvm::StringError>(
++        Twine("Plugin entry point not found in '") + filename + "'.",
++        llvm::inconvertibleErrorCode());
++
++  plugin.info = reinterpret_cast<decltype(tritonGetPluginInfo) *>(getInfoFn)();
++
++  if (plugin.info->apiVersion != TRITON_PLUGIN_API_VERSION)
++    return llvm::make_error<llvm::StringError>(
++        Twine("Wrong API version on plugin '") + filename + "'. Got version " +
++            Twine(plugin.info->apiVersion) + ", supported version is " +
++            Twine(TRITON_PLUGIN_API_VERSION) + ".",
++        llvm::inconvertibleErrorCode());
++
++  if (!isTritonAndPluginsVersionsMatch(plugin.info->tritonVersion))
++    return llvm::make_error<llvm::StringError>(
++        Twine("Wrong TRITON version on plugin '") + filename +
++            "'. Got version " + Twine(plugin.info->tritonVersion) +
++            ", supported version is " + Twine(TRITON_VERSION) + ".",
++        llvm::inconvertibleErrorCode());
++
++  return plugin;
++}
++
++const std::vector<Pass> TritonPlugin::listPasses() const {
++  if (!info->passes && info->numPasses > 0)
++    llvm::reportFatalUsageError(llvm::createStringError(
++        llvm::Twine("Invalid pass pointer in plugin '") + filename + "'."));
++  LLVM_DEBUG(llvm::dbgs() << "Listing " << info->numPasses
++                          << " passes for plugin " << info->pluginName << ":"
++                          << info->pluginVersion << "\n");
++
++  std::vector<Pass> passes;
++  for (auto i = 0; i < info->numPasses; ++i) {
++    const auto pass = &info->passes[i];
++    if (pass->addPass) {
++      LLVM_DEBUG(llvm::dbgs() << "Listing pass " << pass->name << ":"
++                              << pass->version << "\n");
++      passes.push_back(Pass(pass->name, pass->addPass));
++    }
++  }
++  return passes;
++}
++
++void TritonPlugin::registerPasses() const {
++  if (!info->passes && info->numPasses > 0)
++    llvm::reportFatalUsageError(llvm::createStringError(
++        llvm::Twine("Invalid pass pointer in plugin '") + filename + "'."));
++  LLVM_DEBUG(llvm::dbgs() << "Registering " << info->numPasses
++                          << " passes for plugin " << info->pluginName << ":"
++                          << info->pluginVersion << "\n");
++
++  for (auto i = 0; i < info->numPasses; ++i) {
++    const auto &pass = info->passes[i];
++    if (pass.registerPass) {
++      LLVM_DEBUG(llvm::dbgs() << "Registering pass " << pass.name << ":"
++                              << pass.version << "\n");
++      pass.registerPass();
++    }
++  }
++}
++
++void TritonPlugin::registerDialects(DialectRegistry &dialectRegistry) const {
++  if (!info->dialects && info->numDialects > 0)
++    llvm::reportFatalUsageError(llvm::createStringError(
++        llvm::Twine("Invalid dialect pointer in plugin '") + filename + "'."));
++  LLVM_DEBUG(llvm::dbgs() << "Registering " << info->numDialects
++                          << " dialects for plugin " << info->pluginName << ":"
++                          << info->pluginVersion << "\n");
++
++  for (auto i = 0; i < info->numDialects; ++i) {
++    const auto &dialect = info->dialects[i];
++    if (dialect.registerDialect) {
++      LLVM_DEBUG(llvm::dbgs() << "Registering dialect " << dialect.name << ":"
++                              << dialect.version << "\n");
++      dialect.registerDialect(&dialectRegistry);
++    }
++  }
++}
++
++const std::vector<Op> TritonPlugin::listOps() const {
++  if (!info->ops && info->numOps > 0)
++    llvm::reportFatalUsageError(llvm::createStringError(
++        llvm::Twine("Invalid custom op pointer in plugin '") + filename +
++        "'."));
++  LLVM_DEBUG(llvm::dbgs() << "Listing " << info->numOps
++                          << " custom ops for plugin " << info->pluginName
++                          << ":" << info->pluginVersion << "\n");
++
++  std::vector<Op> ops;
++  for (auto i = 0; i < info->numOps; ++i) {
++    const auto op = &info->ops[i];
++    if (op->addOp) {
++      LLVM_DEBUG(llvm::dbgs() << "Listing custom op " << op->name << "\n");
++      ops.push_back(Op(op->name, op->addOp));
++    }
++  }
++  return ops;
++}
++
++static std::vector<TritonPlugin> plugins;
++static bool pluginsLoaded = false;
++const std::vector<TritonPlugin> &mlir::triton::plugin::loadPlugins() {
++  if (pluginsLoaded)
++    return plugins;
++
++  // Bailing when libtriton symbols are not visible is done to prevent
++  // crashes caused by loading plugins that will never find their dependent
++  // symbols (which are hidden by libtriton).
++#if !defined(TRITON_EXT_ENABLED) || TRITON_EXT_ENABLED == 0
++  bool skipLoading = true;
++#else
++  bool skipLoading = false;
++#endif
++
++  if (const char *env = std::getenv("TRITON_PLUGIN_PATHS")) {
++    llvm::SmallVector<llvm::StringRef, 4> paths;
++    llvm::StringRef(env).split(paths, ':');
++    for (const auto &path : paths) {
++      if (skipLoading) {
++        llvm::errs() << "\n"
++                     << "\n=================== WARNING =====================\n"
++                     << "Triton will not load the following extension\n"
++                     << "because it is not built with TRITON_EXT_ENABLED:\n"
++                     << path
++                     << "\n=================================================\n"
++                     << "\n";
++        continue;
++      }
++
++      LLVM_DEBUG(llvm::dbgs() << "Loading plugin from path: " << path << "\n");
++      auto pluginOrErr = TritonPlugin::load(path.str());
++      if (auto err = pluginOrErr.takeError()) {
++        llvm::Error wrappedErr = llvm::createStringError(
++            llvm::Twine("Failed to load plugin from path: ") + path +
++            ". Error: " + llvm::toString(std::move(err)));
++        llvm::reportFatalUsageError(std::move(wrappedErr));
++      }
++      plugins.push_back(std::move(*pluginOrErr));
++    }
++  }
++
++  pluginsLoaded = true;
++  return plugins;
++}
++
++#undef DEBUG_TYPE
+diff --git a/python/src/ir.cc b/python/src/ir.cc
+index 902b3dbba..810142438 100644
+--- a/python/src/ir.cc
++++ b/python/src/ir.cc
+@@ -1,4 +1,4 @@
+-#include "ir.h"
++#include "ir_binding.h"
+ 
+ #include <optional>
+ #include <pybind11/cast.h>
+@@ -37,11 +37,11 @@
+ #include "triton/Dialect/TritonInstrument/IR/Dialect.h"
+ #include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
+ #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
++#include "triton/Tools/PluginUtils.h"
+ #include "triton/Tools/Sys/GetEnv.hpp"
+ #include "llvm/Support/FileSystem.h"
+ #include "llvm/Support/SourceMgr.h"
+ 
+-#include "ir.h"
+ namespace {
+ 
+ namespace py = pybind11;
+@@ -385,6 +385,11 @@ void init_triton_ir(py::module &&m) {
+     registerBuiltinDialectTranslation(registry);
+     registerLLVMDialectTranslation(registry);
+     mlir::LLVM::registerInlinerInterface(registry);
++    // Register dialects from plugins.
++    // pull-based: loadPlugins() (TRITON_PLUGIN_PATHS / dlopen)
++    for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
++      plugin.registerDialects(registry);
++    }
+     context.appendDialectRegistry(registry);
+     context.loadAllAvailableDialects();
+   });
+@@ -1992,6 +1997,17 @@ void init_triton_ir(py::module &&m) {
+               throw std::runtime_error("PassManager::run failed");
+           },
+           py::call_guard<py::gil_scoped_release>());
++
++  // Register custom ops from plugins.
++  // pull-based: loadPlugins() (TRITON_PLUGIN_PATHS / dlopen)
++  for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
++    for (const auto &op : plugin.listOps()) {
++      builderClass.def(op.name,
++                       [op](TritonOpBuilder &self, std::vector<Value> args) {
++                         op.addOp(self, args);
++                       });
++    }
++  }
+ }
+ 
+ bool str_eq_ignore_case(const char *s1, const char *s2, int n) {
+diff --git a/python/src/ir.h b/python/src/ir.h
+index 245bb7b32..8e1eb6cb7 100644
+--- a/python/src/ir.h
++++ b/python/src/ir.h
+@@ -3,48 +3,40 @@
+ #include "mlir/IR/Builders.h"
+ #include "triton/Tools/Sys/GetEnv.hpp"
+ #include <memory>
+-#include <pybind11/pybind11.h>
+-#include <pybind11/stl.h>
+-#include <pybind11/stl_bind.h>
+-
+-namespace py = pybind11;
+-
+-using namespace mlir;
+-using namespace triton;
+ 
+ // A custom op builder that keeps track of the last location
+ class TritonOpBuilder {
+ public:
+   TritonOpBuilder(mlir::MLIRContext *context,
+                   const std::string &compile_mode = "simd") {
+-    builder = std::make_unique<OpBuilder>(context);
+-    lastLoc = std::make_unique<Location>(builder->getUnknownLoc());
++    builder = std::make_unique<mlir::OpBuilder>(context);
++    lastLoc = std::make_unique<mlir::Location>(builder->getUnknownLoc());
+     this->compile_mode = compile_mode;
+   }
+ 
+-  OpBuilder &getBuilder() { return *builder; }
++  mlir::OpBuilder &getBuilder() { return *builder; }
+   mlir::MLIRContext *getContext() { return builder->getContext(); }
+ 
+   bool isLineInfoEnabled() { return lineInfoEnabled; }
+ 
+   bool isSimtMode() const { return compile_mode == "simt"; }
+ 
+-  void setLastLoc(Location loc) {
++  void setLastLoc(mlir::Location loc) {
+     if (lineInfoEnabled)
+-      lastLoc = std::make_unique<Location>(loc);
++      lastLoc = std::make_unique<mlir::Location>(loc);
+   }
+ 
+   void setLastLoc(const std::string &fileName, int line, int column) {
+     auto context = builder->getContext();
+-    setLastLoc(FileLineColLoc::get(context, fileName, line, column));
++    setLastLoc(mlir::FileLineColLoc::get(context, fileName, line, column));
+   }
+ 
+-  Location getLastLoc() {
++  mlir::Location getLastLoc() {
+     assert(lastLoc);
+     return *lastLoc;
+   }
+ 
+-  void setInsertionPointToStart(Block &block) {
++  void setInsertionPointToStart(mlir::Block &block) {
+     if (!block.empty())
+       setLastLoc(block.begin()->getLoc());
+     else
+@@ -52,7 +44,7 @@ public:
+     builder->setInsertionPointToStart(&block);
+   }
+ 
+-  void setInsertionPointToEnd(Block &block) {
++  void setInsertionPointToEnd(mlir::Block &block) {
+     if (!block.empty())
+       setLastLoc(block.back().getLoc());
+     else
+@@ -60,7 +52,7 @@ public:
+     builder->setInsertionPointToEnd(&block);
+   }
+ 
+-  void setInsertionPointAfter(Operation &op) {
++  void setInsertionPointAfter(mlir::Operation &op) {
+     setLastLoc(op.getLoc());
+     builder->setInsertionPointAfter(&op);
+   }
+@@ -84,7 +76,8 @@ public:
+ 
+   // Overload to create or fold a single result operation.
+   template <typename OpTy, typename... Args>
+-  std::enable_if_t<OpTy::template hasTrait<OpTrait::OneResult>(), Value>
++  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::OneResult>(),
++                   mlir::Value>
+   createOrFold(Args &&...args) {
+     auto loc = getLastLoc();
+     return builder->createOrFold<OpTy>(loc, std::forward<Args>(args)...);
+@@ -92,7 +85,7 @@ public:
+ 
+   // Overload to create or fold a zero result operation.
+   template <typename OpTy, typename... Args>
+-  std::enable_if_t<OpTy::template hasTrait<OpTrait::ZeroResults>(), OpTy>
++  std::enable_if_t<OpTy::template hasTrait<mlir::OpTrait::ZeroResults>(), OpTy>
+   createOrFold(Args &&...args) {
+     auto loc = getLastLoc();
+     return builder->createOrFold<OpTy>(loc, std::forward<Args>(args)...);
+@@ -111,7 +104,3 @@ private:
+     return builder->getUnknownLoc();
+   }
+ };
+-
+-namespace ir {
+-extern py::class_<TritonOpBuilder> *getBuilderClass();
+-} // namespace ir
+diff --git a/python/src/ir_binding.h b/python/src/ir_binding.h
+new file mode 100644
+index 000000000..e574333a8
+--- /dev/null
++++ b/python/src/ir_binding.h
+@@ -0,0 +1,15 @@
++#pragma once
++
++#include <pybind11/pybind11.h>
++#include <pybind11/stl.h>
++#include <pybind11/stl_bind.h>
++
++#include <vector>
++
++#include "python/src/ir.h"
++
++namespace py = pybind11;
++
++namespace ir {
++extern py::class_<TritonOpBuilder> *getBuilderClass();
++} // namespace ir
+diff --git a/python/src/passes.cc b/python/src/passes.cc
+index f2d93fab9..a036f42c1 100644
+--- a/python/src/passes.cc
++++ b/python/src/passes.cc
+@@ -12,6 +12,7 @@
+ #include "triton/Dialect/TritonGPU/Transforms/Passes.h"
+ #include "triton/Dialect/TritonInstrument/Transforms/Passes.h"
+ #include "triton/Target/LLVMIR/Passes.h"
++#include "triton/Tools/PluginUtils.h"
+ #include <pybind11/pybind11.h>
+ #include <pybind11/stl.h>
+ 
+@@ -122,6 +123,20 @@ void init_gluon_passes(py::module &&m) {
+                      gluon::createGluonInferCoalescedEncodingsPass);
+ }
+ 
++void init_plugin_passes(py::module &m) {
++  for (const auto &plugin : mlir::triton::plugin::loadPlugins()) {
++    for (const auto &pass : plugin.listPasses()) {
++      std::string wrapped = std::string("add_") + pass.name;
++      m.def(
++          wrapped.c_str(),
++          [pass](mlir::PassManager &pm, std::vector<std::string> args) {
++            pass.addPass(&pm, args);
++          },
++          py::arg("pm"), py::arg("args") = std::vector<std::string>());
++    }
++  }
++}
++
+ void init_triton_passes(py::module &&m) {
+   init_triton_analysis(m.def_submodule("analysis"));
+   init_triton_passes_common(m.def_submodule("common"));
+@@ -130,4 +145,7 @@ void init_triton_passes(py::module &&m) {
+   init_triton_passes_ttgpuir(m.def_submodule("ttgpuir"));
+   init_triton_passes_llvmir(m.def_submodule("llvmir"));
+   init_gluon_passes(m.def_submodule("gluon"));
++
++  auto plugin_m = m.def_submodule("plugin");
++  init_plugin_passes(plugin_m);
+ }
+diff --git a/python/triton/compiler/compiler.py b/python/triton/compiler/compiler.py
+index 0f6f38432..3163c0e8f 100644
+--- a/python/triton/compiler/compiler.py
++++ b/python/triton/compiler/compiler.py
+@@ -246,6 +246,9 @@ def compile(src, target=None, options=None, _env_vars=None):
+     # create cache manager
+     env_vars = get_cache_invalidating_env_vars() if _env_vars is None else _env_vars
+     key = get_cache_key(src, backend, options, env_vars=env_vars)
++    if knobs.runtime.add_stages_inspection_hook is not None:
++        inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
++        key += inspect_stages_key
+     hash = hashlib.sha256(key.encode("utf-8")).hexdigest()
+     fn_cache_manager = get_cache_manager(hash)
+     # For dumping/overriding only hash the source as we want it to be independent of triton
+diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
+index 0f506818f..b55dee737 100644
+--- a/python/triton/runtime/jit.py
++++ b/python/triton/runtime/jit.py
+@@ -709,6 +709,10 @@ class JITFunction(JITCallable, KernelInterface[T]):
+         # the type and the second parameter is the 'specialization' value.
+         bound_args, specialization, options = binder(*args, **kwargs)
+ 
++        if knobs.runtime.add_stages_inspection_hook is not None:
++            inspect_stages_key, inspect_stages_hash = knobs.runtime.add_stages_inspection_hook()
++            specialization.append(f'("custom_pipeline", {inspect_stages_hash})')
++
+         key = compute_cache_key(kernel_key_cache, specialization, options)
+         kernel = kernel_cache.get(key, None)
+ 
+diff --git a/setup.py b/setup.py
+index 22aedaf96..a1a7f4905 100644
+--- a/setup.py
++++ b/setup.py
+@@ -568,6 +568,11 @@ class CMakeBuild(build_ext):
+             "-DTRITON_PLUGIN_DIRS=" + ';'.join([b.src_dir for b in backends if b.is_external]),
+             "-DTRITON_WHEEL_DIR=" + wheeldir, "-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON"
+         ]
++        if check_env_flag("TRITON_EXT_ENABLED"):
++            cmake_args += ["-DTRITON_EXT_ENABLED=1"]
++        else:
++            cmake_args += ["-DTRITON_EXT_ENABLED=0"]
++
+         if lit_dir is not None:
+             cmake_args.append("-DLLVM_EXTERNAL_LIT=" + lit_dir)
+         cmake_args.extend(thirdparty_cmake_args)
+diff --git a/third_party/ascend/backend/compiler.py b/third_party/ascend/backend/compiler.py
+index 1ed488cd5..f0f088b3b 100644
+--- a/third_party/ascend/backend/compiler.py
++++ b/third_party/ascend/backend/compiler.py
+@@ -63,6 +63,7 @@ from triton.backends.compiler import (
+     BaseBackend,
+     GPUTarget,
+ )
++from triton import knobs
+ from triton.runtime.cache import _base32, get_dump_manager
+ from triton.tools.get_ascend_devices import is_compile_on_910_95
+ 
+@@ -1241,6 +1242,11 @@ class AscendBackend(BaseBackend):
+             else:
+                 stages["npubin"] = (
+                     lambda src, metadata: linalg_to_bin_enable_npu_compile_A2_A3(src, metadata, options))
++            # Allow plugins to rewrite stage callables (e.g. insert a custom
++            # pass into make_ttir). This is the 3.2.2/3.5 backport of triton
++            # 3.7's knobs.runtime.add_stages_inspection_hook.
++            if knobs.runtime.add_stages_inspection_hook is not None:
++                knobs.runtime.add_stages_inspection_hook(self, stages, options, language, None)
+         else:
+             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
+                                       "Please ensure the target backend is set to 'npu'.")
+diff --git a/third_party/ascend/triton_ascend.cc b/third_party/ascend/triton_ascend.cc
+index 8bbbad033..39af5b672 100644
+--- a/third_party/ascend/triton_ascend.cc
++++ b/third_party/ascend/triton_ascend.cc
+@@ -26,7 +26,8 @@
+ #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+ #include "ascend/include/DynamicCVPipeline/Passes.h"
+ 
+-#include "ir.h" // TritonOpBuilder
++#include "ir.h"         // TritonOpBuilder
++#include "ir_binding.h" // ir::getBuilderClass
+ #include "triton/Dialect/Triton/IR/Dialect.h"
+ 
+ #include <pybind11/pybind11.h>
+-- 
+2.47.3
+

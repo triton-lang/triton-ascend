@@ -146,6 +146,56 @@ resolveMemoryPointer(Value originalPtr, Value convertedPtr,
   return BlockDataParser::materializePointer(originalPtr, rewriter, known);
 }
 
+namespace {
+
+Value getRemappedOrOriginal(Value value, ConversionPatternRewriter &rewriter) {
+  if (Value remapped = rewriter.getRemappedValue(value))
+    return remapped;
+  return value;
+}
+
+bool hasStaticZeroStride(triton::MakeTensorPtrOp makeTensorPtrOp) {
+  return llvm::any_of(makeTensorPtrOp.getStrides(), [](Value stride) {
+    auto constantStride = getConstantIntValue(stride);
+    return constantStride.has_value() && constantStride.value() == 0;
+  });
+}
+
+SmallVector<OpFoldResult> getBoundarySizesFromMakeTensorPtr(
+    triton::MakeTensorPtrOp makeTensorPtrOp,
+    llvm::ArrayRef<int32_t> boundaryCheck, llvm::ArrayRef<int64_t> tileShape,
+    const Location &loc, ConversionPatternRewriter &rewriter) {
+  assert(makeTensorPtrOp.getShape().size() == tileShape.size());
+  assert(makeTensorPtrOp.getOffsets().size() == tileShape.size());
+
+  SmallVector<OpFoldResult> boundarySizes =
+      getAsIndexOpFoldResult(rewriter.getContext(), tileShape);
+  const OpFoldResult zero = rewriter.getIndexAttr(0);
+
+  for (size_t i = 0; i < tileShape.size(); ++i) {
+    if (llvm::find(boundaryCheck, i) == boundaryCheck.end())
+      continue;
+
+    OpFoldResult shape = getOpFoldResultOfLayoutInfo(
+        getRemappedOrOriginal(makeTensorPtrOp.getShape()[i], rewriter),
+        rewriter);
+    OpFoldResult offset = getOpFoldResultOfLayoutInfo(
+        getRemappedOrOriginal(makeTensorPtrOp.getOffsets()[i], rewriter),
+        rewriter);
+    OpFoldResult nonNegativeOffset =
+        maxOpFoldResult(offset, zero, loc, rewriter);
+    OpFoldResult remaining = maxOpFoldResult(
+        subOpFoldResult(shape, nonNegativeOffset, loc, rewriter), zero, loc,
+        rewriter);
+    boundarySizes[i] =
+        minOpFoldResult(boundarySizes[i], remaining, loc, rewriter);
+  }
+
+  return boundarySizes;
+}
+
+} // namespace
+
 LogicalResult
 AddPtrConverter::matchAndRewrite(triton::AddPtrOp op, OpAdaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
@@ -432,13 +482,19 @@ static bool skipNonComplementaryStaticDeinterleave(triton::LoadOp lhs) {
 LogicalResult
 LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
                                ConversionPatternRewriter &rewriter) const {
+  auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
+  const bool hasZeroStrideMTP =
+      makeTensorPtrOp && hasStaticZeroStride(makeTensorPtrOp);
 
   // Check if tt.load is modified by AddPtrConverter to a specified state.
-  if (checkModifiedByAddPtrConverter(op).succeeded()) {
+  if (!hasZeroStrideMTP && checkModifiedByAddPtrConverter(op).succeeded()) {
     return continueModifyFromAddPtrConverter(op, adaptor, rewriter);
   }
 
-  auto ptr = adaptor.getPtr();
+  Value ptr = hasZeroStrideMTP ? rewriter.getRemappedValue(op.getPtr())
+                               : adaptor.getPtr();
+  if (!ptr)
+    return rewriter.notifyMatchFailure(op, "missing remapped tensor pointer");
   auto mask = op.getMask();
   auto other = op.getOther();
   auto loc = op.getLoc();
@@ -499,7 +555,7 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   }
 
   int64_t lastStride = -1;
-  if (isa<BlockArgument>(ptr)) {
+  if (!hasZeroStrideMTP && isa<BlockArgument>(ptr)) {
     auto u = ptr;
     while (auto blkArg = dyn_cast<BlockArgument>(u)) {
       if (auto forOp = dyn_cast<scf::ForOp>(blkArg.getOwner()->getParentOp())) {
@@ -524,14 +580,15 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     return rewriter.notifyMatchFailure(
         op, "LoadOp expects a memref, not a memref of pointers");
   }
-  if (!op->hasAttr(ConverterUtils::GeneratedByMakeTensorPtrTAG)) {
+  if (!hasZeroStrideMTP &&
+      !op->hasAttr(ConverterUtils::GeneratedByMakeTensorPtrTAG)) {
     auto memrefOp = dyn_cast<memref::ReinterpretCastOp>(ptr.getDefiningOp());
     auto ret = mlir::ConverterUtils::getLastStrideOfReinterpretCastOp(memrefOp);
     if (ret.has_value())
       lastStride = *ret;
   }
   bool mayImplicitTransposeWithLastAxis =
-      (existDotFlag) &&
+      (!hasZeroStrideMTP) && (existDotFlag) &&
       (!op->hasAttr(ConverterUtils::GeneratedByMakeTensorPtrTAG)) &&
       (lastStride != 1 &&
        mlir::ConverterUtils::isaPermutedMemRefType(memRefType));
@@ -596,9 +653,12 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
   // boundary check
   auto boundaryCheck = op.getBoundaryCheck();
   if (!boundaryCheck.empty()) {
-    auto makeTensorPtrOp = op.getPtr().getDefiningOp<triton::MakeTensorPtrOp>();
-    auto boundarySizes = mlir::ConverterUtils::getBoundarySizes(
-        boundaryCheck, /*remapped*/ ptr, loc, rewriter);
+    auto boundarySizes =
+        hasZeroStrideMTP
+            ? getBoundarySizesFromMakeTensorPtr(makeTensorPtrOp, boundaryCheck,
+                                                memRefShape, loc, rewriter)
+            : mlir::ConverterUtils::getBoundarySizes(
+                  boundaryCheck, /*remapped*/ ptr, loc, rewriter);
     // handle the padding
     auto padding = op.getPadding();
     SmallVector<OpFoldResult> srcOffsets(boundarySizes.size(),

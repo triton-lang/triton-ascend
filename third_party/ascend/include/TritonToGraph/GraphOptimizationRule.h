@@ -36,6 +36,15 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
+// apply() historically exposed only success/failure.  Most rewrites still use
+// that contract, but a rule that validates a detached speculative rewrite can
+// distinguish a harmless candidate decline from a pass failure.
+enum class RewritePlanApplyResult {
+  Applied,
+  NotApplicable,
+  Failed,
+};
+
 // A plan is created for one immutable GraphOptimizationContext epoch. Its
 // apply() implementation must be transactional: on failure it leaves the IR
 // unchanged.
@@ -51,6 +60,14 @@ public:
   // Failure means this plan is no longer applicable to the current epoch.
   virtual LogicalResult revalidate(GraphOptimizationContext &context) const = 0;
   virtual LogicalResult apply(IRRewriter &rewriter) = 0;
+
+  // Preserve the existing contract for ordinary rules.  A rule that performs
+  // detached speculative materialization may override this to report a
+  // no-commit decline without pretending that its rewrite was applied.
+  virtual RewritePlanApplyResult applyWithResult(IRRewriter &rewriter) {
+    return succeeded(apply(rewriter)) ? RewritePlanApplyResult::Applied
+                                      : RewritePlanApplyResult::Failed;
+  }
 };
 
 class GraphOptimizationRule {

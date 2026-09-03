@@ -97,6 +97,19 @@ def _row_module(
     }}
 """
         store_value = "%out"
+    elif body == "for_with_scalar_assert":
+        post_load = f"""    %for_lb = arith.constant 0 : index
+    %for_step = arith.constant 1 : index
+    %for_ub = arith.constant 2 : index
+    %out = scf.for %i = %for_lb to %for_ub step %for_step iter_args(%acc = %value) -> (tensor<{width}xf32>) {{
+      %scalar_ok = arith.cmpi slt, {pid_in_work}, %count : i32
+      tt.assert %scalar_ok, "loop scalar assertion" : i1
+      %one = arith.constant dense<1.000000e+00> : tensor<{width}xf32>
+      %next = arith.addf %acc, %one : tensor<{width}xf32>
+      scf.yield %next : tensor<{width}xf32>
+    }}
+"""
+        store_value = "%out"
     elif body in ("auto_overflow_assert", "user_tensor_assert"):
         marker = " {tt.auto_overflow_assert}" if body == "auto_overflow_assert" else ""
         message = (
@@ -296,6 +309,19 @@ def test_row_coalescing_clones_scf_for_with_lifted_iter_args(tmp_path):
     assert "iter_args" in text
     assert "-> (tensor<8x16xf32>)" in text
     assert "scf.yield" in text
+
+
+def test_row_coalescing_lifts_scalar_assert_in_scf_for_body(tmp_path):
+    text = _run_row(
+        _row_module("row_for_scalar_assert", 16, body="for_with_scalar_assert"),
+        tmp_path,
+    )
+
+    _assert_row_hit(text)
+    assert "loop scalar assertion" in text
+    assert "tensor<8xi1>" in text
+    assert "arith.xori" in text
+    assert "arith.ori" in text
 
 
 def test_row_coalescing_rejects_non_whitelisted_y_num_programs(tmp_path):

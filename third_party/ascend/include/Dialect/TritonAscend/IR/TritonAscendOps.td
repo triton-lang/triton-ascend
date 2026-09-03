@@ -520,6 +520,31 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
     let summary = "1D convolution operation";
     let description = [{
         Performs a 1D convolution operation on the input tensor.
+
+        Dimension constraints:
+        - input: [C_in, L_in] (unbatched) or [N, C_in, L_in] (batched),
+          where N is the batch size, C_in the input channel count, and
+          L_in the signal length.
+        - weight: [C_out, C_in/groups, K], where C_out is the output
+          channel count and K the convolution kernel size.
+        - bias (optional): [C_out], one bias per output channel. Must have
+          the same element type as input and weight.
+        - result: [C_out, L_out] (unbatched) or [N, C_out, L_out] (batched).
+
+        Configurable attributes:
+        - stride: integer scalar, the step of the convolution kernel along
+          L. Must be > 0.
+        - padding: IntegerAttr (uniform scalar) or DenseI32ArrayAttr
+          [pad_left, pad_right], the number of zero-padding elements added
+          to each side of the input.
+        - dilation: integer scalar, the spacing between kernel elements.
+        - groups: number of blocked connections from input channels to
+          output channels. C_in and C_out must both be divisible by
+          groups.
+
+        Output shape derivation:
+        L_out = floor((L_in + pad_left + pad_right - dilation * (K - 1) - 1)
+                      / stride + 1)
     }];
 
     let arguments = (ins
@@ -527,7 +552,8 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
         TT_Tensor:$weight,
         Optional<TT_Tensor>:$bias,
         I64Attr:$stride,
-        I64Attr:$padding_size,
+        // IntegerAttr (uniform scalar) or DenseI32ArrayAttr [pad_left, pad_right].
+        AnyAttr:$padding,
         I64Attr:$dilation,
         I64Attr:$groups
     );

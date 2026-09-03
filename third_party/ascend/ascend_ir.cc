@@ -881,7 +881,7 @@ void init_ascend_ir(py::module &&m) {
       .def(
           "create_conv1d",
           [](AscendNPUIROpBuilder &self, Value input, Value weight,
-             py::object bias, int64_t stride, int64_t padding_size,
+             py::object bias, int64_t stride, py::object padding,
              int64_t dilation, int64_t groups, Type output_type) -> Value {
             Value biasValue;
             if (!bias.is_none()) {
@@ -890,17 +890,32 @@ void init_ascend_ir(py::module &&m) {
               biasValue = Value();
             }
             auto &builder = self.getBuilder();
+            // Keep ints as IntegerAttr and sequences as DenseI32ArrayAttr.
+            // padding = [pad_left, pad_right] or a uniform scalar.
+            Attribute paddingAttr;
+            if (py::isinstance<py::int_>(padding)) {
+              paddingAttr = builder.getI64IntegerAttr(padding.cast<int64_t>());
+            } else {
+              py::sequence seq = padding.cast<py::sequence>();
+              if (py::len(seq) != 2) {
+                throw std::invalid_argument(
+                    "padding must be an integer or a 2-element sequence");
+              }
+              SmallVector<int32_t> values;
+              for (auto item : seq)
+                values.push_back(item.cast<int32_t>());
+              paddingAttr = builder.getDenseI32ArrayAttr(values);
+            }
             auto strideAttr = builder.getI64IntegerAttr(stride);
-            auto paddingSizeAttr = builder.getI64IntegerAttr(padding_size);
             auto dilationAttr = builder.getI64IntegerAttr(dilation);
             auto groupsAttr = builder.getI64IntegerAttr(groups);
             auto op = self.create<triton::ascend::Conv1dOp>(
-                output_type, input, weight, biasValue, strideAttr,
-                paddingSizeAttr, dilationAttr, groupsAttr);
+                output_type, input, weight, biasValue, strideAttr, paddingAttr,
+                dilationAttr, groupsAttr);
             return op.getResult();
           },
           py::arg("input"), py::arg("weight"), py::arg("bias"),
-          py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
+          py::arg("stride"), py::arg("padding"), py::arg("dilation"),
           py::arg("groups"), py::arg("output_type"))
       // dot: D = A * B with per-operand fractal (zN) flags; result type
       // inferred from A, B and the flags.

@@ -37,7 +37,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
     %bias_tensor = tt.splat %bias_ptr : !tt.ptr<f16> -> tensor<16x!tt.ptr<f16>>
     %bias_tensor_22 = tt.addptr %bias_tensor, %c_in_offsets : tensor<16x!tt.ptr<f16>>, tensor<16xi32>
     %bias_tensor_23 = tt.load %bias_tensor_22 : tensor<16x!tt.ptr<f16>>
-    %output = ascend.conv1d(%input_tensor_8, %weight_tensor_21, %bias_tensor_23) {dilation = 1 : i64, groups = 1 : i64, padding_size = 0 : i64, stride = 1 : i64} : (tensor<16x128xf16>, tensor<16x16x3xf16>, tensor<16xf16>) -> tensor<16x126xf16>
+    %output = ascend.conv1d(%input_tensor_8, %weight_tensor_21, %bias_tensor_23) {dilation = 1 : i64, groups = 1 : i64, padding = 0 : i64, stride = 1 : i64} : (tensor<16x128xf16>, tensor<16x16x3xf16>, tensor<16xf16>) -> tensor<16x126xf16>
     %l_out_off = tt.make_range {end = 126 : i32, start = 0 : i32} : tensor<126xi32>
     %l_out_off_24 = tt.expand_dims %l_out_off {axis = 0 : i32} : tensor<126xi32> -> tensor<1x126xi32>
     %output_offsets_25 = arith.muli %c_in_offsets_1, %output_offsets : tensor<16x1xi32>
@@ -122,7 +122,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
     %bias_tensor = tt.splat %bias_ptr : !tt.ptr<f16> -> tensor<30x!tt.ptr<f16>>
     %bias_tensor_33 = tt.addptr %bias_tensor, %c_out_offsets : tensor<30x!tt.ptr<f16>>, tensor<30xi32>
     %bias_tensor_34 = tt.load %bias_tensor_33 : tensor<30x!tt.ptr<f16>>
-    %output = ascend.conv1d(%input_tensor_18, %weight_tensor_32, %bias_tensor_34) {dilation = 1 : i64, groups = 1 : i64, padding_size = 1 : i64, stride = 1 : i64} : (tensor<2x32x128xf16>, tensor<30x32x3xf16>, tensor<30xf16>) -> tensor<2x30x128xf16>
+    %output = ascend.conv1d(%input_tensor_18, %weight_tensor_32, %bias_tensor_34) {dilation = 1 : i64, groups = 1 : i64, padding = 1 : i64, stride = 1 : i64} : (tensor<2x32x128xf16>, tensor<30x32x3xf16>, tensor<30xf16>) -> tensor<2x30x128xf16>
     %c_out_offsets_35 = tt.expand_dims %c_out_offsets {axis = 0 : i32} : tensor<30xi32> -> tensor<1x30xi32>
     %c_out_offsets_36 = tt.expand_dims %c_out_offsets_35 {axis = 2 : i32} : tensor<1x30xi32> -> tensor<1x30x1xi32>
     %output_offsets_37 = arith.muli %n_offsets_4, %output_offsets_0 : tensor<2x1x1xi32>

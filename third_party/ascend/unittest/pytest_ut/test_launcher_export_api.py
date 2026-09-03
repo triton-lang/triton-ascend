@@ -298,18 +298,24 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
     for auto_blockify_enabled in (False, True):
-        metadata = _make_metadata()
-        metadata.has_auto_blockify_blacklist_op = blacklisted
-        metadata.auto_blockify_enabled = auto_blockify_enabled
-        src = driver.make_launcher(
-            constants={},
-            signature={0: "*fp32", 1: "*fp32"},
-            metadata=metadata,
-        )
-        expected_per_launch_path = 1 if expect_cap else 0
-        c_abi_launch, cpp_launch = _split_launch_functions(src)
-        assert c_abi_launch.count(cap) == expected_per_launch_path
-        assert cpp_launch.count(cap) == expected_per_launch_path
+        for row_coalescing_applied in (False, True):
+            metadata = _make_metadata()
+            metadata.has_auto_blockify_blacklist_op = blacklisted
+            metadata.auto_blockify_enabled = auto_blockify_enabled
+            metadata.row_coalescing_applied = row_coalescing_applied
+            if row_coalescing_applied:
+                metadata.coalesce_factor = 4
+                metadata.coalesce_axis = 0
+                metadata.coalesce_grid_ceil_div = True
+            src = driver.make_launcher(
+                constants={},
+                signature={0: "*fp32", 1: "*fp32"},
+                metadata=metadata,
+            )
+            expected_per_launch_path = 1 if expect_cap and not row_coalescing_applied else 0
+            c_abi_launch, cpp_launch = _split_launch_functions(src)
+            assert c_abi_launch.count(cap) == expected_per_launch_path
+            assert cpp_launch.count(cap) == expected_per_launch_path
 
 
 @patch.object(driver, "NPUUtils")

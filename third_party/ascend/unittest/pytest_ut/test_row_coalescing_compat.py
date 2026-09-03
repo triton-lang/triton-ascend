@@ -97,10 +97,25 @@ def _row_module(
     }}
 """
         store_value = "%out"
-    elif body in ("auto_overflow_assert", "unmarked_overflow_assert"):
+    elif body in ("auto_overflow_assert", "user_tensor_assert"):
         marker = " {tt.auto_overflow_assert}" if body == "auto_overflow_assert" else ""
+        message = (
+            "int32 overflow detected for operation add"
+            if body == "auto_overflow_assert"
+            else "user tensor assertion"
+        )
         pre_load = f"""    %overflow_ok = arith.cmpi sle, %offsets, %offsets : tensor<{width}xi32>
-    tt.assert %overflow_ok, "int32 overflow detected for operation add"{marker} : tensor<{width}xi1>
+    tt.assert %overflow_ok, "{message}"{marker} : tensor<{width}xi1>
+"""
+    elif body in ("auto_scalar_assert", "user_scalar_assert"):
+        marker = " {tt.auto_overflow_assert}" if body == "auto_scalar_assert" else ""
+        message = (
+            "int32 overflow detected for operation add"
+            if body == "auto_scalar_assert"
+            else "user scalar assertion"
+        )
+        pre_load = f"""    %scalar_ok = arith.cmpi slt, {pid_in_work}, %count : i32
+    tt.assert %scalar_ok, "{message}"{marker} : i1
 """
     elif body == "non_whitelisted_y_num_programs":
         post_load = "    %not_whitelisted = tt.get_num_programs y : i32\n"
@@ -214,19 +229,44 @@ def test_row_coalescing_lifts_automatic_overflow_assert_with_tail_guard(tmp_path
     assert "tensor<8x16xi1>" in text
 
 
-def test_row_coalescing_rejects_unmarked_overflow_assert(tmp_path):
+def test_row_coalescing_lifts_user_tensor_assert_with_tail_guard(tmp_path):
     text = _run_row(
         _row_module(
-            "row_unmarked_overflow_assert",
+            "row_user_tensor_assert",
             16,
-            body="unmarked_overflow_assert",
+            body="user_tensor_assert",
         ),
         tmp_path,
     )
 
-    _assert_row_bailout(text)
+    _assert_row_hit(text)
     assert "tt.assert" in text
+    assert "user tensor assertion" in text
     assert "tt.auto_overflow_assert" not in text
+    assert "arith.xori" in text
+    assert "arith.ori" in text
+    assert "tensor<8x16xi1>" in text
+
+
+@pytest.mark.parametrize(
+    ("body", "message", "has_auto_marker"),
+    (
+        ("auto_scalar_assert", "int32 overflow detected for operation add", True),
+        ("user_scalar_assert", "user scalar assertion", False),
+    ),
+)
+def test_row_coalescing_lifts_scalar_assert_with_tail_guard(
+    body, message, has_auto_marker, tmp_path
+):
+    text = _run_row(_row_module(f"row_{body}", 16, body=body), tmp_path)
+
+    _assert_row_hit(text)
+    assert text.count("tt.assert") == 1
+    assert message in text
+    assert ("tt.auto_overflow_assert" in text) == has_auto_marker
+    assert "arith.xori" in text
+    assert "arith.ori" in text
+    assert "tensor<8xi1>" in text
 
 
 def test_row_coalescing_lifts_reduce_along_original_row_axis(tmp_path):
@@ -289,16 +329,21 @@ def test_row_coalescing_requires_force_simt_only_and_rule_bit(tmp_path):
     _assert_row_bailout(mask_disabled)
 
 
-def test_row_coalescing_rejects_pid_value_defined_before_work_block(tmp_path):
+def test_row_coalescing_lifts_pure_pid_value_defined_before_work_block(tmp_path):
     text = _run_row(
-        _row_module("row_pid_derived_before_work", 16, pid_derived_outside_work=True),
+        _row_module(
+            "row_pid_derived_before_work",
+            16,
+            pid_derived_outside_work=True,
+            body="user_scalar_assert",
+        ),
         tmp_path,
     )
 
-    _assert_row_bailout(text)
-    # The Python MLIR printer may renumber SSA values, so check the preserved
-    # scalar add structurally rather than relying on its textual value name.
-    assert text.count("arith.addi") >= 2
+    _assert_row_hit(text)
+    assert "user scalar assertion" in text
+    assert "tensor<8xi1>" in text
+    assert "cf.cond_br" not in text
 
 
 def test_row_coalescing_rejects_direct_call_even_outside_work_region(tmp_path):

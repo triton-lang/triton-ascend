@@ -469,48 +469,76 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
   return {maxRequiredBuffers, maxX};
 }
 
+// DFS helper function to find all paths from producer to consumer in DAG
+// and calculate the maximum steps (only count edges from producer scope to consumer scope)
+static int findMaxStepsInDAG(
+    scf::IfOp currentNode, scf::IfOp targetNode, int currentSteps,
+    llvm::DenseSet<scf::IfOp> &visited,
+    llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> &dag,
+    bool producerIsCube) {
+  // If we reached the target, return current steps
+  if (currentNode == targetNode) {
+    return currentSteps;
+  }
+
+  visited.insert(currentNode);
+  int maxSteps = -1;
+  auto it = dag.find(currentNode);
+  if (it != dag.end()) {
+    // Determine current node's core type
+    bool currentIsCube = false, currentIsVector = false;
+    if (failed(getOpCoreType(currentNode.getOperation(), currentIsCube, currentIsVector))) {
+      LDBG("Failed to get core type for current IfOp!");
+      return -1;
+    }
+
+    for (scf::IfOp nextNode : it->second) {
+      if (visited.contains(nextNode)) {
+        continue;
+      }
+
+      // Determine next node's core type
+      bool nextIsCube = false, nextIsVector = false;
+      if (failed(getOpCoreType(nextNode.getOperation(), nextIsCube, nextIsVector))) {
+        LDBG("Failed to get core type for next IfOp!");
+        return -1;
+      }
+
+      // If current is in producer scope and next is in consumer scope, step + 1
+      int stepIncrement = 0;
+      if (currentIsCube == producerIsCube && nextIsCube != producerIsCube) {
+        stepIncrement = 1;
+      }
+
+      // Recursively find paths
+      int steps = findMaxStepsInDAG(nextNode, targetNode, 
+                                    currentSteps + stepIncrement, 
+                                    visited, dag,
+                                    producerIsCube);
+      
+      if (steps > maxSteps) {
+        maxSteps = steps;
+      }
+    }
+  }
+
+  visited.erase(currentNode);
+
+  return maxSteps;
+}
+
 // calculateCrossDepsFactor computes the buffer factor based on cross-core
-// dependencies For cross-core deps consumer is in current forOp (one side: cube
-// or vector) producer is in another mainloop with the same id but in the other
-// scope
+// dependencies using DAG-based path analysis
+// For cross-core deps: consumer is in current forOp (one side: cube or vector)
+// producer is in another mainloop with the same id but in the other scope
+// Uses ifBlockCrossCoreDAG to find all paths from producer to consumer
+// Only counts edges from producer scope to consumer scope as steps
 std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
     DenseMap<Operation *, int> &ifOpIndex,
     llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossDeps) {
   int maxRequiredBuffers = 1;
   int maxX = 1;
-
-  // Determine current forOp's scope type (cube or vector)
-  bool currentIsCube = false;
-  bool currentIsVector = false;
-  Operation *currentScope = forOp->getParentOp();
-  while (currentScope) {
-    if (isa<scope::ScopeOp>(currentScope)) {
-      break;
-    }
-    currentScope = currentScope->getParentOp();
-  }
-  if (failed(getScopeType(currentScope, currentIsCube, currentIsVector))) {
-    LDBG("Current forOp is not in a valid cube or vector scope!");
-    return {-1, -1};
-  }
-
-  // Find the other side scope's mainloop and collect its ifOps
-  SmallVector<scf::IfOp> otherSideIfOps;
-  DenseMap<Operation *, int> otherSideIfOpIndexMap;
-  scf::ForOp otherSideForOp =
-      findOtherSideMainloopAndIfOps(forOp, currentIsCube, currentIsVector,
-                                    otherSideIfOps, otherSideIfOpIndexMap);
-
-  if (!otherSideForOp) {
-    LDBG("Failed to find other side mainloop or its ifOps!");
-    return {-1, -1};
-  }
-
-  // Check if the first ifOp has any consumer op in crossDeps
-  // If not, it means the current compute block executes first, need to subtract
-  // 1 from requiredBuffers
-  bool runFirst = isRunFirst(ifOps, crossDeps);
 
   // Iterate all cross-core dependencies
   for (auto &entry : crossDeps) {
@@ -523,40 +551,60 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
       x = 1;
     }
 
-    // Find the IfOp index that consumer belongs to (comsumerIdx)
-    int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
-    if (comsumerIdx == -1) {
+    // Find the IfOp that consumer belongs to
+    scf::IfOp consumerIfOp = findIfOpWithSSBufferAttr(consumerOp);
+    if (!consumerIfOp) {
+      LDBG("Consumer op not found in any if block!");
       return {-1, -1};
     }
 
-    // Find producer's position in the other side's ifOps (producerIdx)
-    int producerIdx = getProducerIfOpIndex(producerOps, otherSideIfOps,
-                                           otherSideIfOpIndexMap);
-    if (producerIdx == -1) {
+    // Find the IfOp that producer belongs to
+    // All producers should be in the same IfOp
+    scf::IfOp producerIfOp = nullptr;
+    for (Operation *producerOp : producerOps) {
+      scf::IfOp foundIfOp = findIfOpWithSSBufferAttr(producerOp);
+      if (!foundIfOp) {
+        LDBG("Producer op not found in any if block!");
+        return {-1, -1};
+      }
+      if (!producerIfOp) {
+        producerIfOp = foundIfOp;
+      } else if (producerIfOp != foundIfOp) {
+        LDBG("Producers are in different if blocks, not supported!");
+        return {-1, -1};
+      }
+    }
+
+    if (!producerIfOp) {
+      LDBG("No producer IfOp found!");
       return {-1, -1};
     }
 
-    // If consumer is after producer (comsumerIdx >= producerIdx), calculate
-    // required buffer count comsumerIdx - producerIdx + 1 represents the buffer
-    // count needed to cover this distance If the current compute block executes
-    // first (firstIfOp has no consumer), subtract 1
-    if (comsumerIdx < producerIdx) {
-      // case : C1 -> V1V2V3 -> C2
-      // in this case comsumerIdx < producerIdx, crossDeps hard to process, do
-      // not change the loop iteration times
-      LDBG("there is complex case!");
-      return {1, 1};
+    // Determine producer scope type
+    bool producerIsCube = false, producerIsVector = false;
+    if (failed(getOpCoreType(producerIfOp.getOperation(), producerIsCube, producerIsVector))) {
+      LDBG("Failed to get core type for producer IfOp!");
+      return {-1, -1};
     }
-    int requiredBuffers = comsumerIdx - producerIdx + 1;
-    if (runFirst) {
-      requiredBuffers = requiredBuffers - 1;
+
+    // Use DAG to find the maximum steps from producer to consumer
+    // Only count edges from producer scope to consumer scope
+    llvm::DenseSet<scf::IfOp> visited;
+    int requiredBuffers = findMaxStepsInDAG(producerIfOp, consumerIfOp, 
+                                            0, visited, 
+                                            info->ifBlockCrossCoreDAG,
+                                            producerIsCube);
+    
+    if (requiredBuffers < 0) {
+      LDBG("Failed to find path in DAG from producer to consumer!");
+      return {-1, -1};
     }
-    LDBG("consumer : " << *consumerOp);
-    LDBG("consumer comsumerIdx: " << comsumerIdx
-                                  << ", producerIdx: " << producerIdx);
-    LDBG("requiredBuffers: " << requiredBuffers);
-    LDBG("buffer: " << x);
-    LDBG("runFirst: " << runFirst);
+
+    LDBG("Consumer: " << *consumerOp);
+    LDBG("Producer IfOp: " << *producerIfOp);
+    LDBG("Consumer IfOp: " << *consumerIfOp);
+    LDBG("Required buffers (from DAG): " << requiredBuffers);
+    LDBG("Buffer count x: " << x);
 
     // Update max value using fraction comparison to avoid precision issues
     // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to

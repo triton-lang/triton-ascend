@@ -73,6 +73,14 @@ int findTcbGroupId(
 // Returns failure if scopeOp does not have tcore_type attribute
 LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector);
 
+// Get isCube/isVector for an operation by finding its parent ScopeOp
+// Returns failure if op is not in a valid cube or vector scope
+LogicalResult getOpCoreType(Operation *op, bool &isCube, bool &isVector);
+
+// Find the IfOp with ssbuffer.if attribute that contains the given operation
+// Returns nullptr if no such IfOp found
+scf::IfOp findIfOpWithSSBufferAttr(Operation *op);
+
 // Check if op is scf.if whose body only contains hivm.hir.sync_block_wait,
 // hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators). Returns
 // false if op is not scf.if or contains any other op.

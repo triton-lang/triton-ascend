@@ -40,7 +40,6 @@ python/test/unit/language/test_core.py::test_convert_float16_to_float32	communit
 python/test/unit/language/test_core.py::test_cumsum_dtype	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_default	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_dot_mulbroadcasted	community/language/test_core.py	1	1	0	0	0	0
-python/test/unit/language/test_core.py::test_dot_multidim	community/language/test_core.py	20	20	0	0	0	0
 python/test/unit/language/test_core.py::test_dot_without_load	community/language/test_core.py	2	2	0	0	0	0
 python/test/unit/language/test_core.py::test_dtype	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_dtype_codegen	community/language/test_core.py	1	1	0	0	0	0
@@ -72,7 +71,6 @@ python/test/unit/language/test_core.py::test_max_returns_zero	community/language
 python/test/unit/language/test_core.py::test_nested_if_else_return	community/language/test_core.py	8	8	0	0	0	0
 python/test/unit/language/test_core.py::test_nested_while	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_num_programs	community/language/test_core.py	1	1	0	0	0	0
-python/test/unit/language/test_core.py::test_propagate_nan	community/language/test_core.py	12	12	0	0	0	0
 python/test/unit/language/test_core.py::test_reshape	community/language/test_core.py	4	4	0	0	0	0
 python/test/unit/language/test_core.py::test_reshape_err	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_scalar_overflow	community/language/test_core.py	1	1	0	0	0	0
@@ -86,7 +84,6 @@ python/test/unit/language/test_core.py::test_split_to_scalar	community/language/
 python/test/unit/language/test_core.py::test_static_range	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_temp_var_in_loop	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_tensor_atomic_add_access_patterns	community/language/test_core.py	240	240	0	0	0	0
-python/test/unit/language/test_core.py::test_tensor_atomic_add_non_exclusive_offset	community/language/test_core.py	18	18	0	0	0	0
 python/test/unit/language/test_core.py::test_tensor_atomic_add_shift_1	community/language/test_core.py	18	18	0	0	0	0
 python/test/unit/language/test_core.py::test_tensor_atomic_rmw_block	community/language/test_core.py	1	1	0	0	0	0
 python/test/unit/language/test_core.py::test_tensor_member	community/language/test_core.py	1	1	0	0	0	0

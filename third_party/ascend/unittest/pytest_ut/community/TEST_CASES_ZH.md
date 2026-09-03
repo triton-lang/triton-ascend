@@ -2,9 +2,9 @@
 
 本文逐项说明本目录迁入的社区测试函数用途，便于评审时核对测试目标。
 源码基线为 `main-dev@396df6cb5b001314e36f22220be07a560de44664`；
-共 231 个顶层测试函数、2184 个参数节点。逐函数来源及历史节点状态见
+共 228 个顶层测试函数、2134 个参数节点。逐函数来源及历史节点状态见
 `MIGRATION_MANIFEST.tsv`，本轮直接验证结果以 PR 描述为准。
-函数数量不表示每个参数节点都通过：冻结清单包含 1908 个 Pass、275 个
+函数数量不表示每个参数节点都通过：冻结清单包含 1858 个 Pass、275 个
 Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点理解。
 
 ## `python/test/unit/language/test_annotations.py`
@@ -72,7 +72,6 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_cumsum_dtype` | 验证 int1/bool 输入的 tl.cumsum 会得到可存为 int32 的累积计数 1、2、3、4。 |
 | `test_default` | 验证 JIT 辅助函数及内核的默认参数在省略和显式传值时分别取正确值。 |
 | `test_dot_mulbroadcasted` | 验证用 expand_dims、逐元素乘法和 sum 手写的分块矩阵乘得到与 NumPy matmul 一致的结果。 |
-| `test_dot_multidim` | 验证 2 至 6 维批量 tl.dot 在 A/B 可选转置时与 PyTorch float32 参考结果完全一致。 |
 | `test_dot_without_load` | 验证由 tl.full 直接构造、未经内存 load 的矩阵可参与 tl.dot 并得到正确乘积。 |
 | `test_dtype` | 验证指针元素类型可在 JIT 中作为 constexpr 读取，并支持相等、or 等静态类型判断。 |
 | `test_dtype_codegen` | 验证各 Triton dtype 对象的 repr 可生成完整且可求值的 triton.language 类型名称。 |
@@ -104,7 +103,6 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_nested_if_else_return` | 枚举三个动态条件，验证嵌套 if/else 中 return 路径不写输出，其余路径选择正确值。 |
 | `test_nested_while` | 验证外层 for 与内层 while 的嵌套循环正确累计 40 次更新。 |
 | `test_num_programs` | 验证三维 launch grid 中 tl.num_programs(0/1/2) 分别返回 11、21、31。 |
-| `test_propagate_nan` | 验证 minimum、maximum、clamp 在 PropagateNan.NONE/ALL 下对一侧或两侧 NaN 的传播规则。 |
 | `test_reshape` | 验证多个等元素数形状之间的 tl.reshape 保持元素排列并与 NumPy reshape 一致。 |
 | `test_reshape_err` | 验证元素数量不匹配的 tl.reshape 在 warmup 编译阶段失败并包含 reshape 错误信息。 |
 | `test_scalar_overflow` | 验证超大 constexpr 整数与 int32 张量运算时被范围检查拒绝，而不是静默溢出。 |
@@ -118,7 +116,6 @@ Skip 和 1 个 XFail；包含混合状态参数的函数须结合清单逐节点
 | `test_static_range` | 验证 tl.static_range 的起止与 step 语义，编译期展开后的累加结果与 Python range 一致。 |
 | `test_temp_var_in_loop` | 验证循环分支内临时变量的重新定义与复用不会生成错误 IR，最终累加值与 PyTorch 参考一致。 |
 | `test_tensor_atomic_add_access_patterns` | 验证多种重复/乱序索引和 mask 下 tensor atomic_add 的冲突累加结果与逐元素参考实现一致。 |
-| `test_tensor_atomic_add_non_exclusive_offset` | 验证多个输入元素映射到同一输出地址时 tensor atomic_add 能正确合并成相邻元素之和。 |
 | `test_tensor_atomic_add_shift_1` | 验证二维偏移错位造成的重叠写入可由 tensor atomic_add 正确累加。 |
 | `test_tensor_atomic_rmw_block` | 验证二维块 atomic_min 内核运行后，输出张量中至少产生一个值为 0 的元素；当前断言仅检查整个张量的最小值，不逐元素核对 8×8 结果。 |
 | `test_tensor_member` | 验证 tl.tensor 的 abs()、sum() 成员方法与对应 tl.abs、tl.sum 函数结果相同。 |

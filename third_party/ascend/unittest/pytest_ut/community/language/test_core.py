@@ -27,7 +27,6 @@ import contextlib
 import itertools
 import re
 from typing import Optional
-import math
 import textwrap
 
 import numpy as np
@@ -890,30 +889,6 @@ def test_atomic_rmw_predicate(num_ctas, device):
     x = torch.zeros((1, ), device=device, dtype=torch.int32)
     kernel[(4096, )](x, num_ctas=num_ctas)
     assert x.item() == 63
-
-
-@pytest.mark.interpreter
-@pytest.mark.parametrize("size, num_ctas, dtype_x_str", [(size, num_ctas, dtype_x_str)
-                                                         for size in [2, 4, 8, 32, 64, 128]
-                                                         for num_ctas in num_ctas_list
-                                                         for dtype_x_str in ['bfloat16', 'float16', 'float32']])
-def test_tensor_atomic_add_non_exclusive_offset(size, num_ctas, dtype_x_str, device):
-    check_type_supported(dtype_x_str, device)
-
-    @triton.jit
-    def kernel(X, val, NUM: tl.constexpr):
-        off = tl.arange(0, NUM)
-        offset = off[:, None] * NUM + off[None, :]
-        val = tl.load(val + offset)
-        tl.atomic_add(X + offset // 2, val)
-
-    shape = (size // 2, size)
-    dtype = getattr(torch, dtype_x_str)
-    x = torch.zeros(shape, dtype=dtype, device=device)
-    val = torch.randn((size**2), dtype=dtype, device=device)
-    kernel[(1, )](x, val, size, num_warps=1, num_ctas=num_ctas)
-    ref = val[0::2] + val[1::2]
-    torch.testing.assert_close(ref, x.reshape(math.prod(shape)))
 
 
 @pytest.mark.interpreter
@@ -2634,44 +2609,6 @@ def matmul_kernel(  #
 # -----------------------
 
 # -----------------------
-# test propagate_nan
-# -----------------------
-
-
-@pytest.mark.parametrize("dtype", ['float16', 'float32'])
-@pytest.mark.parametrize("propagate_nan", ['NONE', 'ALL'])
-@pytest.mark.parametrize("func", ['minimum', 'maximum', 'clamp'])
-def test_propagate_nan(dtype, propagate_nan, func, device):
-
-    @triton.jit
-    def kernel(A, B, C, propagate_nan: tl.constexpr, func: tl.constexpr):
-        if func == 'clamp':
-            tl.store(
-                C,
-                getattr(tl, func)(tl.load(A), -tl.load(B), tl.load(B),
-                                  propagate_nan=getattr(tl.PropagateNan, propagate_nan)))
-        else:
-            tl.store(C,
-                     getattr(tl, func)(tl.load(A), tl.load(B), propagate_nan=getattr(tl.PropagateNan, propagate_nan)))
-
-    for mode in ['A', 'B', 'both']:
-        if func == 'clamp' and mode == 'B':
-            # clamp does not guarantee propagation from 'min' and 'max' args
-            continue
-        A = torch.randn((1, ), device=device, dtype=getattr(torch, dtype))
-        if mode == 'A' or mode == 'both': A[0] = torch.nan
-        B = torch.randn((1, ), device=device, dtype=getattr(torch, dtype))
-        if mode == 'B' or mode == 'both': B[0] = torch.nan
-        C = torch.zeros_like(A, device=device, dtype=getattr(torch, dtype))
-        kernel[(1, )](A, B, C, propagate_nan, func)
-
-        if mode == 'both' or propagate_nan == 'ALL':
-            assert torch.isnan(C[0])
-        else:
-            assert not torch.isnan(C[0])
-
-
-# -----------------------
 # test clamp
 # -----------------------
 
@@ -3087,40 +3024,3 @@ def test_tensor_member(device):
         tl.device_assert(tl.sum(x) == x.sum())
 
     kernel[(1, )]()
-
-
-@pytest.mark.interpreter
-@pytest.mark.parametrize("rank", [2, 3, 4, 5, 6])
-@pytest.mark.parametrize("trans_a", [False, True])
-@pytest.mark.parametrize("trans_b", [False, True])
-def test_dot_multidim(rank, trans_a, trans_b, device):
-
-    if is_interpreter():
-        pytest.skip("bfloat16 is not supported in the interpreter")
-
-    @triton.jit
-    def kernel(X, Y, Z, RANK: tl.constexpr, TRANS_A: tl.constexpr, TRANS_B: tl.constexpr):
-        x = tl.load(X + tl.arange(0, 256 << RANK)).reshape([2] * (RANK - 2) + [32, 32])
-        y = tl.load(Y + tl.arange(0, 256 << RANK)).reshape([2] * (RANK - 2) + [32, 32])
-        if TRANS_A:
-            x = tl.trans(x)
-        if TRANS_B:
-            y = tl.trans(y)
-        z = tl.dot(x, y)
-        tl.store(Z + tl.arange(0, 256 << RANK), z.reshape([256 << RANK]))
-
-    shape = (2, ) * (rank - 2) + (32, 32)
-
-    a = torch.randint(-4, 5, shape, dtype=torch.bfloat16, device=device)
-    b = torch.randint(-4, 5, shape, dtype=torch.bfloat16, device=device)
-    c = torch.empty(shape, dtype=torch.float32, device=device)
-    kernel[(1, )](a, b, c, rank, trans_a, trans_b)
-
-    if trans_a:
-        a = torch.transpose(a, -1, -2)
-    if trans_b:
-        b = torch.transpose(b, -1, -2)
-
-    d = a.to(torch.float32) @ b.to(torch.float32)
-
-    assert torch.equal(c, d)

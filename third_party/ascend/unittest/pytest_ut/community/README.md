@@ -6,8 +6,8 @@ source files.
 
 - Source baseline: `main-dev@396df6cb5b001314e36f22220be07a560de44664`
 - Migrated source files: 28
-- Migrated top-level test functions: 231
-- Historical exhaustive raw nodes: 2184 = 1908P + 275S + 1X
+- Migrated top-level test functions: 228
+- Historical exhaustive raw nodes: 2134 = 1858P + 275S + 1X
 - Historical Fail/Error nodes in this selected set: 0/0
 
 The selected test functions and their parametrization decorators are copied
@@ -32,7 +32,8 @@ tree. Current direct validation is recorded in the pull request.
 
 ## Candidates excluded after direct validation
 
-Eleven initially screened functions are not part of this migration:
+Fourteen directly validated functions are not part of this migration. Eleven
+were excluded during the initial screening:
 
 - `test_trans_2d`, `test_trans_4d`, `test_tma_gather`, and `test_tma_scatter`
   need an Ascend-specific replacement for unsupported NPU `torch.arange`
@@ -44,6 +45,23 @@ Eleven initially screened functions are not part of this migration:
   incompatible with cold `fork` after the parent process initializes the NPU.
 - `test_indirect_matmul` currently crashes `bishengir-compile` while lowering
   the generated Linalg IR on the source baseline.
+
+A subsequent validation on a real `Ascend950PR_9579` at PR commit
+`86796b858e44d6ecd3f3bf860a6c59779838ae37` excluded three more functions:
+
+- `test_tensor_atomic_add_non_exclusive_offset` has one failing parameter out
+  of 18: NPUBIN `PlanMemory` requires 2232320 bits of UB but only 1769472 bits
+  are available.
+- `test_propagate_nan` has eight failing parameters out of 12: six produce
+  incorrect NaN propagation and two cannot select `fmaximum` during NPUBIN
+  generation.
+- `test_dot_multidim` has 16 failing parameters out of 20: 13 fail NPUBIN
+  generation with an unexpected rewrite operation and three produce results
+  that differ from the PyTorch reference.
+
+These three functions account for 50 historical Pass nodes. They are removed
+as whole functions rather than partially retaining only their passing
+parameters, preserving the function-level direct-migration boundary.
 
 They remain adaptation or backend-investigation candidates; this direct
 migration does not skip them, weaken their assertions, or silently rewrite

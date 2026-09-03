@@ -678,7 +678,7 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
             cc_cmd += get_backend_func("get_cc_cmd")
 
     cc_cmd += cann_version_compile_args()
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    cc_cmd += ["-std=c++20", "-shared", "-fPIC", "-o", so_path]
 
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
 

@@ -4,10 +4,13 @@ from triton.language.core import float32, int1
 from ..libdevice import atan, isnan, isinf
 from triton.runtime.jit import jit
 
+from ._utils import _deprecated
+
 pi = core.constexpr(math_pi)
 half_pi = core.constexpr(0.5 * math_pi)
 
 
+@_deprecated(replacement="triton.language.extra.cann.libdevice.atan2")
 @core._tensor_member_fn
 @jit
 @math._add_math_2arg_docstr("atan2")
@@ -29,6 +32,7 @@ def atan2(y, x):
     return (base + add_pi + sub_pi).to(x.dtype)
 
 
+@_deprecated(replacement="triton.language.extra.cann.libdevice.isfinited")
 @core._tensor_member_fn
 @jit
 @math._add_math_1arg_docstr("isfinited")
@@ -42,6 +46,7 @@ def isfinited(x):
     return (~nan_mask & ~inf_mask).to(int1)
 
 
+@_deprecated(replacement="triton.language.extra.cann.libdevice.finitef")
 @core._tensor_member_fn
 @jit
 @math._add_math_1arg_docstr("finitef")

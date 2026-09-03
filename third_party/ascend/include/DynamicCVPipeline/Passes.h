@@ -26,6 +26,7 @@
 #include "AddDynamicCVPipeline.h"
 #include "ascend/include/DynamicCVPipeline/PreCheckAvailable.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
+#include "ascend/include/DynamicCVPipeline/UpliftWhileToFor.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/AddBlockIdForControlOps.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/InterCoreTransferAndSync.h"

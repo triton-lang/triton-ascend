@@ -693,48 +693,62 @@ MakeTensorPtrCanonicalizer::matchAndRewrite(triton::MakeTensorPtrOp op,
   return success();
 }
 
-LogicalResult ReduceSingleCanonicalizer::matchAndRewrite(triton::ReduceOp reduceOp, PatternRewriter &rewriter) const
+LogicalResult ReduceSingleCanonicalizer::matchAndRewrite(
+    triton::ReduceOp reduceOp, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const
 {
     assert(reduceOp.getSrcs().size() <=2 && "Only reduce or reduce with index are supported");
-    auto src = reduceOp.getSrcs()[0];
-    auto srcType = cast<RankedTensorType>(src.getType());
+    auto src = adaptor.getOperands()[0];
+    Value tensorSrc = src;
+    RankedTensorType srcType;
+    if (auto memrefType = dyn_cast<MemRefType>(src.getType())) {
+      tensorSrc = rewriter.create<bufferization::ToTensorOp>(
+          reduceOp.getLoc(), src, /*restrict=*/true)
+          .getResult();
+      srcType = RankedTensorType::get(memrefType.getShape(),
+                                      memrefType.getElementType());
+    } else {
+      srcType = cast<RankedTensorType>(src.getType());
+    }
     auto srcShape = srcType.getShape();
     if (llvm::any_of(srcShape, [](auto s) { return s != 1; }))
       return rewriter.notifyMatchFailure(reduceOp, "reduce's srcs are not all with single element");
     auto loc = reduceOp->getLoc();
 
     // Handle Reduce Value
-    auto res = reduceOp.getResult()[0];
     Value extracted;
     if (srcType.getRank() == 1) {
         auto zero = rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
-        extracted = rewriter.create<tensor::ExtractOp>(loc, src, zero.getResult()).getResult();
+        extracted = rewriter.create<tensor::ExtractOp>(loc, tensorSrc, zero.getResult()).getResult();
     } else {
-        auto resShape = cast<RankedTensorType>(res.getType()).getShape();
-        auto collapseReassociationIndicesOptional = getReassociationIndicesForCollapse(srcShape, resShape);
+        auto resType = cast<RankedTensorType>(reduceOp.getResult()[0].getType());
+        auto collapseReassociationIndicesOptional = getReassociationIndicesForCollapse(srcShape, resType.getShape());
         if (!collapseReassociationIndicesOptional.has_value()) {
             return rewriter.notifyMatchFailure(reduceOp, "Failure with getReassociationIndicesForCollapse call");
         }
         auto collapseReassociationIndices = collapseReassociationIndicesOptional.value();
-        extracted = rewriter.create<tensor::CollapseShapeOp>(loc, src, collapseReassociationIndices).getResult();
+        extracted = rewriter.create<tensor::CollapseShapeOp>(loc, tensorSrc, collapseReassociationIndices).getResult();
     }
-    res.replaceAllUsesWith(extracted);
 
     // Handle Reduce Index
-    if(reduceOp.getSrcs().size() == 1)
+    if(reduceOp.getSrcs().size() == 1) {
+      rewriter.replaceOp(reduceOp, extracted);
       return success();
+    }
 
     auto resIdx = reduceOp.getResult()[1];
     auto zeroI32 = rewriter.create<arith::ConstantOp>(loc, rewriter.getI32IntegerAttr(0));
+    Value indexReplacement;
     if (srcType.getRank() == 1) {
-        resIdx.replaceAllUsesWith(zeroI32);
+        indexReplacement = zeroI32;
     } else {
       auto resIdxShape = cast<RankedTensorType>(resIdx.getType()).getShape();
       auto initTensor = rewriter.create<tensor::EmptyOp>(loc, resIdxShape, rewriter.getI32Type());
       auto fillOp = rewriter.create<linalg::FillOp>(loc, ValueRange{zeroI32}, ValueRange{initTensor});
-      resIdx.replaceAllUsesWith(fillOp.getResult(0));
+      indexReplacement = fillOp.getResult(0);
     }
 
+    rewriter.replaceOp(reduceOp, {extracted, indexReplacement});
     return success();
 }
 

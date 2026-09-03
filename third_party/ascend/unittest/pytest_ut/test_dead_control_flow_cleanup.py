@@ -28,6 +28,8 @@ import test_common
 import torch
 import torch_npu
 
+# Regression for dead control-flow cleanup before staged memory lowering.
+
 
 @triton.jit
 def triton_reduce_deadcode(v_ptr, in_ptr0, in_ptr1, out_ptr0, VBLOCK: tl.constexpr, XBLOCK: tl.constexpr,

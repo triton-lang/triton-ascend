@@ -953,7 +953,13 @@ def make_launcher(constants, signature, metadata):
         "has_auto_blockify_blacklist_op",
         False,
     )
-    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op)
+    # RowCoalescing already reduces the launch grid and expands one program to
+    # H logical rows.  Pure-SIMT codegen deliberately omits AutoBlockify for
+    # that contract, so the launcher must not cap the reduced grid to physical
+    # cores either; doing so would silently skip the remaining row groups.
+    row_coalescing_applied = bool(getattr(metadata, "row_coalescing_applied", False))
+    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
+                                       and not row_coalescing_applied)
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)

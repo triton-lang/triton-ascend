@@ -675,6 +675,16 @@ InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
   return consumerWaitPoint;
 }
 
+mlir::Operation *InterCoreTransferAndSyncPass::getFixpipePointAfterProducer(
+    Value srcValue, int producerBlockId) {
+  mlir::Operation *fixpipePoint = srcValue.getDefiningOp();
+  int blockId = CVPipeline::getOpBlockId(fixpipePoint).value_or(-1);
+  if (blockId != producerBlockId) {
+    return nullptr;
+  }
+  return fixpipePoint;
+}
+
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     OpBuilder &builder, Value normalizedValue, DependencyInfo &dep,
     Location loc, Operation **consumedDataOp) {
@@ -1560,6 +1570,14 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   LOG_DEBUG("[newProdEnd]" << *dep.producerEnd << "\n");
   LOG_DEBUG("[newConsStart]" << *dep.consumerStart << "\n");
   LOG_DEBUG("[newConsEnd]" << *dep.consumerEnd << "\n");
+
+  if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(srcValue.getDefiningOp())) {
+    auto producerPoint =
+        getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
+    if (producerPoint) {
+      dep.producerEnd = producerPoint;
+    }
+  }
 
   // uses of srcValue. Only applied when the source op belongs to a
   // sub-block.

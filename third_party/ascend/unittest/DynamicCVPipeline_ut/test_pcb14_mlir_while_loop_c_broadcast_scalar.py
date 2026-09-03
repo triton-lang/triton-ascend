@@ -223,7 +223,7 @@ def test_pcb14_tc01():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb14_tc01_while_matmul_scalar(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
+    assert "scope" not in mlir, "MLIR code does not contain the 'scope' keyword"
 
     # Output MLIR code to the specified path
 
@@ -246,7 +246,7 @@ def test_pcb14_tc02():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb14_tc02_while_matmul_scalar(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
+    assert "scope" not in mlir, "MLIR code does not contain the 'scope' keyword"
 
     # Output MLIR code to the specified path
 

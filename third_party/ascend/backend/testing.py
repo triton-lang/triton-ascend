@@ -214,6 +214,13 @@ try:
 except ImportError:
     KernelMonitor = None
 
+try:
+    from triton.backends.ascend.utils import is_cann_version_at_least
+    CANN_VERSION_AVAILABLE = True
+except ImportError:
+    CANN_VERSION_AVAILABLE = False
+    print("[WARNING] triton.backends.ascend.utils not found. CANN version check skipped.")
+
 
 # If the CANN version is earlier than 9.1.0, it needs to set libmspti.so in LD_PRELOAD to use mspti.
 def do_bench_npu_mspti(
@@ -295,6 +302,13 @@ def do_bench_npu_mspti(
         return duration_per_kernel
 
 
+def _check_mspti_env():
+    if CANN_VERSION_AVAILABLE:
+        if not is_cann_version_at_least(9, 1, 0):
+            if 'libmspti.so' not in os.getenv('LD_PRELOAD', ''):
+                print("[WARNING] libmspti.so not set in LD_PRELOAD, please set libmspti.so in LD_PRELOAD to use mspti.")
+
+
 def do_bench_npu(
     funcs,
     warmup=5,
@@ -304,16 +318,39 @@ def do_bench_npu(
     keep_res=False,
     target_kernel_name: Optional[str] = None,
 ):
+    """
+    Benchmark the runtime of the provided function on NPU.
+    this function utilizes NPU profiling tools (mspti or torch_npu.profiler) to capture pure Device-side kernel execution time.
+    By default, it returns the mean runtime in milliseconds of the provided function(s) based on `active` iterations.
+
+    :param funcs: Function (or list of functions) to benchmark. If a list is provided, returns a list of mean runtimes.
+    :type funcs: Callable or List[Callable]
+    :param warmup: Warmup iterations. Runs the function `warmup` times before actual timing to stabilize performance. Defaults to 5.
+    :type warmup: int
+    :param active: Active iterations to record for timing. The final result is the average over these iterations. Defaults to 30.
+    :type active: int
+    :param clear_l2_cache: Whether to clear the L2 cache before each function execution. Defaults to False.
+    :type clear_l2_cache: bool, optional
+    :param prof_dir: Directory to save profiler results. If None, defaults to a temporary directory under triton cache. If specified, forces fallback to torch_npu.profiler.
+    :type prof_dir: str, optional
+    :param keep_res: Whether to keep the raw profiler result files (e.g., CSVs) after parsing. Defaults to False. If True, forces fallback to torch_npu.profiler.
+    :type keep_res: bool, optional
+    :param target_kernel_name: Specific NPU kernel name to filter and benchmark. If None, benchmarks the entire function. If specified, returns the execution time of only that kernel. Defaults to None. Only used when falling back to torch_npu.profiler.
+    :type target_kernel_name: str, optional
+    """
     import math
     mspti_available = True
     if KernelMonitor is None:
         mspti_available = False
         print(f"[WARNING] mspti package not found. Falling back to torch_npu.profiler.")
+    _check_mspti_env()
+
     if not isinstance(funcs, list):
         funcs = [funcs]
     results = None
     need_fallback = True
-    if mspti_available and target_kernel_name is None:
+    force_fallback = (prof_dir is not None) or keep_res
+    if mspti_available and target_kernel_name is None and not force_fallback:
         try:
             results = do_bench_npu_mspti(funcs, warmup, active, clear_l2_cache, target_kernel_name)
             first_val = results[0] if isinstance(results, list) else results

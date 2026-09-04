@@ -9,7 +9,7 @@ on:
 
 jobs:
   integration-tests-ascend:
-    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.config.python_version }})
+    name: integration-tests-ascend (${{ matrix.config.runs_on[0] }}, py${{ matrix.config.python_version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest

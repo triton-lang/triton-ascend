@@ -95,21 +95,25 @@ def _build_mlir_attrs_from_scope_attrs(builder, scope_attrs):
 
     Args:
         builder: The IR builder
-        scope_attrs: Dict of scope attributes (e.g., {'core_mode': 'vector', 'noinline': True})
+        scope_attrs: Dict of scope attributes (e.g., {'core_mode': 'vector', 'no_inline': True})
 
     Returns:
         Dict of MLIR attributes
     """
-    mlir_attrs = {"noinline": builder.get_unit_attr()}
+    mlir_attrs = {"no_inline": builder.get_unit_attr()}
     for k, v in scope_attrs.items():
         if k == "core_mode":
             mlir_attrs.update(_handle_core_mode_attr(builder, v))
         elif k == "vec_mode":
             if v is not None:
                 mlir_attrs["vec_mode"] = builder.get_string_attr(v)
-        elif k == "noinline":
+        elif k == "no_inline":
             if not v:
-                mlir_attrs.pop("noinline")
+                mlir_attrs.pop("no_inline", None)
+        elif k == "preload_num":
+            mlir_attrs["hivm.preload_num"] = builder.get_int32_attr(v)
+        elif k == "max_preload_num":
+            mlir_attrs["hivm.max_preload_num"] = builder.get_int32_attr(v)
         elif k == "disable_auto_sync":
             if v:
                 mlir_attrs["hivm.disable_auto_sync"] = _py_value_to_mlir_attr(builder, v)

@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "DynamicCVPipeline/Common/BlockDependencyGraph.h"
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
@@ -44,91 +45,13 @@ static constexpr const char *DEBUG_TYPE = "merge-cube-block";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
-static const llvm::DenseSet<llvm::StringRef> kDisnbleMergeCubeKernel = {
+static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
     "flex_attention_backward_dq_kernel",
     "parallel_deltaformer_bwd_kernel_qk",
     "_parallel_hstu_attn_bwd",
     "chunk_kda_bwd_kernel_intra",
     "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
 };
-
-void MergeCubeBlockPass::findInnermostLoopBlocksWithMatmul(
-    ModuleOp moduleOp, llvm::SmallVectorImpl<Block *> &innermostBlocks) {
-
-  // Find all matmul operations
-  llvm::SmallVector<linalg::MatmulOp> matmulOps;
-  moduleOp.walk([&](linalg::MatmulOp matmulOp) {
-    matmulOps.push_back(matmulOp);
-    return WalkResult::advance();
-  });
-
-  if (matmulOps.empty()) {
-    LDBG("No matmul operations found");
-    return;
-  }
-
-  // For each matmul, find its innermost loop and calculate depth
-  llvm::DenseMap<Block *, int> blockDepthMap;
-
-  for (auto matmulOp : matmulOps) {
-    // Walk up the parent chain to find all loops
-    llvm::SmallVector<Operation *> loops;
-    Operation *currentOp = matmulOp;
-
-    while (currentOp) {
-      if (auto forOp = dyn_cast<scf::ForOp>(currentOp)) {
-        loops.push_back(forOp);
-      } else if (auto whileOp = dyn_cast<scf::WhileOp>(currentOp)) {
-        loops.push_back(whileOp);
-      }
-      currentOp = currentOp->getParentOp();
-    }
-
-    // If this matmul is inside loops, record the innermost loop's block
-    if (!loops.empty()) {
-      Operation *innermostLoop =
-          loops.front(); // The first one is the innermost
-      int depth = loops.size();
-
-      // Get the block from the innermost loop
-      Block *block = nullptr;
-      if (auto forOp = dyn_cast<scf::ForOp>(innermostLoop)) {
-        block = forOp.getBody();
-      } else if (auto whileOp = dyn_cast<scf::WhileOp>(innermostLoop)) {
-        // WhileOp has a region, get the first block
-        block = whileOp.getAfterBody();
-      }
-
-      if (block) {
-        // Update depth map (keep the maximum depth for each block)
-        if (blockDepthMap.find(block) == blockDepthMap.end() ||
-            depth > blockDepthMap[block]) {
-          blockDepthMap[block] = depth;
-        }
-
-        LDBG("Matmul at " << matmulOp << " is in loop at depth " << depth);
-      }
-    }
-  }
-
-  // Find the maximum depth
-  int maxDepth = 0;
-  for (auto &entry : blockDepthMap) {
-    if (entry.second > maxDepth) {
-      maxDepth = entry.second;
-    }
-  }
-
-  LDBG("Maximum loop depth: " << maxDepth);
-
-  // Collect all blocks with maximum depth
-  for (auto &entry : blockDepthMap) {
-    if (entry.second == maxDepth) {
-      LDBG("Found innermost loop block with matmul");
-      innermostBlocks.push_back(entry.first);
-    }
-  }
-}
 
 void MergeCubeBlockPass::runOnOperation() {
   auto moduleOp = getOperation();
@@ -138,7 +61,7 @@ void MergeCubeBlockPass::runOnOperation() {
   }
 
   for (auto funcOp : moduleOp.getOps<func::FuncOp>()) {
-    if (kDisnbleMergeCubeKernel.contains(funcOp.getSymName())) {
+    if (kDisableMergeCubeKernel.contains(funcOp.getSymName())) {
       LDBG("Found unsupport kernel: " << funcOp.getSymName());
       return;
     }
@@ -150,15 +73,21 @@ void MergeCubeBlockPass::runOnOperation() {
 
   LDBG("Starting MergeCubeBlockPass\n" << moduleOp);
 
-  // Find innermost loop blocks with matmul operations
-  llvm::SmallVector<Block *> innermostBlocks;
-  findInnermostLoopBlocksWithMatmul(moduleOp, innermostBlocks);
+  // Collect main loop body blocks via the shared walkMainLoop helper.
+  llvm::SmallVector<Block *> mainLoopBlocks;
+  if (failed(CVPipeline::SplitIf::walkMainLoop(
+          moduleOp, [&](Operation *loop) -> llvm::LogicalResult {
+            mainLoopBlocks.push_back(&loop->getRegion(0).front());
+            return llvm::success();
+          }))) {
+    CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
 
-  LDBG("Found " << innermostBlocks.size()
-                << " innermost loop blocks with matmul\n");
+  LDBG("Found " << mainLoopBlocks.size() << " main loop blocks\n");
 
-  // Process each innermost loop block
-  for (Block *block : innermostBlocks) {
+  // Process each main loop block
+  for (Block *block : mainLoopBlocks) {
     if (failed(processBlock(block, memGraph, bm))) {
       CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
       return;
@@ -172,8 +101,6 @@ llvm::LogicalResult
 MergeCubeBlockPass::processBlock(Block *block,
                                  const MemoryDependenceGraph &memGraph,
                                  ComputeBlockIdManager &bm) {
-
-  // Print block information before processing
   LDBG("Processing Block: " << *block);
   if (Operation *parentOp = block->getParentOp()) {
     LDBG("  Parent operation: " << parentOp->getName().getStringRef());
@@ -189,25 +116,22 @@ MergeCubeBlockPass::processBlock(Block *block,
   LDBG("Built dependency graph with " << graph.blockNodes.size()
                                       << " blocks\n");
 
-  llvm::DenseMap<int, llvm::DenseSet<Value>> blockLoadedValues;
+  // If there are at least two cube blocks, print the graph for debugging.
+  LLVM_DEBUG({
+    unsigned cubeCount = 0;
+    for (auto &entry : graph.blockNodes)
+      if (entry.second->isCube)
+        ++cubeCount;
+    if (cubeCount >= 2) {
+      LDBG("=== Printing dependency graph for current region ===");
+      printGraph(graph);
+    }
+  });
 
-  // Step 2: Find merge candidates
-  llvm::SmallVector<std::pair<int, int>> candidates;
-  if (failed(findMergeCandidates(graph, blockLoadedValues, candidates))) {
-    LDBG("Failed to find merge candidates");
-    return llvm::failure();
-  }
-  LDBG("Found " << candidates.size() << " merge candidates\n");
-
-  // If merge candidates are found, print graph structure
-  if (!candidates.empty()) {
-    LDBG("=== Printing dependency graph for current region ===");
-    printGraph(graph, blockLoadedValues);
-  }
-
-  // Step 3: Perform iterative merging
-  if (failed(
-          performMerging(graph, memGraph, bm, blockLoadedValues, candidates))) {
+  // Step 2: Perform iterative merging. The nested loop inside performs the
+  // candidate selection itself by re-scanning the live cube blocks every
+  // round, so there is no separate findMergeCandidates phase.
+  if (failed(performMerging(graph, memGraph, bm))) {
     LDBG("Failed to perform merging");
     return llvm::failure();
   }
@@ -215,39 +139,72 @@ MergeCubeBlockPass::processBlock(Block *block,
   return llvm::success();
 }
 
-llvm::LogicalResult MergeCubeBlockPass::performMerging(
-    BlockDependencyGraph &graph, const MemoryDependenceGraph &memGraph,
-    ComputeBlockIdManager &bm,
-    llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues,
-    llvm::SmallVectorImpl<std::pair<int, int>> &candidates) {
+llvm::LogicalResult
+MergeCubeBlockPass::performMerging(BlockDependencyGraph &graph,
+                                   const MemoryDependenceGraph &memGraph,
+                                   ComputeBlockIdManager &bm) {
+
+  // Collect the live cube blocks once. After every merge we simply drop
+  // the merged-out source from this list, so we never need to re-scan
+  // graph.blockNodes during the merging rounds.
+  llvm::SmallVector<BlockNode *> cubeBlocks;
+  for (auto &entry : graph.blockNodes) {
+    if (entry.second->isCube)
+      cubeBlocks.push_back(entry.second.get());
+  }
 
   bool merged = true;
   int mergeCount = 0;
 
   while (merged) {
     merged = false;
-    for (auto &pair : candidates) {
-      if (canMergeBlocks(pair.first, pair.second, graph, memGraph, bm,
-                         blockLoadedValues)) {
-        LDBG("Merging block " << pair.second << " into " << pair.first);
+
+    // Nested scan: outer index plays the role of target, inner index the
+    // role of source. As soon as one (target, source) pair is mergeable we
+    // commit, drop `source` from the list, and restart from the top of the
+    // round.
+    for (size_t i = 0; i < cubeBlocks.size() && !merged; ++i) {
+      for (size_t j = 0; j < cubeBlocks.size(); ++j) {
+        if (i == j)
+          continue;
+        BlockNode *target = cubeBlocks[i];
+        BlockNode *source = cubeBlocks[j];
+        if (!canMergeBlocks(target, source, graph, memGraph, bm))
+          continue;
+
+        LDBG("Merging block " << source->blockId << " into "
+                              << target->blockId);
 
         // Execute merge
-        if (failed(mergeBlocks(pair.first, pair.second, bm))) {
+        if (failed(mergeBlocks(target, source, bm))) {
           LDBG("Failed to merge blocks");
           return llvm::failure();
         }
         merged = true;
         mergeCount++;
 
-        // Update graph structure
-        graph.rebuildAfterMerge(pair.first, pair.second);
-
-        // Re-find candidates
-        candidates.clear();
-        if (failed(findMergeCandidates(graph, blockLoadedValues, candidates))) {
-          LDBG("Failed to re-find merge candidates");
+        // Update graph structure. After this call, the BlockNode pointed to
+        // by `source` has been destroyed; the pointer value itself remains
+        // usable for equality checks, but any dereference is unsafe. The
+        // pointers for `target` and unrelated nodes stay valid because
+        // blockNodes.erase() does not rehash or relocate other entries.
+        //
+        // Note: mergeBlocks above has already re-tagged source's ops to
+        // target via the ComputeBlockIdManager, which is not transactional.
+        // A rebuildAfterMerge failure therefore leaves the graph and the
+        // blockIdManager in an inconsistent state, so we abort the whole
+        // merging pass and surface the error to processBlock.
+        if (failed(graph.rebuildAfterMerge(target, source))) {
+          LDBG("Failed to rebuild graph after merging "
+               << source->blockId << " into " << target->blockId);
           return llvm::failure();
         }
+
+        // Drop the merged-out source from the candidate list in place; we
+        // already know it lives at index j. The pointer itself is dangling
+        // after the rebuild but we only use its value for erase, which
+        // shifts elements down to fill the gap.
+        cubeBlocks.erase(cubeBlocks.begin() + j);
         break;
       }
     }
@@ -258,131 +215,44 @@ llvm::LogicalResult MergeCubeBlockPass::performMerging(
   return llvm::success();
 }
 
-llvm::LogicalResult MergeCubeBlockPass::findMergeCandidates(
-    BlockDependencyGraph &graph,
-    llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues,
-    llvm::SmallVectorImpl<std::pair<int, int>> &candidates) {
-
-  // Only get cube blocks (filtered from complete dependency graph)
-  llvm::SmallVector<int> cubeBlocks;
-  for (auto &entry : graph.blockNodes) {
-    if (entry.second.isCube) {
-      cubeBlocks.push_back(entry.first);
-    }
-  }
-
-  // Check all pairs of cube blocks for merge possibility
-  for (size_t i = 0; i < cubeBlocks.size(); ++i) {
-    for (size_t j = i + 1; j < cubeBlocks.size(); ++j) {
-      int blockId1 = cubeBlocks[i];
-      int blockId2 = cubeBlocks[j];
-
-      candidates.push_back({blockId1, blockId2});
-    }
-  }
-
-  return llvm::success();
-}
-
-bool MergeCubeBlockPass::canMergeBlocks(
-    int blockId1, int blockId2, BlockDependencyGraph &graph,
-    const MemoryDependenceGraph &memGraph, ComputeBlockIdManager &bm,
-    llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues) {
+bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
+                                        BlockDependencyGraph &graph,
+                                        const MemoryDependenceGraph &memGraph,
+                                        ComputeBlockIdManager &bm) {
 
   // Precondition: both blocks must be cube
-  BlockNode *node1 = graph.getBlockNode(blockId1);
-  BlockNode *node2 = graph.getBlockNode(blockId2);
-
-  if (!node1 || !node2 || !node1->isCube || !node2->isCube) {
+  if (!target || !source || !target->isCube || !source->isCube) {
     return false;
   }
 
   // Step 1: Check if they have common input or output nodes
-  if (!hasCommonInputOrOutput(blockId1, blockId2, graph)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
+  if (!hasCommonInputOrOutput(target, source, graph)) {
+    LDBG("Blocks " << target->blockId << " and " << source->blockId
                    << " cannot merge: no common input or output nodes\n");
     return false;
   }
 
-  // Step 2: Check if they have same source and sink with no other nodes
-  if (checkSameSourceAndSink(blockId1, blockId2, graph)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << " can merge: same source or sink\n");
-    return true;
-  }
-
-  // Step 3: Check if merging would create a cycle
-  if (!checkNoCycle(blockId1, blockId2, graph, memGraph, bm)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
-                   << "cannot merge: would create cycle\n");
+  // Step 2: Check if merging would create a cycle
+  if (!checkNoCycle(target, source, graph, memGraph, bm)) {
+    LDBG("Blocks " << target->blockId << " and " << source->blockId
+                   << " cannot merge: would create cycle\n");
     return false;
   }
 
-  // Step 4: cube block in the same depth
-  if (hasSameDepth(blockId1, blockId2, graph)) {
-    LDBG("Blocks " << blockId1 << " and " << blockId2
-                    << " can merge: cube blocks have same depth\n");
+  // Step 3: cube blocks at the same depth (with matching successor depths).
+  if (hasSameDepth(target, source, graph)) {
+    LDBG("Blocks " << target->blockId << " and " << source->blockId
+                   << " can merge: cube blocks have same depth\n");
     return true;
-    }
+  }
 
-  LDBG("Blocks " << blockId1 << " and " << blockId2
+  LDBG("Blocks " << target->blockId << " and " << source->blockId
                  << " cannot merge: unsupport scenario\n");
   return false;
 }
 
-bool MergeCubeBlockPass::checkSameSourceAndSink(int blockId1, int blockId2,
-                                                BlockDependencyGraph &graph) {
-
-  // Get block nodes
-  BlockNode *node1 = graph.getBlockNode(blockId1);
-  BlockNode *node2 = graph.getBlockNode(blockId2);
-
-  if (!node1 || !node2) {
-    return false;
-  }
-
-  // Get predecessors and successors
-  auto preds1 = graph.getPredecessors(blockId1);
-  auto preds2 = graph.getPredecessors(blockId2);
-
-  auto succs1 = graph.getSuccessors(blockId1);
-  auto succs2 = graph.getSuccessors(blockId2);
-
-  // Filter blocks: only keep blocks with different type from current block
-  llvm::SmallVector<int> filteredPreds1 =
-      filterBlocksByType(blockId1, preds1, graph);
-  llvm::SmallVector<int> filteredPreds2 =
-      filterBlocksByType(blockId2, preds2, graph);
-  llvm::SmallVector<int> filteredSuccs1 =
-      filterBlocksByType(blockId1, succs1, graph);
-  llvm::SmallVector<int> filteredSuccs2 =
-      filterBlocksByType(blockId2, succs2, graph);
-
-  // Check if filtered predecessors are exactly the same
-  llvm::DenseSet<int> predSet1(filteredPreds1.begin(), filteredPreds1.end());
-  llvm::DenseSet<int> predSet2(filteredPreds2.begin(), filteredPreds2.end());
-
-  if (predSet1 != predSet2) {
-    return false;
-  }
-
-  // Check if filtered successors are exactly the same
-  llvm::DenseSet<int> succSet1(filteredSuccs1.begin(), filteredSuccs1.end());
-  llvm::DenseSet<int> succSet2(filteredSuccs2.begin(), filteredSuccs2.end());
-
-  if (succSet1 != succSet2) {
-    return false;
-  }
-
-  return true;
-}
-
-bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
+bool MergeCubeBlockPass::hasSameDepth(BlockNode *node1, BlockNode *node2,
                                       BlockDependencyGraph &graph) {
-
-  // Get block nodes
-  BlockNode *node1 = graph.getBlockNode(blockId1);
-  BlockNode *node2 = graph.getBlockNode(blockId2);
 
   if (!node1 || !node2) {
     return false;
@@ -393,19 +263,19 @@ bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
   }
 
   // Check that the max depth among successors of both blocks is the same
-  auto getMaxSuccDepth = [&](int blockId) {
+  auto getMaxSuccDepth = [&](BlockNode *node) {
     int maxDepth = -1;
-    for (int succId : graph.getSuccessors(blockId)) {
-      BlockNode *succNode = graph.getBlockNode(succId);
-      if (succNode && succNode->depth > maxDepth) {
+    for (BlockNode *succNode : graph.getSuccessors(node)) {
+      if (succNode && succNode->isCube != node->isCube &&
+          succNode->depth > maxDepth) {
         maxDepth = succNode->depth;
       }
     }
     return maxDepth;
   };
 
-  int maxSuccDepth1 = getMaxSuccDepth(blockId1);
-  int maxSuccDepth2 = getMaxSuccDepth(blockId2);
+  int maxSuccDepth1 = getMaxSuccDepth(node1);
+  int maxSuccDepth2 = getMaxSuccDepth(node2);
 
   // If either block has no successors, still mergeable
   if (maxSuccDepth1 == -1 || maxSuccDepth2 == -1) {
@@ -415,108 +285,93 @@ bool MergeCubeBlockPass::hasSameDepth(int blockId1, int blockId2,
   return maxSuccDepth1 == maxSuccDepth2;
 }
 
-llvm::SmallVector<int> MergeCubeBlockPass::filterBlocksByType(
-    int blockId, llvm::SmallVector<int> blocks, BlockDependencyGraph &graph) {
+llvm::DenseSet<BlockNode *> MergeCubeBlockPass::getBlocksOfDifferentType(
+    BlockNode *currentNode, llvm::ArrayRef<BlockNode *> blocks) {
 
-  // Get current block node
-  BlockNode *currentNode = graph.getBlockNode(blockId);
-  if (!currentNode) {
-    return {};
+  llvm::DenseSet<BlockNode *> result;
+  if (!currentNode)
+    return result;
+
+  // Filter blocks: only keep blocks with a different type than currentNode.
+  for (BlockNode *blockNode : blocks) {
+    if (blockNode && blockNode->isCube != currentNode->isCube)
+      result.insert(blockNode);
   }
-
-  // Filter blocks: only keep blocks with different type from current block
-  llvm::SmallVector<int> filteredBlocks;
-  for (int blockId : blocks) {
-    BlockNode *blockNode = graph.getBlockNode(blockId);
-    if (blockNode && blockNode->isCube != currentNode->isCube) {
-      filteredBlocks.push_back(blockId);
-    }
-  }
-
-  return filteredBlocks;
+  return result;
 }
 
-bool MergeCubeBlockPass::checkNoCycle(int blockId1, int blockId2,
+bool MergeCubeBlockPass::checkNoCycle(BlockNode *node1, BlockNode *node2,
                                       BlockDependencyGraph &graph,
                                       const MemoryDependenceGraph &memGraph,
                                       ComputeBlockIdManager &bm) {
 
-  // Get all operations from blockId2 to be merged into blockId1
-  auto opsToUnify = bm.getOpsByBlockId(blockId2);
+  // Get all operations from node2 to be merged into node1
+  auto opsToUnify = bm.getOpsByBlockId(node2->blockId);
 
   // Use willCreateCycle to check if merging would create a cycle
-  return !willCreateCycle(opsToUnify, memGraph, blockId1, bm);
+  return !willCreateCycle(opsToUnify, memGraph, node1->blockId, bm);
 }
 
-bool MergeCubeBlockPass::hasCommonInputOrOutput(int blockId1, int blockId2,
+bool MergeCubeBlockPass::hasCommonInputOrOutput(BlockNode *node1,
+                                                BlockNode *node2,
                                                 BlockDependencyGraph &graph) {
 
-  // Get predecessors and successors
-  auto preds1 = graph.getPredecessors(blockId1);
-  auto preds2 = graph.getPredecessors(blockId2);
+  // Get predecessors and successors, then filter to opposite-type blocks.
+  // The filtered sets are already DenseSets, so set intersection is O(N).
+  auto filteredPreds1 =
+      getBlocksOfDifferentType(node1, graph.getPredecessors(node1));
+  auto filteredPreds2 =
+      getBlocksOfDifferentType(node2, graph.getPredecessors(node2));
+  auto filteredSuccs1 =
+      getBlocksOfDifferentType(node1, graph.getSuccessors(node1));
+  auto filteredSuccs2 =
+      getBlocksOfDifferentType(node2, graph.getSuccessors(node2));
 
-  auto succs1 = graph.getSuccessors(blockId1);
-  auto succs2 = graph.getSuccessors(blockId2);
+  // Check if there are common input nodes (predecessors).
+  bool hasCommonPred = llvm::any_of(
+      filteredPreds2, [&](BlockNode *p) { return filteredPreds1.count(p); });
 
-  // Filter blocks: only keep blocks with different type from current block
-  llvm::SmallVector<int> filteredPreds1 =
-      filterBlocksByType(blockId1, preds1, graph);
-  llvm::SmallVector<int> filteredPreds2 =
-      filterBlocksByType(blockId2, preds2, graph);
-  llvm::SmallVector<int> filteredSuccs1 =
-      filterBlocksByType(blockId1, succs1, graph);
-  llvm::SmallVector<int> filteredSuccs2 =
-      filterBlocksByType(blockId2, succs2, graph);
+  // Check if there are common output nodes (successors).
+  bool hasCommonSucc = llvm::any_of(
+      filteredSuccs2, [&](BlockNode *s) { return filteredSuccs1.count(s); });
 
-  // Check if there are common input nodes (predecessors)
-  llvm::DenseSet<int> predSet1(filteredPreds1.begin(), filteredPreds1.end());
-  bool hasCommonPred =
-      llvm::any_of(filteredPreds2, [&](int p) { return predSet1.count(p); });
-
-  // Check if there are common output nodes (successors)
-  llvm::DenseSet<int> succSet1(filteredSuccs1.begin(), filteredSuccs1.end());
-  bool hasCommonSucc =
-      llvm::any_of(filteredSuccs2, [&](int s) { return succSet1.count(s); });
-
-  // Return true if they have common input OR output nodes
+  // Return true if they have common input OR output nodes.
   return hasCommonPred || hasCommonSucc;
 }
 
-llvm::LogicalResult MergeCubeBlockPass::mergeBlocks(int targetBlockId,
-                                                    int sourceBlockId,
+llvm::LogicalResult MergeCubeBlockPass::mergeBlocks(BlockNode *target,
+                                                    BlockNode *source,
                                                     ComputeBlockIdManager &bm) {
 
-  // Merge all ops of sourceBlockId into targetBlockId
-  auto sourceOps = bm.getOpsByBlockId(sourceBlockId);
+  // Merge all ops of source into target
+  auto sourceOps = bm.getOpsByBlockId(source->blockId);
   for (Operation *op : sourceOps) {
-    bm.updateBlockId(op, targetBlockId);
+    bm.updateBlockId(op, target->blockId);
   }
 
   return llvm::success();
 }
 
-void MergeCubeBlockPass::printGraph(
-    BlockDependencyGraph &graph,
-    llvm::DenseMap<int, llvm::DenseSet<Value>> &blockLoadedValues) {
+void MergeCubeBlockPass::printGraph(BlockDependencyGraph &graph) {
 
   LDBG("Total blocks in graph: " << graph.blockNodes.size());
 
   // Print all block nodes
   for (auto &entry : graph.blockNodes) {
     int blockId = entry.first;
-    auto &node = entry.second;
+    BlockNode *node = entry.second.get();
 
     LDBG("Block " << blockId << ":");
-    LDBG("  Type: " << (node.isCube ? "CUBE" : "VECTOR"));
-    LDBG("  Depth: " << node.depth);
-    LDBG("  Num ops: " << node.ops.size());
+    LDBG("  Type: " << (node->isCube ? "CUBE" : "VECTOR"));
+    LDBG("  Depth: " << node->depth);
+    LDBG("  Num ops: " << node->ops.size());
 
     // Print predecessors
-    auto preds = graph.getPredecessors(blockId);
+    auto preds = graph.getPredecessors(node);
     if (!preds.empty()) {
       llvm::SmallVector<std::string> predStrs;
-      for (int p : preds) {
-        predStrs.push_back(std::to_string(p));
+      for (BlockNode *p : preds) {
+        predStrs.push_back(std::to_string(p->blockId));
       }
       LDBG("  Predecessors: [" << llvm::join(predStrs, ", ") << "]");
     } else {
@@ -524,11 +379,11 @@ void MergeCubeBlockPass::printGraph(
     }
 
     // Print successors
-    auto succs = graph.getSuccessors(blockId);
+    auto succs = graph.getSuccessors(node);
     if (!succs.empty()) {
       llvm::SmallVector<std::string> succStrs;
-      for (int s : succs) {
-        succStrs.push_back(std::to_string(s));
+      for (BlockNode *s : succs) {
+        succStrs.push_back(std::to_string(s->blockId));
       }
       LDBG("  Successors: [" << llvm::join(succStrs, ", ") << "]");
     } else {

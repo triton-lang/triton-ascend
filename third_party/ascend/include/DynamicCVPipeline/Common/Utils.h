@@ -95,6 +95,7 @@ inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
+static constexpr const int ERRCODE_TUPLE_PRELOAD_FAILED = 3;
 constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
 constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;

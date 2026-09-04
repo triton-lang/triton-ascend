@@ -492,3 +492,94 @@ def test_costmodel_fbgemm_rowwise_quant(tmp_path):
         documented_us,
         tolerance=1.25,
     )
+
+
+@triton.jit
+def anchorless_mixed_stage_scope_kernel(
+    x_ptr,
+    y_ptr,
+    seed_ptr,
+    out_ptr,
+    scalar_out_ptr,
+    BLOCK: tl.constexpr,
+    SCALAR_ITERATIONS: tl.constexpr,
+):
+    # Continuous elementwise tile pass: memory-bound work on unit-stride
+    # addresses, so the SIMD MTE/vector roofline dominates.
+    pid = tl.program_id(0)
+    offs = pid * BLOCK + tl.arange(0, BLOCK)
+    x = tl.load(x_ptr + offs)
+    y = tl.load(y_ptr + offs)
+    tl.store(out_ptr + offs, x * y + 1.0)
+    # Scalar loop-carried recurrence on 0-d values: no gather, no
+    # loaded-index address, no atomic, no scan, so the kernel contains no
+    # primitive SIMT anchor anywhere.  The dependent scalar chain pays the
+    # SIMD front-end ~1 op/cycle, while SIMT issues 4 scalar ops/cycle, so
+    # this anchor-free Stage is cheaper in SIMT and must be materialized as
+    # a StageOwnedScope local SIMT scope by the mixed route.
+    s = tl.load(seed_ptr + pid)
+    for _ in range(SCALAR_ITERATIONS):
+        s = s * 1.0000001 + 1e-7
+    tl.store(scalar_out_ptr + pid, s)
+
+
+@simd_simt_910_95_only
+def test_costmodel_anchorless_mixed_stage_scope(tmp_path):
+    logical_programs = _vector_core_count()
+    block = 8192
+    iterations = 4096
+    torch.manual_seed(3)
+    x = torch.randn((logical_programs * block, ), dtype=torch.float32, device="npu")
+    y = torch.randn((logical_programs * block, ), dtype=torch.float32, device="npu")
+    seed = torch.rand((logical_programs, ), dtype=torch.float32, device="npu")
+    output = torch.empty_like(x)
+    scalar_output = torch.empty((logical_programs, ), dtype=torch.float32, device="npu")
+    report_path = tmp_path / "anchorless_mixed_route.json"
+
+    def launch():
+        anchorless_mixed_stage_scope_kernel[(logical_programs, )](
+            x,
+            y,
+            seed,
+            output,
+            scalar_output,
+            BLOCK=block,
+            SCALAR_ITERATIONS=iterations,
+            **_launch_options(report_path, logical_programs),
+        )
+
+    launch()
+    torch.testing.assert_close(output, x * y + 1.0, rtol=1e-5, atol=1e-5)
+    # Reproduce the FP32 scalar recurrence in the kernel's operation order.
+    # One ULP of FMA-vs-mul-add difference may accumulate over 4096 steps.
+    reference = seed.clone()
+    for _ in range(iterations):
+        reference = reference * 1.0000001 + 1e-7
+    torch.testing.assert_close(scalar_output, reference, rtol=1e-3, atol=1e-3)
+
+    report = _load_route_report(report_path, "mixed_simd_simt")
+    # The whole kernel is anchor-free: this is exactly the scenario where the
+    # legacy gate disabled mixed before stage-owned scopes existed.
+    assert report["features"]["simt_anchors"]["count"] == 0
+    assert report["materialized_simt_anchor_count"] > 0
+    assert report["materialized_stage_owned_scope_count"] > 0
+    assert report["application_reason"] == "minimum_cost_candidate"
+
+    stages = report["stage_model"]["logical_stages"]
+    mixed = report["stage_model"]["routes"]["mixed_simd_simt"]
+    assert mixed["legal"]
+    simt_indices = [
+        index for index, stage in enumerate(mixed["stages"])
+        if stage["implementation"]["mode"] == "simt"
+    ]
+    assert simt_indices, "mixed route selected no SIMT Stage"
+    for index in simt_indices:
+        implementation = mixed["stages"][index]["implementation"]
+        # The SIMT-selected Stages have no primitive anchor, so each one must
+        # have been synthesized and materialized as a stage-owned scope.
+        assert implementation["materialization"] == "local_simt_scope_with_kernel_v1"
+        assert stages[index]["simt_anchor_indices"] == []
+        assert stages[index]["local_simt_materializable"]
+    assert any(stages[index]["model"] == "loop_carried_recurrence"
+               for index in simt_indices), (
+        "the anchor-free scalar recurrence Stage should be the SIMT scope")

@@ -79,9 +79,57 @@ static void clearPreviousSelection(ModuleOp module) {
   module->removeAttr(kSuperblockFactorAttr);
 }
 
+/// Scheduling stage names present only in the post-AutoBlockify analysis
+/// view; the route-neutral materialization module never contains them.
+static bool isSchedulingModelName(llvm::StringRef model) {
+  return model == "auto_blockify_dispatch" || model == "auto_blockify_loop";
+}
+
+static bool isSchedulingStageKind(const LogicalStage &stage) {
+  return stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch ||
+         stage.costModelKind == StageCostModelKind::AutoBlockifyLoop;
+}
+
+/// Align the scored (analysis) Stages with the materialization module's
+/// Stages.  Scheduling Stages are skipped on both sides; the remaining
+/// Stages must agree in order and kind.  Aligned entries for scheduling
+/// Stages stay null.  Returns false when the two partitions disagree.
+static bool
+alignModuleStages(const StageCostModelSummary &stageModel,
+                  const StagePartition &modulePartition,
+                  llvm::SmallVectorImpl<const LogicalStage *> &aligned) {
+  aligned.assign(stageModel.stages.size(), nullptr);
+  size_t moduleCursor = 0;
+  auto skipScheduling = [&]() {
+    while (moduleCursor < modulePartition.stages.size() &&
+           isSchedulingStageKind(modulePartition.stages[moduleCursor]))
+      ++moduleCursor;
+  };
+  for (size_t index = 0; index < stageModel.stages.size(); ++index) {
+    if (isSchedulingModelName(stageModel.stages[index].model))
+      continue;
+    skipScheduling();
+    if (moduleCursor >= modulePartition.stages.size())
+      return false;
+    const LogicalStage &moduleStage = modulePartition.stages[moduleCursor++];
+    if (stageModel.stages[index].model !=
+        stringifyStageCostModel(moduleStage.costModelKind))
+      return false;
+    aligned[index] = &moduleStage;
+  }
+  skipScheduling();
+  return moduleCursor == modulePartition.stages.size();
+}
+
+/// Build the exact anchor set a legal mixed route will materialize.
+/// Primitive anchors come from the shared plan; an anchor-free Stage chosen
+/// as SIMT is synthesized as a StageOwnedScope from the module's own Stage
+/// boundaries, so the wrapped root range is the range the route charged.
 static SimtAnchorPlan
 buildSelectedMixedAnchorPlan(const StageCostModelSummary &stageModel,
-                             const SimtAnchorPlan &completePlan) {
+                             const SimtAnchorPlan &completePlan,
+                             llvm::ArrayRef<const LogicalStage *> alignedStages,
+                             bool compileOn91095) {
   SimtAnchorPlan selected;
   selected.kernelLowerability = completePlan.kernelLowerability;
   if (!stageModel.mixed.legal ||
@@ -91,11 +139,11 @@ buildSelectedMixedAnchorPlan(const StageCostModelSummary &stageModel,
   llvm::DenseSet<unsigned> included;
   for (size_t stageIndex = 0; stageIndex < stageModel.stages.size();
        ++stageIndex) {
-    const LogicalStageCost &stage = stageModel.stages[stageIndex];
     const StageImplementation &implementation =
         stageModel.mixed.implementations[stageIndex];
     if (implementation.mode != StageMode::SIMT)
       continue;
+    const LogicalStageCost &stage = stageModel.stages[stageIndex];
 
     llvm::SmallVector<unsigned> stageAnchorIndices;
     for (unsigned index : stage.simtAnchorIndices)
@@ -104,10 +152,63 @@ buildSelectedMixedAnchorPlan(const StageCostModelSummary &stageModel,
     auto merged = mergeSimtStageAnchors(completePlan, stageAnchorIndices);
     if (!stageAnchorIndices.empty() && !merged)
       return SimtAnchorPlan{};
-    if (merged)
+    if (merged) {
       selected.anchors.push_back(std::move(*merged));
+      continue;
+    }
+
+    const LogicalStage *moduleStage = alignedStages[stageIndex];
+    if (!moduleStage || !moduleStage->localSimtMaterializable)
+      return SimtAnchorPlan{};
+    auto descriptor = buildStageOwnedScopeDescriptor(moduleStage->operations,
+                                                     compileOn91095);
+    if (!descriptor)
+      return SimtAnchorPlan{};
+    costModelLog() << "selected stage-owned scope: stage '" << stage.id
+                   << "' roots=" << moduleStage->operations.size() << "\n";
+    selected.anchors.push_back(std::move(*descriptor));
   }
   return selected;
+}
+
+/// Outcome of preparing a mixed route's local scope contract.
+struct MixedAnchorSelection {
+  SimtAnchorPlan plan;
+  llvm::SmallVector<Operation *> roots;
+  bool supported = false;
+  std::string reason;
+};
+
+/// Prepare the mixed route's local scope contract in one step: partition the
+/// materialization module with the scoring options, align its Stages with
+/// the scored route, and select or synthesize the anchors to materialize.
+static MixedAnchorSelection
+selectMixedAnchors(ModuleOp module, const StageCostModelSummary &stageModel,
+                   const SimtAnchorPlan &anchorPlan,
+                   const SimdSimtCostModelOptions &options) {
+  MixedAnchorSelection selection;
+  auto modulePartition =
+      partitionForSimdSimtSelection(module, anchorPlan, options);
+  if (!modulePartition) {
+    module.emitWarning("mixed route module partition failed: ")
+        << llvm::toString(modulePartition.takeError());
+    selection.reason = "module_partition_failed";
+    return selection;
+  }
+  llvm::SmallVector<const LogicalStage *> aligned;
+  if (!alignModuleStages(stageModel, *modulePartition, aligned)) {
+    selection.reason = "module_stage_alignment_failed";
+    return selection;
+  }
+  selection.plan = buildSelectedMixedAnchorPlan(
+      stageModel, anchorPlan, aligned, options.compileOn91095);
+  selection.roots = selection.plan.materializableRoots();
+  if (selection.roots.empty()) {
+    selection.reason = "no_materializable_mixed_anchor";
+    return selection;
+  }
+  selection.supported = true;
+  return selection;
 }
 
 static bool
@@ -227,12 +328,13 @@ struct SelectSimdSimtCostModelPass
         actionSupported = false;
         applicationReason = "analysis_materialization_anchor_mismatch";
       } else {
-        selectedMixedAnchorPlan =
-            buildSelectedMixedAnchorPlan(report.stageModel, anchorPlan);
-        mixedAnchors = selectedMixedAnchorPlan.materializableRoots();
-        if (mixedAnchors.empty()) {
+        MixedAnchorSelection selection = selectMixedAnchors(
+            module, report.stageModel, anchorPlan, options);
+        selectedMixedAnchorPlan = std::move(selection.plan);
+        mixedAnchors = std::move(selection.roots);
+        if (!selection.supported) {
           actionSupported = false;
-          applicationReason = "no_materializable_mixed_anchor";
+          applicationReason = std::move(selection.reason);
         }
       }
       // A factor>1 mixed route needs batching of the surrounding SIMD
@@ -328,6 +430,12 @@ struct SelectSimdSimtCostModelPass
     }
     reportJSON["materialized_simt_anchor_count"] =
         static_cast<int64_t>(mixedAnchors.size());
+    reportJSON["materialized_stage_owned_scope_count"] = static_cast<int64_t>(
+        llvm::count_if(selectedMixedAnchorPlan.anchors,
+                       [](const SimtAnchorDescriptor &anchor) {
+                         return anchor.kind ==
+                                SimtAnchorKind::StageOwnedScope;
+                       }));
     reportJSON["selected_superblock_factor"] = selectedSuperblockFactor;
     reportJSON["logical_program_count_hint"] = options.logicalProgramCountHint;
     if (options.logicalProgramCountHint > 0) {

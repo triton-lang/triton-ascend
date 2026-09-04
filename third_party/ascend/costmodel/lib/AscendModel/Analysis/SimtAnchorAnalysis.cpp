@@ -43,6 +43,17 @@ static std::string getScalarTypeName(Type type) {
   return "unknown";
 }
 
+/// True for scalar or tensor-of-pointer state.  A scope.scope region may
+/// capture such values but must not return them: TritonToUnstructure cannot
+/// reconstruct the offset information for a returned pointer.
+static bool isPointerLikeType(Type type) {
+  std::string text;
+  llvm::raw_string_ostream stream(text);
+  stream << type;
+  stream.flush();
+  return llvm::StringRef(text).contains("!tt.ptr");
+}
+
 struct PlainCumsumLegality {
   int64_t axisExtent;
   std::string elementType;
@@ -557,6 +568,8 @@ llvm::StringRef mlir::ascend::stringifySimtAnchorKind(SimtAnchorKind kind) {
     return "tensor_atomic";
   case SimtAnchorKind::TriangularSolveLoop:
     return "triangular_solve_loop";
+  case SimtAnchorKind::StageOwnedScope:
+    return "stage_owned_scope";
   }
   llvm_unreachable("unknown SIMT anchor kind");
 }
@@ -646,6 +659,86 @@ bool mlir::ascend::isLoadedIndexDependentMemoryOp(Operation *op) {
          hasTensorPointerOperand(op) && pointerDependsOnLoadedIndex(op);
 }
 
+bool mlir::ascend::isStageScopeWrappable(llvm::ArrayRef<Operation *> roots) {
+  if (roots.empty())
+    return false;
+  Block *block = nullptr;
+  llvm::DenseSet<Operation *> planned;
+  for (Operation *root : roots) {
+    if (!root || !root->getBlock())
+      return false;
+    if (block && root->getBlock() != block)
+      return false;
+    block = root->getBlock();
+    if (!planned.insert(root).second)
+      return false;
+    const llvm::StringRef name = root->getName().getStringRef();
+    if (root->hasTrait<OpTrait::IsTerminator>() ||
+        root->hasTrait<OpTrait::IsIsolatedFromAbove>() ||
+        name == "scope.scope" || name == "scope.return")
+      return false;
+  }
+  if (!block)
+    return false;
+
+  // The materializer moves exactly `roots` into one scope.  A foreign
+  // operation lexically inside the [first, last] range would be reordered
+  // behind the new scope and could break SSA dominance for moved consumers,
+  // so require the range to contain only planned operations.
+  Operation *first = nullptr;
+  Operation *last = nullptr;
+  for (Operation &nested : *block) {
+    if (!planned.contains(&nested))
+      continue;
+    if (!first)
+      first = &nested;
+    last = &nested;
+  }
+  for (Operation *cursor = first; cursor && cursor != last;
+       cursor = cursor->getNextNode())
+    if (!planned.contains(cursor))
+      return false;
+  return true;
+}
+
+std::optional<SimtAnchorDescriptor>
+mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
+                                             bool compileOn91095) {
+  if (!compileOn91095 || !isStageScopeWrappable(roots))
+    return std::nullopt;
+
+  // Mirror wrapAnchorRange: the scope returns exactly the values with an
+  // outside user.  Returned pointer-like state cannot be reconstructed by
+  // TritonToUnstructure, so reject that implementation before it is scored.
+  llvm::DenseSet<Operation *> inside;
+  for (Operation *root : roots) {
+    inside.insert(root);
+    root->walk([&](Operation *nested) { inside.insert(nested); });
+  }
+  auto isInside = [&](Operation *user) {
+    for (Operation *owner = user; owner; owner = owner->getParentOp())
+      if (inside.contains(owner))
+        return true;
+    return false;
+  };
+  for (Operation *root : roots)
+    for (Value result : root->getResults())
+      if (isPointerLikeType(result.getType()) &&
+          llvm::any_of(result.getUses(), [&](OpOperand &use) {
+            return !isInside(use.getOwner());
+          }))
+        return std::nullopt;
+
+  SimtAnchorDescriptor descriptor;
+  descriptor.kind = SimtAnchorKind::StageOwnedScope;
+  descriptor.operation = roots.front();
+  llvm::append_range(descriptor.scopeOperations, roots);
+  descriptor.scopeInsertionPoint = roots.front();
+  descriptor.lowerability = CandidateLowerability{};
+  descriptor.materializable = true;
+  return descriptor;
+}
+
 SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
                                                       bool compileOn91095) {
   COSTMODEL_TRACE("buildMixedSimtAnchorPlan");
@@ -690,12 +783,20 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
     anyMixed |= anchor.lowerability.mixed;
     mixedBlocked |= !anchor.lowerability.mixed && !anchor.lowerability.allSimd;
   }
-  plan.kernelLowerability.mixed = anyMixed && !mixedBlocked;
+  // A kernel with no primitive anchor can still run mixed: every anchor-free
+  // Stage whose roots form a contiguous same-block range is materializable
+  // as a StageOwnedScope, so absence of anchors alone must not disable the
+  // mixed candidate.
+  plan.kernelLowerability.mixed =
+      (anyMixed || plan.anchors.empty()) && !mixedBlocked;
   costModelLog() << "output: anchors=" << plan.anchors.size()
                  << " (kernel lowerability: all_simd="
                  << plan.kernelLowerability.allSimd
                  << " all_simt_only="
                  << plan.kernelLowerability.allSimtOnly
-                 << " mixed=" << plan.kernelLowerability.mixed << ")\n";
+                 << " mixed=" << plan.kernelLowerability.mixed
+                 << (plan.anchors.empty() ? " [stage_owned_scope fallback]"
+                                          : "")
+                 << ")\n";
   return plan;
 }

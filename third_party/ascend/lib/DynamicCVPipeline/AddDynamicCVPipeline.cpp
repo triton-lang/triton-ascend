@@ -20,7 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
+
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Diagnostics.h"
+#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassManager.h"
 #include "llvm/Support/Debug.h"
 #include <cstdint>
@@ -42,7 +48,7 @@
 
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
 
-static constexpr const char *DEBUG_TYPE = "AddDynamicCVPipeline";
+static constexpr const char *DEBUG_TYPE = "add-dynamic-cv-pipeline";
 static constexpr unsigned MAX_RETRY_TIMES = 2;
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(X) LLVM_DEBUG(DBGS() << (X) << "\n")
@@ -54,14 +60,34 @@ namespace triton {
 } // namespace triton
 } // namespace mlir
 
-namespace {
-std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
+static std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
   auto errCodeAttr =
       moduleOp->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
   return errCodeAttr ? std::optional<int64_t>(errCodeAttr.getInt())
                      : std::nullopt;
 }
-} // namespace
+
+static inline void addPasses(OpPassManager &pm) {
+  pm.addPass(createPreCheckAvailablePass());
+  pm.addPass(createStandardizeOpPass());
+  pm.addPass(createPlanComputeBlockPass());
+  pm.addPass(createComputeBlockOptPass());
+  pm.addPass(createSplitDataflowPass());
+  pm.addPass(createAnalyzeDataFlowPass());
+  pm.addPass(createAllocMultiCachePass());
+  pm.addPass(createAddControlFlowConditionPass());
+  pm.addPass(createSeparateMemoryFromComputePass());
+  pm.addPass(createRemoveSsbufAttrPass());
+}
+
+// must collect all sub-passes since they now are not added to pipeline
+void AddDynamicCVPipelinePass::getDependentDialects(
+    DialectRegistry &registry) const {
+  Base::getDependentDialects(registry);
+  OpPassManager tempPM(ModuleOp::getOperationName());
+  addPasses(tempPM);
+  tempPM.getDependentDialects(registry);
+}
 
 AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
@@ -79,6 +105,17 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
     return;
   }
+
+  ScopedDiagnosticHandler handler(&getContext(), [&](Diagnostic &diag) {
+    LLVM_DEBUG({
+      // In debug mode, continue to other handlers, i.e. print to stderr
+      return llvm::failure();
+    });
+
+    // otherwise prohibit any other handler
+    return llvm::success();
+  });
+
   for (unsigned attempt = 0; attempt < MAX_RETRY_TIMES; ++attempt) {
     // restore() consumes the saved region bodies. Each attempt needs its own
     // snapshot, taken before changing buffer counts for the retry.
@@ -93,18 +130,10 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    pm.addPass(createPreCheckAvailablePass());
-    pm.addPass(createStandardizeOpPass());
-    pm.addPass(createPlanComputeBlockPass());
-    pm.addPass(createComputeBlockOptPass());
-    pm.addPass(createSplitDataflowPass());
-    pm.addPass(createAnalyzeDataFlowPass());
-    pm.addPass(createAllocMultiCachePass());
-    pm.addPass(createAddControlFlowConditionPass());
-    pm.addPass(createSeparateMemoryFromComputePass());
-    pm.addPass(createRemoveSsbufAttrPass());
+    addPasses(pm);
 
-    auto result = runPipeline(pm, moduleOp);
+    // run passes in separate pm, instead of the pipeline to suppress reproducer
+    auto result = pm.run(moduleOp);
     auto errCode = getErrorCode(moduleOp);
     if (succeeded(result) && !errCode.has_value()) {
       LDBG("Process successfully");

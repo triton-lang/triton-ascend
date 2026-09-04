@@ -16,7 +16,7 @@ def AddDynamicCVPipeline : Pass<"add_dynamic_cv_pipeline", "mlir::ModuleOp"> {
         "bool", /*default*/"false",
         "compile on 910_95">
     ];
-    let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect", "LLVM::LLVMDialect"];
+    let dependentDialects = ["hivm::HIVMDialect", "bufferization::BufferizationDialect", "scope::ScopeDialect", "annotation::AnnotationDialect"];
 }
 
 def PreCheckAvailablePass : Pass<"pre-check-dynamic-cv-pipeline-available", "mlir::ModuleOp"> {

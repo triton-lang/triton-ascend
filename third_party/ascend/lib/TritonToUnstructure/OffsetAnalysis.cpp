@@ -331,8 +331,7 @@ Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
   auto blockArg = dyn_cast<BlockArgument>(value);
   if (!blockArg || blockArg.getArgNumber() == 0)
     return nullptr;
-  auto forOp = dyn_cast_or_null<scf::ForOp>(
-      blockArg.getOwner()->getParentOp());
+  auto forOp = dyn_cast_or_null<scf::ForOp>(blockArg.getOwner()->getParentOp());
   if (!forOp || blockArg.getOwner() != forOp.getBody())
     return nullptr;
 
@@ -342,9 +341,8 @@ Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
   if (!forOp->hasAttr(controlflow::kPointerDescriptorBoundaryAttr) ||
       !descriptorSlots || descriptorSlots.asArrayRef().size() != 2 ||
       descriptorSlots.asArrayRef()[0] != 2 ||
-      descriptorSlots.asArrayRef()[1] != 3 ||
-      forOp.getInitArgs().size() != 4 || slot != 1 ||
-      isPointerDescriptorBoundarySlot(forOp, slot) ||
+      descriptorSlots.asArrayRef()[1] != 3 || forOp.getInitArgs().size() != 4 ||
+      slot != 1 || isPointerDescriptorBoundarySlot(forOp, slot) ||
       slot >= forOp.getInitArgs().size() ||
       slot >= forOp.getYieldedValues().size())
     return nullptr;
@@ -374,13 +372,11 @@ Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
                carrierType.getDimSize(varyingAxis);
   };
 
-  auto initialAdd =
-      forOp.getInitArgs()[slot].getDefiningOp<arith::AddIOp>();
-  if (!initialAdd ||
-      !((isBroadcastedAxis(initialAdd.getLhs(), 1) &&
-         isBroadcastedAxis(initialAdd.getRhs(), 0)) ||
-        (isBroadcastedAxis(initialAdd.getLhs(), 0) &&
-         isBroadcastedAxis(initialAdd.getRhs(), 1))))
+  auto initialAdd = forOp.getInitArgs()[slot].getDefiningOp<arith::AddIOp>();
+  if (!initialAdd || !((isBroadcastedAxis(initialAdd.getLhs(), 1) &&
+                        isBroadcastedAxis(initialAdd.getRhs(), 0)) ||
+                       (isBroadcastedAxis(initialAdd.getLhs(), 0) &&
+                        isBroadcastedAxis(initialAdd.getRhs(), 1))))
     return nullptr;
 
   auto backedgeAdd =
@@ -396,9 +392,8 @@ Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
     return nullptr;
 
   auto constant = step.getDefiningOp<arith::ConstantOp>();
-  auto elements = constant
-                      ? dyn_cast<DenseElementsAttr>(constant.getValue())
-                      : DenseElementsAttr();
+  auto elements = constant ? dyn_cast<DenseElementsAttr>(constant.getValue())
+                           : DenseElementsAttr();
   if (!elements || !elements.isSplat() ||
       !isa<IntegerType>(elements.getElementType()) ||
       step.getType() != carrierType)
@@ -415,11 +410,10 @@ Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
   rewriter.setInsertionPoint(addPtr);
   Value typedIv = rewriter.create<arith::IndexCastOp>(
       addPtr.getLoc(), elementType, forOp.getInductionVar());
-  Value splatDisplacement = rewriter.create<triton::SplatOp>(
-      addPtr.getLoc(), carrierType, typedIv);
-  return rewriter.create<arith::AddIOp>(addPtr.getLoc(),
-                                       initialAdd.getResult(),
-                                       splatDisplacement);
+  Value splatDisplacement =
+      rewriter.create<triton::SplatOp>(addPtr.getLoc(), carrierType, typedIv);
+  return rewriter.create<arith::AddIOp>(addPtr.getLoc(), initialAdd.getResult(),
+                                        splatDisplacement);
 }
 
 } // namespace

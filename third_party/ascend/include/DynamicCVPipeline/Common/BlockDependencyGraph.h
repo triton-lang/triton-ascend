@@ -29,6 +29,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include <memory>
 
 namespace mlir {
 namespace CVPipeline {
@@ -42,6 +43,14 @@ struct BlockNode {
   llvm::SmallVector<Operation *> ops;
   bool isCube;
   int depth;
+
+  // Neighbour sets are stored directly on the node so that traversal and
+  // edge rewiring can avoid the extra hash lookup a separate map would
+  // require. Because each BlockNode is heap-allocated behind a unique_ptr,
+  // pointers stored here stay stable across insertions/erases in
+  // `BlockDependencyGraph::blockNodes`.
+  llvm::DenseSet<BlockNode *> predecessors;
+  llvm::DenseSet<BlockNode *> successors;
 };
 
 class BlockDependencyGraph {
@@ -54,32 +63,35 @@ public:
   llvm::LogicalResult buildGraph();
 
   BlockNode *getBlockNode(int blockId);
-  llvm::SmallVector<int> getPredecessors(int blockId);
-  llvm::SmallVector<int> getSuccessors(int blockId);
+  llvm::SmallVector<BlockNode *> getPredecessors(BlockNode *node);
+  llvm::SmallVector<BlockNode *> getSuccessors(BlockNode *node);
 
   // computeDepth
   void computeDepths();
   int getDepth(int blockId);
 
-  // detect cycle
-  bool wouldCreateCycle(int blockId1, int blockId2);
-
   // rebuildgraph
-  void rebuildAfterMerge(int targetBlockId, int sourceBlockId);
+  llvm::LogicalResult rebuildAfterMerge(BlockNode *target, BlockNode *source);
 
-  llvm::DenseMap<int, BlockNode> blockNodes;
+  // BlockNode objects are owned by unique_ptr so that the address of a
+  // BlockNode is stable across insertions/erases in the DenseMap. The
+  // pointers stored in each BlockNode's predecessor/successor sets
+  // therefore remain valid for the lifetime of the graph.
+  llvm::DenseMap<int, std::unique_ptr<BlockNode>> blockNodes;
 
 private:
   Block *block;
   const MemoryDependenceGraph &memGraph;
   ComputeBlockIdManager &bm;
 
-  llvm::DenseMap<int, llvm::SmallVector<int>> predecessors;
-  llvm::DenseMap<int, llvm::SmallVector<int>> successors;
-
-  void addEdge(int from, int to);
+  void addEdge(BlockNode *from, BlockNode *to);
 
   bool isInCurrentBlock(Operation *op);
+
+  // Recompute depths starting from `start` and propagating forward through
+  // its successor chain. Assumes predecessors of `start` already hold
+  // correct depths.
+  void recomputeDepthsFrom(BlockNode *start);
 };
 
 } // namespace CVPipeline

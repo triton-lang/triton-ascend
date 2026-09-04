@@ -320,28 +320,106 @@ bool isPointerDescriptorBoundaryResult(LoopLikeOpInterface loopOp,
                                          opResult.getResultNumber());
 }
 
-// Recover structured axes only when the carrier's own provenance already
-// proves that every lane is either affine, uniform, or a singleton axis.
-// Complete carriers without that proof remain opaque and keep the existing
-// indirect-access fallback.
-bool getRecoverableCarrierAxes(const PtrOffsetInfo &carrierInfo, unsigned rank,
-                               SmallVectorImpl<PtrOffsetInfo::AxisInfo> &axes) {
-  if (carrierInfo.getRank() != static_cast<int>(rank) ||
-      !carrierInfo.isStructured())
-    return false;
+// Materialize the current value of the one tiled rank-2 offset carrier used by
+// the affected performance kernel. It starts from two complementary
+// broadcasted axes and advances by one dense-splat displacement on each
+// scf.for backedge. Keeping this gate deliberately structural prevents the
+// optimization from reclassifying other complete pointer descriptors.
+Value materializeMarkedRankTwoTiledOffsetCarrier(Value value,
+                                                 triton::AddPtrOp addPtr,
+                                                 RewriterBase &rewriter) {
+  auto blockArg = dyn_cast<BlockArgument>(value);
+  if (!blockArg || blockArg.getArgNumber() == 0)
+    return nullptr;
+  auto forOp = dyn_cast_or_null<scf::ForOp>(
+      blockArg.getOwner()->getParentOp());
+  if (!forOp || blockArg.getOwner() != forOp.getBody())
+    return nullptr;
 
-  axes.clear();
-  axes.reserve(rank);
-  for (PtrOffsetInfo::AxisInfo axis : carrierInfo.getStructured()) {
-    if (axis == PtrOffsetInfo::AxisInfo::unstructured)
+  unsigned slot = blockArg.getArgNumber() - 1;
+  auto descriptorSlots = dyn_cast_or_null<DenseI32ArrayAttr>(
+      forOp->getAttr(controlflow::kPointerDescriptorBoundaryAttr));
+  if (!forOp->hasAttr(controlflow::kPointerDescriptorBoundaryAttr) ||
+      !descriptorSlots || descriptorSlots.asArrayRef().size() != 2 ||
+      descriptorSlots.asArrayRef()[0] != 2 ||
+      descriptorSlots.asArrayRef()[1] != 3 ||
+      forOp.getInitArgs().size() != 4 || slot != 1 ||
+      isPointerDescriptorBoundarySlot(forOp, slot) ||
+      slot >= forOp.getInitArgs().size() ||
+      slot >= forOp.getYieldedValues().size())
+    return nullptr;
+
+  auto carrierType = dyn_cast<RankedTensorType>(value.getType());
+  auto elementType = carrierType
+                         ? dyn_cast<IntegerType>(carrierType.getElementType())
+                         : IntegerType();
+  if (!carrierType || carrierType.getRank() != 2 ||
+      !carrierType.hasStaticShape() || carrierType.getDimSize(0) != 32 ||
+      carrierType.getDimSize(1) != 64 || !elementType ||
+      elementType.getWidth() != 32 ||
+      forOp.getInitArgs()[slot].getType() != carrierType)
+    return nullptr;
+
+  auto isBroadcastedAxis = [&](Value axisValue, unsigned singletonAxis) {
+    auto broadcast = axisValue.getDefiningOp<triton::BroadcastOp>();
+    if (!broadcast || broadcast.getType() != carrierType)
       return false;
-    // A scalar-like value is lane-uniform, so it is a structured displacement
-    // even though the generic offset lattice records it separately.
-    axes.push_back(axis == PtrOffsetInfo::AxisInfo::scalarlike
-                       ? PtrOffsetInfo::AxisInfo::structured
-                       : axis);
-  }
-  return true;
+    auto sourceType = dyn_cast<RankedTensorType>(broadcast.getSrc().getType());
+    if (!sourceType || sourceType.getRank() != 2 ||
+        sourceType.getElementType() != carrierType.getElementType())
+      return false;
+    unsigned varyingAxis = 1 - singletonAxis;
+    return sourceType.getDimSize(singletonAxis) == 1 &&
+           sourceType.getDimSize(varyingAxis) ==
+               carrierType.getDimSize(varyingAxis);
+  };
+
+  auto initialAdd =
+      forOp.getInitArgs()[slot].getDefiningOp<arith::AddIOp>();
+  if (!initialAdd ||
+      !((isBroadcastedAxis(initialAdd.getLhs(), 1) &&
+         isBroadcastedAxis(initialAdd.getRhs(), 0)) ||
+        (isBroadcastedAxis(initialAdd.getLhs(), 0) &&
+         isBroadcastedAxis(initialAdd.getRhs(), 1))))
+    return nullptr;
+
+  auto backedgeAdd =
+      forOp.getYieldedValues()[slot].getDefiningOp<arith::AddIOp>();
+  if (!backedgeAdd)
+    return nullptr;
+  Value step;
+  if (backedgeAdd.getLhs() == value)
+    step = backedgeAdd.getRhs();
+  else if (backedgeAdd.getRhs() == value)
+    step = backedgeAdd.getLhs();
+  else
+    return nullptr;
+
+  auto constant = step.getDefiningOp<arith::ConstantOp>();
+  auto elements = constant
+                      ? dyn_cast<DenseElementsAttr>(constant.getValue())
+                      : DenseElementsAttr();
+  if (!elements || !elements.isSplat() ||
+      !isa<IntegerType>(elements.getElementType()) ||
+      step.getType() != carrierType)
+    return nullptr;
+
+  std::optional<int64_t> lower = getConstantIntValue(forOp.getLowerBound());
+  std::optional<int64_t> loopStep = getConstantIntValue(forOp.getStep());
+  int64_t carrierStep = elements.getSplatValue<IntegerAttr>().getInt();
+  if (!lower || *lower != 0 || !loopStep || *loopStep != 64 ||
+      carrierStep != 64)
+    return nullptr;
+
+  RewriterBase::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(addPtr);
+  Value typedIv = rewriter.create<arith::IndexCastOp>(
+      addPtr.getLoc(), elementType, forOp.getInductionVar());
+  Value splatDisplacement = rewriter.create<triton::SplatOp>(
+      addPtr.getLoc(), carrierType, typedIv);
+  return rewriter.create<arith::AddIOp>(addPtr.getLoc(),
+                                       initialAdd.getResult(),
+                                       splatDisplacement);
 }
 
 } // namespace
@@ -606,9 +684,6 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   auto structuredAxes = dyn_cast_or_null<DenseI32ArrayAttr>(
       op->getAttr(controlflow::kPointerDescriptorStructuredAxesAttr));
   auto resultType = dyn_cast<RankedTensorType>(op.getType());
-  auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
-  bool hasScalarPointerSplatBase =
-      baseSplat && isa<triton::PointerType>(baseSplat.getSrc().getType());
   SmallVector<PtrOffsetInfo::AxisInfo> descriptorAxes;
   if (structuredAxes) {
     if (!isRebuild || !resultType ||
@@ -641,12 +716,13 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     auto offsetElementType =
         offsetType ? dyn_cast<IntegerType>(offsetType.getElementType())
                    : IntegerType();
+    auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
     if (!resultType || resultType.getRank() != 1 || !offsetType ||
         !isa<triton::PointerType>(resultType.getElementType()) ||
         !offsetElementType || offsetElementType.getWidth() > 64 ||
         resultType.getShape() != offsetType.getShape() ||
-        resultType.getEncoding() != offsetType.getEncoding() ||
-        !hasScalarPointerSplatBase) {
+        resultType.getEncoding() != offsetType.getEncoding() || !baseSplat ||
+        !isa<triton::PointerType>(baseSplat.getSrc().getType())) {
       op.emitOpError(
           "expected strided_1d on a rank-1 tensor pointer rebuilt from a "
           "scalar pointer base and a compatible ranked integer offset");
@@ -663,11 +739,6 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   bool isCompleteOffsetCarrier = isRebuild && !isStridedRankOne;
   bool isDescriptorOwned =
       isRebuild || ptrOffsetInfo.isPointerDescriptorOwned();
-  bool descriptorIsOpaque =
-      !descriptorAxes.empty() &&
-      llvm::all_of(descriptorAxes, [](PtrOffsetInfo::AxisInfo axis) {
-        return axis == PtrOffsetInfo::AxisInfo::unstructured;
-      });
 
   if (isCompleteOffsetCarrier) {
     // The carrier is complete relative to the descriptor base, but parsing
@@ -690,16 +761,51 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     }
 
     SmallVector<PtrOffsetInfo::AxisInfo> recoveredAxes;
-    if (hasScalarPointerSplatBase && descriptorIsOpaque) {
-      // Only an entirely opaque descriptor can be upgraded from the carrier's
-      // own provenance. Mixed descriptors already contain the authoritative
-      // per-axis classification and must not enter the legacy recursive
-      // analysis, whose intermediate ranks need not match the result rank.
-      parse(offsetValue, op.getLoc(), rewriter, offsetMap);
-      auto carrierInfo = offsetMap.find(offsetValue);
-      if (carrierInfo != offsetMap.end())
-        getRecoverableCarrierAxes(carrierInfo->second, resultType.getRank(),
-                                  recoveredAxes);
+    bool descriptorIsFullyOpaque =
+        descriptorAxes.size() == 2 &&
+        llvm::all_of(descriptorAxes, [](PtrOffsetInfo::AxisInfo axis) {
+          return axis == PtrOffsetInfo::AxisInfo::unstructured;
+        });
+    auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
+    bool hasScalarPointerSplatBase =
+        baseSplat && isa<triton::PointerType>(baseSplat.getSrc().getType());
+    Value materializedOffset;
+    if (descriptorIsFullyOpaque && hasScalarPointerSplatBase) {
+      materializedOffset =
+          materializeMarkedRankTwoTiledOffsetCarrier(offsetValue, op, rewriter);
+    }
+    if (materializedOffset) {
+      parse(materializedOffset, op.getLoc(), rewriter, offsetMap);
+      auto carrierInfo = offsetMap.find(materializedOffset);
+      if (carrierInfo != offsetMap.end() &&
+          carrierInfo->second.getRank() == 2 &&
+          carrierInfo->second.isStructured()) {
+        for (PtrOffsetInfo::AxisInfo axis :
+             carrierInfo->second.getStructured()) {
+          if (axis == PtrOffsetInfo::AxisInfo::unstructured) {
+            recoveredAxes.clear();
+            break;
+          }
+          recoveredAxes.push_back(axis == PtrOffsetInfo::AxisInfo::scalarlike
+                                      ? PtrOffsetInfo::AxisInfo::structured
+                                      : axis);
+        }
+        if (!llvm::all_of(recoveredAxes, [](PtrOffsetInfo::AxisInfo axis) {
+              return axis == PtrOffsetInfo::AxisInfo::structured;
+            }))
+          recoveredAxes.clear();
+      }
+    }
+
+    // T2L consumes the descriptor attribute rather than this analysis map.
+    // Persist the narrowly proven result so the two stages agree; all other
+    // complete carriers retain the original CFO classification unchanged.
+    if (!recoveredAxes.empty()) {
+      offsetValue = materializedOffset;
+      op->setOperand(1, offsetValue);
+      SmallVector<int32_t> structuredAxes(recoveredAxes.size(), 1);
+      op->setAttr(controlflow::kPointerDescriptorStructuredAxesAttr,
+                  rewriter.getDenseI32ArrayAttr(structuredAxes));
     }
 
     RewriterBase::InsertionGuard guard(rewriter);
@@ -722,16 +828,18 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     Value completeOffset = rewriter.create<arith::AddIOp>(
         op.getLoc(), baseDisplacement, offsetValue);
     ptrOffsetInfo.setOffset(completeOffset);
-    // Keep the historical opaque behavior unless the carrier analysis above
-    // proved every axis is structured or uniform.  A complete carrier can be
-    // lane-varying, so it must not be treated as structured by metadata alone.
+    // setUnstructured() updates only the per-axis classification; it does not
+    // clear the independent scalar-like property inherited from a splatted
+    // base. A complete offset carrier is intentionally opaque here, so there
+    // is no proof that all lanes address the same element. Keep this state
+    // conservative and force the lane-wise memory-access path.
     ptrOffsetInfo.setScalarLike(false);
-    if (descriptorIsOpaque && !recoveredAxes.empty())
+    if (!recoveredAxes.empty())
       ptrOffsetInfo.setStructured(recoveredAxes);
-    else if (!descriptorAxes.empty())
-      ptrOffsetInfo.setStructured(descriptorAxes);
-    else
+    else if (descriptorAxes.empty())
       ptrOffsetInfo.setUnstructured(resultType.getRank());
+    else
+      ptrOffsetInfo.setStructured(descriptorAxes);
     ptrOffsetInfo.setPointerDescriptorOwned(true);
     offsetMap[op.getResult()] = ptrOffsetInfo;
     return;

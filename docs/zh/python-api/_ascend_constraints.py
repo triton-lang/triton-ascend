@@ -807,6 +807,34 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.extension.dot",
     },
+    "triton.language.extra.cann.extension.conv1d": {
+        "constraints": [
+            "DataType: Ascend supports fp16, bf16, fp32.",
+            "``input``: 2D ``(iC, iW)`` or 3D ``(N, iC, iW)``.",
+            "``weight``: 3D ``(oC, iC // groups, wW)``; ``iC % groups == 0`` and ``oC % groups == 0``.",
+            "``bias``: optional, 1D ``(oC)``.",
+            "``groups``: int; must divide both ``iC`` and ``oC`` (``iC % groups == 0`` and ``oC % groups == 0``).",
+            "``padding``: int (symmetric on both sides) or 2-element tuple ``(padding_left, padding_right)`` (asymmetric).",
+            "``stride``: int, the stride of the convolution kernel.",
+            "``dilation``: only ``dilation=1`` is currently supported.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.conv1d",
+    },
+    "triton.language.extra.cann.extension.conv2d": {
+        "constraints": [
+            "DataType: Ascend supports fp16, bf16, fp32.",
+            "``input``: 3D ``(iC, iH, iW)`` or 4D ``(N, iC, iH, iW)``.",
+            "``weight``: 4D ``(oC, iC // groups, wH, wW)``; ``iC % groups == 0`` and ``oC % groups == 0``.",
+            "``bias``: optional, 1D ``(oC)``.",
+            "``groups``: int; must divide both ``iC`` and ``oC`` (``iC % groups == 0`` and ``oC % groups == 0``).",
+            "``padding``: int (symmetric on all sides), 2-element tuple ``(padding_h, padding_w)`` (symmetric per dimension), or 4-element tuple ``(padding_top, padding_bottom, padding_left, padding_right)`` (asymmetric).",
+            "``stride``: int or 2-element tuple ``(stride_h, stride_w)``.",
+            "``dilation``: only ``dilation=1`` is currently supported.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.conv2d",
+    },
     "triton.language.split": {
         "constraints": [
             "DataType: Ascend A2/A3 does not support fp64, fp8e4, fp8e5, uint16, uint32, uint64 (hardware limitation).",

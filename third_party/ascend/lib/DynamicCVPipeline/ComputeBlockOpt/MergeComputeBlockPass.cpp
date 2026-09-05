@@ -421,9 +421,8 @@ static bool tryCrossCubeCloneMerge(
 }
 
 /// Core merge logic for one scf::ForOp body Block.
-static bool tryMergeInBlock(Block *block, CVPipeline::ComputeBlockIdManager &bm,
+static void tryMergeInBlock(Block *block, CVPipeline::ComputeBlockIdManager &bm,
                             const CVPipeline::MemoryDependenceGraph &memGraph) {
-  bool mergedAny = false;
   while (true) {
     // Step 1: Group and build enhanced dependency graph
     /// computeBlocks: block_id → ComputeBlock
@@ -436,21 +435,21 @@ static bool tryMergeInBlock(Block *block, CVPipeline::ComputeBlockIdManager &bm,
     groupAndBuildGraph(block, memGraph, computeBlocks, succs, preds,
                        blockEdges);
     if (computeBlocks.empty())
-      return mergedAny;
+      return;
 
     // Step 2: Collect VECTOR candidates
     SmallVector<int> vecCandidates =
         collectVectorCandidates(computeBlocks, succs, preds);
     if (vecCandidates.size() < 2) {
       LOG_DEBUG("MergeComputeBlock: vecCandidates.size() < 2, skipping");
-      return mergedAny;
+      return;
     }
 
     // Step 3: Find a pair of adjacent VECTOR blocks
     auto pairOpt = findAdjacentVectorPair(vecCandidates, succs);
     if (!pairOpt) {
       LOG_DEBUG("MergeComputeBlock: No adjacent VECTOR pair found, skipping");
-      return mergedAny;
+      return;
     }
     int predVId = pairOpt->first;
     int succVId = pairOpt->second;
@@ -461,17 +460,14 @@ static bool tryMergeInBlock(Block *block, CVPipeline::ComputeBlockIdManager &bm,
 
     // Step 4: Try direct merge
     if (tryDirectMerge(opsToMerge, memGraph, predVId, succVId, computeBlocks,
-                       bm)) {
-      mergedAny = true;
+                       bm))
       continue;
-    }
 
     // Step 5: Try cross-Cube clone merge
     if (!tryCrossCubeCloneMerge(block, computeBlocks, preds, blockEdges,
                                 predVId, succVId, opsToMerge, memGraph, bm))
-      return mergedAny;
+      return;
     // continue to try next pair
-    mergedAny = true;
   }
 }
 
@@ -496,11 +492,6 @@ public:
     if (CVPipeline::hasFallbackAttr(module)) {
       return;
     }
-
-    // Record that this pass ran. Stays false unless a merge actually
-    // succeeds; the following ReorderOpsByBlockIdPass reads this marker.
-    module->setAttr(CVPipeline::kMergeComputeBlockApplied,
-                    BoolAttr::get(&getContext(), false));
 
     bool shouldRun = false;
     for (auto funcOp : module.getOps<func::FuncOp>()) {
@@ -542,16 +533,9 @@ public:
     auto &aa = getAnalysis<AliasAnalysis>();
     CVPipeline::MemoryDependenceGraph memGraph(module, aa);
     CVPipeline::ComputeBlockIdManager bm(module);
-    bool mergedAny = false;
     for (Block *block : blocksToProcess) {
       LOG_DEBUG("try merge in LoopBlock");
-      mergedAny = tryMergeInBlock(block, bm, memGraph) || mergedAny;
-    }
-    if (mergedAny) {
-      // A merge actually happened; let the following
-      // ReorderOpsByBlockIdPass know it should run.
-      module->setAttr(CVPipeline::kMergeComputeBlockApplied,
-                      BoolAttr::get(&getContext(), true));
+      tryMergeInBlock(block, bm, memGraph);
     }
 
     LOG_DEBUG("After MergeComputeBlockPass: " << *module);

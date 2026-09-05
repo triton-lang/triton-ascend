@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 10,
-  "profile_version": "david-v100-simd-simt-20260903-v20",
+  "profile_version": "david-v100-simd-simt-20260905-v21",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -139,8 +139,8 @@
       "issue_instructions_per_system_cycle": 6.0,
       "spill_transactions_per_system_cycle": 1.0,
       "prefix_scan": {
-        "dependency_factor": 17.35,
-        "description": "SIMD prefix-scan dependency factor calibrated from the identity-baseline-subtracted A5 batch-8, extent-16 scan sweep (143.398 us SIMD scan increment versus 8.267 us SIMT, ratio 17.345); unlike reduction throughput, successive scan levels remain dependent."
+        "dependency_factor": 42.45581534582609,
+        "description": "Normalize the recorded A5 batch-8, extent-16 identity-subtracted scan ratio by base shuffle rates: factor_SIMD = (143.398 / 8.267) * 64 / (32 * 0.817124) * factor_SIMT. The model charges lane_steps / lane_rate * factor, so the measured time ratio is not itself the factor. This effective calibration includes lowering effects, not intrinsic latency or forward/reverse asymmetry. Recalibrate if base rates or lowering change."
       },
       "indirect_memory": {
         "load_transactions_per_system_cycle": 0.125,

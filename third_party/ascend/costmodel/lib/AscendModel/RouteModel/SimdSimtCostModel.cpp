@@ -472,11 +472,13 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
     return llvm::createStringError(
         std::errc::invalid_argument, "invalid SIMD/SIMT profile '%s': %s",
         path.c_str(), reader.getError().str().c_str());
-  if (hardware.profileVersion != "david-v100-simd-simt-20260903-v20")
+  if (hardware.profileVersion != "david-v100-simd-simt-20260903-v20" &&
+      hardware.profileVersion != "david-v100-simd-simt-20260905-v21")
     return llvm::createStringError(
         std::errc::invalid_argument,
         "unsupported SIMD/SIMT profile version '%s' "
-        "(expected david-v100-simd-simt-20260903-v20)",
+        "(expected david-v100-simd-simt-20260903-v20 or "
+        "david-v100-simd-simt-20260905-v21)",
         hardware.profileVersion.c_str());
   if (!microbench)
     return llvm::createStringError(std::errc::invalid_argument,

@@ -822,6 +822,12 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 f"--enable-ubuf-saving={enable_ubuf_saving}",
             ]
 
+        disable_size_align_for_cast = metadata["disable_size_align_for_cast"]
+        if disable_size_align_for_cast is not None:
+            _compile_option_list += [
+                f"--disable-size-align-for-cast={disable_size_align_for_cast}",
+            ]
+
         enable_preload = metadata["enable_preload"]
         if enable_preload is not None:
             _compile_option_list += [
@@ -1061,6 +1067,7 @@ class NPUOptions:
     multibuffer: bool = True
     vf_fusion_mode: str = None
     enable_ubuf_saving: bool = None
+    disable_size_align_for_cast: bool = None
     enable_preload: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False

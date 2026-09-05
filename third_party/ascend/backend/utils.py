@@ -46,7 +46,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "auto_tile_and_bind_subblock",
     "code_motion",
     "compile_on_910_95",
-    "disable_size_align_for_cast",
     "enable_auto_blockify",
     "enable_buffer_insert_optimization",
     "enable_cce_vf_auto_sync",
@@ -123,7 +122,6 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "auto_tile_and_bind_subblock":
     "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
-    "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
     "enable_buffer_insert_optimization":
     "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",

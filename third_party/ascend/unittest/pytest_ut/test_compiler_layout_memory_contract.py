@@ -83,8 +83,7 @@ class _FakePassManager:
 def compiler_module():
     """Load this checkout's compiler without depending on installed Ascend utils.
 
-    The test invokes only ``ttir_to_npubin`` and replaces all external tool
-    interactions below.  A tiny import-time shim keeps the source-level
+    The tests replace all external tool interactions below.  A tiny import-time shim keeps the source-level
     contract test runnable when the installed Triton wheel predates an import
     added by this checkout (for example ``_enable_msdebug``).
     """
@@ -645,6 +644,66 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         assert Path(command[-1]).name == "kernel", case
 
 
+def test_91095_compile_argv_omits_removed_multiple_consumer_option(compiler_module, monkeypatch):
+    commands = []
+
+    class FakeNPUUtils:
+
+        def has_device_limit(self):
+            return False
+
+    def run_bisheng(command, **_kwargs):
+        commands.append(list(command))
+        Path(command[command.index("-o") + 1] + ".o").write_bytes(b"npubin")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    metadata = {
+        "vf_fusion_mode": None,
+        "enable_preload": None,
+        "disable_tightly_coupled_buffer_reuse": False,
+        "enable_hivm_auto_cv_balance": None,
+        "sync_solver": None,
+        "unit_flag": None,
+        "inject_barrier_all": None,
+        "inject_block_all": None,
+        "limit_auto_multi_buffer_only_for_local_buffer": None,
+        "set_workspace_multibuffer": None,
+        "limit_auto_multi_buffer_of_local_buffer": None,
+        "limit_auto_multi_buffer_buffer": None,
+        "enable_mixed_cv": None,
+        "enable_vf_fusion": None,
+        "enable_dynamic_cv_pipeline": None,
+        "enable_flatten": None,
+        "enable_auto_vectorize_v2": None,
+        "auto_vectorize_v2_max_fused_ops_num": None,
+        "prevec_max_fused_ops_num": None,
+        "disable_auto_inject_block_sync": None,
+        "bitcodes": None,
+        "has_auto_blockify_blacklist_op": False,
+        "bisheng_options": None,
+        "vf_merge_level": None,
+        "plan_memory_strategy": None,
+    }
+
+    monkeypatch.setattr(compiler_module, "_parse_linalg_metadata", lambda linalg, metadata: (linalg, metadata))
+    monkeypatch.setattr(compiler_module, "get_common_bishengir_compile_options", lambda _metadata: [])
+    monkeypatch.setattr(compiler_module, "get_auto_bind_sub_block_option", lambda _metadata: False)
+    monkeypatch.setattr(compiler_module, "NPUUtils", FakeNPUUtils)
+    monkeypatch.setattr(compiler_module, "_check_bishengir_api_change", lambda: True)
+    monkeypatch.setattr(compiler_module, "_get_npucompiler_path", lambda: ("/fake/bishengir-compile", {}))
+    monkeypatch.setattr(compiler_module.subprocess, "run", run_bisheng)
+
+    result = compiler_module.linalg_to_bin_enable_npu_compile_910_95(
+        "module {}",
+        metadata,
+        SimpleNamespace(target_arch="Ascend910_9589", debug=False),
+    )
+
+    assert result == b"npubin"
+    assert len(commands) == 1
+    assert not any(option.startswith("--hfusion-enable-multiple-consumer-fusion=") for option in commands[0])
+
+
 def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):
     """The canonical default is portable and enables the A5 template gate."""
 
@@ -699,3 +758,4 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
 
     assert "force_simt_only" not in compiler_module.NPUOptions.__dataclass_fields__
     assert "force_simt_template" not in compiler_module.NPUOptions.__dataclass_fields__
+    assert "hfusion_enable_multiple_consumer_fusion" not in compiler_module.NPUOptions.__dataclass_fields__

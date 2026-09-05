@@ -734,12 +734,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if vf_merge_level is not None:
             _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
-        hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
-        if hfusion_enable_multiple_consumer_fusion:
-            _compile_option_list += [
-                f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"
-            ]
-
         plan_memory_strategy = metadata["plan_memory_strategy"]
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
@@ -1084,7 +1078,6 @@ class NPUOptions:
     enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_cube_block_merge: bool = False
-    hfusion_enable_multiple_consumer_fusion: bool = False
     buf_slot_num_of_veccore: int = None
     buf_slot_num_of_crosscore: int = None
     buf_slot_num_of_gm: int = None

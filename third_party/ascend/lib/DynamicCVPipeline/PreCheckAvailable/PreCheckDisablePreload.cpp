@@ -82,7 +82,11 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "chunk_bwd_kernel_dv_local",
     "chunk_fwd_kernel_h",
     "_jagged_dense_flash_attention_bwd_dk_kernel",
-    "_gqa_sparse_decode_kernel"};
+    "_gqa_sparse_decode_kernel",
+    "pcb14_tc01_while_matmul_scalar",
+    "pcb14_tc02_while_matmul_scalar",
+    "paged_decode_fd_reduce_kernel",
+    "paged_decode_fd_kernel"};
 
 static constexpr const char *DEBUG_TYPE = "pre-check-disable-preload";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")

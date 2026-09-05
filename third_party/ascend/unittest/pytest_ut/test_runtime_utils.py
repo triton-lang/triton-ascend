@@ -116,6 +116,17 @@ def test_deprecated_simt_option_is_routed_once_during_in_place_normalization():
     assert options == {"compile_mode": "simt_only"}
 
 
+def test_removed_hfusion_multiple_consumer_option_warns_and_is_dropped():
+    option_name = "hfusion_enable_multiple_consumer_fusion"
+    options = {option_name: True}
+
+    with pytest.warns(FutureWarning, match=rf"{option_name}.*removed vendor compiler control"):
+        normalized = utils._remove_deprecated_npu_options(options)
+
+    assert normalized == {}
+    assert options == {option_name: True}
+
+
 def test_get_byte_per_numel_supports_unsigned_integer_dtypes():
     assert runtime_utils.get_byte_per_numel(torch.uint16) == 2
     assert runtime_utils.get_byte_per_numel(torch.uint32) == 4

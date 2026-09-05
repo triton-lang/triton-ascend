@@ -135,9 +135,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
   });
 
   m.def("add_dynamic_cv_pipeline",
-        [](mlir::PassManager &pm, bool compileOn91095) {
+        [](mlir::PassManager &pm, bool compileOn91095, int aicoreNum) {
           AddDynamicCVPipelineOptions opts;
           opts.compileOn91095 = compileOn91095;
+          opts.aicoreNum = aicoreNum;
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
 

@@ -919,9 +919,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        enable_libdevice = os.getenv("TRITON_ENABLE_LIBDEVICE", False)
-        if enable_libdevice:
-            _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
+        _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
 
         if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
             _compile_option_list += ["--enable-auto-blockify-loop"]

@@ -40,31 +40,53 @@ using namespace math;
 
 namespace {
 
-static bool matchExpFromSubf(arith::SubFOp subfOp, math::ExpOp &expOp,
-                             CVPipeline::ComputeBlockIdManager &bm) {
-
+static math::ExpOp matchExpFromSubf(arith::SubFOp subfOp) {
   auto subfResult = subfOp.getResult();
   if (!subfOp->hasOneUse()) {
     LOG_DEBUG("SubF has multiple users, skipping");
-    return false;
+    return nullptr;
   }
 
   Operation *user = *subfResult.getUsers().begin();
-  expOp = dyn_cast<math::ExpOp>(user);
+  auto expOp = dyn_cast<math::ExpOp>(user);
   if (!expOp) {
     LOG_DEBUG("SubF user is not ExpOp, skipping");
-    return false;
+    return nullptr;
   }
   if (expOp->getBlock() != subfOp->getBlock()) {
     LOG_DEBUG("SubF and ExpOp not in the same Block, skipping");
+    return nullptr;
+  }
+  return expOp;
+}
+
+static bool isValidExt(arith::SubFOp subfOp, arith::ExtFOp extOp) {
+  if (extOp->getBlock() != subfOp->getBlock()) {
+    LOG_DEBUG("SubF and ExtfOp not in the same Block, skipping");
     return false;
   }
+  auto inType = extOp.getIn().getType();
+  if (!inType.isF16()) {
+    LOG_DEBUG("ExtF input types are not both f16, skipping extended pattern");
+    return false;
+  }
+  auto outType = extOp.getOut().getType();
+  if (!outType.isF32()) {
+    LOG_DEBUG("ExtF output types are not both f32, skipping extended pattern");
+    return false;
+  }
+
+  auto extRes = extOp.getResult();
+  if (!extRes.hasOneUse() || *extRes.getUsers().begin() != subfOp) {
+    LOG_DEBUG("ExtF has multiple users or not used by subf, skipping");
+    return false;
+  }
+
   return true;
 }
 
-static bool matchExtfFromSubf(arith::SubFOp subfOp,
-                              SmallVector<arith::ExtFOp, 2> &extfOps,
-                              CVPipeline::ComputeBlockIdManager &bm) {
+static std::optional<SmallVector<arith::ExtFOp, 2>>
+matchExtfFromSubf(arith::SubFOp subfOp) {
   auto lhs = subfOp.getLhs();
   auto rhs = subfOp.getRhs();
 
@@ -74,58 +96,25 @@ static bool matchExtfFromSubf(arith::SubFOp subfOp,
   if (!lhsDef || !rhsDef) {
     LOG_DEBUG(
         "SubF operands are not both from ExtFOp, skipping extended pattern");
-    return false;
-  }
-  if (lhsDef->getBlock() != subfOp->getBlock() ||
-      rhsDef->getBlock() != subfOp->getBlock()) {
-    LOG_DEBUG("SubF and ExtfOp not in the same Block, skipping");
-    return false;
+    return std::nullopt;
   }
 
-  auto lhsInType = lhsDef.getIn().getType();
-  auto rhsInType = rhsDef.getIn().getType();
-  auto lhsOutType = lhsDef.getOut().getType();
-  auto rhsOutType = rhsDef.getOut().getType();
-
-  if (!lhsInType.isF16() || !rhsInType.isF16()) {
-    LOG_DEBUG("ExtF input types are not both f16, skipping extended pattern");
-    return false;
+  if (!isValidExt(subfOp, lhsDef) || !isValidExt(subfOp, rhsDef)) {
+    return std::nullopt;
   }
 
-  if (!lhsOutType.isF32() || !rhsOutType.isF32()) {
-    LOG_DEBUG("ExtF output types are not both f32, skipping extended pattern");
-    return false;
-  }
-
-  SmallVector<Operation *, 2> lhsUsers;
-  for (Operation *user : lhsDef.getResult().getUsers()) {
-    lhsUsers.push_back(user);
-  }
-  if (lhsUsers.size() != 1 || lhsUsers[0] != subfOp) {
-    LOG_DEBUG("Left ExtF has multiple users or not used by subf, skipping");
-    return false;
-  }
-
-  SmallVector<Operation *, 2> rhsUsers;
-  for (Operation *user : rhsDef.getResult().getUsers()) {
-    rhsUsers.push_back(user);
-  }
-  if (rhsUsers.size() != 1 || rhsUsers[0] != subfOp) {
-    LOG_DEBUG("Right ExtF has multiple users or not used by subf, skipping");
-    return false;
-  }
-
+  SmallVector<arith::ExtFOp, 2> extfOps;
   extfOps.push_back(lhsDef);
   extfOps.push_back(rhsDef);
-  return true;
+  return extfOps;
 }
 
 static void processSubfOp(arith::SubFOp subfOp,
                           CVPipeline::ComputeBlockIdManager &bm) {
   int subfBlockId = bm.getBlockIdByOp(subfOp);
 
-  math::ExpOp expOp;
-  if (!matchExpFromSubf(subfOp, expOp, bm)) {
+  auto expOp = matchExpFromSubf(subfOp);
+  if (!expOp) {
     return;
   }
 
@@ -138,17 +127,19 @@ static void processSubfOp(arith::SubFOp subfOp,
     LOG_DEBUG("Exp blockId already matches subf, skipping update");
   }
 
-  SmallVector<arith::ExtFOp, 2> extfOps;
-  if (matchExtfFromSubf(subfOp, extfOps, bm)) {
-    for (auto extfOp : extfOps) {
-      int extfBlockId = bm.getBlockIdByOp(extfOp);
-      if (extfBlockId != subfBlockId) {
-        LOG_DEBUG("Updating extf blockId from " << extfBlockId << " to "
-                                                << subfBlockId);
-        bm.updateBlockId(extfOp, subfBlockId);
-      } else {
-        LOG_DEBUG("ExtF blockId already matches subf, skipping update");
-      }
+  auto extfOps = matchExtfFromSubf(subfOp);
+  if (!extfOps) {
+    return;
+  }
+
+  for (auto extfOp : *extfOps) {
+    int extfBlockId = bm.getBlockIdByOp(extfOp);
+    if (extfBlockId != subfBlockId) {
+      LOG_DEBUG("Updating extf blockId from " << extfBlockId << " to "
+                                              << subfBlockId);
+      bm.updateBlockId(extfOp, subfBlockId);
+    } else {
+      LOG_DEBUG("ExtF blockId already matches subf, skipping update");
     }
   }
 }

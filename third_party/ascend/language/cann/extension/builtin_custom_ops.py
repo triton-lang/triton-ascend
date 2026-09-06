@@ -23,7 +23,8 @@
 import triton.language.core as tl
 from .custom_op import register_custom_op
 from .core import CORE, PIPE, MODE
-from ._utils import _is_int_like_elem, _assert_int_like_tuple, _deprecated
+from ..utils import _deprecated
+from ._utils import _is_int_like_elem, _assert_int_like_tuple
 
 
 @_deprecated(fn_name="triton.language.extra.cann.extension.custom('__builtin_index_select', ...)")

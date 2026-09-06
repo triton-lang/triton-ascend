@@ -18,13 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-from functools import wraps
 from math import pi as math_pi
-from warnings import warn
 from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
 from triton.backends.ascend.utils import is_compile_on_910_95, triton_enable_libdevice_simt
+
+from .utils import _deprecated
 
 
 def _is_libdevice_simt_enabled(_semantic) -> bool:
@@ -33,23 +33,6 @@ def _is_libdevice_simt_enabled(_semantic) -> bool:
 
 def _is_a5_target(_semantic) -> bool:
     return is_compile_on_910_95(_semantic.builder.options.arch)
-
-
-def _deprecated(replacement):
-
-    def decorator(fn):
-        message = (f"cann.libdevice.{fn.__name__} is deprecated and will be removed in the next release; "
-                   f"use cann.libdevice.{replacement} instead.")
-
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            warn(message, FutureWarning, stacklevel=2)
-            return fn(*args, **kwargs)
-
-        wrapper.__doc__ = f"{fn.__doc__ or ''}\n\n.. warning::\n   {message}"
-        return wrapper
-
-    return decorator
 
 
 class _FlipStaticRange:
@@ -718,7 +701,7 @@ def hadd(arg0, arg1, _semantic=None):
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("int32"), core.dtype("int32")): ("__hmf_hadd_i32", core.dtype("int32")),
-            (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_uhadd_u32_u32", core.dtype("uint32")),
+            (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_uhadd_u32", core.dtype("uint32")),
         }, is_pure=True, _semantic=_semantic)
 
 
@@ -740,7 +723,7 @@ def rhadd(arg0, arg1, _semantic=None):
     return core.extern_elementwise(
         "", "", [arg0, arg1], {
             (core.dtype("int32"), core.dtype("int32")): ("__hmf_rhadd_i32", core.dtype("int32")),
-            (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_urhadd_u32_u32", core.dtype("uint32")),
+            (core.dtype("uint32"), core.dtype("uint32")): ("__hmf_urhadd_u32", core.dtype("uint32")),
         }, is_pure=True, _semantic=_semantic)
 
 
@@ -4116,30 +4099,35 @@ def sqrt(arg0, _semantic=None):
 
 
 @core.extern
-@_deprecated("hadd")
+@_deprecated(fn_name="triton.language.extra.cann.libdevice.uhadd",
+             replacement="triton.language.extra.cann.libdevice.hadd")
 def uhadd(arg0, arg1, _semantic=None):
     return hadd(arg0, arg1, _semantic=_semantic)
 
 
 @core.extern
-@_deprecated("mul24")
+@_deprecated(fn_name="triton.language.extra.cann.libdevice.umul24",
+             replacement="triton.language.extra.cann.libdevice.mul24")
 def umul24(arg0, arg1, _semantic=None):
     return mul24(arg0, arg1, _semantic=_semantic)
 
 
 @core.extern
-@_deprecated("mulhi")
+@_deprecated(fn_name="triton.language.extra.cann.libdevice.umulhi",
+             replacement="triton.language.extra.cann.libdevice.mulhi")
 def umulhi(arg0, arg1, _semantic=None):
     return mulhi(arg0, arg1, _semantic=_semantic)
 
 
 @core.extern
-@_deprecated("rhadd")
+@_deprecated(fn_name="triton.language.extra.cann.libdevice.urhadd",
+             replacement="triton.language.extra.cann.libdevice.rhadd")
 def urhadd(arg0, arg1, _semantic=None):
     return rhadd(arg0, arg1, _semantic=_semantic)
 
 
 @core.extern
-@_deprecated("sad")
+@_deprecated(fn_name="triton.language.extra.cann.libdevice.usad",
+             replacement="triton.language.extra.cann.libdevice.sad")
 def usad(arg0, arg1, arg2, _semantic=None):
     return sad(arg0, arg1, arg2, _semantic=_semantic)

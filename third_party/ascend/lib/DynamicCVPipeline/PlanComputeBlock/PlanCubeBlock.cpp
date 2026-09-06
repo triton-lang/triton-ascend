@@ -64,6 +64,14 @@ static constexpr const char *DEBUG_TYPE = "plan-cube-block";
 
 static bool isMatmulOp(Operation *op) { return isa<linalg::MatmulOp>(op); }
 
+static bool isCubeSimpleOpOrCf(Operation *op) {
+  if (op->getBlock()->mightHaveTerminator() &&
+      op == op->getBlock()->getTerminator()) {
+    return false;
+  }
+  return !isSyncOp(op) && getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
+}
+
 namespace {
 
 class SeedRegionPlanner {

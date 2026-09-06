@@ -166,9 +166,6 @@ static bool traceUserToTargetOp(Value val) {
 }
 
 static bool checkAllProgramIdNonOverlap(ModuleOp module) {
-  if (compileOn91095Flag) {
-    return true;
-  }
   bool allNonOverlap = true;
   module.walk([&](triton::GetProgramIdOp pidOp) {
     if (!traceUserToTargetOp(pidOp.getResult())) {

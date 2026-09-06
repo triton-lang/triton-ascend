@@ -167,8 +167,6 @@ private:
   mlir::Operation *getCopyPointBeforeStore(Value depValue,
                                            Operation *vectorEndOp,
                                            int iniProducerBlockId);
-  mlir::Operation *getFixpipePointAfterProducer(Value depValue,
-                                                int iniProducerBlockId);
   mlir::Operation *insertVectorToCubeTransfer(
       mlir::OpBuilder &builder, mlir::Value srcValue,
       mlir::Value normalizedValue, mlir::Operation *vectorEndOp,

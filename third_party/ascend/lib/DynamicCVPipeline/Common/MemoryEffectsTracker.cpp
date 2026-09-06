@@ -187,8 +187,7 @@ void MemoryDependenceGraph::buildSyncEdges() {
     linkChain(wall.syncPointsOf(CoreType::CUBE_ONLY));
     linkChain(wall.syncPointsOf(CoreType::VECTOR_ONLY));
 
-    for (Operation &rOp : *block) {
-      Operation *R = &rOp;
+    for (Operation *R : *block) {
       if (!isTensorComputeOp(R) && !isStoreLike(R)) {
         continue;
       }
@@ -205,7 +204,7 @@ void MemoryDependenceGraph::buildSyncEdges() {
       // 后最近同 core 同步点（第一个 position > posR）；prev = next - 1 为前最近。
       auto next = std::upper_bound(
           syncs.begin(), syncs.end(), posR,
-          [](unsigned v, const SyncPoint &s) { return v < s.position; });
+          [](const Operation *o, unsigned v) { return wall.positionOf(o) < v; });
 
       if (next != syncs.begin()) { // 前最近 P：P -> R
         syncEdges.addEdge((next - 1)->op, R);
@@ -232,7 +231,7 @@ ArrayRef<Operation *> MemoryDependenceGraph::getMemUsers(Operation *op) const {
   return it->second;
 }
 
-SmallVector<Operation *>
+ArrayRef<Operation *>
 MemoryDependenceGraph::getExecBefore(Operation *op) const {
   SmallVector<Operation *> result;
   auto it = execBefore.find(op);
@@ -247,7 +246,7 @@ MemoryDependenceGraph::getExecBefore(Operation *op) const {
   return result;
 }
 
-SmallVector<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
+ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
   SmallVector<Operation *> result;
   auto it = execAfter.find(op);
   if (it != execAfter.end()) {

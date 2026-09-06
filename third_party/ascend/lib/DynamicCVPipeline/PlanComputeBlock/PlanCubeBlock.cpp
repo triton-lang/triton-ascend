@@ -130,9 +130,6 @@ bool SeedRegionPlanner::tryAddToGroup(Operation *op, Operation *from) {
       !isEligible(op)) {
     return false;
   }
-  // Never let the group straddle a sync: a dependency edge must not bridge a
-  // synchronization point, otherwise the group would appear on both sides of
-  // the barrier and the fence built by ReorderOpsByBlockId would cycle.
   if (from && wall.hasSyncBetween(from, op)) {
     return false;
   }

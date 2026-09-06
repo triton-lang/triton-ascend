@@ -46,8 +46,8 @@ public:
   ArrayRef<Operation *> getMemDefs(Operation *op) const;
   ArrayRef<Operation *> getMemUsers(Operation *op) const;
 
-  SmallVector<Operation *> getExecBefore(Operation *op) const;
-  SmallVector<Operation *> getExecAfter(Operation *op) const;
+  ArrayRef<Operation *> getExecBefore(Operation *op) const;
+  ArrayRef<Operation *> getExecAfter(Operation *op) const;
 
   // Refine a frontOp -> backOp memory edge to the leaf front ops that cause it.
   // Returns empty when no dependency is found.

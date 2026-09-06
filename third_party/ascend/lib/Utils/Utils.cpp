@@ -920,32 +920,6 @@ void traverseForwardUpdateUserChainIf(
                                    builder, stopOps);
 }
 
-bool isMetaUse(Operation *op) { return op->hasAttr("MetaUse"); }
-
-bool isMixUse(Operation *op) { return op->hasAttr("MixUse"); }
-
-IndirectLoadInterfaceOpType getIndirectLoadInterfaceOpType(Operation *op) {
-  auto ty = IndirectLoadInterfaceOpType::Undefined;
-  if (isMetaUse(op)) {
-    if (isa<triton::LoadOp>(op)) {
-      ty = IndirectLoadInterfaceOpType::Load;
-    } else if (isa<arith::FPToSIOp>(op)) {
-      ty = IndirectLoadInterfaceOpType::Calc;
-    }
-  }
-  return ty;
-}
-
-bool opIsIndirectLoad(Operation *op) {
-  auto opType = getIndirectLoadInterfaceOpType(op);
-  return opType == IndirectLoadInterfaceOpType::Load;
-}
-
-bool opIsIndirectCalc(Operation *op) {
-  auto opType = getIndirectLoadInterfaceOpType(op);
-  return opType == IndirectLoadInterfaceOpType::Calc;
-}
-
 scf::ForOp createNestedLoops(
     OpBuilder &builder, Location loc, unsigned currentDim, unsigned totalDims,
     ValueRange LBs, ValueRange UBs, ValueRange steps, SmallVector<Value> &ivs,

@@ -10,8 +10,11 @@
 // CHECK: arith.cmpi slt, %[[ARG9]], %[[C4_I32]]
 // CHECK: scf.condition
 // CHECK: ^bb0(%[[ARG9:.*]]: i32, %[[ARG10:.*]]: index)
-// CHECK: arith.addi %[[ARG9]], %[[C1_I32]]
-// CHECK: arith.addi %[[ARG10]], %[[C8]]
+// The offset increment can reuse the masked access bound after CSE.
+// Check both updates and the loop backedge without ordering the additions.
+// CHECK-DAG: %[[NEXT_ITER:.*]] = arith.addi %[[ARG9]], %[[C1_I32]] : i32
+// CHECK-DAG: %[[NEXT_OFFSET:.*]] = arith.addi %[[ARG10]], %[[C8]] : index
+// CHECK: scf.yield %[[NEXT_ITER]], %[[NEXT_OFFSET]] : i32, index
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @test_while_loop_index_tensor(

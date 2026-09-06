@@ -499,10 +499,6 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func,
   if (autoBlockifyAttr)
     funcFunc->setAttr("auto_blockify_size", autoBlockifyAttr);
 
-  auto coreRatioAttr = func->getAttr("hivm.core_ratio");
-  if (coreRatioAttr)
-    funcFunc->setAttr("hivm.core_ratio", coreRatioAttr);
-
   auto &funcFuncBody = funcFunc.getBody();
   auto &funcBody = func.getBody();
 

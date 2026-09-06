@@ -68,7 +68,6 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "chunk_ttt_linear_fwd_kernel_h",
     "transform_q_fwd_kernel",
     "_attn_fwd",
-    "kernel_sdpa_fwd",
     "kernel_sdpa_bwd_q",
     "pcb08_tc01_kernel",
     "pcb08_tc02_kernel",

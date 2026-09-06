@@ -302,7 +302,7 @@ void MoveLoadIntoUserPass::runOnOperation() {
 
     // Update block_id for all ops
     for (auto *op : opsToMove) {
-      bm.updateBlockIdWithInner(op, targetBlockId);
+      bm.updateBlockId(op, targetBlockId);
     }
 
     LOG_DEBUG("Successfully moved ops to block " << targetBlockId);

@@ -18,44 +18,32 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import pytest
-import torch
-import torch_npu
-from torch.testing import assert_close
-
 import triton
 import triton.language as tl
 import triton.language.extra.cann.extension as al
 
+import torch
+import torch_npu
+import pytest
+import test_common
+
+# ---------------
+# test get_element op
+# ---------------
+
 
 @triton.jit
-def parallel_kernel(x_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr):
-    # Load the full [M, N] block
-    offs_m = tl.arange(0, M)
-    offs_n = tl.arange(0, N)
-    block = tl.load(x_ptr + offs_m[:, None] * N + offs_n[None, :])
-
-    SUB_M: tl.constexpr = M // 2
-    for s in al.parallel(0, 2):
-        sub = al.extract_slice(block, (s * SUB_M, 0), (SUB_M, N), (1, 1))
-        sub = sub * 2.0
-        offs_sub_m = s * SUB_M + tl.arange(0, SUB_M)
-        out_ptrs = out_ptr + offs_sub_m[:, None] * N + offs_n[None, :]
-        tl.store(out_ptrs, sub)
+def get_element_kernel(x_ptr, out_ptr, N: tl.constexpr, IDX: tl.constexpr):
+    offs = tl.arange(0, N)
+    x = tl.load(x_ptr + offs)
+    v = al.get_element(x, [IDX])
+    tl.store(out_ptr, v)
 
 
-@pytest.mark.parametrize("M, N", [(128, 128)])
-def test_parallel(M, N):
-    x = torch.randn((M, N), device="npu", dtype=torch.float32)
-    out = torch.empty((M, N), device="npu", dtype=torch.float32)
-    h = parallel_kernel[(1, )](x, out, M=M, N=N)
-    torch.npu.synchronize()
-    assert_close(out, x * 2, rtol=1e-3, atol=1e-3)
-    code_str = h.asm["ttadapter"]
-    count = code_str.count("hivm.parallel_loop")
-    assert count == 1
-
-
-if __name__ == "__main__":
-    test_parallel(128, 128)
-    print("test_parallel PASSED!")
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'bfloat16', 'uint8'])
+def test_get_element(dtype):
+    size, idx = 64, 10
+    x = test_common.generate_tensor((size, ), dtype).npu()
+    out = torch.zeros(1, dtype=eval('torch.' + dtype)).npu()
+    get_element_kernel[(1, )](x, out, size, idx)
+    assert out.item() == x[idx].item(), (out.item(), x[idx].item())

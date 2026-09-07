@@ -2,14 +2,14 @@ import triton
 import pytest
 import torch
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 
 
 @triton.jit
 def sort_kernel_1d(X, Z, M: tl.constexpr, descending: tl.constexpr):
     off = tl.arange(0, M)
     x = tl.load(X + off)
-    x = extension.sort(x, descending=descending, dim=0)
+    x = al.sort(x, descending=descending, dim=0)
     tl.store(Z + off, x)
 
 

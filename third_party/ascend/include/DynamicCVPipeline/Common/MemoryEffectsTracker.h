@@ -23,6 +23,7 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 
+#include "DynamicCVPipeline/Common/SyncExecEdges.h"
 #include "DynamicCVPipeline/Common/SyncWall.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/IR/Block.h"
@@ -68,6 +69,7 @@ private:
 
   void analyzeOp(Operation *op);
   void analyzeRegionsOf(Operation *op);
+  void buildSyncEdges();
 
   SmallVector<MemoryEffects::EffectInstance>
   collectOuterEffects(Operation *op, bool &unknown, bool recursive = true);
@@ -90,6 +92,7 @@ private:
 
   void recordEdges(Operation *op, ArrayRef<Operation *> defs,
                    ArrayRef<Operation *> preds);
+
   AliasResult queryAlias(Value lhs, Value rhs);
 
   // True when a synchronization op sits strictly between @p a and @p b in the
@@ -108,6 +111,10 @@ private:
   // Execute order
   DenseMap<Operation *, SmallVector<Operation *>> execBefore;
   DenseMap<Operation *, SmallVector<Operation *>> execAfter;
+
+  // Sync-op execution edges, stored independently and merged on read so the
+  // sync-edge builder never touches execBefore/execAfter.
+  SyncExecEdges syncEdges;
 
   SmallVector<std::unique_ptr<MemSlot>> slots;
   DenseMap<Value, MemSlot *> valueToSlot;

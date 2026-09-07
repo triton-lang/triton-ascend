@@ -34,6 +34,10 @@
 // Unknown ops (no SideEffect interface) act as full barriers: they depend on
 // all prior writers/readers and become the sole writer for every slot.
 
+#include <algorithm>
+
+#include <algorithm>
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -153,8 +157,63 @@ MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
     return;
   }
   analyzeOp(root);
+  buildSyncEdges();
+
+
   slots.clear();
   valueToSlot.clear();
+}
+
+
+static bool isBefore( Operation *a,  Operation *b) {
+  return a->isBeforeInBlock(b);
+}
+
+void MemoryDependenceGraph::buildSyncEdges() {
+  if (root == nullptr) {
+    return;
+  }
+
+  root->walk([&](Block *block) {
+    SyncWall &wall = getWall(block);
+
+    // sync 链按 core_type 分别连：相邻同 core 同步点顺序相连，
+    // 保证“只连 core_type 相同的最近”的传递性。
+    auto linkChain = [&](ArrayRef<SyncPoint> syncs) {
+      for (size_t k = 1; k < syncs.size(); ++k) {
+        syncEdges.addEdge(syncs[k - 1].op, syncs[k].op);
+      }
+    };
+    linkChain(wall.syncPointsOf(CoreType::CUBE_ONLY));
+    linkChain(wall.syncPointsOf(CoreType::VECTOR_ONLY));
+
+    for (Operation *R : *block) {
+      if (!isTensorComputeOp(R) && !isStoreLike(R)) {
+        continue;
+      }
+      auto cR = CVPipeline::getOpCoreType(R);
+      if (cR != CoreType::CUBE_ONLY && cR != CoreType::VECTOR_ONLY) {
+        continue; // UNDETERMINED: no matching wall
+      }
+      auto syncs = wall.syncPointsOf(cR);
+      if (syncs.empty()) {
+        continue;
+      }
+      unsigned posR = wall.positionOf(R);
+
+      // 后最近同 core 同步点（第一个 position > posR）；prev = next - 1 为前最近。
+      auto next = std::upper_bound(
+          syncs.begin(), syncs.end(), posR,
+          [](const Operation *o, unsigned v) { return wall.positionOf(o) < v; });
+
+      if (next != syncs.begin()) { // 前最近 P：P -> R
+        syncEdges.addEdge((next - 1)->op, R);
+      }
+      if (next != syncs.end()) { // 后最近 N：R -> N
+        syncEdges.addEdge(R, next->op);
+      }
+    }
+  });
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getMemDefs(Operation *op) const {
@@ -174,17 +233,31 @@ ArrayRef<Operation *> MemoryDependenceGraph::getMemUsers(Operation *op) const {
 
 ArrayRef<Operation *>
 MemoryDependenceGraph::getExecBefore(Operation *op) const {
+  SmallVector<Operation *> result;
   auto it = execBefore.find(op);
-  if (it == execBefore.end())
-    return {};
-  return it->second;
+  if (it != execBefore.end()) {
+    result = it->second;
+  }
+  for (Operation *p : syncEdges.getBefore(op)) {
+    if (!llvm::is_contained(result, p)) {
+      result.push_back(p);
+    }
+  }
+  return result;
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
+  SmallVector<Operation *> result;
   auto it = execAfter.find(op);
-  if (it == execAfter.end())
-    return {};
-  return it->second;
+  if (it != execAfter.end()) {
+    result = it->second;
+  }
+  for (Operation *p : syncEdges.getAfter(op)) {
+    if (!llvm::is_contained(result, p)) {
+      result.push_back(p);
+    }
+  }
+  return result;
 }
 
 SmallVector<Operation *>
@@ -592,62 +665,21 @@ void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap) {
   }
 }
 
-SyncWall &MemoryDependenceGraph::getWall(Block *block) {
-  auto it = walls.find(block);
-  if (it == walls.end()) {
-    it = walls.try_emplace(block, block).first;
-  }
-  return it->second;
-}
-
-bool MemoryDependenceGraph::isSyncSeparated(Operation *a, Operation *b) {
-  if (!a || !b) {
-    return false;
-  }
-
-  if (Block *block = a->getBlock()) {
-    if (Operation *bAnc = CVPipeline::getAncestorInBlock(b, block)) {
-      return getWall(block).hasSyncBetween(a, bAnc);
-    }
-  }
-
-  if (Block *block = b->getBlock()) {
-    if (Operation *aAnc = CVPipeline::getAncestorInBlock(a, block)) {
-      return getWall(block).hasSyncBetween(b, aAnc);
-    }
-  }
-  return false;
-}
-
 void MemoryDependenceGraph::recordEdges(Operation *op,
                                         ArrayRef<Operation *> defs,
                                         ArrayRef<Operation *> preds) {
-  // Drop memory edges that cross a synchronization op
-  SmallVector<Operation *> syncFreeDefs;
-  for (Operation *p : defs) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreeDefs.push_back(p);
-    }
-  }
-  SmallVector<Operation *> syncFreePreds;
-  for (Operation *p : preds) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreePreds.push_back(p);
-    }
-  }
-
-  if (!syncFreeDefs.empty()) {
+  if (!defs.empty()) {
     auto &defList = memDefs[op];
-    defList.assign(syncFreeDefs.begin(), syncFreeDefs.end());
-    for (Operation *p : syncFreeDefs) {
+    defList.assign(defs.begin(), defs.end());
+    for (Operation *p : defs) {
       memUsers[p].push_back(op);
     }
   }
 
-  if (!syncFreePreds.empty()) {
+  if (!preds.empty()) {
     auto &execBeforeList = execBefore[op];
-    execBeforeList.assign(syncFreePreds.begin(), syncFreePreds.end());
-    for (Operation *p : syncFreePreds) {
+    execBeforeList.assign(preds.begin(), preds.end());
+    for (Operation *p : preds) {
       execAfter[p].push_back(op);
     }
   }

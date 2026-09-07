@@ -99,7 +99,7 @@ constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
 static constexpr int crossCoreConsumerId = 0;
 
-enum CoreType {
+enum CoreType : int {
   UNDETERMINED = 0,
   VECTOR_ONLY = 1 << 0,
   CUBE_ONLY = 1 << 1,

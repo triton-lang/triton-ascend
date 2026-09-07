@@ -309,7 +309,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",
-        "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
         "--enable-bishengir-simt-optimization=17",
@@ -339,7 +338,7 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         # Keep bisheng_options neutral in this matrix so it verifies only the
         # pure-SIMT envelope and automatic block policy.
         expected_options = list(common_prefix)
-        auto_blockify = env_enabled and not blacklisted and not row_applied
+        auto_blockify = env_enabled and not row_applied
         if auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
             if superblock > 0:
@@ -424,6 +423,9 @@ def test_895_coalesce_attrs_export_identically(name, attrs, expected, source_pai
 class _FakeNPUUtils:
     npu_utils_mod = SimpleNamespace(__file__="")
 
+    def get_so_path(self):
+        return "/cache/895-closure/npu_utils.so"
+
     def get_aivector_core_num(self):
         return 40
 
@@ -431,25 +433,48 @@ class _FakeNPUUtils:
         return 20
 
 
+def _module_string_constant(source, name):
+    """Extract a source-owned C++ template without importing the driver."""
+    tree = ast.parse(source)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            continue
+        value = ast.literal_eval(node.value)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
 def _load_make_launcher(source):
     state = {"auto_map_enabled": False}
     namespace = {
+        "os": os,
         "NPUUtils": _FakeNPUUtils,
         "_BASE_ARGS_FORMAT": "iiiKKOOOO",
+        "_BASE_ARGS_FORMAT_LEN": len("iiiKKOOOO"),
+        # Keep each source's emitted launcher text intact without importing
+        # the driver module or initializing its NPU extension.
+        "_CPP_DEVICE_POINTER": _module_string_constant(source, "_CPP_DEVICE_POINTER"),
+        "_CPP_MSPROF_EXTERN": _module_string_constant(source, "_CPP_MSPROF_EXTERN"),
+        "_CPP_MSPROF_CALLBACK": _module_string_constant(source, "_CPP_MSPROF_CALLBACK"),
+        "_CPP_MSPROF_BEFORE_LAUNCH": _module_string_constant(source, "_CPP_MSPROF_BEFORE_LAUNCH"),
+        "_CPP_ALIGN_LAUNCH_OFFSET": _module_string_constant(source, "_CPP_ALIGN_LAUNCH_OFFSET"),
+        "_CPP_GET_TENSOR_SHAPE": _module_string_constant(source, "_CPP_GET_TENSOR_SHAPE"),
         "_is_auto_map_parallel_blocks_enabled": lambda: state["auto_map_enabled"],
         "force_disable_ffts": lambda *_args: False,
         "is_ffts_supported": lambda _arch: True,
         "get_ascend_arch_from_env": lambda: "Ascend910B",
         "get_backend_func": lambda name, *_args: f"/* {name} */",
         "convert_sigtype_to_int": lambda _ty: 0,
-        "generate_npu_header_src": lambda: "",
         "extract_device_print_code_from_cann": lambda: "",
     }
-    _exec_functions(source, ("ty_to_cpp", "make_launcher"), namespace)
+    _exec_functions(source, ("generate_npu_header_src", "ty_to_cpp", "make_launcher"), namespace)
     return namespace["make_launcher"], state
 
 
-def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
+def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied, is_pure_simt=False):
     return SimpleNamespace(
         target=SimpleNamespace(arch="Ascend910B"),
         workspace_size=0,
@@ -462,8 +487,8 @@ def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
         parallel_mode="",
         # The baseline closure still reads this retired field; the target
         # closure reads is_pure_simt.  Keep both in this historical test mock.
-        force_simt_only=False,
-        is_pure_simt=False,
+        force_simt_only=is_pure_simt,
+        is_pure_simt=is_pure_simt,
         debug=False,
         shared_mem_dynamic_size=221184,
         coalesce_factor=factor,
@@ -529,7 +554,8 @@ def test_895_launcher_coalescing_and_block_cap_closure(
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    for env_enabled, blacklisted, row_applied in itertools.product(
+    for env_enabled, is_pure_simt, blacklisted, row_applied in itertools.product(
+        (False, True),
         (False, True),
         (False, True),
         (False, True),
@@ -545,6 +571,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             ),
         )
         target_src = target_make_launcher(
@@ -556,14 +583,17 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             ),
         )
-        case = f"{name}: E={env_enabled}, B={blacklisted}, R={row_applied}"
+        case = f"{name}: E={env_enabled}, P={is_pure_simt}, B={blacklisted}, R={row_applied}"
         baseline_paths = _launcher_paths(baseline_src)
         target_paths = _launcher_paths(target_src)
         assert len(baseline_paths) == len(target_paths) == 2, case
         expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
-        expected_target_cap_count = (1 if env_enabled and not blacklisted and not row_applied else 0)
+        expected_target_cap_count = 1 if (
+            env_enabled and not row_applied and (is_pure_simt or not blacklisted)
+        ) else 0
         for baseline_path, target_path in zip(baseline_paths, target_paths):
             assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
             assert baseline_path.count(assignment) == target_path.count(assignment) == 1, case
@@ -598,9 +628,10 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
     )
 
     for family, factors, ceil_div in families:
-        for factor, axis, env_enabled, blacklisted, row_applied in itertools.product(
+        for factor, axis, env_enabled, is_pure_simt, blacklisted, row_applied in itertools.product(
                 factors,
             (0, 1, 2),
+            (False, True),
             (False, True),
             (False, True),
             (False, True),
@@ -613,16 +644,19 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             )
             baseline_src = baseline_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
             target_src = target_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
             grid = grid_names[axis]
             case = (f"{family}: H={factor}, axis={axis}, ceil={ceil_div}, "
-                    f"E={env_enabled}, B={blacklisted}, R={row_applied}")
+                    f"E={env_enabled}, P={is_pure_simt}, B={blacklisted}, R={row_applied}")
             expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
                                    if ceil_div else f"{grid} = {grid} / {factor};")
             expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
-            expected_target_cap_count = (1 if env_enabled and not blacklisted and not row_applied else 0)
+            expected_target_cap_count = 1 if (
+                env_enabled and not row_applied and (is_pure_simt or not blacklisted)
+            ) else 0
             for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
                 assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
                 assert baseline_path.count(expected_assignment) == 1, case

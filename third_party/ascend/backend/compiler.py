@@ -1,4 +1,4 @@
-﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -131,6 +131,9 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
     rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
+    if rc == 4:
+        metadata["disable_vf_operand_substitution"] = True
+        return
     if rc != -1 and rc > 0:
         # When the option dynamic_cv_pipeline is set to False,
         # these options should also reverted.
@@ -682,7 +685,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 [f"--enable-vf-fusion={enable_vf_fusion}"]
 
         enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
-        if enable_dynamic_cv_pipeline == True:
+        if enable_dynamic_cv_pipeline == True and not metadata.get("disable_vf_operand_substitution", False):
             _compile_option_list += [f"--enable-vf-operand-substitution=True"]
 
         enable_flatten = metadata["enable_flatten"]

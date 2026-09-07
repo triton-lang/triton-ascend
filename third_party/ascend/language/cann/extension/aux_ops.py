@@ -5,19 +5,16 @@ from triton.language.core import (_unwrap_if_constexpr, _tensor_member_fn, _unwr
 
 from typing import Optional, Tuple, List, overload, Union
 from triton._C.libtriton import ir
-from ._utils import custom_op
+from ._utils import _deprecated, custom_op
 
 
+@_deprecated(
+    fn_name="triton.language.sync_block_all",
+    replacement="triton.language.extra.cann.extension.sync_block_all",
+)
 @_tensor_member_fn
 @builtin
 def sync_block_all(mode, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_all instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
     mode = _unwrap_if_constexpr(mode)
     event_id = _unwrap_if_constexpr(event_id)
     assert isinstance(mode, str), f"mode: {mode} is not string"
@@ -26,16 +23,13 @@ def sync_block_all(mode, event_id, _semantic=None):
     custom_op(_semantic.builder, "sync_block_all", mode=mode, event_id=event_id)
 
 
+@_deprecated(
+    fn_name="triton.language.sync_block_set",
+    replacement="triton.language.extra.cann.extension.sync_block_set",
+)
 @_tensor_member_fn
 @builtin
 def sync_block_set(sender, receiver, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_set instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
     sender = _unwrap_if_constexpr(sender)
     receiver = _unwrap_if_constexpr(receiver)
     event_id = _unwrap_if_constexpr(event_id)
@@ -49,16 +43,13 @@ def sync_block_set(sender, receiver, event_id, _semantic=None):
     custom_op(_semantic.builder, "sync_block_set", sender=sender, event_id=event_id)
 
 
+@_deprecated(
+    fn_name="triton.language.sync_block_wait",
+    replacement="triton.language.extra.cann.extension.sync_block_wait",
+)
 @_tensor_member_fn
 @builtin
 def sync_block_wait(sender, receiver, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_wait instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
     sender = _unwrap_if_constexpr(sender)
     receiver = _unwrap_if_constexpr(receiver)
     event_id = _unwrap_if_constexpr(event_id)

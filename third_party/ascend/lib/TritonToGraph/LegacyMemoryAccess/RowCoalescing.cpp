@@ -32,6 +32,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Matchers.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -65,6 +66,7 @@ struct RowSeed {
   Value validCount;
   arith::CmpIOp entryGuard;
   Block *workBlock = nullptr;
+  SmallVector<Operation *> externalPidDefinitions;
 };
 
 static int64_t inferRowsPerProgram(int64_t maxBaseElements) {
@@ -93,6 +95,23 @@ static bool isScalarIntegerLike(Value value) {
   auto intTy = dyn_cast<IntegerType>(type);
   return intTy && intTy.getWidth() > 1;
 }
+
+static bool isRankedI1Tensor(Value value) {
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type)
+    return false;
+  auto elementType = dyn_cast<IntegerType>(type.getElementType());
+  return elementType && elementType.getWidth() == 1;
+}
+
+static bool isI1AssertCondition(Value value) {
+  if (auto type = dyn_cast<IntegerType>(value.getType()))
+    return type.getWidth() == 1;
+  return isRankedI1Tensor(value);
+}
+
+static bool isRowLiftable(Operation *op);
+static bool collectExternalPidDefinitions(RowSeed &seed);
 
 // Match the canonical rowwise guard:
 //
@@ -142,7 +161,10 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
     if (!isScalarIntegerLike(cmp.getRhs()))
       continue;
 
-    return RowSeed{pid, axis, cmp.getRhs(), cmp, falseBlock};
+    RowSeed seed{pid, axis, cmp.getRhs(), cmp, falseBlock};
+    if (!collectExternalPidDefinitions(seed))
+      continue;
+    return seed;
   }
 
   return std::nullopt;
@@ -151,6 +173,8 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
 static bool isRowLiftable(Operation *op) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(op))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(op))
+    return isI1AssertCondition(assertOp.getCondition());
   if (auto *dialect = op->getDialect()) {
     StringRef ns = dialect->getNamespace();
     if (ns == arith::ArithDialect::getDialectNamespace() ||
@@ -161,6 +185,87 @@ static bool isRowLiftable(Operation *op) {
              triton::ExpandDimsOp, triton::LoadOp, triton::StoreOp,
              triton::MakeRangeOp, triton::ScanOp, triton::ReduceOp,
              triton::ClampFOp, triton::FpToFpOp, scf::ForOp>(op);
+}
+
+static bool isInWorkRegion(Operation *operation, Block *workBlock) {
+  for (Operation *current = operation; current;
+       current = current->getParentOp()) {
+    if (current->getBlock() == workBlock)
+      return true;
+  }
+  return false;
+}
+
+// Rebuild only side-effect-free, regionless PID-derived definitions that live
+// in the canonical entry block.  Loads, stores and assertions need their own
+// Row masking semantics, so keep them in the work block or reject the match.
+static bool isExternalPidDefinitionLiftable(Operation *operation) {
+  if (!operation || operation->getNumRegions() != 0 ||
+      isa<triton::LoadOp, triton::StoreOp, triton::AssertOp, triton::ReduceOp,
+          triton::ScanOp, scf::ForOp>(operation))
+    return false;
+  return isRowLiftable(operation) && isMemoryEffectFree(operation);
+}
+
+// A PID-derived value may be defined before the branch and then consumed by
+// the work block.  It must be rebuilt from the lifted PID rather than treated
+// as a uniform scalar.  Keep the canonical guard's direct PID use intact and
+// reject every other external dependency that cannot be safely cloned.
+static bool collectExternalPidDefinitions(RowSeed &seed) {
+  Block *entryBlock = seed.pid->getBlock();
+  if (!entryBlock || !seed.workBlock)
+    return false;
+
+  DenseSet<Value> visited;
+  DenseSet<Operation *> definitions;
+  SmallVector<Value> worklist{seed.pid.getResult()};
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+    for (Operation *user : value.getUsers()) {
+      if (user == seed.entryGuard.getOperation()) {
+        // The matched guard is exactly "%pid >= count".  A value derived
+        // from PID must not also feed that guard, because it is not rebuilt.
+        if (value != seed.pid.getResult())
+          return false;
+        continue;
+      }
+      if (isInWorkRegion(user, seed.workBlock)) {
+        for (Value result : user->getResults())
+          worklist.push_back(result);
+        continue;
+      }
+      if (user->getBlock() != entryBlock ||
+          !isExternalPidDefinitionLiftable(user))
+        return false;
+      definitions.insert(user);
+      for (Value result : user->getResults())
+        worklist.push_back(result);
+    }
+  }
+
+  seed.externalPidDefinitions.clear();
+  for (Operation &operation : *entryBlock)
+    if (definitions.contains(&operation))
+      seed.externalPidDefinitions.push_back(&operation);
+  return true;
+}
+
+// Assertions in the work block and in nested scf.for bodies are rebuilt
+// explicitly.  Reduce/scan combine regions are cloned as-is, so assertions in
+// those regions cannot receive the Row tail guard and must fail closed.
+static bool isAssertInRowRebuildableRegion(Operation *operation,
+                                           Block *workBlock) {
+  for (Operation *current = operation; current;
+       current = current->getParentOp()) {
+    if (current->getBlock() == workBlock)
+      return true;
+    Operation *parent = current->getParentOp();
+    if (!parent || !isa<scf::ForOp>(parent))
+      return false;
+  }
+  return false;
 }
 
 static bool collectRowRegion(const RowSeed &seed,
@@ -179,8 +284,13 @@ static bool collectRowRegion(const RowSeed &seed,
         return;
       if (!isRowLiftable(nested))
         safe = false;
+      if (isa<triton::AssertOp>(nested) &&
+          !isAssertInRowRebuildableRegion(nested, seed.workBlock))
+        safe = false;
     });
-    if (!safe || !isRowLiftable(&op))
+    if (!safe || !isRowLiftable(&op) ||
+        (isa<triton::AssertOp>(&op) &&
+         !isAssertInRowRebuildableRegion(&op, seed.workBlock)))
       return false;
     if (isa<triton::StoreOp>(op))
       hasStore = true;
@@ -470,6 +580,32 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
       return true;
     }
 
+    if (auto assertOp = dyn_cast<triton::AssertOp>(op)) {
+      if (!isI1AssertCondition(assertOp.getCondition()))
+        return false;
+      Value condition = liftOperand(assertOp.getCondition(), localMap);
+      if (!condition || !isRankedI1Tensor(condition))
+        return false;
+      auto conditionType = cast<RankedTensorType>(condition.getType());
+      Value activeMask = maskForType(opLoc, condition.getType());
+      if (!activeMask || activeMask.getType() != condition.getType())
+        return false;
+
+      // ceil-div Row launches create inactive tail rows that did not execute
+      // in the original kernel.  Make those lanes vacuously satisfy every
+      // lifted assertion while preserving it on each active row.
+      auto oneAttr = rw.getIntegerAttr(conditionType.getElementType(), 1);
+      Value allTrue = rw.create<arith::ConstantOp>(
+          opLoc, DenseElementsAttr::get(conditionType, oneAttr));
+      Value inactiveMask = rw.create<arith::XOrIOp>(opLoc, activeMask, allTrue);
+      Value guardedCondition =
+          rw.create<arith::OrIOp>(opLoc, inactiveMask, condition);
+      auto rewrittenAssert = rw.create<triton::AssertOp>(
+          assertOp.getLoc(), guardedCondition, assertOp.getMessage());
+      copyAttrs(assertOp, rewrittenAssert);
+      return true;
+    }
+
     if (auto forOp = dyn_cast<scf::ForOp>(op)) {
       OpBuilder::InsertionGuard guard(rw);
       Value lowerBound = lift(forOp.getLowerBound(), localMap);
@@ -569,6 +705,10 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
   };
 
   DenseMap<Value, Value> topMap;
+  for (Operation *op : seed.externalPidDefinitions) {
+    if (!rebuildOp(op, &topMap, false))
+      return false;
+  }
   for (Operation *op : ordered) {
     if (!rebuildOp(op, &topMap, true))
       return false;
@@ -604,6 +744,11 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
   }
   if (seed.entryGuard->use_empty())
     rw.eraseOp(seed.entryGuard);
+  for (auto it = seed.externalPidDefinitions.rbegin();
+       it != seed.externalPidDefinitions.rend(); ++it) {
+    if ((*it)->use_empty())
+      rw.eraseOp(*it);
+  }
 
   (void)moduleOp;
   return true;

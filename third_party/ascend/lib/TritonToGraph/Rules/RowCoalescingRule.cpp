@@ -31,6 +31,7 @@
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
@@ -124,9 +125,25 @@ bool isInWorkRegion(Operation *operation, Block *workBlock) {
   return false;
 }
 
+bool isRankedI1Tensor(Value value) {
+  auto type = dyn_cast<RankedTensorType>(value.getType());
+  if (!type)
+    return false;
+  auto elementType = dyn_cast<IntegerType>(type.getElementType());
+  return elementType && elementType.getWidth() == 1;
+}
+
+bool isI1AssertCondition(Value value) {
+  if (auto type = dyn_cast<IntegerType>(value.getType()))
+    return type.getWidth() == 1;
+  return isRankedI1Tensor(value);
+}
+
 bool isRowLiftable(Operation *operation) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(operation))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(operation))
+    return isI1AssertCondition(assertOp.getCondition());
   if (Dialect *dialect = operation->getDialect()) {
     StringRef dialectNamespace = dialect->getNamespace();
     if (dialectNamespace == arith::ArithDialect::getDialectNamespace() ||
@@ -137,6 +154,29 @@ bool isRowLiftable(Operation *operation) {
              triton::ExpandDimsOp, triton::LoadOp, triton::StoreOp,
              triton::MakeRangeOp, triton::ScanOp, triton::ReduceOp,
              triton::ClampFOp, triton::FpToFpOp, scf::ForOp>(operation);
+}
+
+// Reduce/scan combine regions are cloned without recursively rebuilding their
+// bodies.  Only assertions in the work block or nested scf.for bodies can be
+// given the Row tail guard.
+bool isAssertInRowRebuildableRegion(Operation *operation, Block *workBlock) {
+  for (Operation *current = operation; current;
+       current = current->getParentOp()) {
+    if (current->getBlock() == workBlock)
+      return true;
+    Operation *parent = current->getParentOp();
+    if (!parent || !isa<scf::ForOp>(parent))
+      return false;
+  }
+  return false;
+}
+
+bool isExternalPidDefinitionLiftable(Operation *operation) {
+  if (!operation || operation->getNumRegions() != 0 ||
+      isa<triton::LoadOp, triton::StoreOp, triton::AssertOp, triton::ReduceOp,
+          triton::ScanOp, scf::ForOp>(operation))
+    return false;
+  return isRowLiftable(operation) && isMemoryEffectFree(operation);
 }
 
 bool collectRowRegion(const RowSeed &seed,
@@ -156,8 +196,13 @@ bool collectRowRegion(const RowSeed &seed,
         return;
       if (!isRowLiftable(nested))
         safe = false;
+      if (isa<triton::AssertOp>(nested) &&
+          !isAssertInRowRebuildableRegion(nested, seed.workBlock))
+        safe = false;
     });
-    if (!safe || !isRowLiftable(&operation))
+    if (!safe || !isRowLiftable(&operation) ||
+        (isa<triton::AssertOp>(&operation) &&
+         !isAssertInRowRebuildableRegion(&operation, seed.workBlock)))
       return false;
     hasStore |= isa<triton::StoreOp>(operation);
     ordered.push_back(&operation);
@@ -196,7 +241,11 @@ int64_t inferRowsPerProgram(int64_t maxBaseElements) {
   return kDefaultRowsPerProgram;
 }
 
-bool hasPidDerivedValueOutsideWork(RowSeed &seed) {
+bool hasUnsupportedPidDependencyOutsideWork(RowSeed &seed) {
+  Block *entryBlock = seed.pid->getBlock();
+  if (!entryBlock || !seed.workBlock)
+    return true;
+
   DenseSet<Value> visited;
   SmallVector<Value> worklist{seed.pid.getResult()};
   while (!worklist.empty()) {
@@ -204,12 +253,20 @@ bool hasPidDerivedValueOutsideWork(RowSeed &seed) {
     if (!visited.insert(value).second)
       continue;
     for (Operation *user : value.getUsers()) {
-      // The canonical guard intentionally consumes the scalar PID before the
-      // work block.  Every other PID-derived calculation must be rebuilt in
-      // the lifted region; otherwise legacy Row would splat it as uniform.
-      if (user == seed.entryGuard.getOperation())
+      if (user == seed.entryGuard.getOperation()) {
+        // The canonical guard consumes the original scalar PID directly.
+        // A derived value feeding it cannot be rebuilt independently.
+        if (value != seed.pid.getResult())
+          return true;
         continue;
-      if (!isInWorkRegion(user, seed.workBlock))
+      }
+      if (isInWorkRegion(user, seed.workBlock)) {
+        for (Value result : user->getResults())
+          worklist.push_back(result);
+        continue;
+      }
+      if (user->getBlock() != entryBlock ||
+          !isExternalPidDefinitionLiftable(user))
         return true;
       for (Value result : user->getResults())
         worklist.push_back(result);
@@ -271,7 +328,7 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
       continue;
 
     RowSeed seed{pid, axis, guard.getRhs(), guard, workBlock};
-    if (hasPidDerivedValueOutsideWork(seed))
+    if (hasUnsupportedPidDependencyOutsideWork(seed))
       continue;
     return seed;
   }

@@ -95,9 +95,6 @@ private:
   // Mark an operation as CUBE
   void markCube(Operation *op);
 
-  // Mark synchronization Op
-  llvm::LogicalResult markSynchronizationOp();
-
   // Pattern matching for CUBE operations
   int patternMatchCUBE();
 

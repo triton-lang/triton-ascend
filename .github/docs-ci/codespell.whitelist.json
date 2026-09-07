@@ -193,7 +193,6 @@
   "powf",
   "sinf",
   "tanf",
-  "tanhf",
   "fdim",
   "finitef",
   "fmod",
@@ -249,6 +248,5 @@
   "Robeck",
   "TTGIR",
   "ttgir",
-  "upstreamed",
-  "manylinux"
+  "upstreamed"
 ]

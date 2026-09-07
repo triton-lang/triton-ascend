@@ -2,7 +2,7 @@
 
 ## SIMT 编译示例
 
-使用 SIMT 编译的 triton kernel 示例。通过 kernel 启动参数设置 `compile_mode='simt_only'`，即可启用纯 SIMT 编译。
+使用 SIMT 编译的 triton kernel 示例
 
 ```python
 # Enable libdevice SIMT compilation
@@ -25,8 +25,8 @@ def triton_kernel(input, output, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr)
 dtype, shape, ncore, xblock, xblock_sub = ['int32', (128, 4096), 512, 1024, 1024]
 input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
 output = torch.zeros_like(input)
-# 使用 compile_mode='simt_only' 启用纯 SIMT 编译
-triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, compile_mode='simt_only')
+# Enable SIMT compilation with option "force_simt_only=True"
+triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, force_simt_only=True)
 ```
 
 ## 1. triton.language.extra.cann.libdevice.abs
@@ -49,7 +49,7 @@ triton.language.extra.cann.libdevice.abs(x, _builder=None)
 
 返回类型：`int32`, `float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 2. triton.language.extra.cann.libdevice.acos
 
@@ -71,7 +71,7 @@ triton.language.extra.cann.libdevice.acos(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 3. triton.language.extra.cann.libdevice.acosh
 
@@ -93,7 +93,7 @@ triton.language.extra.cann.libdevice.acosh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 4. triton.language.extra.cann.libdevice.add_rd
 
@@ -116,7 +116,7 @@ triton.language.extra.cann.libdevice.add_rd(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 5. triton.language.extra.cann.libdevice.add_rn
 
@@ -139,7 +139,7 @@ triton.language.extra.cann.libdevice.add_rn(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 6. triton.language.extra.cann.libdevice.add_ru
 
@@ -162,7 +162,7 @@ triton.language.extra.cann.libdevice.add_ru(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 7. triton.language.extra.cann.libdevice.add_rz
 
@@ -185,7 +185,7 @@ triton.language.extra.cann.libdevice.add_rz(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 8. triton.language.extra.cann.libdevice.asin
 
@@ -207,7 +207,7 @@ triton.language.extra.cann.libdevice.asin(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 9. triton.language.extra.cann.libdevice.asinh
 
@@ -229,7 +229,7 @@ triton.language.extra.cann.libdevice.asinh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 10. triton.language.extra.cann.libdevice.atan
 
@@ -251,7 +251,7 @@ triton.language.extra.cann.libdevice.atan(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 11. triton.language.extra.cann.libdevice.atan2
 
@@ -274,7 +274,7 @@ triton.language.extra.cann.libdevice.atan2(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 12. triton.language.extra.cann.libdevice.atanh
 
@@ -296,7 +296,7 @@ triton.language.extra.cann.libdevice.atanh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 13. triton.language.extra.cann.libdevice.brev
 
@@ -318,7 +318,7 @@ triton.language.extra.cann.libdevice.brev(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 14. triton.language.extra.cann.libdevice.byte_perm
 
@@ -356,7 +356,7 @@ triton.language.extra.cann.libdevice.byte_perm(x, y, s, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 15. triton.language.extra.cann.libdevice.cbrt
 
@@ -378,7 +378,7 @@ triton.language.extra.cann.libdevice.cbrt(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 16. triton.language.extra.cann.libdevice.ceil
 
@@ -400,7 +400,7 @@ triton.language.extra.cann.libdevice.ceil(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 17. triton.language.extra.cann.libdevice.clz
 
@@ -422,7 +422,7 @@ triton.language.extra.cann.libdevice.clz(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 18. triton.language.extra.cann.libdevice.copysign
 
@@ -445,7 +445,7 @@ triton.language.extra.cann.libdevice.copysign(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 19. triton.language.extra.cann.libdevice.cos
 
@@ -467,7 +467,7 @@ triton.language.extra.cann.libdevice.cos(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 20. triton.language.extra.cann.libdevice.cosh
 
@@ -489,7 +489,7 @@ triton.language.extra.cann.libdevice.cosh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 21. triton.language.extra.cann.libdevice.cospi
 
@@ -511,7 +511,7 @@ triton.language.extra.cann.libdevice.cospi(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 22. triton.language.extra.cann.libdevice.cyl_bessel_i0
 
@@ -533,7 +533,7 @@ triton.language.extra.cann.libdevice.cyl_bessel_i0(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 23. triton.language.extra.cann.libdevice.cyl_bessel_i1
 
@@ -555,7 +555,7 @@ triton.language.extra.cann.libdevice.cyl_bessel_i1(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 24. triton.language.extra.cann.libdevice.div_rd
 
@@ -578,7 +578,7 @@ triton.language.extra.cann.libdevice.div_rd(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 25. triton.language.extra.cann.libdevice.div_rn
 
@@ -601,7 +601,7 @@ triton.language.extra.cann.libdevice.div_rn(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 26. triton.language.extra.cann.libdevice.div_ru
 
@@ -624,7 +624,7 @@ triton.language.extra.cann.libdevice.div_ru(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 27. triton.language.extra.cann.libdevice.div_rz
 
@@ -647,7 +647,7 @@ triton.language.extra.cann.libdevice.div_rz(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 28. triton.language.extra.cann.libdevice.erf
 
@@ -669,7 +669,7 @@ triton.language.extra.cann.libdevice.erf(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 29. triton.language.extra.cann.libdevice.erfc
 
@@ -691,7 +691,7 @@ triton.language.extra.cann.libdevice.erfc(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 30. triton.language.extra.cann.libdevice.erfcinv
 
@@ -713,7 +713,7 @@ triton.language.extra.cann.libdevice.erfcinv(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 31. triton.language.extra.cann.libdevice.erfcx
 
@@ -735,7 +735,7 @@ triton.language.extra.cann.libdevice.erfcx(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 32. triton.language.extra.cann.libdevice.erfinv
 
@@ -757,7 +757,7 @@ triton.language.extra.cann.libdevice.erfinv(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 33. triton.language.extra.cann.libdevice.exp
 
@@ -779,7 +779,7 @@ triton.language.extra.cann.libdevice.exp(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 34. triton.language.extra.cann.libdevice.exp10
 
@@ -801,7 +801,7 @@ triton.language.extra.cann.libdevice.exp10(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 35. triton.language.extra.cann.libdevice.exp2
 
@@ -823,7 +823,7 @@ triton.language.extra.cann.libdevice.exp2(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 36. triton.language.extra.cann.libdevice.expm1
 
@@ -845,7 +845,7 @@ triton.language.extra.cann.libdevice.expm1(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
 ## 37. triton.language.extra.cann.libdevice.fast_cosf
 
@@ -867,7 +867,7 @@ triton.language.extra.cann.libdevice.fast_cosf(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 38. triton.language.extra.cann.libdevice.fast_dividef
 
@@ -890,31 +890,9 @@ triton.language.extra.cann.libdevice.fast_dividef(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 39. triton.language.extra.cann.libdevice.fast_expf
-
-### OP概述
-
-快速近似指数函数。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回快速近似指数函数的结果。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 40. triton.language.extra.cann.libdevice.fast_exp10f
+## 39. triton.language.extra.cann.libdevice.fast_exp10f
 
 ### OP概述
 
@@ -934,31 +912,31 @@ triton.language.extra.cann.libdevice.fast_exp10f(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 41. triton.language.extra.cann.libdevice.fast_logf
+## 40. triton.language.extra.cann.libdevice.fast_expf
 
 ### OP概述
 
-快速近似自然对数函数。
+快速近似指数函数。
 
 原型:
 
 ```python
-triton.language.extra.cann.libdevice.fast_logf(x, _builder=None)
+triton.language.extra.cann.libdevice.fast_expf(x, _builder=None)
 ```
 
 输入类型：
 
 - x: `float32`
 
-返回值: `tl.tensor`, 返回快速近似自然对数函数的结果。
+返回值: `tl.tensor`, 返回快速近似指数函数的结果。
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 42. triton.language.extra.cann.libdevice.fast_log10f
+## 41. triton.language.extra.cann.libdevice.fast_log10f
 
 ### OP概述
 
@@ -978,9 +956,9 @@ triton.language.extra.cann.libdevice.fast_log10f(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 43. triton.language.extra.cann.libdevice.fast_log2f
+## 42. triton.language.extra.cann.libdevice.fast_log2f
 
 ### OP概述
 
@@ -1000,7 +978,29 @@ triton.language.extra.cann.libdevice.fast_log2f(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
+
+## 43. triton.language.extra.cann.libdevice.fast_logf
+
+### OP概述
+
+快速近似自然对数函数。
+
+原型:
+
+```python
+triton.language.extra.cann.libdevice.fast_logf(x, _builder=None)
+```
+
+输入类型：
+
+- x: `float32`
+
+返回值: `tl.tensor`, 返回快速近似自然对数函数的结果。
+
+返回类型：`float32`
+
+支持编译模式：SIMT
 
 ## 44. triton.language.extra.cann.libdevice.fast_powf
 
@@ -1023,7 +1023,7 @@ triton.language.extra.cann.libdevice.fast_powf(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 45. triton.language.extra.cann.libdevice.fast_sinf
 
@@ -1045,7 +1045,7 @@ triton.language.extra.cann.libdevice.fast_sinf(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
 ## 46. triton.language.extra.cann.libdevice.fast_tanf
 
@@ -1067,31 +1067,9 @@ triton.language.extra.cann.libdevice.fast_tanf(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 47. triton.language.extra.cann.libdevice.fast_tanhf
-
-### OP概述
-
-使用快速近似算法计算 x 的双曲正切值。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.fast_tanhf(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回 x 的双曲正切快速近似值。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 48. triton.language.extra.cann.libdevice.fdim
+## 47. triton.language.extra.cann.libdevice.fdim
 
 ### OP概述
 
@@ -1112,9 +1090,9 @@ triton.language.extra.cann.libdevice.fdim(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 49. triton.language.extra.cann.libdevice.ffs
+## 48. triton.language.extra.cann.libdevice.ffs
 
 ### OP概述
 
@@ -1134,9 +1112,9 @@ triton.language.extra.cann.libdevice.ffs(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 50. triton.language.extra.cann.libdevice.finitef
+## 49. triton.language.extra.cann.libdevice.finitef
 
 ### OP概述
 
@@ -1156,75 +1134,9 @@ triton.language.extra.cann.libdevice.finitef(x, _builder=None)
 
 返回类型：`bool`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 51. triton.language.extra.cann.libdevice.float_as_int
-
-### OP概述
-
-将浮点数的比特位重新解释为32位整数。不进行数值转换。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.float_as_int(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位整数的结果。
-
-返回类型：`int32`
-
-支持编译模式：SIMD, SIMT
-
-## 52. triton.language.extra.cann.libdevice.float_as_uint
-
-### OP概述
-
-将浮点数的比特位重新解释为32位无符号整数。不进行数值转换。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.float_as_uint(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位无符号整数的结果。
-
-返回类型：`uint32`
-
-支持编译模式：SIMD, SIMT
-
-## 53. triton.language.extra.cann.libdevice.float2half_rn
-
-### OP概述
-
-使用最近偶数舍入模式将 x 从 32 位浮点数转换为 16 位浮点数。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.float2half_rn(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回转换后的 16 位浮点数。
-
-返回类型：`float16`
-
-支持编译模式：SIMD, SIMT
-
-## 54. triton.language.extra.cann.libdevice.float2int_rd
+## 50. triton.language.extra.cann.libdevice.float2int_rd
 
 ### OP概述
 
@@ -1244,9 +1156,9 @@ triton.language.extra.cann.libdevice.float2int_rd(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 55. triton.language.extra.cann.libdevice.float2int_rn
+## 51. triton.language.extra.cann.libdevice.float2int_rn
 
 ### OP概述
 
@@ -1266,9 +1178,9 @@ triton.language.extra.cann.libdevice.float2int_rn(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 56. triton.language.extra.cann.libdevice.float2int_ru
+## 52. triton.language.extra.cann.libdevice.float2int_ru
 
 ### OP概述
 
@@ -1288,9 +1200,9 @@ triton.language.extra.cann.libdevice.float2int_ru(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 57. triton.language.extra.cann.libdevice.float2int_rz
+## 53. triton.language.extra.cann.libdevice.float2int_rz
 
 ### OP概述
 
@@ -1310,9 +1222,9 @@ triton.language.extra.cann.libdevice.float2int_rz(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 58. triton.language.extra.cann.libdevice.float2ll_rd
+## 54. triton.language.extra.cann.libdevice.float2ll_rd
 
 ### OP概述
 
@@ -1332,9 +1244,9 @@ triton.language.extra.cann.libdevice.float2ll_rd(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 59. triton.language.extra.cann.libdevice.float2ll_rn
+## 55. triton.language.extra.cann.libdevice.float2ll_rn
 
 ### OP概述
 
@@ -1354,9 +1266,9 @@ triton.language.extra.cann.libdevice.float2ll_rn(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 60. triton.language.extra.cann.libdevice.float2ll_ru
+## 56. triton.language.extra.cann.libdevice.float2ll_ru
 
 ### OP概述
 
@@ -1376,9 +1288,9 @@ triton.language.extra.cann.libdevice.float2ll_ru(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 61. triton.language.extra.cann.libdevice.float2ll_rz
+## 57. triton.language.extra.cann.libdevice.float2ll_rz
 
 ### OP概述
 
@@ -1398,9 +1310,9 @@ triton.language.extra.cann.libdevice.float2ll_rz(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 62. triton.language.extra.cann.libdevice.float2uint_rd
+## 58. triton.language.extra.cann.libdevice.float2uint_rd
 
 ### OP概述
 
@@ -1420,9 +1332,9 @@ triton.language.extra.cann.libdevice.float2uint_rd(x, _builder=None)
 
 返回类型：`uint32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 63. triton.language.extra.cann.libdevice.float2uint_rn
+## 59. triton.language.extra.cann.libdevice.float2uint_rn
 
 ### OP概述
 
@@ -1442,9 +1354,9 @@ triton.language.extra.cann.libdevice.float2uint_rn(x, _builder=None)
 
 返回类型：`uint32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 64. triton.language.extra.cann.libdevice.float2uint_ru
+## 60. triton.language.extra.cann.libdevice.float2uint_ru
 
 ### OP概述
 
@@ -1464,9 +1376,9 @@ triton.language.extra.cann.libdevice.float2uint_ru(x, _builder=None)
 
 返回类型：`uint32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 65. triton.language.extra.cann.libdevice.float2uint_rz
+## 61. triton.language.extra.cann.libdevice.float2uint_rz
 
 ### OP概述
 
@@ -1486,9 +1398,9 @@ triton.language.extra.cann.libdevice.float2uint_rz(x, _builder=None)
 
 返回类型：`uint32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 66. triton.language.extra.cann.libdevice.float2ull_rd
+## 62. triton.language.extra.cann.libdevice.float2ull_rd
 
 ### OP概述
 
@@ -1508,9 +1420,9 @@ triton.language.extra.cann.libdevice.float2ull_rd(x, _builder=None)
 
 返回类型：`uint64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 67. triton.language.extra.cann.libdevice.float2ull_rn
+## 63. triton.language.extra.cann.libdevice.float2ull_rn
 
 ### OP概述
 
@@ -1530,9 +1442,9 @@ triton.language.extra.cann.libdevice.float2ull_rn(x, _builder=None)
 
 返回类型：`uint64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 68. triton.language.extra.cann.libdevice.float2ull_ru
+## 64. triton.language.extra.cann.libdevice.float2ull_ru
 
 ### OP概述
 
@@ -1552,9 +1464,9 @@ triton.language.extra.cann.libdevice.float2ull_ru(x, _builder=None)
 
 返回类型：`uint64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 69. triton.language.extra.cann.libdevice.float2ull_rz
+## 65. triton.language.extra.cann.libdevice.float2ull_rz
 
 ### OP概述
 
@@ -1574,9 +1486,53 @@ triton.language.extra.cann.libdevice.float2ull_rz(x, _builder=None)
 
 返回类型：`uint64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 70. triton.language.extra.cann.libdevice.floor
+## 66. triton.language.extra.cann.libdevice.float_as_int
+
+### OP概述
+
+将浮点数的比特位重新解释为32位整数。不进行数值转换。
+
+原型:
+
+```python
+triton.language.extra.cann.libdevice.float_as_int(x, _builder=None)
+```
+
+输入类型：
+
+- x: `float32`
+
+返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位整数的结果。
+
+返回类型：`int32`
+
+支持编译模式：SIMT, SIMD
+
+## 67. triton.language.extra.cann.libdevice.float_as_uint
+
+### OP概述
+
+将浮点数的比特位重新解释为32位无符号整数。不进行数值转换。
+
+原型:
+
+```python
+triton.language.extra.cann.libdevice.float_as_uint(x, _builder=None)
+```
+
+输入类型：
+
+- x: `float32`
+
+返回值: `tl.tensor`, 返回将浮点数的比特位重新解释为32位无符号整数的结果。
+
+返回类型：`uint32`
+
+支持编译模式：SIMT
+
+## 68. triton.language.extra.cann.libdevice.floor
 
 ### OP概述
 
@@ -1596,9 +1552,9 @@ triton.language.extra.cann.libdevice.floor(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 71. triton.language.extra.cann.libdevice.fma
+## 69. triton.language.extra.cann.libdevice.fma
 
 ### OP概述
 
@@ -1620,9 +1576,9 @@ triton.language.extra.cann.libdevice.fma(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 72. triton.language.extra.cann.libdevice.fma_rd
+## 70. triton.language.extra.cann.libdevice.fma_rd
 
 ### OP概述
 
@@ -1644,9 +1600,9 @@ triton.language.extra.cann.libdevice.fma_rd(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 73. triton.language.extra.cann.libdevice.fma_rn
+## 71. triton.language.extra.cann.libdevice.fma_rn
 
 ### OP概述
 
@@ -1668,9 +1624,9 @@ triton.language.extra.cann.libdevice.fma_rn(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 74. triton.language.extra.cann.libdevice.fma_ru
+## 72. triton.language.extra.cann.libdevice.fma_ru
 
 ### OP概述
 
@@ -1692,9 +1648,9 @@ triton.language.extra.cann.libdevice.fma_ru(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 75. triton.language.extra.cann.libdevice.fma_rz
+## 73. triton.language.extra.cann.libdevice.fma_rz
 
 ### OP概述
 
@@ -1716,9 +1672,9 @@ triton.language.extra.cann.libdevice.fma_rz(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 76. triton.language.extra.cann.libdevice.fmod
+## 74. triton.language.extra.cann.libdevice.fmod
 
 ### OP概述
 
@@ -1739,9 +1695,9 @@ triton.language.extra.cann.libdevice.fmod(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 77. triton.language.extra.cann.libdevice.gamma
+## 75. triton.language.extra.cann.libdevice.gamma
 
 ### OP概述
 
@@ -1761,9 +1717,9 @@ triton.language.extra.cann.libdevice.gamma(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 78. triton.language.extra.cann.libdevice.hadd
+## 76. triton.language.extra.cann.libdevice.hadd
 
 ### OP概述
 
@@ -1777,38 +1733,16 @@ triton.language.extra.cann.libdevice.hadd(x, y, _builder=None)
 
 输入类型：
 
-- x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- x: `int32`
+- y: `int32`
 
 返回值: `tl.tensor`, 返回 x 和 y 的平均值。
 
-返回类型：与输入类型相同（`int32` 或 `uint32`）。
+返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 79. triton.language.extra.cann.libdevice.half2float
-
-### OP概述
-
-将 x 从 16 位浮点数转换为 32 位浮点数。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.half2float(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float16`
-
-返回值: `tl.tensor`, 返回转换后的 32 位浮点数。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 80. triton.language.extra.cann.libdevice.hypot
+## 77. triton.language.extra.cann.libdevice.hypot
 
 ### OP概述
 
@@ -1829,9 +1763,9 @@ triton.language.extra.cann.libdevice.hypot(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 81. triton.language.extra.cann.libdevice.ilogb
+## 78. triton.language.extra.cann.libdevice.ilogb
 
 ### OP概述
 
@@ -1851,31 +1785,9 @@ triton.language.extra.cann.libdevice.ilogb(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 82. triton.language.extra.cann.libdevice.int_as_float
-
-### OP概述
-
-将32位整数的比特位重新解释为浮点数。不进行数值转换。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.int_as_float(x, _builder=None)
-```
-
-输入类型：
-
-- x: `int32`
-
-返回值: `tl.tensor`, 返回将32位整数的比特位重新解释为浮点数的结果。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 83. triton.language.extra.cann.libdevice.int2float_rd
+## 79. triton.language.extra.cann.libdevice.int2float_rd
 
 ### OP概述
 
@@ -1895,9 +1807,9 @@ triton.language.extra.cann.libdevice.int2float_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 84. triton.language.extra.cann.libdevice.int2float_rn
+## 80. triton.language.extra.cann.libdevice.int2float_rn
 
 ### OP概述
 
@@ -1917,9 +1829,9 @@ triton.language.extra.cann.libdevice.int2float_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 85. triton.language.extra.cann.libdevice.int2float_ru
+## 81. triton.language.extra.cann.libdevice.int2float_ru
 
 ### OP概述
 
@@ -1939,9 +1851,9 @@ triton.language.extra.cann.libdevice.int2float_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 86. triton.language.extra.cann.libdevice.int2float_rz
+## 82. triton.language.extra.cann.libdevice.int2float_rz
 
 ### OP概述
 
@@ -1961,9 +1873,31 @@ triton.language.extra.cann.libdevice.int2float_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 87. triton.language.extra.cann.libdevice.isinf
+## 83. triton.language.extra.cann.libdevice.int_as_float
+
+### OP概述
+
+将32位整数的比特位重新解释为浮点数。不进行数值转换。
+
+原型:
+
+```python
+triton.language.extra.cann.libdevice.int_as_float(x, _builder=None)
+```
+
+输入类型：
+
+- x: `int32`
+
+返回值: `tl.tensor`, 返回将32位整数的比特位重新解释为浮点数的结果。
+
+返回类型：`float32`
+
+支持编译模式：SIMT
+
+## 84. triton.language.extra.cann.libdevice.isinf
 
 ### OP概述
 
@@ -1983,9 +1917,9 @@ triton.language.extra.cann.libdevice.isinf(x, _builder=None)
 
 返回类型：`bool`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 88. triton.language.extra.cann.libdevice.isnan
+## 85. triton.language.extra.cann.libdevice.isnan
 
 ### OP概述
 
@@ -2005,9 +1939,9 @@ triton.language.extra.cann.libdevice.isnan(x, _builder=None)
 
 返回类型：`bool`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 89. triton.language.extra.cann.libdevice.j0
+## 86. triton.language.extra.cann.libdevice.j0
 
 ### OP概述
 
@@ -2027,9 +1961,9 @@ triton.language.extra.cann.libdevice.j0(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 90. triton.language.extra.cann.libdevice.j1
+## 87. triton.language.extra.cann.libdevice.j1
 
 ### OP概述
 
@@ -2049,9 +1983,9 @@ triton.language.extra.cann.libdevice.j1(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 91. triton.language.extra.cann.libdevice.jn
+## 88. triton.language.extra.cann.libdevice.jn
 
 ### OP概述
 
@@ -2072,9 +2006,9 @@ triton.language.extra.cann.libdevice.jn(n, x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 92. triton.language.extra.cann.libdevice.ldexp
+## 89. triton.language.extra.cann.libdevice.ldexp
 
 ### OP概述
 
@@ -2095,9 +2029,9 @@ triton.language.extra.cann.libdevice.ldexp(x, exp, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 93. triton.language.extra.cann.libdevice.lgamma
+## 90. triton.language.extra.cann.libdevice.lgamma
 
 ### OP概述
 
@@ -2117,9 +2051,9 @@ triton.language.extra.cann.libdevice.lgamma(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 94. triton.language.extra.cann.libdevice.ll2float_rd
+## 91. triton.language.extra.cann.libdevice.ll2float_rd
 
 ### OP概述
 
@@ -2139,9 +2073,9 @@ triton.language.extra.cann.libdevice.ll2float_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 95. triton.language.extra.cann.libdevice.ll2float_rn
+## 92. triton.language.extra.cann.libdevice.ll2float_rn
 
 ### OP概述
 
@@ -2161,9 +2095,9 @@ triton.language.extra.cann.libdevice.ll2float_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 96. triton.language.extra.cann.libdevice.ll2float_ru
+## 93. triton.language.extra.cann.libdevice.ll2float_ru
 
 ### OP概述
 
@@ -2183,9 +2117,9 @@ triton.language.extra.cann.libdevice.ll2float_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 97. triton.language.extra.cann.libdevice.ll2float_rz
+## 94. triton.language.extra.cann.libdevice.ll2float_rz
 
 ### OP概述
 
@@ -2205,9 +2139,9 @@ triton.language.extra.cann.libdevice.ll2float_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 98. triton.language.extra.cann.libdevice.llrint
+## 95. triton.language.extra.cann.libdevice.llrint
 
 ### OP概述
 
@@ -2227,9 +2161,9 @@ triton.language.extra.cann.libdevice.llrint(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 99. triton.language.extra.cann.libdevice.llround
+## 96. triton.language.extra.cann.libdevice.llround
 
 ### OP概述
 
@@ -2249,9 +2183,9 @@ triton.language.extra.cann.libdevice.llround(x, _builder=None)
 
 返回类型：`int64`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 100. triton.language.extra.cann.libdevice.log
+## 97. triton.language.extra.cann.libdevice.log
 
 ### OP概述
 
@@ -2271,9 +2205,9 @@ triton.language.extra.cann.libdevice.log(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 101. triton.language.extra.cann.libdevice.log10
+## 98. triton.language.extra.cann.libdevice.log10
 
 ### OP概述
 
@@ -2293,9 +2227,9 @@ triton.language.extra.cann.libdevice.log10(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 102. triton.language.extra.cann.libdevice.log1p
+## 99. triton.language.extra.cann.libdevice.log1p
 
 ### OP概述
 
@@ -2315,9 +2249,9 @@ triton.language.extra.cann.libdevice.log1p(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 103. triton.language.extra.cann.libdevice.log2
+## 100. triton.language.extra.cann.libdevice.log2
 
 ### OP概述
 
@@ -2337,9 +2271,9 @@ triton.language.extra.cann.libdevice.log2(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 104. triton.language.extra.cann.libdevice.logb
+## 101. triton.language.extra.cann.libdevice.logb
 
 ### OP概述
 
@@ -2359,55 +2293,32 @@ triton.language.extra.cann.libdevice.logb(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 105. triton.language.extra.cann.libdevice.max
+## 102. triton.language.extra.cann.libdevice.mul24
 
 ### OP概述
 
-逐元素计算 x 和 y 的最大值。
+计算 x 和 y 的低24位乘法结果。
 
 原型:
 
 ```python
-triton.language.extra.cann.libdevice.max(x, y, _builder=None)
+triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
 ```
 
 输入类型：
 
-- x: `int32`, `float32`
-- y: `int32`, `float32`，类型必须与 x 相同
+- x: `int32`
+- y: `int32`
 
-返回值: `tl.tensor`, 返回 x 和 y 的逐元素最大值。
+返回值: `tl.tensor`, 返回 x 和 y 的低24位乘法结果。
 
-返回类型：与输入类型相同（`int32` 或 `float32`）。
+返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 106. triton.language.extra.cann.libdevice.min
-
-### OP概述
-
-逐元素计算 x 和 y 的最小值。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.min(x, y, _builder=None)
-```
-
-输入类型：
-
-- x: `int32`, `float32`
-- y: `int32`, `float32`，类型必须与 x 相同
-
-返回值: `tl.tensor`, 返回 x 和 y 的逐元素最小值。
-
-返回类型：与输入类型相同（`int32` 或 `float32`）。
-
-支持编译模式：SIMD, SIMT
-
-## 107. triton.language.extra.cann.libdevice.mul_rd
+## 103. triton.language.extra.cann.libdevice.mul_rd
 
 ### OP概述
 
@@ -2428,9 +2339,9 @@ triton.language.extra.cann.libdevice.mul_rd(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 108. triton.language.extra.cann.libdevice.mul_rn
+## 104. triton.language.extra.cann.libdevice.mul_rn
 
 ### OP概述
 
@@ -2451,9 +2362,9 @@ triton.language.extra.cann.libdevice.mul_rn(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 109. triton.language.extra.cann.libdevice.mul_ru
+## 105. triton.language.extra.cann.libdevice.mul_ru
 
 ### OP概述
 
@@ -2474,9 +2385,9 @@ triton.language.extra.cann.libdevice.mul_ru(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 110. triton.language.extra.cann.libdevice.mul_rz
+## 106. triton.language.extra.cann.libdevice.mul_rz
 
 ### OP概述
 
@@ -2497,32 +2408,9 @@ triton.language.extra.cann.libdevice.mul_rz(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 111. triton.language.extra.cann.libdevice.mul24
-
-### OP概述
-
-计算 x 和 y 的低24位乘法结果。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.mul24(x, y, _builder=None)
-```
-
-输入类型：
-
-- x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
-
-返回值: `tl.tensor`, 返回 x 和 y 的低24位乘法结果。
-
-返回类型：与输入类型相同（`int32` 或 `uint32`）。
-
-支持编译模式：SIMD, SIMT
-
-## 112. triton.language.extra.cann.libdevice.mulhi
+## 107. triton.language.extra.cann.libdevice.mulhi
 
 ### OP概述
 
@@ -2536,38 +2424,16 @@ triton.language.extra.cann.libdevice.mulhi(x, y, _builder=None)
 
 输入类型：
 
-- x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- x: `int32`
+- y: `int32`
 
 返回值: `tl.tensor`, 返回 x 和 y 的乘法结果的高 32 位。
 
-返回类型：与输入类型相同（`int32` 或 `uint32`）。
+返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 113. triton.language.extra.cann.libdevice.nan
-
-### OP概述
-
-根据 x 生成 NaN 值。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.nan(x, _builder=None)
-```
-
-输入类型：
-
-- x: `float32`
-
-返回值: `tl.tensor`, 返回生成的 NaN 值。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 114. triton.language.extra.cann.libdevice.nearbyint
+## 108. triton.language.extra.cann.libdevice.nearbyint
 
 ### OP概述
 
@@ -2587,9 +2453,9 @@ triton.language.extra.cann.libdevice.nearbyint(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 115. triton.language.extra.cann.libdevice.nextafter
+## 109. triton.language.extra.cann.libdevice.nextafter
 
 ### OP概述
 
@@ -2610,9 +2476,9 @@ triton.language.extra.cann.libdevice.nextafter(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 116. triton.language.extra.cann.libdevice.norm3d
+## 110. triton.language.extra.cann.libdevice.norm3d
 
 ### OP概述
 
@@ -2634,9 +2500,9 @@ triton.language.extra.cann.libdevice.norm3d(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 117. triton.language.extra.cann.libdevice.norm4d
+## 111. triton.language.extra.cann.libdevice.norm4d
 
 ### OP概述
 
@@ -2659,9 +2525,9 @@ triton.language.extra.cann.libdevice.norm4d(x, y, z, w, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 118. triton.language.extra.cann.libdevice.normcdf
+## 112. triton.language.extra.cann.libdevice.normcdf
 
 ### OP概述
 
@@ -2681,9 +2547,9 @@ triton.language.extra.cann.libdevice.normcdf(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 119. triton.language.extra.cann.libdevice.normcdfinv
+## 113. triton.language.extra.cann.libdevice.normcdfinv
 
 ### OP概述
 
@@ -2703,9 +2569,9 @@ triton.language.extra.cann.libdevice.normcdfinv(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 120. triton.language.extra.cann.libdevice.popc
+## 114. triton.language.extra.cann.libdevice.popc
 
 ### OP概述
 
@@ -2725,9 +2591,9 @@ triton.language.extra.cann.libdevice.popc(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 121. triton.language.extra.cann.libdevice.pow
+## 115. triton.language.extra.cann.libdevice.pow
 
 ### OP概述
 
@@ -2748,9 +2614,9 @@ triton.language.extra.cann.libdevice.pow(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 122. triton.language.extra.cann.libdevice.rcbrt
+## 116. triton.language.extra.cann.libdevice.rcbrt
 
 ### OP概述
 
@@ -2770,9 +2636,9 @@ triton.language.extra.cann.libdevice.rcbrt(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 123. triton.language.extra.cann.libdevice.rcp_rd
+## 117. triton.language.extra.cann.libdevice.rcp_rd
 
 ### OP概述
 
@@ -2792,9 +2658,9 @@ triton.language.extra.cann.libdevice.rcp_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 124. triton.language.extra.cann.libdevice.rcp_rn
+## 118. triton.language.extra.cann.libdevice.rcp_rn
 
 ### OP概述
 
@@ -2814,9 +2680,9 @@ triton.language.extra.cann.libdevice.rcp_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 125. triton.language.extra.cann.libdevice.rcp_ru
+## 119. triton.language.extra.cann.libdevice.rcp_ru
 
 ### OP概述
 
@@ -2836,9 +2702,9 @@ triton.language.extra.cann.libdevice.rcp_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 126. triton.language.extra.cann.libdevice.rcp_rz
+## 120. triton.language.extra.cann.libdevice.rcp_rz
 
 ### OP概述
 
@@ -2858,9 +2724,9 @@ triton.language.extra.cann.libdevice.rcp_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 127. triton.language.extra.cann.libdevice.reciprocal
+## 121. triton.language.extra.cann.libdevice.reciprocal
 
 ### OP概述
 
@@ -2880,9 +2746,9 @@ triton.language.extra.cann.libdevice.reciprocal(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 128. triton.language.extra.cann.libdevice.relu
+## 122. triton.language.extra.cann.libdevice.relu
 
 ### OP概述
 
@@ -2902,9 +2768,9 @@ triton.language.extra.cann.libdevice.relu(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 129. triton.language.extra.cann.libdevice.remainder
+## 123. triton.language.extra.cann.libdevice.remainder
 
 ### OP概述
 
@@ -2925,9 +2791,9 @@ triton.language.extra.cann.libdevice.remainder(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 130. triton.language.extra.cann.libdevice.rhadd
+## 124. triton.language.extra.cann.libdevice.rhadd
 
 ### OP概述
 
@@ -2941,16 +2807,16 @@ triton.language.extra.cann.libdevice.rhadd(x, y, _builder=None)
 
 输入类型：
 
-- x: `int32` 或 `uint32`
-- y: `int32` 或 `uint32`，类型必须与 x 相同
+- x: `int32`
+- y: `int32`
 
 返回值: `tl.tensor`, 返回 x 和 y 平均值的取整结果。
 
-返回类型：与输入类型相同（`int32` 或 `uint32`）。
+返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 131. triton.language.extra.cann.libdevice.rhypot
+## 125. triton.language.extra.cann.libdevice.rhypot
 
 ### OP概述
 
@@ -2971,9 +2837,9 @@ triton.language.extra.cann.libdevice.rhypot(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 132. triton.language.extra.cann.libdevice.rint
+## 126. triton.language.extra.cann.libdevice.rint
 
 ### OP概述
 
@@ -2993,9 +2859,9 @@ triton.language.extra.cann.libdevice.rint(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 133. triton.language.extra.cann.libdevice.rnorm3d
+## 127. triton.language.extra.cann.libdevice.rnorm3d
 
 ### OP概述
 
@@ -3017,9 +2883,9 @@ triton.language.extra.cann.libdevice.rnorm3d(x, y, z, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 134. triton.language.extra.cann.libdevice.rnorm4d
+## 128. triton.language.extra.cann.libdevice.rnorm4d
 
 ### OP概述
 
@@ -3042,9 +2908,9 @@ triton.language.extra.cann.libdevice.rnorm4d(x, y, z, w, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 135. triton.language.extra.cann.libdevice.round
+## 129. triton.language.extra.cann.libdevice.round
 
 ### OP概述
 
@@ -3064,9 +2930,9 @@ triton.language.extra.cann.libdevice.round(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 136. triton.language.extra.cann.libdevice.rsqrt
+## 130. triton.language.extra.cann.libdevice.rsqrt
 
 ### OP概述
 
@@ -3086,9 +2952,9 @@ triton.language.extra.cann.libdevice.rsqrt(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 137. triton.language.extra.cann.libdevice.rsqrt_rn
+## 131. triton.language.extra.cann.libdevice.rsqrt_rn
 
 ### OP概述
 
@@ -3108,13 +2974,13 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 138. triton.language.extra.cann.libdevice.sad
+## 132. triton.language.extra.cann.libdevice.sad
 
 ### OP概述
 
-计算有符号或无符号 32 位整数的 |x-y|+z。
+计算 |x-y|+z，其中 x 和 y 是有符号整数，z 是无符号整数。
 
 原型:
 
@@ -3122,19 +2988,19 @@ triton.language.extra.cann.libdevice.rsqrt_rn(x, _builder=None)
 triton.language.extra.cann.libdevice.sad(x, y, z, _builder=None)
 ```
 
-支持的类型签名：
+输入类型：
 
-- (`int32`, `int32`, `int32`) -> `int32`
-- (`int32`, `int32`, `uint32`) -> `int32`
-- (`uint32`, `uint32`, `uint32`) -> `uint32`
+- x: `int32`
+- y: `int32`
+- z: `int32`
 
 返回值: `tl.tensor`, 返回 |x-y|+z。
 
-返回类型：`int32` 或 `uint32`，具体类型由上述类型签名决定。
+返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 139. triton.language.extra.cann.libdevice.saturatef
+## 133. triton.language.extra.cann.libdevice.saturatef
 
 ### OP概述
 
@@ -3154,9 +3020,9 @@ triton.language.extra.cann.libdevice.saturatef(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 140. triton.language.extra.cann.libdevice.scalbn
+## 134. triton.language.extra.cann.libdevice.scalbn
 
 ### OP概述
 
@@ -3177,9 +3043,9 @@ triton.language.extra.cann.libdevice.scalbn(x, n, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 141. triton.language.extra.cann.libdevice.signbit
+## 135. triton.language.extra.cann.libdevice.signbit
 
 ### OP概述
 
@@ -3199,9 +3065,9 @@ triton.language.extra.cann.libdevice.signbit(x, _builder=None)
 
 返回类型：`int32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 142. triton.language.extra.cann.libdevice.sin
+## 136. triton.language.extra.cann.libdevice.sin
 
 ### OP概述
 
@@ -3221,9 +3087,9 @@ triton.language.extra.cann.libdevice.sin(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 143. triton.language.extra.cann.libdevice.sinh
+## 137. triton.language.extra.cann.libdevice.sinh
 
 ### OP概述
 
@@ -3243,9 +3109,9 @@ triton.language.extra.cann.libdevice.sinh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 144. triton.language.extra.cann.libdevice.sinpi
+## 138. triton.language.extra.cann.libdevice.sinpi
 
 ### OP概述
 
@@ -3265,9 +3131,9 @@ triton.language.extra.cann.libdevice.sinpi(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 145. triton.language.extra.cann.libdevice.sqrt
+## 139. triton.language.extra.cann.libdevice.sqrt
 
 ### OP概述
 
@@ -3287,9 +3153,9 @@ triton.language.extra.cann.libdevice.sqrt(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 146. triton.language.extra.cann.libdevice.sqrt_rd
+## 140. triton.language.extra.cann.libdevice.sqrt_rd
 
 ### OP概述
 
@@ -3309,9 +3175,9 @@ triton.language.extra.cann.libdevice.sqrt_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 147. triton.language.extra.cann.libdevice.sqrt_rn
+## 141. triton.language.extra.cann.libdevice.sqrt_rn
 
 ### OP概述
 
@@ -3331,9 +3197,9 @@ triton.language.extra.cann.libdevice.sqrt_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 148. triton.language.extra.cann.libdevice.sqrt_ru
+## 142. triton.language.extra.cann.libdevice.sqrt_ru
 
 ### OP概述
 
@@ -3353,9 +3219,9 @@ triton.language.extra.cann.libdevice.sqrt_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 149. triton.language.extra.cann.libdevice.sqrt_rz
+## 143. triton.language.extra.cann.libdevice.sqrt_rz
 
 ### OP概述
 
@@ -3375,9 +3241,9 @@ triton.language.extra.cann.libdevice.sqrt_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 150. triton.language.extra.cann.libdevice.sub_rd
+## 144. triton.language.extra.cann.libdevice.sub_rd
 
 ### OP概述
 
@@ -3398,9 +3264,9 @@ triton.language.extra.cann.libdevice.sub_rd(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 151. triton.language.extra.cann.libdevice.sub_rn
+## 145. triton.language.extra.cann.libdevice.sub_rn
 
 ### OP概述
 
@@ -3421,9 +3287,9 @@ triton.language.extra.cann.libdevice.sub_rn(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 152. triton.language.extra.cann.libdevice.sub_ru
+## 146. triton.language.extra.cann.libdevice.sub_ru
 
 ### OP概述
 
@@ -3444,9 +3310,9 @@ triton.language.extra.cann.libdevice.sub_ru(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 153. triton.language.extra.cann.libdevice.sub_rz
+## 147. triton.language.extra.cann.libdevice.sub_rz
 
 ### OP概述
 
@@ -3467,9 +3333,9 @@ triton.language.extra.cann.libdevice.sub_rz(x, y, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 154. triton.language.extra.cann.libdevice.tan
+## 148. triton.language.extra.cann.libdevice.tan
 
 ### OP概述
 
@@ -3489,9 +3355,9 @@ triton.language.extra.cann.libdevice.tan(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 155. triton.language.extra.cann.libdevice.tanh
+## 149. triton.language.extra.cann.libdevice.tanh
 
 ### OP概述
 
@@ -3511,9 +3377,9 @@ triton.language.extra.cann.libdevice.tanh(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 156. triton.language.extra.cann.libdevice.tgamma
+## 150. triton.language.extra.cann.libdevice.tgamma
 
 ### OP概述
 
@@ -3533,9 +3399,9 @@ triton.language.extra.cann.libdevice.tgamma(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 157. triton.language.extra.cann.libdevice.trunc
+## 151. triton.language.extra.cann.libdevice.trunc
 
 ### OP概述
 
@@ -3555,31 +3421,9 @@ triton.language.extra.cann.libdevice.trunc(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT, SIMD
 
-## 158. triton.language.extra.cann.libdevice.uint_as_float
-
-### OP概述
-
-将32位无符号整数的比特位重新解释为浮点数。不进行数值转换。
-
-原型:
-
-```python
-triton.language.extra.cann.libdevice.uint_as_float(x, _builder=None)
-```
-
-输入类型：
-
-- x: `uint32`
-
-返回值: `tl.tensor`, 返回将32位无符号整数的比特位重新解释为浮点数的结果。
-
-返回类型：`float32`
-
-支持编译模式：SIMD, SIMT
-
-## 159. triton.language.extra.cann.libdevice.uint2float_rd
+## 152. triton.language.extra.cann.libdevice.uint2float_rd
 
 ### OP概述
 
@@ -3599,9 +3443,9 @@ triton.language.extra.cann.libdevice.uint2float_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 160. triton.language.extra.cann.libdevice.uint2float_rn
+## 153. triton.language.extra.cann.libdevice.uint2float_rn
 
 ### OP概述
 
@@ -3621,9 +3465,9 @@ triton.language.extra.cann.libdevice.uint2float_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 161. triton.language.extra.cann.libdevice.uint2float_ru
+## 154. triton.language.extra.cann.libdevice.uint2float_ru
 
 ### OP概述
 
@@ -3643,9 +3487,9 @@ triton.language.extra.cann.libdevice.uint2float_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 162. triton.language.extra.cann.libdevice.uint2float_rz
+## 155. triton.language.extra.cann.libdevice.uint2float_rz
 
 ### OP概述
 
@@ -3665,9 +3509,31 @@ triton.language.extra.cann.libdevice.uint2float_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 163. triton.language.extra.cann.libdevice.ull2float_rd
+## 156. triton.language.extra.cann.libdevice.uint_as_float
+
+### OP概述
+
+将32位无符号整数的比特位重新解释为浮点数。不进行数值转换。
+
+原型:
+
+```python
+triton.language.extra.cann.libdevice.uint_as_float(x, _builder=None)
+```
+
+输入类型：
+
+- x: `uint32`
+
+返回值: `tl.tensor`, 返回将32位无符号整数的比特位重新解释为浮点数的结果。
+
+返回类型：`float32`
+
+支持编译模式：SIMT
+
+## 157. triton.language.extra.cann.libdevice.ull2float_rd
 
 ### OP概述
 
@@ -3687,9 +3553,9 @@ triton.language.extra.cann.libdevice.ull2float_rd(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 164. triton.language.extra.cann.libdevice.ull2float_rn
+## 158. triton.language.extra.cann.libdevice.ull2float_rn
 
 ### OP概述
 
@@ -3709,9 +3575,9 @@ triton.language.extra.cann.libdevice.ull2float_rn(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 165. triton.language.extra.cann.libdevice.ull2float_ru
+## 159. triton.language.extra.cann.libdevice.ull2float_ru
 
 ### OP概述
 
@@ -3731,9 +3597,9 @@ triton.language.extra.cann.libdevice.ull2float_ru(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 166. triton.language.extra.cann.libdevice.ull2float_rz
+## 160. triton.language.extra.cann.libdevice.ull2float_rz
 
 ### OP概述
 
@@ -3753,9 +3619,9 @@ triton.language.extra.cann.libdevice.ull2float_rz(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 167. triton.language.extra.cann.libdevice.y0
+## 161. triton.language.extra.cann.libdevice.y0
 
 ### OP概述
 
@@ -3775,9 +3641,9 @@ triton.language.extra.cann.libdevice.y0(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 168. triton.language.extra.cann.libdevice.y1
+## 162. triton.language.extra.cann.libdevice.y1
 
 ### OP概述
 
@@ -3797,9 +3663,9 @@ triton.language.extra.cann.libdevice.y1(x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT
 
-## 169. triton.language.extra.cann.libdevice.yn
+## 163. triton.language.extra.cann.libdevice.yn
 
 ### OP概述
 
@@ -3820,4 +3686,4 @@ triton.language.extra.cann.libdevice.yn(n, x, _builder=None)
 
 返回类型：`float32`
 
-支持编译模式：SIMD, SIMT
+支持编译模式：SIMT

@@ -32,7 +32,6 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "llvm/ADT/DenseSet.h"
 
 namespace mlir {
 namespace CVPipeline {

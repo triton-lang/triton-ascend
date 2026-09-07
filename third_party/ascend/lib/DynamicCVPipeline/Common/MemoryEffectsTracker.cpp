@@ -56,9 +56,7 @@
 #include "llvm/Support/Debug.h"
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/SyncWall.h"
 #include "DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 
 using namespace mlir;
@@ -592,62 +590,21 @@ void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap) {
   }
 }
 
-SyncWall &MemoryDependenceGraph::getWall(Block *block) {
-  auto it = walls.find(block);
-  if (it == walls.end()) {
-    it = walls.try_emplace(block, block).first;
-  }
-  return it->second;
-}
-
-bool MemoryDependenceGraph::isSyncSeparated(Operation *a, Operation *b) {
-  if (!a || !b) {
-    return false;
-  }
-
-  if (Block *block = a->getBlock()) {
-    if (Operation *bAnc = CVPipeline::getAncestorInBlock(b, block)) {
-      return getWall(block).hasSyncBetween(a, bAnc);
-    }
-  }
-
-  if (Block *block = b->getBlock()) {
-    if (Operation *aAnc = CVPipeline::getAncestorInBlock(a, block)) {
-      return getWall(block).hasSyncBetween(b, aAnc);
-    }
-  }
-  return false;
-}
-
 void MemoryDependenceGraph::recordEdges(Operation *op,
                                         ArrayRef<Operation *> defs,
                                         ArrayRef<Operation *> preds) {
-  // Drop memory edges that cross a synchronization op
-  SmallVector<Operation *> syncFreeDefs;
-  for (Operation *p : defs) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreeDefs.push_back(p);
-    }
-  }
-  SmallVector<Operation *> syncFreePreds;
-  for (Operation *p : preds) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreePreds.push_back(p);
-    }
-  }
-
-  if (!syncFreeDefs.empty()) {
+  if (!defs.empty()) {
     auto &defList = memDefs[op];
-    defList.assign(syncFreeDefs.begin(), syncFreeDefs.end());
-    for (Operation *p : syncFreeDefs) {
+    defList.assign(defs.begin(), defs.end());
+    for (Operation *p : defs) {
       memUsers[p].push_back(op);
     }
   }
 
-  if (!syncFreePreds.empty()) {
+  if (!preds.empty()) {
     auto &execBeforeList = execBefore[op];
-    execBeforeList.assign(syncFreePreds.begin(), syncFreePreds.end());
-    for (Operation *p : syncFreePreds) {
+    execBeforeList.assign(preds.begin(), preds.end());
+    for (Operation *p : preds) {
       execAfter[p].push_back(op);
     }
   }

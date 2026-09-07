@@ -85,6 +85,7 @@ inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
     "hivm.tightly_coupled_buffer";
 inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
 inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
+inline constexpr llvm::StringLiteral kCoreTypeCubeAndVector = "CUBE_AND_VECTOR";
 inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
 inline constexpr llvm::StringLiteral kSubBlock = "ssbuffer.subBlock";
 inline constexpr llvm::StringLiteral kMergeComputeBlockApplied =
@@ -107,10 +108,10 @@ enum CoreType {
 };
 
 inline constexpr CoreType fromStrCoreType(std::string_view s) {
-  if (s == "VECTOR") {
+  if (s == std::string_view(kCoreTypeVector)) {
     return CoreType::VECTOR_ONLY;
   }
-  if (s == "CUBE") {
+  if (s == std::string_view(kCoreTypeCube)) {
     return CoreType::CUBE_ONLY;
   }
 
@@ -268,11 +269,11 @@ int getLoopCarriedArgIndex(Value operand, Block *block);
 inline llvm::StringRef coreTypeToString(CoreType ct) {
   switch (ct) {
   case CUBE_ONLY:
-    return "CUBE";
+    return kCoreTypeCube;
   case VECTOR_ONLY:
-    return "VECTOR";
+    return kCoreTypeVector;
   case CUBE_AND_VECTOR:
-    return "CUBE_AND_VECTOR";
+    return kCoreTypeCubeAndVector;
   default:
     return "UNDETERMINED";
   }

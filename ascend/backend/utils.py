@@ -29,8 +29,27 @@ import sysconfig
 from pathlib import Path
 import logging
 from platform import python_version
+from triton.backends.ascend.backend_register import backend_strategy_registry
 
 import pybind11
+
+backend_policy = None
+
+
+def get_backend_func(name, *args, **kwargs):
+    global backend_policy
+    if backend_policy is None:
+        backend_policy_env = os.getenv("TRITON_BACKEND", "default").lower()
+        if backend_policy_env == "torch_npu" or backend_policy_env == "mindspore":
+            backend_policy = backend_policy_env
+        if backend_policy is None:
+            try:
+                import torch
+                import torch_npu
+                backend_policy = "torch_npu"
+            except ImportError:
+                backend_policy = "mindspore"
+    return backend_strategy_registry.execute_func(backend_policy, name, *args, **kwargs)
 
 
 def get_logger(logger_name, logger_level_str):
@@ -274,14 +293,11 @@ def _get_cxx_precompiled(header_path):
 
 def _precompile_npu_hash(header_src):
     import sys
-    import torch
-    import torch_npu
     cxx = _get_cxx()
     py_version = sys.version
-    torch_version = torch.version.git_version
-    torch_npu_version = torch_npu.version.git_version
     asc_path = _get_ascend_path().name
-    version_txt = [header_src, cxx, py_version, torch_version, torch_npu_version, asc_path]
+    version_txt = [header_src, cxx, py_version, asc_path]
+    version_txt += get_backend_func("version_hash")
     hash_txt = hashlib.sha256("_".join(version_txt).encode("utf-8")).hexdigest()
     return hash_txt
 
@@ -319,17 +335,8 @@ def _precompile_npu_ext(header_path, gch_path):
         f"-I{os.path.join(asc_path, 'include/experiment/msprof')}",
         f"-I{pybind11.get_include()}",
     ]
-    import torch
-    import torch_npu
 
-    torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
-    use_cxx11_abi = _check_cxx11_abi()
-    cc_cmd += [
-        f"-I{os.path.join(torch_path, 'include')}",
-        f"-I{os.path.join(torch_npu_path, 'include')}",
-        f"-D_GLIBCXX_USE_CXX11_ABI={use_cxx11_abi}",
-    ]
+    cc_cmd += get_backend_func("get_cc_cmd", build_pch=True)
 
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", gch_path]
 
@@ -387,19 +394,7 @@ def _build_npu_ext(obj_name: str, header_path, src_path, *, kernel_launcher="tor
     ]
     # FIXME: check why this condition works wrong in parall scene
     if kernel_launcher == "torch":
-        import torch
-        import torch_npu
-
-        torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-        torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
-        use_cxx11_abi = _check_cxx11_abi()
-        cc_cmd += [
-            f"-I{os.path.join(torch_path, 'include')}",
-            f"-I{os.path.join(torch_npu_path, 'include')}",
-            f"-L{os.path.join(torch_npu_path, 'lib')}",
-            "-ltorch_npu",
-            f"-D_GLIBCXX_USE_CXX11_ABI={use_cxx11_abi}",
-        ]
+        cc_cmd += get_backend_func("get_cc_cmd", build_pch=False)
 
     cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-Winvalid-pch", "-o", so_path]
 
@@ -435,9 +430,7 @@ def _get_kernel_target(metadata: dict):
 
 
 def _check_cxx11_abi():
-    import torch
-
-    return 1 if torch._C._GLIBCXX_USE_CXX11_ABI else 0
+    return get_backend_func("cxx_abi")
 
 
 def convert_sigtype_to_int(sigty: str):
@@ -468,23 +461,8 @@ def convert_sigtype_to_int(sigty: str):
     return MAP_SIGTYPE_TO_INT[sigty]
 
 
-def convert_torch_dtype_to_numpy(torch_dtype):
-    import torch
-    import numpy as np
-    TORCH_TO_NUMPY_DTYPE = {
-        torch.float32: np.float32,
-        torch.float64: np.float64,
-        torch.float16: np.float16,
-        torch.int8: np.int8,
-        torch.uint8: np.uint8,
-        torch.int16: np.int16,
-        torch.int32: np.int32,
-        torch.int64: np.int64,
-        torch.bool: np.bool_,
-        torch.complex64: np.complex64,
-        torch.complex128: np.complex128,
-    }
-    return TORCH_TO_NUMPY_DTYPE[torch_dtype]
+def convert_dtype_to_numpy(dtype):
+    return get_backend_func("type_convert")[dtype]
 
 
 def _check_bishengir_able_save_ir() -> bool:

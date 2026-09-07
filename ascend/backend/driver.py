@@ -41,6 +41,7 @@ from triton.backends.ascend.utils import (
     get_ascend_arch_from_env,
     is_ffts_supported,
     force_disable_ffts,
+    get_backend_func
 )
 
 class NPUUtils(object):
@@ -129,11 +130,7 @@ class NPULauncher(object):
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
         if self.enable_msprof_register_tensor:
-            import torch
-            tensor_params = [arg for arg in args if isinstance(arg, torch.Tensor)]
-            tensor_params_shape = []
-            for t in tensor_params:
-                tensor_params_shape.append([s for s in t.shape])
+            tensor_params_shape = get_backend_func("get_tensor_params_shape", *args)
             # args[5] must be the packed metadata.
             # Check the launch wrapper in which PyArg_ParseTuple specifies the ordering of args
             args[5]['tensor_params_shape'] = tensor_params_shape
@@ -180,17 +177,13 @@ class NPUDriver(DriverBase):
         """
         Get current device
         """
-        import torch
-        import torch_npu
-        return torch.npu.current_device()
+        return get_backend_func("get_current_device")
 
     def set_current_device(self, device):
         """
         Set current device as the given device
         """
-        import torch
-        import torch_npu
-        return torch.npu.set_device(device)
+        return get_backend_func("set_current_device", device)
 
     def get_current_stream(self, device: Optional[int] = None) -> int:
         """
@@ -198,29 +191,18 @@ class NPUDriver(DriverBase):
         """
         # According to torch_npu, the content of a torch.npu.Stream is essentilly an rtStream_t
         # TODO: use CANN API instead of torchnpu
-        import torch
-        import torch_npu
-        if device is None:
-            device = self.get_current_device()
-        if hasattr(torch_npu._C, "_npu_getCurrentRawStreamNoWait"):
-            from torch_npu._C import _npu_getCurrentRawStreamNoWait
-            return _npu_getCurrentRawStreamNoWait(device)
-        else:
-            from torch_npu._C import _npu_getCurrentRawStream
-            return _npu_getCurrentRawStream(device)
+        return get_backend_func("get_current_stream", device)
 
     def get_benchmarker(self):
         from triton.testing import do_bench
         return do_bench
 
     def get_device_interface(self):
-        import torch
-        return torch.npu
+        return get_backend_func("get_device_interface")
 
     def get_empty_cache_for_benchmark(self):
-        import torch
         cache_size = 192 * 1024 * 1024
-        return torch.empty(cache_size // 4, dtype=torch.int, device='npu')
+        return get_backend_func("get_empty_tensor", cache_size // 4)
 
 
 def _precompile_npu_ext_with_lock(header_src, enable_precompile):
@@ -410,10 +392,8 @@ def generate_npu_header_src():
 #include <vector>
 #include <Python.h>
 #include "runtime/runtime/rt.h"
-#include <ATen/ATen.h>
 #include <acl/acl.h>
-#include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
-{'#include <torch_npu/csrc/framework/OpCommand.h>' if enable_taskqueue else ''}
+{get_backend_func("header_file", enable_taskqueue)}
 
 #endif
 """
@@ -776,13 +756,13 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
   name.append(kernelName);
   void *workspace_addr_ptr = NULL;
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
- 	auto optionsWorkspace = at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte);
+  {get_backend_func("pre_launch", True)}
   {f'''
     uint64_t totalWorkSpaceSize = {workspace_size} * blockNum4Workspace;
-    at::Tensor workspace_tensor = at::empty(totalWorkSpaceSize, optionsWorkspace);  
-    workspace_addr_ptr = const_cast<void *>(workspace_tensor.storage().data());
+    {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
   ''' if workspace_size > 0 else ''}
  	{'auto launch_call = [=]() -> rtError_t' if enable_taskqueue else ''} {{
+    {get_backend_func("pre_launch", False)}
     uint32_t blockNum = gridX * gridY * gridZ;
     #ifdef ENABLE_GRID_WARN_PRINT
       static bool warned = false;
@@ -791,7 +771,6 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
         warned = true;
     }}
     #endif  
-
     {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};
@@ -806,8 +785,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     uint16_t ModuleId = 0;
     {f'''
     uint64_t syncBlockLockSize = {lock_num} * sizeof(int64_t);
-    at::Tensor syncBlockLock_tensor = at_npu::native::allocate_workspace(syncBlockLockSize, stream);
-    syncBlockLock_ptr = const_cast<void *>(syncBlockLock_tensor.storage().data());
+    {get_backend_func("allocate_sync_block_lock", "syncBlockLockSize", "stream")}
     if (!syncBlockLock_ptr) {{
       {alloc_success_code if enable_taskqueue else sync_lock_fail_code}
     }}
@@ -844,7 +822,7 @@ static void _launch(const char* kernelName, const void* func, rtStream_t stream,
     {cpp_msprof_call_after_launch}
     {'return ret;' if enable_taskqueue else 'ret = rtStreamSynchronize(stream);'}
    }};
-   {'at_npu::native::OpCommand cmd; cmd.Name(name.c_str()).SetCustomHandler(launch_call).Run();' if enable_taskqueue else ''}
+   {f'''{get_backend_func("async_launch", "launch_call") if enable_taskqueue else ''}'''}
   return;
 }}
 

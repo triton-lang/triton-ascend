@@ -8,7 +8,7 @@
 triton.language.load_tensor_descriptor(
     desc: tensor_descriptor_base,
     offsets: Sequence[constexpr | tensor],
-    _semantic=None
+
 ) -> tensor
 ```
 
@@ -20,7 +20,6 @@ triton.language.load_tensor_descriptor(
 | ----------- | ------------------------------- | ---------------------------------------------------------- |
 | `desc`      | `tensor_descriptor_base`        | 张量描述符对象，由 `make_tensor_descriptor` 创建，定义了内存布局（形状、步长、块大小等）。 |
 | `offsets`   | `Sequence[constexpr \| tensor]` | 数据加载的起始偏移量序列，用于指定当前线程块要加载的数据位置                             |
-| `_semantic` | -                               | 保留参数，暂不支持外部调用                                            |
 
 返回值：`tensor` - 根据张量描述符内存布局信息，从指定偏移量处加载的数据块
 
@@ -28,25 +27,28 @@ triton.language.load_tensor_descriptor(
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-|GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × |
-|Ascend A2/A3| √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | × |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | × |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | × |
 
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |
 | ------ | --------------- |
-| GPU    | 仅支持 1~5维 tensor |
-| Ascend | 仅支持 1~5维 tensor |
+| GPU    | 仅支持 1~8维 tensor |
+| Ascend | 仅支持 1~8维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
 
-结论：Ascend 对比 GPU 缺失uint16、uint32、uint64的支持能力（硬件限制）。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 
 | 差异点            | 描述                                                         | 解决途径                                                |
 | ----------------- | ------------------------------------------------------------ | ------------------------------------------------------- |

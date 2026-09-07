@@ -5,17 +5,11 @@
 简介：将一个张量（子张量）插入到另一个张量的指定位置，即将一个张量按照操作指定的偏移量、大小和步幅参数插入到另一个张量中。
 原型：
 
+
 ```python
-triton.language.insert_slice(
-    ful,
-    sub,
-    offsets,
-    sizes,
-    strides,
-    _builder=None,
-    _generator=None
-) -> tensor
+triton.language.insert_slice(ful, slice, offsets, strides)
 ```
+
 
 ## 2. OP 规格
 
@@ -28,8 +22,6 @@ triton.language.insert_slice(
 | `offsets`     | `tuple of ints`    | 指定在`ful`张量中插入的起始偏移量（每个维度） |
 | `sizes` | `tuple of ints` | 指定插入区域的大小（每个维度）                                             |
 | `strides` | `tuple of ints` | 指定插入区域的步长（每个维度）                                            |
-| `_builder` |- | 保留参数，暂不支持外部调用                                            |
-| `_generator`   | -               | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `tensor`：插入子张量后的新张量
@@ -38,9 +30,10 @@ triton.language.insert_slice(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
-| Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
 
 #### 2.2.2 Shape 支持
 

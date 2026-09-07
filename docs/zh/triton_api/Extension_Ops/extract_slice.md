@@ -5,16 +5,11 @@
 简介：从输入张量中按照操作指定的偏移量、大小和步幅参数提取一个张量。
 原型：
 
+
 ```python
-triton.language.extract_slice(
-    ful,
-    offsets,
-    sizes,
-    strides,
-    _builder=None,
-    _generator=None
-) -> tensor
+triton.language.extract_slice(ful, offsets, sizes, strides)
 ```
+
 
 ## 2. OP 规格
 
@@ -26,8 +21,6 @@ triton.language.extract_slice(
 | `offsets`       | `tuple of ints`    | 切片在各个维度上的起始偏移量                                                        |
 | `sizes`     | `tuple of ints`    | 切片在各个维度上的大小 |
 | `strides` | `tuple of ints` | 切片在各个维度上的步长                                             |
-| `_builder` |- | 保留参数，暂不支持外部调用                                            |
-| `_generator`   | -               | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `tensor`：提取的切片张量
@@ -36,9 +29,10 @@ triton.language.extract_slice(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 |  bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
-| Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
 
 #### 2.2.2 Shape 支持
 

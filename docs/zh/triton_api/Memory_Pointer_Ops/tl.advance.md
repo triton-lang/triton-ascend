@@ -9,7 +9,7 @@
 triton.language.advance(
  base: triton.PointerType,
  offsets: tuple(int | constexpr),
- _semantic=None
+
 )
 ```
 
@@ -21,7 +21,6 @@ triton.language.advance(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `base`        | `triton.PointerType`          |需要被更新的指针，`tl.make_block_ptr`的结果                                |
 | `offsets`     | `tuple(int \| constexpr)`    | 张量各维度的基址偏移量列表，`len(offsets)`需要与`len(base.offsets)`相等 |
-| `_semantic`   | -                 | 保留参数，暂不支持外部调用|
 
 返回值：`pointer_type<blocked<shape, element_type>>`： 指向tensor的指针
 
@@ -29,27 +28,29 @@ triton.language.advance(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | √    | √    | ×    |
-| Ascend A2/A3 | √    | √     | √     | ×     | ×      | ×      | ×      | √     | √    | √    | ×    | √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | × |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | × |
 
-结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
+结论：
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |
 | ------ | --------------- |
-| GPU    | 仅支持 1~5维 tensor |
-| Ascend A2/A3 | 仅支持 1~5维 tensor |
+| GPU    | 仅支持 1~8维 tensor |
+| Ascend A2/A3 | 仅支持 1~8维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
 
-- Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
 - Ascend只允许通过调整`order`参数的顺序来表达转置语义，不能通过调整`stride`参数的顺序实现转置语义。
 - 当前`tl.make_tensor_ptr`，如果与较复杂的循环和分支语句搭配使用，可能会出现编译问题
 

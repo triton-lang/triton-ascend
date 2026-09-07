@@ -11,7 +11,7 @@
 生产者核心完成任务后，向消费者发送同步信号。
 
 ```python
-triton.language.sync_block_set(sender, receiver, event_id, _builder=None)
+triton.language.sync_block_set(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None)
 ```
 
 ### 2.2 规格
@@ -23,7 +23,8 @@ triton.language.sync_block_set(sender, receiver, event_id, _builder=None)
 | `sender` | `str` | 必需 | 发送方核心类型："cube" 或 "vector" |
 | `receiver` | `str` | 必需 | 接收方核心类型："cube" 或 "vector" |
 | `event_id` | `int` | 必需 | 事件ID，用于区分不同的同步点 |
-| `_builder` | - | `None` | 保留参数，暂不支持外部调用 |
+| `sender_pipe` | `str`，可选 | `None` | 发送方流水线类型 |
+| `receiver_pipe` | `str`，可选 | `None` | 接收方流水线类型 |
 
 #### 2.2.2 特殊限制说明
 
@@ -37,7 +38,7 @@ triton.language.sync_block_set(sender, receiver, event_id, _builder=None)
 消费者核心等待生产者的同步信号。
 
 ```python
-triton.language.sync_block_wait(sender, receiver, event_id, _builder=None)
+triton.language.sync_block_wait(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None)
 ```
 
 ### 3.2 规格
@@ -49,7 +50,8 @@ triton.language.sync_block_wait(sender, receiver, event_id, _builder=None)
 | `sender` | `str` | 必需 | 发送方核心类型："cube" 或 "vector" |
 | `receiver` | `str` | 必需 | 接收方核心类型："cube" 或 "vector" |
 | `event_id` | `int` | 必需 | 等待的事件ID |
-| `_builder` | - | `None` | 保留参数，暂不支持外部调用 |
+| `sender_pipe` | `str`，可选 | `None` | 发送方流水线类型 |
+| `receiver_pipe` | `str`，可选 | `None` | 接收方流水线类型 |
 
 #### 3.2.2 特殊限制说明
 
@@ -63,7 +65,7 @@ triton.language.sync_block_wait(sender, receiver, event_id, _builder=None)
 全局屏障同步，让所有指定类型的核心同步到同一点。
 
 ```python
-triton.language.sync_block_all(mode, event_id, _builder=None)
+triton.language.sync_block_all(mode, event_id)
 ```
 
 ### 4.2 规格
@@ -74,7 +76,6 @@ triton.language.sync_block_all(mode, event_id, _builder=None)
 |------|------|--------|----------|
 | `mode` | `str` | 必需 | 同步模式："all_cube"、"all_vector" 或 "all" |
 | `event_id` | `int` | 必需 | 全局同步事件ID |
-| `_builder` | - | `None` | 保留参数，暂不支持外部调用 |
 
 #### 4.2.2 特殊限制说明
 

@@ -5,9 +5,11 @@
 简介：加法  ，与四则运算 ‘+’等价
 原型：
 
+
 ```python
-triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
+triton.language.add(input, other, sanitize_overflow=True)
 ```
+
 
 ## 2. OP 规格
 
@@ -15,10 +17,9 @@ triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `x`        | `tensor or Number`     |     第一个入参     |
-| `y`       | `tensor or Number`     |     第二个入参     |
+| `input` | tensor或Number | 第一个入参（左操作数） |
+| `other` | tensor或Number | 第二个入参（右操作数） |
 | `sanitize_overflow`     | `bool`    | 是否对整数加法做溢出检查，默认值为True,无需显示指定 |
-| `_builder`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `tl.tensor`：加法结果
@@ -27,10 +28,15 @@ triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-|GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-|Ascend A2/A3| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | √ |
+
+
+结论：
+- Ascend A2/A3/950 对比 GPU 缺少fp64数据类型支持。
 
 #### 2.2.2 Shape 支持
 

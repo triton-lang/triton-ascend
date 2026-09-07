@@ -5,9 +5,7 @@
 简介：**计算以缩放格式表示两个矩阵块的矩阵乘积**
 
 ```python
-triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format,
-    acc=None, lhs_k_pack=True, rhs_k_pack=True,
-    out_dtype=triton.language.float32, _semantic=None)
+triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None, fast_math=False, lhs_k_pack=False, rhs_k_pack=False, out_dtype=triton.language.float32)
 ```
 
 ## 2. OP 规格
@@ -25,7 +23,6 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 | `acc`       | `tensor`    | 累积张量                                                        |
 | `lhs_k_pack`     | `(bool, optional)`    | true 沿 K 维度打包<br>false 沿 M 维度打包<br>|
 | `rhs_k_pack` | `(bool, optional)` | true 沿 K 维度打包<br>false 沿 N 维度打包<br>|
-| `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `out`：tensor类型，计算缩放矩阵乘后输出的值
@@ -34,14 +31,16 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 
 #### 2.2.1 DataType 支持
 
-|        |     fp4     |    fp8    |    bf16    |    fp16    |
-| ------------- | --------- | -------- | -------- | -------- |
-| GPU    | √    | √     | √     | √     |
-| Ascend A2/A3 | ×    | ×     | √     | √    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | × | × | × | × | × | × | × | √ | × | × | √ | √ | √ | √ |
+| Ascend A2/A3 | × | × | × | × | × | × | × | × | √ | × | × | √ | × | × | × |
+| Ascend 950 | × | × | × | × | × | × | × | × | × | × | × | × | √ | √ | × |
 
 结论：
-1、Ascend 对比 GPU 缺失fp4、fp8的支持能力（硬件限制）。
-2、缩放张量的值为int8，GPU上为uint8。
+- Ascend A2/A3 对比 GPU 缺失 fp4, fp8, fp64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp16, fp64, bf16 的支持能力。
+- 缩放张量的值为int8，GPU上为uint8。
 
 #### 2.2.2 Shape 支持
 
@@ -54,11 +53,12 @@ triton.language.dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_forma
 
 ### 2.3 特殊限制说明
 
-1、由于不支持fp8，左右矩阵不支持fp4、fp8格式，Ascend 对比 GPU 缺失lhs_k_pack、rhs_k_pack的矩阵解压缩支持能力（硬件限制）。
+1、Ascend A2/A3 左右矩阵不支持fp4、fp8数据类型，Ascend 950 对比 GPU 缺失 fp4，fp64 的支持能力。
 2、输入矩阵lhs、rhs推荐输入范围为[-5, 5]，超过可能会出现极值inf。
 3、由于硬件存在对齐要求，需要限制scale矩阵做broadcast的倍数，至少应为16
 
-4、当前支持的缩放矩阵格式为int8，社区为uint8
+4、当前支持的缩放矩阵格式为uint8/int8
+5、Scale应该是32的倍数
 
 ### 2.4 使用方法
 

@@ -5,7 +5,7 @@
 简介：`triton.language.reduce` 沿指定轴 `axis` 对输入 tensor 应用 `combine_fn` 进行规约，返回规约后的结果张量。
 
 ```python
-triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None, _generator=None)
+triton.language.reduce(input, axis, combine_fn, keep_dims=False)
 ```
 
 ## 2. OP 规格
@@ -18,8 +18,6 @@ triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None,
 | `axis` | `int` 或 `None` | 沿着哪个维度进行reduce操作。如果为None，则reduce所有维度 |
 | `combine_fn` | `Callable` | 用于组合两个标量tensor组的函数（必须用@triton.jit标记） |
 | `keep_dims` | `bool` | 如果为True，保持被reduce的维度为长度1 |
-| `_semantic` | `Optional[str]` | 保留参数，暂不支持外部调用 |
-| `_generator` | `Optional[Generator]` | 保留参数，暂不支持外部调用 |
 
 **注意**：此函数也可以作为tensor的成员函数调用，如 `x.reduce(...)` 而不是 `reduce(x, ...)`
 
@@ -30,11 +28,16 @@ triton.language.reduce(input, axis, combine_fn, keep_dims=False, _semantic=None,
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ |
-| GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
+
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 无缺失的数据类型。
 #### 2.2.2 Shape 支持
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。

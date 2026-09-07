@@ -5,11 +5,8 @@
 简介：用于比较两个张量的元素，与`>`等价。
 
 ```python
-triton.language.semantic.greater_than(
- input: tl.tensor,
- other: tl.tensor,
- builder: ir.builder
-) -> tl.tensor
+x > y
+triton.language.semantic.greater_than(input, other)
 ```
 
 作为`tensor`的内置运算符使用，如`x>y`。
@@ -22,7 +19,6 @@ triton.language.semantic.greater_than(
 | :---: | :---: | --- |
 | `input` | `tensor` | 张量数据，左操作数，代表要进行比较的主数据 |
 | `other`   | `tensor` | 张量数据，右操作数，与`input`逐元素进行比较 |
-| `builder` | - | 保留参数，暂不支持外部调用 |
 
 返回值：
 `tl.tensor`：同`input`的shape的张量
@@ -31,12 +27,15 @@ triton.language.semantic.greater_than(
 
 #### 2.2.1 DataType 支持
 
-|       | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GPU      | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-| Ascend A2/A3 | √ | √ | √ | √ | × | × | × | √ | √ | √ | × | √ | √ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
-结论：Ascend 对比 GPU 缺失 uint16/uint32/uint64、fp64 的支持能力。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64、fp64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 
@@ -51,7 +50,7 @@ triton.language.semantic.greater_than(
 
 > 相对社区能力缺失且无法实现
 
-Ascend 对比 GPU 缺失 uint16/uint32/uint64、fp64 的支持能力。
+Ascend 950 对比 GPU 缺失 fp64 的支持能力。
 
 ### 2.4 使用方法
 

@@ -44,12 +44,12 @@ Atomic_Ops/index.md
 
 |api|简要说明|
 |--|--|
-| [eq](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
+| [equal](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
 | [le](./Comparing_Ops/le.md) | 用于比较两个张量的元素，与`<=`等价。 |
 | [ge](./Comparing_Ops/ge.md) | 用于比较两个张量的元素，与`>=`等价。 |
 | [lt](./Comparing_Ops/lt.md) | 用于比较两个张量的元素，与`<`等价。 |
 | [gt](./Comparing_Ops/gt.md) | 用于比较两个张量的元素，与`>`等价。 |
-| [ne](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
+| [not_equal](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
 
 ```{toctree}
 :maxdepth: 3
@@ -151,6 +151,7 @@ Inline_Assembly/index.md
 |--|--|
 |[range](./Iterators/range.md)  |永远向上计数的迭代器 |
 |[static_range](./Iterators/static_range.md) | 永远向上计数的迭代器 |
+|[condition](./Iterators/condition.md) | while 循环条件包装器，用于向编译器传递额外属性 |
 
 ```{toctree}
 :maxdepth: 3
@@ -308,6 +309,7 @@ Random_Number_Generation/index.md
 |[max](./Reduction_Ops/max.md) |返回沿指定 axis 轴上 input 张量中所有元素的最大值 |
 |[min](./Reduction_Ops/min.md) |返回沿指定 axis 轴上 input 张量中所有元素的最小值 |
 |[reduce](./Reduction_Ops/reduce.md) |将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素 |
+|[reduce_or](./Reduction_Ops/reduce_or.md) |返回 input 张量中，沿指定 axis 的所有元素的逻辑或 |
 |[sum](./Reduction_Ops/sum.md) |返回 input 张量中，沿指定 axis 的所有元素的总和 |
 |[xor_sum](./Reduction_Ops/xor_sum.md) |返回 input 张量中，沿指定 axis 的所有元素的异或和 |
 
@@ -323,10 +325,12 @@ Reduction_Ops/index.md
 |api|简要说明|
 |--|--|
 |[associative_scan](./Scan_Sort_Ops/associative_scan.md) |沿指定 axis 将 combine_fn 应用于 input 张量的每个元素和携带的值，并更新携带的值 |
+|[bitonic_merge](./Scan_Sort_Ops/bitonic_merge.md) |将沿指定维度的 bitonic 序列合并为单调有序序列 |
 |[cumprod](./Scan_Sort_Ops/cumprod.md) |返回沿指定 axis 的 input 张量中所有元素的累积乘积 |
 |[cumsum](./Scan_Sort_Ops/cumsum.md)  |返回沿指定 axis 的 input 张量中所有元素的累积和 |
 |[histogram](./Scan_Sort_Ops/histogram.md) |基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始值为0 |
 |[sort](./Scan_Sort_Ops/sort.md) |沿着指定维度对张量进行排序 |
+|[topk](./Scan_Sort_Ops/topk.md) |返回沿指定维度的前 k 个最大元素 |
 
 ```{toctree}
 :maxdepth: 3

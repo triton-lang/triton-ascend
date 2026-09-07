@@ -14,7 +14,7 @@ triton.language.load(
  cache_modifier='',
  eviction_policy='',
  volatile=False,
- _semantic=None
+
 )
 ```
 
@@ -34,7 +34,6 @@ triton.language.load(
 | `cache_modifier`   | `""` 或 `"ca"`或`"cg"`                | 可选参数，控制NVIDIA PTX上的cache选项，对Ascend硬件无效                                                |
 | `eviction_policy`   | `str`                | 控制NVIDIA PTX的eviction策略， 对Ascend硬件无效                                                |
 | `volatile`   | `bool`                 | 控制NVIDIA PTX的volatile选项， 对Ascend硬件无效                                        |
-| `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 当前910代际均还不支持cache_modifier，eviction_policy， volatile等参数
 
@@ -42,12 +41,16 @@ triton.language.load(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | √    | √     | √     | √     | √      | √      | √      | √     | √    | √    | √    | √    | √    |
-| Ascend A2/A3 | √    | √     | √     | ×     | ×      | ×      | ×      | √     | √    | √    | ×    | √    |  √    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | √ |
 
-结论：Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64、fp64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。
+
 
 #### 2.2.2 Shape 支持
 
@@ -56,7 +59,7 @@ triton.language.load(
 | GPU    | 支持scalar和1~5维tensor |
 | Ascend A2/A3 | 支持scalar和1~5维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 #### 2.2.3 社区约束
 
@@ -77,7 +80,7 @@ triton.language.load(
 
 > 相对社区能力缺失且无法实现
 
-Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
+Ascend 950 对比 GPU 缺失 fp64 的支持能力（硬件限制）。
 
 | 差异点                                 | 描述                                                         | 解决途径                       |
 | -------------------------------------- | ------------------------------------------------------------ | ------------------------------ |

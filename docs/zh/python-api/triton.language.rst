@@ -15,7 +15,6 @@ Programming Model
     tensor_descriptor
     program_id
     num_programs
-    map_elementwise
 
 Creation Ops
 ------------
@@ -89,34 +88,27 @@ Math Ops
     :nosignatures:
 
     abs
-    add
     cdiv
     ceil
     clamp
     cos
-    div
     div_rn
     erf
     exp
     exp2
     fdiv
-    floordiv
     floor
     fma
     log
     log2
     maximum
     minimum
-    mod
-    mul
-    neg
     rsqrt
     sigmoid
     sin
     softmax
     sqrt
     sqrt_rn
-    sub
     umulhi
 
 Logical Ops
@@ -170,12 +162,12 @@ Scan/Sort Ops
     :nosignatures:
 
     associative_scan
-    bitonic_merge
     cumprod
     cumsum
     histogram
     sort
     topk
+    bitonic_merge
 
 Atomic Ops
 ----------
@@ -201,9 +193,7 @@ Random Number Generation
     randint4x
     randint
     rand
-    rand4x
     randn
-    randn4x
 
 Iterators
 ---------
@@ -213,7 +203,6 @@ Iterators
 
     range
     static_range
-    condition
 
 Compiler Hint Ops
 -----------------

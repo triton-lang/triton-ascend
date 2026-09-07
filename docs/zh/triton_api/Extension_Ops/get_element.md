@@ -5,14 +5,11 @@
 简介：根据给定的索引，从输入张量中读取单个元素。
 原型：
 
+
 ```python
-triton.language.get_element(
-    src,
-    indice,
-    _builder=None,
-    _generator=None
-) -> scalar
+triton.language.get_element(src, indice)
 ```
+
 
 可以作为tensor的成员函数调用，如`x.get_element(...)`，与`get_element(x, ...)`等效。
 
@@ -24,8 +21,6 @@ triton.language.get_element(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `src`        | `tensor`          | 要被访问的源张量                                                     |
 | `indice`       | `tuple of ints` 或 `tuple of tensors`    | 用于指定元素位置的索引                                                    |
-| `_builder` |- | 保留参数，暂不支持外部调用                                            |
-| `_generator`   | -               | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `scalar`：与 `src` 张量元素类型相同的标量值
@@ -34,9 +29,10 @@ triton.language.get_element(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
-| Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | × |
 
 #### 2.2.2 Shape 支持
 

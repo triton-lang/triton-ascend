@@ -5,7 +5,7 @@
 `compile_hint` 是一个编译器提示（hint）机制，允许用户为张量附加元数据信息，这些信息会被传递到编译器后端，用于指导优化和代码生成。
 
 ```python
-triton.language.compile_hint(ptr, hint_name, hint_val=None, _builder=None)
+triton.language.compile_hint(ptr, hint_name, hint_val=None)
 ```
 
 ## 2.规格
@@ -17,7 +17,6 @@ triton.language.compile_hint(ptr, hint_name, hint_val=None, _builder=None)
 | `ptr` | `tensor` | 必需 | 需要附加提示的张量对象 |
 | `hint_name` | `str` `constexpr` | 必需 | 提示的名称标识符（必须为字符串） |
 | `hint_val` | `None` `bool` `int` `constexpr` `list` | `None` | 提示的值，支持多种类型 |
-| `_builder` | - | `None` | 保留参数，暂不支持外部调用 |
 
 ### 2.2 类型支持
 

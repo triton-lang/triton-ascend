@@ -12,7 +12,7 @@ triton.language.atomic_xchg(
     mask=None,
     sem=None,
     scope=None,
-    _semantic=None
+
 ) -> pointer
 ```
 
@@ -29,7 +29,6 @@ triton.language.atomic_xchg(
 | `mask`     | `int1`或`tensor<int1>`，可选    | 指定数据范围，防止访问越界 |
 | `sem` | `str`，可选 | 指定操作的内存语义<br>社区官方配置可接受的值为“acquire”、“release”、“acq_rel”（默认，代表“ACQUIRE_RELEASE”）和“relaxed”<br>我们只支持“acq_rel”：<br>- acquire：获取锁后，能够看到之前的释放操作（相当于一个“读取”操作，并且这个读取操作会阻塞，直到能够读取到“最新”的数据，也就是其他线程释放后的数据）<br>- release：在释放锁之前的所有操作，对后续获取锁的线程可见（相当于一个“写入”操作，并且这个写入操作会“同步”所有之前的写操作）                                             |
 | `scope` | `str`，可选 | 观察原子操作同步效果的线程范围<br>可接受的值为“gpu”（默认）、“cta”（协作线程数组、线程块）或“sys”（代表“SYSTEM”） <br>我们只支持“gpu”                                            |
-| `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 返回值：
 `pointer`：tensor，执行操作之前的旧值
@@ -38,10 +37,15 @@ triton.language.atomic_xchg(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU      | ×      | ×    |  √      | ×    |  ×    | √   | √    | √      | ×    | √      | √    | ×    |  ×    |
-| Ascend A2/A3 | √    | √     | √     | √     | √     | √     | √     | √      | √    | √    | ×    | ×    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | × | × | × | √ | √ | √ | √ | × | √ | √ | × | × | × | × |
+| Ascend A2/A3 | × | × | × | × | × | √ | × | √ | × | √ | × | × | × | × | × |
+| Ascend 950 | × | × | × | × | √ | √ | √ | √ | × | √ | × | × | × | × | × |
+
+
+结论：
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
 
 #### 2.2.2 Shape 支持
 

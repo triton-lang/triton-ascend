@@ -48,10 +48,11 @@ triton.language.min(input, axis=None, return_indices=False, return_indices_tie_b
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-|GPU| √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ |
-|Ascend A2/A3| √ | √ | × | √ | × | √ | × | √ | √ | √ | √ | √ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
 #### 2.2.2 Shape 支持
 
@@ -77,4 +78,6 @@ def triton_min_1d(in_ptr0, out_ptr1, xnumel, XBLOCK : tl.constexpr):
 
 ### 2.4. 特殊限制
 
-Ascend A3对比 GPU 缺失uint16、uint32、uint64、fp64的支持。
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 缺失 fp64 的支持能力。

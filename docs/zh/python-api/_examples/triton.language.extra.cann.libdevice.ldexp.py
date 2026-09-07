@@ -24,15 +24,17 @@ def torch_ldexp_reference(x0, x1):
 
 
 @triton.jit
-def triton_ldexp(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
-    xoffset = tl.program_id(0) * XBLOCK
-    for xoffset_sub in range(0, XBLOCK, XBLOCK_SUB):
-        x_index = xoffset + xoffset_sub + tl.arange(0, XBLOCK_SUB)[:]
-        xmask = x_index < xnumel
-        tmp0 = tl.load(in_ptr0 + x_index, xmask)
-        tmp1 = tl.load(in_ptr1 + x_index, xmask)
+def triton_kernel(input, input2, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    base = tl.arange(0, XBLOCK_SUB)
+    loops: tl.constexpr = XBLOCK // XBLOCK_SUB
+    for loop in range(loops):
+        x0 = offset + (loop * XBLOCK_SUB) + base
+        mask = x0 < n_elements
+        tmp0 = tl.load(input + (x0), mask=mask)
+        tmp1 = tl.load(input2 + (x0), mask=mask)
         tmp2 = libdevice.ldexp(tmp0, tmp1)
-        tl.store(out_ptr0 + x_index, tmp2, xmask)
+        tl.store(output + (x0), tmp2, mask=mask)
 
 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)

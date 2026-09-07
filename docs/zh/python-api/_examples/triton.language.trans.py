@@ -19,7 +19,7 @@ def test_trans():
     D1, D2, D3 = 2, 3, 4
     x = torch.zeros([D1, D2, D3], dtype=torch.float32).npu()
     out = torch.empty((D1 * D2 * D3, ), dtype=torch.float32, device="npu")
-    trans_kernel[(1, )](x, out, D1, D2, D3)
+    trans_kernel[(1, )](out, x, D1, D2, D3)
 
     assert out.shape == (D1 * D2 * D3, ), f"Shape mismatch: expected {(D1*D2*D3,)} but got {out.shape}."
     print("Test passed.")

@@ -5,15 +5,11 @@
 简介：基于 input 计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始于 0。
 原型：
 
+
 ```python
-triton.language.histogram(
- input,
- num_bins,
- mask=None,
- _semantic=None,
- _generator=None
-)
+triton.language.histogram(input, num_bins, mask=None)
 ```
+
 
 可以作为tensor的成员函数调用，如`x.histogram(...)`，与`histogram(x, ...)`等效。
 
@@ -26,21 +22,26 @@ triton.language.histogram(
 | `input`        | `tensor`          | 输入数据，包含需要统计分布的所有数值点                                                    |
 | `num_bins`       | `int`    | 定义要将整个数据范围划分成多少个等宽的区间                       |
 | `mask`     | `int1`或`tensor<int1>`，可选    | 指定数据范围，防止访问越界 |
-| `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
-| `_generator` |-                 | 保留参数，暂不支持外部调用
 
 返回值：
 用tensor表示的直方图
-注：input输入范围限制在[0,num_bins-1]中，待版本更新后支持全范围
+注：当前triton3.2版本暂未支持mask，待版本更新后支持；input输入范围限制在[0,num_bins-1]中，待版本更新后支持全范围
 
 ### 2.2 支持规格
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | ×    | ×     | √     | ×     | ×      | √      | ×      | ×     | ×    | ×    | ×    | ×    | ×       |
-| Ascend A2/A3 | ×    | ×     | √    | ×     | ×      | √      | √      | √     | ×    | ×    | ×    | ×    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | × | × | × | √ | √ | × | × | × | × | × | × | × | × | × |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | × | × | × | × | × | × | × |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | × | × | × | × | × | × | × |
+
+
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint32 的支持能力。
+- Ascend 950 对比 GPU 无缺失的数据类型。
+
 
 #### 2.2.2 Shape 支持
 

@@ -21,7 +21,7 @@ def test_view():
     R1, R2 = 6, 4
     x = torch.zeros([D1, D2, D3], dtype=torch.float32).npu()
     out = torch.empty((D1 * D2 * D3, ), dtype=torch.float32, device="npu")
-    view_kernel[(1, )](x, out, D1, D2, D3, R1, R2)
+    view_kernel[(1, )](out, x, D1, D2, D3, R1, R2)
 
     assert out.shape == (D1 * D2 * D3, ), f"Shape mismatch: expected {(D1*D2*D3,)} but got {out.shape}."
     print("Test passed.")

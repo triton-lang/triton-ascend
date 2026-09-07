@@ -5,7 +5,7 @@
 `multiple_of` 用于向编译器声明输入张量中的第一个值是某个数的倍数。
 
 ```python
-triton.language.multiple_of(input, values, _semantic=None)
+triton.language.multiple_of(input, values)
 ```
 
 ## 2. 规格
@@ -27,16 +27,18 @@ triton.language.multiple_of(input, values, _semantic=None)
 
 A3：
 
-| | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-|------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
-| GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ | ✓ | ✓ | × | ✓ | ✓ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | × | ✓ |
+| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | × | ✓ | × | × | ✓ |
+| Ascend 950 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | ✓ | ✓ | ✓ | ✓ |
 
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
 
-Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力（硬件限制）。
+结论：Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64、fp64 的支持能力。
+Ascend 950 对比 GPU 缺失 fp64 的支持能力（硬件限制）。
 
 ### 2.4 使用方法
 

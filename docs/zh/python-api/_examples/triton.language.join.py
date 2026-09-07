@@ -21,7 +21,7 @@ def test_join():
     y = torch.zeros([M, N], dtype=torch.float32).npu()
 
     out = torch.empty((2 * M * N, ), dtype=torch.float32, device="npu")
-    join_2d_kernel[(1, )](x, y, out, M=M, N=N)
+    join_2d_kernel[(1, )](out, x, y, M=M, N=N)
 
     assert out.shape == (2 * M * N, ), f"Shape mismatch: expected {(2*M*N,)} but got {out.shape}."
     print("Test passed.")

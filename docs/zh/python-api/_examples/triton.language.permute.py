@@ -20,7 +20,7 @@ def test_permute():
     x = torch.zeros([M, N, K], dtype=torch.float32).npu()
     out = torch.empty((M * N * K, ), dtype=torch.float32, device="npu")
 
-    permute_3d_kernel[(1, )](x, out, M=M, N=N, K=K)
+    permute_3d_kernel[(1, )](out, x, M=M, N=N, K=K)
 
     assert out.shape == (M * N * K, ), "Shape mismatch"
     print("Test passed.")

@@ -50,6 +50,7 @@ public:
   llvm::LogicalResult markOpBlockId(Operation *op);
   llvm::LogicalResult markOpsWithNewId(llvm::ArrayRef<Operation *> ops);
   void updateBlockId(Operation *op, int blockId);
+  void eraseOp(Operation *op);
 
   bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
   llvm::LogicalResult inheritFromParent(Block *block);

@@ -223,5 +223,10 @@ bool collectViewOpsAndCheckGlobalMemory(Value viewValue,
   return false;
 }
 
+void setSkipExtraReorder(ModuleOp module, bool skip) {
+  module->setAttr(CVPipeline::kSkipExtraReorder,
+                  BoolAttr::get(module->getContext(), skip));
+}
+
 } // namespace CVPipeline
 } // namespace mlir

@@ -105,6 +105,30 @@ void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
   blockIdToOps[blockId].push_back(op);
 }
 
+void ComputeBlockIdManager::eraseOp(Operation *op) {
+  if (!op) {
+    return;
+  }
+  auto it = opToBlockId.find(op);
+  if (it == opToBlockId.end()) {
+    return;
+  }
+  int blockId = it->second;
+  opToBlockId.erase(it);
+  if (blockId == -1) {
+    return;
+  }
+  auto bidIt = blockIdToOps.find(blockId);
+  if (bidIt == blockIdToOps.end()) {
+    return;
+  }
+  auto &vec = bidIt->second;
+  auto vecIt = llvm::find(vec, op);
+  if (vecIt != vec.end()) {
+    vec.erase(vecIt);
+  }
+}
+
 llvm::ArrayRef<Operation *>
 ComputeBlockIdManager::getOpsRefByBlockId(int blockId) const {
   if (blockId == -1) {

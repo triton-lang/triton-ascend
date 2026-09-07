@@ -25,6 +25,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/ArrayRef.h"
@@ -93,6 +94,19 @@ void cloneScalarOpsForCrossBlockUses(ComputeBlockIdManager &bmOriginal,
  */
 bool collectViewOpsAndCheckGlobalMemory(Value viewValue,
                                         SetVector<Operation *> &matchedOps);
+
+/**
+ * @brief Set the module attribute telling ReorderOpsByBlockIdPass to skip the
+ * extra reorder
+ *
+ * Set this marker when it ran but merged nothing, in
+ * which case the extra reorder is unnecessary. ReorderOpsByBlockIdPass
+ * consumes (and removes) the attribute.
+ *
+ * @param module The module op to attach the attribute to
+ * @param skip True to request skipping the extra reorder
+ */
+void setSkipExtraReorder(ModuleOp module, bool skip);
 
 } // namespace CVPipeline
 } // namespace mlir

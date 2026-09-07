@@ -57,3 +57,31 @@ tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
+
+## Next Steps: From Examples to Full Development
+
+This page helps you finish installation and verify the first example. To continue through the full operator development workflow, follow the path below:
+
+1. **Operator development**: Read the Vector / Cube / fusion tutorials for your operator type, then modify an example kernel to complete the develop–compile–verify loop.
+2. **Autotune**: Use Autotune to select suitable tiling configs.
+3. **Debug and profiling**: Learn print-based debugging and performance collection.
+4. **Migration and advanced topics**: Migrate from GPU Triton to Ascend, or check environment variables and compiler options.
+
+### Development Guide
+
+| Document | Description |
+|----------|-------------|
+| [Triton-Ascend Operator Programming](./programming_guide/index.md) | General principles: multi-core split, on-chip memory, access patterns, and tiling |
+| [Triton-Ascend Operator Migration](./migration_guide/index.md) | Migrate GPU Triton operators to Ascend NPU |
+| [Triton-Ascend Operator Debugging and Profiling](./debug_guide/index.md) | Debugging, profiling, and accuracy troubleshooting |
+| [Environment Variables and Compiler Options](./environment_variable_and_compiler_options_reference.md) | Runtime and compilation configuration reference |
+
+### Tutorials & Examples
+
+| Document | Description |
+|----------|-------------|
+| [Vector Operator Development](./programming_guide/vector_operator.md) | Element-wise, reduction, gather/scatter, and other Vector Core operators |
+| [Cube Operator Development](./programming_guide/cube_operator.md) | Cube operators centered on `tl.dot` and matrix multiplication |
+| [CV Fusion Operator Development](./programming_guide/cv_fusion_operator.md) | Kernels that combine Cube compute with Vector post-processing |
+| [Triton-Ascend Autotune](./autotune_guide.md) | Recommended Autotune usage and automatic tiling scope |
+| [Example Operators](./examples/index.md) | End-to-end examples such as Softmax, LayerNorm, Attention, and Matmul |

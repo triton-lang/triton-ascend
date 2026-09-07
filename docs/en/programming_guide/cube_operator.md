@@ -61,4 +61,4 @@ Recommended decomposition:
 4. **Design inner loops for long K or long sequences**: the K-dimension loop should control the on-chip footprint of each A/B tile, and the sequence-dimension loop should avoid loading an oversized K/V block at once.
 5. **Use Autotune to manage candidate tiles**: prepare multiple `BLOCK_M/N/K` and `multibuffer` configurations for common shapes and let the runtime choose the optimal combination.
 
-A common migration risk is directly keeping a GPU-style large grid. If the output tile count is far larger than the physical Cube Core count, let each program process multiple tiles in an inner loop, or set `TRITON_ALL_BLOCKS_PARALLEL=1` when logical programs are independent.
+A common migration risk is directly keeping a GPU-style large grid. For eligible kernels whose logical programs are independent, the backend automatically maps the logical grid onto the available physical cores; its IR safety analysis skips unsupported kernels. If the kernel has ordering dependencies or is rejected by that analysis, let each program process multiple tiles in an inner loop.

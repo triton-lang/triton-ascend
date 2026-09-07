@@ -38,6 +38,7 @@
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
@@ -412,6 +413,41 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
   }
 
   applyReorder(block, reorderedRes.value());
+
+  // Verify the sync fence invariant: every op that preceded (followed) a
+  // gpu.barrier / hivm.sync_block_all in the original source order must still
+  // precede (follow) it.
+  LLVM_DEBUG({
+    DenseMap<Operation *, unsigned> sourceIdx;
+    for (unsigned i = 0; i < allOps.size(); ++i) {
+      sourceIdx[allOps[i]] = i;
+    }
+    for (Operation &op : block) {
+      if (!CVPipeline::isSyncOp(&op)) {
+        continue;
+      }
+      bool seenBarrier = false;
+      unsigned barrierIdx = sourceIdx[&op];
+      for (Operation &it : block) {
+        if (&it == &op) {
+          seenBarrier = true;
+          continue;
+        }
+        if (!sourceIdx.contains(&it)) {
+          continue;
+        }
+        unsigned idx = sourceIdx.at(&it);
+        if (seenBarrier && idx < barrierIdx) {
+          LOG_DEBUG("Barrier fence violated: op after barrier in source moved "
+                    << "before it: " << it << "\n");
+        }
+        if (!seenBarrier && idx > barrierIdx) {
+          LOG_DEBUG("Barrier fence violated: op before barrier in source moved "
+                    << "after it: " << it << "\n");
+        }
+      }
+    }
+  });
 
   return llvm::success();
 }

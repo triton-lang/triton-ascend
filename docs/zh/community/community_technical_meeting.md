@@ -14,12 +14,12 @@ Triton-Ascend 定期召开社区技术会议，作为项目治理的核心决策
 
 - **会议频率**：每两周一次
 - **会议时间**：周四 14:15（UTC+8）
-- **会议起始日期**：2026 年 6 月 4 日
+- **会议起始日期**：2026 年 9 月 3 日
 - **会议链接**：[链接](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)
 - **会议室号**：865 4019 2059
 - **会议室密码**：123456
 - **会议议程与纪要**：[议程&纪要](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
-- **会议 iCalendar**：[iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DObLUj7lyTNwJj6XJgAALAAAAOvNV2DJnuObI9tqQGt1c3aeqVgCdzMYHV0m_J0KHIX0i4QUrtvsJwMu_EMF5VKyBKdX4rPWh_raTxvF4jAwMDAwMQ&meetingMasterEventId=1PZVSVC8S8WIBZJ1e4wuZQ)
+- **会议 iCalendar**：[iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DBlmQBo-ZbCIRz2GWwAALAAAAH1WzqoLLdQ-3b1rNf3AN6DLmYOhAUMS4b1zaoD-mgyykQQcSeS7S4Sf27U3_r_pLLEVTWFd8P_zVnm1zzAwMDAwMg)
 
 ## 投票规则
 

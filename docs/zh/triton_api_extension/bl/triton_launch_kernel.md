@@ -311,7 +311,7 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 ### ABI 稳定性
 
 - `triton_launch_kernel` 由 `generate_npu_wrapper_src()` 按 kernel 编译动态生成，每个 launcher stub `.so` 中的该函数其参数区内存布局可能不同
-- 布局影响因素包括：kernel signature、`metadata.workspace_size`、`metadata.lock_num`、`metadata.coalesce_factor`、`metadata.coalesce_axis`、`metadata.force_simt_only`、`TRITON_DEVICE_PRINT`、ffts 支持状态
+- 布局影响因素包括：kernel signature、`metadata.workspace_size`、`metadata.lock_num`、`metadata.coalesce_factor`、`metadata.coalesce_axis`、`metadata.is_pure_simt`、`TRITON_DEVICE_PRINT`、ffts 支持状态
 - **不同编译产物生成的 `triton_launch_kernel` 不可互换使用**；调用方应确保使用的 launcher stub `.so` 与目标 kernel 编译产物匹配
 
 ### grid 语义

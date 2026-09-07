@@ -3,10 +3,7 @@ name: Documentation
 on:
   pull_request:
     paths:
-      - '*.md'
-      - 'docs/**/*.md'
-      - 'docs/**/*.mdx'
-      - 'docs/**/_toc.yaml'
+      - 'docs/**'
       - '.github/workflows/documentation.yml'
       - '.github/docs-ci/**'
   # Manual full scans (checkAll) to surface errors in existing docs
@@ -132,3 +129,116 @@ jobs:
               cat output.md
             } >> "$GITHUB_STEP_SUMMARY"
           fi
+
+  docs-examples-npu:
+    name: Docs examples test (${{ matrix.config.name }}, py${{ matrix.config.python_version }})
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {name: a3, runs_on: linux-aarch64-a3-4, cann_version: '8.5.0', chip_type: a3, os: ubuntu22.04, python_version: '3.10'}
+          - {name: a5, runs_on: linux-amd64-a5-4, cann_version: '9.1.0', chip_type: '950', os: ubuntu22.04, python_version: '3.12'}
+    env:
+      PYTHON: "python${{ matrix.config.python_version }}"
+      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ~/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
+
+      - name: Download and install Bisheng compiler
+        shell: bash
+        run: |
+          if [ ! -f cmake/bisheng-version.txt ]; then
+            echo "cmake/bisheng-version.txt not found, skipping"
+            exit 0
+          fi
+          ARCH=$(uname -m)
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
+          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
+          if [ -z "${BISHENG_FILENAME}" ]; then
+            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
+            exit 1
+          fi
+          echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
+          curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
+            --retry-delay 10 -C - \
+            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+          if [ -n "${BISHENG_SHA256}" ]; then
+            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          else
+            echo "Warning: No SHA256 checksum provided, skipping verification"
+          fi
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+
+      - name: Build and install triton-ascend
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: "true"
+          TRITON_BUILD_WITH_CLANG_LLD: "TRUE"
+          TRITON_DISABLE_LINE_INFO: 1
+          CCACHE_COMPRESS: "true"
+          TRITON_BUILD_WITH_O1: true
+          TRITON_BUILD_TD: ON
+          TRITON_BUILD_PROTON: OFF
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          npu-smi info
+          ccache --zero-stats
+          NUM_PROCS=$(( $(nproc) / 3 ))
+          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
+          if [ -f setup_ascend.py ]; then
+            SETUP_DIR="./"
+            SETUP_PY="setup_ascend.py"
+          elif [ -f setup.py ]; then
+            SETUP_DIR="./"
+            SETUP_PY="setup.py"
+          elif [ -f python/setup.py ]; then
+            SETUP_DIR="python"
+            SETUP_PY="setup.py"
+          else
+            echo "ERROR: setup.py or setup_ascend.py not found" >&2
+            exit 1
+          fi
+          cd "$SETUP_DIR"
+          MAX_JOBS="$NUM_PROCS" \
+          ${PYTHON} ${SETUP_PY} bdist_wheel
+          ${PYTHON} -m pip install dist/*.whl
+
+      - name: Run API doc example tests
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          ${PYTHON} -m pytest -s -v -n 8 --dist=loadfile \
+            --import-mode=importlib \
+            --override-ini="python_files=triton.*.py" \
+            docs/zh/python-api/_examples/

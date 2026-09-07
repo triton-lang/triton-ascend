@@ -20,7 +20,7 @@ GPU 上常见的写法会把 grid 设计为大量逻辑 program，由硬件和�
 
 - grid 优先使用 1D；2D NPU 适配写法也会合并为 1D，例如 `(20,)` 与 `(4, 5)` 的效果相同。
 - Vector-only 算子的并发任务数通常按 Vector Core 数量组织；包含 `tl.dot` 的算子通常按 AI Core 数量组织。
-- 当逻辑 grid 远大于物理核数时，需要评估是否改成每个 program 内部循环处理多个 tile，或在逻辑核之间无顺序依赖时使用 `TRITON_ALL_BLOCKS_PARALLEL`。
+- 当逻辑 grid 远大于物理核数时，后端会自动把符合条件且逻辑核相互独立的任务折叠到可用物理核。对于存在顺序依赖或未通过 IR 安全分析的 kernel，应改成每个 program 内部循环处理多个 tile。
 - coreDim 不能超过 `UINT16_MAX`（65535），大 shape 算子需要结合 BLOCK_SIZE 或分块方式控制 grid 大小。
 
 | 维度 | 核心结构 | 算子类型 |
@@ -155,11 +155,7 @@ NPU的 coreDim 参数不能超过 UINT16_MAX（65535）。当处理大规模数�
 数据规模：N = 1073741824，原始 BLOCK_SIZE = 2048，计算得到的 coreDim = 524288 > 65535（超限）
 
 解决思路1：
-昇腾编译器针对coreDim超限问题，有对应的解决方案，只需将环境变量'TRITON_ALL_BLOCKS_PARALLEL'设为1。设置命令如下：
-
-```bash
-export TRITON_ALL_BLOCKS_PARALLEL=1
-```
+后端会对通过 IR 安全分析的 kernel 自动启用 block mapping，无需再设置环境变量。需要确认各逻辑 program 之间不存在顺序依赖；如果编译器提示自动 block mapping 已跳过，请采用解决思路2中的显式 tiling。
 
 解决思路2：
 通过增大 BLOCK_SIZE 来减少所需的核心数量，确保 coreDim 不超过限制。

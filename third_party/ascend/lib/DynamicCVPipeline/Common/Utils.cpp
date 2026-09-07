@@ -9,9 +9,11 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -131,6 +133,16 @@ bool isVectorOnlyOp(Operation *op) {
       .Default([](auto) { return false; });
 }
 
+bool isSyncOp(Operation *op) {
+  return isa<gpu::BarrierOp, hivm::SyncBlockOp, hivm::SyncBlockWaitOp,
+             hivm::SyncBlockSetOp>(op);
+}
+
+bool isExternalSyncOp(Operation *op) {
+  return isSyncOp(op) &&
+         op->getAttrOfType<IntegerAttr>(CVPipeline::kExternalSync);
+}
+
 bool isScfOp(Operation *op) {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
 }
@@ -209,11 +221,8 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
   if (funcOp) {
     constexpr llvm::StringLiteral regionalDisabledOps[]{
         "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64",
-        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
-        "backward_dkdv",
-        "pcb10_tc01_kernel",
-        "chunk_ttt_linear_fwd_kernel_h",
-        "chunk_ttt_linear_bwd_kernel_h"};
+        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64", "backward_dkdv",
+        "chunk_ttt_linear_fwd_kernel_h", "chunk_ttt_linear_bwd_kernel_h"};
     if (llvm::is_contained(regionalDisabledOps, funcOp.getSymName())) {
       return CoreType::UNDETERMINED;
     }

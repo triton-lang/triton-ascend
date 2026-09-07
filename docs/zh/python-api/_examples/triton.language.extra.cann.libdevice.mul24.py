@@ -1,8 +1,5 @@
 import os
 
-# The libdevice SIMT ops below are A5-only (Ascend 910_95 / 950) and are
-# additionally gated by this env switch; set it so the examples run on A5
-# hardware without extra configuration.
 os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
 
 import pytest
@@ -14,6 +11,18 @@ from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+def torch_mul24_reference(x0, x1):
+    assert x0.device.type == "cpu"
+    assert x1.device.type == "cpu"
+    assert x0.dtype == x1.dtype
+    assert x0.dtype in (torch.int32, torch.uint32)
+    assert x0.shape == x1.shape
+
+    if x0.dtype == torch.int32:
+        return ((x0 << 8) >> 8) * ((x1 << 8) >> 8)
+    return (((x0.to(torch.int64) & 0xFFFFFF) * (x1.to(torch.int64) & 0xFFFFFF)) & 0xFFFFFFFF).to(torch.uint32)
 
 
 @triton.jit
@@ -30,22 +39,17 @@ def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLO
         tl.store(output + (x0), tmp2, mask=mask)
 
 
-def _mul24(x, y):
-    """Low 24-bit multiplication result."""
-    v = (int(x) & 0xFFFFFF) * (int(y) & 0xFFFFFF)
-    v &= 0xFFFFFF
-    if v & 0x800000:
-        v -= 0x1000000
-    return v
-
-
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_mul24():
-    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    x1 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    expected = torch.tensor([_mul24(*v) for v in zip(x0.tolist(), x1.tolist())], dtype=torch.int32).npu()
+    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    x1 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    expected = (torch_mul24_reference(x0, x1)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
     output = torch.empty(8, dtype=torch.int32, device='npu')
-    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
+    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(output, expected, rtol=0, atol=0)
 
 

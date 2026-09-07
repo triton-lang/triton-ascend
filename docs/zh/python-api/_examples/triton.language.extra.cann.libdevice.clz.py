@@ -1,8 +1,5 @@
 import os
 
-# The libdevice SIMT ops below are A5-only (Ascend 910_95 / 950) and are
-# additionally gated by this env switch; set it so the examples run on A5
-# hardware without extra configuration.
 os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
 
 import pytest
@@ -14,6 +11,18 @@ from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+def torch_clz_reference(x0):
+    assert x0.device.type == "cpu"
+    assert x0.dtype == torch.int32
+
+    vals = x0.view(-1).tolist()
+    out = []
+    for v in vals:
+        u = v & 0xFFFFFFFF
+        out.append(32 if u == 0 else 32 - u.bit_length())
+    return torch.tensor(out, dtype=torch.int32).view(x0.shape)
 
 
 @triton.jit
@@ -29,18 +38,15 @@ def triton_kernel(input0, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: 
         tl.store(output + (x0), tmp1, mask=mask)
 
 
-def _clz(x):
-    """Count leading zero bits of the 32-bit representation of x."""
-    v = int(x) & 0xFFFFFFFF
-    return 32 - v.bit_length() if v != 0 else 32
-
-
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_clz():
-    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    expected = torch.tensor([_clz(*v) for v in zip(x0.tolist())], dtype=torch.int32).npu()
+    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    expected = (torch_clz_reference(x0)).npu()
+    x0 = x0.npu()
     output = torch.empty(8, dtype=torch.int32, device='npu')
-    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
+    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(output, expected, rtol=0, atol=0)
 
 

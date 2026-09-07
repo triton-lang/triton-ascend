@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
@@ -47,6 +48,45 @@ using namespace mlir;
 namespace mlir {
 namespace CVPipeline {
 
+static bool groupWouldStraddleSync(llvm::ArrayRef<Operation *> opsToUnify,
+                                   int targetBlockId,
+                                   ComputeBlockIdManager &bm) {
+  llvm::DenseMap<Block *, llvm::SmallVector<Operation *>> opsByBlock;
+  for (auto *op : opsToUnify) {
+    if (op && op->getBlock()) {
+      opsByBlock[op->getBlock()].push_back(op);
+    }
+  }
+  for (auto *op : bm.getOpsByBlockId(targetBlockId)) {
+    if (op && op->getBlock()) {
+      opsByBlock[op->getBlock()].push_back(op);
+    }
+  }
+  for (auto &blockOps : opsByBlock) {
+    Block *blk = blockOps.first;
+    SyncWall wall(blk);
+    unsigned refSeg = 0;
+    bool refSet = false;
+    for (auto *op : blockOps.second) {
+      if (getAncestorInBlock(op, blk) == nullptr) {
+        continue;
+      }
+      unsigned seg = wall.segmentOf(op);
+      if (!refSet) {
+        refSeg = seg;
+        refSet = true;
+        continue;
+      }
+      if (seg != refSeg) {
+        LOG_DEBUG("Reject merge: group would straddle a sync in block "
+                  << blk << "\n");
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
                      const MemoryDependenceGraph &memGraph, int targetBlockId,
                      ComputeBlockIdManager &bm) {
@@ -55,6 +95,11 @@ bool willCreateCycle(llvm::ArrayRef<Operation *> opsToUnify,
   }
 
   auto *block = opsToUnify.front()->getBlock();
+
+  // A block_id group must never straddle a synchronization op
+  if (groupWouldStraddleSync(opsToUnify, targetBlockId, bm)) {
+    return true;
+  }
 
   llvm::DenseSet<Operation *> okSet;
   for (auto *op : bm.getOpsByBlockId(targetBlockId)) {

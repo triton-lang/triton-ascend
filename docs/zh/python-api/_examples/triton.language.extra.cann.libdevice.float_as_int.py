@@ -1,7 +1,22 @@
+import os
+
+os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
+
+import pytest
 import triton
 import triton.language as tl
 import triton.language.extra.cann.libdevice as libdevice
 import torch
+from triton.backends.ascend.utils import triton_enable_libdevice_simt
+
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
+                  "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+def torch_float_as_int_reference(x0):
+    assert x0.device.type == "cpu"
+    assert x0.dtype == torch.float32
+    return x0.view(torch.int32)
 
 
 @triton.jit
@@ -17,8 +32,20 @@ def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: t
         tl.store(output + (x0), tmp1, mask=mask)
 
 
+@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+def test_float_as_int():
+    x0 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    expected = torch_float_as_int_reference(x0).npu()
+    x0 = x0.npu()
+    output = torch.empty(8, dtype=torch.int32, device='npu')
+    triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=0, atol=0)
+
+
 if __name__ == "__main__":
-    dtype, shape, ncore, xblock, xblock_sub = ['float32', (128, 4096), 512, 1024, 1024]
-    input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
-    output = torch.zeros_like(input)
-    triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub)
+    if not triton_enable_libdevice_simt():
+        print(_SIMT_SKIP_MSG)
+    else:
+        test_float_as_int()

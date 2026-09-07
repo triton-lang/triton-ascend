@@ -65,6 +65,8 @@ Enums
     CORE
     SYNC_IN_VF
     IteratorType
+    SYNC_HINT
+    EVENT_ID
     FixpipeDMAMode
     FixpipeDualDstMode
     FixpipePreQuantMode
@@ -98,6 +100,7 @@ Custom Ops
     custom
     custom_semantic
     register_custom_op
+    SyncEventSlot
 
 IR Affine Types
 ---------------

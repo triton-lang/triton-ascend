@@ -1,0 +1,67 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright 2018-2020 Philippe Tillet
+# Copyright 2020-2022 OpenAI
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Source: python/test/unit/runtime/test_driver.py at main-dev@396df6cb5b001314e36f22220be07a560de44664
+
+import sys
+from concurrent.futures import ThreadPoolExecutor
+import torch
+
+import triton
+import triton.language as tl
+
+
+def test_is_lazy():
+    from importlib import reload
+    reload(sys.modules["triton.runtime.driver"])
+    reload(sys.modules["triton.runtime"])
+    assert triton.runtime.driver._active is None
+    assert triton.runtime.driver._default is None
+    assert isinstance(triton.runtime.driver.active, getattr(triton.backends.driver, "DriverBase"))
+    assert isinstance(triton.runtime.driver.default, getattr(triton.backends.driver, "DriverBase"))
+    utils = triton.runtime.driver.active.utils  # noqa: F841
+
+
+def test_kernel_in_thread(device):
+    # NPU device selection is thread-local, so bind each calling thread to the
+    # device that owns the buffer before launching the cached kernel.
+    buf = torch.zeros((38016 * 1024, ), dtype=torch.float32, device=device)
+
+    @triton.jit
+    def _kernel(P, BLOCK: tl.constexpr):
+        pid = tl.program_id(0).to(tl.int64)
+        offset = pid * BLOCK + tl.arange(0, BLOCK)
+
+        p = tl.load(P + offset)
+        tl.store(P + offset, p)
+
+    def call_triton():
+        getattr(torch, device).set_device(buf.device)
+        N = buf.numel()
+        grid = lambda meta: (triton.cdiv(N, meta["BLOCK"]), )
+        _kernel[grid](buf, BLOCK=1024)
+        getattr(torch, device).synchronize()
+
+    call_triton()
+    with ThreadPoolExecutor(1) as pool:
+        future = pool.submit(call_triton)
+        future.result()

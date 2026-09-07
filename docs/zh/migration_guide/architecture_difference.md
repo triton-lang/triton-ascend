@@ -32,7 +32,7 @@ triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使�
 - **编译期**：Triton pass 把 kernel 函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk 大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑 block id。
 - **运行期**：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 `physical_core_count`，与编译期的折叠保持一致。
 
-两侧共享同一份 gating 元数据（`NPUOptions` 上的 `enable_auto_blockify`，未传时回落到 `TRITON_ALL_BLOCKS_PARALLEL`），编译期循环包与运行期 cap 永远同步 —— 不存在 kernel 按一种模式编译却按另一种模式启动的情形。
+编译期和运行期共享同一份后端内部策略。自动 block mapping 由后端统一启用，编译器生成的 IR 安全标记会排除不适用的 kernel。因此，编译期循环包与运行期 cap 始终同步，不存在 kernel 按一种模式编译却按另一种模式启动的情形。
 
 从 GPU Triton kernel 移植时的注意事项：
 
@@ -192,8 +192,7 @@ tl.load() 和 tl.store()
 | enable_hivm_auto_cv_balance                   | 启用或禁用自动 CV balance，用于在 CV 融合场景下平衡 Cube 与 Vector 执行。 | 默认None；true , false。 autotune中可配置 |
 | tile_mix_vector_loop                          | CV算子的一个优化项，当前vector可以切几份                        | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                       |
 | tile_mix_cube_loop                            | CV算子一个优化项，当前cube可以切几份      | 默认None；可取单个值，如 2、4 或 8；autotune中可配置候选值                      |
-| auto_blockify_size                            | TRITON_ALL_BLOCKS_PARALLEL优化项，用于指定扩展的左起第一个维度的大小。 | 默认1；可取单个整数值，如 2、4 或 8；autotune中可配置候选值                       |
-| enable_auto_blockify                          | per-kernel 级别覆盖 `TRITON_ALL_BLOCKS_PARALLEL` 环境变量。显式设为 **true** 或 **false** 时，kernel 按该值生效（忽略环境变量）；未设置（None）时由环境变量决定。优先级：该选项 > 环境变量 > 关。编译期 blockify pass 与运行期 block-count cap 都按此解析后的值生效，二者永远一致。 | 默认 None；可取值 **true** / **false** / None。 |
 
-- 注：优化编译选项在ascend/backend/compiler.py代码中。
+- 注：优化编译选项位于 `third_party/ascend/backend/compiler.py`。
 - 注：CV算子表示该算子运算过程中既使用了AI Core又使用了Vector Core。
+- 注：当前有效编译选项及废弃名称的迁移方式见 {ref}`编译选项清理与兼容性 <compiler-option-cleanup-and-compatibility>`。

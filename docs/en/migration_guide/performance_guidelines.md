@@ -4,7 +4,7 @@
 
 ### I. Principles for Automatically Combining Grid Cores
 
-Some scenarios requiring migration of Triton operators from GPUs to NPUs. Due to architectural differences, the Triton operators developed on GPUs often utilize large grid core counts. When executed on NPUs, these operators cannot be scheduled all at once. Delivering them in batches introduces significant latency and degrades performance. To optimize NPU-based Triton operators, you need to check the grid core counts first. In cases with large grid core counts, set the environment variable *TRITON_ALL_BLOCKS_PARALLEL* to improve operator execution performance.
+Some scenarios require migrating Triton operators from GPUs to NPUs. Due to architectural differences, Triton operators developed on GPUs often use large logical grids that cannot be scheduled on NPUs all at once. The Ascend backend automatically maps eligible independent logical programs onto the available physical cores and skips unsupported kernels according to IR safety analysis. During performance tuning, check the grid size and compiler warnings first; if automatic mapping is skipped, reduce the logical grid through explicit tiling or inner loops.
 
 ## Optimizing Instruction Parallelism
 

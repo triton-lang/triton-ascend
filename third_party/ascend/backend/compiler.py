@@ -505,23 +505,6 @@ def get_common_bishengir_compile_options(metadata):
     return [bishengir_target_opt]
 
 
-def _needs_lib_call_no_inline(metadata):
-    """Return whether the target needs the CANN 9.1 hacc.noinline workaround."""
-    arch = metadata['target'].arch
-    return arch.startswith("Ascend950")
-
-
-@functools.lru_cache()
-def _npu_compiler_supports_option(compiler_path: str, option: str) -> bool:
-    """Check an optional BiShengIR flag instead of assuming toolchain parity."""
-    try:
-        result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                timeout=10, check=False)
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return option in result.stdout
-
-
 def get_auto_bind_sub_block_option(metadata):
     # auto_tile_and_bind_subblock is read from the module.
     # enable_auto_bind_sub_block is set by the user and has a higher priority.
@@ -698,6 +681,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-vf-fusion={enable_vf_fusion}"]
 
+        enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
+        if enable_dynamic_cv_pipeline == True:
+            _compile_option_list += [f"--enable-vf-operand-substitution=True"]
+
         enable_flatten = metadata["enable_flatten"]
         if enable_flatten is not None:
             _compile_option_list += \
@@ -735,9 +722,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
-            if (_needs_lib_call_no_inline(metadata)
-                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
-                _compile_option_list += ["--enable-lib-call-no-inline=false"]
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
@@ -751,7 +735,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += [f"--enable-vf-merge-level={vf_merge_level}"]
 
         hfusion_enable_multiple_consumer_fusion = metadata["hfusion_enable_multiple_consumer_fusion"]
-        if hfusion_enable_multiple_consumer_fusion:
+        if hfusion_enable_multiple_consumer_fusion is not None:
             _compile_option_list += [
                 f"--hfusion-enable-multiple-consumer-fusion={hfusion_enable_multiple_consumer_fusion}"
             ]
@@ -948,9 +932,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 bishengir_hivm_opt,
                 "--enable-triton-kernel-compile=true",
             ]
-            if (_needs_lib_call_no_inline(metadata)
-                    and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
-                _compile_option_list += ["--enable-lib-call-no-inline=false"]
 
         _compile_option_list += ["--mlir-print-ir-after-failure"]
         _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
@@ -1103,7 +1084,7 @@ class NPUOptions:
     enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_cube_block_merge: bool = False
-    hfusion_enable_multiple_consumer_fusion: bool = False
+    hfusion_enable_multiple_consumer_fusion: bool = None
     buf_slot_num_of_veccore: int = None
     buf_slot_num_of_crosscore: int = None
     buf_slot_num_of_gm: int = None

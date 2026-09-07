@@ -1,8 +1,5 @@
 import os
 
-# The libdevice SIMT ops below are A5-only (Ascend 910_95 / 950) and are
-# additionally gated by this env switch; set it so the examples run on A5
-# hardware without extra configuration.
 os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
 
 import pytest
@@ -14,6 +11,17 @@ from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+def torch_mulhi_reference(x0, x1):
+    assert x0.device.type == "cpu"
+    assert x1.device.type == "cpu"
+    assert x0.dtype == torch.int32
+    assert x1.dtype == torch.int32
+    assert x0.shape == x1.shape
+
+    product = x0.to(torch.int64) * x1.to(torch.int64)
+    return (product >> 32).to(torch.int32)
 
 
 @triton.jit
@@ -30,20 +38,17 @@ def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLO
         tl.store(output + (x0), tmp2, mask=mask)
 
 
-def _mulhi(x, y):
-    """High 32 bits of the 64-bit product of two 32-bit integers."""
-    p = (int(x) * int(y)) & 0xFFFFFFFFFFFFFFFF
-    v = p >> 32
-    return v - 0x100000000 if v & 0x80000000 else v
-
-
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_mulhi():
-    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    x1 = (torch.randint(1, 16, (8, ))).to(torch.int32).npu()
-    expected = torch.tensor([_mulhi(*v) for v in zip(x0.tolist(), x1.tolist())], dtype=torch.int32).npu()
+    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    x1 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    expected = (torch_mulhi_reference(x0, x1)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
     output = torch.empty(8, dtype=torch.int32, device='npu')
-    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
+    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(output, expected, rtol=0, atol=0)
 
 

@@ -1,8 +1,5 @@
 import os
 
-# The libdevice SIMT ops below are A5-only (Ascend 910_95 / 950) and are
-# additionally gated by this env switch; set it so the examples run on A5
-# hardware without extra configuration.
 os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
 
 import pytest
@@ -14,6 +11,21 @@ from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+def torch_norm4d_reference(x0, x1, x2, x3):
+    assert x0.device.type == "cpu"
+    assert x1.device.type == "cpu"
+    assert x2.device.type == "cpu"
+    assert x3.device.type == "cpu"
+    assert x0.dtype == torch.float32
+    assert x1.dtype == torch.float32
+    assert x2.dtype == torch.float32
+    assert x3.dtype == torch.float32
+    assert x0.shape == x1.shape
+    assert x1.shape == x2.shape
+    assert x2.shape == x3.shape
+    return torch.sqrt(x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3)
 
 
 @triton.jit
@@ -34,13 +46,19 @@ def triton_kernel(input0, input1, input2, input3, output, n_elements, XBLOCK: tl
 
 @pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
 def test_norm4d():
-    x0 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32).npu()
-    x1 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32).npu()
-    x2 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32).npu()
-    x3 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32).npu()
-    expected = (torch.sqrt(x0 * x0 + x1 * x1 + x2 * x2 + x3 * x3)).to(torch.float32).npu()
+    x0 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    x1 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    x2 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    x3 = (torch.rand((8, )) * 3.0 - 1.5).to(torch.float32)
+    expected = (torch_norm4d_reference(x0, x1, x2, x3)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
+    x2 = x2.npu()
+    x3 = x3.npu()
     output = torch.empty(8, dtype=torch.float32, device='npu')
-    triton_kernel[(1, )](x0, x1, x2, x3, output, 8, XBLOCK=8, XBLOCK_SUB=8, force_simt_only=True)
+    triton_kernel[(1, )](x0, x1, x2, x3, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
     torch.testing.assert_close(output, expected, rtol=1e-03, atol=1e-03, equal_nan=True)
 
 

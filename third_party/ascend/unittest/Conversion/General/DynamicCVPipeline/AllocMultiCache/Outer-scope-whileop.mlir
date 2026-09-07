@@ -2,13 +2,18 @@
 
 // Test: C→V transfer with scf.while (main_loop) in single-buffer mode.
 // Pass must not crash; IR structure (whileOp, main_loop, TCB marks) preserved.
+//   We pin the inter-core buffer count to 1 via the module-level
+//   `ssbuffer.inter_core_buf_count` attribute so the default of 2 doesn't
+//   trigger the double-buffer polling branch (scf.if dispatch), which is
+//   not supported for scf.while main loops here.
 
 // CHECK-LABEL: func.func @tc_while_ctov_sender
 // CHECK: scf.while
 // CHECK: ssbuffer.main_loop
 // CHECK: tightly_coupled_buffer
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">,
+                   ssbuffer.inter_core_buf_count = 1 : i32} {
 func.func @tc_while_ctov_sender() {
   %c0_i32 = arith.constant 0 : i32
   %c100_i32 = arith.constant 100 : i32

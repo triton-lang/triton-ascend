@@ -45,6 +45,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/Common/SyncWall.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -72,18 +73,19 @@ class SeedRegionPlanner {
   ComputeBlockIdManager &bm;
   llvm::DenseSet<Operation *> &assigned;
   llvm::SmallVectorImpl<Operation *> &group;
+  const SyncWall &wall;
   bool willCreateCycle(Operation *op);
   bool isEligible(Operation *op);
-  bool tryAddToGroup(Operation *op);
+  bool tryAddToGroup(Operation *op, Operation *from);
 
 public:
   SeedRegionPlanner(SmallVector<Operation *> seeds, Block *block,
                     const DependencyHelper &depHelper,
                     llvm::DenseSet<Operation *> &assigned,
                     llvm::SmallVectorImpl<Operation *> &group,
-                    ComputeBlockIdManager &bm)
+                    ComputeBlockIdManager &bm, const SyncWall &wall)
       : seeds(seeds), block(block), depHelper(depHelper), assigned(assigned),
-        group(group), bm(bm) {
+        group(group), bm(bm), wall(wall) {
     for (auto sd : seeds) {
       group.push_back(sd);
     }
@@ -115,9 +117,15 @@ bool SeedRegionPlanner::isEligible(Operation *op) {
   return !willCreateCycle(op);
 }
 
-bool SeedRegionPlanner::tryAddToGroup(Operation *op) {
+bool SeedRegionPlanner::tryAddToGroup(Operation *op, Operation *from) {
   if (!op || llvm::is_contained(group, op) || op->getBlock() != block ||
       !isEligible(op)) {
+    return false;
+  }
+  // Never let the group straddle a sync: a dependency edge must not bridge a
+  // synchronization point, otherwise the group would appear on both sides of
+  // the barrier and the fence built by ReorderOpsByBlockId would cycle.
+  if (from && wall.hasSyncBetween(from, op)) {
     return false;
   }
   group.push_back(op);
@@ -129,7 +137,8 @@ void SeedRegionPlanner::run() {
   while (head < group.size()) {
     Operation *currOp = group[head++];
     depHelper.forEachSource<DependencyHelper::SourceMode::AcrossIterArg>(
-        currOp, [this](Operation *source) { tryAddToGroup(source); });
+        currOp,
+        [&, this](Operation *source) { tryAddToGroup(source, currOp); });
   }
 }
 
@@ -146,6 +155,7 @@ class TopologicalPartitionPlanner {
   llvm::DenseSet<Operation *> &assigned;
   const DependencyHelper &depHelper;
   ComputeBlockIdManager &bm;
+  const SyncWall &wall;
   llvm::DenseSet<Operation *> newassigned;
   llvm::DenseSet<Operation *> bypassVisited;
   std::queue<Operation *> queue;
@@ -165,8 +175,9 @@ public:
   TopologicalPartitionPlanner(Block *block,
                               llvm::DenseSet<Operation *> &assigned,
                               const DependencyHelper &depHelper,
-                              ComputeBlockIdManager &bm)
-      : block(block), assigned(assigned), depHelper(depHelper), bm(bm) {
+                              ComputeBlockIdManager &bm, const SyncWall &wall)
+      : block(block), assigned(assigned), depHelper(depHelper), bm(bm),
+        wall(wall) {
     initializeIndegreeForBlock(block, indegree, depHelper, bm);
 
     block->walk([&](Operation *op) {
@@ -341,8 +352,17 @@ llvm::LogicalResult TopologicalPartitionPlanner::run() {
     }
 
     auto group = createNewGroupFromQueue();
-    if (llvm::failed(bm.markOpsWithNewId(group))) {
-      return llvm::failure();
+    // A wave of mutually-independent ready cube ops may span several segments
+    // separated by syncs. Split by segment so no block_id group straddles a
+    // synchronization op; each segment gets its own fresh id.
+    llvm::DenseMap<unsigned, llvm::SmallVector<Operation *>> segmentGroups;
+    for (auto *op : group) {
+      segmentGroups[wall.segmentOf(op)].push_back(op);
+    }
+    for (auto &segGroup : segmentGroups) {
+      if (llvm::failed(bm.markOpsWithNewId(segGroup.second))) {
+        return llvm::failure();
+      }
     }
   }
 
@@ -360,7 +380,8 @@ static SmallVector<Operation *> collectMatmulOps(Block *block) {
 }
 
 static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm,
-                            const DependencyHelper &depHelper) {
+                            const DependencyHelper &depHelper,
+                            const SyncWall &wall) {
   for (auto *op : llvm::make_pointer_range(block->getOperations())) {
     if (getOpCoreType(op) != CUBE_ONLY) {
       continue;
@@ -371,6 +392,11 @@ static void fuseMarkOpToDef(Block *block, ComputeBlockIdManager &bm,
     }
     auto *defOp = markOp.getSrc().getDefiningOp();
     if (!defOp) {
+      continue;
+    }
+    // Merging the mark into the def's group would make the group straddle a
+    // sync if the mark sits on the other side of one; keep them separate then.
+    if (!wall.sameSegment(markOp, defOp)) {
       continue;
     }
 
@@ -463,6 +489,10 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
   llvm::DenseSet<Operation *> assigned;
   auto allDots = collectMatmulOps(block);
 
+  // Source-order sync walls of this block; used to keep every block_id group
+  // on a single side of each synchronization op.
+  SyncWall wall(block);
+
   // Phase 1: Add helper ops (transpose, load/store, ptr etc.) to cube block of
   // related matmul
   for (auto *dot : allDots) {
@@ -472,6 +502,18 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
     auto temBlockId = bm.getNextId();
     llvm::SmallVector<Operation *> dotSeeds =
         matchSeed(dot, bm, depHelper.memGraph);
+    // Drop seeds straddling a sync relative to the dot: they belong to their
+    // own segment and Phase 2 hands them a separate id, so the seed group can
+    // never appear on both sides of the barrier.
+    llvm::SmallVector<Operation *> prunedSeeds;
+    for (auto *seed : dotSeeds) {
+      if (wall.sameSegment(seed, dot)) {
+        prunedSeeds.push_back(seed);
+      }
+    }
+    llvm::erase_if(dotSeeds, [&](Operation *seed) {
+      return !wall.sameSegment(seed, dot);
+    });
     if (willCreateCycle(dotSeeds, depHelper.memGraph, temBlockId, bm)) {
       LOG_DEBUG("Cube Seed already have a cycle!!");
       for (auto seed : dotSeeds) {
@@ -480,8 +522,8 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
       return llvm::failure();
     }
     llvm::SmallVector<Operation *> newGroup;
-    SeedRegionPlanner regionPlanner{dotSeeds, block,    depHelper,
-                                    assigned, newGroup, bm};
+    SeedRegionPlanner regionPlanner{dotSeeds, block, depHelper, assigned,
+                                    newGroup, bm,    wall};
     regionPlanner.run();
 
     for (auto *op : newGroup) {
@@ -493,11 +535,11 @@ processBlockWithCubeBFS(Block *block, const DependencyHelper &depHelper,
   }
 
   // Phase 2: Handle remaining Cube Ops following Topo order
-  TopologicalPartitionPlanner topoPlanner{block, assigned, depHelper, bm};
+  TopologicalPartitionPlanner topoPlanner{block, assigned, depHelper, bm, wall};
   if (failed(topoPlanner.run())) {
     return failure();
   }
-  fuseMarkOpToDef(block, bm, depHelper);
+  fuseMarkOpToDef(block, bm, depHelper, wall);
   return llvm::success();
 }
 

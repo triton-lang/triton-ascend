@@ -136,6 +136,11 @@ static void applyMerge(scf::IfOp ifOp, ArrayRef<Operation *> downstreamOps,
         if (op.hasTrait<OpTrait::IsTerminator>()) {
           continue;
         }
+        // Never fold a sync into a compute block: it must keep its own unique
+        // block id so the fence between before/after ops survives.
+        if (CVPipeline::isSyncOp(&op)) {
+          continue;
+        }
         if (CVPipeline::getOpBlockId(&op)) {
           bm.updateBlockId(&op, target);
         }

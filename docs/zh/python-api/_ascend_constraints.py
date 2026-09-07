@@ -2516,2067 +2516,1262 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.scatter_ub_to_out",
     },
     "triton.language.extra.cann.libdevice.abs": {
-        "replace_docstring": [
-            "Computes the element-wise absolute value of x.",
-        ],
         "constraints": [
-            "- x: ``int32``, ``float32``",
-            "Return value: ``tl.tensor``, returns the absolute value of the input argument.",
-            "Return type: ``int32``, ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.abs",
+        "example": "triton.language.extra.cann.libdevice.abs",
     },
     "triton.language.extra.cann.libdevice.acos": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the arc cosine of the input argument, in the range [0, pi] radians.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.acos",
     },
     "triton.language.extra.cann.libdevice.acosh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse hyperbolic cosine of the input argument, in the range [0, +inf].",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.acosh",
     },
     "triton.language.extra.cann.libdevice.add_rd": {
-        "replace_docstring": [
-            "Computes x + y rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the sum of x and y, rounded down.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.add_rd",
+        "example": "triton.language.extra.cann.libdevice.add_rd",
     },
     "triton.language.extra.cann.libdevice.add_rn": {
-        "replace_docstring": [
-            "Computes x + y rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the sum of x and y, rounded to nearest even.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.add_rn",
+        "example": "triton.language.extra.cann.libdevice.add_rn",
     },
     "triton.language.extra.cann.libdevice.add_ru": {
-        "replace_docstring": [
-            "Computes x + y rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the sum of x and y, rounded up.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.add_ru",
+        "example": "triton.language.extra.cann.libdevice.add_ru",
     },
     "triton.language.extra.cann.libdevice.add_rz": {
-        "replace_docstring": [
-            "Computes x + y rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the sum of x and y, rounded toward zero.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.add_rz",
+        "example": "triton.language.extra.cann.libdevice.add_rz",
     },
     "triton.language.extra.cann.libdevice.asin": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the arc sine of the input argument, in the range [-pi/2, pi/2] radians.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.asin",
     },
     "triton.language.extra.cann.libdevice.asinh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse hyperbolic sine of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.asinh",
     },
     "triton.language.extra.cann.libdevice.atan": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the arc tangent of the input argument, in the range [-pi/2, pi/2] radians.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.atan",
     },
     "triton.language.extra.cann.libdevice.atan2": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the arc tangent of x / y, in the range [-pi, pi] radians.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.atan2",
     },
     "triton.language.extra.cann.libdevice.atanh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse hyperbolic tangent of the input argument, defined for inputs in [-1, 1].",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.atanh",
     },
     "triton.language.extra.cann.libdevice.brev": {
-        "replace_docstring": [
-            "Reverses the bit order of a 32-bit integer.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the 32-bit integer with reversed bit order.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.brev",
+        "example": "triton.language.extra.cann.libdevice.brev",
     },
     "triton.language.extra.cann.libdevice.byte_perm": {
-        "replace_docstring": [
-            "Selects bytes from two 32-bit integers x and y according to the selector s and returns the combined integer.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "- s: ``int32``",
-            "Return value: ``tl.tensor``, returns the integer whose n-th byte is selected from x and y by the selector s.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.byte_perm",
+        "example": "triton.language.extra.cann.libdevice.byte_perm",
     },
     "triton.language.extra.cann.libdevice.cbrt": {
-        "replace_docstring": [
-            "Computes the cube root of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the cube root of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.cbrt",
+        "example": "triton.language.extra.cann.libdevice.cbrt",
     },
     "triton.language.extra.cann.libdevice.ceil": {
-        "replace_docstring": [
-            "Rounds x up to the nearest integer.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the ceiling of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ceil",
+        "example": "triton.language.extra.cann.libdevice.ceil",
     },
     "triton.language.extra.cann.libdevice.clz": {
-        "replace_docstring": [
-            "Counts the number of leading zero bits in a 32-bit integer.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the number of leading zero bits, in the range [0, 32].",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.clz",
+        "example": "triton.language.extra.cann.libdevice.clz",
     },
     "triton.language.extra.cann.libdevice.copysign": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns a value with the magnitude of x and the sign of y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.copysign",
     },
     "triton.language.extra.cann.libdevice.cos": {
-        "replace_docstring": [
-            "Computes the element-wise cosine of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the cosine of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.cos",
+        "example": "triton.language.extra.cann.libdevice.cos",
     },
     "triton.language.extra.cann.libdevice.cosh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the hyperbolic cosine of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.cosh",
     },
     "triton.language.extra.cann.libdevice.cospi": {
-        "replace_docstring": [
-            "Computes cos(pi * x).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns cos(pi * x).",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.cospi",
+        "example": "triton.language.extra.cann.libdevice.cospi",
     },
     "triton.language.extra.cann.libdevice.cyl_bessel_i0": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the modified Bessel function of the first kind of order 0.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.cyl_bessel_i0",
     },
     "triton.language.extra.cann.libdevice.cyl_bessel_i1": {
-        "replace_docstring": [
-            "Computes the modified Bessel function of the first kind of order 1.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the modified Bessel function of the first kind of order 1.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.cyl_bessel_i1",
+        "example": "triton.language.extra.cann.libdevice.cyl_bessel_i1",
     },
     "triton.language.extra.cann.libdevice.div_rd": {
-        "replace_docstring": [
-            "Computes x / y rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the division result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.div_rd",
+        "example": "triton.language.extra.cann.libdevice.div_rd",
     },
     "triton.language.extra.cann.libdevice.div_rn": {
-        "replace_docstring": [
-            "Computes x / y rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the division result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.div_rn",
+        "example": "triton.language.extra.cann.libdevice.div_rn",
     },
     "triton.language.extra.cann.libdevice.div_ru": {
-        "replace_docstring": [
-            "Computes x / y rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the division result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.div_ru",
+        "example": "triton.language.extra.cann.libdevice.div_ru",
     },
     "triton.language.extra.cann.libdevice.div_rz": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the division result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.div_rz",
     },
     "triton.language.extra.cann.libdevice.erf": {
-        "replace_docstring": [
-            "Computes the error function of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the error function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.erf",
+        "example": "triton.language.extra.cann.libdevice.erf",
     },
     "triton.language.extra.cann.libdevice.erfc": {
-        "replace_docstring": [
-            "Computes the complementary error function of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the complementary error function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.erfc",
+        "example": "triton.language.extra.cann.libdevice.erfc",
     },
     "triton.language.extra.cann.libdevice.erfcinv": {
-        "replace_docstring": [
-            "Computes the inverse complementary error function of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse complementary error function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.erfcinv",
+        "example": "triton.language.extra.cann.libdevice.erfcinv",
     },
     "triton.language.extra.cann.libdevice.erfcx": {
-        "replace_docstring": [
-            "Computes the scaled complementary error function of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the scaled complementary error function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.erfcx",
+        "example": "triton.language.extra.cann.libdevice.erfcx",
     },
     "triton.language.extra.cann.libdevice.erfinv": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse error function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.erfinv",
     },
     "triton.language.extra.cann.libdevice.exp": {
-        "replace_docstring": [
-            "Computes e raised to the power x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns e raised to the power x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.exp",
+        "example": "triton.language.extra.cann.libdevice.exp",
     },
     "triton.language.extra.cann.libdevice.exp10": {
-        "replace_docstring": [
-            "Computes 10 raised to the power x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 10 raised to the power x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.exp10",
+        "example": "triton.language.extra.cann.libdevice.exp10",
     },
     "triton.language.extra.cann.libdevice.exp2": {
-        "replace_docstring": [
-            "Computes 2 raised to the power x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 2 raised to the power x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.exp2",
+        "example": "triton.language.extra.cann.libdevice.exp2",
     },
     "triton.language.extra.cann.libdevice.expm1": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns e^x - 1.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.expm1",
     },
     "triton.language.extra.cann.libdevice.fast_cosf": {
-        "replace_docstring": [
-            "Fast approximation of the cosine of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the cosine function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_cosf",
+        "example": "triton.language.extra.cann.libdevice.fast_cosf",
     },
     "triton.language.extra.cann.libdevice.fast_dividef": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the division result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.fast_dividef",
     },
     "triton.language.extra.cann.libdevice.fast_exp10f": {
-        "replace_docstring": [
-            "Fast approximation of 10 raised to the power x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of 10 raised to the power x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_exp10f",
+        "example": "triton.language.extra.cann.libdevice.fast_exp10f",
     },
     "triton.language.extra.cann.libdevice.fast_expf": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the exponential function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.fast_expf",
     },
     "triton.language.extra.cann.libdevice.fast_log10f": {
-        "replace_docstring": [
-            "Fast approximation of the base-10 logarithm of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the base-10 logarithm.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_log10f",
+        "example": "triton.language.extra.cann.libdevice.fast_log10f",
     },
     "triton.language.extra.cann.libdevice.fast_log2f": {
-        "replace_docstring": [
-            "Fast approximation of the base-2 logarithm of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the base-2 logarithm.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_log2f",
+        "example": "triton.language.extra.cann.libdevice.fast_log2f",
     },
     "triton.language.extra.cann.libdevice.fast_logf": {
-        "replace_docstring": [
-            "Fast approximation of the natural logarithm of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the natural logarithm.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_logf",
+        "example": "triton.language.extra.cann.libdevice.fast_logf",
     },
     "triton.language.extra.cann.libdevice.fast_powf": {
-        "replace_docstring": [
-            "Fast approximation of x raised to the power y.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the power function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_powf",
+        "example": "triton.language.extra.cann.libdevice.fast_powf",
     },
     "triton.language.extra.cann.libdevice.fast_sinf": {
-        "replace_docstring": [
-            "Fast approximation of the sine of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the sine function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_sinf",
+        "example": "triton.language.extra.cann.libdevice.fast_sinf",
     },
     "triton.language.extra.cann.libdevice.fast_tanf": {
-        "replace_docstring": [
-            "Fast approximation of the tangent of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns a fast approximation of the tangent function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fast_tanf",
+        "example": "triton.language.extra.cann.libdevice.fast_tanf",
+    },
+    "triton.language.extra.cann.libdevice.fast_tanhf": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.fast_tanhf",
     },
     "triton.language.extra.cann.libdevice.fdim": {
-        "replace_docstring": [
-            "Computes the positive difference max(x - y, 0).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the positive difference between x and y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fdim",
+        "example": "triton.language.extra.cann.libdevice.fdim",
     },
     "triton.language.extra.cann.libdevice.ffs": {
-        "replace_docstring": [
-            "Finds the index of the first (least significant) bit set to 1, in the range [0, 32].",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the index of the least significant bit set to 1, in the range [0, 32].",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ffs",
+        "example": "triton.language.extra.cann.libdevice.ffs",
     },
     "triton.language.extra.cann.libdevice.finitef": {
-        "replace_docstring": [
-            "Determines whether x is a finite value.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns True if the input is finite, otherwise False.",
-            "Return type: ``bool``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.finitef",
+        "example": "triton.language.extra.cann.libdevice.finitef",
+    },
+    "triton.language.extra.cann.libdevice.float2half_rn": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.float2half_rn",
     },
     "triton.language.extra.cann.libdevice.float2int_rd": {
-        "replace_docstring": [
-            "Converts x to int32, rounding down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit integer.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2int_rd",
+        "example": "triton.language.extra.cann.libdevice.float2int_rd",
     },
     "triton.language.extra.cann.libdevice.float2int_rn": {
-        "replace_docstring": [
-            "Converts x to int32, rounding to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit integer.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2int_rn",
+        "example": "triton.language.extra.cann.libdevice.float2int_rn",
     },
     "triton.language.extra.cann.libdevice.float2int_ru": {
-        "replace_docstring": [
-            "Converts x to int32, rounding up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit integer.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2int_ru",
+        "example": "triton.language.extra.cann.libdevice.float2int_ru",
     },
     "triton.language.extra.cann.libdevice.float2int_rz": {
-        "replace_docstring": [
-            "Converts x to int32, rounding toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit integer.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2int_rz",
+        "example": "triton.language.extra.cann.libdevice.float2int_rz",
     },
     "triton.language.extra.cann.libdevice.float2ll_rd": {
-        "replace_docstring": [
-            "Converts x to int64, rounding down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ll_rd",
+        "example": "triton.language.extra.cann.libdevice.float2ll_rd",
     },
     "triton.language.extra.cann.libdevice.float2ll_rn": {
-        "replace_docstring": [
-            "Converts x to int64, rounding to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ll_rn",
+        "example": "triton.language.extra.cann.libdevice.float2ll_rn",
     },
     "triton.language.extra.cann.libdevice.float2ll_ru": {
-        "replace_docstring": [
-            "Converts x to int64, rounding up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ll_ru",
+        "example": "triton.language.extra.cann.libdevice.float2ll_ru",
     },
     "triton.language.extra.cann.libdevice.float2ll_rz": {
-        "replace_docstring": [
-            "Converts x to int64, rounding toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ll_rz",
+        "example": "triton.language.extra.cann.libdevice.float2ll_rz",
     },
     "triton.language.extra.cann.libdevice.float2uint_rd": {
-        "replace_docstring": [
-            "Converts x to uint32, rounding down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit unsigned integer.",
-            "Return type: ``uint32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2uint_rd",
+        "example": "triton.language.extra.cann.libdevice.float2uint_rd",
     },
     "triton.language.extra.cann.libdevice.float2uint_rn": {
-        "replace_docstring": [
-            "Converts x to uint32, rounding to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit unsigned integer.",
-            "Return type: ``uint32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2uint_rn",
+        "example": "triton.language.extra.cann.libdevice.float2uint_rn",
     },
     "triton.language.extra.cann.libdevice.float2uint_ru": {
-        "replace_docstring": [
-            "Converts x to uint32, rounding up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit unsigned integer.",
-            "Return type: ``uint32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2uint_ru",
+        "example": "triton.language.extra.cann.libdevice.float2uint_ru",
     },
     "triton.language.extra.cann.libdevice.float2uint_rz": {
-        "replace_docstring": [
-            "Converts x to uint32, rounding toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 32-bit unsigned integer.",
-            "Return type: ``uint32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2uint_rz",
+        "example": "triton.language.extra.cann.libdevice.float2uint_rz",
     },
     "triton.language.extra.cann.libdevice.float2ull_rd": {
-        "replace_docstring": [
-            "Converts x to uint64, rounding down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit unsigned integer.",
-            "Return type: ``uint64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ull_rd",
+        "example": "triton.language.extra.cann.libdevice.float2ull_rd",
     },
     "triton.language.extra.cann.libdevice.float2ull_rn": {
-        "replace_docstring": [
-            "Converts x to uint64, rounding to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit unsigned integer.",
-            "Return type: ``uint64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ull_rn",
+        "example": "triton.language.extra.cann.libdevice.float2ull_rn",
     },
     "triton.language.extra.cann.libdevice.float2ull_ru": {
-        "replace_docstring": [
-            "Converts x to uint64, rounding up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit unsigned integer.",
-            "Return type: ``uint64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ull_ru",
+        "example": "triton.language.extra.cann.libdevice.float2ull_ru",
     },
     "triton.language.extra.cann.libdevice.float2ull_rz": {
-        "replace_docstring": [
-            "Converts x to uint64, rounding toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the converted 64-bit unsigned integer.",
-            "Return type: ``uint64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float2ull_rz",
+        "example": "triton.language.extra.cann.libdevice.float2ull_rz",
     },
     "triton.language.extra.cann.libdevice.float_as_int": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the float bits reinterpreted as a 32-bit integer.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.float_as_int",
     },
     "triton.language.extra.cann.libdevice.float_as_uint": {
-        "replace_docstring": [
-            "Reinterprets the bits of a float32 value as uint32.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the float bits reinterpreted as a 32-bit unsigned integer.",
-            "Return type: ``uint32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.float_as_uint",
+        "example": "triton.language.extra.cann.libdevice.float_as_uint",
     },
     "triton.language.extra.cann.libdevice.floor": {
-        "replace_docstring": [
-            "Rounds x down to the nearest integer.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the floor of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.floor",
+        "example": "triton.language.extra.cann.libdevice.floor",
     },
     "triton.language.extra.cann.libdevice.fma": {
-        "replace_docstring": [
-            "Computes x * y + z with a single rounding.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the fused multiply-add result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fma",
+        "example": "triton.language.extra.cann.libdevice.fma",
     },
     "triton.language.extra.cann.libdevice.fma_rd": {
-        "replace_docstring": [
-            "Computes x * y + z with a single rounding, rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the fused multiply-add result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fma_rd",
+        "example": "triton.language.extra.cann.libdevice.fma_rd",
     },
     "triton.language.extra.cann.libdevice.fma_rn": {
-        "replace_docstring": [
-            "Computes x * y + z with a single rounding, rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the fused multiply-add result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fma_rn",
+        "example": "triton.language.extra.cann.libdevice.fma_rn",
     },
     "triton.language.extra.cann.libdevice.fma_ru": {
-        "replace_docstring": [
-            "Computes x * y + z with a single rounding, rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the fused multiply-add result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fma_ru",
+        "example": "triton.language.extra.cann.libdevice.fma_ru",
     },
     "triton.language.extra.cann.libdevice.fma_rz": {
-        "replace_docstring": [
-            "Computes x * y + z with a single rounding, rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the fused multiply-add result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.fma_rz",
+        "example": "triton.language.extra.cann.libdevice.fma_rz",
     },
     "triton.language.extra.cann.libdevice.fmod": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the floating-point remainder.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.fmod",
     },
     "triton.language.extra.cann.libdevice.gamma": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the gamma function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.gamma",
     },
     "triton.language.extra.cann.libdevice.hadd": {
-        "replace_docstring": [
-            "Computes the average of x and y.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "Return value: ``tl.tensor``, returns the average of x and y.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.hadd",
+        "example": "triton.language.extra.cann.libdevice.hadd",
+    },
+    "triton.language.extra.cann.libdevice.half2float": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.half2float",
     },
     "triton.language.extra.cann.libdevice.hypot": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the Euclidean distance between x and y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.hypot",
     },
     "triton.language.extra.cann.libdevice.ilogb": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the unbiased exponent of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.ilogb",
     },
     "triton.language.extra.cann.libdevice.int2float_rd": {
-        "replace_docstring": [
-            "Converts an int32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.int2float_rd",
+        "example": "triton.language.extra.cann.libdevice.int2float_rd",
     },
     "triton.language.extra.cann.libdevice.int2float_rn": {
-        "replace_docstring": [
-            "Converts an int32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.int2float_rn",
+        "example": "triton.language.extra.cann.libdevice.int2float_rn",
     },
     "triton.language.extra.cann.libdevice.int2float_ru": {
-        "replace_docstring": [
-            "Converts an int32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.int2float_ru",
+        "example": "triton.language.extra.cann.libdevice.int2float_ru",
     },
     "triton.language.extra.cann.libdevice.int2float_rz": {
-        "replace_docstring": [
-            "Converts an int32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.int2float_rz",
+        "example": "triton.language.extra.cann.libdevice.int2float_rz",
     },
     "triton.language.extra.cann.libdevice.int_as_float": {
-        "replace_docstring": [
-            "Reinterprets the bits of an int32 value as float32.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the 32-bit integer bits reinterpreted as a float.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.int_as_float",
+        "example": "triton.language.extra.cann.libdevice.int_as_float",
     },
     "triton.language.extra.cann.libdevice.isinf": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns True if the input is infinite, otherwise False.",
-            "Return type: ``bool``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.isinf",
     },
     "triton.language.extra.cann.libdevice.isnan": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns True if the input is NaN, otherwise False.",
-            "Return type: ``bool``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.isnan",
     },
     "triton.language.extra.cann.libdevice.j0": {
-        "replace_docstring": [
-            "Computes the Bessel function of the first kind of order 0.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the first kind of order 0.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.j0",
+        "example": "triton.language.extra.cann.libdevice.j0",
     },
     "triton.language.extra.cann.libdevice.j1": {
-        "replace_docstring": [
-            "Computes the Bessel function of the first kind of order 1.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the first kind of order 1.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.j1",
+        "example": "triton.language.extra.cann.libdevice.j1",
     },
     "triton.language.extra.cann.libdevice.jn": {
-        "replace_docstring": [
-            "Computes the Bessel function of the first kind of integer order n.",
-        ],
         "constraints": [
-            "- n: ``int32``",
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the first kind of order n.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.jn",
+        "example": "triton.language.extra.cann.libdevice.jn",
     },
     "triton.language.extra.cann.libdevice.ldexp": {
         "constraints": [
-            "- x: ``float32``",
-            "- exp: ``int32``",
-            "Return value: ``tl.tensor``, returns x * 2^exp.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.ldexp",
     },
     "triton.language.extra.cann.libdevice.lgamma": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the natural logarithm of the absolute value of the gamma function of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.lgamma",
     },
     "triton.language.extra.cann.libdevice.ll2float_rd": {
-        "replace_docstring": [
-            "Converts an int64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ll2float_rd",
+        "example": "triton.language.extra.cann.libdevice.ll2float_rd",
     },
     "triton.language.extra.cann.libdevice.ll2float_rn": {
-        "replace_docstring": [
-            "Converts an int64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ll2float_rn",
+        "example": "triton.language.extra.cann.libdevice.ll2float_rn",
     },
     "triton.language.extra.cann.libdevice.ll2float_ru": {
-        "replace_docstring": [
-            "Converts an int64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ll2float_ru",
+        "example": "triton.language.extra.cann.libdevice.ll2float_ru",
     },
     "triton.language.extra.cann.libdevice.ll2float_rz": {
-        "replace_docstring": [
-            "Converts an int64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``int64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ll2float_rz",
+        "example": "triton.language.extra.cann.libdevice.ll2float_rz",
     },
     "triton.language.extra.cann.libdevice.llrint": {
-        "replace_docstring": [
-            "Rounds x to the nearest int64 value.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the rounded 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.llrint",
+        "example": "triton.language.extra.cann.libdevice.llrint",
     },
     "triton.language.extra.cann.libdevice.llround": {
-        "replace_docstring": [
-            "Rounds x to the nearest int64 value.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the rounded 64-bit integer.",
-            "Return type: ``int64``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.llround",
+        "example": "triton.language.extra.cann.libdevice.llround",
     },
     "triton.language.extra.cann.libdevice.log": {
-        "replace_docstring": [
-            "Computes the natural logarithm of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the natural logarithm of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.log",
+        "example": "triton.language.extra.cann.libdevice.log",
     },
     "triton.language.extra.cann.libdevice.log10": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the base-10 logarithm of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.log10",
     },
     "triton.language.extra.cann.libdevice.log1p": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns log(1 + x).",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.log1p",
     },
     "triton.language.extra.cann.libdevice.log2": {
-        "replace_docstring": [
-            "Computes the base-2 logarithm of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the base-2 logarithm of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.log2",
+        "example": "triton.language.extra.cann.libdevice.log2",
     },
     "triton.language.extra.cann.libdevice.logb": {
-        "replace_docstring": [
-            "Computes the unbiased exponent of x, i.e. floor(log2(|x|)).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the exponent of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.logb",
+        "example": "triton.language.extra.cann.libdevice.logb",
+    },
+    "triton.language.extra.cann.libdevice.max": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.max",
+    },
+    "triton.language.extra.cann.libdevice.min": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.min",
     },
     "triton.language.extra.cann.libdevice.mul24": {
-        "replace_docstring": [
-            "Computes the low 24-bit multiplication result of x and y.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "Return value: ``tl.tensor``, returns the low 24 bits of x * y.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mul24",
+        "example": "triton.language.extra.cann.libdevice.mul24",
     },
     "triton.language.extra.cann.libdevice.mul_rd": {
-        "replace_docstring": [
-            "Computes x * y rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the floating-point multiplication result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mul_rd",
+        "example": "triton.language.extra.cann.libdevice.mul_rd",
     },
     "triton.language.extra.cann.libdevice.mul_rn": {
-        "replace_docstring": [
-            "Computes x * y rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the floating-point multiplication result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mul_rn",
+        "example": "triton.language.extra.cann.libdevice.mul_rn",
     },
     "triton.language.extra.cann.libdevice.mul_ru": {
-        "replace_docstring": [
-            "Computes x * y rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the floating-point multiplication result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mul_ru",
+        "example": "triton.language.extra.cann.libdevice.mul_ru",
     },
     "triton.language.extra.cann.libdevice.mul_rz": {
-        "replace_docstring": [
-            "Computes x * y rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the floating-point multiplication result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mul_rz",
+        "example": "triton.language.extra.cann.libdevice.mul_rz",
     },
     "triton.language.extra.cann.libdevice.mulhi": {
-        "replace_docstring": [
-            "Computes the high 32 bits of the product x * y.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "Return value: ``tl.tensor``, returns the high 32 bits of the product x * y.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.mulhi",
+        "example": "triton.language.extra.cann.libdevice.mulhi",
+    },
+    "triton.language.extra.cann.libdevice.nan": {
+        "constraints": [
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
+        ],
+        "example": "triton.language.extra.cann.libdevice.nan",
     },
     "triton.language.extra.cann.libdevice.nearbyint": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the nearest integer.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.nearbyint",
     },
     "triton.language.extra.cann.libdevice.nextafter": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the next representable floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.nextafter",
     },
     "triton.language.extra.cann.libdevice.norm3d": {
-        "replace_docstring": [
-            "Computes the Euclidean norm of (x, y, z).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the Euclidean norm of a 3D vector.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.norm3d",
+        "example": "triton.language.extra.cann.libdevice.norm3d",
     },
     "triton.language.extra.cann.libdevice.norm4d": {
-        "replace_docstring": [
-            "Computes the Euclidean norm of (x, y, z, w).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "- w: ``float32``",
-            "Return value: ``tl.tensor``, returns the Euclidean norm of a 4D vector.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.norm4d",
+        "example": "triton.language.extra.cann.libdevice.norm4d",
     },
     "triton.language.extra.cann.libdevice.normcdf": {
-        "replace_docstring": [
-            "Computes the standard normal cumulative distribution function.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the standard normal cumulative distribution function value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.normcdf",
+        "example": "triton.language.extra.cann.libdevice.normcdf",
     },
     "triton.language.extra.cann.libdevice.normcdfinv": {
-        "replace_docstring": [
-            "Computes the inverse of the standard normal cumulative distribution function.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the inverse of the standard normal cumulative distribution function.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.normcdfinv",
+        "example": "triton.language.extra.cann.libdevice.normcdfinv",
     },
     "triton.language.extra.cann.libdevice.popc": {
-        "replace_docstring": [
-            "Counts the number of bits set to 1 in x, in the range [0, 32].",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "Return value: ``tl.tensor``, returns the number of bits set to 1, in the range [0, 32].",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.popc",
+        "example": "triton.language.extra.cann.libdevice.popc",
     },
     "triton.language.extra.cann.libdevice.pow": {
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns x raised to the power y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.pow",
     },
     "triton.language.extra.cann.libdevice.rcbrt": {
-        "replace_docstring": [
-            "Computes the reciprocal cube root of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal cube root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rcbrt",
+        "example": "triton.language.extra.cann.libdevice.rcbrt",
     },
     "triton.language.extra.cann.libdevice.rcp_rd": {
-        "replace_docstring": [
-            "Computes 1 / x rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 1 / x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rcp_rd",
+        "example": "triton.language.extra.cann.libdevice.rcp_rd",
     },
     "triton.language.extra.cann.libdevice.rcp_rn": {
-        "replace_docstring": [
-            "Computes 1 / x rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 1 / x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rcp_rn",
+        "example": "triton.language.extra.cann.libdevice.rcp_rn",
     },
     "triton.language.extra.cann.libdevice.rcp_ru": {
-        "replace_docstring": [
-            "Computes 1 / x rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 1 / x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rcp_ru",
+        "example": "triton.language.extra.cann.libdevice.rcp_ru",
     },
     "triton.language.extra.cann.libdevice.rcp_rz": {
-        "replace_docstring": [
-            "Computes 1 / x rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 1 / x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rcp_rz",
+        "example": "triton.language.extra.cann.libdevice.rcp_rz",
     },
     "triton.language.extra.cann.libdevice.reciprocal": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns 1 / x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.reciprocal",
     },
     "triton.language.extra.cann.libdevice.relu": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the rectified linear unit result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.relu",
     },
     "triton.language.extra.cann.libdevice.remainder": {
-        "replace_docstring": [
-            "Computes the IEEE remainder of x / y.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the remainder of x / y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.remainder",
+        "example": "triton.language.extra.cann.libdevice.remainder",
     },
     "triton.language.extra.cann.libdevice.rhadd": {
-        "replace_docstring": [
-            "Computes the rounded average of x and y.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "Return value: ``tl.tensor``, returns the rounded average of x and y.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rhadd",
+        "example": "triton.language.extra.cann.libdevice.rhadd",
     },
     "triton.language.extra.cann.libdevice.rhypot": {
-        "replace_docstring": [
-            "Computes 1 / sqrt(x^2 + y^2).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal of the Euclidean distance between x and y.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rhypot",
+        "example": "triton.language.extra.cann.libdevice.rhypot",
     },
     "triton.language.extra.cann.libdevice.rint": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the nearest integer to x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.rint",
     },
     "triton.language.extra.cann.libdevice.rnorm3d": {
-        "replace_docstring": [
-            "Computes 1 / sqrt(x^2 + y^2 + z^2).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal of the Euclidean norm of a 3D vector.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rnorm3d",
+        "example": "triton.language.extra.cann.libdevice.rnorm3d",
     },
     "triton.language.extra.cann.libdevice.rnorm4d": {
-        "replace_docstring": [
-            "Computes 1 / sqrt(x^2 + y^2 + z^2 + w^2).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "- z: ``float32``",
-            "- w: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal of the Euclidean norm of a 4D vector.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rnorm4d",
+        "example": "triton.language.extra.cann.libdevice.rnorm4d",
     },
     "triton.language.extra.cann.libdevice.round": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the nearest integer to x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.round",
     },
     "triton.language.extra.cann.libdevice.rsqrt": {
-        "replace_docstring": [
-            "Computes the reciprocal square root of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rsqrt",
+        "example": "triton.language.extra.cann.libdevice.rsqrt",
     },
     "triton.language.extra.cann.libdevice.rsqrt_rn": {
-        "replace_docstring": [
-            "Computes the reciprocal square root of x, rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the reciprocal square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.rsqrt_rn",
+        "example": "triton.language.extra.cann.libdevice.rsqrt_rn",
     },
     "triton.language.extra.cann.libdevice.sad": {
-        "replace_docstring": [
-            "Computes |x - y| + z, where x and y are signed integers and z is an unsigned integer.",
-        ],
         "constraints": [
-            "- x: ``int32``",
-            "- y: ``int32``",
-            "- z: ``int32``",
-            "Return value: ``tl.tensor``, returns |x - y| + z.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sad",
+        "example": "triton.language.extra.cann.libdevice.sad",
     },
     "triton.language.extra.cann.libdevice.saturatef": {
-        "replace_docstring": [
-            "Clamps x to the range [0, 1].",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns x clamped to the range [0.0, 1.0].",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.saturatef",
+        "example": "triton.language.extra.cann.libdevice.saturatef",
     },
     "triton.language.extra.cann.libdevice.scalbn": {
-        "replace_docstring": [
-            "Computes x * 2^n.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- n: ``int32``",
-            "Return value: ``tl.tensor``, returns x * 2^n.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.scalbn",
+        "example": "triton.language.extra.cann.libdevice.scalbn",
     },
     "triton.language.extra.cann.libdevice.signbit": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the sign bit of x.",
-            "Return type: ``int32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.signbit",
     },
     "triton.language.extra.cann.libdevice.sin": {
-        "replace_docstring": [
-            "Computes the element-wise sine of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the sine of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sin",
+        "example": "triton.language.extra.cann.libdevice.sin",
     },
     "triton.language.extra.cann.libdevice.sinh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the hyperbolic sine of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.sinh",
     },
     "triton.language.extra.cann.libdevice.sinpi": {
-        "replace_docstring": [
-            "Computes sin(pi * x).",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns sin(pi * x).",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sinpi",
+        "example": "triton.language.extra.cann.libdevice.sinpi",
     },
     "triton.language.extra.cann.libdevice.sqrt": {
-        "replace_docstring": [
-            "Computes the square root of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sqrt",
+        "example": "triton.language.extra.cann.libdevice.sqrt",
     },
     "triton.language.extra.cann.libdevice.sqrt_rd": {
-        "replace_docstring": [
-            "Computes the square root of x, rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sqrt_rd",
+        "example": "triton.language.extra.cann.libdevice.sqrt_rd",
     },
     "triton.language.extra.cann.libdevice.sqrt_rn": {
-        "replace_docstring": [
-            "Computes the square root of x, rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sqrt_rn",
+        "example": "triton.language.extra.cann.libdevice.sqrt_rn",
     },
     "triton.language.extra.cann.libdevice.sqrt_ru": {
-        "replace_docstring": [
-            "Computes the square root of x, rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sqrt_ru",
+        "example": "triton.language.extra.cann.libdevice.sqrt_ru",
     },
     "triton.language.extra.cann.libdevice.sqrt_rz": {
-        "replace_docstring": [
-            "Computes the square root of x, rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the square root of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sqrt_rz",
+        "example": "triton.language.extra.cann.libdevice.sqrt_rz",
     },
     "triton.language.extra.cann.libdevice.sub_rd": {
-        "replace_docstring": [
-            "Computes x - y rounded down.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns x - y, rounded down.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sub_rd",
+        "example": "triton.language.extra.cann.libdevice.sub_rd",
     },
     "triton.language.extra.cann.libdevice.sub_rn": {
-        "replace_docstring": [
-            "Computes x - y rounded to nearest even.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns x - y, rounded to nearest even.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sub_rn",
+        "example": "triton.language.extra.cann.libdevice.sub_rn",
     },
     "triton.language.extra.cann.libdevice.sub_ru": {
-        "replace_docstring": [
-            "Computes x - y rounded up.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns x - y, rounded up.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sub_ru",
+        "example": "triton.language.extra.cann.libdevice.sub_ru",
     },
     "triton.language.extra.cann.libdevice.sub_rz": {
-        "replace_docstring": [
-            "Computes x - y rounded toward zero.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "- y: ``float32``",
-            "Return value: ``tl.tensor``, returns x - y, rounded toward zero.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.sub_rz",
+        "example": "triton.language.extra.cann.libdevice.sub_rz",
     },
     "triton.language.extra.cann.libdevice.tan": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the tangent of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.tan",
     },
     "triton.language.extra.cann.libdevice.tanh": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the hyperbolic tangent of x.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.tanh",
     },
     "triton.language.extra.cann.libdevice.tgamma": {
-        "replace_docstring": [
-            "Computes the gamma function of x.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the gamma function of the input argument.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.tgamma",
+        "example": "triton.language.extra.cann.libdevice.tgamma",
     },
     "triton.language.extra.cann.libdevice.trunc": {
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the truncated result.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT, SIMD",
+            "Platform and compilation modes:\n\n"
+            "- Ascend A2/A3 supports SIMD.\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
         "example":
         "triton.language.extra.cann.libdevice.trunc",
     },
     "triton.language.extra.cann.libdevice.uint2float_rd": {
-        "replace_docstring": [
-            "Converts a uint32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.uint2float_rd",
+        "example": "triton.language.extra.cann.libdevice.uint2float_rd",
     },
     "triton.language.extra.cann.libdevice.uint2float_rn": {
-        "replace_docstring": [
-            "Converts a uint32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.uint2float_rn",
+        "example": "triton.language.extra.cann.libdevice.uint2float_rn",
     },
     "triton.language.extra.cann.libdevice.uint2float_ru": {
-        "replace_docstring": [
-            "Converts a uint32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.uint2float_ru",
+        "example": "triton.language.extra.cann.libdevice.uint2float_ru",
     },
     "triton.language.extra.cann.libdevice.uint2float_rz": {
-        "replace_docstring": [
-            "Converts a uint32 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint32``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.uint2float_rz",
+        "example": "triton.language.extra.cann.libdevice.uint2float_rz",
     },
     "triton.language.extra.cann.libdevice.uint_as_float": {
-        "replace_docstring": [
-            "Reinterprets the bits of a uint32 value as float32.",
-        ],
         "constraints": [
-            "- x: ``uint32``",
-            "Return value: ``tl.tensor``, returns the 32-bit unsigned integer bits reinterpreted as a float.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.uint_as_float",
+        "example": "triton.language.extra.cann.libdevice.uint_as_float",
     },
     "triton.language.extra.cann.libdevice.ull2float_rd": {
-        "replace_docstring": [
-            "Converts a uint64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ull2float_rd",
+        "example": "triton.language.extra.cann.libdevice.ull2float_rd",
     },
     "triton.language.extra.cann.libdevice.ull2float_rn": {
-        "replace_docstring": [
-            "Converts a uint64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ull2float_rn",
+        "example": "triton.language.extra.cann.libdevice.ull2float_rn",
     },
     "triton.language.extra.cann.libdevice.ull2float_ru": {
-        "replace_docstring": [
-            "Converts a uint64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ull2float_ru",
+        "example": "triton.language.extra.cann.libdevice.ull2float_ru",
     },
     "triton.language.extra.cann.libdevice.ull2float_rz": {
-        "replace_docstring": [
-            "Converts a uint64 value to float32.",
-        ],
         "constraints": [
-            "- x: ``uint64``",
-            "Return value: ``tl.tensor``, returns the converted floating-point value.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.ull2float_rz",
+        "example": "triton.language.extra.cann.libdevice.ull2float_rz",
     },
     "triton.language.extra.cann.libdevice.y0": {
-        "replace_docstring": [
-            "Computes the Bessel function of the second kind of order 0.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the second kind of order 0.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.y0",
+        "example": "triton.language.extra.cann.libdevice.y0",
     },
     "triton.language.extra.cann.libdevice.y1": {
-        "replace_docstring": [
-            "Computes the Bessel function of the second kind of order 1.",
-        ],
         "constraints": [
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the second kind of order 1.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.y1",
+        "example": "triton.language.extra.cann.libdevice.y1",
     },
     "triton.language.extra.cann.libdevice.yn": {
-        "replace_docstring": [
-            "Computes the Bessel function of the second kind of integer order n.",
-        ],
         "constraints": [
-            "- n: ``int32``",
-            "- x: ``float32``",
-            "Return value: ``tl.tensor``, returns the Bessel function of the second kind of order n.",
-            "Return type: ``float32``",
-            "Compilation modes: SIMT",
+            "Platform and compilation modes:\n\n"
+            "- Ascend 950 supports SIMD, SIMT.",
         ],
-        "example":
-        "triton.language.extra.cann.libdevice.yn",
+        "example": "triton.language.extra.cann.libdevice.yn",
     },
 }

@@ -70,24 +70,30 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 
 |No.| NPU Option                                   | Hardware Platform    | Description|
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune option. It enables or disables the ping-pong pipeline. Enabled by default.|
-| 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only). It enables or disables auto-binding of sub-blocks.|
-| 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables automatic CV balancing.|
-| 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables the synchronization solver. |
-| 5   | unit_flag                                     | NPU        | Autotune option. It enables or disables the sync unit flag.|
-| 6   | inject_barrier_all                            | NPU        | Autotune option. It enables or disables automatic injection of barriers for all operations.|
-| 7   | inject_block_all                              | NPU        | Autotune option. It enables or disables automatic injection of blocks for all operations.|
-| 8   | limit_auto_multi_buffer_only_for_local_buffer | NPU        | Autotune option. It restricts automatic multi-buffering only to local buffers.|
-| 9   | limit_auto_multi_buffer_of_local_buffer       | NPU        | Autotune option. It enables or disables automatic multi-buffering for local buffers.|
-| 10  | set_workspace_multibuffer                     | NPU        | Autotune option. It enables or disables multi-buffering for the workspace.|
-| 11  | tile_mix_vector_loop                          | NPU        | Autotune option (CV-fused kernels only). It enables or disables tiling for vector loops.|
-| 12  | tile_mix_cube_loop                            | NPU        | Autotune option (CV-fused kernels only). It enables or disables tiling for cube loops.|
-| 13  | disable_auto_inject_block_sync                | NPU        | Autotune option (CV-fused kernels only). It enables or disables automatic injection of block synchronizations.|
-| 14  | stream                                        | NPU        | (Optional) Informs the compiler about the NPU stream to use.|
-| 15  | enable_linearize                              | NPU        | Autotune option. It enables or disables the linearization pass.|
-| 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only). It enables or disables the ND (n-dimensional) to NZ (non-zero) layout transformation.|
-| 17  | auto_blockify_size                            | NPU        | Autotune option. It enables or disables AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
-| 18  | compile_mode                                  | NPU (950)  | Compilation mode: `"unstructured_in_simt"` (default) / `"simd"` / `"simt_only"`. |
+| 1   | multibuffer                                   | NPU        | Enables or disables the ping-pong pipeline. Enabled by default.|
+| 2   | enable_graph_optimize                         | NPU        | Enables or disables TTIR Graph Optimization.|
+| 3   | bisheng_options                               | NPU (950) | Forwards additional arguments to BiSheng compilation paths that support this option.|
+| 4   | enable_auto_bind_sub_block                    | NPU        | Enables or disables automatic sub-block binding.|
+| 5   | enable_hivm_auto_cv_balance                   | NPU        | Enables or disables automatic CV balancing.|
+| 6   | enable_cube_block_merge                       | NPU (950) | Controls Cube block merging in the DynamicCV pipeline.|
+| 7   | vf_fusion_mode                                | NPU (950) | Selects the VF fusion strategy.|
+| 8   | enable_vf_fusion                              | NPU (950) | Enables or disables VF fusion.|
+| 9   | hfusion_enable_multiple_consumer_fusion       | NPU (950) | Enables or disables multiple-consumer HFusion.|
+| 10  | sync_solver                                   | NPU        | Enables or disables the synchronization solver.|
+| 11  | unit_flag                                     | NPU        | Enables or disables the sync unit flag.|
+| 12  | inject_barrier_all                            | NPU        | Enables or disables automatic barrier injection.|
+| 13  | inject_block_all                              | NPU        | Enables or disables automatic block injection.|
+| 14  | limit_auto_multi_buffer_only_for_local_buffer | NPU        | Restricts automatic multi-buffering to local buffers.|
+| 15  | limit_auto_multi_buffer_of_local_buffer       | NPU        | Configures the local-buffer automatic multi-buffering scope.|
+| 16  | set_workspace_multibuffer                     | NPU        | Configures workspace multi-buffering.|
+| 17  | tile_mix_vector_loop                          | NPU        | Configures the Vector loop split count.|
+| 18  | tile_mix_cube_loop                            | NPU        | Configures the Cube loop split count.|
+| 19  | buf_slot_num_of_veccore                       | NPU        | Configures the number of vector-core-local buffer slots.|
+| 20  | buf_slot_num_of_crosscore                     | NPU        | Configures the number of cross-core buffer slots.|
+| 21  | buf_slot_num_of_gm                            | NPU        | Configures the number of GM load buffer slots.|
+| 22  | compile_mode                                  | NPU        | Compilation mode: `"simd_simt_template"` (default) / `"simd"` / `"simt_only"`; `"simt_only"` is supported only on Ascend 950.|
+
+See {ref}`Compiler Option Cleanup and Compatibility <compiler-option-cleanup-and-compatibility>` for deprecated-option compatibility and rename mappings.
 
 #### 3.2.2 SIMD Compiler
 
@@ -216,7 +222,7 @@ Developers choose the compilation path via `compile_mode`.
 | `compile_mode` | Description | Compilation Path |
 |---|---|---|
 | `"simd"` | Pure SIMD: structured access via DMA; unstructured access via scalar loops | `Triton IR → Linalg IR → AscendNPU IR` |
-| `"unstructured_in_simt"` (**default**) | Hybrid: structured access stays on SIMD; discrete access prefers SIMT templates | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simd_simt_template"` (**default**) | Hybrid: structured access stays on SIMD; discrete access prefers SIMT templates | `Triton IR → Linalg IR → AscendNPU IR` |
 | `"simt_only"` | Pure SIMT: send Triton IR directly to AscendNPU IR | `Triton IR → AscendNPU IR` |
 
 Usage examples:
@@ -226,7 +232,7 @@ Usage examples:
 kernel[grid](..., compile_mode="simd")
 
 # Hybrid (default; discrete access on 950 prefers SIMT)
-kernel[grid](..., compile_mode="unstructured_in_simt")
+kernel[grid](..., compile_mode="simd_simt_template")
 
 # Pure SIMT
 kernel[grid](..., compile_mode="simt_only", num_warps=32)
@@ -237,7 +243,7 @@ kernel[grid](..., compile_mode="simt_only", num_warps=32)
 ```mermaid
 flowchart TD
     A[compile_mode] --> B["simd"]
-    A --> C["unstructured_in_simt"]
+    A --> C["simd_simt_template"]
     A --> D["simt_only"]
 
     %% simt_only branch
@@ -251,7 +257,7 @@ flowchart TD
     B4 --> B5[TritonToLinalg]
     B5 --> B6[AscendNPU IR]
 
-    %% unstructured_in_simt full path
+    %% simd_simt_template full path
     C --> C1[discrete-mask-access-conversion]
     C1 --> C2[Mark when conditions are met and defer to downstream SIMT handling]
     C2 --> C3[triton-to-unstructured]
@@ -273,7 +279,7 @@ flowchart TD
     class D,D1 simtOnly
 ```
 
-| Stage | `"simd"` | `"unstructured_in_simt"` | `"simt_only"` |
+| Stage | `"simd"` | `"simd_simt_template"` | `"simt_only"` |
 |------|----------|--------------------------|---------------|
 | Discrete mask handling | Split into contiguous/discrete bounds and handle with load + select / store | On Ascend 950 with tensor rank ≤ 5: mark and defer to downstream; otherwise same as left | Not run |
 | Unstructured access | Expand to scalar loops | Prefer SIMT indirect access (rank ≤ 5); fall back to scalar loops on failure | Not run |

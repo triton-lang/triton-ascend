@@ -26,17 +26,15 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/AliasAnalysis.h"
-#include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Location.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
-#include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include <optional>
 
 static constexpr const char *DEBUG_TYPE = "move-load-into-user";
@@ -122,6 +120,11 @@ getFirstUser(bufferization::ToTensorOp toTensorOp,
   }
   LOG_DEBUG("Find first user:\n" << *firstUser);
 
+  if (CVPipeline::getOpCoreType(firstUser) != CVPipeline::VECTOR_ONLY) {
+    LOG_DEBUG("First User is not VECTOR");
+    return std::nullopt;
+  }
+
   int blockId = bm.getBlockIdByOp(firstUser);
   if (blockId == -1) {
     LOG_DEBUG("First user has no block_id");
@@ -156,8 +159,21 @@ bool MoveLoadIntoUserPass::checkAllOpsInSameBlock(
       return false;
     }
   }
-
+  info.commonBlockId = commonBlockId;
   return true;
+}
+
+memref::AllocOp getOriginAlloc(Value dest) {
+  if (auto allocOp = dest.getDefiningOp<memref::AllocOp>()) {
+    return allocOp;
+  } else if (auto viewLike =
+                 dyn_cast<ViewLikeOpInterface>(dest.getDefiningOp())) {
+    auto source = viewLike.getViewSource();
+    if (source) {
+      return getOriginAlloc(source);
+    }
+  }
+  return nullptr;
 }
 
 bool MoveLoadIntoUserPass::matchLoadPattern(LoadPatternInfo &info) {
@@ -173,8 +189,8 @@ bool MoveLoadIntoUserPass::matchLoadPattern(LoadPatternInfo &info) {
   // to_tensor Get the reinterpret_cast (or alloc)
   Value dest = info.copyOp.getTarget();
 
-  // Check if dest is alloc
-  if (auto allocOp = dest.getDefiningOp<memref::AllocOp>()) {
+  // Check if dest is alloc/from one alloc
+  if (auto allocOp = getOriginAlloc(dest)) {
     info.allocOp = allocOp;
   } else {
     LOG_DEBUG("Copy dest is not from alloc");
@@ -203,9 +219,10 @@ bool MoveLoadIntoUserPass::matchLoadPattern(LoadPatternInfo &info) {
   return true;
 }
 
-static void collectAllDependencies(Operation *op, SetVector<Operation *> &deps,
-                                   int commonBlockId,
-                                   CVPipeline::ComputeBlockIdManager &bm) {
+static void
+collectAllDependencies(Operation *op, SetVector<Operation *> &deps,
+                       int commonBlockId, CVPipeline::ComputeBlockIdManager &bm,
+                       CVPipeline::MemoryDependenceGraph &memGraph) {
   if (deps.contains(op)) {
     return;
   }
@@ -216,11 +233,12 @@ static void collectAllDependencies(Operation *op, SetVector<Operation *> &deps,
   }
 
   deps.insert(op);
-  for (auto operand : op->getOperands()) {
-    if (auto definingOp = operand.getDefiningOp()) {
-      collectAllDependencies(definingOp, deps, commonBlockId, bm);
-    }
-  }
+
+  CVPipeline::DependencyHelper depHelper(memGraph);
+  depHelper.forEachSource(op, [&](Operation *source) {
+    collectAllDependencies(source, deps, commonBlockId, bm, memGraph);
+    return WalkResult::advance();
+  });
 }
 
 void MoveLoadIntoUserPass::runOnOperation() {
@@ -239,6 +257,7 @@ void MoveLoadIntoUserPass::runOnOperation() {
   LOG_DEBUG("before MogeLoadIntoUserPass ....\n" << *module);
 
   module.walk([&](memref::CopyOp copyOp) {
+    LOG_DEBUG("\nNow check memref.copy = " << copyOp << "\n");
     // Step 1: Match the load pattern and collect 4 ops
     LoadPatternInfo info;
     info.copyOp = copyOp;
@@ -250,7 +269,6 @@ void MoveLoadIntoUserPass::runOnOperation() {
     if (!checkAllOpsInSameBlock(info, bm)) {
       return;
     }
-    LOG_DEBUG("valid pattern.");
     // Store the valid pattern
     validPatterns.push_back(info);
   });
@@ -271,7 +289,7 @@ void MoveLoadIntoUserPass::runOnOperation() {
 
     SetVector<Operation *> opsToMove;
     for (auto *op : matchedOps) {
-      collectAllDependencies(op, opsToMove, commonBlockId, bm);
+      collectAllDependencies(op, opsToMove, commonBlockId, bm, memGraph);
     }
     CVPipeline::cloneScalarOpsForCrossBlockUses(bm, opsToMove,
                                                 bm.getBlockIdByOp(firstUser));

@@ -1694,27 +1694,19 @@ void TritonToLinalgPass::runOnOperation() {
     return;
   }
 
-  // Check if the kernel contains tl.dot. Without tl.dot,
-  // the kernel would be pure AIV kernel.
+  // Check if the kernel contains a cube op: tl.dot / tl.dot_scaled / al.dot
+  // decompose into a cube linalg.matmul, and conv1d/conv2d run on the cube
+  // unit. Without any of them the kernel would be tagged as a pure AIV kernel;
+  // with them it must be tagged mix mode, otherwise the cube tile-and-slice
+  // fails (cbuf overflow).
   bool existDot = false;
-  moduleOp.walk([&](triton::DotOp dotOp) {
-    existDot = true;
-    return WalkResult::interrupt();
-  });
-  moduleOp.walk([&](triton::DotScaledOp dotScaledOp) {
-    existDot = true;
-    return WalkResult::interrupt();
-  });
-  // dot decomposes into a cube linalg.matmul, so a kernel containing it is
-  // a cube (mix) kernel, not a pure-AIV one. Without this the func gets tagged
-  // mix_mode="aiv" and the cube tile-and-slice fails (cbuf overflow).
-  moduleOp.walk([&](triton::ascend::DotOp dotOp) {
-    existDot = true;
-    return WalkResult::interrupt();
-  });
-  moduleOp.walk([&](hfusion::Conv1DOp conv1dOp) {
-    existDot = true;
-    return WalkResult::interrupt();
+  moduleOp.walk([&](Operation *op) {
+    if (isa<triton::DotOp, triton::DotScaledOp, triton::ascend::DotOp,
+            hfusion::Conv1DOp, hfusion::Conv2DOp>(op)) {
+      existDot = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
   });
   existDotFlag = existDot;
 

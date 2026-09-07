@@ -1180,8 +1180,14 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   int optInt =
       std::min(info->intraCoreBufferCount - 1, info->crossCoreBufferCount);
 
+  auto stepIntType = dyn_cast<IntegerType>(step.getType());
+  if (!stepIntType) {
+    LDBG("[Error] forOp step is expected to be an integer type, got "
+         << step.getType() << ", forOp=" << forOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
   Value optNum =
-      builder.create<arith::ConstantIntOp>(loc, optInt, CONST_INT_TYPE);
+      builder.create<arith::ConstantIntOp>(loc, optInt, stepIntType.getWidth());
   Value optOffset = builder.create<arith::MulIOp>(loc, step, optNum);
   Value lowerPlusOffset =
       builder.create<arith::AddIOp>(loc, lowerBound, optOffset);

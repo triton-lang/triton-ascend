@@ -47,6 +47,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createSinkI1ProducersIntoUsersPass();
 std::unique_ptr<OperationPass<ModuleOp>> createBroadcastUBOptPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMoveLoadIntoUserPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPosMaskPatternPass();
+std::unique_ptr<OperationPass<ModuleOp>> createRelocateMemrefDeclPass();
 
 std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpSubfPatternPass();

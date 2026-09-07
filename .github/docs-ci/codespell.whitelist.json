@@ -193,6 +193,7 @@
   "powf",
   "sinf",
   "tanf",
+  "tanhf",
   "fdim",
   "finitef",
   "fmod",
@@ -234,5 +235,6 @@
   "atol",
   "ffts",
   "ctypes",
-  "xdist"
+  "xdist",
+  "manylinux"
 ]

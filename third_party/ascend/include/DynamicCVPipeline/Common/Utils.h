@@ -59,6 +59,7 @@ inline constexpr llvm::StringLiteral kLoadStoreBufCount =
     "ssbuffer.load_store_buf_count";
 inline constexpr llvm::StringLiteral kAnalyzeFlagId =
     "ssbuffer.analyze_flag_id";
+inline constexpr llvm::StringLiteral kLoopId = "ssbuffer.loop_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";

@@ -1072,13 +1072,61 @@ StoreConverter::matchAndRewrite(triton::StoreOp op, OpAdaptor adaptor,
     } else {
       srcOffsets = dstOffsets;
     }
-    auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
-        val, srcOffsets, boundarySizes, loc, rewriter);
     auto dstSubview = mlir::ConverterUtils::makeSubViewOp(
         ptr, dstOffsets, boundarySizes, loc, rewriter);
-    auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
-        loc, srcSlice, dstSubview);
-    storeOp.setWritable(true);
+
+    bool isCheckedAxisPrefix = !boundaryCheck.empty();
+    for (auto [expectedAxis, checkedAxis] : llvm::enumerate(boundaryCheck)) {
+      if (checkedAxis != static_cast<int32_t>(expectedAxis)) {
+        isCheckedAxisPrefix = false;
+        break;
+      }
+    }
+
+    auto hasSingleLeadingDynamicDim = [](MemRefType subviewType) {
+      if (subviewType.getRank() <= 1)
+        return false;
+      auto shape = subviewType.getShape();
+      if (!ShapedType::isDynamic(shape[0]))
+        return false;
+      for (int64_t i = 1, e = subviewType.getRank(); i < e; ++i) {
+        if (ShapedType::isDynamic(shape[i]))
+          return false;
+      }
+      return true;
+    };
+
+    // Prefix boundary_check stores on rank>1 tiles lower to memref.copy: the
+    // extract_slice + materialize_in_destination pattern reaches BiSheng's
+    // hivm-recognize-discontinuous-store, which misreads the strided source
+    // subview on A2/A3 (see test_block_ptr_boundary_store). memref.copy
+    // carries explicit strides on both sides and takes the same BiSheng path
+    // as strided loads, which is correct on all targets. Loop-carried tensor
+    // pointers always stay on the materialize path.
+    bool isLoopCarriedTensorPtr =
+        isa<BlockArgument>(op.getPtr()) &&
+        isa<scf::ForOp>(op.getPtr().getParentBlock()->getParentOp());
+    bool insideScfFor = static_cast<bool>(op->getParentOfType<scf::ForOp>());
+    auto dstSubviewType = cast<MemRefType>(dstSubview.getType());
+
+    if (!isLoopCarriedTensorPtr &&
+        (hasSingleLeadingDynamicDim(dstSubviewType) ||
+         (isCheckedAxisPrefix && dstOffsets.size() > 1u && !insideScfFor))) {
+      auto tensorValueType = cast<RankedTensorType>(val.getType());
+      auto valueMemRefType = MemRefType::get(tensorValueType.getShape(),
+                                             tensorValueType.getElementType());
+      Value valueMemRef =
+          rewriter.create<bufferization::ToMemrefOp>(loc, valueMemRefType, val);
+      auto srcSubview = mlir::ConverterUtils::makeSubViewOp(
+          valueMemRef, srcOffsets, boundarySizes, loc, rewriter);
+      rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    } else {
+      auto srcSlice = mlir::ConverterUtils::makeExtractSliceOp(
+          val, srcOffsets, boundarySizes, loc, rewriter);
+      auto storeOp = rewriter.create<bufferization::MaterializeInDestinationOp>(
+          loc, srcSlice, dstSubview);
+      storeOp.setWritable(true);
+    }
     rewriter.eraseOp(op);
     return success();
   }

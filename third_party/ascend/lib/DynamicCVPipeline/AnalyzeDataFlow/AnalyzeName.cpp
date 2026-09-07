@@ -41,11 +41,19 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[]{
-    "chunk_abc_bwd_kernel_dh",      "flash_varlen_fwd_kernel",
-    "chunk_gsa_bwd_k_kernel_dqkvg", "_jagged_flash_attention_bwd_basic_kernel",
-    "_sparse_decode_kernel",        "chunk_gsa_fwd_k_kernel_intra",
-    "_sparse_decode_model1_kernel", "sparse_flash_attention_grad_kernel",
-    "parallel_path_fwd_kernel"};
+    "chunk_abc_bwd_kernel_dh",
+    "flash_varlen_fwd_kernel",
+    "chunk_gsa_bwd_k_kernel_dqkvg",
+    "_jagged_flash_attention_bwd_basic_kernel",
+    "_sparse_decode_kernel",
+    "chunk_gsa_fwd_k_kernel_intra",
+    "_sparse_decode_model1_kernel",
+    "sparse_flash_attention_grad_kernel",
+    "parallel_path_fwd_kernel",
+    "_swa_bwd_dkdv_kernel",
+    "flex_attention_backward_dkdv_kernel",
+    "flex_attention_backward_dkdv_kernel_tasklist",
+};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

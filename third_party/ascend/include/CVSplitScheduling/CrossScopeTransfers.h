@@ -23,29 +23,96 @@
 #ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_CROSS_SCOPE_TRANSFERS_H
 #define TRITON_ASCEND_CV_SPLIT_SCHEDULING_CROSS_SCOPE_TRANSFERS_H
 
+#include "ascend/include/CVSplitScheduling/CrossCoreResourcePlan.h"
+#include "ascend/include/CVSplitScheduling/CrossCoreScheduleCandidate.h"
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/DenseMap.h"
+
 #include "llvm/ADT/SmallVector.h"
 
 #include <cstdint>
+#include <optional>
 
 namespace mlir::triton::cv_split {
 
+/// Highest synchronization flag ID the hardware offers this schedule, and the
+/// number of IDs that implies. Callers sizing a slot policy must fit inside it.
+constexpr unsigned kMaxTransferFlagId = 14;
+constexpr unsigned kMaxTransferFlags = kMaxTransferFlagId + 1;
+
+/// UB bytes, beyond what the rotating pools already reserve, that merging the
+/// CUBE->VECTOR roles onto one union slot per lane would cost. Zero when the
+/// roles are the same size, in which case the merge is free. Returns
+/// `std::nullopt` when there is nothing to merge. Callers compare this against
+/// the same budget `insertCrossScopeTransfers` uses, so both analyses reach the
+/// same answer about whether those pools still rotate.
+std::optional<uint64_t>
+cubeToVectorUnionExtraBytes(Block *body, const Classification &classification,
+                            unsigned interCoreBufferDepth, unsigned lanes);
+
+/// Describes the emitted consumer side of one CUBE-to-VECTOR transfer.
+/// These non-owning handles are valid until scope separation rewrites the
+/// mixed loop.
+struct CubeToVectorTransferChain {
+  /// VECTOR wait crossed only by independently proven prerequisites.
+  Operation *wait;
+  /// Tensor read from the shared UB slot after `wait`.
+  Value transferredValue;
+  /// Original VECTOR consumers after their operands were replaced.
+  llvm::SmallVector<Operation *> consumers;
+  /// Structural lineage identity retained for diagnostics only.
+  int64_t originId;
+  /// Forward synchronization flag retained for diagnostics only.
+  int forwardFlagId;
+};
+
+/// Describes the IR emitted for one VECTOR-to-CUBE transfer. The values and
+/// operation pointers are non-owning handles into the loop being transformed.
 struct VectorToCubeTransferChain {
-    Value pSrc;
-    Value l1Alloc;
-    Operation *anchor;
-    SmallVector<Operation *> operationsToErase;
+  /// VECTOR-produced tensor that must be packed for CUBE consumption.
+  Value pSrc;
+  /// Shared L1 destination allocated for the packed tensor.
+  Value l1Alloc;
+  /// `hivm::SyncBlockSetOp` before which the final copy is committed.
+  Operation *anchor;
+  /// Pack operations still owned by the IR. Scope separation must erase them
+  /// in reverse order before rebuilding a per-vector-core pack.
+  llvm::SmallVector<Operation *> operationsToErase;
 };
 
+/// Cross-scope transfer metadata consumed by scope separation.
 struct CrossScopeTransferInfo {
-    int64_t blockM;
-    SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
+  /// Full row count derived from the leading CUBE-to-VECTOR transfer
+  /// dimension. Scope separation halves it to M/2 rows per vector core.
+  int64_t blockM;
+  llvm::SmallVector<CubeToVectorTransferChain> cubeToVectorChains;
+  llvm::SmallVector<VectorToCubeTransferChain> vectorToCubeChains;
 };
 
-FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(scf::ForOp loop, const Classification &classification);
+/// Materializes CUBE-to-VECTOR and VECTOR-to-CUBE data movement and
+/// synchronization for `loop`.
+///
+/// `classification` assigns each operation to its execution engine.
+/// transferPhaseEnds maps a VECTOR-engine operation whose result is consumed
+/// by CUBE to its selected UB-to-L1 copy and ready-signal commit anchor. The
+/// generic scheduler chooses the local phase end; the early-publication policy may choose an earlier
+/// validated plan anchor for a terminal lineage boundary.
+/// The returned handles remain owned by the mutated IR and must be consumed
+/// before the referenced operations are erased or reordered.
+/// `blockM`, derived internally from the leading transfer, must be positive and
+/// divisible by 32 so scope separation can split it evenly across two AIVs.
+FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(
+    scf::ForOp loop, const Classification &classification,
+    const llvm::DenseMap<Operation *, Operation *> &transferPhaseEnds,
+    const CrossCorePipelinePlan *materializedPlan,
+    const CrossCoreResourcePlan *resourcePlan,
+    const CrossCoreScheduleCandidate *scheduleCandidate,
+    unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes = 0,
+    unsigned vectorToCubeSlotOverride = 0);
 
 } // namespace mlir::triton::cv_split
 

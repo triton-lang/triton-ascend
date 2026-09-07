@@ -24,7 +24,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9589">} {
     %lhs_buffer = memref.alloc() : memref<32x16xf16>
     memref.copy %lhs_src, %lhs_buffer : memref<32x16xf16> to memref<32x16xf16>
     %lhs = bufferization.to_tensor %lhs_buffer restrict writable :
-        memref<32x16xf16>
+        memref<32x16xf16> to tensor<32x16xf16>
     scf.for %outer = %c0 to %c2 step %c1 {
       scf.for %inner = %c0 to %c16 step %c1 {
         %matmul = linalg.matmul

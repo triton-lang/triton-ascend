@@ -39,7 +39,9 @@ public:
   static constexpr int INVALID_FLAG_ID = -1;
 
   // Constructor: initialize with Module for scanning
-  FlagIdManager(ModuleOp module);
+  /// `firstAvailableId` defaults to one to preserve DCVP's existing flag
+  /// numbering.  Passes that own the zero ID may explicitly request zero.
+  FlagIdManager(ModuleOp module, int firstAvailableId = 1);
 
   // Acquire an available ID: try to reuse existing flags first (conservative
   // analysis), if cannot reuse, then increment and allocate. insertionPoint:

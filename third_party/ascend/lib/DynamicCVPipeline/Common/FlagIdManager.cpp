@@ -36,8 +36,9 @@ using namespace hivm;
 
 static constexpr int kMaxOps = 1024;
 
-FlagIdManager::FlagIdManager(ModuleOp module) {
+FlagIdManager::FlagIdManager(ModuleOp module, int firstAvailableId) {
   this->module = module;
+  currentMaxId = static_cast<int64_t>(firstAvailableId) - 1;
   scanExistingFlags(module);
   LOG_DEBUG("FlagIdManager: Initialized with max_id = " << currentMaxId
                                                         << "\n");

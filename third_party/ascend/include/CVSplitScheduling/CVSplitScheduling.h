@@ -48,7 +48,8 @@
 namespace mlir {
 namespace triton {
 
-std::unique_ptr<OperationPass<ModuleOp>> createCVSplitSchedulingPass(const CVSplitSchedulingOptions &options = {});
+std::unique_ptr<OperationPass<ModuleOp>>
+createCVSplitSchedulingPass(const CVSplitSchedulingOptions &options = {});
 
 } // namespace triton
 } // namespace mlir

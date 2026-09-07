@@ -2,11 +2,11 @@
 // RUN: triton-opt %s --debug-only=cv-split-scheduling "--cv_split_scheduling=compile-on-910-95=true unroll-factor=4" 2>&1 >/dev/null | FileCheck %s --check-prefix=DIAG
 
 // The loop has both CUBE and VECTOR work, so it reaches transfer discovery,
-// but the independent VECTOR chain consumes no matmul result. Stage 8 rejects
+// but the independent VECTOR chain consumes no matmul result. Transfer analysis rejects
 // it after unrolling and scheduling; the module transaction must return the
 // original loop rather than any partially transformed variant.
 
-// DIAG: [cv-split] === Stage 8: cross-scope transfers ===
+// DIAG: [cv-split] === cross-scope transfer materialization ===
 // DIAG: [cv-split] Candidate failed; restoring function and trying next function
 // DIAG: [cv-split] No candidate transformed; keeping original IR
 

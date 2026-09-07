@@ -20,10 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
@@ -54,6 +57,19 @@ namespace triton {
 AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
     : AddDynamicCVPipelineBase(options) {}
+
+static void checkAndDisableVfSub(ModuleOp module) {
+  static constexpr llvm::StringLiteral kDisableVfSubKernels[1]{
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"};
+  module->walk([=](func::FuncOp funcOp) {
+    if (llvm::is_contained(kDisableVfSubKernels, funcOp.getSymName())) {
+      CVPipeline::setFallbackAttr(module,
+                                  CVPipeline::ERRCODE_DISABLE_VF_SUBSTITUTION);
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+}
 
 void AddDynamicCVPipelinePass::runOnOperation() {
   auto moduleOp = getOperation();
@@ -121,6 +137,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     return;
   }
 
+  checkAndDisableVfSub(moduleOp);
   LDBG("Process successfully");
 }
 

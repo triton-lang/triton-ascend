@@ -744,13 +744,13 @@ std::optional<uint64_t> cubeToVectorUnionExtraBytes(
 }
 
 FailureOr<CrossScopeTransferInfo> insertCrossScopeTransfers(
-        scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
-        const DenseMap<Operation *, Operation *> &transferPhaseEnds,
-        const CrossCorePipelinePlan *materializedPlan,
-        const CrossCoreResourcePlan *resourcePlan,
-        const CrossCoreScheduleCandidate *scheduleCandidate,
-        unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes,
-        unsigned vectorToCubeSlotOverride) {
+    scf::ForOp loop, const DenseMap<Operation *, EngineType> &classification,
+    const DenseMap<Operation *, Operation *> &transferPhaseEnds,
+    const CrossCorePipelinePlan *materializedPlan,
+    const CrossCoreResourcePlan *resourcePlan,
+    const CrossCoreScheduleCandidate *scheduleCandidate,
+    unsigned interCoreBufferDepth, uint64_t privateBufferUbBudgetBytes,
+    unsigned vectorToCubeSlotOverride) {
 
   MLIRContext *ctx = loop.getContext();
   Location loc = loop.getLoc();

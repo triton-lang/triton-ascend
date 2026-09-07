@@ -530,16 +530,16 @@ static LogicalResult extractVectorRegions(Block *body,
 CVSplitVectorRegionRequest
 PostCVSplitOwnedVectorRegionRequest::getRequest() const {
   return CVSplitVectorRegionRequest{target,
-        operations,
-        dependencies,
-        externalBytesRead,
-        externalBytesWritten,
-        temporaryUbBytes,
-        reductionRows,
-        reductionWidth,
-        inputLayout,
-        outputLayout,
-        oneOutlinedRegion};
+                                    operations,
+                                    dependencies,
+                                    externalBytesRead,
+                                    externalBytesWritten,
+                                    temporaryUbBytes,
+                                    reductionRows,
+                                    reductionWidth,
+                                    inputLayout,
+                                    outputLayout,
+                                    oneOutlinedRegion};
 }
 
 FailureOr<PostCVSplitRequestSet>

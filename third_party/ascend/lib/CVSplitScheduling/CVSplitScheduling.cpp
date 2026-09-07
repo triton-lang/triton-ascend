@@ -124,10 +124,10 @@ enum class PostSplitScheduleMode { Disabled, Materialize };
 
 static std::optional<PostSplitScheduleMode>
 parsePostSplitScheduleMode(llvm::StringRef value) {
-    if (value == "disabled")
-      return PostSplitScheduleMode::Disabled;
-    if (value == "materialize")
-      return PostSplitScheduleMode::Materialize;
+  if (value == "disabled")
+    return PostSplitScheduleMode::Disabled;
+  if (value == "materialize")
+    return PostSplitScheduleMode::Materialize;
   return std::nullopt;
 }
 

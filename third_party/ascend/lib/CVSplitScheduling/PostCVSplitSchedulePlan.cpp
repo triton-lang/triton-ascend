@@ -180,9 +180,9 @@ static bool verifyPlan(const PostCVSplitSchedulePlan &plan) {
 } // namespace
 
 PostCVSplitSchedulePlan buildPostCVSplitSchedulePlan(
-  const PostCVSplitRequestSet &requests,
-  const CrossCoreResourcePlan &currentResources,
-  const CrossCoreResourceLimits &limits) {
+    const PostCVSplitRequestSet &requests,
+    const CrossCoreResourcePlan &currentResources,
+    const CrossCoreResourceLimits &limits) {
   PostCVSplitSchedulePlan plan;
   plan.firstLogicalFlagId = limits.firstAvailableFlagId;
   plan.maximumLogicalFlagId = kMaximumLogicalFlagId;

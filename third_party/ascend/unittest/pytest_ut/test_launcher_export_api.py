@@ -269,12 +269,12 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
 
 
 @pytest.mark.parametrize(
-    ("auto_map_enabled", "blacklisted", "expect_cap"),
+    ("auto_map_enabled", "blacklisted"),
     (
-        (False, False, False),
-        (False, True, False),
-        (True, False, True),
-        (True, True, False),
+        (False, False),
+        (False, True),
+        (True, False),
+        (True, True),
     ),
 )
 @patch.object(driver, "NPUUtils")
@@ -290,32 +290,39 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
     mock_npu_utils,
     auto_map_enabled,
     blacklisted,
-    expect_cap,
 ):
     mock_auto_map.return_value = auto_map_enabled
     mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    for auto_blockify_enabled in (False, True):
-        for row_coalescing_applied in (False, True):
-            metadata = _make_metadata()
-            metadata.has_auto_blockify_blacklist_op = blacklisted
-            metadata.auto_blockify_enabled = auto_blockify_enabled
-            metadata.row_coalescing_applied = row_coalescing_applied
-            if row_coalescing_applied:
-                metadata.coalesce_factor = 4
-                metadata.coalesce_axis = 0
-                metadata.coalesce_grid_ceil_div = True
-            src = driver.make_launcher(
-                constants={},
-                signature={0: "*fp32", 1: "*fp32"},
-                metadata=metadata,
-            )
-            expected_per_launch_path = 1 if expect_cap and not row_coalescing_applied else 0
-            c_abi_launch, cpp_launch = _split_launch_functions(src)
-            assert c_abi_launch.count(cap) == expected_per_launch_path
-            assert cpp_launch.count(cap) == expected_per_launch_path
+    for auto_blockify_enabled, is_pure_simt, row_coalescing_applied in product(
+        (False, True),
+        (False, True),
+        (False, True),
+    ):
+        metadata = _make_metadata()
+        metadata.has_auto_blockify_blacklist_op = blacklisted
+        metadata.auto_blockify_enabled = auto_blockify_enabled
+        metadata.is_pure_simt = is_pure_simt
+        metadata.row_coalescing_applied = row_coalescing_applied
+        if row_coalescing_applied:
+            metadata.coalesce_factor = 4
+            metadata.coalesce_axis = 0
+            metadata.coalesce_grid_ceil_div = True
+        src = driver.make_launcher(
+            constants={},
+            signature={0: "*fp32", 1: "*fp32"},
+            metadata=metadata,
+        )
+        expected_per_launch_path = 1 if (
+            auto_map_enabled and not row_coalescing_applied and (is_pure_simt or not blacklisted)
+        ) else 0
+        c_abi_launch, cpp_launch = _split_launch_functions(src)
+        case = (f"E={auto_map_enabled}, P={is_pure_simt}, B={blacklisted}, "
+                f"R={row_coalescing_applied}, A={auto_blockify_enabled}")
+        assert c_abi_launch.count(cap) == expected_per_launch_path, case
+        assert cpp_launch.count(cap) == expected_per_launch_path, case
 
 
 @patch.object(driver, "NPUUtils")

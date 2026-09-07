@@ -50,6 +50,11 @@ public:
       8; // Address offset for each allocation
   static constexpr int SSBUF_ADDR_MAX = 6072; // Maximum allowed address
 
+  // MNE counter specific address range (2560-3072)
+  static constexpr int MNE_COUNTER_BASE_ADDR = 2560;
+  static constexpr int MNE_COUNTER_ADDR_OFFSET = 4; // Each counter uses 4 bytes (i32)
+  static constexpr int MNE_COUNTER_ADDR_MAX = 3072;
+
   // Constructor
   SSBufferManager() = default;
 
@@ -65,13 +70,31 @@ public:
   readFromSSBuffer(int64_t addr, OpBuilder &builder,
                    SmallVectorImpl<Operation *> &createdOps);
 
+  // Allocate address for MNE counter (2560-3072 range)
+  // Returns nullopt if address exceeds maximum limit
+  std::optional<int64_t> allocateMNECounterAddr() {
+    int64_t addrValue =
+        MNE_COUNTER_BASE_ADDR + mneCounterCount * MNE_COUNTER_ADDR_OFFSET;
+    
+    if (addrValue > MNE_COUNTER_ADDR_MAX) {
+      return std::nullopt;
+    }
+    
+    mneCounterCount++;
+    return addrValue;
+  }
+
   // Get the number of allocated addresses
   size_t getAllocatedCount() const { return valueToAddrMap.size(); }
+
+  // Get the number of MNE counters allocated
+  size_t getMNECounterCount() const { return mneCounterCount; }
 
   // Clear all mappings (for testing or reset)
   void clear() {
     valueToAddrMap.clear();
     addrToValueMap.clear();
+    mneCounterCount = 0;
   }
 
 private:
@@ -85,6 +108,9 @@ private:
   // Used for fast lookup when reading from SSBuffer
   // This avoids O(n) traversal in findValueByAddr
   llvm::DenseMap<int64_t, Value> addrToValueMap;
+  
+  // Counter for MNE counter address allocation
+  size_t mneCounterCount = 0;
 };
 
 static constexpr int ADDR_INT_TYPE = 64;
@@ -100,7 +126,7 @@ inline MemRefType getSsbufMemrefType(Builder &builder) {
 inline std::pair<arith::ConstantOp, hivm::PointerCastOp>
 getSsbufConstAndPointerCast(OpBuilder &builder, Location loc, uint64_t addr,
                             Type elemType) {
-  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
+  auto i64Type = builder.getIntegerType(SSBufferManager::ADDR_INT_TYPE);
   auto addrAttr = builder.getIntegerAttr(i64Type, addr);
   auto addrConst = builder.create<arith::ConstantOp>(loc, i64Type, addrAttr);
   auto addressSpaceAttr =

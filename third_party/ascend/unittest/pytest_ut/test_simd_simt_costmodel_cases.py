@@ -49,7 +49,7 @@ def _launch_options(report_path, logical_programs):
     return options
 
 
-def _assert_performance(case, launch, profile_root, documented_us, tolerance=1.2):
+def _profile_median_us(case, launch, profile_root):
     for _ in range(20):
         launch()
     torch.npu.synchronize()
@@ -91,7 +91,11 @@ def _assert_performance(case, launch, profile_root, documented_us, tolerance=1.2
                 if row.get("Duration(us)"):
                     durations.append(float(row["Duration(us)"]))
     assert durations, f"{case}: profiler generated no kernel duration"
-    duration_us = statistics.median(durations)
+    return statistics.median(durations)
+
+
+def _assert_performance(case, launch, profile_root, documented_us, tolerance=1.2):
+    duration_us = _profile_median_us(case, launch, profile_root)
     maximum_us = documented_us * tolerance
     print(
         f"{case}: profiler median {duration_us:.3f} us (documented {documented_us:.3f} us, limit {maximum_us:.3f} us)")
@@ -511,16 +515,20 @@ def anchorless_mixed_stage_scope_kernel(
     x = tl.load(x_ptr + offs)
     y = tl.load(y_ptr + offs)
     tl.store(out_ptr + offs, x * y + 1.0)
-    # Scalar loop-carried recurrence on 0-d values: no gather, no
+    # Scalar loop-carried recurrence on a length-1 vector: no gather, no
     # loaded-index address, no atomic, no scan, so the kernel contains no
     # primitive SIMT anchor anywhere.  The dependent scalar chain pays the
     # SIMD front-end ~1 op/cycle, while SIMT issues 4 scalar ops/cycle, so
     # this anchor-free Stage is cheaper in SIMT and must be materialized as
-    # a StageOwnedScope local SIMT scope by the mixed route.
-    s = tl.load(seed_ptr + pid)
+    # a StageOwnedScope local SIMT scope by the mixed route.  The recurrence
+    # state is a length-1 tensor because the SIMT VF scope ABI requires
+    # every scope return value to be a ranked tensor: a plain scalar
+    # live-out cannot cross the scope boundary.
+    lane = tl.arange(0, 1)
+    s = tl.load(seed_ptr + pid + lane)
     for _ in range(SCALAR_ITERATIONS):
         s = s * 1.0000001 + 1e-7
-    tl.store(scalar_out_ptr + pid, s)
+    tl.store(scalar_out_ptr + pid + lane, s)
 
 
 @simd_simt_910_95_only
@@ -583,3 +591,253 @@ def test_costmodel_anchorless_mixed_stage_scope(tmp_path):
     assert any(stages[index]["model"] == "loop_carried_recurrence"
                for index in simt_indices), (
         "the anchor-free scalar recurrence Stage should be the SIMT scope")
+
+
+@triton.jit
+def mixed_route_anchor_and_anchorless_kernel(
+    x_ptr,
+    y_ptr,
+    table_ptr,
+    idx_ptr,
+    seed_ptr,
+    out_ptr,
+    gather_out_ptr,
+    scalar_out_ptr,
+    TILE_BLOCK: tl.constexpr,
+    TILE_LOOP_COUNT: tl.constexpr,
+    GATHER_BLOCK: tl.constexpr,
+    SCALAR_ITERATIONS: tl.constexpr,
+):
+    # Segment 1 (SIMD): streamed contiguous tile loop on unit-stride
+    # addresses.  The SIMD MTE/vector roofline dominates, so the mixed route
+    # must keep every Stage of this loop on the SIMD side.
+    pid = tl.program_id(0)
+    base = pid * (TILE_LOOP_COUNT * TILE_BLOCK)
+    for i in range(TILE_LOOP_COUNT):
+        offs = base + i * TILE_BLOCK + tl.arange(0, TILE_BLOCK)
+        x = tl.load(x_ptr + offs)
+        y = tl.load(y_ptr + offs)
+        tl.store(out_ptr + offs, x * y + 1.0)
+    # Segment 2 (anchored SIMT): the table pointer is addressed by a loaded
+    # index, so the load is loaded-index-dependent memory, a primitive SIMT
+    # anchor.  The gather must be large enough that the SIMD-side emulation
+    # cost exceeds the local SIMT scope's fixed mode-switch plus UB handoff
+    # overhead; otherwise the mixed route correctly keeps even the anchored
+    # gather on the SIMD side.
+    goffs = pid * GATHER_BLOCK + tl.arange(0, GATHER_BLOCK)
+    indices = tl.load(idx_ptr + goffs).to(tl.int32)
+    t = tl.load(table_ptr + indices)
+    tl.store(gather_out_ptr + goffs, t)
+    # Segment 3 (anchorless SIMT): scalar loop-carried recurrence on a
+    # length-1 tensor.  No gather, no loaded-index address, no atomic and no
+    # scan, so the segment contains no primitive SIMT anchor anywhere; the
+    # mixed route must still recognize it as SIMT-cheaper and synthesize a
+    # stage-owned SIMT scope.  The recurrence state is a length-1 tensor
+    # because the SIMT VF scope ABI requires every scope return value to be
+    # a ranked tensor.
+    lane = tl.arange(0, 1)
+    s = tl.load(seed_ptr + pid + lane)
+    for _ in range(SCALAR_ITERATIONS):
+        s = s * 1.0000001 + 1e-7
+    tl.store(scalar_out_ptr + pid + lane, s)
+
+
+@simd_simt_910_95_only
+def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path):
+    logical_programs = _vector_core_count()
+    # The unified buffer frame must hold the tile buffers plus the gather's
+    # double-buffered indices and gathered table: int16 indices and float16
+    # gathered values keep the 8192-element gather inside the ~216KB AIV UB
+    # budget, while the gather stays large enough for the SIMD-side gather
+    # emulation to cost more than the local SIMT scope.
+    tile_block = 8192
+    tile_loop = 32
+    gather_block = 8192
+    iterations = 4096
+    table_size = 30000
+    torch.manual_seed(5)
+    x = torch.randn((logical_programs * tile_block * tile_loop, ), dtype=torch.float32, device="npu")
+    y = torch.randn((logical_programs * tile_block * tile_loop, ), dtype=torch.float32, device="npu")
+    table = torch.randn((table_size, ), dtype=torch.float16, device="npu")
+    idx = torch.randint(0, table_size, (logical_programs * gather_block, ), dtype=torch.int16, device="npu")
+    seed = torch.rand((logical_programs, ), dtype=torch.float32, device="npu")
+    output = torch.empty_like(x)
+    gather_output = torch.empty((logical_programs * gather_block, ), dtype=torch.float16, device="npu")
+    scalar_output = torch.empty((logical_programs, ), dtype=torch.float32, device="npu")
+    report_path = tmp_path / "mixed_route_anchor_and_anchorless.json"
+    constexprs = {
+        "TILE_BLOCK": tile_block,
+        "TILE_LOOP_COUNT": tile_loop,
+        "GATHER_BLOCK": gather_block,
+        "SCALAR_ITERATIONS": iterations,
+    }
+    args = (x, y, table, idx, seed, output, gather_output, scalar_output)
+
+    def launch_mixed():
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
+            *args, **constexprs, **_launch_options(report_path, logical_programs))
+
+    def launch_all_simd():
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
+            *args, **constexprs, num_warps=4, compile_mode="simd")
+
+    def launch_all_simt():
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
+            *args, **constexprs, num_warps=4, compile_mode="simt_only")
+
+    # Correctness of the mixed execution.
+    launch_mixed()
+    torch.testing.assert_close(output, x * y + 1.0, rtol=1e-5, atol=1e-5)
+    torch.testing.assert_close(gather_output, table[idx.long()], rtol=1e-5, atol=1e-5)
+    reference = seed.clone()
+    for _ in range(iterations):
+        reference = reference * 1.0000001 + 1e-7
+    torch.testing.assert_close(scalar_output, reference, rtol=1e-3, atol=1e-3)
+
+    # The cost model must compute the mixed route as the cheapest candidate.
+    report = _load_route_report(report_path, "mixed_simd_simt")
+    routes = report["stage_model"]["routes"]
+    mixed = routes["mixed_simd_simt"]
+    assert mixed["legal"]
+    assert mixed["total_system_cycles"] < routes["all_simd"]["total_system_cycles"]
+    assert mixed["total_system_cycles"] < routes["all_simt_only"]["total_system_cycles"]
+
+    stages = report["stage_model"]["logical_stages"]
+    mixed_stages = mixed["stages"]
+    assert len(stages) == len(mixed_stages)
+    simt_indices = [
+        index for index, stage in enumerate(mixed_stages)
+        if stage["implementation"]["mode"] == "simt"
+    ]
+    anchored_indices = [
+        index for index in simt_indices if stages[index]["simt_anchor_indices"]
+    ]
+    anchorless_indices = [
+        index for index in simt_indices if not stages[index]["simt_anchor_indices"]
+    ]
+    assert anchored_indices, "mixed route selected no SIMT stage with a primitive anchor"
+    assert anchorless_indices, "mixed route selected no anchor-free SIMT stage"
+    for index in anchored_indices:
+        assert stages[index]["features"]["has_indirect_memory"]
+        assert mixed_stages[index]["implementation"]["materialization"] == "local_simt_scope_with_kernel_v1"
+    for index in anchorless_indices:
+        assert stages[index]["model"] == "loop_carried_recurrence"
+        assert stages[index]["local_simt_materializable"]
+        assert mixed_stages[index]["implementation"]["materialization"] == "local_simt_scope_with_kernel_v1"
+    assert report["materialized_simt_anchor_count"] >= 1
+    assert report["materialized_stage_owned_scope_count"] >= 1
+
+    # Every other stage (the contiguous tile loop and the AutoBlockify V1
+    # dispatch/loop control stages) stays on the SIMD side.
+    simd_tile_indices = [
+        index for index, stage in enumerate(stages)
+        if mixed_stages[index]["implementation"]["mode"] == "simd"
+        and stage["workload"]["store_bytes_per_iteration"] >= tile_block * 4
+    ]
+    assert simd_tile_indices, "the contiguous elementwise tile pass should stay SIMD"
+    for index, stage in enumerate(stages):
+        if index not in simt_indices:
+            assert mixed_stages[index]["implementation"]["mode"] == "simd"
+
+    # Measured performance: the mixed execution must beat both single-mode
+    # executions of the very same kernel.
+    mixed_us = _profile_median_us("mixed_route_anchor_and_anchorless/mixed", launch_mixed,
+                                   tmp_path / "profile_mixed")
+    all_simd_us = _profile_median_us("mixed_route_anchor_and_anchorless/all_simd", launch_all_simd,
+                                     tmp_path / "profile_all_simd")
+    all_simt_us = _profile_median_us("mixed_route_anchor_and_anchorless/all_simt", launch_all_simt,
+                                     tmp_path / "profile_all_simt")
+    baseline_us = min(all_simd_us, all_simt_us)
+    print(f"mixed_route_anchor_and_anchorless: mixed {mixed_us:.3f} us vs "
+          f"all_simd {all_simd_us:.3f} us, all_simt {all_simt_us:.3f} us")
+    assert mixed_us <= baseline_us * 1.05, (
+        f"mixed execution ({mixed_us:.3f} us) is not faster than the best "
+        f"single mode ({baseline_us:.3f} us)")
+
+
+@triton.jit
+def loop_body_split_stage_kernel(
+    x_ptr,
+    out_ptr,
+    BLOCK: tl.constexpr,
+    LOOP_COUNT: tl.constexpr,
+):
+    # Each program owns one contiguous (LOOP_COUNT + 1) * BLOCK region: the
+    # first BLOCK elements are a plain unit-stride tile pass, the remaining
+    # LOOP_COUNT * BLOCK elements are written by the loop below.
+    pid = tl.program_id(0)
+    region = pid * (BLOCK * (LOOP_COUNT + 1))
+    offs = region + tl.arange(0, BLOCK)
+    x = tl.load(x_ptr + offs)
+    tl.store(out_ptr + offs, x * 2.0 + 1.0)
+    # Independent structured loop: the induction value feeds addresses only
+    # (no algorithmic loop-carried dependency), so the loop must NOT be
+    # staged as a whole.  The shell has to remain a control-only Stage while
+    # the body's load/multiply/store become separate semantic roots that are
+    # partitioned, costed, and routed per iteration like any plain root.
+    base = region + BLOCK
+    for i in range(LOOP_COUNT):
+        loffs = base + i * BLOCK + tl.arange(0, BLOCK)
+        v = tl.load(x_ptr + loffs)
+        tl.store(out_ptr + loffs, v * 3.0 + 0.5)
+
+
+@simd_simt_910_95_only
+def test_costmodel_loop_body_split_stages(tmp_path):
+    logical_programs = _vector_core_count()
+    block = 2048
+    loop_count = 8
+    torch.manual_seed(4)
+    x = torch.randn((logical_programs * block * (loop_count + 1), ), dtype=torch.float32, device="npu")
+    output = torch.empty_like(x)
+    report_path = tmp_path / "loop_body_split_route.json"
+
+    def launch():
+        loop_body_split_stage_kernel[(logical_programs, )](
+            x,
+            output,
+            BLOCK=block,
+            LOOP_COUNT=loop_count,
+            **_launch_options(report_path, logical_programs),
+        )
+
+    launch()
+    x_blocks = x.view(logical_programs, loop_count + 1, block)
+    out_blocks = output.view(logical_programs, loop_count + 1, block)
+    torch.testing.assert_close(out_blocks[:, 0, :], x_blocks[:, 0, :] * 2.0 + 1.0, rtol=1e-6, atol=1e-6)
+    torch.testing.assert_close(out_blocks[:, 1:, :], x_blocks[:, 1:, :] * 3.0 + 0.5, rtol=1e-6, atol=1e-6)
+
+    report = json.loads(report_path.read_text())
+    assert report["stage_model"]["applied"]
+    stages = report["stage_model"]["logical_stages"]
+
+    # The independent loop's shell is staged separately and owns control
+    # overhead only: it must not carry the body's memory workload.
+    shells = [stage for stage in stages if stage["model"] == "independent_pipelined_loop"]
+    assert len(shells) == 1, f"expected one loop shell stage, got {[s['id'] for s in shells]}"
+    shell = shells[0]
+    assert shell["iteration_count"] == loop_count
+    assert shell["workload"]["load_bytes_per_iteration"] == 0
+    assert shell["workload"]["store_bytes_per_iteration"] == 0
+    assert shell["features"]["loop_backedge_count"] >= 1
+
+    # The body's memory work is staged outside the shell and charged once
+    # per loop iteration.
+    bodies = [
+        stage for stage in stages
+        if stage["iteration_count"] == loop_count
+        and stage["workload"]["store_bytes_per_iteration"] > 0
+    ]
+    assert bodies, "loop body memory work was not staged separately from the shell"
+    for body in bodies:
+        assert body["model"] != "independent_pipelined_loop"
+
+    # Store-traffic accounting: the staged per-program store traffic must
+    # equal the kernel's real store traffic (prologue once + body once per
+    # iteration), proving the body is costed per iteration while the shell
+    # does not double-charge body work.
+    total_store_bytes = sum(
+        stage["iteration_count"] * stage["workload"]["store_bytes_per_iteration"]
+        for stage in stages
+    )
+    assert total_store_bytes == (loop_count + 1) * block * 4

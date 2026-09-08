@@ -102,6 +102,10 @@ struct StagePartition {
   bool operationOwnershipComplete = false;
   int64_t modeledOperationCount = 0;
   std::vector<LogicalStage> stages;
+  /// Mirrors StagePartitionerOptions::splitIndependentLoopBody so ownership,
+  /// workload, and feature analyses resolve roots with the same loop-body
+  /// exposure rule that built this partition.
+  bool splitIndependentLoopBody = true;
 };
 
 struct StageOperationRate {

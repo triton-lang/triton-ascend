@@ -710,6 +710,9 @@ mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
   // Mirror wrapAnchorRange: the scope returns exactly the values with an
   // outside user.  Returned pointer-like state cannot be reconstructed by
   // TritonToUnstructure, so reject that implementation before it is scored.
+  // The SIMT VF scope ABI additionally requires every scope.return value to
+  // be a ranked tensor (LegalizeBoolForSimtVF asserts on non-tensor state),
+  // so a scalar escaping the root range must also reject the scope.
   llvm::DenseSet<Operation *> inside;
   for (Operation *root : roots) {
     inside.insert(root);
@@ -723,10 +726,10 @@ mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
   };
   for (Operation *root : roots)
     for (Value result : root->getResults())
-      if (isPointerLikeType(result.getType()) &&
-          llvm::any_of(result.getUses(), [&](OpOperand &use) {
+      if (llvm::any_of(result.getUses(), [&](OpOperand &use) {
             return !isInside(use.getOwner());
-          }))
+          }) && (isPointerLikeType(result.getType()) ||
+                 !isa<RankedTensorType>(result.getType())))
         return std::nullopt;
 
   SimtAnchorDescriptor descriptor;

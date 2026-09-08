@@ -521,10 +521,11 @@ static StagePartitionerOptions buildStagePartitionerOptions(
     const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
     unsigned numWarps, bool wholeKernelSuperblockMaterializable,
     bool scopeSuperblockMaterializable, bool compileOn91095,
-    int64_t logicalProgramCountHint) {
+    int64_t logicalProgramCountHint, bool splitIndependentLoopBody) {
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
   partitionerOptions.compileOn91095 = compileOn91095;
+  partitionerOptions.splitIndependentLoopBody = splitIndependentLoopBody;
   partitionerOptions.maximumSuperblockFactor =
       (wholeKernelSuperblockMaterializable || scopeSuperblockMaterializable ||
        features.autoBlockifyV1Applied)
@@ -552,12 +553,13 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     unsigned numWarps, bool wholeKernelSuperblockMaterializable,
     bool scopeSuperblockMaterializable, bool compileOn91095,
     int64_t logicalProgramCountHint, int64_t physicalCoreCountHint,
-    ModuleOp module, const SimtAnchorPlan *anchorPlan) {
+    bool splitIndependentLoopBody, ModuleOp module,
+    const SimtAnchorPlan *anchorPlan) {
   COSTMODEL_TRACE_DEBUG("evaluateStageModel");
   StagePartitionerOptions partitionerOptions = buildStagePartitionerOptions(
       features, profile, numWarps, wholeKernelSuperblockMaterializable,
       scopeSuperblockMaterializable, compileOn91095,
-      logicalProgramCountHint);
+      logicalProgramCountHint, splitIndependentLoopBody);
   StagePartitioner partitioner;
   if (!module || !anchorPlan)
     return llvm::createStringError(std::errc::invalid_argument,
@@ -815,7 +817,7 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
       options.wholeKernelSuperblockMaterializable,
       options.scopeSuperblockMaterializable, options.compileOn91095,
       options.logicalProgramCountHint, options.physicalVectorCoreCountHint,
-      module, anchorPlan);
+      options.splitIndependentLoopBody, module, anchorPlan);
   if (!stageModel)
     return stageModel.takeError();
   report.stageModel = std::move(*stageModel);
@@ -885,7 +887,7 @@ llvm::Expected<StagePartition> mlir::ascend::partitionForSimdSimtSelection(
       *features, profile, options.numWarps,
       options.wholeKernelSuperblockMaterializable,
       options.scopeSuperblockMaterializable, options.compileOn91095,
-      options.logicalProgramCountHint);
+      options.logicalProgramCountHint, options.splitIndependentLoopBody);
   return StagePartitioner().partition(module, anchorPlan,
                                       partitionerOptions);
 }

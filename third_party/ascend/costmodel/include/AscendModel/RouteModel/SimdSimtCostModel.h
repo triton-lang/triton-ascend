@@ -87,6 +87,11 @@ struct SimdSimtCostModelOptions {
   /// logical-program group.
   int64_t logicalProgramCountHint = 0;
   int64_t physicalVectorCoreCountHint = 0;
+  /// Expose the bodies of independent structured loops as their own semantic
+  /// roots, so a loop is charged only its backedge overhead while its body is
+  /// partitioned into normal Stages.  Both the scoring analysis and the
+  /// selector's materialization partition must use the same value.
+  bool splitIndependentLoopBody = true;
 };
 
 struct SimdSimtCostReport {

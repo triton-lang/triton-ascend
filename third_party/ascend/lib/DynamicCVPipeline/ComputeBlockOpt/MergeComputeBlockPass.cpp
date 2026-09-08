@@ -21,6 +21,7 @@
  */
 
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -516,12 +517,12 @@ public:
       return;
     }
 
-    auto intraBufCount =
-        module->getAttrOfType<IntegerAttr>(CVPipeline::kIntraBufCount);
-    auto interCoreBufCount =
-        module->getAttrOfType<IntegerAttr>(CVPipeline::kInterCoreBufCount);
-    if (!intraBufCount || !interCoreBufCount || intraBufCount.getInt() < 3 ||
-        interCoreBufCount.getInt() < 2) {
+    BufferCountManager bufMgr(module);
+    int intraBufCount =
+        bufMgr.getBufferCountByType(BufferCountManager::DepType::IntraCore);
+    int interCoreBufCount =
+        bufMgr.getBufferCountByType(BufferCountManager::DepType::InterCore);
+    if (intraBufCount < 3 || interCoreBufCount < 2) {
       LOG_DEBUG("MergeComputeBlock disabled: intraBufCount < 3 or "
                 "interCoreBufCount < 2");
       return;

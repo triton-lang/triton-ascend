@@ -25,6 +25,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
+#include <limits>
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -53,8 +54,6 @@ using namespace mlir::triton;
 using namespace mlir::CVPipeline;
 
 // Attribute name constants
-static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
-static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
 static constexpr int SHAPE_1D_LENGTH = 1;
 static constexpr int constantIntType = 32;
@@ -181,7 +180,7 @@ bool DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
   if (!isa<linalg::TransposeOp>(userOp))
     return false;
   for (mlir::Operation *transposeOpUser : userOp->getUsers()) {
-    if (getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr)
+    if (getSsbufferCoreType(transposeOpUser) != CVPipeline::kCoreTypeVector)
       return false;
   }
   return true;
@@ -272,7 +271,7 @@ void DataDependencyAnalysisPass::collectBlockInfo(
   // In cases with one or more core_types
   // as long as there is a cube, it is necessary to check the dataflow.
   StringRef coreType = getSsbufferCoreType(ops[0]);
-  if (coreType.contains(ssbufferCoreTypeCubeAttr)) {
+  if (coreType.contains(CVPipeline::kCoreTypeCube)) {
     blockInfo.isCube = true;
   }
 
@@ -348,7 +347,7 @@ mlir::Operation *DataDependencyAnalysisPass::createBlockInfoConstOp(
 
   BlockInfo blockInfo;
   blockInfo.blockId = newId;
-  blockInfo.isCube = (coreType == ssbufferCoreTypeCubeAttr);
+  blockInfo.isCube = (coreType == CVPipeline::kCoreTypeCube);
   blockInfo.isControl = false;
   blockInfo.Operations.push_back(constOp);
   info.getBlockInfoMap()[newId] = blockInfo;
@@ -438,9 +437,9 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(
     }
     // Determine dependency type based on initCoreType
     DependencyType depType;
-    if (initCoreType == ssbufferCoreTypeVectorAttr) {
+    if (initCoreType == CVPipeline::kCoreTypeVector) {
       depType = DependencyType::VectorToCube;
-    } else if (initCoreType == ssbufferCoreTypeCubeAttr) {
+    } else if (initCoreType == CVPipeline::kCoreTypeCube) {
       depType = DependencyType::CubeToVector;
     }
 
@@ -455,8 +454,8 @@ void DataDependencyAnalysisPass::insertProducerAndRecordDeps(
     LOG_DEBUG("Recorded iterArg dependency: "
               << initCoreType << " -> "
               << (depType == DependencyType::VectorToCube
-                      ? ssbufferCoreTypeCubeAttr
-                      : ssbufferCoreTypeVectorAttr)
+                      ? CVPipeline::kCoreTypeCube
+                      : CVPipeline::kCoreTypeVector)
               << ", producerBlockId=" << newId
               << ", consumerBlockId=" << userBlockId << "\n");
   }
@@ -484,9 +483,9 @@ void DataDependencyAnalysisPass::insertConsumerAndRecordDeps(
   int yieldedDefBlockId = *yieldedDefBlockIdOpt;
 
   DependencyType depType;
-  if (initCoreType == ssbufferCoreTypeVectorAttr) {
+  if (initCoreType == CVPipeline::kCoreTypeVector) {
     depType = DependencyType::CubeToVector;
-  } else if (initCoreType == ssbufferCoreTypeCubeAttr) {
+  } else if (initCoreType == CVPipeline::kCoreTypeCube) {
     depType = DependencyType::VectorToCube;
   }
 
@@ -531,9 +530,9 @@ void DataDependencyAnalysisPass::recordInitValueDeps(
   int loopBlockId = *loopBlockIdOpt;
 
   DependencyType depType;
-  if (yieldCoreType == ssbufferCoreTypeVectorAttr) {
+  if (yieldCoreType == CVPipeline::kCoreTypeVector) {
     depType = DependencyType::CubeToVector;
-  } else if (yieldCoreType == ssbufferCoreTypeCubeAttr) {
+  } else if (yieldCoreType == CVPipeline::kCoreTypeCube) {
     depType = DependencyType::VectorToCube;
   }
 
@@ -730,7 +729,7 @@ void DataDependencyAnalysisPass::analyzeExternalInputs(
       }
 
       // Case 1: Cube -> C->C dependency
-      if (coreType == ssbufferCoreTypeCubeAttr) {
+      if (coreType == CVPipeline::kCoreTypeCube) {
         LOG_DEBUG("Found external input with CUBE core type: " << input
                                                                << "\n");
         auto producerIdOpt = CVPipeline::getOpBlockId(input.getDefiningOp());
@@ -748,7 +747,7 @@ void DataDependencyAnalysisPass::analyzeExternalInputs(
         continue;
       }
       // Case 2: Vector -> V->C dependency
-      if (coreType == ssbufferCoreTypeVectorAttr) {
+      if (coreType == CVPipeline::kCoreTypeVector) {
         LOG_DEBUG("Found external input with VECTOR core type: " << input
                                                                  << "\n");
         auto producerIdOpt = CVPipeline::getOpBlockId(input.getDefiningOp());
@@ -797,7 +796,7 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
       unsigned resultIndex = opResult.getResultNumber();
       StringRef resultCoreType =
           getCoreTypeWithIndex(output.getDefiningOp(), resultIndex);
-      if (resultCoreType != ssbufferCoreTypeCubeAttr) {
+      if (resultCoreType != CVPipeline::kCoreTypeCube) {
         continue;
       }
 
@@ -824,7 +823,7 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
               "Warning: [c->v] Input value has no core type attribute.\n");
           continue;
         }
-        if (userCoreType == ssbufferCoreTypeVectorAttr) {
+        if (userCoreType == CVPipeline::kCoreTypeVector) {
           LOG_DEBUG("Found external output used by VECTOR core type: " << output
                                                                        << "\n");
           auto consumerIdOpt = CVPipeline::getOpBlockId(user);
@@ -858,9 +857,9 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
     mlir::Operation *predOp, mlir::Operation *nextOp) {
   DependencyInfo depInfo;
 
-  if (predCoreType == ssbufferCoreTypeCubeAttr) {
+  if (predCoreType == CVPipeline::kCoreTypeCube) {
     depInfo.type = DependencyType::CubeToVector;
-  } else if (predCoreType == ssbufferCoreTypeVectorAttr) {
+  } else if (predCoreType == CVPipeline::kCoreTypeVector) {
     depInfo.type = DependencyType::VectorToCube;
   }
   depInfo.producerBlockId = producerBlockId;
@@ -969,6 +968,91 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
   LOG_DEBUG("=== mem dep analysis complete ===\n");
+}
+
+void DataDependencyAnalysisPass::sortMemoryDependencies(
+  llvm::SmallVector<DependencyInfo> &memoryDependencies) {
+  llvm::DenseMap<int, unsigned> blockOrder;
+  unsigned order = 0;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    auto blockId = CVPipeline::getOpBlockId(op);
+    if (blockId && !blockOrder.count(*blockId)) {
+      blockOrder[*blockId] = order;
+    }
+    ++order;
+  });
+
+  auto getBlockOrder = [&](int blockId) {
+    auto it = blockOrder.find(blockId);
+    return it == blockOrder.end() ? std::numeric_limits<unsigned>::max()
+                                  : it->second;
+  };
+
+  std::stable_sort(
+      memoryDependencies.begin(), memoryDependencies.end(),
+      [&](const DependencyInfo &lhs, const DependencyInfo &rhs) {
+        auto lhsProducer = getBlockOrder(lhs.iniProducerBlockId);
+        auto rhsProducer = getBlockOrder(rhs.iniProducerBlockId);
+        if (lhsProducer != rhsProducer) {
+          return lhsProducer < rhsProducer;
+        }
+        return getBlockOrder(lhs.iniConsumerBlockId) <
+               getBlockOrder(rhs.iniConsumerBlockId);
+      });
+}
+
+void DataDependencyAnalysisPass::updateDependencyGraph(
+    int producerBlockId, int consumerBlockId,
+    llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap) {
+  llvm::DenseSet<int> successors;
+  successors.insert(consumerBlockId);
+  auto consumerIt = reachableMap.find(consumerBlockId);
+  if (consumerIt != reachableMap.end()) {
+    successors.insert(consumerIt->second.begin(), consumerIt->second.end());
+  }
+
+  for (auto &entry : reachableMap) {
+    if (entry.first == producerBlockId ||
+        entry.second.contains(producerBlockId)) {
+      entry.second.insert(successors.begin(), successors.end());
+    }
+  }
+  reachableMap[producerBlockId].insert(successors.begin(), successors.end());
+}
+
+void DataDependencyAnalysisPass::buildInitialDependencyGraph(
+    DataDependencyInfo &info,
+    llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap) {
+  for (const auto &dep : info.getV2CDependencies()) {
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                          reachableMap);
+  }
+  for (const auto &dep : info.getC2VDependencies()) {
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                          reachableMap);
+  }
+}
+
+void DataDependencyAnalysisPass::optimizeMemoryDependencies(
+    DataDependencyInfo &info) {
+  auto &memoryDependencies = info.getMemoryDependencies();
+  sortMemoryDependencies(memoryDependencies);
+
+  llvm::DenseMap<int, llvm::DenseSet<int>> reachableMap;
+  buildInitialDependencyGraph(info, reachableMap);
+
+  llvm::SmallVector<DependencyInfo> necessaryDependencies;
+  for (const auto &dep : memoryDependencies) {
+    auto &successors = reachableMap[dep.producerBlockId];
+    if (successors.contains(dep.consumerBlockId)) {
+      continue;
+    }
+    necessaryDependencies.push_back(dep);
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                           reachableMap);
+  }
+
+  memoryDependencies = std::move(necessaryDependencies);
 }
 
 // Producer/Consumer Hierarchy Analysis
@@ -1101,6 +1185,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
   deduplicateDependencies(info.getC2VDependencies());
   deduplicateDependencies(info.getC2CDependencies());
   deduplicateDependencies(info.getMemoryDependencies());
+
+  optimizeMemoryDependencies(info);
 
   info.setValid(true);
 

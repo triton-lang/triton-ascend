@@ -2111,11 +2111,12 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
 
   // Scan existing kIntraDeps to start groupId after the max already used
   // (e.g. by InterCoreTransferAndSyncPass for C2C fixpipe transfers).
+  // Attribute format: [group1, role1, group2, role2, ...].
   int groupId = 0;
   module.walk([&](Operation *op) {
     if (auto attr = op->getAttrOfType<ArrayAttr>(CVPipeline::kIntraDeps)) {
-      if (!attr.empty()) {
-        if (auto intAttr = dyn_cast<IntegerAttr>(attr[0])) {
+      for (size_t i = 0; i + 1 < attr.size(); i += 2) {
+        if (auto intAttr = dyn_cast<IntegerAttr>(attr[i])) {
           groupId = std::max(groupId, static_cast<int>(intAttr.getInt()) + 1);
         }
       }

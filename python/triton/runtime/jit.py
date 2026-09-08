@@ -696,6 +696,13 @@ class JITFunction(JITCallable, KernelInterface[T]):
         kwargs["debug"] = kwargs.get("debug", self.debug) or knobs.runtime.debug
         kwargs["instrumentation_mode"] = knobs.compilation.instrumentation_mode
 
+        for arg in args:
+            if hasattr(arg, 'device') and str(arg.device).startswith('npu'):
+                target_device = arg.device.index
+                if target_device is not None and target_device != driver.active.get_current_device():
+                    driver.active.set_current_device(target_device)
+                break
+
         # parse options
         device = driver.active.get_current_device()
         stream = driver.active.get_current_stream(device)

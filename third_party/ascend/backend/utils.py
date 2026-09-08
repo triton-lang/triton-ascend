@@ -141,7 +141,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_max_rewrites_per_function":
     "it is ignored; the backend fixes the maximum rewrites per function to 64.",
     "graph_optimize_rule_mask":
-    "it is ignored; the backend fixes the graph-optimization rule mask to 3071 (legacy + IAT + PTSM).",
+    "it is ignored; the backend fixes the graph-optimization rule mask to 68607 (legacy + IAT + PTSM + AtomicMaskCanonicalization).",
     "graph_optimize_ub_capacity_bytes":
     "it is ignored; the backend derives an 80%-of-raw-UB graph budget from the target architecture.",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",

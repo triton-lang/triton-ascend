@@ -449,38 +449,19 @@ struct DiscreteMaskAtomicConversion
       return failure();
     }
 
-    const std::map<RMWOp, TypelessValue> initMap = {
-        {RMWOp::FADD, TypelessValue::Zero},
-        {RMWOp::ADD, TypelessValue::Zero},
-        {RMWOp::UMAX, TypelessValue::Zero},
-        {RMWOp::OR, TypelessValue::Zero},
-        {RMWOp::MIN, TypelessValue::Max},
-        {RMWOp::UMIN, TypelessValue::Max},
-        {RMWOp::AND, TypelessValue::Max},
-        {RMWOp::MAX, TypelessValue::Min},
-        {RMWOp::XOR, TypelessValue::Zero},
-        {RMWOp::XCHG, TypelessValue::Undefined},
-    };
-    assert(initMap.find(rmwOp) != initMap.end());
-    auto typelessVal = initMap.at(rmwOp);
-    if (typelessVal == TypelessValue::Undefined) {
-      // Undefined default value atomic op will be decomposed in AscendNPU-IR
-      op->setAttr(ConverterUtils::discreteMaskAttrName,
-                  UnitAttr::get(rewriter.getContext()));
+    auto attr = getAtomicRMWIdentityAttr(rmwOp, src.getType(), rewriter);
+    if (failed(attr)) {
+      // Undefined default value atomic op will be decomposed in AscendNPU-IR.
+      op->setAttr(ConverterUtils::discreteMaskAttrName, rewriter.getUnitAttr());
       return failure();
     }
+    TypedAttr identity = *attr;
+
+    if (auto type = dyn_cast<RankedTensorType>(src.getType()))
+      identity = DenseElementsAttr::get(type, identity);
+    Value fill = rewriter.create<arith::ConstantOp>(loc, identity);
 
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
-    FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
-        typelessVal, src.getType(), loc, rewriter);
-    if (failed(fill)) {
-      LLVM_DEBUG({
-        llvm::dbgs() << "Unsupported type for constant creation: "
-                     << src.getType() << "\n";
-      });
-      op->emitError("Unsupported atomic operation.");
-      return failure();
-    }
 
     // For mask = contMask & discMask, retain contMask as the memory-access
     // guard and replace only the discrete part with the RMW identity value.
@@ -494,7 +475,7 @@ struct DiscreteMaskAtomicConversion
     }
 
     auto maskedValue =
-        rewriter.create<arith::SelectOp>(loc, valueMask, src, *fill);
+        rewriter.create<arith::SelectOp>(loc, valueMask, src, fill);
     auto newAtomicOp = rewriter.create<mlir::triton::AtomicRMWOp>(
         loc, src.getType(), rmwOp, ptr, maskedValue, accessMask, op.getSem(),
         op.getScope());

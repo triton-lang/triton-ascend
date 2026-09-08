@@ -1159,6 +1159,45 @@ getReduceWithIndexParams(triton::ReduceOp op) {
                                .isUnsignedSrc = isUnsignedSrc};
 }
 
+FailureOr<TypedAttr> getAtomicRMWIdentityAttr(triton::RMWOp rmwOp, Type type,
+                                              OpBuilder &rewriter) {
+  using triton::RMWOp;
+  static const std::map<RMWOp, TypelessValue> initMap = {
+      {RMWOp::FADD, TypelessValue::Zero},
+      {RMWOp::ADD, TypelessValue::Zero},
+      {RMWOp::UMAX, TypelessValue::Zero},
+      {RMWOp::OR, TypelessValue::Zero},
+      {RMWOp::MIN, TypelessValue::Max},
+      {RMWOp::UMIN, TypelessValue::Max},
+      {RMWOp::AND, TypelessValue::Max},
+      {RMWOp::MAX, TypelessValue::Min},
+      {RMWOp::XOR, TypelessValue::Zero},
+      {RMWOp::XCHG, TypelessValue::Undefined},
+  };
+  assert(initMap.find(rmwOp) != initMap.end());
+  auto typelessVal = initMap.at(rmwOp);
+
+  Type elementType = getElementTypeOrSelf(type);
+  Type initType = elementType;
+  if (auto intType = dyn_cast<IntegerType>(elementType)) {
+    // Query the existing unsigned Max entries for UMIN/AND (all bits one).
+    // Signed MIN/MAX use signed extrema even though TTIR types are signless.
+    bool isUnsigned =
+        rmwOp == RMWOp::UMIN || rmwOp == RMWOp::UMAX || rmwOp == RMWOp::AND;
+    initType = IntegerType::get(rewriter.getContext(), intType.getWidth(),
+                                isUnsigned ? IntegerType::Unsigned
+                                           : IntegerType::Signless);
+  }
+  auto attr = specializeTypelessValueToAttr(typelessVal, initType, rewriter);
+  if (failed(attr))
+    return failure();
+  TypedAttr identity = *attr;
+  if (auto intAttr = dyn_cast_if_present<IntegerAttr>(identity))
+    identity = IntegerAttr::get(elementType, intAttr.getValue());
+
+  return identity;
+}
+
 // Specialize the Typeless Value (Zero, Min, Max) into a mlir TypedAttr
 FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
                                                    Type type, OpBuilder &b) {

@@ -11,6 +11,8 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, ttir_to_linalg
 import pytest
 
+pytestmark = pytest.mark.backend("none")
+
 
 def compile_kernel(kernel, signature, constants):
     """Helper to compile a kernel function to MLIR in linalg dialect."""
@@ -19,7 +21,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions()
+        options = NPUOptions(arch="Ascend910B1")
         ttir = ast_to_ttir(kernel, src, context, options, {}, {})
         metadata = {
             **options.__dict__,
@@ -163,6 +165,36 @@ def kernel_extra_buf_wide(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
     tl.store(out_ptr + i, r, mask=i < n)
 
 
+@al.register_custom_op
+class my_custom_op_flatten:
+    """Custom op declaring the implementations hivm-flatten-ops may collapse to."""
+
+    core = al.CORE.VECTOR
+    pipe = al.PIPE.PIPE_V
+    mode = al.MODE.SIMD
+    symbol = "my_flatten_func_3d"
+    bitcode = os.path.abspath(__file__)
+    iterator_types = [
+        al.IteratorType.Parallel,
+        al.IteratorType.Parallel,
+        al.IteratorType.Parallel,
+    ]
+    # Declared out of order on purpose: the pair must come out sorted by rank.
+    flatten_symbols = {2: "my_flatten_func_2d", 1: "my_flatten_func_1d"}
+
+    def __init__(self, x, out=None):
+        pass
+
+
+@triton.jit
+def kernel_flatten(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    x = tl.reshape(tl.load(x_ptr + i, mask=i < n), (4, 4, BLOCK // 16))
+    y = tl.reshape(tl.load(out_ptr + i, mask=i < n), (4, 4, BLOCK // 16))
+    r = al.custom("my_custom_op_flatten", x, out=y)
+    tl.store(out_ptr + i, tl.reshape(r, (BLOCK, )), mask=i < n)
+
+
 # ============== Pytest tests ==============
 
 
@@ -285,6 +317,37 @@ def test_custom_op_without_extra_buffers_has_no_extra_buffer_attrs():
         assert "extra_buffers_sizes" not in line
 
 
+def test_custom_op_flatten_symbols():
+    """flatten_symbols is emitted as the paired flatten_ranks / flatten_symbols attrs."""
+    mlir = compile_kernel(
+        kernel_flatten,
+        {"x_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+        {"BLOCK": 256},
+    )
+    assert mlir and len(mlir) > 0
+    lines = _custom_lines(mlir, "my_custom_op_flatten")
+    assert lines, "expected at least one hivm.hir.custom line for my_custom_op_flatten"
+    line = lines[0]
+    # Ranks are sorted and paired with their symbol, whatever the dict order was.
+    assert "flatten_ranks = [1, 2]" in line
+    assert 'flatten_symbols = ["my_flatten_func_1d", "my_flatten_func_2d"]' in line
+    # The original symbol is untouched; the pass switches it after collapsing.
+    assert 'symbol = "my_flatten_func_3d"' in line
+    # The declaration describes a real rank-3 SIMD op before bufferization.
+    assert "tensor<4x4x16xf32>" in line
+    assert "#hivm.vf_mode<SIMD>" in line
+
+
+def test_custom_op_without_flatten_symbols_has_no_flatten_attrs():
+    """Ops that do not declare flatten_symbols should not emit the flatten attributes."""
+    mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+                          {"BLOCK": 256})
+    assert mlir
+    for line in _custom_lines(mlir, "my_custom_op"):
+        assert "flatten_ranks" not in line
+        assert "flatten_symbols" not in line
+
+
 # ============== Main for manual testing ==============
 
 if __name__ == "__main__":
@@ -293,6 +356,8 @@ if __name__ == "__main__":
     test_custom_op_extra_buffers_integer_variants()
     test_custom_op_extra_buffers_mixed_scalar_types()
     test_custom_op_extra_buffers_single_buffer()
+    test_custom_op_flatten_symbols()
+    test_custom_op_without_flatten_symbols_has_no_flatten_attrs()
     mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
                           {"BLOCK": 256})
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")

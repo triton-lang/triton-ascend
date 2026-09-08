@@ -1,5 +1,5 @@
 # Build triton-ascend wheels inside a manylinux container.
-# Used by wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
+# Used by ascend-wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
 # on the runner; buildx talks to remote buildkitd.
 #
 # Layer order matters for the registry cache used by wheels.yml: everything

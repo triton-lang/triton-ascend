@@ -5,13 +5,13 @@ on:
     paths:
       - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
-      - .github/workflows/llvm-build.yml
+      - .github/workflows/ascend-llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   pull_request:
     paths:
       - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
-      - .github/workflows/llvm-build.yml
+      - .github/workflows/ascend-llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   workflow_dispatch:
 

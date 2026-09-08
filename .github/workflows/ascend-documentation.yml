@@ -7,7 +7,7 @@ on:
       - 'docs/**/*.md'
       - 'docs/**/*.mdx'
       - 'docs/**/_toc.yaml'
-      - '.github/workflows/documentation.yml'
+      - '.github/workflows/ascend-documentation.yml'
       - '.github/docs-ci/**'
   # Manual full scans (checkAll) to surface errors in existing docs
   # that incremental PR runs never touch. These never block a PR.

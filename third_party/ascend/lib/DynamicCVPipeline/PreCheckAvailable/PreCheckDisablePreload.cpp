@@ -68,6 +68,7 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "chunk_ttt_linear_fwd_kernel_h",
     "transform_q_fwd_kernel",
     "_attn_fwd",
+    "kernel_sdpa_fwd",
     "kernel_sdpa_bwd_q",
     "pcb08_tc01_kernel",
     "pcb08_tc02_kernel",
@@ -117,6 +118,18 @@ void PreCheckDisablePreload::runOnOperation() {
   if (!foundBlacklistFunc) {
     LDBG("No preload blacklist func found, passed.");
     return;
+  }
+
+  // Keep the explicit 3-preload setting only for kernel_sdpa_fwd.
+  if (foundBlacklistFunc.getSymName() == "kernel_sdpa_fwd") {
+    auto intraBufferCount =
+        module->getAttrOfType<IntegerAttr>(CVPipeline::kIntraBufCount);
+    auto interBufferCount =
+        module->getAttrOfType<IntegerAttr>(CVPipeline::kInterCoreBufCount);
+    if (intraBufferCount && interBufferCount &&
+        intraBufferCount.getInt() == 3 && interBufferCount.getInt() == 2) {
+      return;
+    }
   }
 
   LDBG("3-preload will be disabled because "

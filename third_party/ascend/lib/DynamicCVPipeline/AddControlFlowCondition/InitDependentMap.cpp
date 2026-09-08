@@ -391,17 +391,24 @@ static scf::IfOp findIfOpContainingOp(Operation *op) {
   return nullptr;
 }
 
-// Compute producer buffer counts (max map size) from cross/intra-core maps;
-// falls back to BufferCountManager IntraCore when the intra-core map is empty.
+// Compute producer buffer counts. Cross-core count comes from
+// BufferCountManager (the upstream labels only the last producer per group,
+// so map size no longer reflects the true producer count); intra-core count
+// is derived from intraCoreDependentMap, falling back to BufferCountManager
+// when the map is empty.
 static void computeProducerBufferCount(ControlFlowConditionInfo *info,
                                        ModuleOp module) {
-  // Get cross-core buffer count (max size in the map)
-  info->crossCoreBufferCount = 0;
-  for (auto &entry : info->crossCoreDependentMap) {
-    info->crossCoreBufferCount =
-        std::max(info->crossCoreBufferCount, (int)entry.second.size());
-  }
-  LDBG("Cross-core buffer count (max): " << info->crossCoreBufferCount);
+  // Get cross-core buffer count from BufferCountManager. The upstream
+  // pass now labels only the last producer (instead of every producer),
+  // so crossCoreDependentMap no longer reflects the true producer count;
+  // the authoritative value is the module attribute read via
+  // BufferCountManager (ssbuffer.inter_core_buf_count), defaulting to 1
+  // when the attribute is absent.
+  BufferCountManager crossBufferCountMgr(module);
+  info->crossCoreBufferCount = crossBufferCountMgr.getBufferCountByType(
+      BufferCountManager::DepType::InterCore);
+  LDBG("Cross-core buffer count (from BufferCountManager): "
+       << info->crossCoreBufferCount);
 
   // Get intra-core buffer count (max size across all main loops)
   info->intraCoreBufferCount = 0;

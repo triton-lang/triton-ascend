@@ -708,18 +708,18 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
   }
 
   for (int outputGroupIdx : crossCoreOutputValues) {
-    int outputCount = 0;
-    if (crossCoreBuffers.count(outputGroupIdx)) {
-      for (auto &entry : crossCoreBuffers[outputGroupIdx]) {
-        outputCount += entry.second.size();
-      }
-    } else {
+    // The upstream pass now labels only the last producer per group, so
+    // producerOps.size() no longer reflects the real buffer count for a
+    // group. Use the authoritative cross-core buffer count populated by
+    // InitDependentMapPass via BufferCountManager
+    // (ssbuffer.inter_core_buf_count).
+    if (!crossCoreBuffers.count(outputGroupIdx)) {
       LDBG("outputGroupIdx " << outputGroupIdx
                              << " not found in any buffers map!" << "\n");
       return nullptr;
     }
-    Value bufferNum =
-        builder.create<arith::ConstantIntOp>(loc, outputCount, CONST_INT_TYPE);
+    Value bufferNum = builder.create<arith::ConstantIntOp>(
+        loc, info->crossCoreBufferCount, CONST_INT_TYPE);
     auto conds = createSsbufLoads(
         builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs, ssbufferPtrs,
         [&](Value cond, auto) {

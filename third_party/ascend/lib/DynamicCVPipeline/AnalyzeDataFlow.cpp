@@ -47,6 +47,8 @@ void AnalyzeDataFlowPass::runOnOperation() {
 
   pm.addPass(createAnalyzeScopePass());
 
+  pm.addPass(createAnalyzeArgsPass());
+
   pm.addPass(createAnalyzeFlagPass());
 
   pm.addPass(createAnalyzeCubeContolFLowInputChainPass());
@@ -72,6 +74,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass() {
 
 void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeNamePass);
+  registerPass(createAnalyzeArgsPass);
   registerPass(createAnalyzeFlagPass);
   registerPass(createAnalyzeScopePass);
   registerPass(createAnalyzeDataFlowPass);

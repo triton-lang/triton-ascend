@@ -1,5 +1,5 @@
 /*
- * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ * Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -20,26 +20,29 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ASCEND_CV_SPLIT_SCHEDULING_SCOPE_SEPARATION_H
-#define TRITON_ASCEND_CV_SPLIT_SCHEDULING_SCOPE_SEPARATION_H
-
-#include "ascend/include/CVSplitScheduling/CrossScopeTransfers.h"
-#include "ascend/include/CVSplitScheduling/PostCVSplitDetachedSchedule.h"
-
-#include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/Support/LogicalResult.h"
+#include "ascend/include/CVSplitScheduling/VectorAccumulatorMatmul.h"
 
 namespace mlir::triton::cv_split {
 
-LogicalResult createScopeSeparation(func::FuncOp funcOp, scf::ForOp innerLoop,
-                                    const CrossScopeTransferInfo &transferInfo,
-                                    bool materializePostSplitSchedule = false,
-                                    const PostCVSplitDetachedSchedule *
-                                        detachedSchedule = nullptr,
-                                    const CrossCoreScheduleCandidate *
-                                        scheduleCandidate = nullptr);
+FailureOr<bool>
+isVectorAccumulatorMatmul(linalg::MatmulOp matmul, Block *body,
+                          const Classification &classification) {
+  if (!body)
+    return failure();
+  if (!matmul || matmul->getBlock() != body)
+    return false;
+
+  Value init = matmul.getDpsInitOperand(0)->get();
+  Operation *producer = init.getDefiningOp();
+  if (!producer || producer->getBlock() != body)
+    return false;
+
+  auto classIt = classification.find(producer);
+  if (classIt == classification.end()) {
+    matmul.emitError("missing classification for matmul accumulator producer");
+    return failure();
+  }
+  return classIt->second == EngineType::VECTOR;
+}
 
 } // namespace mlir::triton::cv_split
-
-#endif // TRITON_ASCEND_CV_SPLIT_SCHEDULING_SCOPE_SEPARATION_H

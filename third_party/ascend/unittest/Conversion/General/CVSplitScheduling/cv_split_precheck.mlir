@@ -15,6 +15,21 @@ func.func @no_loop() {
   return
 }
 
+// REJECT-LABEL: func.func @loop_without_matmul
+// REJECT: scf.for
+// REJECT-NOT: scope.scope
+// DIAG: [cv-split] Function: loop_without_matmul
+// DIAG-NEXT: [cv-split] Pre-check rejected function, skip
+func.func @loop_without_matmul() {
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %c16 = arith.constant 16 : index
+  scf.for %iv = %c0 to %c16 step %c1 {
+    arith.addi %iv, %c1 : index
+  }
+  return
+}
+
 // ACCEPT: [cv-split] Function: single_loop_without_store
 // ACCEPT-NEXT: [cv-split] Pre-check accepted candidate loop
 // FACTOR2: [cv-split] Function: single_loop_without_store
@@ -25,7 +40,12 @@ func.func @single_loop_without_store() {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %iv = %c0 to %c16 step %c1 {
+    %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+        outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
     arith.addi %iv, %c1 : index
   }
   return
@@ -39,8 +59,13 @@ func.func @one_nested_candidate(%lb: index, %ub: index, %step: index) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %outer = %lb to %ub step %step {
     scf.for %inner = %c0 to %c16 step %c1 {
+      %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+          outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
       arith.addi %inner, %c1 : index
     }
   }
@@ -57,8 +82,13 @@ func.func @outer_store_after_inner_candidate(
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %outer = %lb to %ub step %step {
     scf.for %inner = %c0 to %c16 step %c1 {
+      %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+          outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
       arith.addi %inner, %c1 : index
     }
     memref.store %value, %dst[%outer] : memref<?xi32>
@@ -106,7 +136,12 @@ func.func @static_external_tensor() {
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
   %tile = tensor.empty() : tensor<4x8xf32>
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %iv = %c0 to %c16 step %c1 {
+    %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+        outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
     %sum = arith.addf %tile, %tile : tensor<4x8xf32>
   }
   return
@@ -121,8 +156,13 @@ func.func @static_tensor_iter_args() {
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
   %init = tensor.empty() : tensor<4x8xf32>
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   %result = scf.for %iv = %c0 to %c16 step %c1
       iter_args(%arg = %init) -> tensor<4x8xf32> {
+    %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+        outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
     %next = arith.addf %arg, %arg : tensor<4x8xf32>
     scf.yield %next : tensor<4x8xf32>
   }
@@ -137,7 +177,12 @@ func.func @local_memref_copy(%src: memref<8xf32>) {
   %c0 = arith.constant 0 : index
   %c1 = arith.constant 1 : index
   %c16 = arith.constant 16 : index
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %iv = %c0 to %c16 step %c1 {
+    %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+        outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
     %dst = memref.alloc() : memref<8xf32>
     memref.copy %src, %dst : memref<8xf32> to memref<8xf32>
   }
@@ -154,7 +199,12 @@ func.func @linalg_reduce_region() {
   %c16 = arith.constant 16 : index
   %input = tensor.empty() : tensor<4x8xf32>
   %init = tensor.empty() : tensor<4xf32>
+  %lhs = tensor.empty() : tensor<32x16xf16>
+  %rhs = tensor.empty() : tensor<16x16xf16>
+  %mat_init = tensor.empty() : tensor<32x16xf32>
   scf.for %iv = %c0 to %c16 step %c1 {
+    %matmul = linalg.matmul ins(%lhs, %rhs : tensor<32x16xf16>, tensor<16x16xf16>)
+        outs(%mat_init : tensor<32x16xf32>) -> tensor<32x16xf32>
     %reduced = linalg.reduce ins(%input : tensor<4x8xf32>)
         outs(%init : tensor<4xf32>) dimensions = [1]
         (%in: f32, %acc: f32) {

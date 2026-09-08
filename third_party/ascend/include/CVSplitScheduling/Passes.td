@@ -34,7 +34,40 @@ def CVSplitScheduling : Pass<"cv_split_scheduling", "mlir::ModuleOp"> {
            "compile on 910_95">,
     Option<"unrollFactor", "unroll-factor",
            "int", /*default*/"2",
-           "loop unroll factor (2, 4, or 8)">
+           "loop unroll factor (2, 4, or 8)">,
+    Option<"enablePlanDrivenEarlyPublish",
+           "enable-plan-driven-early-publish",
+           "bool", /*default*/"false",
+           "publish the terminal VECTOR-to-CUBE boundary in each unroll "
+           "lineage at its earliest legal plan anchor instead of waiting for "
+           "independent scalar/rank-1 local state. This optional experiment "
+           "keeps storage, slot reuse, and arithmetic "
+           "unchanged, and a missing/invalid analysis plan keeps the generic "
+           "late-publish behavior.">,
+    Option<"scheduleCandidateId", "schedule-candidate-id",
+           "int", /*default*/"-1",
+           "developer override selecting one immutable structural "
+           "schedule candidate by deterministic ID. Negative diagnoses only. "
+           "the initial override accepts only the structurally all-one control and keeps "
+           "the qualified generic reorder unchanged.">,
+    Option<"postSplitScheduleMode", "post-split-schedule-mode",
+           "std::string", /*default*/"\"disabled\"",
+           "post-CVSplit schedule handling: 'disabled' keeps the qualified generic path and 'materialize' "
+           "transactionally publishes the complete detached schedule and "
+           "publishes both CUBE and VECTOR scopes after every proof passes">,
+    Option<"promoteFullyUnrolled", "promote-fully-unrolled",
+           "bool", /*default*/"true",
+           "promote the scope loops left by a candidate whose unroll consumed "
+           "its whole trip count; disable to keep them for inspection">,
+    Option<"privateBufferUbBudgetBytes", "private-buffer-ub-budget-bytes",
+           "int64_t", /*default*/"-1",
+           "spare UB, in bytes, that cross-scope pools may spend to stop "
+           "reusing a slot between lanes. Negative means the pass does not "
+           "know the headroom and spends what the schedule asks for; the "
+           "backend's memory planner is what actually decides whether it "
+           "fits, and it reports an overflow with the exact requirement when "
+           "it does not. Zero declines any spend, which keeps the rotating "
+           "pools and the interleaved schedule that orders them.">,
   ];
   let dependentDialects = [
     "mlir::scf::SCFDialect",

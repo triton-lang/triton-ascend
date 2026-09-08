@@ -23,10 +23,14 @@
 #include "ascend/include/CVSplitScheduling/DependencyScheduler.h"
 
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 #include <algorithm>
 
@@ -37,212 +41,598 @@ namespace mlir::triton::cv_split {
 #define DEBUG_TYPE "cv-split-scheduling"
 
 // ============================================================================
-// Stage 4: Dependency graph
+// Dependency graph construction
 // ============================================================================
-static void buildDependencyGraph(Block *body, DenseMap<Operation *, SmallVector<Operation *>> &predecessors)
-{
-    for (Operation &op : *body) {
-        if (isa<scf::YieldOp>(&op))
-            continue;
-        for (Value operand : op.getOperands()) {
-            auto *defOp = operand.getDefiningOp();
-            if (!defOp || defOp->getBlock() != body || isa<scf::YieldOp>(defOp))
-                continue;
-            predecessors[&op].push_back(defOp);
-        }
+static void buildDependencyGraph(
+    Block *body,
+    DenseMap<Operation *, SmallVector<Operation *>> &predecessors) {
+  for (Operation &op : *body) {
+    if (isa<scf::YieldOp>(&op))
+      continue;
+    for (Value operand : op.getOperands()) {
+      auto *defOp = operand.getDefiningOp();
+      if (!defOp || defOp->getBlock() != body || isa<scf::YieldOp>(defOp))
+        continue;
+      predecessors[&op].push_back(defOp);
     }
+  }
 
-    // Add memory dependency edges: memref.copy → bufferization.to_tensor
-    // memref.copy writes to an alloc via side effect (no SSA result).
-    // to_tensor reads from the same alloc. Without this edge, dependency leveling
-    // can place to_tensor BEFORE copy, causing reads of uninitialized data.
-    for (Operation &op : *body) {
-        auto copyOp = dyn_cast<memref::CopyOp>(&op);
-        if (!copyOp)
-            continue;
-        Value dst = copyOp.getTarget();
-        for (Operation *user : dst.getUsers()) {
-            if (user == &op || user->getBlock() != body)
-                continue;
-            if (isa<bufferization::ToTensorOp>(user)) {
-                predecessors[user].push_back(&op);
-            }
-        }
+  // Add memory dependency edges: memref.copy → bufferization.to_tensor
+  // memref.copy writes to an alloc via side effect (no SSA result).
+  // to_tensor reads from the same alloc. Without this edge, dependency leveling
+  // can place to_tensor BEFORE copy, causing reads of uninitialized data.
+  for (Operation &op : *body) {
+    auto copyOp = dyn_cast<memref::CopyOp>(&op);
+    if (!copyOp)
+      continue;
+    Value dst = copyOp.getTarget();
+    for (Operation *user : dst.getUsers()) {
+      if (user == &op || user->getBlock() != body)
+        continue;
+      if (isa<bufferization::ToTensorOp>(user)) {
+        predecessors[user].push_back(&op);
+      }
     }
+  }
 
-    // Similarly: memref.copy also depends on reinterpret_cast of its SOURCE.
-    // The source reinterpret_cast depends on address arithmetic that computes
-    // the GM offset. Ensure copy is ordered after its source address is ready.
-    // (This is already captured by SSA edges since copy USES the source value.)
+  // Similarly: memref.copy also depends on reinterpret_cast of its SOURCE.
+  // The source reinterpret_cast depends on address arithmetic that computes
+  // the GM offset. Ensure copy is ordered after its source address is ready.
+  // (This is already captured by SSA edges since copy USES the source value.)
 }
 
-static LogicalResult validateDependencyGraph(const DenseMap<Operation *, SmallVector<Operation *>> &predecessors)
-{
-    for (const auto &entry : predecessors) {
-        if (entry.second.empty()) {
-            LLVM_DEBUG(llvm::dbgs() << "[cv-split] Invalid empty predecessor entry for " << entry.first->getName()
-                                    << ", bail\n");
-            return failure();
-        }
+// ============================================================================
+// Dependency level assignment
+// ============================================================================
+static SmallVector<Operation *> collectRoots(
+    Block *body,
+    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors) {
+  SmallVector<Operation *> roots;
+  for (Operation &op : *body) {
+    if (isa<scf::YieldOp>(&op))
+      continue;
+    auto it = predecessors.find(&op);
+    if (it == predecessors.end()) {
+      roots.push_back(&op);
+      LLVM_DEBUG(llvm::dbgs() << "[cv-split] Root: " << op.getName() << "\n");
     }
+  }
+  return roots;
+}
+
+static int assignDependencyLevels(
+    Block *body,
+    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    const SmallVector<Operation *> &roots, DenseMap<Operation *, int> &levels) {
+  for (auto *root : roots)
+    levels[root] = 0;
+
+  int maxLevel = 0;
+
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (Operation &op : *body) {
+      if (isa<scf::YieldOp>(&op))
+        continue;
+
+      auto it = predecessors.find(&op);
+      if (it == predecessors.end())
+        continue;
+
+      int requiredLevel = 0;
+      bool allPredecessorsReady = true;
+      for (auto *pred : it->second) {
+        auto predIt = levels.find(pred);
+        if (predIt == levels.end()) {
+          allPredecessorsReady = false;
+          break;
+        }
+        requiredLevel = std::max(requiredLevel, predIt->second + 1);
+      }
+      if (!allPredecessorsReady)
+        continue;
+
+      auto lvlIt = levels.find(&op);
+      if (lvlIt == levels.end()) {
+        levels[&op] = requiredLevel;
+        maxLevel = std::max(maxLevel, requiredLevel);
+        changed = true;
+      }
+    }
+  }
+
+  return maxLevel;
+}
+
+static LogicalResult
+verifyDependencyLevels(Block *body, const DenseMap<Operation *, int> &levels) {
+  for (Operation &op : *body) {
+    if (isa<scf::YieldOp>(&op))
+      continue;
+    if (!levels.count(&op)) {
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[cv-split] No dependency level assigned to "
+                 << op.getName()
+                 << "; dependency graph may contain a cycle, bail\n");
+      return failure();
+    }
+  }
+  return success();
+}
+
+// ============================================================================
+// Dependency-level diagnostics
+// ============================================================================
+static void
+logLevelHistogram(Block *body, const DenseMap<Operation *, int> &levels,
+                  const DenseMap<Operation *, EngineType> &classification,
+                  int maxLevel) {
+  for (int lvl = 0; lvl <= maxLevel; ++lvl) {
+    SmallVector<Operation *> cubeOps, vectorOps;
+    for (Operation &op : *body) {
+      if (isa<scf::YieldOp>(&op))
+        continue;
+      if (levels.at(&op) != lvl)
+        continue;
+      auto classIt = classification.find(&op);
+      if (classIt == classification.end())
+        continue;
+      if (classIt->second == EngineType::CUBE)
+        cubeOps.push_back(&op);
+      else
+        vectorOps.push_back(&op);
+    }
+
+    LLVM_DEBUG(llvm::dbgs() << "[cv-split]   L" << lvl << ": " << cubeOps.size()
+                            << "C " << vectorOps.size() << "V\n");
+  }
+}
+
+// ============================================================================
+// Reorder around VECTOR -> CUBE producer boundaries
+// ============================================================================
+// A breadth-first dependency-level order starts every independent unrolled
+// chain before completing any one of them.  For attention this leaves four
+// full score tiles and their softmax temporaries live at once, fragments the
+// vector functions, and can overflow UB.  The useful cross-core schedule is
+// instead organized around values that VECTOR must produce before CUBE can
+// continue (for example, each softmax P tile consumed by a PV matmul).
+//
+// Complete the dependency slice of each such producer in original program
+// order, then append the remaining operations.  The input block is already a
+// valid topological order, so filtering that order by a dependency-closed
+// slice preserves SSA order.  After scope separation this yields the intended
+// phase order without matching a particular kernel:
+//
+//   CUBE:   producer work for all boundaries, then consuming work
+//   VECTOR: complete boundary 0, boundary 1, ..., then remaining work
+//
+// If a loop has no VECTOR -> CUBE boundary, retain the existing level order.
+static void collectPredecessorSlice(
+    Operation *op,
+    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    DenseSet<Operation *> &slice) {
+  if (!slice.insert(op).second)
+    return;
+  auto it = predecessors.find(op);
+  if (it == predecessors.end())
+    return;
+  for (Operation *pred : it->second)
+    collectPredecessorSlice(pred, predecessors, slice);
+}
+
+// A boundary tensor can have state-maintenance users that are not predecessors
+// of the value sent to CUBE.  Softmax is the important example: exp(score) is
+// both truncated into P (the boundary value) and reduced into the running
+// denominator.  Leaving that rank-1 reduction branch for the later PV phase
+// keeps the full score tile live across all unrolled lanes.  Close a producer
+// slice over ready scalar/rank-1 VECTOR operations so this state is completed
+// with the boundary, while deliberately excluding rank-2 work such as the PV
+// accumulator update.
+static void extendWithReadyVectorState(
+    Block *body,
+    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    const Classification &classification,
+    const DenseSet<Operation *> &alreadyScheduled,
+    DenseSet<Operation *> &slice) {
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (Operation &op : *body) {
+      if (slice.contains(&op) || isa<scf::YieldOp>(&op))
+        continue;
+      auto classIt = classification.find(&op);
+      if (classIt == classification.end() ||
+          classIt->second != EngineType::VECTOR || op.getNumResults() == 0)
+        continue;
+
+      bool isScalarOrRankOne = llvm::all_of(op.getResultTypes(), [](Type type) {
+        if (auto shaped = dyn_cast<ShapedType>(type))
+          return shaped.hasRank() && shaped.getRank() <= 1;
+        return true;
+      });
+      if (!isScalarOrRankOne)
+        continue;
+
+      auto predIt = predecessors.find(&op);
+      if (predIt == predecessors.end())
+        continue;
+      bool touchesSlice = false;
+      for (Operation *pred : predIt->second)
+        touchesSlice |= slice.contains(pred);
+      if (!touchesSlice)
+        continue;
+
+      // Pull in private scalar/rank-1 initializers as well.  For example,
+      // a linalg.reduce commonly has a fresh rank-1 linalg.fill init that
+      // is not yet in the boundary slice.  Reject the candidate if its
+      // newly required dependency closure contains any other rank-2
+      // value; that would absorb the next tile or PV accumulator phase.
+      DenseSet<Operation *> candidateSlice;
+      collectPredecessorSlice(&op, predecessors, candidateSlice);
+      bool safe = true;
+      for (Operation *candidate : candidateSlice) {
+        if (slice.contains(candidate) || alreadyScheduled.contains(candidate))
+          continue;
+        auto candidateClassIt = classification.find(candidate);
+        if (candidateClassIt == classification.end() ||
+            candidateClassIt->second != EngineType::VECTOR ||
+            !llvm::all_of(candidate->getResultTypes(), [](Type type) {
+              if (auto shaped = dyn_cast<ShapedType>(type))
+                return shaped.hasRank() && shaped.getRank() <= 1;
+              return true;
+            })) {
+          safe = false;
+          break;
+        }
+      }
+      if (!safe)
+        continue;
+      for (Operation *candidate : candidateSlice)
+        slice.insert(candidate);
+      changed = true;
+    }
+  }
+}
+
+static SmallVector<Operation *>
+collectVectorToCubeProducers(Block *body,
+                             const Classification &classification) {
+  SmallVector<Operation *> producers;
+  for (Operation &op : *body) {
+    auto classIt = classification.find(&op);
+    if (classIt == classification.end() ||
+        classIt->second != EngineType::VECTOR)
+      continue;
+
+    bool feedsCubeMatmul = false;
+    for (Value result : op.getResults()) {
+      for (Operation *user : result.getUsers()) {
+        if (user->getBlock() != body || !isa<linalg::MatmulOp>(user))
+          continue;
+        auto userClassIt = classification.find(user);
+        if (userClassIt == classification.end() ||
+            userClassIt->second != EngineType::CUBE)
+          continue;
+        if (user->getOperand(0) == result || user->getOperand(1) == result) {
+          feedsCubeMatmul = true;
+          break;
+        }
+      }
+      if (feedsCubeMatmul)
+        break;
+    }
+    if (feedsCubeMatmul)
+      producers.push_back(&op);
+  }
+  return producers;
+}
+
+/// Select one early-publish candidate per VECTOR-to-CUBE lineage.
+///
+/// The terminal boundary has no younger boundary in the same lineage whose
+/// production can hide independent local state. Delaying this handoff therefore
+/// extends the other core's critical path directly. Earlier boundaries retain
+/// the generic phase-end anchor until a later resource/cost model proves that
+/// publishing them early is profitable.
+static DenseMap<Operation *, const CrossCoreBoundary *>
+collectTerminalEarlyPublishBoundaries(
+    const CrossCorePipelinePlan *pipelinePlan,
+    bool enablePlanDrivenEarlyPublish) {
+  DenseMap<Operation *, const CrossCoreBoundary *> selected;
+  if (!enablePlanDrivenEarlyPublish || !pipelinePlan)
+    return selected;
+
+  for (const CrossCorePhaseLineage &lineage : pipelinePlan->lineages) {
+    if (lineage.direction != CrossCoreDirection::VectorToCube)
+      continue;
+
+    const CrossCoreBoundary *terminal = nullptr;
+    for (unsigned boundaryIndex : lineage.boundaryIndices) {
+      if (boundaryIndex >= pipelinePlan->boundaries.size())
+        continue;
+      const CrossCoreBoundary &boundary =
+          pipelinePlan->boundaries[boundaryIndex];
+      if (!terminal || boundary.producerOrder > terminal->producerOrder)
+        terminal = &boundary;
+    }
+
+    if (terminal && terminal->producer && terminal->earliestPublishAnchor)
+      selected[terminal->producer] = terminal;
+  }
+  return selected;
+}
+
+unsigned countVectorToCubeBoundaries(Block *body,
+                                     const Classification &classification) {
+  return collectVectorToCubeProducers(body, classification).size();
+}
+
+static void reorderForCrossScopeProducerPhases(
+    Block *body,
+    const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
+    const DenseMap<Operation *, int> &levels,
+    const Classification &classification,
+    DenseMap<Operation *, Operation *> &transferPhaseEnds,
+    unsigned pipelineDistance, const CrossCorePipelinePlan *pipelinePlan,
+    bool enablePlanDrivenEarlyPublish) {
+  SmallVector<Operation *> originalOrder;
+  for (Operation &op : *body) {
+    if (!isa<scf::YieldOp>(&op))
+      originalOrder.push_back(&op);
+  }
+
+  SmallVector<Operation *> boundaryProducers =
+      collectVectorToCubeProducers(body, classification);
+  DenseMap<Operation *, const CrossCoreBoundary *> earlyPublishBoundaries =
+      collectTerminalEarlyPublishBoundaries(
+          pipelinePlan, enablePlanDrivenEarlyPublish);
+  SmallVector<Operation *> scheduled;
+  DenseSet<Operation *> alreadyScheduled;
+
+  if (boundaryProducers.empty()) {
+    scheduled = originalOrder;
+    llvm::stable_sort(scheduled, [&](Operation *a, Operation *b) {
+      return levels.at(a) < levels.at(b);
+    });
+  } else {
+    // Phase slices, in boundary order.
+    SmallVector<SmallVector<Operation *>> phaseOps(boundaryProducers.size());
+    for (auto [index, producer] : llvm::enumerate(boundaryProducers)) {
+      DenseSet<Operation *> slice;
+      collectPredecessorSlice(producer, predecessors, slice);
+      extendWithReadyVectorState(body, predecessors, classification,
+                                 alreadyScheduled, slice);
+
+      // Keep the original topological order of the complete producer phase.
+      // Generic scheduling commits the handoff after the complete phase. The
+      // The early-publication policy may instead use the terminal lineage boundary's
+      // analyzed earliest-publish anchor, allowing independent local state to
+      // continue while the other core consumes the transferred value.
+      Operation *phaseEnd = producer;
+      for (Operation *op : originalOrder) {
+        if (!slice.contains(op))
+          continue;
+        if (alreadyScheduled.insert(op).second) {
+          phaseOps[index].push_back(op);
+          phaseEnd = op;
+        }
+      }
+
+      Operation *transferAnchor = phaseEnd;
+      const CrossCoreBoundary *earlyBoundary =
+          earlyPublishBoundaries.lookup(producer);
+      if (earlyBoundary) {
+        Operation *candidateAnchor = earlyBoundary->earliestPublishAnchor;
+        const bool anchorInPhase =
+            candidateAnchor && candidateAnchor->getBlock() == body &&
+            slice.contains(candidateAnchor);
+        const bool anchorNoLaterThanPhaseEnd =
+            candidateAnchor == phaseEnd ||
+            (candidateAnchor && candidateAnchor->isBeforeInBlock(phaseEnd));
+        if (anchorInPhase && anchorNoLaterThanPhaseEnd) {
+          transferAnchor = candidateAnchor;
+          LLVM_DEBUG(llvm::dbgs()
+                     << "[cv-split] early-publish origin="
+                     << earlyBoundary->key.originId << " lane="
+                     << earlyBoundary->key.lane << " publish@"
+                     << earlyBoundary->earliestPublishOrder
+                     << " local-phase-end=" << phaseEnd->getName() << "\n");
+        } else {
+          LLVM_DEBUG(llvm::dbgs()
+                     << "[cv-split] reject early-publish origin="
+                     << earlyBoundary->key.originId
+                     << ": analyzed anchor is not in the scheduled phase\n");
+        }
+      }
+      transferPhaseEnds[producer] = transferAnchor;
+    }
+
+    // Everything left consumes results the other engine produces from a
+    // boundary -- for attention, the accumulator update that reads a PV
+    // matmul.  Attribute each such operation to the boundary it descends
+    // from, so it can be scheduled relative to that boundary instead of
+    // being deferred to the end of the body.
+    DenseMap<Operation *, unsigned> boundaryOfOp;
+    for (auto [index, producer] : llvm::enumerate(boundaryProducers))
+      for (Operation *op : phaseOps[index])
+        boundaryOfOp[op] = index;
+
+    SmallVector<SmallVector<Operation *>> tailOps(boundaryProducers.size());
+    SmallVector<Operation *> unattributed;
+    for (Operation *op : originalOrder) {
+      if (alreadyScheduled.contains(op))
+        continue;
+      // Latest boundary this operation transitively depends on.
+      DenseSet<Operation *> slice;
+      collectPredecessorSlice(op, predecessors, slice);
+      std::optional<unsigned> owner;
+      for (Operation *pred : slice) {
+        auto it = boundaryOfOp.find(pred);
+        if (it != boundaryOfOp.end() && (!owner || it->second > *owner))
+          owner = it->second;
+      }
+      if (owner) {
+        tailOps[*owner].push_back(op);
+        boundaryOfOp[op] = *owner;
+      } else {
+        unattributed.push_back(op);
+      }
+    }
+
+    // Software-pipeline the two at a distance of `pipelineDistance`
+    // boundaries.  A boundary's consuming work is emitted just before the
+    // boundary that reuses its buffer slot, which puts an existing
+    // cross-core handoff between the read of a slot and the write that
+    // reuses it -- the ordering those shared slots require, taken from
+    // synchronization the schedule already performs rather than from a new
+    // edge.  Deferring all consuming work to the end of the body, as a
+    // plain two-phase order does, leaves no such handoff in between.
+    // Operations with no boundary anywhere in their dependency slice depend
+    // only on values defined outside the body, so they lead: the pipelined
+    // order below moves consumers ahead of where a plain two-phase order
+    // would put them, and those consumers may read these.
+    const unsigned distance = std::max(1u, pipelineDistance);
+    for (Operation *op : unattributed)
+      scheduled.push_back(op);
+    for (unsigned index = 0; index < boundaryProducers.size(); ++index) {
+      if (index >= distance)
+        for (Operation *op : tailOps[index - distance])
+          scheduled.push_back(op);
+      for (Operation *op : phaseOps[index])
+        scheduled.push_back(op);
+    }
+    // Drain the boundaries whose consumers have no later boundary to sit in
+    // front of.
+    for (unsigned index =
+             boundaryProducers.size() -
+             std::min<unsigned>(distance, boundaryProducers.size());
+         index < boundaryProducers.size(); ++index)
+      for (Operation *op : tailOps[index])
+        scheduled.push_back(op);
+  }
+
+  Operation *yield = body->getTerminator();
+  for (Operation *op : scheduled)
+    op->moveBefore(yield);
+}
+
+static LogicalResult
+validateForcedScheduleCandidate(const CrossCorePipelinePlan *pipelinePlan,
+                                const CrossCoreScheduleCandidate *candidate) {
+  if (!candidate)
     return success();
-}
+  if (!pipelinePlan || !candidate->diagnosticOnly ||
+      candidate->selectionEligible || candidate->logicalLaneCount == 0 ||
+      candidate->logicalLaneCount != pipelinePlan->laneCount ||
+      candidate->waveWidth != candidate->logicalLaneCount ||
+      candidate->prefetchLimit == 0 || candidate->prefetchLimit > 2)
+    return failure();
 
-// ============================================================================
-// Stage 5: Dependency level assignment
-// ============================================================================
-static SmallVector<Operation *> collectRoots(Block *body,
-                                             const DenseMap<Operation *, SmallVector<Operation *>> &predecessors)
-{
-    SmallVector<Operation *> roots;
-    for (Operation &op : *body) {
-        if (isa<scf::YieldOp>(&op))
-            continue;
-        auto it = predecessors.find(&op);
-        if (it == predecessors.end()) {
-            roots.push_back(&op);
-            LLVM_DEBUG(llvm::dbgs() << "[cv-split] Root: " << op.getName() << "\n");
-        }
+  unsigned expectedMatrixLineages = 0;
+  for (const CrossCorePhaseLineage &lineage : pipelinePlan->lineages)
+    expectedMatrixLineages +=
+        lineage.direction == CrossCoreDirection::CubeToVector;
+  if (expectedMatrixLineages == 0 ||
+      candidate->matrixLineageLimits.size() != expectedMatrixLineages)
+    return failure();
+
+  DenseSet<unsigned> seenLineages;
+  DenseSet<int64_t> seenOrigins;
+  unsigned widenedMatrixLineages = 0;
+  bool sawDepthOne = false;
+  for (auto [expectedPhase, limit] :
+       llvm::enumerate(candidate->matrixLineageLimits)) {
+    if (limit.pipelineLineageIndex >= pipelinePlan->lineages.size() ||
+        limit.phaseOrdinal != expectedPhase || limit.inFlightLimit == 0 ||
+        limit.inFlightLimit > 2 || limit.transferSlotCount == 0 ||
+        limit.direction != CrossCoreDirection::CubeToVector ||
+        !seenLineages.insert(limit.pipelineLineageIndex).second ||
+        !seenOrigins.insert(limit.originId).second)
+      return failure();
+    const CrossCorePhaseLineage &lineage =
+        pipelinePlan->lineages[limit.pipelineLineageIndex];
+    if (lineage.originId != limit.originId ||
+        lineage.direction != limit.direction)
+      return failure();
+    if (limit.inFlightLimit == 2) {
+      if (sawDepthOne)
+        return failure();
+      ++widenedMatrixLineages;
+    } else {
+      sawDepthOne = true;
     }
-    return roots;
-}
+  }
 
-static int assignDependencyLevels(Block *body, const DenseMap<Operation *, SmallVector<Operation *>> &predecessors,
-                                  const SmallVector<Operation *> &roots, DenseMap<Operation *, int> &levels)
-{
-    for (auto *root : roots)
-        levels[root] = 0;
+  const unsigned expectedDepth = widenedMatrixLineages == 0 ? 1 : 2;
+  if (candidate->maximumLiveMatrixResultsPerLineage != expectedDepth ||
+      candidate->prefetchLimit != expectedDepth)
+    return failure();
 
-    int maxLevel = 0;
-
-    bool changed = true;
-    while (changed) {
-        changed = false;
-        for (Operation &op : *body) {
-            if (isa<scf::YieldOp>(&op))
-                continue;
-
-            auto it = predecessors.find(&op);
-            if (it == predecessors.end())
-                continue;
-
-            int requiredLevel = 0;
-            bool allPredecessorsReady = true;
-            for (auto *pred : it->second) {
-                auto predIt = levels.find(pred);
-                if (predIt == levels.end()) {
-                    allPredecessorsReady = false;
-                    break;
-                }
-                requiredLevel = std::max(requiredLevel, predIt->second + 1);
-            }
-            if (!allPredecessorsReady)
-                continue;
-
-            auto lvlIt = levels.find(&op);
-            if (lvlIt == levels.end()) {
-                levels[&op] = requiredLevel;
-                maxLevel = std::max(maxLevel, requiredLevel);
-                changed = true;
-            }
-        }
-    }
-
-    return maxLevel;
-}
-
-static LogicalResult verifyDependencyLevels(Block *body, const DenseMap<Operation *, int> &levels)
-{
-    for (Operation &op : *body) {
-        if (isa<scf::YieldOp>(&op))
-            continue;
-        if (!levels.count(&op)) {
-            LLVM_DEBUG(llvm::dbgs() << "[cv-split] No dependency level assigned to " << op.getName()
-                                    << "; dependency graph may contain a cycle, bail\n");
-            return failure();
-        }
-    }
-    return success();
-}
-
-// ============================================================================
-// Stage 6: Level diagnostics
-// ============================================================================
-static void logLevelHistogram(Block *body, const DenseMap<Operation *, int> &levels,
-                              const DenseMap<Operation *, EngineType> &classification, int maxLevel)
-{
-    for (int lvl = 0; lvl <= maxLevel; ++lvl) {
-        SmallVector<Operation *> cubeOps, vectorOps;
-        for (Operation &op : *body) {
-            if (isa<scf::YieldOp>(&op))
-                continue;
-            auto lvlIt = levels.find(&op);
-            if (lvlIt->second != lvl)
-                continue;
-            auto classIt = classification.find(&op);
-            if (classIt->second == EngineType::CUBE)
-                cubeOps.push_back(&op);
-            else
-                vectorOps.push_back(&op);
-        }
-
-        LLVM_DEBUG(llvm::dbgs() << "[cv-split]   L" << lvl << ": " << cubeOps.size() << "C " << vectorOps.size()
-                                << "V\n");
-    }
-}
-
-// ============================================================================
-// Stage 7: Reorder by dependency level
-// ============================================================================
-static void reorderByLevel(Block *body, const DenseMap<Operation *, int> &levels)
-{
-    SmallVector<Operation *> ops;
-    for (Operation &op : *body) {
-        if (!isa<scf::YieldOp>(&op))
-            ops.push_back(&op);
-    }
-
-    llvm::stable_sort(ops, [&](Operation *a, Operation *b) { return levels.lookup(a) < levels.lookup(b); });
-
-    Operation *yield = body->getTerminator();
-    for (auto *op : ops)
-        op->moveBefore(yield);
+  LLVM_DEBUG(
+      llvm::dbgs()
+      << "[cv-split] forced schedule candidate matched candidate="
+      << candidate->candidateId << " lanes=" << candidate->logicalLaneCount
+      << " matrix-lineages=" << candidate->matrixLineageLimits.size()
+      << " widened-prefix=" << widenedMatrixLineages << " behavior="
+      << (widenedMatrixLineages == 0                        ? "generic"
+          : widenedMatrixLineages == 1                      ? "first-widened"
+          : widenedMatrixLineages == expectedMatrixLineages ? "all-widened"
+                                                            : "prefix-widened")
+      << "\n");
+  return success();
 }
 
 // ============================================================================
 // Dependency-level scheduler
 // ----------------------------------------------------------------------------
-// Orchestrates stages 4-7 over an (already unrolled) loop body:
+// Orchestrates dependency scheduling over an (already unrolled) loop body:
 //   1. build a def->use dependency graph (SSA edges + memref.copy->to_tensor
 //      memory edges),
 //   2. assign every op a level = longest dependency depth from a root,
 //   3. report the per-level CUBE/VECTOR distribution,
-//   4. reorder the body by level, ready to be
-//      split into a CUBE scope and a VECTOR scope.
+//   4. complete each VECTOR -> CUBE producer slice before starting unrelated
+//      work, then split into a CUBE scope and a VECTOR scope.
 // run() fails when dependency levels cannot be assigned to every op.
 // ============================================================================
-LogicalResult DependencyScheduler::run(Block *body, const Classification &classification)
-{
-    DenseMap<Operation *, SmallVector<Operation *>> predecessors;
-    DenseMap<Operation *, int> levels;
+LogicalResult
+DependencyScheduler::run(Block *body, const Classification &classification,
+                         DenseMap<Operation *, Operation *> &transferPhaseEnds,
+                         unsigned pipelineDistance,
+                         const CrossCorePipelinePlan *pipelinePlan,
+                         const CrossCoreScheduleCandidate *scheduleCandidate,
+                         bool enablePlanDrivenEarlyPublish) {
+  DenseMap<Operation *, SmallVector<Operation *>> predecessors;
+  DenseMap<Operation *, int> levels;
 
-    buildDependencyGraph(body, predecessors);
-    if (failed(validateDependencyGraph(predecessors)))
-        return failure();
+  if (failed(
+          validateForcedScheduleCandidate(pipelinePlan, scheduleCandidate))) {
+    LLVM_DEBUG(llvm::dbgs()
+               << "[cv-split] forced schedule candidate rejected\n");
+    return failure();
+  }
 
-    SmallVector<Operation *> roots = collectRoots(body, predecessors);
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << roots.size() << " roots\n");
+  buildDependencyGraph(body, predecessors);
 
-    int maxLevel = assignDependencyLevels(body, predecessors, roots, levels);
-    if (failed(verifyDependencyLevels(body, levels)))
-        return failure();
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << (maxLevel + 1) << " dependency levels\n");
+  SmallVector<Operation *> roots = collectRoots(body, predecessors);
+  LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << roots.size() << " roots\n");
 
-    logLevelHistogram(body, levels, classification, maxLevel);
+  int maxLevel = assignDependencyLevels(body, predecessors, roots, levels);
+  if (failed(verifyDependencyLevels(body, levels)))
+    return failure();
+  LLVM_DEBUG(llvm::dbgs() << "[cv-split] " << (maxLevel + 1)
+                          << " dependency levels\n");
 
-    reorderByLevel(body, levels);
-    LLVM_DEBUG(llvm::dbgs() << "[cv-split] Reordered by level\n");
-    return success();
+  logLevelHistogram(body, levels, classification, maxLevel);
+
+  reorderForCrossScopeProducerPhases(body, predecessors, levels, classification,
+                                     transferPhaseEnds, pipelineDistance,
+                                     pipelinePlan,
+                                     enablePlanDrivenEarlyPublish);
+  LLVM_DEBUG(
+      llvm::dbgs() << "[cv-split] Reordered by cross-scope producer phase\n");
+  return success();
 }
 
 } // namespace mlir::triton::cv_split

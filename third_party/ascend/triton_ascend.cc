@@ -142,13 +142,28 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
 
-  m.def("add_cv_split_scheduling",
-        [](mlir::PassManager &pm, bool compileOn91095, int unrollFactor) {
-          CVSplitSchedulingOptions opts;
-          opts.compileOn91095 = compileOn91095;
-          opts.unrollFactor = unrollFactor;
-          pm.addPass(mlir::triton::createCVSplitSchedulingPass(opts));
-        });
+  m.def(
+      "add_cv_split_scheduling",
+      [](mlir::PassManager &pm, bool compileOn91095, int unrollFactor,
+         bool promoteFullyUnrolled, int64_t privateBufferUbBudgetBytes,
+         bool enablePlanDrivenEarlyPublish, int scheduleCandidateId,
+         const std::string &postSplitScheduleMode) {
+        CVSplitSchedulingOptions opts;
+        opts.compileOn91095 = compileOn91095;
+        opts.unrollFactor = unrollFactor;
+        opts.enablePlanDrivenEarlyPublish = enablePlanDrivenEarlyPublish;
+        opts.scheduleCandidateId = scheduleCandidateId;
+        opts.postSplitScheduleMode = postSplitScheduleMode;
+        opts.promoteFullyUnrolled = promoteFullyUnrolled;
+        opts.privateBufferUbBudgetBytes = privateBufferUbBudgetBytes;
+        pm.addPass(mlir::triton::createCVSplitSchedulingPass(opts));
+      },
+      py::arg("pm"), py::arg("compile_on_910_95"), py::arg("unroll_factor"),
+      py::arg("promote_fully_unrolled") = true,
+      py::arg("private_buffer_ub_budget_bytes") = -1,
+      py::arg("enable_plan_driven_early_publish") = false,
+      py::arg("schedule_candidate_id") = -1,
+      py::arg("post_split_schedule_mode") = "disabled");
 
   m.def(
       "add_graph_optimize",

@@ -24,10 +24,27 @@
 #define TRITON_ASCEND_CV_SPLIT_SCHEDULING_UNFUSE_PV_MATMULS_H
 
 #include "ascend/include/CVSplitScheduling/classifyAllOps.h"
+#include "mlir/IR/Block.h"
+#include "mlir/IR/Operation.h"
+#include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace mlir::triton::cv_split {
 
-LogicalResult unfusePVMatmuls(Block *body, Classification &classification);
+struct AccumulatorJoinBinding {
+  Operation *matmulProducer;
+  Operation *vectorJoin;
+};
+
+struct AccumulatorJoinRewriteResult {
+  llvm::SmallVector<AccumulatorJoinBinding> bindings;
+};
+
+/// Separates VECTOR-produced accumulator joins from their matmuls and returns
+/// one in-memory producer-to-join binding for every rewrite.
+FailureOr<AccumulatorJoinRewriteResult>
+unfuseVectorAccumulatorMatmuls(Block *body,
+                               Classification &classification);
 
 } // namespace mlir::triton::cv_split
 

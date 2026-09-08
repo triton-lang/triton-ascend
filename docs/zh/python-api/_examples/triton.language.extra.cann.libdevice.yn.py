@@ -65,17 +65,22 @@ def triton_kernel(input0, input1, output, n_elements, XBLOCK: tl.constexpr, XBLO
         tl.store(output + (x0), tmp2, mask=mask)
 
 
+@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+def test_yn():
+    x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
+    x1 = (torch.rand((8, )) + 0.1).to(torch.float32)
+    expected = (torch_yn_reference(x0, x1)).npu()
+    x0 = x0.npu()
+    x1 = x1.npu()
+    output = torch.empty(8, dtype=torch.float32, device='npu')
+    triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
+    output = output.cpu()
+    expected = expected.cpu()
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
 if __name__ == "__main__":
     if not triton_enable_libdevice_simt():
         print(_SIMT_SKIP_MSG)
     else:
-        x0 = (torch.randint(1, 16, (8, ))).to(torch.int32)
-        x1 = (torch.rand((8, )) + 0.1).to(torch.float32)
-        expected = (torch_yn_reference(x0, x1)).npu()
-        x0 = x0.npu()
-        x1 = x1.npu()
-        output = torch.empty(8, dtype=torch.float32, device='npu')
-        triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
-        output = output.cpu()
-        expected = expected.cpu()
-        torch.testing.assert_close(output, expected, rtol=1e-03, atol=1e-03, equal_nan=True)
+        test_yn()

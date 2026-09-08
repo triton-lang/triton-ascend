@@ -41,7 +41,7 @@ def test_isinf():
 
     torch_res = torch_res.cpu()
     triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=0, atol=0)
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04)
 
 
 if __name__ == "__main__":

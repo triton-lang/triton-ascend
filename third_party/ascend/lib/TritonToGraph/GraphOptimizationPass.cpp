@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "Rules/FoldHistogramParking.h"
+#include "Rules/NarrowUnsignedTensor.h"
 #include "TritonToGraph/GraphOptimizationContext.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/Passes.h"
@@ -31,6 +33,7 @@
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -131,10 +134,12 @@ public:
     this->ubSafetyPercent = options.ubSafetyPercent;
     this->reservedUBBytes = options.reservedUBBytes;
     this->compileMode = options.compileMode;
+    this->compileOn91095 = options.compileOn91095;
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect>();
+    registry.insert<arith::ArithDialect, tensor::TensorDialect,
+                    triton::TritonDialect>();
   }
 
   void runOnOperation() override;
@@ -231,6 +236,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.ubSafetyPercent = static_cast<unsigned>(cliUBSafetyPercent);
   options.reservedUBBytes = static_cast<unsigned>(cliReservedUBBytes);
   options.compileMode = this->compileMode;
+  options.compileOn91095 = this->compileOn91095;
   options.independentAxisTensorize.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
   options.independentAxisTensorize.iatAndPtsmEnabled =
@@ -246,6 +252,17 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
 void GraphOptimizePass::runOnOperation() {
   GraphOptimizationOptions options;
   if (failed(getStableOptions(options))) {
+    signalPassFailure();
+    return;
+  }
+
+  // Simplify tensor values before constructing any graph analyses so layout
+  // rules observe the reduced workload, without retaining stale graph state.
+  RewritePatternSet patterns(&getContext());
+  patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
+  if (options.compileOn91095)
+    patterns.add<FoldHistogramParking>(&getContext());
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
     signalPassFailure();
     return;
   }

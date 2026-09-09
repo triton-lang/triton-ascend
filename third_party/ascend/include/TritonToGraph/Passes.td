@@ -73,6 +73,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let summary = "Optimize Triton IR with graph analyses";
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
+    Option<"compileOn91095", "compile-on-910-95", "bool", "false",
+           "Enable histogram rewrites relying on Ascend 910_95 templates">,
     Option<"ruleMask", "rule-mask", "uint64_t", "511",
            "Bitmask of known 32-bit graph rule identities; default 511 preserves the legacy native bundle. Only IAT/SPAF/PTSM may later be considered for default enablement; RLF/IPBE/SCP/CBAF remain explicit opt-in no-ops">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",

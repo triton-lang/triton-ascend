@@ -1,6 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "AscendModel/Support/CostModelLogger.h"
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseSet.h"
@@ -740,12 +741,19 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
 llvm::Expected<ProgramStructure>
 ProgramStructureAnalysis::analyze(ModuleOp module,
                                   const SimtAnchorPlan &anchorPlan) const {
+  COSTMODEL_TRACE("ProgramStructureAnalysis::analyze");
   if (!module)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "ProgramStructureAnalysis requires ModuleOp");
   ProgramStructure structure;
   structure.rootOperations = collectTopLevelSemanticRoots(module);
+  costModelLog() << "semantic roots: " << structure.rootOperations.size()
+                 << " (StageBoundaryAnalysis will group these into stages)\n";
+  for (auto [index, root] : llvm::enumerate(structure.rootOperations))
+    costModelLog() << "  root[" << index << "]: "
+                   << root->getName().getStringRef() << " " << root->getLoc()
+                   << "\n";
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -941,6 +949,7 @@ buildAnchorGroups(const ProgramStructure &structure,
 llvm::Expected<StagePartition>
 StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
                                const SimtAnchorPlan &anchorPlan) const {
+  COSTMODEL_TRACE("StageBoundaryAnalysis::analyze");
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -1003,6 +1012,21 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
     stage.costModelKind = kind;
     stage.scheduleKind = schedule;
     stage.id = makeStageId(partition.stages.size(), kind);
+    {
+      const char *reason = "single root";
+      if (stage.operations.size() > 1)
+        reason = anchorGroup >= 0 ? "compound SIMT anchor group"
+                                  : "merged plain roots (same kind/schedule "
+                                    "or same source statement)";
+      costModelLog() << "boundary: stage '" << stage.id << "' roots="
+                     << (next - index) << " reason=" << reason << "\n";
+      for (size_t rootIndex = index; rootIndex < next; ++rootIndex) {
+        Operation *rootOp = structure.rootOperations[rootIndex];
+        costModelLog() << "  root[" << rootIndex << "]: "
+                       << rootOp->getName().getStringRef() << " "
+                       << rootOp->getLoc() << "\n";
+      }
+    }
     partition.stages.push_back(std::move(stage));
     index = next;
   }
@@ -1108,6 +1132,7 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
 
 llvm::Error StageKindClassifier::analyze(StagePartition &partition,
                                          int64_t tinyDotFlopsMax) const {
+  COSTMODEL_TRACE("StageKindClassifier::analyze");
   if (!partition.operationOwnershipComplete)
     return llvm::Error::success();
   auto compatible = [](StageCostModelKind kind,
@@ -1286,6 +1311,7 @@ llvm::Error
 StageModeLegalityAnalysis::analyze(StagePartition &partition,
                                    int64_t maximumSuperblockFactor,
                                    bool scopeSuperblockMaterializable) const {
+  COSTMODEL_TRACE("StageModeLegalityAnalysis::analyze");
   const int64_t maximum = std::clamp<int64_t>(maximumSuperblockFactor, 1, 4);
   // Local and whole-kernel SuperBlock candidates consume the same SIMT warp
   // resources.  Do not regenerate F4 here after evaluateStageModel has
@@ -1329,15 +1355,102 @@ StageModeLegalityAnalysis::analyze(StagePartition &partition,
   return llvm::Error::success();
 }
 
+static llvm::StringRef stringifyScheduleKind(StageScheduleKind kind) {
+  switch (kind) {
+  case StageScheduleKind::StraightLine:
+    return "straight_line";
+  case StageScheduleKind::IndependentPipelined:
+    return "independent_pipelined";
+  case StageScheduleKind::LoopCarriedSerial:
+    return "loop_carried_serial";
+  case StageScheduleKind::PartiallyDependent:
+    return "partially_dependent";
+  }
+  return "unknown";
+}
+
+static std::string joinFactors(const std::vector<int64_t> &factors) {
+  std::string text;
+  llvm::raw_string_ostream stream(text);
+  llvm::interleave(factors, stream, ",");
+  stream.flush();
+  return text;
+}
+
+/// Print one operation and its nested regions as an indented tree.  Every
+/// TTIR operation owned by a Stage appears here, including loop bodies.
+static void logOperationTree(Operation *operation, int depth) {
+  std::string indent(static_cast<size_t>(depth) * 2, ' ');
+  costModelLog() << indent << operation->getName().getStringRef() << " "
+                 << operation->getLoc() << "\n";
+  for (Region &region : operation->getRegions())
+    for (Block &block : region)
+      for (Operation &nested : block)
+        logOperationTree(&nested, depth + 1);
+}
+
+/// Print the final Stage partition: one summary block per logical Stage with
+/// its kind, schedule, ownership, legality, features, and workload.
+static void logStagePartition(const StagePartition &partition) {
+  for (const LogicalStage &stage : partition.stages) {
+    costModelLog()
+        << "stage '" << stage.id << "': model="
+        << stringifyStageCostModel(stage.costModelKind)
+        << " schedule=" << stringifyScheduleKind(stage.scheduleKind)
+        << " iterations=" << stage.iterationCount
+        << " ops=" << stage.operations.size()
+        << " liveIn=" << stage.liveIns.size() << "(" << stage.liveInBytes
+        << "B)"
+        << " liveOut=" << stage.liveOuts.size() << "(" << stage.liveOutBytes
+        << "B)"
+        << " simdLegal=" << stage.simdLegal
+        << " simtLegal=" << stage.simtLegal
+        << " simtFactors=[" << joinFactors(stage.legalSimtFactors) << "]"
+        << " localFactors=[" << joinFactors(stage.localSimtFactors) << "]"
+        << (stage.localSimtMaterializable ? " localSimtMaterializable" : "")
+        << "\n";
+    costModelLog()
+        << "  features: loop=" << stage.features.hasLoop
+        << " loopCarriedDep=" << stage.features.hasLoopCarriedDataDependency
+        << " pointerInduction=" << stage.features.hasPointerInduction
+        << " contiguousMem=" << stage.features.hasContiguousMemory
+        << " indirectMem=" << stage.features.hasIndirectMemory
+        << " reduction=" << stage.features.hasReduction
+        << " prefixScan=" << stage.features.hasPrefixScan
+        << " dot=" << stage.features.hasDot
+        << " conversionPack=" << stage.features.hasConversionPack
+        << " activeLaneRatio=" << stage.features.activeLaneRatio << "\n";
+    costModelLog()
+        << "  workload: scalarOps=" << stage.workload.scalarOperations
+        << " loadBytes=" << stage.workload.loadBytes
+        << " storeBytes=" << stage.workload.storeBytes
+        << " loadWarps=" << stage.workload.loadWarpInstructions
+        << " storeWarps=" << stage.workload.storeWarpInstructions
+        << " predElems=" << stage.workload.predicateElements
+        << " shuffleSteps=" << stage.workload.shuffleLaneSteps
+        << " dotFlops=" << stage.workload.dotFlops
+        << " issueElems=" << stage.workload.issueElements
+        << " spillTxns=" << stage.workload.estimatedSpillTransactions
+        << " paysKernelSetup=" << stage.workload.paysKernelSetup << "\n";
+    costModelLog() << "  operation tree (" << stage.operations.size()
+                   << " roots):\n";
+    for (Operation *root : stage.operations)
+      logOperationTree(root, 2);
+  }
+}
+
 llvm::Expected<StagePartition>
 StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
                             const StagePartitionerOptions &options) const {
+  COSTMODEL_TRACE("StagePartitioner::partition");
   auto structure = ProgramStructureAnalysis().analyze(module, anchorPlan);
   if (!structure)
     return structure.takeError();
   auto result = StageBoundaryAnalysis().analyze(*structure, anchorPlan);
   if (!result)
     return result.takeError();
+  costModelLog() << "output: roots=" << structure->rootOperations.size()
+                 << " stages=" << result->stages.size() << "\n";
   StageWorkloadAnalysis workloadAnalysis;
   if (llvm::Error error = workloadAnalysis.analyze(*result))
     return std::move(error);
@@ -1354,5 +1467,6 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
     return std::move(error);
   if (llvm::Error error = StagePartitionVerifier().verify(*result))
     return std::move(error);
+  logStagePartition(*result);
   return std::move(*result);
 }

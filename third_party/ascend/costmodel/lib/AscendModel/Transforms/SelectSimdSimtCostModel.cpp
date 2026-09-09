@@ -9,6 +9,7 @@
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Support/CostModelLogger.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
 
@@ -141,6 +142,8 @@ struct SelectSimdSimtCostModelPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    COSTMODEL_TRACE("SelectSimdSimtCostModelPass::runOnOperation");
+    costModelLogIR("costmodel input module", module);
     clearPreviousSelection(module);
     const bool autoMode = mode.getValue() == "auto";
 
@@ -161,6 +164,8 @@ struct SelectSimdSimtCostModelPass
       }
       analysisModule = *parsedAnalysisModule;
     }
+    costModelLogIR("analysis module (post-layout/post-AutoBlockify TTIR)",
+                   analysisModule);
 
     SimdSimtCostModelOptions options;
     options.profilePath = profilePath.getValue();
@@ -285,6 +290,13 @@ struct SelectSimdSimtCostModelPass
                                          report.candidateCosts.mixedSimdSimt));
     module->setAttr(kSuperblockFactorAttr,
                     builder.getI64IntegerAttr(selectedSuperblockFactor));
+    costModelLog() << "decision: recommended=" << recommended
+                   << " effective=" << effective << " source=" << selectionSource
+                   << " reason=" << applicationReason
+                   << " superblock_factor=" << selectedSuperblockFactor
+                   << " (scores: all_simd=" << report.candidateCosts.allSimd
+                   << " all_simt_only=" << report.candidateCosts.allSimtOnly
+                   << " mixed=" << report.candidateCosts.mixedSimdSimt << ")\n";
 
     // Selector and Materializer consume the same immutable anchor plan in one
     // pass invocation.  No per-operation marker is persisted in TTIR.
@@ -294,6 +306,7 @@ struct SelectSimdSimtCostModelPass
       signalPassFailure();
       return;
     }
+    costModelLogIR("materialized module (SIMT scopes applied)", module);
 
     llvm::json::Object reportJSON = report.toJSON();
     reportJSON["mode"] = mode.getValue();

@@ -5,6 +5,7 @@ add_compile_definitions(
 )
 
 add_mlir_library(AscendModelRouteModel
+  ../Support/CostModelLogger.cpp
   ../Analysis/SimtAnchorAnalysis.cpp
   ../Analysis/StagePartitioner.cpp
   StageCostModels.cpp
@@ -15,6 +16,7 @@ add_mlir_library(AscendModelRouteModel
 
   ADDITIONAL_HEADER_DIRS
   ${TRITON_ASCEND_COSTMODEL_SOURCE_DIR}/include/AscendModel/RouteModel
+  ${TRITON_ASCEND_COSTMODEL_SOURCE_DIR}/include/AscendModel/Support
 
   DEPENDS
   AscendModelOpsIncGen

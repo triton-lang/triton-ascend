@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/Support/CostModelLogger.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -518,6 +519,7 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     bool scopeSuperblockMaterializable, int64_t logicalProgramCountHint,
     int64_t physicalCoreCountHint, ModuleOp module,
     const SimtAnchorPlan *anchorPlan) {
+  COSTMODEL_TRACE_DEBUG("evaluateStageModel");
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
   partitionerOptions.maximumSuperblockFactor =
@@ -717,6 +719,7 @@ mlir::ascend::analyzeSimdSimtFeatures(ModuleOp module, bool compileOn91095) {
 llvm::Expected<SimdSimtFeatureSummary>
 mlir::ascend::analyzeSimdSimtFeatures(ModuleOp module,
                                       const SimtAnchorPlan &anchorPlan) {
+  COSTMODEL_TRACE("analyzeSimdSimtFeatures");
   if (!module)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "cannot analyze a null ModuleOp");
@@ -726,6 +729,13 @@ mlir::ascend::analyzeSimdSimtFeatures(ModuleOp module,
       anchorPlan.anchors,
       [](const SimtAnchorDescriptor &anchor) { return anchor.materializable; });
   features.simtAnchors.kernelLowerability = anchorPlan.kernelLowerability;
+  costModelLog() << "features: materializable anchors="
+                 << features.simtAnchors.count
+                 << " (lowerability: all_simd="
+                 << anchorPlan.kernelLowerability.allSimd
+                 << " all_simt_only="
+                 << anchorPlan.kernelLowerability.allSimtOnly
+                 << " mixed=" << anchorPlan.kernelLowerability.mixed << ")\n";
 
   for (const SimtAnchorDescriptor &anchor : anchorPlan.anchors) {
     if (anchor.triangularSolve)
@@ -747,10 +757,13 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
                                const SimdSimtCostModelOptions &options,
                                ModuleOp module,
                                const SimtAnchorPlan *anchorPlan) {
+  COSTMODEL_TRACE("estimateSimdSimtCandidates");
   auto profileOrError = loadCandidateProfile(options.profilePath);
   if (!profileOrError)
     return profileOrError.takeError();
   CandidateProfile profile = std::move(*profileOrError);
+  costModelLog() << "profile: version=" << profile.hardware.profileVersion
+                 << " target=" << profile.hardware.target << "\n";
 
   SimdSimtCostReport report;
   report.profileVersion = profile.hardware.profileVersion;
@@ -785,6 +798,14 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   if (!stageModel)
     return stageModel.takeError();
   report.stageModel = std::move(*stageModel);
+  costModelLog() << "stage model: stages=" << report.stageModel.stages.size()
+                 << " (legal: all_simd=" << report.stageModel.allSimd.legal
+                 << " all_simt_only=" << report.stageModel.allSimt.legal
+                 << " mixed=" << report.stageModel.mixed.legal
+                 << "; totals: all_simd="
+                 << report.stageModel.allSimd.totalCycles
+                 << " all_simt_only=" << report.stageModel.allSimt.totalCycles
+                 << " mixed=" << report.stageModel.mixed.totalCycles << ")\n";
   report.candidateCosts.allSimd = report.stageModel.allSimd.totalCycles;
   report.candidateCosts.allSimtOnly = report.stageModel.allSimt.totalCycles;
   report.candidateCosts.mixedSimdSimt = report.stageModel.mixed.totalCycles;

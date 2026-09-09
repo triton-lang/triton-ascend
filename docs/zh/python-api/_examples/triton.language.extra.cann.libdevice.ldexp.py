@@ -50,7 +50,7 @@ def test_ldexp():
 
     torch_res = torch_res.cpu()
     triton_res = triton_res.cpu()
-    torch.testing.assert_close(torch_res, triton_res, rtol=1e-03, atol=1e-03, equal_nan=True)
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":

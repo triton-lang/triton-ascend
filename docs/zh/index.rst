@@ -54,11 +54,10 @@ Triton Ascend
    triton <python-api/triton>
    triton.language <python-api/triton.language>
    triton.testing <python-api/triton.testing>
-   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
-
-.. Temporarily disabled -- restore into the toctree above when needed:
    triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
+   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
    triton.extension.buffer.language <python-api/triton.extension.buffer.language>
+
 
 .. toctree::
    :maxdepth: 1

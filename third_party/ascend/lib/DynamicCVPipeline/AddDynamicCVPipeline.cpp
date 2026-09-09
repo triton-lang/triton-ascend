@@ -20,10 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
@@ -54,6 +57,19 @@ namespace triton {
 AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
     : AddDynamicCVPipelineBase(options) {}
+
+static void checkAndDisableVfSub(ModuleOp module) {
+  static constexpr llvm::StringLiteral kDisableVfSubKernels[1]{
+      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"};
+  module->walk([=](func::FuncOp funcOp) {
+    if (llvm::is_contained(kDisableVfSubKernels, funcOp.getSymName())) {
+      CVPipeline::setFallbackAttr(module,
+                                  CVPipeline::ERRCODE_DISABLE_VF_SUBSTITUTION);
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+}
 
 void AddDynamicCVPipelinePass::runOnOperation() {
   auto moduleOp = getOperation();
@@ -86,26 +102,42 @@ void AddDynamicCVPipelinePass::runOnOperation() {
       CVPipeline::hasFallbackAttr(moduleOp)) {
     auto errCodeAttr =
         moduleOp->getAttrOfType<IntegerAttr>(CVPipeline::ERRCODE_ATTR);
+    int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt())
+                              : CVPipeline::ERRCODE_FAILED;
     if (!errCodeAttr) {
       moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
                               << "Unexpected pass failure (no fallback attr "
                                  "set); fallback to compilation without "
                                  "dynamic CV pipeline.";
     } else {
-      moduleOp->emitWarning() << "[" << DEBUG_TYPE << "] "
-                              << "Pass failed, "
-                              << "fallback to compilation without "
-                                 "dynamic CV pipeline.";
+      if (errCode == CVPipeline::ERRCODE_IGNORED) {
+        // pipeline correctly decided this kernel is not a fit
+        // (no matmul, already scope-optimized, unsupported pattern) --
+        // just print a message, no IR.
+        mlir::emitWarning(moduleOp->getLoc())
+            << "[" << DEBUG_TYPE << "] "
+            << "Kernel not applicable for dynamic CV pipeline "
+               "(no matmul / already scope-optimized / unsupported "
+               "pattern); falling back to standard compilation.";
+      } else {
+        // a sub-pass genuinely failed (UB overflow, flag-budget
+        // exhaustion, unsupported while-condition, i1 cross-block dep, ...) --
+        // print a warning message and print module IR.
+        moduleOp->emitWarning()
+            << "[" << DEBUG_TYPE << "] " << "Pass failed (errcode=" << errCode
+            << "); "
+               "falling back to compilation without "
+               "dynamic CV pipeline.";
+      }
     }
 
-    int errCode = errCodeAttr ? static_cast<int>(errCodeAttr.getInt())
-                              : CVPipeline::ERRCODE_FAILED;
     fallback.restore();
     moduleOp->setAttr(CVPipeline::ERRCODE_ATTR,
                       builder.getI32IntegerAttr(errCode));
     return;
   }
 
+  checkAndDisableVfSub(moduleOp);
   LDBG("Process successfully");
 }
 

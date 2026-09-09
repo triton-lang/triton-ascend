@@ -86,11 +86,15 @@ inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
 inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
 inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
 inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
+inline constexpr llvm::StringLiteral kSubBlock = "ssbuffer.subBlock";
+inline constexpr llvm::StringLiteral kMergeComputeBlockApplied =
+    "ssbuffer.merge_compute_block_applied";
 
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
 static constexpr const int ERRCODE_FAILED = 1;
 static constexpr const int ERRCODE_IGNORED = 2;
+static constexpr const int ERRCODE_DISABLE_VF_SUBSTITUTION = 4;
 constexpr int64_t CACHE_TABLE_BUFFER_SIZE = 4096;
 constexpr int64_t BYTE_SIZE = 8;
 static constexpr int crossCoreProducerId = 1;
@@ -172,10 +176,6 @@ inline bool isMainLoopOp(Operation *op) {
 }
 
 CoreType getCoreTypeOfSimpleOpOrCf(Operation *op);
-
-inline bool isCubeSimpleOpOrCf(Operation *op) {
-  return !isSyncOp(op) && getCoreTypeOfSimpleOpOrCf(op) == CoreType::CUBE_ONLY;
-}
 
 inline bool isVectorSimpleOpOrCf(Operation *op) {
   return getCoreTypeOfSimpleOpOrCf(op) == CoreType::VECTOR_ONLY;

@@ -7,11 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
-#include "AscendModel/Support/CostModelError.h"
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/Support/CostModelError.h"
 #include "AscendModel/Support/CostModelLogger.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -549,18 +549,19 @@ static StagePartitionerOptions buildStagePartitionerOptions(
   return partitionerOptions;
 }
 
-static llvm::Expected<StageCostModelSummary> evaluateStageModel(
-    const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
-    unsigned numWarps, bool wholeKernelSuperblockMaterializable,
-    bool scopeSuperblockMaterializable, bool compileOn91095,
-    int64_t logicalProgramCountHint, int64_t physicalCoreCountHint,
-    bool splitIndependentLoopBody, ModuleOp module,
-    const SimtAnchorPlan *anchorPlan) {
+static llvm::Expected<StageCostModelSummary>
+evaluateStageModel(const SimdSimtFeatureSummary &features,
+                   const CandidateProfile &profile, unsigned numWarps,
+                   bool wholeKernelSuperblockMaterializable,
+                   bool scopeSuperblockMaterializable, bool compileOn91095,
+                   int64_t logicalProgramCountHint,
+                   int64_t physicalCoreCountHint, bool splitIndependentLoopBody,
+                   ModuleOp module, const SimtAnchorPlan *anchorPlan) {
   COSTMODEL_TRACE_DEBUG("evaluateStageModel");
   StagePartitionerOptions partitionerOptions = buildStagePartitionerOptions(
       features, profile, numWarps, wholeKernelSuperblockMaterializable,
-      scopeSuperblockMaterializable, compileOn91095,
-      logicalProgramCountHint, splitIndependentLoopBody);
+      scopeSuperblockMaterializable, compileOn91095, logicalProgramCountHint,
+      splitIndependentLoopBody);
   StagePartitioner partitioner;
   if (!module || !anchorPlan)
     return llvm::createStringError(std::errc::invalid_argument,
@@ -750,10 +751,8 @@ mlir::ascend::analyzeSimdSimtFeatures(ModuleOp module,
       [](const SimtAnchorDescriptor &anchor) { return anchor.materializable; });
   features.simtAnchors.kernelLowerability = anchorPlan.kernelLowerability;
   costModelLog() << "features: materializable anchors="
-                 << features.simtAnchors.count
-                 << " (lowerability: all_simd="
-                 << anchorPlan.kernelLowerability.allSimd
-                 << " all_simt_only="
+                 << features.simtAnchors.count << " (lowerability: all_simd="
+                 << anchorPlan.kernelLowerability.allSimd << " all_simt_only="
                  << anchorPlan.kernelLowerability.allSimtOnly
                  << " mixed=" << anchorPlan.kernelLowerability.mixed << ")\n";
 
@@ -889,6 +888,5 @@ llvm::Expected<StagePartition> mlir::ascend::partitionForSimdSimtSelection(
       options.wholeKernelSuperblockMaterializable,
       options.scopeSuperblockMaterializable, options.compileOn91095,
       options.logicalProgramCountHint, options.splitIndependentLoopBody);
-  return StagePartitioner().partition(module, anchorPlan,
-                                      partitionerOptions);
+  return StagePartitioner().partition(module, anchorPlan, partitionerOptions);
 }

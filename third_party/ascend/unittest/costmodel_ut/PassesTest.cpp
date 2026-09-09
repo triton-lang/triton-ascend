@@ -621,13 +621,12 @@ module {
   options.actualTarget = "Ascend950PR_9579";
   options.numWarps = 4;
   options.compileOn91095 = true;
-  ASSERT_TRUE(runPasses(*module,
-                        createSelectSimdSimtCostModelPass(options)));
+  ASSERT_TRUE(runPasses(*module, createSelectSimdSimtCostModelPass(options)));
 
-  auto effective = (*module)->getAttrOfType<StringAttr>(
-      "ascend.simt_costmodel.effective");
-  auto reportAttr = (*module)->getAttrOfType<StringAttr>(
-      "ascend.simt_costmodel.report_json");
+  auto effective =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.effective");
+  auto reportAttr =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
   ASSERT_TRUE(effective);
   ASSERT_TRUE(reportAttr);
   EXPECT_EQ(effective.getValue(), "backend_default");

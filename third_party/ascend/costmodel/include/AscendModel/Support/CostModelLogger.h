@@ -99,19 +99,19 @@ using costmodel::logLevel;
 } // namespace mlir::ascend
 
 #define COSTMODEL_TRACE_PRIVATE_CONCAT2(a, b) a##b
-#define COSTMODEL_TRACE_PRIVATE_CONCAT(a, b)                                    \
+#define COSTMODEL_TRACE_PRIVATE_CONCAT(a, b)                                   \
   COSTMODEL_TRACE_PRIVATE_CONCAT2(a, b)
-#define COSTMODEL_TRACE_PRIVATE_VAR(line)                                       \
+#define COSTMODEL_TRACE_PRIVATE_VAR(line)                                      \
   COSTMODEL_TRACE_PRIVATE_CONCAT(costModelTraceScope, line)
 
 /// Interface-level trace, active at log level >= 1.
-#define COSTMODEL_TRACE(name)                                                   \
-  ::mlir::ascend::costmodel::CostModelTraceScope COSTMODEL_TRACE_PRIVATE_VAR(   \
+#define COSTMODEL_TRACE(name)                                                  \
+  ::mlir::ascend::costmodel::CostModelTraceScope COSTMODEL_TRACE_PRIVATE_VAR(  \
       __LINE__)(name, ::mlir::ascend::costmodel::logEnabled())
 
 /// Internal helper trace, active at log level >= 2 only.
-#define COSTMODEL_TRACE_DEBUG(name)                                             \
-  ::mlir::ascend::costmodel::CostModelTraceScope COSTMODEL_TRACE_PRIVATE_VAR(   \
+#define COSTMODEL_TRACE_DEBUG(name)                                            \
+  ::mlir::ascend::costmodel::CostModelTraceScope COSTMODEL_TRACE_PRIVATE_VAR(  \
       __LINE__)(name, ::mlir::ascend::costmodel::debugEnabled())
 
 #endif // ASCENDMODEL_SUPPORT_COSTMODELLOGGER_H

@@ -473,8 +473,7 @@ collectTriangularSolveScopeOperations(Operation *anchor,
 }
 
 static std::optional<SimtAnchorDescriptor>
-analyzeAnchor(Operation *op,
-              const SimtLoweringCapabilities &capabilities) {
+analyzeAnchor(Operation *op, const SimtLoweringCapabilities &capabilities) {
   if (!op)
     return std::nullopt;
   SimtAnchorDescriptor descriptor;
@@ -561,8 +560,8 @@ analyzeAnchor(Operation *op,
     return std::nullopt;
   }
 
-  descriptor.materializable = capabilities.supportsLocalSimtScopes &&
-                              descriptor.lowerability.mixed;
+  descriptor.materializable =
+      capabilities.supportsLocalSimtScopes && descriptor.lowerability.mixed;
   if (descriptor.kind == SimtAnchorKind::PlainOneDimensionalCumsum)
     descriptor.materializable &=
         capabilities.supportsPlainCumsumInLocalSIMTScope;
@@ -743,10 +742,11 @@ mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
   };
   for (Operation *root : roots)
     for (Value result : root->getResults())
-      if (llvm::any_of(result.getUses(), [&](OpOperand &use) {
-            return !isInside(use.getOwner());
-          }) && (isPointerLikeType(result.getType()) ||
-                 !isa<RankedTensorType>(result.getType())))
+      if (llvm::any_of(
+              result.getUses(),
+              [&](OpOperand &use) { return !isInside(use.getOwner()); }) &&
+          (isPointerLikeType(result.getType()) ||
+           !isa<RankedTensorType>(result.getType())))
         return std::nullopt;
 
   SimtAnchorDescriptor descriptor;
@@ -759,8 +759,9 @@ mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
   return descriptor;
 }
 
-SimtLoweringCapabilities mlir::ascend::querySimtLoweringCapabilities(
-    llvm::StringRef actualTarget, bool compileOn91095) {
+SimtLoweringCapabilities
+mlir::ascend::querySimtLoweringCapabilities(llvm::StringRef actualTarget,
+                                            bool compileOn91095) {
   SimtLoweringCapabilities capabilities;
   // The integration layer is the authority for local-scope support.  Target
   // spelling is retained for diagnostics/future capability-table expansion;
@@ -777,8 +778,7 @@ SimtLoweringCapabilities mlir::ascend::querySimtLoweringCapabilities(
   costModelDebug() << "lowering capabilities: target=" << actualTarget
                    << " local_simt_scope="
                    << capabilities.supportsLocalSimtScopes
-                   << " cumsum_simd="
-                   << capabilities.supportsPlainCumsumSIMD
+                   << " cumsum_simd=" << capabilities.supportsPlainCumsumSIMD
                    << " cumsum_simt_only="
                    << capabilities.supportsPlainCumsumSIMTOnly
                    << " cumsum_local_simt_scope="
@@ -812,12 +812,13 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(
     }
     for (Operation *scopeOperation : descriptor->scopeOperations)
       operationsInPlannedScope.insert(scopeOperation);
-    costModelDebug()
-        << "anchor: op=" << descriptor->operation->getName().getStringRef()
-        << " kind="
-        << stringifySimtAnchorKind(descriptor->kind).str()
-        << " materializable=" << descriptor->materializable
-        << " scopeOperations=" << descriptor->scopeOperations.size() << "\n";
+    costModelDebug() << "anchor: op="
+                     << descriptor->operation->getName().getStringRef()
+                     << " kind="
+                     << stringifySimtAnchorKind(descriptor->kind).str()
+                     << " materializable=" << descriptor->materializable
+                     << " scopeOperations="
+                     << descriptor->scopeOperations.size() << "\n";
     plan.anchors.push_back(std::move(*descriptor));
     return WalkResult::skip();
   });
@@ -839,8 +840,7 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(
   costModelLog() << "output: anchors=" << plan.anchors.size()
                  << " (kernel lowerability: all_simd="
                  << plan.kernelLowerability.allSimd
-                 << " all_simt_only="
-                 << plan.kernelLowerability.allSimtOnly
+                 << " all_simt_only=" << plan.kernelLowerability.allSimtOnly
                  << " mixed=" << plan.kernelLowerability.mixed
                  << (plan.anchors.empty() ? " [stage_owned_scope fallback]"
                                           : "")

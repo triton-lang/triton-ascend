@@ -55,10 +55,9 @@ public:
 /// materialize local scopes.
 class StageBoundaryAnalysis {
 public:
-  llvm::Expected<StagePartition>
-  analyze(const ProgramStructure &structure,
-          const SimtAnchorPlan &anchorPlan,
-          bool compileOn91095 = true) const;
+  llvm::Expected<StagePartition> analyze(const ProgramStructure &structure,
+                                         const SimtAnchorPlan &anchorPlan,
+                                         bool compileOn91095 = true) const;
 };
 
 /// Derives structural facts for every already-owned Stage.  It never chooses

@@ -513,8 +513,8 @@ static void deriveStageOwnedScopes(StagePartition &partition,
     const bool wrappable =
         buildStageOwnedScopeDescriptor(stage.operations, compileOn91095)
             .has_value();
-    costModelLog() << "stage scope: stage '" << stage.id << "' roots="
-                   << stage.operations.size()
+    costModelLog() << "stage scope: stage '" << stage.id
+                   << "' roots=" << stage.operations.size()
                    << " stage_owned_scope=" << wrappable << "\n";
     if (wrappable) {
       stage.localSimtMaterializable = true;
@@ -522,8 +522,8 @@ static void deriveStageOwnedScopes(StagePartition &partition,
       // A stage-owned scope obeys the same SuperBlock ABI as primitive
       // anchors: factor > 1 requires every root to be a direct child of the
       // AutoBlockify V1 loop body.
-      stage.localSuperblockMaterializable = llvm::all_of(
-          stage.operations, [](Operation *root) {
+      stage.localSuperblockMaterializable =
+          llvm::all_of(stage.operations, [](Operation *root) {
             Operation *parent = root ? root->getParentOp() : nullptr;
             return parent && parent->hasAttr("ta.auto_blockify_v1.loop");
           });
@@ -585,8 +585,8 @@ static std::vector<Operation *> collectTopLevelSemanticRoots(ModuleOp module) {
   return result;
 }
 
-static void appendIndependentLoopBodyRoots(
-    Operation *operation, std::vector<Operation *> &roots) {
+static void appendIndependentLoopBodyRoots(Operation *operation,
+                                           std::vector<Operation *> &roots) {
   if (!isIndependentStructuredLoop(operation) ||
       operation->hasAttr("ta.auto_blockify_v1.loop"))
     return;
@@ -1003,9 +1003,9 @@ ProgramStructureAnalysis::analyze(ModuleOp module,
   costModelLog() << "semantic roots: " << structure.rootOperations.size()
                  << " (StageBoundaryAnalysis will group these into stages)\n";
   for (auto [index, root] : llvm::enumerate(structure.rootOperations))
-    costModelLog() << "  root[" << index << "]: "
-                   << root->getName().getStringRef() << " " << root->getLoc()
-                   << "\n";
+    costModelLog() << "  root[" << index
+                   << "]: " << root->getName().getStringRef() << " "
+                   << root->getLoc() << "\n";
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -1156,8 +1156,8 @@ buildAnchorGroups(const ProgramStructure &structure,
       continue;
     llvm::SmallVector<size_t, 8> positions;
     auto addPosition = [&](Operation *operation) {
-      Operation *root =
-          getPartitionSemanticRoot(operation, structure.splitIndependentLoopBody);
+      Operation *root = getPartitionSemanticRoot(
+          operation, structure.splitIndependentLoopBody);
       auto iterator = llvm::find(structure.rootOperations, root);
       if (iterator == structure.rootOperations.end())
         return;
@@ -1263,8 +1263,9 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
             std::errc::invalid_argument,
             "StageBoundaryAnalysis overlaps semantic root ownership");
       stage.operations.push_back(candidate);
-      stage.iterationCount = std::max(
-          stage.iterationCount, semanticRootIterationCount(candidate, splitLoopBody));
+      stage.iterationCount =
+          std::max(stage.iterationCount,
+                   semanticRootIterationCount(candidate, splitLoopBody));
       if (semanticKindPriority(candidateKind) > semanticKindPriority(kind)) {
         kind = candidateKind;
         schedule = candidateSchedule;
@@ -1280,12 +1281,13 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
         reason = anchorGroup >= 0 ? "compound SIMT anchor group"
                                   : "merged plain roots (same kind/schedule "
                                     "or same source statement)";
-      costModelLog() << "boundary: stage '" << stage.id << "' roots="
-                     << (next - index) << " reason=" << reason << "\n";
+      costModelLog() << "boundary: stage '" << stage.id
+                     << "' roots=" << (next - index) << " reason=" << reason
+                     << "\n";
       for (size_t rootIndex = index; rootIndex < next; ++rootIndex) {
         Operation *rootOp = structure.rootOperations[rootIndex];
-        costModelLog() << "  root[" << rootIndex << "]: "
-                       << rootOp->getName().getStringRef() << " "
+        costModelLog() << "  root[" << rootIndex
+                       << "]: " << rootOp->getName().getStringRef() << " "
                        << rootOp->getLoc() << "\n";
       }
     }
@@ -1443,13 +1445,13 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
     // scalar-FMA dot rate keeps a hybrid Stage honestly expensive in SIMT.
     if (facts.hasDot && (facts.hasReduction || facts.hasIndirectMemory ||
                          facts.hasLoopCarriedDataDependency))
-      costModelLog()
-          << "hybrid dominant structures accepted: Stage '" << stage.id
-          << "' combines tt.dot with "
-          << (facts.hasLoopCarriedDataDependency
-                  ? "loop-carried recurrence"
-                  : facts.hasReduction ? "reduction" : "indirect memory")
-          << "; modeling as the dominant structure\n";
+      costModelLog() << "hybrid dominant structures accepted: Stage '"
+                     << stage.id << "' combines tt.dot with "
+                     << (facts.hasLoopCarriedDataDependency
+                             ? "loop-carried recurrence"
+                         : facts.hasReduction ? "reduction"
+                                              : "indirect memory")
+                     << "; modeling as the dominant structure\n";
 
     auto derive = [&]() {
       if (facts.hasLoopCarriedDataDependency)
@@ -1529,8 +1531,7 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
       llvm::DenseSet<Operation *> selected;
       for (Operation *localRoot : stage.localSimtOperations) {
         selected.insert(localRoot);
-        localRoot->walk(
-            [&](Operation *nested) { selected.insert(nested); });
+        localRoot->walk([&](Operation *nested) { selected.insert(nested); });
       }
       auto accumulateSelected = [&](auto &&self, Operation *operation,
                                     double multiplicity) -> void {
@@ -1545,9 +1546,8 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
         if (operation->hasAttr("ta.auto_blockify_v1.loop"))
           return;
         const double childMultiplicity =
-            multiplicity * static_cast<double>(
-                               getLoopTripCount(operation,
-                                                fallbackLoopTripCount));
+            multiplicity * static_cast<double>(getLoopTripCount(
+                               operation, fallbackLoopTripCount));
         for (Region &region : operation->getRegions())
           for (Block &block : region)
             for (Operation &nested : block.getOperations())
@@ -1709,8 +1709,8 @@ static void logOperationTree(Operation *operation, int depth) {
 static void logStagePartition(const StagePartition &partition) {
   for (const LogicalStage &stage : partition.stages) {
     costModelLog()
-        << "stage '" << stage.id << "': model="
-        << stringifyStageCostModel(stage.costModelKind)
+        << "stage '" << stage.id
+        << "': model=" << stringifyStageCostModel(stage.costModelKind)
         << " schedule=" << stringifyScheduleKind(stage.scheduleKind)
         << " iterations=" << stage.iterationCount
         << " ops=" << stage.operations.size()
@@ -1718,35 +1718,36 @@ static void logStagePartition(const StagePartition &partition) {
         << "B)"
         << " liveOut=" << stage.liveOuts.size() << "(" << stage.liveOutBytes
         << "B)"
-        << " simdLegal=" << stage.simdLegal
-        << " simtLegal=" << stage.simtLegal
+        << " simdLegal=" << stage.simdLegal << " simtLegal=" << stage.simtLegal
         << " simtFactors=[" << joinFactors(stage.legalSimtFactors) << "]"
         << " localFactors=[" << joinFactors(stage.localSimtFactors) << "]"
         << (stage.localSimtMaterializable ? " localSimtMaterializable" : "")
         << "\n";
-    costModelLog()
-        << "  features: loop=" << stage.features.hasLoop
-        << " loopCarriedDep=" << stage.features.hasLoopCarriedDataDependency
-        << " pointerInduction=" << stage.features.hasPointerInduction
-        << " contiguousMem=" << stage.features.hasContiguousMemory
-        << " indirectMem=" << stage.features.hasIndirectMemory
-        << " reduction=" << stage.features.hasReduction
-        << " prefixScan=" << stage.features.hasPrefixScan
-        << " dot=" << stage.features.hasDot
-        << " conversionPack=" << stage.features.hasConversionPack
-        << " activeLaneRatio=" << stage.features.activeLaneRatio << "\n";
-    costModelLog()
-        << "  workload: scalarOps=" << stage.workload.scalarOperations
-        << " loadBytes=" << stage.workload.loadBytes
-        << " storeBytes=" << stage.workload.storeBytes
-        << " loadWarps=" << stage.workload.loadWarpInstructions
-        << " storeWarps=" << stage.workload.storeWarpInstructions
-        << " predElems=" << stage.workload.predicateElements
-        << " shuffleSteps=" << stage.workload.shuffleLaneSteps
-        << " dotFlops=" << stage.workload.dotFlops
-        << " issueElems=" << stage.workload.issueElements
-        << " spillTxns=" << stage.workload.estimatedSpillTransactions
-        << " paysKernelSetup=" << stage.workload.paysKernelSetup << "\n";
+    costModelLog() << "  features: loop=" << stage.features.hasLoop
+                   << " loopCarriedDep="
+                   << stage.features.hasLoopCarriedDataDependency
+                   << " pointerInduction=" << stage.features.hasPointerInduction
+                   << " contiguousMem=" << stage.features.hasContiguousMemory
+                   << " indirectMem=" << stage.features.hasIndirectMemory
+                   << " reduction=" << stage.features.hasReduction
+                   << " prefixScan=" << stage.features.hasPrefixScan
+                   << " dot=" << stage.features.hasDot
+                   << " conversionPack=" << stage.features.hasConversionPack
+                   << " activeLaneRatio=" << stage.features.activeLaneRatio
+                   << "\n";
+    costModelLog() << "  workload: scalarOps="
+                   << stage.workload.scalarOperations
+                   << " loadBytes=" << stage.workload.loadBytes
+                   << " storeBytes=" << stage.workload.storeBytes
+                   << " loadWarps=" << stage.workload.loadWarpInstructions
+                   << " storeWarps=" << stage.workload.storeWarpInstructions
+                   << " predElems=" << stage.workload.predicateElements
+                   << " shuffleSteps=" << stage.workload.shuffleLaneSteps
+                   << " dotFlops=" << stage.workload.dotFlops
+                   << " issueElems=" << stage.workload.issueElements
+                   << " spillTxns=" << stage.workload.estimatedSpillTransactions
+                   << " paysKernelSetup=" << stage.workload.paysKernelSetup
+                   << "\n";
     costModelLog() << "  operation tree (" << stage.operations.size()
                    << " roots):\n";
     for (Operation *root : stage.operations)
@@ -1762,9 +1763,8 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
       module, anchorPlan, options.splitIndependentLoopBody);
   if (!structure)
     return structure.takeError();
-  auto result =
-      StageBoundaryAnalysis().analyze(*structure, anchorPlan,
-                                       options.compileOn91095);
+  auto result = StageBoundaryAnalysis().analyze(*structure, anchorPlan,
+                                                options.compileOn91095);
   if (!result)
     return result.takeError();
   costModelLog() << "output: roots=" << structure->rootOperations.size()

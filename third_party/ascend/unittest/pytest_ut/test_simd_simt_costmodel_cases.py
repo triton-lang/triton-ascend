@@ -576,10 +576,7 @@ def test_costmodel_anchorless_mixed_stage_scope(tmp_path):
     stages = report["stage_model"]["logical_stages"]
     mixed = report["stage_model"]["routes"]["mixed_simd_simt"]
     assert mixed["legal"]
-    simt_indices = [
-        index for index, stage in enumerate(mixed["stages"])
-        if stage["implementation"]["mode"] == "simt"
-    ]
+    simt_indices = [index for index, stage in enumerate(mixed["stages"]) if stage["implementation"]["mode"] == "simt"]
     assert simt_indices, "mixed route selected no SIMT Stage"
     for index in simt_indices:
         implementation = mixed["stages"][index]["implementation"]
@@ -589,8 +586,7 @@ def test_costmodel_anchorless_mixed_stage_scope(tmp_path):
         assert stages[index]["simt_anchor_indices"] == []
         assert stages[index]["local_simt_materializable"]
     assert any(stages[index]["model"] == "loop_carried_recurrence"
-               for index in simt_indices), (
-        "the anchor-free scalar recurrence Stage should be the SIMT scope")
+               for index in simt_indices), ("the anchor-free scalar recurrence Stage should be the SIMT scope")
 
 
 @triton.jit
@@ -680,16 +676,16 @@ def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
     args = (x, y, table, idx, seed, output, gather_output, scalar_output)
 
     def launch_mixed():
-        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
-            *args, **constexprs, **_launch_options(report_path, logical_programs))
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](*args, **constexprs,
+                                                                       **_launch_options(report_path, logical_programs))
 
     def launch_all_simd():
-        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
-            *args, **constexprs, num_warps=4, compile_mode="simd")
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](*args, **constexprs, num_warps=4,
+                                                                       compile_mode="simd")
 
     def launch_all_simt():
-        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](
-            *args, **constexprs, num_warps=4, compile_mode="simt_only")
+        mixed_route_anchor_and_anchorless_kernel[(logical_programs, )](*args, **constexprs, num_warps=4,
+                                                                       compile_mode="simt_only")
 
     # Correctness of the mixed execution.
     launch_mixed()
@@ -711,16 +707,9 @@ def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
     stages = report["stage_model"]["logical_stages"]
     mixed_stages = mixed["stages"]
     assert len(stages) == len(mixed_stages)
-    simt_indices = [
-        index for index, stage in enumerate(mixed_stages)
-        if stage["implementation"]["mode"] == "simt"
-    ]
-    anchored_indices = [
-        index for index in simt_indices if stages[index]["simt_anchor_indices"]
-    ]
-    anchorless_indices = [
-        index for index in simt_indices if not stages[index]["simt_anchor_indices"]
-    ]
+    simt_indices = [index for index, stage in enumerate(mixed_stages) if stage["implementation"]["mode"] == "simt"]
+    anchored_indices = [index for index in simt_indices if stages[index]["simt_anchor_indices"]]
+    anchorless_indices = [index for index in simt_indices if not stages[index]["simt_anchor_indices"]]
     assert anchored_indices, "mixed route selected no SIMT stage with a primitive anchor"
     assert anchorless_indices, "mixed route selected no anchor-free SIMT stage"
     for index in anchored_indices:
@@ -736,8 +725,7 @@ def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
     # Every other stage (the contiguous tile loop and the AutoBlockify V1
     # dispatch/loop control stages) stays on the SIMD side.
     simd_tile_indices = [
-        index for index, stage in enumerate(stages)
-        if mixed_stages[index]["implementation"]["mode"] == "simd"
+        index for index, stage in enumerate(stages) if mixed_stages[index]["implementation"]["mode"] == "simd"
         and stage["workload"]["store_bytes_per_iteration"] >= tile_block * 4
     ]
     assert simd_tile_indices, "the contiguous elementwise tile pass should stay SIMD"
@@ -747,8 +735,7 @@ def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
 
     # Measured performance: the mixed execution must beat both single-mode
     # executions of the very same kernel.
-    mixed_us = _profile_median_us("mixed_route_anchor_and_anchorless/mixed", launch_mixed,
-                                   tmp_path / "profile_mixed")
+    mixed_us = _profile_median_us("mixed_route_anchor_and_anchorless/mixed", launch_mixed, tmp_path / "profile_mixed")
     all_simd_us = _profile_median_us("mixed_route_anchor_and_anchorless/all_simd", launch_all_simd,
                                      tmp_path / "profile_all_simd")
     all_simt_us = _profile_median_us("mixed_route_anchor_and_anchorless/all_simt", launch_all_simt,
@@ -756,9 +743,8 @@ def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
     baseline_us = min(all_simd_us, all_simt_us)
     print(f"mixed_route_anchor_and_anchorless: mixed {mixed_us:.3f} us vs "
           f"all_simd {all_simd_us:.3f} us, all_simt {all_simt_us:.3f} us")
-    assert mixed_us <= baseline_us * 1.05, (
-        f"mixed execution ({mixed_us:.3f} us) is not faster than the best "
-        f"single mode ({baseline_us:.3f} us)")
+    assert mixed_us <= baseline_us * 1.05, (f"mixed execution ({mixed_us:.3f} us) is not faster than the best "
+                                            f"single mode ({baseline_us:.3f} us)")
 
 
 @triton.jit
@@ -831,8 +817,7 @@ def test_costmodel_loop_body_split_stages(tmp_path):
     # per loop iteration.
     bodies = [
         stage for stage in stages
-        if stage["iteration_count"] == loop_count
-        and stage["workload"]["store_bytes_per_iteration"] > 0
+        if stage["iteration_count"] == loop_count and stage["workload"]["store_bytes_per_iteration"] > 0
     ]
     assert bodies, "loop body memory work was not staged separately from the shell"
     for body in bodies:
@@ -842,8 +827,6 @@ def test_costmodel_loop_body_split_stages(tmp_path):
     # equal the kernel's real store traffic (prologue once + body once per
     # iteration), proving the body is costed per iteration while the shell
     # does not double-charge body work.
-    total_store_bytes = sum(
-        stage["iteration_count"] * stage["workload"]["store_bytes_per_iteration"]
-        for stage in stages
-    )
+    total_store_bytes = sum(stage["iteration_count"] * stage["workload"]["store_bytes_per_iteration"]
+                            for stage in stages)
     assert total_store_bytes == (loop_count + 1) * block * 4

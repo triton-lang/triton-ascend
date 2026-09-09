@@ -70,9 +70,8 @@ static bool containsExplicitVectorScope(ModuleOp module) {
 }
 
 static bool isBackendIntrinsicSimtScan(Operation *op) {
-  if (op->getName().getStringRef() != "tt.scan" ||
-      op->getNumOperands() == 0 || op->getNumRegions() == 0 ||
-      op->getRegion(0).empty())
+  if (op->getName().getStringRef() != "tt.scan" || op->getNumOperands() == 0 ||
+      op->getNumRegions() == 0 || op->getRegion(0).empty())
     return false;
 
   auto axisAttr = op->getAttrOfType<IntegerAttr>("axis");
@@ -175,10 +174,9 @@ using ModuleStageRun = llvm::SmallVector<const LogicalStage *, 4>;
 /// only requires the run's roots to be a continuous materializable range.
 /// Runs stay empty for scheduling Stages.  Returns false when the two
 /// partitions disagree.
-static bool
-alignModuleStages(const StageCostModelSummary &stageModel,
-                  const StagePartition &modulePartition,
-                  llvm::SmallVectorImpl<ModuleStageRun> &aligned) {
+static bool alignModuleStages(const StageCostModelSummary &stageModel,
+                              const StagePartition &modulePartition,
+                              llvm::SmallVectorImpl<ModuleStageRun> &aligned) {
   aligned.assign(stageModel.stages.size(), ModuleStageRun{});
   // Look-ahead helper: the kind of the next non-scheduling scored Stage.
   // Once a run already contains its scored kind, a trailing supporting
@@ -206,14 +204,14 @@ alignModuleStages(const StageCostModelSummary &stageModel,
     skipScheduling();
     if (moduleCursor >= modulePartition.stages.size()) {
       costModelLog() << "stage alignment failed: scored stage '" << scored.id
-                     << "' (" << scored.model
-                     << ") has no module stage left\n";
+                     << "' (" << scored.model << ") has no module stage left\n";
       return false;
     }
 
     ModuleStageRun run;
     if (stringifyStageCostModel(
-            modulePartition.stages[moduleCursor].costModelKind) == scored.model) {
+            modulePartition.stages[moduleCursor].costModelKind) ==
+        scored.model) {
       run.push_back(&modulePartition.stages[moduleCursor++]);
     } else {
       // Absorb supporting-kind Stages until the run already contains the
@@ -244,8 +242,8 @@ alignModuleStages(const StageCostModelSummary &stageModel,
         costModelLog() << "stage alignment failed: scored stage '" << scored.id
                        << "' (" << scored.model
                        << ") found no matching kind before module stage "
-                       << moduleCursor << "/"
-                       << modulePartition.stages.size() << "\n";
+                       << moduleCursor << "/" << modulePartition.stages.size()
+                       << "\n";
         return false;
       }
     }
@@ -267,8 +265,7 @@ alignModuleStages(const StageCostModelSummary &stageModel,
 /// Primitive anchors come from the shared plan; an anchor-free Stage chosen
 /// as SIMT is synthesized as a StageOwnedScope from the module's own Stage
 /// boundaries, so the wrapped root range is the range the route charged.
-static SimtAnchorPlan
-buildSelectedMixedAnchorPlan(
+static SimtAnchorPlan buildSelectedMixedAnchorPlan(
     const StageCostModelSummary &stageModel, const SimtAnchorPlan &completePlan,
     llvm::ArrayRef<ModuleStageRun> alignedStages, bool compileOn91095) {
   SimtAnchorPlan selected;
@@ -347,8 +344,8 @@ selectMixedAnchors(ModuleOp module, const StageCostModelSummary &stageModel,
     selection.reason = "module_stage_alignment_failed";
     return selection;
   }
-  selection.plan = buildSelectedMixedAnchorPlan(
-      stageModel, anchorPlan, aligned, options.compileOn91095);
+  selection.plan = buildSelectedMixedAnchorPlan(stageModel, anchorPlan, aligned,
+                                                options.compileOn91095);
   selection.roots = selection.plan.materializableRoots();
   if (selection.roots.empty()) {
     selection.reason = "no_materializable_mixed_anchor";
@@ -434,9 +431,8 @@ struct SelectSimdSimtCostModelPass
         if (auto count = object->getInteger("physical_vector_core_count_hint"))
           options.physicalVectorCoreCountHint = std::max<int64_t>(0, *count);
 
-    const SimtLoweringCapabilities capabilities =
-        querySimtLoweringCapabilities(options.actualTarget,
-                                      options.compileOn91095);
+    const SimtLoweringCapabilities capabilities = querySimtLoweringCapabilities(
+        options.actualTarget, options.compileOn91095);
     SimtAnchorPlan anchorPlan = buildMixedSimtAnchorPlan(module, capabilities);
     SimtAnchorPlan analysisAnchorPlan =
         buildMixedSimtAnchorPlan(analysisModule, capabilities);
@@ -524,8 +520,8 @@ struct SelectSimdSimtCostModelPass
         actionSupported = false;
         applicationReason = "analysis_materialization_anchor_mismatch";
       } else {
-        MixedAnchorSelection selection = selectMixedAnchors(
-            module, report.stageModel, anchorPlan, options);
+        MixedAnchorSelection selection =
+            selectMixedAnchors(module, report.stageModel, anchorPlan, options);
         selectedMixedAnchorPlan = std::move(selection.plan);
         mixedAnchors = std::move(selection.roots);
         if (!selection.supported) {
@@ -591,7 +587,8 @@ struct SelectSimdSimtCostModelPass
     module->setAttr(kSuperblockFactorAttr,
                     builder.getI64IntegerAttr(selectedSuperblockFactor));
     costModelLog() << "decision: recommended=" << recommended
-                   << " effective=" << effective << " source=" << selectionSource
+                   << " effective=" << effective
+                   << " source=" << selectionSource
                    << " reason=" << applicationReason
                    << " superblock_factor=" << selectedSuperblockFactor
                    << " (scores: all_simd=" << report.candidateCosts.allSimd
@@ -633,8 +630,7 @@ struct SelectSimdSimtCostModelPass
     reportJSON["materialized_stage_owned_scope_count"] = static_cast<int64_t>(
         llvm::count_if(selectedMixedAnchorPlan.anchors,
                        [](const SimtAnchorDescriptor &anchor) {
-                         return anchor.kind ==
-                                SimtAnchorKind::StageOwnedScope;
+                         return anchor.kind == SimtAnchorKind::StageOwnedScope;
                        }));
     reportJSON["selected_superblock_factor"] = selectedSuperblockFactor;
     reportJSON["logical_program_count_hint"] = options.logicalProgramCountHint;

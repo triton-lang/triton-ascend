@@ -110,8 +110,8 @@ static void logRoutePlan(llvm::StringRef name, const StageRoutePlan &plan,
   costModelLog() << "\n";
   for (size_t index = 0; index < plan.implementations.size(); ++index) {
     const StageImplementation &implementation = plan.implementations[index];
-    costModelLog() << "  stage '" << costTable.stages[index].id << "': "
-                   << stringifyStageMode(implementation.mode)
+    costModelLog() << "  stage '" << costTable.stages[index].id
+                   << "': " << stringifyStageMode(implementation.mode)
                    << " factor=" << implementation.superblockFactor
                    << (implementation.localScope ? " local_scope" : "")
                    << " cycles=" << plan.logicalStageCycles[index]

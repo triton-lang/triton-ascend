@@ -140,9 +140,8 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
     // A reduction whose accumulation is a tt.dot (hybrid dot+reduction
     // Stage) must charge the dot on the accumulation chain; pure
     // reductions keep dot == 0 and are unaffected.
-    resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle +
-        resources.dot;
+    resources.criticalPath = resources.compute + resources.predicate +
+                             resources.shuffle + resources.dot;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 
@@ -662,8 +661,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         localStage.workload.paysKernelSetup = false;
         localStage.features = StageModelFeatures{};
         localStage.features.hasPrefixScan = stage.features.hasPrefixScan;
-        localStage.features.hasReduction = !stage.features.hasPrefixScan &&
-                                           stage.features.hasReduction;
+        localStage.features.hasReduction =
+            !stage.features.hasPrefixScan && stage.features.hasReduction;
         StageResourceCycles local =
             mapWorkload(localStage, profile.simt, StageMode::SIMT);
         std::string localFormula;
@@ -677,10 +676,11 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           formula = "hybrid_local_scope = residual SIMD (" + residualFormula +
                     ") + anchored SIMT (" + localFormula + ")";
       } else {
-        resources = mapWorkload(
-            stage, implementation.mode == StageMode::SIMD ? profile.simd
-                                                           : profile.simt,
-            implementation.mode);
+        resources =
+            mapWorkload(stage,
+                        implementation.mode == StageMode::SIMD ? profile.simd
+                                                               : profile.simt,
+                        implementation.mode);
         baseCycles = estimateStage(stage, profile, implementation.mode,
                                    resources, trace ? &formula : nullptr);
       }
@@ -688,8 +688,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       cost.implementation = implementation;
       cost.resources = resources;
       cost.totalCycles =
-          applySuperBlock(stage, resources, implementation, profile,
-                          baseCycles, trace ? &superblockFormula : nullptr);
+          applySuperBlock(stage, resources, implementation, profile, baseCycles,
+                          trace ? &superblockFormula : nullptr);
       if (!cost.isValid())
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' produced an invalid cost",

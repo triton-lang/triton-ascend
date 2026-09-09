@@ -76,6 +76,9 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
+  pm.addPass(createMergeComputeBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+
   pm.addPass(createRelocateMemrefDeclPass());
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
@@ -110,6 +113,7 @@ void registerComputeBlockOptPasses() {
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);
+  registerPass(createMergeComputeBlockPass);
   registerPass(createRelocateMemrefDeclPass);
 }
 

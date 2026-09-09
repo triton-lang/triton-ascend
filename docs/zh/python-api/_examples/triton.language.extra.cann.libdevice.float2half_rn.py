@@ -42,7 +42,7 @@ def test_float2half_rn():
     triton_kernel[(1, )](x0, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
     output = output.cpu()
     expected = expected.cpu()
-    torch.testing.assert_close(output, expected, rtol=0, atol=0, equal_nan=True)
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":

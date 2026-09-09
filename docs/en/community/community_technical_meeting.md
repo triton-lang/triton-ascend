@@ -14,12 +14,12 @@ Triton-Ascend holds regular community technical meetings as the core decision-ma
 
 - **Meeting Frequency**: Bi-weekly
 - **Meeting Time**: Thursday 14:15(UTC+8)
-- **Meeting Start Date**: 4 June, 2026
+- **Meeting Start Date**: 2026-09-03
 - **Meeting Link**: [Link](https://us06web.zoom.us/j/86540192059?pwd=X2N3pl5bnZH5CgiuX1zjyZoELItmjP.1)
 - **Meeting Room Number**: 865 4019 2059
 - **Meeting Room Password**: 123456
 - **Meeting Agenda and Minutes**: [Agenda&Minutes](https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0)
-- **Meeting iCalendar**: [iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DObLUj7lyTNwJj6XJgAALAAAAOvNV2DJnuObI9tqQGt1c3aeqVgCdzMYHV0m_J0KHIX0i4QUrtvsJwMu_EMF5VKyBKdX4rPWh_raTxvF4jAwMDAwMQ&meetingMasterEventId=1PZVSVC8S8WIBZJ1e4wuZQ)
+- **Meeting iCalendar**: [iCalendar-ics](https://us06web.zoom.us/meeting/tZIoc-mppzkqH92hP7TBYHppsqZUxg9F8VPf/ics?icsToken=DBlmQBo-ZbCIRz2GWwAALAAAAH1WzqoLLdQ-3b1rNf3AN6DLmYOhAUMS4b1zaoD-mgyykQQcSeS7S4Sf27U3_r_pLLEVTWFd8P_zVnm1zzAwMDAwMg)
 
 ## Voting Rules
 

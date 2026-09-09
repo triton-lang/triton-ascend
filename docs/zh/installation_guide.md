@@ -62,7 +62,7 @@ pip install -e .
     git clone --no-checkout https://github.com/llvm/llvm-project.git
     cd llvm-project
     git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
     git apply llvm_patch_f6ded0b.patch
     ```
 

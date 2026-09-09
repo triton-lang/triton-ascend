@@ -10,7 +10,7 @@
 
 **硬件要求**
 
-支持的操作系统：linux（aarch64/x86_64）
+支持的操作系统：Linux（aarch64/x86_64）
 
 支持的Ascend产品：Atlas A2/A3/950系列
 
@@ -18,8 +18,7 @@
 
 **软件依赖**
 
-确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》
-完成驱动与固件安装。
+确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
 
 - CANN版本：9.1.0
 - Python版本：python3.11
@@ -35,11 +34,11 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 ## 快速开始
 
-**运行tutorials中向量加法示例验证结果**
+**运行tutorials中的向量加法示例验证结果**
 
 向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。
-> ⚠️ 下述命令需在 bash 环境下执行。若使用 POSIX sh，请将 `source` 替换为 `.`。
+> ⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）

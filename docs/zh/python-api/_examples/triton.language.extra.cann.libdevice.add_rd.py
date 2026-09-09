@@ -48,7 +48,7 @@ def test_add_rd():
     triton_kernel[(1, )](x0, x1, output, 8, XBLOCK=8, XBLOCK_SUB=8, compile_mode='simt_only')
     output = output.cpu()
     expected = expected.cpu()
-    torch.testing.assert_close(output, expected, rtol=1e-03, atol=1e-03, equal_nan=True)
+    torch.testing.assert_close(output, expected, rtol=1e-04, atol=1e-04, equal_nan=True)
 
 
 if __name__ == "__main__":

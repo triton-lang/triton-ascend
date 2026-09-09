@@ -345,6 +345,19 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
   return llvm::failure();
 }
 
+static bool isStoreLikeWithRegion(Operation *op) {
+  if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+    return true;
+  }
+  auto ret = op->walk([&](Operation *subOp) {
+    if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(subOp)) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return ret == WalkResult::interrupt();
+}
+
 // Stable sort ops based on their group orders
 static llvm::FailureOr<SmallVector<Operation *>>
 buildReorderedOps(const BlockOpGraph &graph,
@@ -361,7 +374,7 @@ buildReorderedOps(const BlockOpGraph &graph,
     SmallVector<Operation *> storeOps;
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
-        if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+        if (isStoreLikeWithRegion(op)) {
           storeOps.push_back(op);
           continue;
         }

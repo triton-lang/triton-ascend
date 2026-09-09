@@ -516,12 +516,11 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
   for (auto &entry : crossDeps) {
     Operation *consumerOp = entry.first;                 // Consumer operation
     SmallVector<Operation *> producerOps = entry.second; // Producer op list
-    int x = producerOps.size(); // Producer op count (one buffer has
-                                // two ops in different scope)
-    // some special buffer is not Symmetrical
-    if (producerOps.size() == 1) {
-      x = 1;
-    }
+    // The upstream pass now labels only the last producer per group, so
+    // producerOps.size() no longer reflects the real producer/buffer count.
+    // Use the authoritative value populated by InitDependentMapPass via
+    // BufferCountManager (ssbuffer.inter_core_buf_count).
+    int x = info->crossCoreBufferCount;
 
     // Find the IfOp index that consumer belongs to (comsumerIdx)
     int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);

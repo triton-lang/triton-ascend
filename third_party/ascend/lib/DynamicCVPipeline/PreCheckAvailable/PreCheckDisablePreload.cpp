@@ -56,7 +56,8 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "pcb14_tc01_while_matmul_scalar",
     "pcb14_tc02_while_matmul_scalar",
     "paged_decode_fd_reduce_kernel",
-    "paged_decode_fd_kernel"};
+    "paged_decode_fd_kernel",
+    "flash_fwd_kernel"};
 
 static constexpr const char *DEBUG_TYPE = "pre-check-disable-preload";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")

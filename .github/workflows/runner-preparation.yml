@@ -102,8 +102,6 @@ jobs:
             echo 'matrix-ASCEND<<MATRIX_EOF' >> $GITHUB_OUTPUT
             echo '[
               {
-                "name": "linux-aarch64-a3-4",
-                "runner_type": "linux-aarch64-a3-4",
                 "runs_on": ["linux-aarch64-a3-4"],
                 "chip_type": "a3",
                 "cann_version": "8.5.0",
@@ -111,8 +109,6 @@ jobs:
                 "python_version": "3.10"
               },
               {
-                "name": "linux-aarch64-a3-4",
-                "runner_type": "linux-aarch64-a3-4",
                 "runs_on": ["linux-aarch64-a3-4"],
                 "chip_type": "a3",
                 "cann_version": "8.5.0",

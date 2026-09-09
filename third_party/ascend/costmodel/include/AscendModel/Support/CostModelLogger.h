@@ -11,7 +11,7 @@
 //   1 / default  - full detail: interface call chain, key inputs/outputs,
 //                  IR snapshots, stage partition detail, and per-stage cost
 //                  formulas
-//   2 / verbose  - alias of 1 (kept for compatibility)
+//   2 / verbose  - level 1 plus internal helper traces
 //
 // Usage:
 //   void someInterface(ModuleOp module) {

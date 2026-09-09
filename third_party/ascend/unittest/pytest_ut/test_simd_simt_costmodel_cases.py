@@ -643,7 +643,13 @@ def mixed_route_anchor_and_anchorless_kernel(
 
 
 @simd_simt_910_95_only
-def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path):
+def test_costmodel_mixed_route_anchor_and_anchorless(tmp_path, monkeypatch):
+    # TRITON_ASCEND_COMPILE_MODE unconditionally overrides any explicit
+    # compile_mode kwarg (AscendOptions.__post_init__).  With it exported the
+    # all_simd/all_simt baseline launches below would silently compile as
+    # simd_simt too, and the measured baseline comparison would compare
+    # three identical mixed binaries.
+    monkeypatch.delenv("TRITON_ASCEND_COMPILE_MODE", raising=False)
     logical_programs = _vector_core_count()
     # The unified buffer frame must hold the tile buffers plus the gather's
     # double-buffered indices and gathered table: int16 indices and float16

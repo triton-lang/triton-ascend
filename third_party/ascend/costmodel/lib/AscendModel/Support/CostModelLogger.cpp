@@ -40,7 +40,7 @@ int &logLevelRef() {
 }
 
 unsigned &traceDepthRef() {
-  static unsigned depth = 0;
+  static thread_local unsigned depth = 0;
   return depth;
 }
 
@@ -57,7 +57,7 @@ namespace mlir::ascend::costmodel {
 
 int logLevel() { return logLevelRef(); }
 bool logEnabled() { return logLevel() >= 1; }
-bool debugEnabled() { return logLevel() >= 1; }
+bool debugEnabled() { return logLevel() >= 2; }
 
 // The one place that owns the log backend.  Swap llvm::errs() here (e.g. for
 // a raw_fd_ostream or a captured callback stream) to redirect all costmodel

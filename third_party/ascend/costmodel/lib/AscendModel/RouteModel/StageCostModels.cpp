@@ -137,9 +137,62 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
                              resources.predicate + resources.shuffle +
                              resources.dot;
   else if (stage.features.hasReduction)
+    // A reduction whose accumulation is a tt.dot (hybrid dot+reduction
+    // Stage) must charge the dot on the accumulation chain; pure
+    // reductions keep dot == 0 and are unaffected.
     resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle;
+        resources.compute + resources.predicate + resources.shuffle +
+        resources.dot;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
+}
+
+static StageWorkload subtractWorkload(const StageWorkload &total,
+                                      const StageWorkload &local) {
+  StageWorkload residual = total;
+  auto subtract = [](double lhs, double rhs) {
+    return std::max(0.0, lhs - rhs);
+  };
+  residual.scalarOperations =
+      subtract(total.scalarOperations, local.scalarOperations);
+  residual.loadBytes = subtract(total.loadBytes, local.loadBytes);
+  residual.storeBytes = subtract(total.storeBytes, local.storeBytes);
+  residual.loadWarpInstructions =
+      subtract(total.loadWarpInstructions, local.loadWarpInstructions);
+  residual.storeWarpInstructions =
+      subtract(total.storeWarpInstructions, local.storeWarpInstructions);
+  residual.predicateElements =
+      subtract(total.predicateElements, local.predicateElements);
+  residual.shuffleLaneSteps =
+      subtract(total.shuffleLaneSteps, local.shuffleLaneSteps);
+  residual.dotFlops = subtract(total.dotFlops, local.dotFlops);
+  residual.issueElements = subtract(total.issueElements, local.issueElements);
+  residual.estimatedSpillTransactions = subtract(
+      total.estimatedSpillTransactions, local.estimatedSpillTransactions);
+  for (const auto &[name, elements] : local.operationElements) {
+    auto it = residual.operationElements.find(name);
+    if (it != residual.operationElements.end())
+      it->second = subtract(it->second, elements);
+  }
+  return residual;
+}
+
+static void addResources(StageResourceCycles &into,
+                         const StageResourceCycles &from) {
+  into.setup += from.setup;
+  into.scalar += from.scalar;
+  into.load += from.load;
+  into.store += from.store;
+  into.compute += from.compute;
+  into.predicate += from.predicate;
+  into.shuffle += from.shuffle;
+  into.dot += from.dot;
+  into.loopControl += from.loopControl;
+  into.branchControl += from.branchControl;
+  into.divergence += from.divergence;
+  into.synchronization += from.synchronization;
+  into.spill += from.spill;
+  into.issue += from.issue;
+  into.criticalPath += from.criticalPath;
 }
 
 static double applySuperBlock(const LogicalStage &stage,
@@ -551,6 +604,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.iterationCount = stage.iterationCount;
     logicalCost.features = stage.features;
     logicalCost.workload = stage.workload;
+    logicalCost.localSimtWorkload = stage.localSimtWorkload;
     logicalCost.ownedOperationCount =
         static_cast<int64_t>(stage.operations.size());
     logicalCost.sourceLocations = collectSourceLocations(stage);
@@ -583,15 +637,53 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' has an illegal candidate",
                                        stage.id.c_str());
-      StageResourceCycles resources = mapWorkload(
-          stage,
-          implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
       std::string formula;
       std::string superblockFormula;
-      const double baseCycles =
-          estimateStage(stage, profile, implementation.mode, resources,
-                        trace ? &formula : nullptr);
+      StageResourceCycles resources;
+      double baseCycles = 0.0;
+      if (implementation.localScope &&
+          stage.localSimtWorkload.issueElements > 0.0) {
+        LogicalStage residualStage = stage;
+        residualStage.workload =
+            subtractWorkload(stage.workload, stage.localSimtWorkload);
+        StageResourceCycles residual =
+            mapWorkload(residualStage, profile.simd, StageMode::SIMD);
+        std::string residualFormula;
+        const double residualCycles =
+            estimateStage(residualStage, profile, StageMode::SIMD, residual,
+                          trace ? &residualFormula : nullptr);
+
+        LogicalStage localStage = stage;
+        localStage.costModelKind = stage.features.hasPrefixScan
+                                       ? StageCostModelKind::PrefixScan
+                                       : stage.costModelKind;
+        localStage.scheduleKind = StageScheduleKind::StraightLine;
+        localStage.workload = stage.localSimtWorkload;
+        localStage.workload.paysKernelSetup = false;
+        localStage.features = StageModelFeatures{};
+        localStage.features.hasPrefixScan = stage.features.hasPrefixScan;
+        localStage.features.hasReduction = !stage.features.hasPrefixScan &&
+                                           stage.features.hasReduction;
+        StageResourceCycles local =
+            mapWorkload(localStage, profile.simt, StageMode::SIMT);
+        std::string localFormula;
+        const double localCycles =
+            estimateStage(localStage, profile, StageMode::SIMT, local,
+                          trace ? &localFormula : nullptr);
+        resources = residual;
+        addResources(resources, local);
+        baseCycles = residualCycles + localCycles;
+        if (trace)
+          formula = "hybrid_local_scope = residual SIMD (" + residualFormula +
+                    ") + anchored SIMT (" + localFormula + ")";
+      } else {
+        resources = mapWorkload(
+            stage, implementation.mode == StageMode::SIMD ? profile.simd
+                                                           : profile.simt,
+            implementation.mode);
+        baseCycles = estimateStage(stage, profile, implementation.mode,
+                                   resources, trace ? &formula : nullptr);
+      }
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;

@@ -591,6 +591,64 @@ TEST(CostModelPassesTest, SimdSimtScoresGenericSemanticStages) {
   EXPECT_EQ(*reportReason, "report_mode");
 }
 
+TEST(CostModelPassesTest, AllSimdPreservesBackendIntrinsicSimtRouting) {
+  mlir::MLIRContext context;
+  context.allowUnregisteredDialects();
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>)
+      -> tensor<4xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<4xf32>
+    return %0 : tensor<4xf32>
+  }
+  func.func private @intrinsic_scan(%input: tensor<1xf32>)
+      -> tensor<1xf32> {
+    %scan = "tt.scan"(%input) ({
+    ^bb0(%lhs: f32, %rhs: f32):
+      %sum = arith.addf %lhs, %rhs : f32
+      "tt.scan.return"(%sum) : (f32) -> ()
+    }) {axis = 0 : i32, reverse = false}
+      : (tensor<1xf32>) -> tensor<1xf32>
+    return %scan : tensor<1xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "auto";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.numWarps = 4;
+  options.compileOn91095 = true;
+  ASSERT_TRUE(runPasses(*module,
+                        createSelectSimdSimtCostModelPass(options)));
+
+  auto effective = (*module)->getAttrOfType<StringAttr>(
+      "ascend.simt_costmodel.effective");
+  auto reportAttr = (*module)->getAttrOfType<StringAttr>(
+      "ascend.simt_costmodel.report_json");
+  ASSERT_TRUE(effective);
+  ASSERT_TRUE(reportAttr);
+  EXPECT_EQ(effective.getValue(), "backend_default");
+  auto report = llvm::json::parse(reportAttr.getValue());
+  ASSERT_TRUE(static_cast<bool>(report));
+  auto *object = report->getAsObject();
+  ASSERT_NE(object, nullptr);
+  auto costOnly = object->getString("cost_only_decision_kind");
+  auto decision = object->getString("decision_kind");
+  auto reportedEffective = object->getString("effective_decision_kind");
+  auto reason = object->getString("application_reason");
+  ASSERT_TRUE(costOnly);
+  ASSERT_TRUE(decision);
+  ASSERT_TRUE(reportedEffective);
+  ASSERT_TRUE(reason);
+  EXPECT_EQ(*costOnly, "all_simd");
+  EXPECT_EQ(*decision, "backend_default");
+  EXPECT_EQ(*reportedEffective, "backend_default");
+  EXPECT_EQ(*reason, "backend_intrinsic_simt_required");
+}
+
 TEST(CostModelPassesTest, SimdSimtSelectionUsesExternalAnalysisIR) {
   mlir::MLIRContext context;
   auto module = parseModule(context, kOutOfSimdSimtCoverageModule);

@@ -1,4 +1,5 @@
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 
@@ -31,6 +32,22 @@ using mlir::ascend::StageWorkloadAnalysis;
 using mlir::ascend::TriangularSolveFacts;
 
 namespace {
+
+TEST(SimdSimtCostModelTest, CumsumCapabilitiesDistinguishMixedLocalScope) {
+  auto capabilities = mlir::ascend::querySimtLoweringCapabilities(
+      "Ascend950PR_9579", /*compileOn91095=*/true);
+  EXPECT_TRUE(capabilities.supportsLocalSimtScopes);
+  EXPECT_TRUE(capabilities.supportsPlainCumsumSIMD);
+  EXPECT_TRUE(capabilities.supportsPlainCumsumSIMTOnly);
+  EXPECT_FALSE(capabilities.supportsPlainCumsumInLocalSIMTScope);
+
+  auto genericCapabilities = mlir::ascend::querySimtLoweringCapabilities(
+      "Ascend910B", /*compileOn91095=*/false);
+  EXPECT_FALSE(genericCapabilities.supportsLocalSimtScopes);
+  EXPECT_TRUE(genericCapabilities.supportsPlainCumsumSIMD);
+  EXPECT_FALSE(genericCapabilities.supportsPlainCumsumSIMTOnly);
+  EXPECT_FALSE(genericCapabilities.supportsPlainCumsumInLocalSIMTScope);
+}
 
 SimdSimtFeatureSummary triangularBt16StageFeatures() {
   SimdSimtFeatureSummary f;
@@ -1369,7 +1386,7 @@ TEST(SimdSimtCostModelTest, PointerInductionLoopIsNotADataRecurrence) {
             StageCostModelKind::IndependentPipelinedLoop);
 }
 
-TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
+TEST(SimdSimtCostModelTest, HybridDominantStructuresClassifyAsDominantKind) {
   StagePartition partition;
   partition.operationOwnershipComplete = true;
   LogicalStage stage =
@@ -1379,9 +1396,15 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   stage.features.hasIndirectMemory = true;
   partition.stages.push_back(std::move(stage));
 
+  // A Stage mixing tt.dot with another dominant structure cannot always be
+  // split (the dot may sit inside the other structure's serial chain), so
+  // the classifier models it with the dominant structure's kind instead of
+  // failing: derive() ranks dot above indirect memory for straight-line
+  // Stages, and the workload keeps charging both structures.
   llvm::Error error =
       mlir::ascend::StageKindClassifier().analyze(partition, 16384);
-  ASSERT_TRUE(static_cast<bool>(error));
-  EXPECT_NE(llvm::toString(std::move(error)).find("requires_split"),
-            std::string::npos);
+  ASSERT_TRUE(static_cast<bool>(error) == false)
+      << llvm::toString(std::move(error));
+  EXPECT_EQ(partition.stages.front().costModelKind,
+            StageCostModelKind::TinyCubeRoofline);
 }

@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Support/CostModelError.h"
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
@@ -840,8 +841,7 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
       static_cast<unsigned>(report.allSimtOnlyCandidateLegal) +
       static_cast<unsigned>(report.mixedCandidateLegal);
   if (legalCandidateCount == 0)
-    return llvm::createStringError(
-        std::errc::not_supported,
+    return llvm::make_error<UnsupportedCostModelIR>(
         "Stage Route Model found no materializable candidate");
   report.decision =
       chooseBest(report.candidateCosts, report.allSimdCandidateLegal,
@@ -854,8 +854,9 @@ llvm::Expected<SimdSimtCostReport> mlir::ascend::analyzeSimdSimtCandidates(
   if (!module)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "cannot analyze a null ModuleOp");
-  SimtAnchorPlan anchorPlan =
-      buildMixedSimtAnchorPlan(module, options.compileOn91095);
+  SimtAnchorPlan anchorPlan = buildMixedSimtAnchorPlan(
+      module, querySimtLoweringCapabilities(options.actualTarget,
+                                            options.compileOn91095));
   return analyzeSimdSimtCandidates(module, anchorPlan, options);
 }
 

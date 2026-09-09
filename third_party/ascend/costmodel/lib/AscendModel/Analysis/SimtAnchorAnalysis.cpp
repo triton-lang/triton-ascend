@@ -472,8 +472,9 @@ collectTriangularSolveScopeOperations(Operation *anchor,
   return result;
 }
 
-static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
-                                                         bool compileOn91095) {
+static std::optional<SimtAnchorDescriptor>
+analyzeAnchor(Operation *op,
+              const SimtLoweringCapabilities &capabilities) {
   if (!op)
     return std::nullopt;
   SimtAnchorDescriptor descriptor;
@@ -513,8 +514,20 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     if (!facts)
       return std::nullopt;
     descriptor.kind = SimtAnchorKind::PlainOneDimensionalCumsum;
-    if (facts->axisExtent <= 0 || !isSupportedCumsumType(facts->elementType))
-      descriptor.lowerability.mixed = false;
+    descriptor.lowerability.allSimd = capabilities.supportsPlainCumsumSIMD;
+    descriptor.lowerability.allSimtOnly =
+        capabilities.supportsPlainCumsumSIMTOnly;
+    const bool supportedShapeAndType =
+        facts->axisExtent > 0 && isSupportedCumsumType(facts->elementType);
+    descriptor.lowerability.allSimd &= supportedShapeAndType;
+    descriptor.lowerability.allSimtOnly &= supportedShapeAndType;
+    // A mixed route does not require every recognized anchor to become a
+    // local SIMT scope.  Cumsum can remain in the residual SIMD portion while
+    // independent, genuinely materializable anchors use local SIMT scopes.
+    descriptor.lowerability.mixed =
+        supportedShapeAndType &&
+        (capabilities.supportsPlainCumsumSIMD ||
+         capabilities.supportsPlainCumsumInLocalSIMTScope);
   } else if (name == "tt.atomic_rmw" || name == "tt.atomic_cas") {
     descriptor.kind = SimtAnchorKind::TensorAtomic;
     auto result = op->getNumResults() > 0
@@ -548,7 +561,11 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     return std::nullopt;
   }
 
-  descriptor.materializable = compileOn91095 && descriptor.lowerability.mixed;
+  descriptor.materializable = capabilities.supportsLocalSimtScopes &&
+                              descriptor.lowerability.mixed;
+  if (descriptor.kind == SimtAnchorKind::PlainOneDimensionalCumsum)
+    descriptor.materializable &=
+        capabilities.supportsPlainCumsumInLocalSIMTScope;
   return descriptor;
 }
 
@@ -742,8 +759,35 @@ mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
   return descriptor;
 }
 
-SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
-                                                      bool compileOn91095) {
+SimtLoweringCapabilities mlir::ascend::querySimtLoweringCapabilities(
+    llvm::StringRef actualTarget, bool compileOn91095) {
+  SimtLoweringCapabilities capabilities;
+  // The integration layer is the authority for local-scope support.  Target
+  // spelling is retained for diagnostics/future capability-table expansion;
+  // individual anchor matchers no longer branch on a product-name boolean.
+  capabilities.supportsLocalSimtScopes = compileOn91095;
+  // tt.scan is supported by the normal SIMD pipeline and by the whole-kernel
+  // simt_only pipeline on 91095.  The local-SIMT-scope pipeline is a third,
+  // narrower capability: its current external compiler cannot legalize the
+  // resulting hivm.hir.vcumsum, so cumsum must stay on the SIMD side of a
+  // mixed route instead of being outlined.
+  capabilities.supportsPlainCumsumSIMD = true;
+  capabilities.supportsPlainCumsumSIMTOnly = compileOn91095;
+  capabilities.supportsPlainCumsumInLocalSIMTScope = false;
+  costModelDebug() << "lowering capabilities: target=" << actualTarget
+                   << " local_simt_scope="
+                   << capabilities.supportsLocalSimtScopes
+                   << " cumsum_simd="
+                   << capabilities.supportsPlainCumsumSIMD
+                   << " cumsum_simt_only="
+                   << capabilities.supportsPlainCumsumSIMTOnly
+                   << " cumsum_local_simt_scope="
+                   << capabilities.supportsPlainCumsumInLocalSIMTScope << "\n";
+  return capabilities;
+}
+
+SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(
+    ModuleOp module, const SimtLoweringCapabilities &capabilities) {
   COSTMODEL_TRACE("buildMixedSimtAnchorPlan");
   SimtAnchorPlan plan;
   llvm::DenseSet<Operation *> operationsInPlannedScope;
@@ -751,7 +795,7 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
     if (operationsInPlannedScope.contains(op))
       return WalkResult::skip();
     std::optional<SimtAnchorDescriptor> descriptor =
-        analyzeAnchor(op, compileOn91095);
+        analyzeAnchor(op, capabilities);
     if (!descriptor)
       return WalkResult::advance();
 
@@ -802,4 +846,10 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
                                           : "")
                  << ")\n";
   return plan;
+}
+
+SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
+                                                      bool compileOn91095) {
+  return buildMixedSimtAnchorPlan(
+      module, querySimtLoweringCapabilities("", compileOn91095));
 }

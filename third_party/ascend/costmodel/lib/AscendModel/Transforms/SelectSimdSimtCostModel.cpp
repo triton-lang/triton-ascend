@@ -9,6 +9,7 @@
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Support/CostModelError.h"
 #include "AscendModel/Support/CostModelLogger.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
@@ -66,6 +67,58 @@ static bool containsExplicitVectorScope(ModuleOp module) {
     return WalkResult::advance();
   });
   return found;
+}
+
+static bool isBackendIntrinsicSimtScan(Operation *op) {
+  if (op->getName().getStringRef() != "tt.scan" ||
+      op->getNumOperands() == 0 || op->getNumRegions() == 0 ||
+      op->getRegion(0).empty())
+    return false;
+
+  auto axisAttr = op->getAttrOfType<IntegerAttr>("axis");
+  auto srcTy = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+  if (!axisAttr || !srcTy || !srcTy.hasRank())
+    return false;
+  int64_t axis = axisAttr.getInt();
+  ArrayRef<int64_t> shape = srcTy.getShape();
+  if (axis < 0 || axis >= static_cast<int64_t>(shape.size()))
+    return false;
+  for (int64_t dim = 0; dim < static_cast<int64_t>(shape.size()); ++dim) {
+    if (dim != axis && shape[dim] != 1)
+      return false;
+  }
+
+  Operation *combineOp = nullptr;
+  for (Operation &bodyOp : op->getRegion(0).front().without_terminator()) {
+    llvm::StringRef name = bodyOp.getName().getStringRef();
+    if (name == "arith.extf" || name == "arith.truncf" ||
+        name == "arith.bitcast")
+      continue;
+    if (combineOp)
+      return false;
+    combineOp = &bodyOp;
+  }
+  if (!combineOp)
+    return false;
+  llvm::StringRef combineName = combineOp->getName().getStringRef();
+  return combineName == "arith.addf" || combineName == "arith.addi";
+}
+
+static bool requiresBackendIntrinsicSimtRouting(ModuleOp module,
+                                                bool compileOn91095) {
+  if (!compileOn91095)
+    return false;
+  bool required = false;
+  module.walk([&](Operation *op) {
+    llvm::StringRef name = op->getName().getStringRef();
+    if (name == "tt.gather" || name == "tt.histogram" ||
+        isBackendIntrinsicSimtScan(op)) {
+      required = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return required;
 }
 
 static void clearPreviousSelection(ModuleOp module) {
@@ -381,21 +434,70 @@ struct SelectSimdSimtCostModelPass
         if (auto count = object->getInteger("physical_vector_core_count_hint"))
           options.physicalVectorCoreCountHint = std::max<int64_t>(0, *count);
 
-    SimtAnchorPlan anchorPlan =
-        buildMixedSimtAnchorPlan(module, options.compileOn91095);
+    const SimtLoweringCapabilities capabilities =
+        querySimtLoweringCapabilities(options.actualTarget,
+                                      options.compileOn91095);
+    SimtAnchorPlan anchorPlan = buildMixedSimtAnchorPlan(module, capabilities);
     SimtAnchorPlan analysisAnchorPlan =
-        buildMixedSimtAnchorPlan(analysisModule, options.compileOn91095);
+        buildMixedSimtAnchorPlan(analysisModule, capabilities);
     auto reportOr =
         analyzeSimdSimtCandidates(analysisModule, analysisAnchorPlan, options);
     if (!reportOr) {
-      module.emitError("C++ SIMD/SIMT cost model failed: ")
-          << llvm::toString(reportOr.takeError());
-      signalPassFailure();
+      std::string reason;
+      bool recoverable = false;
+      llvm::Error unhandled = llvm::handleErrors(
+          reportOr.takeError(), [&](const UnsupportedCostModelIR &error) {
+            reason = error.getMessage().str();
+            recoverable = true;
+          });
+      if (unhandled) {
+        reason = llvm::toString(std::move(unhandled));
+        module.emitError("C++ SIMD/SIMT cost model internal failure: ")
+            << reason;
+        signalPassFailure();
+        return;
+      }
+      assert(recoverable && "typed costmodel error was not handled");
+      // Unsupported but valid TTIR is recoverable.  Internal partition/profile
+      // invariants are deliberately not swallowed by this path.
+      module.emitWarning("C++ SIMD/SIMT cost model fell back to "
+                         "backend_default: ")
+          << reason;
+      Builder builder(module.getContext());
+      module->setAttr(kEffectiveExecutionAttr,
+                      builder.getStringAttr(kBackendDefault));
+      module->setAttr(kSelectionSourceAttr,
+                      builder.getStringAttr("backend_default"));
+      llvm::json::Object reportJSON;
+      reportJSON["mode"] = mode.getValue();
+      reportJSON["recommended_decision_kind"] = kBackendDefault.str();
+      reportJSON["effective_decision_kind"] = kBackendDefault.str();
+      reportJSON["selection_source"] = "backend_default";
+      reportJSON["application_reason"] = reason;
+      reportJSON["action_supported"] = false;
+      std::string json =
+          llvm::formatv("{0}", llvm::json::Value(std::move(reportJSON))).str();
+      module->setAttr(kReportJSONAttr, builder.getStringAttr(json));
+      if (failed(appendJSONLine(reportFile.getValue(), json)))
+        module.emitWarning("failed to append C++ SIMD/SIMT report to ")
+            << reportFile.getValue();
       return;
     }
     SimdSimtCostReport report = std::move(*reportOr);
 
-    std::string recommended = stringifySimdSimtCandidate(report.decision).str();
+    std::string costOnlyRecommended =
+        stringifySimdSimtCandidate(report.decision).str();
+    std::string recommended = costOnlyRecommended;
+    // "all_simd" means that the Route Model does not need to materialize a
+    // local SIMT scope.  It must not disable backend-intrinsic SIMT lowering
+    // for operations such as tt.scan, whose strict SIMD lowering is not a
+    // valid executable candidate.  Preserve the proven backend route in this
+    // case instead of applying a semantically different all-SIMD contract.
+    const bool preserveBackendIntrinsicRoute =
+        autoMode && recommended == kAllSimd &&
+        requiresBackendIntrinsicSimtRouting(module, options.compileOn91095);
+    if (preserveBackendIntrinsicRoute)
+      recommended = kBackendDefault.str();
     std::string effective = kBackendDefault.str();
     std::string selectionSource = "backend_default";
     std::string applicationReason;
@@ -408,7 +510,7 @@ struct SelectSimdSimtCostModelPass
     else if (report.decision == SimdSimtCandidateKind::AllSIMTOnly)
       selectedSuperblockFactor =
           report.stageModel.allSimt.routeSuperblockFactor;
-    else
+    else if (recommended == kMixedSimdSimt)
       selectedSuperblockFactor = report.stageModel.mixed.routeSuperblockFactor;
 
     bool actionSupported = true;
@@ -465,7 +567,9 @@ struct SelectSimdSimtCostModelPass
     if (autoMode && actionSupported) {
       effective = recommended;
       selectionSource = "cpp_cost_model";
-      applicationReason = "minimum_cost_candidate";
+      applicationReason = preserveBackendIntrinsicRoute
+                              ? "backend_intrinsic_simt_required"
+                              : "minimum_cost_candidate";
     } else if (!autoMode) {
       applicationReason = "report_mode";
     } else if (applicationReason.empty()) {
@@ -506,6 +610,8 @@ struct SelectSimdSimtCostModelPass
 
     llvm::json::Object reportJSON = report.toJSON();
     reportJSON["mode"] = mode.getValue();
+    reportJSON["cost_only_decision_kind"] = costOnlyRecommended;
+    reportJSON["decision_kind"] = recommended;
     reportJSON["recommended_decision_kind"] = recommended;
     reportJSON["effective_decision_kind"] = effective;
     reportJSON["selection_source"] = selectionSource;

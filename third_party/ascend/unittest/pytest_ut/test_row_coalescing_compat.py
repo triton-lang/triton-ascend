@@ -97,6 +97,11 @@ def _row_module(
     }}
 """
         store_value = "%out"
+    elif body in ("auto_overflow_assert", "user_assert"):
+        marker = " {tt.auto_overflow_assert}" if body == "auto_overflow_assert" else ""
+        post_load = f"""    %assert_ok = arith.constant dense<true> : tensor<{width}xi1>
+    tt.assert %assert_ok, "int32 overflow detected for operation add"{marker} : tensor<{width}xi1>
+"""
     elif body == "non_whitelisted_y_num_programs":
         post_load = "    %not_whitelisted = tt.get_num_programs y : i32\n"
     elif body != "copy":
@@ -222,6 +227,29 @@ def test_row_coalescing_clones_scf_for_with_lifted_iter_args(tmp_path):
     assert "iter_args" in text
     assert "-> (tensor<8x16xf32>)" in text
     assert "scf.yield" in text
+
+
+def test_row_coalescing_lifts_marked_automatic_overflow_assert(tmp_path):
+    text = _run_row(
+        _row_module("row_auto_overflow_assert", 16, body="auto_overflow_assert"),
+        tmp_path,
+    )
+
+    _assert_row_hit(text)
+    assert "tt.auto_overflow_assert" in text
+    assert '"int32 overflow detected for operation add"' in text
+    assert "tensor<8x16xi1>" in text
+
+
+def test_row_coalescing_rejects_unmarked_user_assert(tmp_path):
+    text = _run_row(
+        _row_module("row_user_assert", 16, body="user_assert"),
+        tmp_path,
+    )
+
+    _assert_row_bailout(text)
+    assert "tt.assert" in text
+    assert "tt.auto_overflow_assert" not in text
 
 
 def test_row_coalescing_rejects_non_whitelisted_y_num_programs(tmp_path):

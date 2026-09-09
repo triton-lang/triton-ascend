@@ -8,6 +8,17 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 
+def _load_program_grid_module():
+    module_name = "triton.backends.ascend.program_grid"
+    program_grid_path = Path(__file__).resolve().parents[2] / "backend" / "program_grid.py"
+    spec = importlib.util.spec_from_file_location(module_name, program_grid_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_driver_module():
     driver_path = Path(__file__).resolve().parents[2] / "backend" / "driver.py"
     spec = importlib.util.spec_from_file_location("ascend_driver_under_test", driver_path)
@@ -17,6 +28,7 @@ def _load_driver_module():
     return module
 
 
+_load_program_grid_module()
 driver = _load_driver_module()
 
 
@@ -40,6 +52,8 @@ def _make_metadata():
         coalesce_factor=1,
         coalesce_axis=-1,
         coalesce_grid_ceil_div=False,
+        program_grid_transforms=None,
+        program_grid_specialization=None,
         has_auto_blockify_blacklist_op=False,
         row_coalescing_applied=False,
     )
@@ -257,6 +271,218 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
         c_abi_launch, cpp_launch = _split_launch_functions(src)
         assert c_abi_launch.count(cap) == expected_per_launch_path, case
         assert cpp_launch.count(cap) == expected_per_launch_path, case
+
+
+def _program_grid_transform(order, axis, factor, logical_extent, *, persistent=False):
+    return {
+        "order": order,
+        "kind": "ceil_div",
+        "axis": axis,
+        "factor": factor,
+        "logical_extent": logical_extent,
+        "persistent_coverage": persistent,
+        "grid_stride_abi_verified": persistent,
+    }
+
+
+def _program_grid_specialization(*, grid=(8, 65, 1), rule_mask=512):
+    return {
+        "version": 1,
+        "grid": list(grid),
+        "rule_mask": rule_mask,
+    }
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_keeps_c_abi_transform_and_marks_python_grid_final(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_transforms = {
+        "version":
+        1,
+        "transforms": [
+            _program_grid_transform(0, 0, 2, 65),
+            _program_grid_transform(1, 0, 3, 65),
+            _program_grid_transform(2, 1, 4, 17),
+        ],
+    }
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32", 1: "*fp32"},
+        metadata=metadata,
+    )
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    expected_in_order = (
+        "const int logicalGrid0 = gridX;",
+        "gridX = (gridX + 2 - 1) / 2;",
+        "gridX = (gridX + 3 - 1) / 3;",
+        "const int logicalGrid1 = gridY;",
+        "gridY = (gridY + 4 - 1) / 4;",
+    )
+    positions = [c_abi_launch.index(fragment) for fragment in expected_in_order]
+    assert positions == sorted(positions)
+    assert "ChunkCoalescing" not in c_abi_launch
+
+    # Python JIT has already turned its exact cache-specialized logical grid
+    # into the final launch grid.  The generated Python entry deliberately
+    # preserves the raw C ABI path behind this guard instead of double-dividing
+    # the program count.
+    assert "bool gridAlreadyTransformed" in cpp_launch
+    assert "if (!gridAlreadyTransformed)" in cpp_launch
+    assert cpp_launch.index("if (!gridAlreadyTransformed)") < cpp_launch.index("gridX = (gridX + 2 - 1) / 2;")
+    assert "_launch(kernelName, function, stream,\n          true," in src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_grid_specialization_snapshot_precedes_c_abi_transforms(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_specialization = _program_grid_specialization()
+    metadata.program_grid_transforms = {
+        "version": 1,
+        "transforms": [_program_grid_transform(0, 1, 4, 65)],
+    }
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=metadata,
+    )
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    expected_check = (
+        "const int originalGrid0 = gridX;",
+        "const int originalGrid1 = gridY;",
+        "const int originalGrid2 = gridZ;",
+        "if (!haccProgramGridSpecializationMatches(",
+        "haccGridSpecializationRejected = true;",
+    )
+    positions = [c_abi_launch.index(fragment) for fragment in expected_check]
+    assert positions == sorted(positions)
+    assert c_abi_launch.index("const int originalGrid1 = gridY;") < c_abi_launch.index(
+        "const int logicalGrid1 = gridY;")
+    assert c_abi_launch.index("const int logicalGrid1 = gridY;") < c_abi_launch.index("gridY = (gridY + 4 - 1) / 4;")
+
+    # The Python path relies on the backend's pre-launch check, then passes a
+    # final grid.  Retaining the raw check only behind this guard keeps C API
+    # mismatch rejection while avoiding a false rejection of the final grid.
+    guard = cpp_launch.index("if (!gridAlreadyTransformed)")
+    assert guard < cpp_launch.index("const int originalGrid1 = gridY;")
+    assert cpp_launch.index("const int originalGrid1 = gridY;") < cpp_launch.index("const int logicalGrid1 = gridY;")
+
+    assert src.count("static bool haccProgramGridSpecializationMatches") == 1
+    assert c_abi_launch.count("\n  haccGridSpecializationRejected = false;") == 1
+    assert cpp_launch.count("haccGridSpecializationRejected = true;") == 1
+    assert "runtime grid does not match the compiled hacc.grid_specialization" in src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_legacy_launcher_does_not_gain_grid_specialization_state(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=_make_metadata(),
+    )
+
+    assert "haccProgramGridSpecializationMatches" not in src
+    assert "haccGridSpecializationRejected" not in src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_new_nonpersistent_program_grid_contract_never_emits_global_block_cap(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_transforms = {
+        "version": 1,
+        "transforms": [_program_grid_transform(0, 0, 4, 68)],
+    }
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=metadata,
+    )
+    cap = "blockNum = std::min(blockNum, (uint32_t)40);"
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    assert cap not in c_abi_launch
+    assert cap not in cpp_launch
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_persistent_program_grid_contract_caps_verified_axis_in_both_paths(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_transforms = {
+        "version": 1,
+        "transforms": [_program_grid_transform(0, 0, 2, 38, persistent=True)],
+    }
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "*fp32"},
+        metadata=metadata,
+    )
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    global_cap = "blockNum = std::min(blockNum, (uint32_t)40);"
+    axis_cap = "gridX = std::min(gridX, static_cast<int>(programGridAxisCap));"
+    for launch_path in (c_abi_launch, cpp_launch):
+        assert "capped tt.num_programs(0)" in launch_path
+        assert axis_cap in launch_path
+        assert global_cap not in launch_path
 
 
 @patch.object(driver, "NPUUtils")

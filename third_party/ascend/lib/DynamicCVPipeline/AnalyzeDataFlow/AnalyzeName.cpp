@@ -50,7 +50,6 @@ static constexpr llvm::StringLiteral interceptrFunc[]{
     "_sparse_decode_model1_kernel",
     "sparse_flash_attention_grad_kernel",
     "parallel_path_fwd_kernel",
-    "_swa_bwd_dkdv_kernel",
     "flex_attention_backward_dkdv_kernel",
     "flex_attention_backward_dkdv_kernel_tasklist",
 };

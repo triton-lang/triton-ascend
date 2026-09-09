@@ -680,7 +680,12 @@ class JITFunction(JITCallable, KernelInterface[T]):
         assert "device" not in kwargs, "device option is deprecated; current device will be used"
         assert "stream" not in kwargs, "stream option is deprecated; current stream will be used"
         for k in kwargs:
-            if k not in options.__dict__ and k not in sigkeys:
+            # InitVar-backed backend options intentionally need not be stored
+            # in ``options.__dict__``.  In particular, Ascend keeps disabled
+            # program-grid specialization out of that dictionary so its
+            # legacy cache identity is unchanged, while still accepting an
+            # explicit all-disabled opt-in mask.
+            if k not in options.__dict__ and not hasattr(options, k) and k not in sigkeys:
                 raise KeyError("Keyword argument %s was specified but unrecognised" % k)
         # constexprs
         constexprs = find_paths_if(sigvals, lambda _, val: val == "constexpr")
@@ -709,6 +714,35 @@ class JITFunction(JITCallable, KernelInterface[T]):
         # the type and the second parameter is the 'specialization' value.
         bound_args, specialization, options = binder(*args, **kwargs)
 
+        # Backends which need an original launch grid as a static compiler
+        # input may opt in to resolving it here, after binding but before *any*
+        # JIT cache lookup.  The returned compiler options become part of both
+        # this key and the backend compiler cache; no hook means legacy order,
+        # callable evaluation count, and key stay untouched.
+        resolved_launch_grid = None
+        # The newer mapping hook additionally receives the ordered JIT
+        # parameters so a backend can safely turn exact launch-time integer
+        # values into cache-keyed compiler inputs.  Keep the older grid-only
+        # hook as a compatibility fallback for backends that predate it.
+        prepare_program_mapping_specialization = getattr(backend, "prepare_program_mapping_specialization", None)
+        prepare_program_grid_specialization = getattr(backend, "prepare_program_grid_specialization", None)
+        if callable(prepare_program_mapping_specialization):
+            prepared = prepare_program_mapping_specialization(grid, bound_args, options, self.params)
+        elif callable(prepare_program_grid_specialization):
+            prepared = prepare_program_grid_specialization(grid, bound_args, options)
+        else:
+            prepared = None
+        if prepared is not None:
+            resolved_launch_grid, compiler_options = prepared
+            if not isinstance(compiler_options, dict):
+                raise RuntimeError("backend program-grid specialization hook must return a dict of compiler options")
+            # ``options`` is the binder's cache-key dictionary while
+            # ``kwargs`` is reparsed on a cache miss by _pack_args(). Keep
+            # them identical so a cache hit can never launch an artifact
+            # compiled for another original extent.
+            options.update(compiler_options)
+            kwargs.update(compiler_options)
+
         key = compute_cache_key(kernel_key_cache, specialization, options)
         kernel = kernel_cache.get(key, None)
 
@@ -731,16 +765,37 @@ class JITFunction(JITCallable, KernelInterface[T]):
         if not warmup:
             # canonicalize grid
             assert grid is not None
-            if callable(grid):
-                grid = grid(bound_args)
-            grid_size = len(grid)
-            grid_0 = grid[0]
-            grid_1 = grid[1] if grid_size > 1 else 1
-            grid_2 = grid[2] if grid_size > 2 else 1
+            if resolved_launch_grid is None:
+                if callable(grid):
+                    grid = grid(bound_args)
+                grid_size = len(grid)
+                grid_0 = grid[0]
+                grid_1 = grid[1] if grid_size > 1 else 1
+                grid_2 = grid[2] if grid_size > 2 else 1
+                launch_grid = grid
+            else:
+                # The opt-in backend already validated and canonicalized the
+                # original 3-D grid before cache lookup.  Re-evaluating a
+                # callable here could change tail bounds after compilation.
+                #
+                # A backend may additionally publish a versioned host-launch
+                # transform in the compiled metadata.  Apply it only after
+                # selecting the exact cache entry, and before handing the
+                # grid to the generated Python launcher.  This makes the
+                # launcher-visible grid agree with the transformed program
+                # count while the backend remains responsible for validating
+                # the original specialization and any persistent-core cap.
+                if hasattr(kernel, "result"):
+                    kernel = kernel.result()
+                launch_grid = resolved_launch_grid
+                finalize_program_mapping_launch_grid = getattr(backend, "finalize_program_mapping_launch_grid", None)
+                if callable(finalize_program_mapping_launch_grid):
+                    launch_grid = finalize_program_mapping_launch_grid(resolved_launch_grid, kernel.metadata)
+                grid_0, grid_1, grid_2 = launch_grid
             if hasattr(kernel, "result"):
                 kernel = kernel.result()
             # launch kernel
-            launch_metadata = kernel.launch_metadata(grid, stream, *bound_args.values())
+            launch_metadata = kernel.launch_metadata(launch_grid, stream, *bound_args.values())
             kernel.run(grid_0, grid_1, grid_2, stream, kernel.function, kernel.packed_metadata, launch_metadata,
                        knobs.runtime.launch_enter_hook, knobs.runtime.launch_exit_hook, *bound_args.values())
         return kernel

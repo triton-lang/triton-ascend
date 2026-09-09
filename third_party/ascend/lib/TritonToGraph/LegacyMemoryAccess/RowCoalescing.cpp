@@ -94,6 +94,17 @@ static bool isScalarIntegerLike(Value value) {
   return intTy && intTy.getWidth() > 1;
 }
 
+// Preserve only the compiler-generated overflow instrumentation while
+// lifting a row.  User assertions remain a deliberate bailout so their trap
+// behavior is never changed by this optimization.
+static bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 // Match the canonical rowwise guard:
 //
 //   %pid = tt.get_program_id x
@@ -151,6 +162,8 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
 static bool isRowLiftable(Operation *op) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(op))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(op))
+    return isAutomaticOverflowAssert(assertOp);
   if (auto *dialect = op->getDialect()) {
     StringRef ns = dialect->getNamespace();
     if (ns == arith::ArithDialect::getDialectNamespace() ||

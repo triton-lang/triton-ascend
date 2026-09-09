@@ -22,11 +22,13 @@
 
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
+#include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
@@ -53,6 +55,12 @@ constexpr llvm::StringLiteral kCoalesceFactorAttr = "hacc.coalesce_factor";
 constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
+// IndependentAxisTensorize owns an incompatible launcher contract.  A module
+// carrying this marker must never receive the legacy Row rewrite afterwards.
+constexpr llvm::StringLiteral kIndependentAxisTensorizeMarkerAttr =
+    "hacc.independent_axis_tensorize";
+constexpr llvm::StringLiteral kPersistentTaskStripMiningMarkerAttr =
+    "hacc.persistent_task_strip_mining";
 
 constexpr int64_t kDefaultRowsPerProgram = 8;
 constexpr int64_t kMaxBaseElementsPerLift = 1024;
@@ -98,7 +106,11 @@ bool hasDirectCall(triton::FuncOp function) {
   return hasCall;
 }
 
-bool readsAxisNumPrograms(triton::FuncOp function, int32_t axis) {
+bool readsAxisNumPrograms(
+    triton::FuncOp function, int32_t axis,
+    const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
+  if (programAxisAnalysis)
+    return programAxisAnalysis->get(axis).readsNumPrograms;
   bool reads = false;
   function.walk([&](triton::GetNumProgramsOp np) {
     if (np.getAxisAsInt() == axis)
@@ -115,6 +127,17 @@ bool isScalarIntegerLike(Value value) {
   return integerType && integerType.getWidth() > 1;
 }
 
+// Row rewrites only accept the frontend's own overflow instrumentation.  A
+// user-authored tt.assert can have externally meaningful trap behavior, so it
+// must continue to make the candidate fail closed.
+bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 bool isInWorkRegion(Operation *operation, Block *workBlock) {
   for (Operation *current = operation; current;
        current = current->getParentOp()) {
@@ -127,6 +150,8 @@ bool isInWorkRegion(Operation *operation, Block *workBlock) {
 bool isRowLiftable(Operation *operation) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(operation))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(operation))
+    return isAutomaticOverflowAssert(assertOp);
   if (Dialect *dialect = operation->getDialect()) {
     StringRef dialectNamespace = dialect->getNamespace();
     if (dialectNamespace == arith::ArithDialect::getDialectNamespace() ||
@@ -230,7 +255,9 @@ bool hasEscapingWorkResult(ArrayRef<Operation *> ordered, Block *workBlock) {
   return false;
 }
 
-std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
+std::optional<RowSeed> matchRowSeed(
+    triton::FuncOp function,
+    const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
   SmallVector<triton::GetProgramIdOp> pids;
   function.walk([&](triton::GetProgramIdOp pid) { pids.push_back(pid); });
   if (pids.size() != 1)
@@ -238,7 +265,7 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
 
   triton::GetProgramIdOp pid = pids.front();
   const int32_t axis = pid.getAxisAsInt();
-  if (readsAxisNumPrograms(function, axis))
+  if (readsAxisNumPrograms(function, axis, programAxisAnalysis))
     return std::nullopt;
 
   for (Operation *user : pid.getResult().getUsers()) {
@@ -278,17 +305,21 @@ std::optional<RowSeed> matchRowSeed(triton::FuncOp function) {
   return std::nullopt;
 }
 
-std::optional<RowCandidate> analyzeRow(triton::FuncOp function) {
+std::optional<RowCandidate>
+analyzeRow(triton::FuncOp function,
+           const ProgramAxisDependenceAnalysis *programAxisAnalysis = nullptr) {
   ModuleOp module = function->getParentOfType<ModuleOp>();
   if (!module || !isPublicEntry(function) ||
       !isOnlyPublicEntry(module, function) || function->getNumRegions() != 1 ||
       function->getRegion(0).empty() || hasDirectCall(function) ||
+      module->hasAttr(kIndependentAxisTensorizeMarkerAttr) ||
+      module->hasAttr(kPersistentTaskStripMiningMarkerAttr) ||
       module->hasAttr(kCoalesceFactorAttr) ||
       module->hasAttr(kCoalesceAxisAttr) ||
       module->hasAttr(kCoalesceGridCeilDivAttr))
     return std::nullopt;
 
-  std::optional<RowSeed> seed = matchRowSeed(function);
+  std::optional<RowSeed> seed = matchRowSeed(function, programAxisAnalysis);
   if (!seed)
     return std::nullopt;
 
@@ -388,14 +419,15 @@ public:
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return AnalysisRequirement::None;
+    return AnalysisRequirement::ProgramAxisDependence;
   }
 
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
     if (std::optional<RowCandidate> candidate =
-            analyzeRow(context.getFunction())) {
+            analyzeRow(context.getFunction(),
+                       &context.getProgramAxisDependenceAnalysis())) {
       LLVM_DEBUG(llvm::dbgs()
                  << "[" DEBUG_TYPE "] matched graph optimization rule "
                  << static_cast<unsigned>(getId()) << " ("

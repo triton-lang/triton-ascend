@@ -708,6 +708,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
         rewriter.replaceAllUsesWith(res, replacement);
         std::advance(resIter, std::max(getPtrTensorRank(res.getType()), 1));
       }
+      offsetMap.clear();
       rewriter.eraseOp(op);
       op = newOp;
       convertTensorPtrPre(op, rewriter, offsetMap);

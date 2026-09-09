@@ -9,6 +9,7 @@
 #define ASCENDMODEL_ROUTEMODEL_SIMDSIMTCOSTMODEL_H
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
+#include "AscendModel/RouteModel/StageCostModels.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Error.h"
@@ -86,6 +87,11 @@ struct SimdSimtCostModelOptions {
   /// logical-program group.
   int64_t logicalProgramCountHint = 0;
   int64_t physicalVectorCoreCountHint = 0;
+  /// Expose the bodies of independent structured loops as their own semantic
+  /// roots, so a loop is charged only its backedge overhead while its body is
+  /// partitioned into normal Stages.  Both the scoring analysis and the
+  /// selector's materialization partition must use the same value.
+  bool splitIndependentLoopBody = true;
 };
 
 struct SimdSimtCostReport {
@@ -139,6 +145,15 @@ llvm::Expected<SimdSimtCostReport>
 analyzeSimdSimtCandidates(mlir::ModuleOp module,
                           const SimtAnchorPlan &anchorPlan,
                           const SimdSimtCostModelOptions &options = {});
+
+/// Partition `module` with exactly the options the candidate model uses for
+/// scoring.  The selector calls this so a Mixed decision synthesized from
+/// StageOwnedScope units (anchor-free Stages) wraps the same root ranges
+/// that produced the scored route.
+llvm::Expected<StagePartition>
+partitionForSimdSimtSelection(mlir::ModuleOp module,
+                              const SimtAnchorPlan &anchorPlan,
+                              const SimdSimtCostModelOptions &options = {});
 
 } // namespace ascend
 } // namespace mlir

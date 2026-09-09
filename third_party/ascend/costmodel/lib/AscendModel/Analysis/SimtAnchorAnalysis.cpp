@@ -1,6 +1,7 @@
 //===- SimtAnchorAnalysis.cpp - Materializable SIMT anchors --------------===//
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
+#include "AscendModel/Support/CostModelLogger.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -40,6 +41,17 @@ static std::string getScalarTypeName(Type type) {
   if (type.isIndex())
     return "index";
   return "unknown";
+}
+
+/// True for scalar or tensor-of-pointer state.  A scope.scope region may
+/// capture such values but must not return them: TritonToUnstructure cannot
+/// reconstruct the offset information for a returned pointer.
+static bool isPointerLikeType(Type type) {
+  std::string text;
+  llvm::raw_string_ostream stream(text);
+  stream << type;
+  stream.flush();
+  return llvm::StringRef(text).contains("!tt.ptr");
 }
 
 struct PlainCumsumLegality {
@@ -460,8 +472,8 @@ collectTriangularSolveScopeOperations(Operation *anchor,
   return result;
 }
 
-static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
-                                                         bool compileOn91095) {
+static std::optional<SimtAnchorDescriptor>
+analyzeAnchor(Operation *op, const SimtLoweringCapabilities &capabilities) {
   if (!op)
     return std::nullopt;
   SimtAnchorDescriptor descriptor;
@@ -501,8 +513,20 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     if (!facts)
       return std::nullopt;
     descriptor.kind = SimtAnchorKind::PlainOneDimensionalCumsum;
-    if (facts->axisExtent <= 0 || !isSupportedCumsumType(facts->elementType))
-      descriptor.lowerability.mixed = false;
+    descriptor.lowerability.allSimd = capabilities.supportsPlainCumsumSIMD;
+    descriptor.lowerability.allSimtOnly =
+        capabilities.supportsPlainCumsumSIMTOnly;
+    const bool supportedShapeAndType =
+        facts->axisExtent > 0 && isSupportedCumsumType(facts->elementType);
+    descriptor.lowerability.allSimd &= supportedShapeAndType;
+    descriptor.lowerability.allSimtOnly &= supportedShapeAndType;
+    // A mixed route does not require every recognized anchor to become a
+    // local SIMT scope.  Cumsum can remain in the residual SIMD portion while
+    // independent, genuinely materializable anchors use local SIMT scopes.
+    descriptor.lowerability.mixed =
+        supportedShapeAndType &&
+        (capabilities.supportsPlainCumsumSIMD ||
+         capabilities.supportsPlainCumsumInLocalSIMTScope);
   } else if (name == "tt.atomic_rmw" || name == "tt.atomic_cas") {
     descriptor.kind = SimtAnchorKind::TensorAtomic;
     auto result = op->getNumResults() > 0
@@ -536,7 +560,11 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     return std::nullopt;
   }
 
-  descriptor.materializable = compileOn91095 && descriptor.lowerability.mixed;
+  descriptor.materializable =
+      capabilities.supportsLocalSimtScopes && descriptor.lowerability.mixed;
+  if (descriptor.kind == SimtAnchorKind::PlainOneDimensionalCumsum)
+    descriptor.materializable &=
+        capabilities.supportsPlainCumsumInLocalSIMTScope;
   return descriptor;
 }
 
@@ -556,6 +584,8 @@ llvm::StringRef mlir::ascend::stringifySimtAnchorKind(SimtAnchorKind kind) {
     return "tensor_atomic";
   case SimtAnchorKind::TriangularSolveLoop:
     return "triangular_solve_loop";
+  case SimtAnchorKind::StageOwnedScope:
+    return "stage_owned_scope";
   }
   llvm_unreachable("unknown SIMT anchor kind");
 }
@@ -645,15 +675,127 @@ bool mlir::ascend::isLoadedIndexDependentMemoryOp(Operation *op) {
          hasTensorPointerOperand(op) && pointerDependsOnLoadedIndex(op);
 }
 
-SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
-                                                      bool compileOn91095) {
+bool mlir::ascend::isStageScopeWrappable(llvm::ArrayRef<Operation *> roots) {
+  if (roots.empty())
+    return false;
+  Block *block = nullptr;
+  llvm::DenseSet<Operation *> planned;
+  for (Operation *root : roots) {
+    if (!root || !root->getBlock())
+      return false;
+    if (block && root->getBlock() != block)
+      return false;
+    block = root->getBlock();
+    if (!planned.insert(root).second)
+      return false;
+    const llvm::StringRef name = root->getName().getStringRef();
+    if (root->hasTrait<OpTrait::IsTerminator>() ||
+        root->hasTrait<OpTrait::IsIsolatedFromAbove>() ||
+        name == "scope.scope" || name == "scope.return")
+      return false;
+  }
+  if (!block)
+    return false;
+
+  // The materializer moves exactly `roots` into one scope.  A foreign
+  // operation lexically inside the [first, last] range would be reordered
+  // behind the new scope and could break SSA dominance for moved consumers,
+  // so require the range to contain only planned operations.
+  Operation *first = nullptr;
+  Operation *last = nullptr;
+  for (Operation &nested : *block) {
+    if (!planned.contains(&nested))
+      continue;
+    if (!first)
+      first = &nested;
+    last = &nested;
+  }
+  for (Operation *cursor = first; cursor && cursor != last;
+       cursor = cursor->getNextNode())
+    if (!planned.contains(cursor))
+      return false;
+  return true;
+}
+
+std::optional<SimtAnchorDescriptor>
+mlir::ascend::buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
+                                             bool compileOn91095) {
+  if (!compileOn91095 || !isStageScopeWrappable(roots))
+    return std::nullopt;
+
+  // Mirror wrapAnchorRange: the scope returns exactly the values with an
+  // outside user.  Returned pointer-like state cannot be reconstructed by
+  // TritonToUnstructure, so reject that implementation before it is scored.
+  // The SIMT VF scope ABI additionally requires every scope.return value to
+  // be a ranked tensor (LegalizeBoolForSimtVF asserts on non-tensor state),
+  // so a scalar escaping the root range must also reject the scope.
+  llvm::DenseSet<Operation *> inside;
+  for (Operation *root : roots) {
+    inside.insert(root);
+    root->walk([&](Operation *nested) { inside.insert(nested); });
+  }
+  auto isInside = [&](Operation *user) {
+    for (Operation *owner = user; owner; owner = owner->getParentOp())
+      if (inside.contains(owner))
+        return true;
+    return false;
+  };
+  for (Operation *root : roots)
+    for (Value result : root->getResults())
+      if (llvm::any_of(
+              result.getUses(),
+              [&](OpOperand &use) { return !isInside(use.getOwner()); }) &&
+          (isPointerLikeType(result.getType()) ||
+           !isa<RankedTensorType>(result.getType())))
+        return std::nullopt;
+
+  SimtAnchorDescriptor descriptor;
+  descriptor.kind = SimtAnchorKind::StageOwnedScope;
+  descriptor.operation = roots.front();
+  llvm::append_range(descriptor.scopeOperations, roots);
+  descriptor.scopeInsertionPoint = roots.front();
+  descriptor.lowerability = CandidateLowerability{};
+  descriptor.materializable = true;
+  return descriptor;
+}
+
+SimtLoweringCapabilities
+mlir::ascend::querySimtLoweringCapabilities(llvm::StringRef actualTarget,
+                                            bool compileOn91095) {
+  SimtLoweringCapabilities capabilities;
+  // The integration layer is the authority for local-scope support.  Target
+  // spelling is retained for diagnostics/future capability-table expansion;
+  // individual anchor matchers no longer branch on a product-name boolean.
+  capabilities.supportsLocalSimtScopes = compileOn91095;
+  // tt.scan is supported by the normal SIMD pipeline and by the whole-kernel
+  // simt_only pipeline on 91095.  The local-SIMT-scope pipeline is a third,
+  // narrower capability: its current external compiler cannot legalize the
+  // resulting hivm.hir.vcumsum, so cumsum must stay on the SIMD side of a
+  // mixed route instead of being outlined.
+  capabilities.supportsPlainCumsumSIMD = true;
+  capabilities.supportsPlainCumsumSIMTOnly = compileOn91095;
+  capabilities.supportsPlainCumsumInLocalSIMTScope = false;
+  costModelDebug() << "lowering capabilities: target=" << actualTarget
+                   << " local_simt_scope="
+                   << capabilities.supportsLocalSimtScopes
+                   << " cumsum_simd=" << capabilities.supportsPlainCumsumSIMD
+                   << " cumsum_simt_only="
+                   << capabilities.supportsPlainCumsumSIMTOnly
+                   << " cumsum_local_simt_scope="
+                   << capabilities.supportsPlainCumsumInLocalSIMTScope << "\n";
+  return capabilities;
+}
+
+SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(
+    ModuleOp module, const SimtLoweringCapabilities &capabilities) {
+  COSTMODEL_TRACE("buildMixedSimtAnchorPlan");
   SimtAnchorPlan plan;
   llvm::DenseSet<Operation *> operationsInPlannedScope;
   module.walk<WalkOrder::PreOrder>([&](Operation *op) {
     if (operationsInPlannedScope.contains(op))
       return WalkResult::skip();
     std::optional<SimtAnchorDescriptor> descriptor =
-        analyzeAnchor(op, compileOn91095);
+        analyzeAnchor(op, capabilities);
     if (!descriptor)
       return WalkResult::advance();
 
@@ -670,6 +812,13 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
     }
     for (Operation *scopeOperation : descriptor->scopeOperations)
       operationsInPlannedScope.insert(scopeOperation);
+    costModelDebug() << "anchor: op="
+                     << descriptor->operation->getName().getStringRef()
+                     << " kind="
+                     << stringifySimtAnchorKind(descriptor->kind).str()
+                     << " materializable=" << descriptor->materializable
+                     << " scopeOperations="
+                     << descriptor->scopeOperations.size() << "\n";
     plan.anchors.push_back(std::move(*descriptor));
     return WalkResult::skip();
   });
@@ -682,6 +831,25 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
     anyMixed |= anchor.lowerability.mixed;
     mixedBlocked |= !anchor.lowerability.mixed && !anchor.lowerability.allSimd;
   }
-  plan.kernelLowerability.mixed = anyMixed && !mixedBlocked;
+  // A kernel with no primitive anchor can still run mixed: every anchor-free
+  // Stage whose roots form a contiguous same-block range is materializable
+  // as a StageOwnedScope, so absence of anchors alone must not disable the
+  // mixed candidate.
+  plan.kernelLowerability.mixed =
+      (anyMixed || plan.anchors.empty()) && !mixedBlocked;
+  costModelLog() << "output: anchors=" << plan.anchors.size()
+                 << " (kernel lowerability: all_simd="
+                 << plan.kernelLowerability.allSimd
+                 << " all_simt_only=" << plan.kernelLowerability.allSimtOnly
+                 << " mixed=" << plan.kernelLowerability.mixed
+                 << (plan.anchors.empty() ? " [stage_owned_scope fallback]"
+                                          : "")
+                 << ")\n";
   return plan;
+}
+
+SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
+                                                      bool compileOn91095) {
+  return buildMixedSimtAnchorPlan(
+      module, querySimtLoweringCapabilities("", compileOn91095));
 }

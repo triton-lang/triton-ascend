@@ -1,6 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "AscendModel/Support/CostModelLogger.h"
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseSet.h"
@@ -60,10 +61,57 @@ static bool isPointerLikeType(Type type) {
   return llvm::StringRef(typeToString(type)).contains("!tt.ptr");
 }
 
-/// True when a loop argument only participates in address induction.  Such a
-/// value is an implementation recurrence that later pointer canonicalization
-/// can eliminate; it is not an algorithmic loop-carried dependency and must
-/// not disable the SIMD independent-loop roofline model.
+/// Defined after operationTreeHasTrueLoopCarriedDependency; forward declared
+/// because root collection, ownership, and workload helpers all resolve loop
+/// shells through it.
+static bool isIndependentStructuredLoop(Operation *operation);
+
+/// Operand index of the (optional) mask predicate of a memory operation.
+static std::optional<unsigned> getMemoryMaskOperandIndex(Operation *operation) {
+  const llvm::StringRef name = operation->getName().getStringRef();
+  if (name == "tt.load")
+    return 1u;
+  if (name == "tt.store" || name.starts_with("tt.atomic"))
+    return 2u;
+  return std::nullopt;
+}
+
+/// True when every use of `value` is the mask predicate of a memory
+/// operation, allowing forwarding through shape helpers and predicate
+/// boolean algebra.  A comparison that only guards masked accesses
+/// implements addressing boundary logic; it does not couple loop
+/// iterations algorithmically.
+static bool isMemoryMaskOnlyValue(Value value) {
+  llvm::SmallVector<Value, 8> worklist{value};
+  llvm::DenseSet<Value> visited;
+  while (!worklist.empty()) {
+    Value current = worklist.pop_back_val();
+    if (!visited.insert(current).second)
+      continue;
+    for (OpOperand &use : current.getUses()) {
+      Operation *user = use.getOwner();
+      const std::optional<unsigned> maskOperand =
+          getMemoryMaskOperandIndex(user);
+      if (maskOperand && use.getOperandNumber() == *maskOperand)
+        continue;
+      const llvm::StringRef name = user->getName().getStringRef();
+      const bool maskForwarding =
+          name == "tt.splat" || name == "tt.broadcast" ||
+          name == "tt.expand_dims" || name == "arith.andi" ||
+          name == "arith.ori" || name == "arith.xori";
+      if (!maskForwarding)
+        return false;
+      llvm::append_range(worklist, user->getResults());
+    }
+  }
+  return true;
+}
+
+/// True when a loop argument only participates in address induction or in
+/// masking the accesses that addressing guards.  Such a value is an
+/// implementation recurrence that later pointer canonicalization can
+/// eliminate; it is not an algorithmic loop-carried dependency and must not
+/// disable the SIMD independent-loop roofline model.
 static bool isAddressOnlyLoopValue(Value root) {
   llvm::SmallVector<Value, 8> worklist{root};
   llvm::DenseSet<Value> visited;
@@ -80,6 +128,14 @@ static bool isAddressOnlyLoopValue(Value root) {
       if ((name == "tt.load" || name == "tt.store" ||
            name.starts_with("tt.atomic")) &&
           use.getOperandNumber() == 0) {
+        reachesAddressUse = true;
+        continue;
+      }
+      if (name == "arith.cmpi" || name == "arith.cmpf") {
+        // A comparison feeding only memory masks is addressing boundary
+        // logic (e.g. a per-iteration bound), not a data recurrence.
+        if (!llvm::all_of(user->getResults(), isMemoryMaskOnlyValue))
+          return false;
         reachesAddressUse = true;
         continue;
       }
@@ -280,7 +336,8 @@ static int64_t getLoopTripCount(Operation *operation,
 static void accumulateDynamicOperationTree(Operation *operation,
                                            StageWorkload &work,
                                            double multiplicity,
-                                           int64_t fallbackLoopTripCount) {
+                                           int64_t fallbackLoopTripCount,
+                                           bool splitLoopBody = false) {
   if (!operation)
     return;
   StageWorkload local;
@@ -290,6 +347,10 @@ static void accumulateDynamicOperationTree(Operation *operation,
 
   if (operation->hasAttr("ta.auto_blockify_v1.loop"))
     return;
+  // With loop-body splitting the loop shell Stage owns only control overhead;
+  // its body operations are separate roots and must not be double-counted.
+  if (splitLoopBody && isIndependentStructuredLoop(operation))
+    return;
   const double childMultiplicity =
       multiplicity *
       static_cast<double>(getLoopTripCount(operation, fallbackLoopTripCount));
@@ -297,7 +358,7 @@ static void accumulateDynamicOperationTree(Operation *operation,
     for (Block &block : region)
       for (Operation &nested : block.getOperations())
         accumulateDynamicOperationTree(&nested, work, childMultiplicity,
-                                       fallbackLoopTripCount);
+                                       fallbackLoopTripCount, splitLoopBody);
 }
 
 static int64_t countAlgorithmLoops(const LogicalStage &stage) {
@@ -337,13 +398,16 @@ static void makePerIteration(LogicalStage &stage) {
 }
 
 static Operation *getTopLevelSemanticRoot(Operation *operation);
+static Operation *getPartitionSemanticRoot(Operation *operation,
+                                           bool splitLoopBody);
 
 static bool stageOwnsAnchor(const LogicalStage &stage,
-                            const SimtAnchorDescriptor &anchor) {
+                            const SimtAnchorDescriptor &anchor,
+                            bool splitLoopBody = false) {
   if (!anchor.materializable || !stage.localSimtMaterializable)
     return false;
   auto owns = [&](Operation *operation) {
-    Operation *root = getTopLevelSemanticRoot(operation);
+    Operation *root = getPartitionSemanticRoot(operation, splitLoopBody);
     return root && llvm::is_contained(stage.operations, root);
   };
   if (anchor.scopeOperations.empty())
@@ -357,17 +421,22 @@ static bool stageOwnsAnchor(const LogicalStage &stage,
 /// second source of Stage boundaries.
 static void attachExactAnchorOwnership(StagePartition &partition,
                                        const SimtAnchorPlan &anchorPlan) {
+  const bool splitLoopBody = partition.splitIndependentLoopBody;
   for (LogicalStage &stage : partition.stages) {
     if (!stage.localSimtMaterializable)
       continue;
     stage.simtAnchorIndices.clear();
+    stage.localSimtOperations.clear();
+    stage.allAnchorsSimdLowerable = true;
     stage.localSuperblockMaterializable = false;
     bool allAnchorsDirectlyOwnedByV1Loop = true;
     for (auto indexedAnchor : llvm::enumerate(anchorPlan.anchors)) {
       const SimtAnchorDescriptor &anchor = indexedAnchor.value();
-      if (anchor.materializable && stageOwnsAnchor(stage, anchor)) {
+      if (anchor.materializable &&
+          stageOwnsAnchor(stage, anchor, splitLoopBody)) {
         stage.simtAnchorIndices.push_back(
             static_cast<unsigned>(indexedAnchor.index()));
+        stage.allAnchorsSimdLowerable &= anchor.lowerability.allSimd;
         Operation *insertionPoint = anchor.scopeOperations.size() > 1
                                         ? anchor.scopeInsertionPoint
                                         : anchor.operation;
@@ -398,12 +467,68 @@ static Operation *getTopLevelSemanticRoot(Operation *operation) {
     return nullptr;
   Operation *root = operation;
   while (Operation *parent = root->getParentOp()) {
+    const llvm::StringRef parentName = parent->getName().getStringRef();
+    // AutoBlockify V1 may wrap a multi-block original function body in a
+    // newly created scf.execute_region.  That region is only a scheduling
+    // shell, so semantic roots inside it should be exposed directly instead
+    // of being owned by the execute_region.
     if (isFunctionLikeTTIROp(parent) ||
-        parent->hasAttr("ta.auto_blockify_v1.loop"))
+        parent->hasAttr("ta.auto_blockify_v1.loop") ||
+        (parentName == "scf.execute_region" &&
+         parent->hasAttr("ta.auto_blockify_v1.schedule")))
       return root;
     root = parent;
   }
   return nullptr;
+}
+
+static Operation *getPartitionSemanticRoot(Operation *operation,
+                                           bool splitLoopBody) {
+  Operation *topLevelRoot = getTopLevelSemanticRoot(operation);
+  if (!splitLoopBody || !topLevelRoot)
+    return topLevelRoot;
+
+  Operation *root = operation;
+  while (root != topLevelRoot) {
+    Operation *parent = root->getParentOp();
+    if (isIndependentStructuredLoop(parent))
+      return root;
+    root = parent;
+  }
+  return topLevelRoot;
+}
+
+/// Anchor-free Stages can still become local SIMT scopes: the whole root
+/// range is the scope unit (StageOwnedScope).  AutoBlockify V1 scheduling
+/// shells are excluded because wrapping them would serialize the SIMT
+/// execution of every logical program, which is a whole-kernel route.
+static void deriveStageOwnedScopes(StagePartition &partition,
+                                   bool compileOn91095) {
+  for (LogicalStage &stage : partition.stages) {
+    if (stage.localSimtMaterializable || !stage.simtAnchorIndices.empty())
+      continue;
+    if (stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch ||
+        stage.costModelKind == StageCostModelKind::AutoBlockifyLoop)
+      continue;
+    const bool wrappable =
+        buildStageOwnedScopeDescriptor(stage.operations, compileOn91095)
+            .has_value();
+    costModelLog() << "stage scope: stage '" << stage.id
+                   << "' roots=" << stage.operations.size()
+                   << " stage_owned_scope=" << wrappable << "\n";
+    if (wrappable) {
+      stage.localSimtMaterializable = true;
+      stage.localSimtFactors = {1};
+      // A stage-owned scope obeys the same SuperBlock ABI as primitive
+      // anchors: factor > 1 requires every root to be a direct child of the
+      // AutoBlockify V1 loop body.
+      stage.localSuperblockMaterializable =
+          llvm::all_of(stage.operations, [](Operation *root) {
+            Operation *parent = root ? root->getParentOp() : nullptr;
+            return parent && parent->hasAttr("ta.auto_blockify_v1.loop");
+          });
+    }
+  }
 }
 
 static bool isInsideAutoBlockifyV1Loop(Operation *operation) {
@@ -418,31 +543,81 @@ static bool isInsideAutoBlockifyV1Loop(Operation *operation) {
 
 static std::vector<Operation *> collectTopLevelSemanticRoots(ModuleOp module) {
   std::vector<Operation *> result;
-  auto appendBlock = [&](Block &block) {
+  auto appendOps = [&](auto &&self, Block &block, bool insideV1Loop) -> void {
     for (Operation &nested : block.getOperations()) {
       if (nested.hasTrait<OpTrait::IsTerminator>())
         continue;
+
+      const llvm::StringRef name = nested.getName().getStringRef();
+      const bool isV1Loop = nested.hasAttr("ta.auto_blockify_v1.loop");
+      // AutoBlockify V1 wraps a multi-block original function body in a new
+      // scf.execute_region.  That region is only a scheduling shell; expose
+      // its inner operations as semantic roots so the real algorithm is not
+      // hidden behind an auto_blockify_dispatch stage.
+      const bool isV1ExecuteRegion =
+          insideV1Loop && name == "scf.execute_region" &&
+          nested.hasAttr("ta.auto_blockify_v1.schedule");
+      if (isV1ExecuteRegion) {
+        for (Region &region : nested.getRegions())
+          for (Block &body : region)
+            self(self, body, insideV1Loop);
+        continue;
+      }
+
       result.push_back(&nested);
       // AutoBlockify V1's scf.for is a scheduling shell.  Own the shell as
       // loop control, then expose its direct body operations as semantic
       // roots.  Other structured operations remain atomic roots so their
       // nested recurrence/reduction work is not double-owned.
-      if (!nested.hasAttr("ta.auto_blockify_v1.loop") ||
-          nested.getNumRegions() == 0)
+      if (!isV1Loop || nested.getNumRegions() == 0)
         continue;
-      for (Block &body : nested.getRegion(0))
-        for (Operation &bodyOperation : body.getOperations())
-          if (!bodyOperation.hasTrait<OpTrait::IsTerminator>())
-            result.push_back(&bodyOperation);
+      for (Region &region : nested.getRegions())
+        for (Block &body : region)
+          self(self, body, /*insideV1Loop=*/true);
     }
   };
   for (Operation &operation : module.getBody()->getOperations()) {
     if (!isFunctionLikeTTIROp(&operation) || operation.getNumRegions() == 0)
       continue;
     for (Block &block : operation.getRegion(0))
-      appendBlock(block);
+      appendOps(appendOps, block, /*insideV1Loop=*/false);
   }
   return result;
+}
+
+static void appendIndependentLoopBodyRoots(Operation *operation,
+                                           std::vector<Operation *> &roots) {
+  if (!isIndependentStructuredLoop(operation) ||
+      operation->hasAttr("ta.auto_blockify_v1.loop"))
+    return;
+
+  costModelLog() << "loop split: exposing body roots of "
+                 << operation->getName().getStringRef() << " "
+                 << operation->getLoc() << "\n";
+  for (Region &region : operation->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &nested : block.getOperations()) {
+        if (nested.hasTrait<OpTrait::IsTerminator>())
+          continue;
+        roots.push_back(&nested);
+        appendIndependentLoopBodyRoots(&nested, roots);
+      }
+    }
+  }
+}
+
+static std::vector<Operation *>
+collectPartitionSemanticRoots(ModuleOp module, bool splitLoopBody) {
+  std::vector<Operation *> roots = collectTopLevelSemanticRoots(module);
+  if (!splitLoopBody)
+    return roots;
+
+  std::vector<Operation *> expandedRoots;
+  for (Operation *root : roots) {
+    expandedRoots.push_back(root);
+    appendIndependentLoopBodyRoots(root, expandedRoots);
+  }
+  return expandedRoots;
 }
 
 static bool operationTreeContainsName(Operation *root, llvm::StringRef name) {
@@ -499,6 +674,57 @@ static bool operationTreeHasAnyName(Operation *root,
   });
 }
 
+/// A structured loop whose body may be exposed as independent semantic roots:
+/// it is not an AutoBlockify V1 scheduling shell and carries no true
+/// algorithmic loop-carried dependency (address-only induction is an
+/// implementation recurrence and stays legal).  Recurrence loops keep the
+/// atomic whole-loop Stage because their body cannot be re-associated.
+static bool isIndependentStructuredLoop(Operation *operation) {
+  if (!operation || operation->hasAttr("ta.auto_blockify_v1.loop"))
+    return false;
+  const llvm::StringRef name = operation->getName().getStringRef();
+  if ((name != "scf.for" && name != "scf.while") ||
+      operation->getNumRegions() == 0 || operation->getRegion(0).empty())
+    return false;
+  return !operationTreeHasTrueLoopCarriedDependency(operation);
+}
+
+/// Trip count of the independent structured loops enclosing `root` when
+/// loop-body splitting is active.  Nested loop bodies execute by the product
+/// of their enclosing trip counts, not the maximum.
+static int64_t enclosingSplitLoopTripCount(Operation *root) {
+  int64_t trips = 1;
+  if (!root)
+    return trips;
+  for (Operation *parent = root->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (!isIndependentStructuredLoop(parent))
+      continue;
+    const int64_t factor = std::max<int64_t>(1, getLoopTripCount(parent, 1));
+    if (trips > std::numeric_limits<int64_t>::max() / factor)
+      return std::numeric_limits<int64_t>::max();
+    trips *= factor;
+  }
+  return trips;
+}
+
+/// Entry multiplicity for one semantic root when accumulating a Stage's
+/// dynamic workload.  A split loop's shell Stage and body-root Stages each
+/// see one textual appearance of their roots per loop iteration, while
+/// StageWorkloadAnalysis charges them through iterationCount (inherited
+/// from the enclosing split loop).  The accumulation must therefore
+/// pre-multiply by that trip count so makePerIteration's division restores
+/// the true per-iteration workload; otherwise N_iter * C_body undercounts
+/// the Stage's dynamic work by the trip count.
+static double semanticRootEntryMultiplicity(Operation *root,
+                                            bool splitLoopBody) {
+  if (!splitLoopBody || !root)
+    return 1.0;
+  if (isIndependentStructuredLoop(root))
+    return static_cast<double>(getLoopTripCount(root, 1));
+  return static_cast<double>(enclosingSplitLoopTripCount(root));
+}
+
 /// Classify one transitive semantic ownership unit.  This function consumes
 /// only TTIR structure; it does not inspect a kernel name, workload name,
 /// measured performance, or route score.
@@ -553,7 +779,8 @@ static StageScheduleKind scheduleForSemanticRoot(Operation *root,
   return StageScheduleKind::StraightLine;
 }
 
-static int64_t semanticRootIterationCount(Operation *root) {
+static int64_t semanticRootIterationCount(Operation *root,
+                                          bool splitLoopBody = false) {
   int64_t iterations = 1;
   if (!root || root->hasAttr("ta.auto_blockify_v1.loop"))
     return iterations;
@@ -561,6 +788,10 @@ static int64_t semanticRootIterationCount(Operation *root) {
     if (!operation->hasAttr("ta.auto_blockify_v1.loop"))
       iterations = std::max(iterations, getLoopTripCount(operation, 1));
   });
+  // Loop-body body roots execute once per enclosing iteration: inherit the
+  // enclosing independent loop's trip count so per-Stage cost stays exact.
+  if (splitLoopBody)
+    iterations = std::max(iterations, enclosingSplitLoopTripCount(root));
   return iterations;
 }
 
@@ -583,14 +814,17 @@ static std::string makeStageId(size_t ordinal, StageCostModelKind kind) {
 }
 
 static void collectOwnedOperationTree(Operation *root,
-                                      llvm::DenseSet<Operation *> &owned) {
+                                      llvm::DenseSet<Operation *> &owned,
+                                      bool splitLoopBody = false) {
   if (!root)
     return;
   owned.insert(root);
   // The AutoBlockify loop is intentionally split into a scheduling shell and
   // direct semantic body roots.  Treating the shell as the owner of its body
-  // would double-own every algorithm operation.
-  if (root->hasAttr("ta.auto_blockify_v1.loop"))
+  // would double-own every algorithm operation.  Independent algorithmic
+  // loops follow the same rule when loop-body splitting is active.
+  if (root->hasAttr("ta.auto_blockify_v1.loop") ||
+      (splitLoopBody && isIndependentStructuredLoop(root)))
     return;
   root->walk([&](Operation *nested) {
     if (nested != root)
@@ -639,10 +873,11 @@ static int64_t staticTensorBytes(llvm::ArrayRef<Value> values) {
 /// Values defined outside and consumed inside are live-ins; values defined
 /// inside and consumed by any operation outside are live-outs.
 static void deriveStageLiveValues(StagePartition &partition) {
+  const bool splitLoopBody = partition.splitIndependentLoopBody;
   for (LogicalStage &stage : partition.stages) {
     llvm::DenseSet<Operation *> owned;
     for (Operation *root : stage.operations)
-      collectOwnedOperationTree(root, owned);
+      collectOwnedOperationTree(root, owned, splitLoopBody);
 
     llvm::SetVector<Value> liveIns;
     llvm::SetVector<Value> liveOuts;
@@ -667,23 +902,35 @@ static void deriveStageLiveValues(StagePartition &partition) {
 /// materializer will create.  Stage live values are intentionally not used:
 /// a Stage can own SIMD operations around a much smaller local scope, and
 /// charging its complete live-out footprint would invent UB traffic.
+/// Anchor-owned scopes use the merged anchor operation set; anchor-free
+/// StageOwnedScope stages use the Stage's complete root range instead.
 static void deriveLocalSimtScopeTraffic(StagePartition &partition,
                                         const SimtAnchorPlan &anchorPlan) {
   for (LogicalStage &stage : partition.stages) {
     stage.localSimtScopeCount = 0;
     stage.scopeInputTensorBytes = 0;
     stage.scopeOutputTensorBytes = 0;
-    auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
-    if (!merged)
-      continue;
-    {
+    stage.localSimtOperations.clear();
+    llvm::SmallVector<Operation *> roots;
+    bool isRange = false;
+    if (stage.simtAnchorIndices.empty()) {
+      if (!stage.localSimtMaterializable)
+        continue;
+      llvm::append_range(roots, stage.operations);
+      isRange = roots.size() > 1;
+    } else {
+      auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
+      if (!merged)
+        continue;
       const SimtAnchorDescriptor &anchor = *merged;
-      llvm::SmallVector<Operation *> roots;
-      const bool isRange = anchor.scopeOperations.size() > 1;
+      isRange = anchor.scopeOperations.size() > 1;
       if (isRange)
         llvm::append_range(roots, anchor.scopeOperations);
       else
         roots.push_back(anchor.operation);
+    }
+    {
+      stage.localSimtOperations.assign(roots.begin(), roots.end());
 
       llvm::DenseSet<Operation *> inside;
       for (Operation *root : roots) {
@@ -739,13 +986,26 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
 
 llvm::Expected<ProgramStructure>
 ProgramStructureAnalysis::analyze(ModuleOp module,
-                                  const SimtAnchorPlan &anchorPlan) const {
+                                  const SimtAnchorPlan &anchorPlan,
+                                  bool splitIndependentLoopBody) const {
+  COSTMODEL_TRACE("ProgramStructureAnalysis::analyze");
   if (!module)
     return llvm::createStringError(
         std::errc::invalid_argument,
         "ProgramStructureAnalysis requires ModuleOp");
   ProgramStructure structure;
-  structure.rootOperations = collectTopLevelSemanticRoots(module);
+  structure.splitIndependentLoopBody = splitIndependentLoopBody;
+  structure.rootOperations =
+      collectPartitionSemanticRoots(module, splitIndependentLoopBody);
+  if (splitIndependentLoopBody)
+    costModelLog() << "loop body split: enabled (independent structured "
+                      "loops expose body roots)\n";
+  costModelLog() << "semantic roots: " << structure.rootOperations.size()
+                 << " (StageBoundaryAnalysis will group these into stages)\n";
+  for (auto [index, root] : llvm::enumerate(structure.rootOperations))
+    costModelLog() << "  root[" << index
+                   << "]: " << root->getName().getStringRef() << " "
+                   << root->getLoc() << "\n";
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -765,13 +1025,14 @@ ProgramStructureAnalysis::analyze(ModuleOp module,
 
     llvm::SmallVector<Operation *, 8> scopeRoots;
     for (Operation *operation : anchor.scopeOperations) {
-      Operation *root = getTopLevelSemanticRoot(operation);
+      Operation *root =
+          getPartitionSemanticRoot(operation, splitIndependentLoopBody);
       if (root && llvm::is_contained(structure.rootOperations, root) &&
           !llvm::is_contained(scopeRoots, root))
         scopeRoots.push_back(root);
     }
-    Operation *insertionRoot =
-        getTopLevelSemanticRoot(anchor.scopeInsertionPoint);
+    Operation *insertionRoot = getPartitionSemanticRoot(
+        anchor.scopeInsertionPoint, splitIndependentLoopBody);
     auto insertionIt = llvm::find(structure.rootOperations, insertionRoot);
     if (scopeRoots.empty() || insertionIt == structure.rootOperations.end())
       return llvm::createStringError(
@@ -895,7 +1156,8 @@ buildAnchorGroups(const ProgramStructure &structure,
       continue;
     llvm::SmallVector<size_t, 8> positions;
     auto addPosition = [&](Operation *operation) {
-      Operation *root = getTopLevelSemanticRoot(operation);
+      Operation *root = getPartitionSemanticRoot(
+          operation, structure.splitIndependentLoopBody);
       auto iterator = llvm::find(structure.rootOperations, root);
       if (iterator == structure.rootOperations.end())
         return;
@@ -940,7 +1202,9 @@ buildAnchorGroups(const ProgramStructure &structure,
 
 llvm::Expected<StagePartition>
 StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
-                               const SimtAnchorPlan &anchorPlan) const {
+                               const SimtAnchorPlan &anchorPlan,
+                               bool compileOn91095) const {
+  COSTMODEL_TRACE("StageBoundaryAnalysis::analyze");
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -950,6 +1214,8 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
     return anchorGroups.takeError();
 
   StagePartition partition;
+  partition.splitIndependentLoopBody = structure.splitIndependentLoopBody;
+  const bool splitLoopBody = structure.splitIndependentLoopBody;
   llvm::DenseSet<Operation *> owned;
   for (size_t index = 0; index < structure.rootOperations.size();) {
     Operation *root = structure.rootOperations[index];
@@ -960,10 +1226,15 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
 
     const int64_t anchorGroup = (*anchorGroups)[index];
     StageCostModelKind kind = classifySemanticRoot(root);
+    // A split loop's shell owns only control overhead; classification must
+    // not reach into the body it no longer owns (e.g. a scan inside the body
+    // must not relabel the backedge Stage as a reduction).
+    if (splitLoopBody && isIndependentStructuredLoop(root))
+      kind = StageCostModelKind::IndependentPipelinedLoop;
     StageScheduleKind schedule = scheduleForSemanticRoot(root, kind);
     LogicalStage stage;
     stage.operations.push_back(root);
-    stage.iterationCount = semanticRootIterationCount(root);
+    stage.iterationCount = semanticRootIterationCount(root, splitLoopBody);
     stage.localSimtMaterializable = anchorGroup >= 0;
     if (stage.localSimtMaterializable)
       stage.localSimtFactors = {1};
@@ -993,7 +1264,8 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
             "StageBoundaryAnalysis overlaps semantic root ownership");
       stage.operations.push_back(candidate);
       stage.iterationCount =
-          std::max(stage.iterationCount, semanticRootIterationCount(candidate));
+          std::max(stage.iterationCount,
+                   semanticRootIterationCount(candidate, splitLoopBody));
       if (semanticKindPriority(candidateKind) > semanticKindPriority(kind)) {
         kind = candidateKind;
         schedule = candidateSchedule;
@@ -1003,6 +1275,22 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
     stage.costModelKind = kind;
     stage.scheduleKind = schedule;
     stage.id = makeStageId(partition.stages.size(), kind);
+    {
+      const char *reason = "single root";
+      if (stage.operations.size() > 1)
+        reason = anchorGroup >= 0 ? "compound SIMT anchor group"
+                                  : "merged plain roots (same kind/schedule "
+                                    "or same source statement)";
+      costModelLog() << "boundary: stage '" << stage.id
+                     << "' roots=" << (next - index) << " reason=" << reason
+                     << "\n";
+      for (size_t rootIndex = index; rootIndex < next; ++rootIndex) {
+        Operation *rootOp = structure.rootOperations[rootIndex];
+        costModelLog() << "  root[" << rootIndex
+                       << "]: " << rootOp->getName().getStringRef() << " "
+                       << rootOp->getLoc() << "\n";
+      }
+    }
     partition.stages.push_back(std::move(stage));
     index = next;
   }
@@ -1013,12 +1301,14 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
     partition.stages.front().workload.paysKernelSetup = true;
 
   attachExactAnchorOwnership(partition, anchorPlan);
+  deriveStageOwnedScopes(partition, compileOn91095);
   deriveStageLiveValues(partition);
   deriveLocalSimtScopeTraffic(partition, anchorPlan);
   return partition;
 }
 
 llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
+  const bool splitLoopBody = partition.splitIndependentLoopBody;
   for (LogicalStage &stage : partition.stages) {
     StageModelFeatures &facts = stage.features;
     const double activeLaneRatio = facts.activeLaneRatio;
@@ -1026,7 +1316,7 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
     facts.activeLaneRatio = activeLaneRatio;
     llvm::DenseSet<Operation *> owned;
     for (Operation *root : stage.operations)
-      collectOwnedOperationTree(root, owned);
+      collectOwnedOperationTree(root, owned, splitLoopBody);
     bool hasMemory = false;
     int64_t algorithmLoopCount = 0;
     if (stage.costModelKind != StageCostModelKind::AutoBlockifyDispatch &&
@@ -1108,6 +1398,7 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
 
 llvm::Error StageKindClassifier::analyze(StagePartition &partition,
                                          int64_t tinyDotFlopsMax) const {
+  COSTMODEL_TRACE("StageKindClassifier::analyze");
   if (!partition.operationOwnershipComplete)
     return llvm::Error::success();
   auto compatible = [](StageCostModelKind kind,
@@ -1143,12 +1434,24 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
     if (stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch ||
         stage.costModelKind == StageCostModelKind::AutoBlockifyLoop)
       continue;
+    // A Stage mixing tt.dot with another dominant structure (reduction,
+    // indirect memory, loop-carried recurrence) cannot always be split: the
+    // dot may sit inside the serial chain itself (e.g. a chunked-scan state
+    // update whose per-iteration body contains dots), so the partitioner has
+    // no boundary at which to separate it.  Model such hybrid Stages with
+    // the dominant structure's kind instead of failing: the workload
+    // accounting already charges the dot on the same critical path
+    // (StageCostModels mapWorkload/estimateStage), and the SIMT profile's
+    // scalar-FMA dot rate keeps a hybrid Stage honestly expensive in SIMT.
     if (facts.hasDot && (facts.hasReduction || facts.hasIndirectMemory ||
                          facts.hasLoopCarriedDataDependency))
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "requires_split: Stage '%s' owns incompatible dominant structures",
-          stage.id.c_str());
+      costModelLog() << "hybrid dominant structures accepted: Stage '"
+                     << stage.id << "' combines tt.dot with "
+                     << (facts.hasLoopCarriedDataDependency
+                             ? "loop-carried recurrence"
+                         : facts.hasReduction ? "reduction"
+                                              : "indirect memory")
+                     << "; modeling as the dominant structure\n";
 
     auto derive = [&]() {
       if (facts.hasLoopCarriedDataDependency)
@@ -1207,6 +1510,7 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
     return llvm::createStringError(
         std::errc::invalid_argument,
         "StageWorkloadAnalysis requires complete operation ownership");
+  const bool splitLoopBody = partition.splitIndependentLoopBody;
   for (LogicalStage &stage : partition.stages) {
     StageWorkload work;
     work.paysKernelSetup = stage.workload.paysKernelSetup;
@@ -1215,10 +1519,48 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
         loopCount > 0 ? std::max<int64_t>(1, stage.iterationCount / loopCount)
                       : 1;
     for (Operation *root : stage.operations)
-      accumulateDynamicOperationTree(root, work, 1.0, fallbackLoopTripCount);
+      accumulateDynamicOperationTree(
+          root, work, semanticRootEntryMultiplicity(root, splitLoopBody),
+          fallbackLoopTripCount, splitLoopBody);
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);
+
+    stage.localSimtWorkload = StageWorkload{};
+    if (!stage.localSimtOperations.empty()) {
+      llvm::DenseSet<Operation *> selected;
+      for (Operation *localRoot : stage.localSimtOperations) {
+        selected.insert(localRoot);
+        localRoot->walk([&](Operation *nested) { selected.insert(nested); });
+      }
+      auto accumulateSelected = [&](auto &&self, Operation *operation,
+                                    double multiplicity) -> void {
+        if (!operation)
+          return;
+        if (selected.contains(operation)) {
+          StageWorkload local;
+          accumulateOneOperation(operation, local);
+          scaleWorkload(local, multiplicity);
+          mergeWorkload(stage.localSimtWorkload, std::move(local));
+        }
+        if (operation->hasAttr("ta.auto_blockify_v1.loop"))
+          return;
+        const double childMultiplicity =
+            multiplicity * static_cast<double>(getLoopTripCount(
+                               operation, fallbackLoopTripCount));
+        for (Region &region : operation->getRegions())
+          for (Block &block : region)
+            for (Operation &nested : block.getOperations())
+              self(self, &nested, childMultiplicity);
+      };
+      for (Operation *root : stage.operations)
+        accumulateSelected(accumulateSelected, root,
+                           semanticRootEntryMultiplicity(root, splitLoopBody));
+      scaleWorkload(stage.localSimtWorkload,
+                    1.0 / static_cast<double>(
+                              std::max<int64_t>(1, stage.iterationCount)));
+      recomputeIssueElements(stage.localSimtWorkload);
+    }
     if (!stage.workload.isFiniteAndNonNegative())
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -1250,12 +1592,10 @@ StagePartitionVerifier::verify(const StagePartition &partition) const {
           std::errc::invalid_argument,
           "materializable Stage '%s' has no operation ownership",
           stage.id.c_str());
-    if (stage.localSimtMaterializable && partition.operationOwnershipComplete &&
-        stage.simtAnchorIndices.empty())
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "materializable Stage '%s' has no exact SIMT anchor ownership",
-          stage.id.c_str());
+    // A materializable Stage carries either exact primitive anchor indices
+    // or, since StageOwnedScope synthesis, none at all: an anchor-free
+    // Stage's own contiguous root range is its local SIMT scope.  Both
+    // forms require the non-empty operation ownership checked above.
     if (partition.operationOwnershipComplete)
       for (unsigned index : stage.simtAnchorIndices)
         if (!ownedAnchors.insert(index).second)
@@ -1286,6 +1626,7 @@ llvm::Error
 StageModeLegalityAnalysis::analyze(StagePartition &partition,
                                    int64_t maximumSuperblockFactor,
                                    bool scopeSuperblockMaterializable) const {
+  COSTMODEL_TRACE("StageModeLegalityAnalysis::analyze");
   const int64_t maximum = std::clamp<int64_t>(maximumSuperblockFactor, 1, 4);
   // Local and whole-kernel SuperBlock candidates consume the same SIMT warp
   // resources.  Do not regenerate F4 here after evaluateStageModel has
@@ -1293,7 +1634,7 @@ StageModeLegalityAnalysis::analyze(StagePartition &partition,
   // a smaller runtime grid).
   const int64_t localMaximum = scopeSuperblockMaterializable ? maximum : 1;
   for (LogicalStage &stage : partition.stages) {
-    stage.simdLegal = true;
+    stage.simdLegal = stage.allAnchorsSimdLowerable;
     stage.simtLegal = true;
     stage.legalSimtFactors = {1};
     // A pure-SIMT SuperBlock factor is a whole-kernel schedule, not a
@@ -1329,15 +1670,105 @@ StageModeLegalityAnalysis::analyze(StagePartition &partition,
   return llvm::Error::success();
 }
 
+static llvm::StringRef stringifyScheduleKind(StageScheduleKind kind) {
+  switch (kind) {
+  case StageScheduleKind::StraightLine:
+    return "straight_line";
+  case StageScheduleKind::IndependentPipelined:
+    return "independent_pipelined";
+  case StageScheduleKind::LoopCarriedSerial:
+    return "loop_carried_serial";
+  case StageScheduleKind::PartiallyDependent:
+    return "partially_dependent";
+  }
+  return "unknown";
+}
+
+static std::string joinFactors(const std::vector<int64_t> &factors) {
+  std::string text;
+  llvm::raw_string_ostream stream(text);
+  llvm::interleave(factors, stream, ",");
+  stream.flush();
+  return text;
+}
+
+/// Print one operation and its nested regions as an indented tree.  Every
+/// TTIR operation owned by a Stage appears here, including loop bodies.
+static void logOperationTree(Operation *operation, int depth) {
+  std::string indent(static_cast<size_t>(depth) * 2, ' ');
+  costModelLog() << indent << operation->getName().getStringRef() << " "
+                 << operation->getLoc() << "\n";
+  for (Region &region : operation->getRegions())
+    for (Block &block : region)
+      for (Operation &nested : block)
+        logOperationTree(&nested, depth + 1);
+}
+
+/// Print the final Stage partition: one summary block per logical Stage with
+/// its kind, schedule, ownership, legality, features, and workload.
+static void logStagePartition(const StagePartition &partition) {
+  for (const LogicalStage &stage : partition.stages) {
+    costModelLog()
+        << "stage '" << stage.id
+        << "': model=" << stringifyStageCostModel(stage.costModelKind)
+        << " schedule=" << stringifyScheduleKind(stage.scheduleKind)
+        << " iterations=" << stage.iterationCount
+        << " ops=" << stage.operations.size()
+        << " liveIn=" << stage.liveIns.size() << "(" << stage.liveInBytes
+        << "B)"
+        << " liveOut=" << stage.liveOuts.size() << "(" << stage.liveOutBytes
+        << "B)"
+        << " simdLegal=" << stage.simdLegal << " simtLegal=" << stage.simtLegal
+        << " simtFactors=[" << joinFactors(stage.legalSimtFactors) << "]"
+        << " localFactors=[" << joinFactors(stage.localSimtFactors) << "]"
+        << (stage.localSimtMaterializable ? " localSimtMaterializable" : "")
+        << "\n";
+    costModelLog() << "  features: loop=" << stage.features.hasLoop
+                   << " loopCarriedDep="
+                   << stage.features.hasLoopCarriedDataDependency
+                   << " pointerInduction=" << stage.features.hasPointerInduction
+                   << " contiguousMem=" << stage.features.hasContiguousMemory
+                   << " indirectMem=" << stage.features.hasIndirectMemory
+                   << " reduction=" << stage.features.hasReduction
+                   << " prefixScan=" << stage.features.hasPrefixScan
+                   << " dot=" << stage.features.hasDot
+                   << " conversionPack=" << stage.features.hasConversionPack
+                   << " activeLaneRatio=" << stage.features.activeLaneRatio
+                   << "\n";
+    costModelLog() << "  workload: scalarOps="
+                   << stage.workload.scalarOperations
+                   << " loadBytes=" << stage.workload.loadBytes
+                   << " storeBytes=" << stage.workload.storeBytes
+                   << " loadWarps=" << stage.workload.loadWarpInstructions
+                   << " storeWarps=" << stage.workload.storeWarpInstructions
+                   << " predElems=" << stage.workload.predicateElements
+                   << " shuffleSteps=" << stage.workload.shuffleLaneSteps
+                   << " dotFlops=" << stage.workload.dotFlops
+                   << " issueElems=" << stage.workload.issueElements
+                   << " spillTxns=" << stage.workload.estimatedSpillTransactions
+                   << " paysKernelSetup=" << stage.workload.paysKernelSetup
+                   << "\n";
+    costModelLog() << "  operation tree (" << stage.operations.size()
+                   << " roots):\n";
+    for (Operation *root : stage.operations)
+      logOperationTree(root, 2);
+  }
+}
+
 llvm::Expected<StagePartition>
 StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
                             const StagePartitionerOptions &options) const {
-  auto structure = ProgramStructureAnalysis().analyze(module, anchorPlan);
+  COSTMODEL_TRACE("StagePartitioner::partition");
+  auto structure = ProgramStructureAnalysis().analyze(
+      module, anchorPlan, options.splitIndependentLoopBody);
   if (!structure)
     return structure.takeError();
-  auto result = StageBoundaryAnalysis().analyze(*structure, anchorPlan);
+  auto result = StageBoundaryAnalysis().analyze(*structure, anchorPlan,
+                                                options.compileOn91095);
   if (!result)
     return result.takeError();
+  costModelLog() << "output: roots=" << structure->rootOperations.size()
+                 << " stages=" << result->stages.size() << "\n";
   StageWorkloadAnalysis workloadAnalysis;
   if (llvm::Error error = workloadAnalysis.analyze(*result))
     return std::move(error);
@@ -1354,5 +1785,6 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
     return std::move(error);
   if (llvm::Error error = StagePartitionVerifier().verify(*result))
     return std::move(error);
+  logStagePartition(*result);
   return std::move(*result);
 }

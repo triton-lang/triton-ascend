@@ -1,6 +1,7 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/Support/CostModelLogger.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -136,16 +137,69 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
                              resources.predicate + resources.shuffle +
                              resources.dot;
   else if (stage.features.hasReduction)
-    resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle;
+    // A reduction whose accumulation is a tt.dot (hybrid dot+reduction
+    // Stage) must charge the dot on the accumulation chain; pure
+    // reductions keep dot == 0 and are unaffected.
+    resources.criticalPath = resources.compute + resources.predicate +
+                             resources.shuffle + resources.dot;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
+}
+
+static StageWorkload subtractWorkload(const StageWorkload &total,
+                                      const StageWorkload &local) {
+  StageWorkload residual = total;
+  auto subtract = [](double lhs, double rhs) {
+    return std::max(0.0, lhs - rhs);
+  };
+  residual.scalarOperations =
+      subtract(total.scalarOperations, local.scalarOperations);
+  residual.loadBytes = subtract(total.loadBytes, local.loadBytes);
+  residual.storeBytes = subtract(total.storeBytes, local.storeBytes);
+  residual.loadWarpInstructions =
+      subtract(total.loadWarpInstructions, local.loadWarpInstructions);
+  residual.storeWarpInstructions =
+      subtract(total.storeWarpInstructions, local.storeWarpInstructions);
+  residual.predicateElements =
+      subtract(total.predicateElements, local.predicateElements);
+  residual.shuffleLaneSteps =
+      subtract(total.shuffleLaneSteps, local.shuffleLaneSteps);
+  residual.dotFlops = subtract(total.dotFlops, local.dotFlops);
+  residual.issueElements = subtract(total.issueElements, local.issueElements);
+  residual.estimatedSpillTransactions = subtract(
+      total.estimatedSpillTransactions, local.estimatedSpillTransactions);
+  for (const auto &[name, elements] : local.operationElements) {
+    auto it = residual.operationElements.find(name);
+    if (it != residual.operationElements.end())
+      it->second = subtract(it->second, elements);
+  }
+  return residual;
+}
+
+static void addResources(StageResourceCycles &into,
+                         const StageResourceCycles &from) {
+  into.setup += from.setup;
+  into.scalar += from.scalar;
+  into.load += from.load;
+  into.store += from.store;
+  into.compute += from.compute;
+  into.predicate += from.predicate;
+  into.shuffle += from.shuffle;
+  into.dot += from.dot;
+  into.loopControl += from.loopControl;
+  into.branchControl += from.branchControl;
+  into.divergence += from.divergence;
+  into.synchronization += from.synchronization;
+  into.spill += from.spill;
+  into.issue += from.issue;
+  into.criticalPath += from.criticalPath;
 }
 
 static double applySuperBlock(const LogicalStage &stage,
                               const StageResourceCycles &resources,
                               const StageImplementation &implementation,
                               const HardwareProfile &profile,
-                              double stageCycles) {
+                              double stageCycles,
+                              std::string *formula = nullptr) {
   if (implementation.mode != StageMode::SIMT ||
       implementation.superblockFactor == 1)
     return stageCycles;
@@ -190,6 +244,10 @@ static double applySuperBlock(const LogicalStage &stage,
   // both materializers batch complete logical programs around the Stage.
   if (stage.costModelKind == StageCostModelKind::LoopCarriedRecurrence) {
     const double recurrenceBody = std::max(0.0, stageCycles - fixed);
+    if (formula)
+      *formula = "superblock: max(setup + F*N_iter*issue, "
+                 "setup + recurrenceBody + spillPressure) + "
+                 "persistentStatePressure";
     return std::max(issueFloor, fixed + recurrenceBody + pressure) +
            persistentStatePressure;
   }
@@ -198,21 +256,32 @@ static double applySuperBlock(const LogicalStage &stage,
   const double body = std::max(0.0, stageCycles - fixed);
   const double groupedBody = factor * std::max(0.0, body - latencySensitive) +
                              factor * latencySensitive / effectiveFactor;
+  if (formula)
+    *formula = "superblock: max(setup + F*N_iter*issue, setup + F*(body - "
+               "latencySensitive) + F*latencySensitive/F_eff + spillPressure) "
+               "+ persistentStatePressure";
   return std::max(issueFloor, fixed + groupedBody + pressure) +
          persistentStatePressure;
 }
 
 static double estimateStage(const LogicalStage &stage,
                             const HardwareProfile &profile, StageMode mode,
-                            const StageResourceCycles &r) {
+                            const StageResourceCycles &r,
+                            std::string *formula = nullptr) {
   const double count = iterations(stage);
   const double serial = r.setup + count * serialBody(r);
+  if (formula)
+    *formula = "total = setup + N_iter * max(execution, issue), execution = "
+               "scalar + load + store + compute + predicate + shuffle + dot + "
+               "control + spill";
   switch (stage.costModelKind) {
   case StageCostModelKind::AutoBlockifyDispatch:
   case StageCostModelKind::AutoBlockifyLoop: {
     const double dispatchCount =
         stage.costModelKind == StageCostModelKind::AutoBlockifyLoop ? count
                                                                     : 1.0;
+    if (formula)
+      *formula = "total = setup + D * max(scalar + control, issue)";
     return r.setup +
            dispatchCount * std::max(r.scalar + controlBody(r), r.issue);
   }
@@ -220,17 +289,25 @@ static double estimateStage(const LogicalStage &stage,
   case StageCostModelKind::ContinuousTileStore:
   case StageCostModelKind::ContinuousShortLoad:
   case StageCostModelKind::CachePolicyStore:
-    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage)) {
+      if (formula)
+        *formula = "total = setup + N_iter * (scalar + predicate + control + "
+                   "spill + max(load, store, issue))";
       return r.setup + count * (r.scalar + r.predicate + controlBody(r) +
                                 r.spill + std::max({r.load, r.store, r.issue}));
+    }
     return serial;
   case StageCostModelKind::IndependentPipelinedLoop:
-    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage)) {
+      if (formula)
+        *formula = "total = setup + N_iter * (max(load, store, compute + dot + "
+                   "shuffle, scalar + predicate + control, issue) + spill)";
       return r.setup +
              count *
                  (std::max({r.load, r.store, r.compute + r.dot + r.shuffle,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
+    }
     return serial;
   case StageCostModelKind::LoopCarriedRecurrence: {
     const double critical = r.criticalPath > 0.0
@@ -248,16 +325,26 @@ static double estimateStage(const LogicalStage &stage,
       const double persistentState =
           static_cast<double>(stage.liveOutBytes) /
           profile.superblockPersistentStateBytesPerCycle;
+      if (formula)
+        *formula = "total = setup + N_iter * max(criticalPath + load + store "
+                   "+ control + spill, issue) + liveOutBytes / "
+                   "persistentStateBytesPerCycle";
       return r.setup + count * critical + persistentState;
     }
     const int64_t groups = std::max<int64_t>(
         1, std::min(stage.features.parallelRecurrenceGroupCount,
                     profile.logicalWarpGroupCount));
+    if (formula)
+      *formula = "total = setup + max(ceil(N_iter / warpGroups) * critical, "
+                 "N_iter * issue)";
     return r.setup +
            std::max(std::ceil(count / static_cast<double>(groups)) * critical,
                     count * r.issue);
   }
   case StageCostModelKind::RowwiseReduction:
+    if (formula)
+      *formula = "total = setup + N_iter * max(scalar + load + store + "
+                 "criticalPath + control + spill, issue)";
     return r.setup +
            count * std::max(r.scalar + r.load + r.store + r.criticalPath +
                                 controlBody(r) + r.spill,
@@ -268,6 +355,10 @@ static double estimateStage(const LogicalStage &stage,
         r.shuffle * (mode == StageMode::SIMD
                          ? profile.simd.prefixScanDependencyFactor
                          : profile.simt.prefixScanDependencyFactor);
+    if (formula)
+      *formula = "total = setup + N_iter * max(scalar + load + store + compute "
+                 "+ predicate + shuffle * scanDependencyFactor + control + "
+                 "spill, issue)";
     return r.setup +
            count * std::max(r.scalar + r.load + r.store + scanCritical +
                                 controlBody(r) + r.spill,
@@ -275,17 +366,25 @@ static double estimateStage(const LogicalStage &stage,
   }
   case StageCostModelKind::CubeRoofline:
   case StageCostModelKind::TinyCubeRoofline:
-    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage)) {
+      if (formula)
+        *formula = "total = setup + N_iter * (scalar + predicate + control + "
+                   "shuffle + spill + max(load, compute + dot, store, issue))";
       return r.setup +
              count * (r.scalar + r.predicate + controlBody(r) + r.shuffle +
                       r.spill +
                       std::max({r.load, r.compute + r.dot, r.store, r.issue}));
+    }
     return serial;
   case StageCostModelKind::ConversionPack:
-    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage)) {
+      if (formula)
+        *formula = "total = setup + N_iter * (predicate + control + spill + "
+                   "max(scalar + compute, load, store, issue))";
       return r.setup + count * (r.predicate + controlBody(r) + r.spill +
                                 std::max({r.scalar + r.compute, r.load, r.store,
                                           r.issue}));
+    }
     return serial;
   default:
     return serial;
@@ -306,6 +405,35 @@ static bool isDeclaredLegal(const LogicalStage &stage,
                               implementation.superblockFactor);
   return llvm::is_contained(stage.legalSimtFactors,
                             implementation.superblockFactor);
+}
+
+/// One log block per (Stage, implementation) candidate: mode, factor, the
+/// mapped resource cycles, and the symbolic cost formula that produced the
+/// total.
+static void logImplementationCost(const LogicalStage &stage,
+                                  const StageImplementation &implementation,
+                                  const StageResourceCycles &r,
+                                  double totalCycles,
+                                  const std::string &formula,
+                                  const std::string &superblockFormula) {
+  llvm::raw_ostream &os = costModelLog();
+  os << "cost stage '" << stage.id << "' ["
+     << stringifyStageCostModel(stage.costModelKind) << "] "
+     << (implementation.mode == StageMode::SIMD ? "SIMD" : "SIMT")
+     << " factor=" << implementation.superblockFactor
+     << (implementation.localScope ? " local_scope" : "")
+     << ": total=" << totalCycles << " cycles\n";
+  os << "  resources: setup=" << r.setup << " scalar=" << r.scalar
+     << " load=" << r.load << " store=" << r.store << " compute=" << r.compute
+     << " predicate=" << r.predicate << " shuffle=" << r.shuffle
+     << " dot=" << r.dot << " loopCtl=" << r.loopControl
+     << " branchCtl=" << r.branchControl << " divergence=" << r.divergence
+     << " sync=" << r.synchronization << " spill=" << r.spill
+     << " issue=" << r.issue << " criticalPath=" << r.criticalPath << "\n";
+  os << "  formula: " << formula;
+  if (!superblockFormula.empty())
+    os << " | " << superblockFormula;
+  os << "\n";
 }
 
 } // namespace
@@ -429,6 +557,25 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
   table.modeledOperationCount = partition.modeledOperationCount;
   table.profileVersion = profile.profileVersion;
   llvm::StringSet<> stageIds;
+  const bool trace = logEnabled();
+  if (trace) {
+    const StageModeProfile &simd = profile.simd;
+    const StageModeProfile &simt = profile.simt;
+    costModelLog() << "profile rates: SIMD(vectorWidth=" << simd.vectorWidth
+                   << " issueWidth=" << simd.issueWidth
+                   << " loadBytesPerCycle=" << simd.loadBytesPerCycle
+                   << " storeBytesPerCycle=" << simd.storeBytesPerCycle
+                   << " scalarOpsPerCycle=" << simd.scalarOperationsPerCycle
+                   << " issueOpsPerCycle=" << simd.issueOperationsPerCycle
+                   << ")\n";
+    costModelLog() << "profile rates: SIMT(loadWarpsPerCycle="
+                   << simt.loadWarpInstructionsPerCycle
+                   << " storeWarpsPerCycle="
+                   << simt.storeWarpInstructionsPerCycle
+                   << " scalarOpsPerCycle=" << simt.scalarOperationsPerCycle
+                   << " issueOpsPerCycle=" << simt.issueOperationsPerCycle
+                   << " warpGroups=" << profile.logicalWarpGroupCount << ")\n";
+  }
 
   for (const LogicalStage &stage : partition.stages) {
     if (stage.id.empty() || !stageIds.insert(stage.id).second)
@@ -456,6 +603,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.iterationCount = stage.iterationCount;
     logicalCost.features = stage.features;
     logicalCost.workload = stage.workload;
+    logicalCost.localSimtWorkload = stage.localSimtWorkload;
     logicalCost.ownedOperationCount =
         static_cast<int64_t>(stage.operations.size());
     logicalCost.sourceLocations = collectSourceLocations(stage);
@@ -488,20 +636,67 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' has an illegal candidate",
                                        stage.id.c_str());
-      StageResourceCycles resources = mapWorkload(
-          stage,
-          implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
+      std::string formula;
+      std::string superblockFormula;
+      StageResourceCycles resources;
+      double baseCycles = 0.0;
+      if (implementation.localScope &&
+          stage.localSimtWorkload.issueElements > 0.0) {
+        LogicalStage residualStage = stage;
+        residualStage.workload =
+            subtractWorkload(stage.workload, stage.localSimtWorkload);
+        StageResourceCycles residual =
+            mapWorkload(residualStage, profile.simd, StageMode::SIMD);
+        std::string residualFormula;
+        const double residualCycles =
+            estimateStage(residualStage, profile, StageMode::SIMD, residual,
+                          trace ? &residualFormula : nullptr);
+
+        LogicalStage localStage = stage;
+        localStage.costModelKind = stage.features.hasPrefixScan
+                                       ? StageCostModelKind::PrefixScan
+                                       : stage.costModelKind;
+        localStage.scheduleKind = StageScheduleKind::StraightLine;
+        localStage.workload = stage.localSimtWorkload;
+        localStage.workload.paysKernelSetup = false;
+        localStage.features = StageModelFeatures{};
+        localStage.features.hasPrefixScan = stage.features.hasPrefixScan;
+        localStage.features.hasReduction =
+            !stage.features.hasPrefixScan && stage.features.hasReduction;
+        StageResourceCycles local =
+            mapWorkload(localStage, profile.simt, StageMode::SIMT);
+        std::string localFormula;
+        const double localCycles =
+            estimateStage(localStage, profile, StageMode::SIMT, local,
+                          trace ? &localFormula : nullptr);
+        resources = residual;
+        addResources(resources, local);
+        baseCycles = residualCycles + localCycles;
+        if (trace)
+          formula = "hybrid_local_scope = residual SIMD (" + residualFormula +
+                    ") + anchored SIMT (" + localFormula + ")";
+      } else {
+        resources =
+            mapWorkload(stage,
+                        implementation.mode == StageMode::SIMD ? profile.simd
+                                                               : profile.simt,
+                        implementation.mode);
+        baseCycles = estimateStage(stage, profile, implementation.mode,
+                                   resources, trace ? &formula : nullptr);
+      }
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;
-      cost.totalCycles = applySuperBlock(
-          stage, resources, implementation, profile,
-          estimateStage(stage, profile, implementation.mode, resources));
+      cost.totalCycles =
+          applySuperBlock(stage, resources, implementation, profile, baseCycles,
+                          trace ? &superblockFormula : nullptr);
       if (!cost.isValid())
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' produced an invalid cost",
                                        stage.id.c_str());
+      if (trace)
+        logImplementationCost(stage, implementation, resources,
+                              cost.totalCycles, formula, superblockFormula);
       logicalCost.implementations.push_back(std::move(cost));
     }
 

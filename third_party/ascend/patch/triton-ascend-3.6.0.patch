@@ -230,9 +230,10 @@ diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
 index 48049f026..e96284bc2 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,36 @@
+@@ -1,6 +1,37 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
++#include "ascend/include/CVSplitScheduling/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 +#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 +#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
@@ -267,7 +268,7 @@ index 48049f026..e96284bc2 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +114,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +115,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -287,12 +288,13 @@ index 48049f026..e96284bc2 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +178,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +179,40 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
 +  // DynamicCVPipeline passes
 +  mlir::triton::registerAddDynamicCVPipelinePasses();
++  mlir::triton::registerCVSplitSchedulingPasses();
 +  mlir::triton::registerPreCheckAvailablePasses();
 +  mlir::triton::registerStandardizeOpPasses();
 +  mlir::triton::registerAddControlFlowConditionPasses();

@@ -1,0 +1,32 @@
+add_triton_library(CVSplitScheduling
+  CVSplitScheduling.cpp
+  PostCVSplitRequestExtraction.cpp
+  CrossCoreOwnershipProof.cpp
+  CrossCorePipelinePlan.cpp
+  CrossCoreScheduleCandidate.cpp
+  CrossCoreResourcePlan.cpp
+  CrossScopeTransfers.cpp
+  classifyAllOps.cpp
+  DependencyScheduler.cpp
+  PreCheck.cpp
+  PostCVSplitDetachedSchedule.cpp
+  PostCVSplitScheduleBinding.cpp
+  PostCVSplitSchedulePlan.cpp
+  ScopeSeparation.cpp
+  UnfusePVMatmuls.cpp
+  VectorAccumulatorMatmul.cpp
+
+  DEPENDS
+  CVSplitSchedulingPassIncGen
+
+  LINK_LIBS
+  BiShengIRHIVMDialect
+  BiShengIRScopeDialect
+  BiShengIRAnnotationDialect
+  MLIRFuncDialect
+  MLIRLinalgDialect
+  MLIRSCFDialect
+  MLIRSCFTransforms
+  MLIRTransforms
+  DynamicCVPipeline
+)

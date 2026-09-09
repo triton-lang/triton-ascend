@@ -126,3 +126,17 @@ def subview(src: bl.buffer, offsets: List[tl.tensor], sizes: List[tl.constexpr],
     # create buffer_type with strides
     buffer_ty = bl.buffer_type(element_ty=src.dtype, shape=sizes_int, space=src.space, strides=result_memory_strides)
     return bl.buffer(result_handle, buffer_ty)
+
+
+def reinterpret_view(src: bl.buffer, shape: List[tl.constexpr], strides: List[tl.constexpr], offset: tl.constexpr,
+                     builder: ir.builder) -> bl.buffer:
+    shape_int = tl._unwrap_shape(shape)
+    strides_int = tl._unwrap_shape(strides)
+    offset_int = tl._unwrap_if_constexpr(offset)
+
+    result_handle = builder.reinterpret_view(src.handle, offset_int, shape_int, strides_int)
+
+    # reinterpret_view assigns the logical pitch directly, so the requested
+    # strides are already the memory strides of the result.
+    buffer_ty = bl.buffer_type(element_ty=src.dtype, shape=shape_int, space=src.space, strides=strides_int)
+    return bl.buffer(result_handle, buffer_ty)

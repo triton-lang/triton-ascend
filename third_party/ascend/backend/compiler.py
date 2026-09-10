@@ -52,6 +52,7 @@ from triton.backends.ascend.utils import (
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
+    _npu_compiler_supports_option,
     downgrade_llir,
     force_disable_ffts,
     triton_enable_libdevice_simt,
@@ -518,6 +519,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
+            # Probe --help: an older bishengir-compile rejects unknown flags.
+            if (metadata.get("enable_hivm_batch_matmul")
+                    and _npu_compiler_supports_option("--enable-hivm-batch-matmul")):
+                _compile_option_list += ["--enable-hivm-batch-matmul"]
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
@@ -728,6 +733,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                 bishengir_hivm_opt,
                 "--enable-triton-kernel-compile=true",
             ]
+            # Probe --help: an older bishengir-compile rejects unknown flags.
+            if (metadata.get("enable_hivm_batch_matmul")
+                    and _npu_compiler_supports_option("--enable-hivm-batch-matmul")):
+                _compile_option_list += ["--enable-hivm-batch-matmul"]
 
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
@@ -820,6 +829,10 @@ class NPUOptions:
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_select_analysis: bool = True
     enable_hivm_auto_cv_balance: bool = None
+    # Lower a rank-3 tl.dot as one batched mmad macro rather than a loop
+    # over the batch. Off unless a kernel asks for it; only forwarded when
+    # bishengir-compile advertises --enable-hivm-batch-matmul.
+    enable_hivm_batch_matmul: bool = False
     sync_solver: bool = None
     unit_flag: bool = None
     enable_cce_vf_auto_sync: bool = None

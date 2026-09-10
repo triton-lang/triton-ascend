@@ -47,6 +47,7 @@ static constexpr const char *DEBUG_TYPE = "merge-cube-block";
 
 static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
     "_attn_bwd",
+    "kernel_sdpa_bwd_q",
     "_sdpa_infer_kernel",
     "kernel_da_bwd_kv_ul",
     "pcb06_tc02_c2v2v2c_chain",

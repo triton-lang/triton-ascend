@@ -43,7 +43,19 @@ function(add_proton_library name)
 
   # If HIP is AMD-based
   target_compile_definitions(${name} PRIVATE __HIP_PLATFORM_AMD__)
-
+  # MSPTI optional
+  if(DEFINED MSPTI_INCLUDE_DIR AND EXISTS "${MSPTI_INCLUDE_DIR}")
+    target_include_directories(${name} PRIVATE "${MSPTI_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_MSPTI)
+    if(DEFINED MSPTI_LIB_DIR)
+      target_compile_definitions(${name} PRIVATE MSPTI_LIB_DIR=${MSPTI_LIB_DIR})
+    endif()
+  endif()
+  # CANN is optional so CUDA/HIP-only Proton builds remain unaffected.
+  if(DEFINED CANN_INCLUDE_DIR AND EXISTS "${CANN_INCLUDE_DIR}")
+    target_include_directories(${name} PRIVATE "${CANN_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CANN)
+  endif()
   # Append this library name to the GLOBAL property "PROTON_LIBS"
   set_property(GLOBAL APPEND PROPERTY PROTON_LIBS ${name})
 endfunction()

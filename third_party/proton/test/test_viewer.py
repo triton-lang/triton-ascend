@@ -8,6 +8,7 @@ file_path = __file__
 triton_example_file = file_path.replace("test_viewer.py", "examples/triton.json")
 cuda_example_file = file_path.replace("test_viewer.py", "examples/cuda.json")
 hip_example_file = file_path.replace("test_viewer.py", "examples/hip.json")
+ascend_example_file = file_path.replace("test_viewer.py", "examples/ascend.json")
 frame_example_file = file_path.replace("test_viewer.py", "examples/frame.json")
 leaf_example_file = file_path.replace("test_viewer.py", "examples/leaf_nodes.json")
 
@@ -83,6 +84,22 @@ def test_parse():
     gf, derived_metrics = parse(["time/s"], triton_example_file)
     for derived_metric in derived_metrics:
         assert derived_metric in gf.inc_metrics or derived_metric in gf.exc_metrics
+
+
+def test_ascend_parse():
+    gf, metrics = parse(["time/ns", "avg_time/ns"], ascend_example_file)
+    kernel = gf.dataframe[gf.dataframe["name"] == "vector_add_kernel"].iloc[0]
+    assert metrics == ["time/ns (inc)", "avg_time/ns (inc)"]
+    assert kernel["time/ns (inc)"] == 10000
+    assert kernel["avg_time/ns (inc)"] == pytest.approx(2000)
+
+    _, _, _, device_info = read(ascend_example_file)
+    assert device_info["NPU"]["0"]["arch"] == "Ascend950PR_9579"
+
+
+def test_ascend_util_reports_missing_peak_specs():
+    with pytest.raises(ValueError, match="Peak memory bandwidth is unavailable"):
+        parse(["util"], ascend_example_file)
 
 
 def test_min_time_flops():

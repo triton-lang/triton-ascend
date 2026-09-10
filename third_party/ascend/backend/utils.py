@@ -766,32 +766,6 @@ def _check_bishengir_able_save_ir() -> bool:
         return False
 
 
-@functools.lru_cache(None)
-def _npu_compiler_supports_option(option: str) -> bool:
-    """Return True if ``bishengir-compile --help`` advertises ``option``.
-
-    Optional flags must not be passed to an older toolchain that does not
-    know them -- the compile would fail on an unrecognized argument. Probe
-    once per process (cached) so a kernel that asks for a new flag still
-    builds against a compiler that has not landed it yet.
-    """
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return option in (result.stdout or "")
-
-
 def get_ascend_arch_from_env():
     _warn_deprecated_ascend_env_var("TRITON_ASCEND_ARCH")
     return ""

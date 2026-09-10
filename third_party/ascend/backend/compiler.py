@@ -57,7 +57,6 @@ from triton.backends.ascend.utils import (
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
-    _npu_compiler_supports_option,
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
     _remove_deprecated_npu_options,
@@ -74,6 +73,35 @@ from triton.backends.compiler import (
     GPUTarget,
 )
 from triton.runtime.cache import get_dump_manager
+
+
+@functools.lru_cache(None)
+def _npu_compiler_supports_option(option: str) -> bool:
+    """Return True if ``bishengir-compile --help`` advertises ``option``.
+
+    Optional flags must not be passed to an older toolchain that does not
+    know them -- the compile would fail on an unrecognized argument. Probe
+    once per process (cached) so a kernel that asks for a new flag still
+    builds against a compiler that has not landed it yet.
+
+    Kept in this module (not utils) so source-loaded compiler tests that stub
+    ``triton.backends.ascend.utils`` do not need a matching export.
+    """
+    bishengir_path, _ = _get_npucompiler_path()
+    if not bishengir_path:
+        return False
+    try:
+        result = subprocess.run(
+            [bishengir_path, "--help"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return option in (result.stdout or "")
 
 
 # TODO: materialize the concrete min shape

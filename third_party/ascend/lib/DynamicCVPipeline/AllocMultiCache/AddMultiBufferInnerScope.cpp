@@ -1916,6 +1916,13 @@ setupWhileIterArgCounter(const MainLoop &loop, OpBuilder &builder) {
   OpBuilder preBuilder(ctx);
   preBuilder.setInsertionPoint(oldWhile);
   Value zero = preBuilder.create<arith::ConstantIntOp>(loc, 0, 32);
+  // Tag the init constant with the same block_id as the main_loop whileOp,
+  // otherwise downstream passes see an arith.constant with no
+  // ssbuffer.block_id attr sitting right next to the whileOp's tagged ops.
+  if (auto bid = getOpBlockId(oldWhile)) {
+    zero.getDefiningOp()->setAttr(kBlockId,
+                                 preBuilder.getI32IntegerAttr(*bid));
+  }
 
   // Old inits/result-types + i32 counter appended at the end.
   SmallVector<Value> newInits(oldWhile.getInits().begin(),

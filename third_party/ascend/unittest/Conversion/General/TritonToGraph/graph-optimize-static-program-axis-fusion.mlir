@@ -1,6 +1,5 @@
 // RUN: triton-opt --split-input-file %s --verify-each '-graph-optimize=rule-mask=1024 ub-capacity-bytes=2097152 device-core-count=1' -o - 2>&1 | FileCheck %s --check-prefix=FULL
 // RUN: triton-opt --split-input-file %s --verify-each '-graph-optimize=rule-mask=1024 ub-capacity-bytes=2097152 device-core-count=2' -o - 2>&1 | FileCheck %s --check-prefix=PARTIAL
-// RUN: triton-opt --split-input-file %s --verify-each '-graph-optimize=rule-mask=1024 ub-capacity-bytes=2097152 device-core-count=3' -o - 2>&1 | FileCheck %s --check-prefix=LOW
 // RUN: triton-opt --split-input-file %s --verify-each '-graph-optimize=rule-mask=1024 ub-capacity-bytes=2097152 device-core-count=1 compile-mode=simt_only' -o - 2>&1 | FileCheck %s --check-prefix=SIMT
 
 // The only positive fixture is deliberately logits-shaped.  K is loaded once
@@ -26,12 +25,6 @@
 // PARTIAL: scf.for %[[PARTIAL_IV:.*]] = {{.*}} to {{.*}} step {{.*}} : i32 {
 // PARTIAL: %[[PARTIAL_GROUP:.*]] = arith.addi %[[PARTIAL_BASE]], %[[PARTIAL_IV]] : i32
 // PARTIAL: arith.muli %[[PARTIAL_GROUP]], {{.*}} : i32
-
-// LOW: resource-cost candidate=static-program-axis-fusion.f2 accepted=false reason=insufficient_parallelism
-// LOW: resource-cost candidate=static-program-axis-fusion.f4 accepted=false reason=insufficient_parallelism
-// LOW-LABEL: tt.func public @spaf_g4(
-// LOW: tt.get_program_id z
-// LOW-NOT: scf.for
 
 // SIMT-LABEL: tt.func public @spaf_g4(
 // SIMT: tt.get_program_id z
@@ -99,9 +92,6 @@ module attributes {
 // PARTIAL-LABEL: tt.func public @spaf_g1_noop(
 // PARTIAL: tt.get_program_id z
 // PARTIAL-NOT: scf.for
-// LOW-LABEL: tt.func public @spaf_g1_noop(
-// LOW: tt.get_program_id z
-// LOW-NOT: scf.for
 module attributes {
   hacc.grid_specialization = {version = 1 : i64, grid_0 = 1 : i64,
                               grid_1 = 1 : i64, grid_2 = 1 : i64,

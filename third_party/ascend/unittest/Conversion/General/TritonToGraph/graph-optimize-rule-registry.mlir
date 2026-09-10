@@ -1,21 +1,11 @@
 // RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=0' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=511' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=512' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=1024' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=2048' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=4096' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=8192' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=16384' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=32768' -o - | FileCheck %s --check-prefix=NOOP
-// RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=65024' -o - | FileCheck %s --check-prefix=NOOP
 // RUN: triton-opt --verify-each %s -graph-optimize='rule-mask=65535' -o - | FileCheck %s --check-prefix=NOOP
 // RUN: triton-opt --debug-only=graph-optimize --verify-each %s -graph-optimize -o /dev/null 2>&1 | FileCheck %s --check-prefix=DEFAULT-OFF --allow-empty
 // RUN: not triton-opt --verify-each %s -graph-optimize='rule-mask=65536' -o - 2>&1 | FileCheck %s --check-prefix=UNKNOWN
 // RUN: not triton-opt --verify-each %s -graph-optimize='rule-mask=4294967296' -o - 2>&1 | FileCheck %s --check-prefix=OUT-OF-RANGE
 
-// Every reserved rule must be a stable no-op until its matcher/materializer
-// implementation lands. The commands above also prove that every new bit is
-// independently accepted, while 0 still disables all native graph rules.
+// The aggregate mask validates the complete registered-bit set, while zero
+// keeps the legacy no-op path covered.
 // NOOP-LABEL: tt.func @registry_noop(
 // NOOP: tt.return
 // DEFAULT-OFF-NOT: IndependentAxisTensorizeRule

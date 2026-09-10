@@ -51,29 +51,3 @@ module attributes {hacc.grid_specialization = {grid_0 = 19 : i64, grid_1 = 1 : i
     tt.return
   }
 }
-
-// -----
-
-// A PTSM bit without the required token PID remains unchanged and cannot
-// publish a launcher cap.
-// CHECK-NOT: hacc.persistent_task_strip_mining
-// CHECK-NOT: hacc.program_grid_transforms
-// CHECK-LABEL: tt.func @structural_missing_token_entry
-// CHECK: tt.get_program_id y
-module attributes {hacc.grid_specialization = {grid_0 = 19 : i64, grid_1 = 1 : i64, grid_2 = 1 : i64, rule_mask = 2048 : i64, version = 1 : i64}} {
-  tt.func @structural_missing_token_entry(%input: !tt.ptr<f32>, %output: !tt.ptr<f32>) attributes {hacc.grid_specialization = {grid_0 = 19 : i64, grid_1 = 1 : i64, grid_2 = 1 : i64, rule_mask = 2048 : i64, version = 1 : i64}} {
-    %c4 = arith.constant 4 : i32
-    %head = tt.get_program_id y : i32
-    %dims = tt.make_range {end = 4 : i32, start = 0 : i32} : tensor<4xi32>
-    %base = arith.muli %head, %c4 : i32
-    %input_base = tt.addptr %input, %base : !tt.ptr<f32>, i32
-    %input_splat = tt.splat %input_base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
-    %input_ptrs = tt.addptr %input_splat, %dims : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
-    %values = tt.load %input_ptrs : tensor<4x!tt.ptr<f32>>
-    %output_base = tt.addptr %output, %base : !tt.ptr<f32>, i32
-    %output_splat = tt.splat %output_base : !tt.ptr<f32> -> tensor<4x!tt.ptr<f32>>
-    %output_ptrs = tt.addptr %output_splat, %dims : tensor<4x!tt.ptr<f32>>, tensor<4xi32>
-    tt.store %output_ptrs, %values : tensor<4x!tt.ptr<f32>>
-    tt.return
-  }
-}

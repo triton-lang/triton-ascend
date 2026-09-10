@@ -368,6 +368,7 @@ static void attachExactAnchorOwnership(StagePartition &partition,
       if (anchor.materializable && stageOwnsAnchor(stage, anchor)) {
         stage.simtAnchorIndices.push_back(
             static_cast<unsigned>(indexedAnchor.index()));
+        stage.allAnchorsSimdLowerable &= anchor.lowerability.allSimd;
         Operation *insertionPoint = anchor.scopeOperations.size() > 1
                                         ? anchor.scopeInsertionPoint
                                         : anchor.operation;
@@ -673,6 +674,7 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
     stage.localSimtScopeCount = 0;
     stage.scopeInputTensorBytes = 0;
     stage.scopeOutputTensorBytes = 0;
+    stage.localSimtOperations.clear();
     auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
     if (!merged)
       continue;
@@ -684,6 +686,7 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
         llvm::append_range(roots, anchor.scopeOperations);
       else
         roots.push_back(anchor.operation);
+      stage.localSimtOperations.assign(roots.begin(), roots.end());
 
       llvm::DenseSet<Operation *> inside;
       for (Operation *root : roots) {
@@ -1143,13 +1146,14 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
     if (stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch ||
         stage.costModelKind == StageCostModelKind::AutoBlockifyLoop)
       continue;
-    if (facts.hasDot && (facts.hasReduction || facts.hasIndirectMemory ||
-                         facts.hasLoopCarriedDataDependency))
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "requires_split: Stage '%s' owns incompatible dominant structures",
-          stage.id.c_str());
-
+    // A Stage mixing tt.dot with another dominant structure (reduction,
+    // indirect memory, loop-carried recurrence) cannot always be split: the
+    // dot may sit inside the serial chain itself (e.g. a chunked-scan state
+    // update whose per-iteration body contains dots), so the partitioner has
+    // no boundary at which to separate it. Model such hybrid Stages with the
+    // dominant structure's kind instead of failing: workload accounting
+    // charges the dot on the same critical path, and the SIMT profile's
+    // scalar-FMA dot rate keeps a hybrid Stage honestly expensive in SIMT.
     auto derive = [&]() {
       if (facts.hasLoopCarriedDataDependency)
         return StageCostModelKind::LoopCarriedRecurrence;

@@ -268,6 +268,7 @@ llvm::json::Object LogicalStageCost::toJSON() const {
   result["iteration_count"] = iterationCount;
   result["features"] = features.toJSON();
   result["workload"] = workload.toJSON();
+  result["local_simt_workload"] = localSimtWorkload.toJSON();
   result["owned_operation_count"] = ownedOperationCount;
   llvm::json::Array locations;
   for (const std::string &location : sourceLocations)

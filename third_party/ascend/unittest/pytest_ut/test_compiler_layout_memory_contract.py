@@ -588,18 +588,29 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     assert events[-1] == "run_row"
 
 
-def test_make_ttir_forwards_iat_rule_and_explicit_resource_snapshot(
+@pytest.mark.parametrize(
+    ("rule_mask", "aot_shaped"),
+    ((512, False), (1024, True)),
+    ids=("iat", "spaf-aot"),
+)
+def test_make_ttir_forwards_program_mapping_rule_and_resource_snapshot(
     compiler_module,
     monkeypatch,
+    rule_mask,
+    aot_shaped,
 ):
-    """IAT must be opt-in and receive real target facts, never defaults."""
-    options = SimpleNamespace(
-        enable_graph_optimize=True,
-        target_arch="Ascend910B1",
-        compile_mode="simd_simt_template",
-        debug=False,
-        program_mapping_rule_mask=512,
-    )
+    """Every opt-in mapping rule receives real target facts, never defaults."""
+    options_kwargs = {
+        "enable_graph_optimize": True,
+        "target_arch": "Ascend910B1",
+        "compile_mode": "simd_simt_template",
+        "debug": False,
+        "program_mapping_rule_mask": rule_mask,
+    }
+    if aot_shaped:
+        # An AOT-shaped caller can request SPAF without a static grid.
+        options_kwargs["program_grid_specialization"] = None
+    options = SimpleNamespace(**options_kwargs)
     monkeypatch.setattr(
         compiler_module,
         "NPUUtils",
@@ -615,47 +626,7 @@ def test_make_ttir_forwards_iat_rule_and_explicit_resource_snapshot(
     assert graph_calls == [{
         "ub_capacity_bytes": 96 * 1024,
         "compile_mode": "simd_simt_template",
-        "rule_mask": 512,
-        "device_core_count": 40,
-        "min_programs_per_core": 1,
-        "ub_safety_percent": 80,
-        "reserved_ub_bytes": 0,
-        "mapping_ub_capacity_bytes": 192 * 1024,
-        "store_coalescing_ub_budget_bytes": 96 * 1024,
-    }]
-    assert events[-1] == "run_row"
-
-
-def test_make_ttir_forwards_static_axis_fusion_rule_and_resource_snapshot(
-    compiler_module,
-    monkeypatch,
-):
-    options = SimpleNamespace(
-        enable_graph_optimize=True,
-        target_arch="Ascend910B1",
-        compile_mode="simd_simt_template",
-        # An AOT-shaped caller can still request the rule. It deliberately
-        # carries no specialization attr and therefore remains a C++ no-op.
-        program_grid_specialization=None,
-        program_mapping_rule_mask=1024,
-        debug=False,
-    )
-    monkeypatch.setattr(
-        compiler_module,
-        "NPUUtils",
-        lambda: SimpleNamespace(get_aivector_core_num=lambda: 40),
-    )
-
-    events, graph_calls = _run_make_ttir_with_recorded_graph_options(
-        compiler_module,
-        monkeypatch,
-        options,
-    )
-
-    assert graph_calls == [{
-        "ub_capacity_bytes": 96 * 1024,
-        "compile_mode": "simd_simt_template",
-        "rule_mask": 1024,
+        "rule_mask": rule_mask,
         "device_core_count": 40,
         "min_programs_per_core": 1,
         "ub_safety_percent": 80,

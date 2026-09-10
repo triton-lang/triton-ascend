@@ -36,32 +36,6 @@ def _contract(*transforms, version=1):
     return {"version": version, "transforms": list(transforms)}
 
 
-@pytest.mark.parametrize(("logical_extent", "factor", "expected"), [(64, 8, 8), (65, 8, 9)])
-def test_single_transform_uses_ceil_div_and_retains_original_tail_extent(
-    program_grid,
-    logical_extent,
-    factor,
-    expected,
-):
-    contract = _contract(_transform(0, 0, factor, logical_extent))
-
-    assert program_grid.apply_program_grid_transforms(
-        (logical_extent, 1, 1),
-        contract,
-    ) == (expected, 1, 1)
-
-    # The transform compresses program ids; lane masking remains tied to the
-    # retained original logical extent, so a non-divisible final group neither
-    # duplicates nor drops a logical tile.
-    covered = []
-    for program_id in range(expected):
-        for lane in range(factor):
-            logical_tile = program_id * factor + lane
-            if logical_tile < logical_extent:
-                covered.append(logical_tile)
-    assert covered == list(range(logical_extent))
-
-
 @pytest.mark.parametrize(
     ("logical_extent", "expected_programs"),
     [(1, 1), (7, 1), (8, 1), (9, 2), (64, 8), (65, 9)],

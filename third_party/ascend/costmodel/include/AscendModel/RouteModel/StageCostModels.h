@@ -85,6 +85,15 @@ struct LogicalStage {
   /// materialize only anchors owned by Stages that the solver selected as
   /// SIMT; consuming every materializable anchor would violate the route.
   std::vector<unsigned> simtAnchorIndices;
+  /// Conjunction of all owned anchors' pure-SIMD lowering capabilities.
+  bool allAnchorsSimdLowerable = true;
+  /// Exact operations materialized inside the local SIMT scope.  This may be
+  /// much smaller than `operations` for a hybrid Stage (for example one
+  /// tt.scan inside a loop-carried Stage that also owns several tt.dot ops).
+  std::vector<Operation *> localSimtOperations;
+  /// Per-Stage-iteration workload of localSimtOperations.  Local mixed costing
+  /// uses this for SIMT and charges the residual workload with the SIMD model.
+  StageWorkload localSimtWorkload;
   bool simdLegal = false;
   bool simtLegal = false;
   /// True when this Stage has exact operation ownership/live-in/live-out and

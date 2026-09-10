@@ -1,4 +1,5 @@
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 
@@ -31,6 +32,22 @@ using mlir::ascend::StageWorkloadAnalysis;
 using mlir::ascend::TriangularSolveFacts;
 
 namespace {
+
+TEST(SimdSimtCostModelTest, CumsumCapabilitiesDistinguishMixedLocalScope) {
+  auto capabilities = mlir::ascend::querySimtLoweringCapabilities(
+      "Ascend950PR_9579", /*compileOn91095=*/true);
+  EXPECT_TRUE(capabilities.supportsLocalSimtScopes);
+  EXPECT_TRUE(capabilities.supportsPlainCumsumSIMD);
+  EXPECT_TRUE(capabilities.supportsPlainCumsumSIMTOnly);
+  EXPECT_FALSE(capabilities.supportsPlainCumsumInLocalSIMTScope);
+
+  auto genericCapabilities = mlir::ascend::querySimtLoweringCapabilities(
+      "Ascend910B", /*compileOn91095=*/false);
+  EXPECT_FALSE(genericCapabilities.supportsLocalSimtScopes);
+  EXPECT_TRUE(genericCapabilities.supportsPlainCumsumSIMD);
+  EXPECT_FALSE(genericCapabilities.supportsPlainCumsumSIMTOnly);
+  EXPECT_FALSE(genericCapabilities.supportsPlainCumsumInLocalSIMTScope);
+}
 
 SimdSimtFeatureSummary triangularBt16StageFeatures() {
   SimdSimtFeatureSummary f;

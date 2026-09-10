@@ -1,8 +1,9 @@
 //===- StageRouteCostModel.h - Logical-stage route model -------*- C++ -*-===//
 //
-// A kernel is represented as serial algorithm stages.  Every Stage is
-// implemented entirely by SIMD or entirely by SIMT.  A mixed kernel is a
-// route containing both modes; there is deliberately no mixed Stage.
+// A kernel is represented as serial algorithm stages.  Whole-kernel
+// implementations use one mode per Stage.  A local-scope implementation may
+// execute an exact anchored subrange in SIMT while retaining the residual Stage
+// workload in SIMD; this mirrors scope materialization for hybrid IR.
 //
 //===----------------------------------------------------------------------===//
 
@@ -139,6 +140,9 @@ struct LogicalStageCost {
   int64_t iterationCount = 1;
   StageModelFeatures features;
   StageWorkload workload;
+  /// Work executed by an anchored local SIMT scope.  The residual
+  /// (workload-localSimtWorkload) remains SIMD in a mixed implementation.
+  StageWorkload localSimtWorkload;
   int64_t ownedOperationCount = 0;
   /// Unique source locations of the TTIR operations owned by this Stage.
   /// These are calibration provenance only: they let a debug-line-enabled

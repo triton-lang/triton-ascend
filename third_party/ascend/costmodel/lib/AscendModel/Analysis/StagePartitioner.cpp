@@ -368,6 +368,7 @@ static void attachExactAnchorOwnership(StagePartition &partition,
       if (anchor.materializable && stageOwnsAnchor(stage, anchor)) {
         stage.simtAnchorIndices.push_back(
             static_cast<unsigned>(indexedAnchor.index()));
+        stage.allAnchorsSimdLowerable &= anchor.lowerability.allSimd;
         Operation *insertionPoint = anchor.scopeOperations.size() > 1
                                         ? anchor.scopeInsertionPoint
                                         : anchor.operation;
@@ -673,6 +674,7 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
     stage.localSimtScopeCount = 0;
     stage.scopeInputTensorBytes = 0;
     stage.scopeOutputTensorBytes = 0;
+    stage.localSimtOperations.clear();
     auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
     if (!merged)
       continue;
@@ -684,6 +686,7 @@ static void deriveLocalSimtScopeTraffic(StagePartition &partition,
         llvm::append_range(roots, anchor.scopeOperations);
       else
         roots.push_back(anchor.operation);
+      stage.localSimtOperations.assign(roots.begin(), roots.end());
 
       llvm::DenseSet<Operation *> inside;
       for (Operation *root : roots) {

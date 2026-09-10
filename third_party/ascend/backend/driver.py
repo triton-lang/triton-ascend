@@ -32,8 +32,8 @@ from triton.runtime.cache import get_cache_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import _build_npu_ext, get_backend_func
-from triton.backends.ascend.launcher import (argument_types, export_launcher, get_runtime,
-                                            make_launch_spec, ty_to_cpp, wrap_handle_tensordesc)
+from triton.backends.ascend.launcher import (argument_types, export_launcher, get_runtime, make_launch_spec, ty_to_cpp,
+                                             wrap_handle_tensordesc)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils

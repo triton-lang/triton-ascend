@@ -26,14 +26,15 @@
 #include <atomic>
 #include <cstring>
 #include <string>
-#include <vector>
 #include <sys/syscall.h>
 #include <unistd.h>
+#include <vector>
 
 extern "C" {
 int MsprofReportApi(unsigned int, const MsprofApi *);
 unsigned long int MsprofSysCycleTime();
-int MsprofRegisterCallback(unsigned int, int (*)(unsigned int, void *, unsigned int));
+int MsprofRegisterCallback(unsigned int,
+                           int (*)(unsigned int, void *, unsigned int));
 }
 
 namespace triton::ascend {
@@ -47,8 +48,10 @@ inline int profileControl(unsigned type, void *data, unsigned len) {
     if (command->type >= 6)
       return 1;
     if (command->type == 1) {
-      profileL0.store((command->profSwitch & 0x800ULL) != 0, std::memory_order_relaxed);
-      profileL1.store((command->profSwitch & 2ULL) != 0, std::memory_order_relaxed);
+      profileL0.store((command->profSwitch & 0x800ULL) != 0,
+                      std::memory_order_relaxed);
+      profileL1.store((command->profSwitch & 2ULL) != 0,
+                      std::memory_order_relaxed);
     }
   }
   return 0;
@@ -62,21 +65,29 @@ struct ProfileTensor {
 
 inline uint32_t profileTaskType(uint32_t type) {
   switch (type) {
-  case 1: return MSPROF_GE_TASK_TYPE_AIV;
-  case 2: return MSPROF_GE_TASK_TYPE_AI_CORE;
-  case 3: return MSPROF_GE_TASK_TYPE_MIX_AIC;
-  case 4: return MSPROF_GE_TASK_TYPE_MIX_AIV;
-  default: return MSPROF_GE_TASK_TYPE_AI_CORE;
+  case 1:
+    return MSPROF_GE_TASK_TYPE_AIV;
+  case 2:
+    return MSPROF_GE_TASK_TYPE_AI_CORE;
+  case 3:
+    return MSPROF_GE_TASK_TYPE_MIX_AIC;
+  case 4:
+    return MSPROF_GE_TASK_TYPE_MIX_AIV;
+  default:
+    return MSPROF_GE_TASK_TYPE_AI_CORE;
   }
 }
 
-inline void reportProfile(const TritonNpuLaunchSpecV1 &spec, const std::string &name,
-                          uint32_t blocks, unsigned long begin,
+inline void reportProfile(const TritonNpuLaunchSpecV1 &spec,
+                          const std::string &name, uint32_t blocks,
+                          unsigned long begin,
                           const std::vector<ProfileTensor> &tensors) {
-  if (!profileL0.load(std::memory_order_relaxed) && !profileL1.load(std::memory_order_relaxed))
+  if (!profileL0.load(std::memory_order_relaxed) &&
+      !profileL1.load(std::memory_order_relaxed))
     return;
   const auto end = MsprofSysCycleTime();
-  const auto hash = MsprofGetHashId(const_cast<char *>(name.c_str()), name.size());
+  const auto hash =
+      MsprofGetHashId(const_cast<char *>(name.c_str()), name.size());
   const auto thread = static_cast<unsigned>(syscall(SYS_gettid));
   MsprofApi api{};
   api.level = MSPROF_REPORT_NODE_LEVEL;
@@ -111,7 +122,9 @@ inline void reportProfile(const TritonNpuLaunchSpecV1 &spec, const std::string &
     context.opName = hash;
     context.ctxIdNum = 1;
     context.ctxIds[0] = 0;
-    std::memcpy(info.data, &context, std::min(sizeof(context), size_t(MSPROF_ADDTIONAL_INFO_DATA_LENGTH)));
+    std::memcpy(
+        info.data, &context,
+        std::min(sizeof(context), size_t(MSPROF_ADDTIONAL_INFO_DATA_LENGTH)));
     MsprofReportAdditionalInfo(false, &info, sizeof(info));
   }
 
@@ -131,7 +144,8 @@ inline void reportProfile(const TritonNpuLaunchSpecV1 &spec, const std::string &
       entry.tensorType = kind;
       entry.format = 2;
       entry.dataType = tensor.dtype;
-      for (size_t j = 0; j < tensor.shape.size() && j < MSPROF_GE_TENSOR_DATA_SHAPE_LEN; ++j)
+      for (size_t j = 0;
+           j < tensor.shape.size() && j < MSPROF_GE_TENSOR_DATA_SHAPE_LEN; ++j)
         entry.shape[j] = tensor.shape[j];
     };
     if (tensor.kind == 0 || tensor.kind == 2)

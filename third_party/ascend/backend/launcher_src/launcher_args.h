@@ -67,8 +67,10 @@ struct ArgLayout {
   }
 
   ArgLayout(const TritonNpuLaunchSpecV1 &spec, const TritonNpuArgTypeV1 *types,
-            size_t count) : inputCount(count) {
-    static_assert(sizeof(void *) == 8, "Ascend launcher requires 64-bit pointers");
+            size_t count)
+      : inputCount(count) {
+    static_assert(sizeof(void *) == 8,
+                  "Ascend launcher requires 64-bit pointers");
     if (count && !types)
       throw std::invalid_argument("missing launcher argument types");
     if (spec.flags & TRITON_NPU_FFTS)
@@ -81,17 +83,34 @@ struct ArgLayout {
       uint32_t kind = types[i].kind;
       size_t size;
       switch (kind) {
-      case TRITON_NPU_CONSTEXPR: continue;
-      case TRITON_NPU_I8: case TRITON_NPU_U8: size = 1; break;
-      case TRITON_NPU_I16: case TRITON_NPU_U16: size = 2; break;
-      case TRITON_NPU_I32: case TRITON_NPU_U32: case TRITON_NPU_F32: size = 4; break;
-      case TRITON_NPU_I64: case TRITON_NPU_U64: case TRITON_NPU_F64:
-      case TRITON_NPU_POINTER: size = 8; break;
-      default: throw std::invalid_argument("unknown launcher argument kind");
+      case TRITON_NPU_CONSTEXPR:
+        continue;
+      case TRITON_NPU_I8:
+      case TRITON_NPU_U8:
+        size = 1;
+        break;
+      case TRITON_NPU_I16:
+      case TRITON_NPU_U16:
+        size = 2;
+        break;
+      case TRITON_NPU_I32:
+      case TRITON_NPU_U32:
+      case TRITON_NPU_F32:
+        size = 4;
+        break;
+      case TRITON_NPU_I64:
+      case TRITON_NPU_U64:
+      case TRITON_NPU_F64:
+      case TRITON_NPU_POINTER:
+        size = 8;
+        break;
+      default:
+        throw std::invalid_argument("unknown launcher argument kind");
       }
       // Match the existing generated packed struct: even i8/i16 parameters
       // start on a 4-byte boundary. Pointer and 64-bit parameters use 8 bytes.
-      args.push_back({i, kind, types[i].dtype, reserve(size, size == 8 ? 8 : 4), size});
+      args.push_back(
+          {i, kind, types[i].dtype, reserve(size, size == 8 ? 8 : 4), size});
     }
     if (spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM))
       originalGrid = reserve(2 * sizeof(uint32_t), 4);
@@ -106,12 +125,14 @@ struct ArgLayout {
   void pack(char *buffer, const void *const *values, const size_t *sizes,
             size_t count) const {
     if (count != args.size())
-      throw std::invalid_argument("kernel argument count does not match launch plan");
+      throw std::invalid_argument(
+          "kernel argument count does not match launch plan");
     if (count && (!values || !sizes))
       throw std::invalid_argument("missing kernel argument buffers/sizes");
     for (size_t i = 0; i < count; ++i) {
       if (!values[i] || sizes[i] != args[i].size)
-        throw std::invalid_argument("kernel argument width does not match launch plan");
+        throw std::invalid_argument(
+            "kernel argument width does not match launch plan");
       std::memcpy(buffer + args[i].offset, values[i], args[i].size);
     }
   }
@@ -122,7 +143,8 @@ inline void validateSpec(const TritonNpuLaunchSpecV1 &spec) {
     throw std::invalid_argument("unsupported launcher spec ABI");
   if (spec.flags & ~uint64_t(1023))
     throw std::invalid_argument("unknown launcher flags");
-  if (!spec.coalesce_factor || spec.coalesce_axis < -1 || spec.coalesce_axis > 2)
+  if (!spec.coalesce_factor || spec.coalesce_axis < -1 ||
+      spec.coalesce_axis > 2)
     throw std::invalid_argument("invalid launcher coalescing configuration");
   if ((spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM)) &&
       (spec.coalesce_factor != 1 || spec.coalesce_axis != -1 ||
@@ -161,18 +183,21 @@ inline LaunchGrid prepareGrid(const TritonNpuLaunchSpecV1 &spec,
       dim = (dim + spec.coalesce_factor - 1) / spec.coalesce_factor;
     else {
       if (dim % spec.coalesce_factor)
-        throw std::invalid_argument("launch grid is not divisible by coalesce factor");
+        throw std::invalid_argument(
+            "launch grid is not divisible by coalesce factor");
       dim /= spec.coalesce_factor;
     }
     result.grid[spec.coalesce_axis] = static_cast<int32_t>(dim);
   }
-  uint64_t blocks = checkedMultiply(checkedMultiply(result.grid[0], result.grid[1]), result.grid[2]);
+  uint64_t blocks = checkedMultiply(
+      checkedMultiply(result.grid[0], result.grid[1]), result.grid[2]);
   if (blocks > std::numeric_limits<uint32_t>::max())
     throw std::overflow_error("launch grid exceeds uint32 block count");
   result.logicalBlocks = blocks;
-  result.physicalBlocks = (spec.flags & TRITON_NPU_AUTO_MAP)
-                              ? std::min(result.logicalBlocks, spec.physical_blocks)
-                              : result.logicalBlocks;
+  result.physicalBlocks =
+      (spec.flags & TRITON_NPU_AUTO_MAP)
+          ? std::min(result.logicalBlocks, spec.physical_blocks)
+          : result.logicalBlocks;
   return result;
 }
 
@@ -180,12 +205,16 @@ struct LockLayout {
   uint64_t participants, orderedElements, unorderedStride, elements, bytes;
 };
 
-inline LockLayout prepareLocks(const TritonNpuLaunchSpecV1 &spec, uint32_t blocks) {
+inline LockLayout prepareLocks(const TritonNpuLaunchSpecV1 &spec,
+                               uint32_t blocks) {
   uint64_t participants = checkedMultiply(blocks, spec.participant_factor);
   uint64_t ordered = checkedMultiply(spec.ordered_locks, 8);
-  uint64_t stride = checkedMultiply(checkedAdd(1, checkedMultiply(2, participants)), 8);
-  uint64_t elements = checkedAdd(ordered, checkedMultiply(spec.unordered_locks, stride));
-  return {participants, ordered, stride, elements, checkedMultiply(elements, 8)};
+  uint64_t stride =
+      checkedMultiply(checkedAdd(1, checkedMultiply(2, participants)), 8);
+  uint64_t elements =
+      checkedAdd(ordered, checkedMultiply(spec.unordered_locks, stride));
+  return {participants, ordered, stride, elements,
+          checkedMultiply(elements, 8)};
 }
 
 } // namespace triton::ascend

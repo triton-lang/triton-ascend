@@ -96,17 +96,9 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
     return parseIntScalar(operand, loc, builder);
   }
 
-  if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
-    auto parentOp = blockArgument.getOwner()->getParentOp();
-    if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
-      OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
-      if (initArgOperand) {
-        Value initArg = initArgOperand->get();
-        return parse(initArg, loc, builder);
-      }
-    }
-  }
-
+  // A tensor loop argument represents the current iteration, not its init.
+  // Leave invariant argument elimination to canonicalization; an argument with
+  // no defining operation must fail analysis and use the existing fallback.
   auto definingOp = operand.getDefiningOp();
   if (!definingOp)
     return failure();

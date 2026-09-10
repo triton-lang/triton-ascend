@@ -85,9 +85,9 @@ def test_launch_plan_preserves_independent_grid_policies(policy, ceil_div):
 @pytest.mark.parametrize("pure", [False, True])
 def test_native_simt_configuration(policy, monkeypatch, taskqueue, pure):
     monkeypatch.setenv("TRITON_ENABLE_TASKQUEUE", str(taskqueue))
-    spec = launcher.make_launch_spec(metadata(target=SimpleNamespace(arch="Ascend950PR"),
-                                    compile_on_910_95=True, parallel_mode="mix_simd_simt",
-                                    is_pure_simt=pure, shared_mem_dynamic_size=221184), policy)
+    spec = launcher.make_launch_spec(
+        metadata(target=SimpleNamespace(arch="Ascend950PR"), compile_on_910_95=True, parallel_mode="mix_simd_simt",
+                 is_pure_simt=pure, shared_mem_dynamic_size=221184), policy)
     assert bool(spec.flags & launcher.TASKQUEUE) == taskqueue
     assert bool(spec.flags & launcher.PURE_SIMT) == pure
     assert spec.flags & launcher.DYNAMIC_SHARED
@@ -96,9 +96,9 @@ def test_native_simt_configuration(policy, monkeypatch, taskqueue, pure):
 
 
 def test_unordered_lock_participants_and_workspace(policy):
-    spec = launcher.make_launch_spec(metadata(sync_block_lock_layout=(3 << 32) | 2,
-                                    workspace_size=2048, mix_mode="mix", bs_task_type=32,
-                                    auto_tile_and_bind_subblock=True), policy)
+    spec = launcher.make_launch_spec(
+        metadata(sync_block_lock_layout=(3 << 32) | 2, workspace_size=2048, mix_mode="mix", bs_task_type=32,
+                 auto_tile_and_bind_subblock=True), policy)
     assert (spec.ordered_locks, spec.unordered_locks, spec.participant_factor) == (2, 3, 2)
     assert (spec.workspace_size, spec.physical_blocks, spec.task_type, spec.mix_ratio) == (2048, 20, 3, 2)
 
@@ -106,8 +106,8 @@ def test_unordered_lock_participants_and_workspace(policy):
 def test_empty_and_constexpr_arguments():
     assert launcher.argument_types({}) == []
     assert launcher.argument_types({0: "constexpr"}) == [(launcher.CONSTEXPR, -1)]
-    assert launcher.argument_types({0: "i1", 1: "u1", 2: "bf16"}) == [
-        (launcher.I32, -1), (launcher.U32, -1), (launcher.F32, -1)]
+    assert launcher.argument_types({0: "i1", 1: "u1", 2: "bf16"}) == [(launcher.I32, -1), (launcher.U32, -1),
+                                                                      (launcher.F32, -1)]
 
 
 def test_nested_descriptor_and_tuple_expansion():
@@ -119,7 +119,7 @@ def test_nested_descriptor_and_tuple_expansion():
     assert recorded[9:] == [7, 1234, 16, 32, 32, 1, True, 16, 32, 32, 1, ("keep", "tuple"), 5678]
     assert len(launcher.argument_types(signature)) == len(recorded) - 9
     with pytest.raises(TypeError, match="Tuple argument"):
-        wrapped(*([None] * 9), (7,), 5678)
+        wrapped(*([None] * 9), (7, ), 5678)
 
 
 def test_simple_signature_keeps_native_callable():
@@ -132,9 +132,10 @@ def test_export_path_is_lazy_and_cached(policy, monkeypatch):
     calls = []
     native = object()
     runtime = SimpleNamespace(create_launcher=lambda spec, types: native)
-    monkeypatch.setattr(driver, "NPUUtils", lambda: SimpleNamespace(
-        get_aivector_core_num=policy.get_aivector_core_num,
-        get_aicore_num=policy.get_aicore_num, get_so_path=lambda: "/cache/utils/npu_utils.so"))
+    monkeypatch.setattr(
+        driver, "NPUUtils",
+        lambda: SimpleNamespace(get_aivector_core_num=policy.get_aivector_core_num, get_aicore_num=policy.
+                                get_aicore_num, get_so_path=lambda: "/cache/utils/npu_utils.so"))
     monkeypatch.setattr(driver, "get_runtime", lambda path, debug: (runtime, "/cache/runtime/runtime.so"))
     monkeypatch.setattr(driver, "export_launcher", lambda *args: calls.append(args) or "/cache/export.so")
     src = SimpleNamespace(signature={0: "*fp32"}, fn=SimpleNamespace(arg_names=["x"]))
@@ -215,8 +216,7 @@ def test_repeated_preparation_reuses_keys_and_artifacts(prepared_backend, monkey
     assert len(state.builds) == 2
     hashes = []
     original_hash = hashlib.sha256
-    monkeypatch.setattr(hashlib, "sha256", lambda *a, **kw: (
-        hashes.append(a), original_hash(*a, **kw))[1])
+    monkeypatch.setattr(hashlib, "sha256", lambda *a, **kw: (hashes.append(a), original_hash(*a, **kw))[1])
     for _ in range(5):
         second = state.driver.NPULauncher(state.src, metadata(workspace_size=2048))
         assert second._runtime_path == first._runtime_path
@@ -309,6 +309,7 @@ def test_custom_cache_queries_and_materialization_are_not_bypassed(prepared_back
     queries = []
 
     class CustomCache(FileCacheManager):
+
         def get_file(self, filename):
             queries.append(filename)
             return super().get_file(filename)
@@ -334,6 +335,7 @@ def test_remote_cache_keeps_access_accounting(prepared_backend, monkeypatch):
     storage, accesses = {}, []
 
     class RemoteBackend:
+
         def __init__(self, key):
             self.key = key
 
@@ -388,8 +390,9 @@ def _concurrent_artifact_worker(root, gate, queue):
 def test_multiple_processes_build_one_cold_artifact(tmp_path):
     context = multiprocessing.get_context("spawn")
     gate, queue = context.Event(), context.Queue()
-    processes = [context.Process(target=_concurrent_artifact_worker, args=(str(tmp_path), gate, queue))
-                 for _ in range(4)]
+    processes = [
+        context.Process(target=_concurrent_artifact_worker, args=(str(tmp_path), gate, queue)) for _ in range(4)
+    ]
     for process in processes:
         process.start()
     gate.set()
@@ -413,9 +416,11 @@ def test_distinct_artifacts_build_concurrently_and_failure_retries(tmp_path, mon
     barrier = threading.Barrier(2)
 
     def work(key):
+
         def build():
             barrier.wait(timeout=10)
             return b"built"
+
         return utils._get_or_build_npu_artifact(get_cache_manager(key * 64), "test.so", build)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -452,18 +457,18 @@ def test_fingerprint_reuses_package_metadata_and_tracks_compiler(tmp_path, monke
     compiler = tmp_path / "compiler"
     compiler.write_text("compiler v1")
     calls = []
-    monkeypatch.setattr(utils, "_npu_ext_build_command", lambda name, path, **kw: (
-        [str(compiler), path, *kw.get("extra_cflags", ())], "output.so"))
+    monkeypatch.setattr(utils, "_npu_ext_build_command", lambda name, path, **kw:
+                        ([str(compiler), path, *kw.get("extra_cflags", ())], "output.so"))
     monkeypatch.setattr(utils, "get_cann_version", lambda: (9, 1, 0))
     monkeypatch.setattr(utils, "_npu_compiler_version", lambda path, identity: Path(path).read_text())
     monkeypatch.setattr(importlib.metadata, "version", lambda name: calls.append(name) or "test-version")
     utils._npu_package_versions.cache_clear()
     utils._npu_fingerprint.cache_clear()
     try:
-        first = utils.npu_extension_fingerprint("test", extra_cflags=("-O3",))
-        assert utils.npu_extension_fingerprint("test", extra_cflags=("-O3",)) == first
+        first = utils.npu_extension_fingerprint("test", extra_cflags=("-O3", ))
+        assert utils.npu_extension_fingerprint("test", extra_cflags=("-O3", )) == first
         assert calls == ["torch", "torch_npu"]
-        changed = utils.npu_extension_fingerprint("test", extra_cflags=("-O0",))
+        changed = utils.npu_extension_fingerprint("test", extra_cflags=("-O0", ))
         assert changed["command"] != first["command"]
         replacement = compiler.with_suffix(".new")
         replacement.write_text("compiler v2")
@@ -484,8 +489,8 @@ def test_build_command_reuses_stable_options_but_tracks_environment(tmp_path, mo
     monkeypatch.setenv("CC", "compiler-a")
     utils._npu_ext_build_options.cache_clear()
     try:
-        first, _ = utils._npu_ext_build_command("option_test", "/build/test.cpp", extra_cflags=("-O3",))
-        second, _ = utils._npu_ext_build_command("option_test", "/build/test.cpp", extra_cflags=("-O0",))
+        first, _ = utils._npu_ext_build_command("option_test", "/build/test.cpp", extra_cflags=("-O3", ))
+        second, _ = utils._npu_ext_build_command("option_test", "/build/test.cpp", extra_cflags=("-O0", ))
         assert first[0] == second[0] == "compiler-a"
         assert "-O3" in first and "-O0" in second and calls == ["get_cc_cmd"]
         monkeypatch.setenv("CC", "compiler-b")

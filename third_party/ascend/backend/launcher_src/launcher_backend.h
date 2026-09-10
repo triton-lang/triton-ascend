@@ -27,11 +27,11 @@
 #include <memory>
 
 #ifdef TRITON_LAUNCHER_MINDSPORE
-#include "include/utils/device_manager_conf.h"
-#include "include/runtime/hardware_abstract/device_context/device_context_manager.h"
 #include "include/mindspore/ops/kernel/ascend/aclnn/pyboost_impl/aclnn_utils.h"
-#include "include/runtime/pipeline/pipeline.h"
 #include "include/pynative/utils/runtime/op_executor.h"
+#include "include/runtime/hardware_abstract/device_context/device_context_manager.h"
+#include "include/runtime/pipeline/pipeline.h"
+#include "include/utils/device_manager_conf.h"
 #endif
 
 namespace triton::ascend {
@@ -44,9 +44,10 @@ struct Allocation {
 inline auto *deviceContext() {
   // Resolve the current device on each submission instead of freezing the
   // device of the first kernel in a process-wide static.
-  return mindspore::device::DeviceContextManager::GetInstance().GetOrCreateDeviceContext(
-      {mindspore::device::DeviceType::kAscend,
-       mindspore::DeviceManagerConf::GetInstance()->device_id()});
+  return mindspore::device::DeviceContextManager::GetInstance()
+      .GetOrCreateDeviceContext(
+          {mindspore::device::DeviceType::kAscend,
+           mindspore::DeviceManagerConf::GetInstance()->device_id()});
 }
 inline void bindDevice() {
   deviceContext()->device_res_manager_->BindDeviceToCurrentThread(false);
@@ -68,9 +69,11 @@ struct BackendApi {
 
   BackendApi() {
     void *handle = openRuntime(TRITON_NPU_UTILS_RELATIVE);
-    workspace = resolve<decltype(workspace)>(handle, "triton_allocate_workspace");
+    workspace =
+        resolve<decltype(workspace)>(handle, "triton_allocate_workspace");
     lock = resolve<decltype(lock)>(handle, "triton_allocate_sync_block_lock");
-    release = resolve<decltype(release)>(handle, "triton_release_retained_tensor");
+    release =
+        resolve<decltype(release)>(handle, "triton_release_retained_tensor");
     async = resolve<decltype(async)>(handle, "triton_async_launch");
   }
 };
@@ -82,10 +85,12 @@ inline void bindDevice() {}
 inline Allocation allocate(uint64_t size, cann_stream stream, bool isLock) {
   auto &api = backendApi();
   void *handle = nullptr;
-  void *data = isLock ? api.lock(size, stream, &handle) : api.workspace(size, &handle);
+  void *data =
+      isLock ? api.lock(size, stream, &handle) : api.workspace(size, &handle);
   std::shared_ptr<void> owner(handle, api.release);
   if (!data)
-    throw std::runtime_error(isLock ? "sync block lock allocation failed" : "workspace allocation failed");
+    throw std::runtime_error(isLock ? "sync block lock allocation failed"
+                                    : "workspace allocation failed");
   return {data, std::move(owner)};
 }
 inline void submit(std::function<cann_error()> call, const char *name) {

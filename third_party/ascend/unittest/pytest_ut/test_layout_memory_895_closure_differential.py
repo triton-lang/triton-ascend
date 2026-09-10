@@ -457,6 +457,7 @@ def _load_launch_plan():
     def create(*, metadata, **_kwargs):
         with patch.object(launcher.utils, "_is_auto_map_parallel_blocks_enabled", lambda: state["auto_map_enabled"]):
             return launcher.make_launch_spec(metadata, _FakeNPUUtils())
+
     return create, state
 
 

@@ -629,7 +629,7 @@ def _get_cxx():
 
 
 def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                   precompile=False, extra_cflags=()):
+                           precompile=False, extra_cflags=()):
     header_path = None
     if src_path is None:
         src_path = header_or_src_path
@@ -643,8 +643,7 @@ def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, 
     asc_path = str(_get_ascend_path())
     has_runtime_header = os.path.exists(os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h"))
     policy = backend_policy or "torch_npu"
-    cc_cmd = [cxx, src_path, *_npu_ext_build_options(obj_name, kernel_launcher, asc_path,
-                                                   has_runtime_header, policy)]
+    cc_cmd = [cxx, src_path, *_npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_header, policy)]
     if header_path is not None:
         # Preserve the position of this optional include in the original command.
         cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
@@ -695,11 +694,10 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
     return tuple(cc_cmd)
 
 
-def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                   precompile=False, extra_cflags=()) -> str:
-    cc_cmd, so_path = _npu_ext_build_command(
-        obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
-        precompile=precompile, extra_cflags=extra_cflags)
+def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch", precompile=False,
+                   extra_cflags=()) -> str:
+    cc_cmd, so_path = _npu_ext_build_command(obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
+                                             precompile=precompile, extra_cflags=extra_cflags)
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
@@ -720,16 +718,18 @@ def _file_identity(path):
 @functools.lru_cache(maxsize=2)
 def _npu_package_versions(policy):
     import importlib.metadata
-    names = ("mindspore",) if policy == "mindspore" else ("torch", "torch_npu")
+    names = ("mindspore", ) if policy == "mindspore" else ("torch", "torch_npu")
     return tuple((name, importlib.metadata.version(name)) for name in names)
 
 
 @functools.lru_cache(maxsize=32)
 def _npu_fingerprint(command, compiler, identity, cann, policy):
     return {
-        "command": list(command), "compiler": compiler,
+        "command": list(command),
+        "compiler": compiler,
         "compiler_version": _npu_compiler_version(compiler, identity),
-        "cann": cann, "packages": dict(_npu_package_versions(policy)),
+        "cann": cann,
+        "packages": dict(_npu_package_versions(policy)),
         "python_abi": sysconfig.get_config_var("SOABI"),
     }
 
@@ -742,11 +742,13 @@ def npu_extension_fingerprint(obj_name, *, extra_cflags=()):
     """
     command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags)
     compiler = os.path.realpath(shutil.which(command[0]) or command[0])
-    info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler),
-                            get_cann_version(), backend_policy or "torch_npu")
+    info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler), get_cann_version(), backend_policy
+                            or "torch_npu")
     # Keep the existing dictionary contract without exposing cached mutable data.
     return {
-        **info, "command": list(info["command"]), "packages": dict(info["packages"]),
+        **info,
+        "command": list(info["command"]),
+        "packages": dict(info["packages"]),
     }
 
 

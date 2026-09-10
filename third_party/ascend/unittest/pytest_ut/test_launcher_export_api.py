@@ -31,12 +31,10 @@ from triton.backends.ascend import driver, launcher
 
 
 class Spec(ct.Structure):
-    _fields_ = [("version", ct.c_uint32), ("struct_size", ct.c_uint32),
-                ("flags", ct.c_uint64), ("workspace_size", ct.c_uint64),
-                ("ordered_locks", ct.c_uint64), ("unordered_locks", ct.c_uint64),
-                ("lock_init_value", ct.c_int64), ("participant_factor", ct.c_uint32),
-                ("physical_blocks", ct.c_uint32), ("coalesce_factor", ct.c_uint32),
-                ("coalesce_axis", ct.c_int32), ("task_type", ct.c_uint32),
+    _fields_ = [("version", ct.c_uint32), ("struct_size", ct.c_uint32), ("flags", ct.c_uint64),
+                ("workspace_size", ct.c_uint64), ("ordered_locks", ct.c_uint64), ("unordered_locks", ct.c_uint64),
+                ("lock_init_value", ct.c_int64), ("participant_factor", ct.c_uint32), ("physical_blocks", ct.c_uint32),
+                ("coalesce_factor", ct.c_uint32), ("coalesce_axis", ct.c_int32), ("task_type", ct.c_uint32),
                 ("mix_ratio", ct.c_uint32), ("shared_mem_dynamic_size", ct.c_uint32)]
 
 
@@ -45,25 +43,30 @@ class ArgType(ct.Structure):
 
 
 class Request(ct.Structure):
-    _fields_ = [("version", ct.c_uint32), ("struct_size", ct.c_uint32),
-                ("kernel_name", ct.c_char_p), ("function", ct.c_void_p), ("stream", ct.c_void_p),
-                ("grid", ct.c_int32 * 3), ("shapes_data", ct.POINTER(ct.c_int64)),
-                ("shape_dims", ct.POINTER(ct.c_int)), ("tensor_kinds", ct.POINTER(ct.c_int)),
-                ("num_tensors", ct.c_int)]
+    _fields_ = [("version", ct.c_uint32), ("struct_size", ct.c_uint32), ("kernel_name", ct.c_char_p),
+                ("function", ct.c_void_p), ("stream", ct.c_void_p), ("grid", ct.c_int32 * 3),
+                ("shapes_data", ct.POINTER(ct.c_int64)), ("shape_dims", ct.POINTER(ct.c_int)),
+                ("tensor_kinds", ct.POINTER(ct.c_int)), ("num_tensors", ct.c_int)]
 
 
 @pytest.fixture(scope="module")
 def native_api():
     _, path = launcher.get_runtime(driver.NPUUtils().get_so_path())
     api = ct.CDLL(path)
-    api.triton_npu_create_plan_v1.argtypes = [ct.POINTER(Spec), ct.POINTER(ArgType), ct.c_size_t,
-                                            ct.POINTER(ct.c_char), ct.c_size_t]
+    api.triton_npu_create_plan_v1.argtypes = [
+        ct.POINTER(Spec), ct.POINTER(ArgType), ct.c_size_t,
+        ct.POINTER(ct.c_char), ct.c_size_t
+    ]
     api.triton_npu_create_plan_v1.restype = ct.c_void_p
     api.triton_npu_destroy_plan_v1.argtypes = [ct.c_void_p]
     api.triton_npu_destroy_plan_v1.restype = None
-    api.triton_npu_launch_v1.argtypes = [ct.c_void_p, ct.POINTER(Request), ct.POINTER(ct.c_void_p),
-                                       ct.POINTER(ct.c_size_t), ct.c_size_t,
-                                       ct.POINTER(ct.c_char), ct.c_size_t]
+    api.triton_npu_launch_v1.argtypes = [
+        ct.c_void_p,
+        ct.POINTER(Request),
+        ct.POINTER(ct.c_void_p),
+        ct.POINTER(ct.c_size_t), ct.c_size_t,
+        ct.POINTER(ct.c_char), ct.c_size_t
+    ]
     api.triton_npu_launch_v1.restype = ct.c_int
     return api
 
@@ -73,8 +76,8 @@ def spec():
 
 
 def request():
-    return Request(version=1, struct_size=ct.sizeof(Request), kernel_name=b"abi_contract",
-                   grid=(ct.c_int32 * 3)(0, 1, 1))
+    return Request(version=1, struct_size=ct.sizeof(Request), kernel_name=b"abi_contract", grid=(ct.c_int32 * 3)(0, 1,
+                                                                                                                 1))
 
 
 @contextmanager
@@ -92,10 +95,9 @@ def plan(api, kinds, **changes):
         api.triton_npu_destroy_plan_v1(handle)
 
 
-@pytest.mark.parametrize("field,value", [("version", 2), ("struct_size", 1), ("flags", 1 << 60),
-                                         ("coalesce_factor", 0), ("coalesce_axis", -2), ("coalesce_axis", 3),
-                                         ("participant_factor", 0), ("task_type", 0), ("task_type", 5),
-                                         ("mix_ratio", 65536)])
+@pytest.mark.parametrize("field,value", [("version", 2), ("struct_size", 1), ("flags", 1 << 60), ("coalesce_factor", 0),
+                                         ("coalesce_axis", -2), ("coalesce_axis", 3), ("participant_factor", 0),
+                                         ("task_type", 0), ("task_type", 5), ("mix_ratio", 65536)])
 def test_c_api_rejects_incompatible_or_invalid_plan(native_api, field, value):
     config = spec()
     setattr(config, field, value)
@@ -116,11 +118,16 @@ def test_c_api_empty_signature_and_constexpr(native_api, kinds, flags):
 
 
 @pytest.mark.parametrize("kind,value_type,value", [
-    (launcher.I8, ct.c_int8, -7), (launcher.U8, ct.c_uint8, 250),
-    (launcher.I16, ct.c_int16, -1234), (launcher.U16, ct.c_uint16, 65530),
-    (launcher.I32, ct.c_int32, -34342), (launcher.U32, ct.c_uint32, 2**31 + 5),
-    (launcher.I64, ct.c_int64, -(2**40) + 7), (launcher.U64, ct.c_uint64, 2**48 + 17),
-    (launcher.F32, ct.c_float, 1.25), (launcher.F64, ct.c_double, -3.75),
+    (launcher.I8, ct.c_int8, -7),
+    (launcher.U8, ct.c_uint8, 250),
+    (launcher.I16, ct.c_int16, -1234),
+    (launcher.U16, ct.c_uint16, 65530),
+    (launcher.I32, ct.c_int32, -34342),
+    (launcher.U32, ct.c_uint32, 2**31 + 5),
+    (launcher.I64, ct.c_int64, -(2**40) + 7),
+    (launcher.U64, ct.c_uint64, 2**48 + 17),
+    (launcher.F32, ct.c_float, 1.25),
+    (launcher.F64, ct.c_double, -3.75),
     (launcher.POINTER, ct.c_void_p, 0x123456789ABCDEF0),
 ], ids=["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64", "pointer"])
 def test_c_api_checks_argument_count_and_width(native_api, kind, value_type, value):

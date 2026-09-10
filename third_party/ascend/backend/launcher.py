@@ -42,9 +42,22 @@ FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARE
     1 << i for i in range(10))
 
 _KINDS = {
-    "constexpr": CONSTEXPR, "i1": I32, "i8": I8, "i16": I16, "i32": I32, "i64": I64,
-    "u1": U32, "u8": U8, "u16": U16, "u32": U32, "u64": U64,
-    "fp16": F32, "bf16": F32, "fp32": F32, "f32": F32, "fp64": F64,
+    "constexpr": CONSTEXPR,
+    "i1": I32,
+    "i8": I8,
+    "i16": I16,
+    "i32": I32,
+    "i64": I64,
+    "u1": U32,
+    "u8": U8,
+    "u16": U16,
+    "u32": U32,
+    "u64": U64,
+    "fp16": F32,
+    "bf16": F32,
+    "fp32": F32,
+    "f32": F32,
+    "fp64": F64,
 }
 
 
@@ -52,9 +65,16 @@ def ty_to_cpp(ty):
     if ty.startswith(("*", "tensordesc")):
         return "void*"
     return {
-        I8: "int8_t", I16: "int16_t", I32: "int32_t", I64: "int64_t",
-        U8: "uint8_t", U16: "uint16_t", U32: "uint32_t", U64: "uint64_t",
-        F32: "float", F64: "double",
+        I8: "int8_t",
+        I16: "int16_t",
+        I32: "int32_t",
+        I64: "int64_t",
+        U8: "uint8_t",
+        U16: "uint16_t",
+        U32: "uint32_t",
+        U64: "uint64_t",
+        F32: "float",
+        F64: "double",
     }[_KINDS[ty]]
 
 
@@ -163,7 +183,8 @@ def make_launch_spec(metadata, npu_utils):
         flags |= DYNAMIC_SHARED
     locks = int(getattr(metadata, "sync_block_lock_layout", 0))
     ordered, unordered = locks & 0xFFFFFFFF, (locks >> 32) & 0xFFFFFFFF
-    factor = 2 if unordered and metadata.mix_mode == "mix" and getattr(metadata, "auto_tile_and_bind_subblock", False) else 1
+    factor = 2 if unordered and metadata.mix_mode == "mix" and getattr(metadata, "auto_tile_and_bind_subblock",
+                                                                       False) else 1
     task_type = 1 if metadata.mix_mode == "aiv" else 2
     encoded = int(getattr(metadata, "bs_task_type", 0))
     mix_ratio = 0
@@ -175,12 +196,15 @@ def make_launch_spec(metadata, npu_utils):
     return LaunchSpec(
         flags=flags,
         workspace_size=max(int(getattr(metadata, "workspace_size", 0)), 0),
-        ordered_locks=ordered, unordered_locks=unordered,
+        ordered_locks=ordered,
+        unordered_locks=unordered,
         lock_init_value=int(getattr(metadata, "lock_init_value", getattr(metadata, "lock_init_val", 0))),
-        participant_factor=factor, physical_blocks=int(physical),
+        participant_factor=factor,
+        physical_blocks=int(physical),
         coalesce_factor=int(getattr(metadata, "coalesce_factor", 1) or 1),
         coalesce_axis=int(getattr(metadata, "coalesce_axis", -1)),
-        task_type=task_type, mix_ratio=mix_ratio,
+        task_type=task_type,
+        mix_ratio=mix_ratio,
         shared_mem_dynamic_size=int(getattr(metadata, "shared_mem_dynamic_size", 0)) if flags & DYNAMIC_SHARED else 0,
     )
 
@@ -245,8 +269,13 @@ def _runtime_source_identity():
     # Content, rather than timestamps, also detects same-size edits within a
     # filesystem clock tick. The prepared mapping and digest are still reused.
     return tuple((name, (root / name).read_text()) for name in (
-        "launcher_runtime.cpp", "launcher_abi.h", "launcher_args.h", "launcher_cann.h",
-        "launcher_backend.h", "launcher_cache.h", "launcher_profiler.h",
+        "launcher_runtime.cpp",
+        "launcher_abi.h",
+        "launcher_args.h",
+        "launcher_cann.h",
+        "launcher_backend.h",
+        "launcher_cache.h",
+        "launcher_profiler.h",
     ))
 
 
@@ -278,7 +307,7 @@ def _shared_key(fingerprint, sources):
 
 
 def _build_shared(name, sources, debug=False):
-    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=("-O3",))
+    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=("-O3", ))
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
     cache = get_cache_manager(key)
     filename = name + sysconfig.get_config_var("EXT_SUFFIX")
@@ -291,8 +320,9 @@ def _build_shared(name, sources, debug=False):
         with tempfile.TemporaryDirectory() as temp:
             for source_name, content in sources.items():
                 Path(temp, source_name).write_text(content)
-            source_path = Path(temp, "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
-            built = utils._build_npu_ext(name, str(source_path), extra_cflags=("-O3",))
+            source_path = Path(temp,
+                               "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
+            built = utils._build_npu_ext(name, str(source_path), extra_cflags=("-O3", ))
             return Path(built).read_bytes()
 
     return utils._get_or_build_npu_artifact(cache, filename, build)
@@ -313,10 +343,12 @@ def get_runtime(npu_utils_path, debug=False):
         # compiler selection and version-file identity for derived print code.
         bisheng = utils._get_bisheng_path()
         version_file = utils._find_cann_version_file()
-        print_identity = (bisheng, utils._file_identity(bisheng),
-                          version_file, utils._file_identity(version_file) if version_file else None)
-    sources = {**_runtime_sources(_runtime_source_identity()),
-               **_runtime_config(_cache_relative(npu_utils_path), utils.backend_policy, print_identity)}
+        print_identity = (bisheng, utils._file_identity(bisheng), version_file,
+                          utils._file_identity(version_file) if version_file else None)
+    sources = {
+        **_runtime_sources(_runtime_source_identity()),
+        **_runtime_config(_cache_relative(npu_utils_path), utils.backend_policy, print_identity)
+    }
     path = _build_shared("__triton_launcher_runtime", sources, debug)
     return _load_runtime(path), path
 
@@ -325,12 +357,10 @@ def export_launcher(spec, types, runtime_path, debug=False):
     """Bind the legacy C ABI using constants and a fixed export adapter."""
     fields = ", ".join(str(value) for value in spec.as_dict().values())
     initializers = ", ".join(f"{{{kind}, {dtype}}}" for kind, dtype in types) or "{0, -1}"
-    config = (
-        f"#define TRITON_EXPORT_RUNTIME_RELATIVE {json.dumps(_cache_relative(runtime_path))}\n"
-        f"static constexpr TritonNpuLaunchSpecV1 spec = {{1, sizeof(TritonNpuLaunchSpecV1), {fields}}};\n"
-        f"static constexpr TritonNpuArgTypeV1 types[] = {{{initializers}}};\n"
-        f"static constexpr size_t numTypes = {len(types)};\n"
-    )
+    config = (f"#define TRITON_EXPORT_RUNTIME_RELATIVE {json.dumps(_cache_relative(runtime_path))}\n"
+              f"static constexpr TritonNpuLaunchSpecV1 spec = {{1, sizeof(TritonNpuLaunchSpecV1), {fields}}};\n"
+              f"static constexpr TritonNpuArgTypeV1 types[] = {{{initializers}}};\n"
+              f"static constexpr size_t numTypes = {len(types)};\n")
     native = _runtime_sources(_runtime_source_identity())
     sources = {name: native[name] for name in ("launcher_abi.h", "launcher_cache.h")}
     export_source = str(Path(__file__).with_name("launcher_src") / "launcher_export.cpp")

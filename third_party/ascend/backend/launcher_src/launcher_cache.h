@@ -34,7 +34,8 @@ inline std::string cachePath(const char *relative) {
   if (!base || !*base)
     base = std::getenv("HOME");
   if (!base || !*base)
-    throw std::runtime_error("neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set");
+    throw std::runtime_error(
+        "neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set");
   return std::string(base) + "/.triton/cache/" + relative;
 }
 

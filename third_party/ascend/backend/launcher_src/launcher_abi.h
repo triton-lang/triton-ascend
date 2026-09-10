@@ -103,14 +103,15 @@ typedef struct TritonNpuLaunchPlan TritonNpuLaunchPlan;
  * pointer arguments remain subject to the caller's stream/lifetime contract.
  * An error buffer, when supplied, always receives a null-terminated string.
  * No C++ exception or Python object crosses this ABI. */
-TritonNpuLaunchPlan *triton_npu_create_plan_v1(
-    const TritonNpuLaunchSpecV1 *spec, const TritonNpuArgTypeV1 *types,
-    size_t num_types, char *error, size_t error_size);
+TritonNpuLaunchPlan *
+triton_npu_create_plan_v1(const TritonNpuLaunchSpecV1 *spec,
+                          const TritonNpuArgTypeV1 *types, size_t num_types,
+                          char *error, size_t error_size);
 void triton_npu_destroy_plan_v1(TritonNpuLaunchPlan *plan);
-int triton_npu_launch_v1(
-    const TritonNpuLaunchPlan *plan, const TritonNpuLaunchRequestV1 *request,
-    const void *const *args, const size_t *arg_sizes, size_t num_args,
-    char *error, size_t error_size);
+int triton_npu_launch_v1(const TritonNpuLaunchPlan *plan,
+                         const TritonNpuLaunchRequestV1 *request,
+                         const void *const *args, const size_t *arg_sizes,
+                         size_t num_args, char *error, size_t error_size);
 
 #ifdef __cplusplus
 }

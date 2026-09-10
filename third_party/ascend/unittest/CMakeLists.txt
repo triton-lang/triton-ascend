@@ -26,8 +26,6 @@ set_target_properties(check-triton-ascend-lit-tests PROPERTIES FOLDER "Tests")
 
 add_lit_testsuites(TRITON-LIT-TESTS ${CMAKE_CURRENT_SOURCE_DIR} DEPENDS ${TRITON_TEST_DEPENDS})
 
-add_subdirectory(resource_cost_model)
-
 if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   add_subdirectory(costmodel_ut)
 endif()

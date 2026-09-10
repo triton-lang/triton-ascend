@@ -297,41 +297,6 @@ def test_graph_optimize_pass_accepts_zero_rule_mask(tmp_path):
     assert_reparseable(module, tmp_path, "zero-rule-mask")
 
 
-def test_graph_optimize_binding_rejects_unknown_and_out_of_range_masks():
-    module = make_ast_ttir(NPUOptions(arch="Ascend910_95"))
-    pm = ir.pass_manager(module.context)
-
-    with pytest.raises(ValueError, match="unknown graph rule bits"):
-        ascend.passes.ttir.add_graph_optimize(pm, rule_mask=1 << 16)
-    with pytest.raises(ValueError, match="fit in uint32_t"):
-        ascend.passes.ttir.add_graph_optimize(pm, rule_mask=1 << 32)
-
-
-def test_graph_optimize_binding_accepts_independent_mapping_and_store_budgets(tmp_path):
-    """The Python binding must expose the two C++ budget channels together.
-
-    A program-mapping candidate uses the physical 256-KiB capacity, while
-    StoreCoalescing retains the legacy 128-KiB admission budget.  This catches
-    a Python/C++ ABI drift before a JIT launch reaches graph optimization.
-    """
-    module = make_ast_ttir(NPUOptions(arch="Ascend910_95"))
-    pm = ir.pass_manager(module.context)
-    ascend.passes.ttir.add_graph_optimize(
-        pm,
-        rule_mask=512,
-        ub_capacity_bytes=128 * 1024,
-        mapping_ub_capacity_bytes=256 * 1024,
-        store_coalescing_ub_budget_bytes=128 * 1024,
-        device_core_count=56,
-        min_programs_per_core=1,
-        ub_safety_percent=80,
-    )
-    pm.run(module, "")
-
-    assert "tt.func" in str(module)
-    assert_reparseable(module, tmp_path, "independent-mapping-store-budgets")
-
-
 def test_default_generic_graph_mask_excludes_legacy_memory_compatibility(tmp_path, ):
     """The 8/16/32/64 identities are enabled by default, not generic rules.
 

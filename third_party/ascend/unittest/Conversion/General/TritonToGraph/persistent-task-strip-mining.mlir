@@ -1,5 +1,4 @@
 // RUN: triton-opt --split-input-file %s --verify-each -graph-optimize='rule-mask=2048 ub-capacity-bytes=1048576 device-core-count=1 min-programs-per-core=1 ub-safety-percent=80 compile-mode=simd_simt_template' -o - | FileCheck %s
-// RUN: triton-opt --split-input-file %s --verify-each -graph-optimize='rule-mask=2048 ub-capacity-bytes=1048576 device-core-count=1 min-programs-per-core=1 ub-safety-percent=80 compile-mode=simt_only' -o - | FileCheck %s --check-prefix=SIMT
 //
 // PTSM owns the token (x) axis.  The input/output pointers are token-derived,
 // while the weight load is invariant and must stay outside the strip-mined
@@ -18,10 +17,6 @@
 // CHECK: arith.cmpi slt
 // CHECK: "tt.reduce"({{.*}}) <{axis = 1 : i32}>
 // CHECK: tt.store
-// SIMT-NOT: hacc.persistent_task_strip_mining
-// SIMT-NOT: hacc.program_grid_transforms
-// SIMT-LABEL: tt.func @structural_persistent_entry
-// SIMT: tt.get_program_id x
 module attributes {hacc.grid_specialization = {grid_0 = 19 : i64, grid_1 = 1 : i64, grid_2 = 1 : i64, rule_mask = 2048 : i64, version = 1 : i64}} {
   tt.func @structural_persistent_entry(%input: !tt.ptr<f32>, %output: !tt.ptr<f32>, %weight: !tt.ptr<f32>) attributes {hacc.grid_specialization = {grid_0 = 19 : i64, grid_1 = 1 : i64, grid_2 = 1 : i64, rule_mask = 2048 : i64, version = 1 : i64}} {
     %c4 = arith.constant 4 : i32

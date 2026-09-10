@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -56,6 +57,15 @@ using namespace mlir::CVPipeline;
 static constexpr const char *ssbufferCoreTypeCubeAttr = "CUBE";
 static constexpr const char *ssbufferCoreTypeVectorAttr = "VECTOR";
 static constexpr int ND_SHAPE_LENGTH = 2;
+
+static bool isFullSyncBlockOp(mlir::Operation *op)
+{
+    auto syncBlockOp = dyn_cast_or_null<hivm::SyncBlockOp>(op);
+    if (!syncBlockOp) {
+        return false;
+    }
+    return syncBlockOp.getSyncBlockModeAttr().getSyncMode() == hivm::SyncBlockMode::ALL;
+}
 
 // Helper: ssbuffer.core_type
 llvm::StringRef getSsbufferCoreType(Operation *op)
@@ -649,7 +659,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
         if (op->getNumRegions() > 0) {
             return;
         }
-        if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
+        if (isa<annotation::MarkOp, gpu::BarrierOp>(op) || isFullSyncBlockOp(op)) {
             return;
         }
         auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
@@ -660,7 +670,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
         int currBlockId = *currBlockIdOpt;
 
         for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
-            if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp)) {
+            if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp) || isFullSyncBlockOp(predOp)) {
                 continue;
             }
             if (predOp->getNumRegions() > 0) {
@@ -669,7 +679,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info)
                     return;
                 }
                 for (mlir::Operation *realPredOp : realdeps) {
-                    if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
+                    if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp) || isFullSyncBlockOp(realPredOp)) {
                         continue;
                     }
                     auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);

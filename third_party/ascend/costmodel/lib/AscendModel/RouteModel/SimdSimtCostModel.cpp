@@ -512,14 +512,18 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
   return profile;
 }
 
-static llvm::Expected<StageCostModelSummary> evaluateStageModel(
+/// Options shared by candidate scoring and the selector's StageOwnedScope
+/// synthesis so both see identical Stage boundaries.  The selector must
+/// partition the materialization module with exactly these options;
+/// otherwise synthesized stage scopes would not match the scored route.
+static StagePartitionerOptions buildStagePartitionerOptions(
     const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
     unsigned numWarps, bool wholeKernelSuperblockMaterializable,
-    bool scopeSuperblockMaterializable, int64_t logicalProgramCountHint,
-    int64_t physicalCoreCountHint, ModuleOp module,
-    const SimtAnchorPlan *anchorPlan) {
+    bool scopeSuperblockMaterializable, bool compileOn91095,
+    int64_t logicalProgramCountHint) {
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
+  partitionerOptions.compileOn91095 = compileOn91095;
   partitionerOptions.maximumSuperblockFactor =
       (wholeKernelSuperblockMaterializable || scopeSuperblockMaterializable ||
        features.autoBlockifyV1Applied)
@@ -539,6 +543,19 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   }
   partitionerOptions.scopeSuperblockMaterializable =
       scopeSuperblockMaterializable;
+  return partitionerOptions;
+}
+
+static llvm::Expected<StageCostModelSummary> evaluateStageModel(
+    const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
+    unsigned numWarps, bool wholeKernelSuperblockMaterializable,
+    bool scopeSuperblockMaterializable, bool compileOn91095,
+    int64_t logicalProgramCountHint, int64_t physicalCoreCountHint,
+    ModuleOp module, const SimtAnchorPlan *anchorPlan) {
+  StagePartitionerOptions partitionerOptions = buildStagePartitionerOptions(
+      features, profile, numWarps, wholeKernelSuperblockMaterializable,
+      scopeSuperblockMaterializable, compileOn91095,
+      logicalProgramCountHint);
   StagePartitioner partitioner;
   if (!module || !anchorPlan)
     return llvm::createStringError(std::errc::invalid_argument,
@@ -769,9 +786,12 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   report.allSimtOnlyCandidateLegal =
       options.compileOn91095 && !features.hasExplicitScope &&
       features.simtAnchors.kernelLowerability.allSimtOnly;
+  // Anchor count is deliberately not required here: an anchor-free kernel
+  // may still select Mixed through StageOwnedScope units synthesized by the
+  // StagePartitioner.  Stage-level materializability is decided by the
+  // stage model's mixed legality below.
   report.mixedCandidateLegal = !features.hasExplicitScope &&
                                options.compileOn91095 &&
-                               features.simtAnchors.count > 0 &&
                                features.simtAnchors.kernelLowerability.mixed;
   report.includeFeaturesInJSON = options.includeFeaturesInJSON;
 
@@ -780,8 +800,9 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   auto stageModel = evaluateStageModel(
       features, profile, static_cast<unsigned>(numWarps),
       options.wholeKernelSuperblockMaterializable,
-      options.scopeSuperblockMaterializable, options.logicalProgramCountHint,
-      options.physicalVectorCoreCountHint, module, anchorPlan);
+      options.scopeSuperblockMaterializable, options.compileOn91095,
+      options.logicalProgramCountHint, options.physicalVectorCoreCountHint,
+      module, anchorPlan);
   if (!stageModel)
     return stageModel.takeError();
   report.stageModel = std::move(*stageModel);
@@ -823,4 +844,26 @@ llvm::Expected<SimdSimtCostReport> mlir::ascend::analyzeSimdSimtCandidates(
     return features.takeError();
   return estimateSimdSimtCandidatesImpl(*features, options, module,
                                         &anchorPlan);
+}
+
+llvm::Expected<StagePartition> mlir::ascend::partitionForSimdSimtSelection(
+    ModuleOp module, const SimtAnchorPlan &anchorPlan,
+    const SimdSimtCostModelOptions &options) {
+  if (!module)
+    return llvm::createStringError(std::errc::invalid_argument,
+                                   "cannot partition a null ModuleOp");
+  auto profileOrError = loadCandidateProfile(options.profilePath);
+  if (!profileOrError)
+    return profileOrError.takeError();
+  CandidateProfile profile = std::move(*profileOrError);
+  auto features = analyzeSimdSimtFeatures(module, anchorPlan);
+  if (!features)
+    return features.takeError();
+  StagePartitionerOptions partitionerOptions = buildStagePartitionerOptions(
+      *features, profile, options.numWarps,
+      options.wholeKernelSuperblockMaterializable,
+      options.scopeSuperblockMaterializable, options.compileOn91095,
+      options.logicalProgramCountHint);
+  return StagePartitioner().partition(module, anchorPlan,
+                                      partitionerOptions);
 }

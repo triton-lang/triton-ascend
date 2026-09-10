@@ -79,11 +79,6 @@ _DEFAULT_HINT_NUM_STAGES = [1, 2]
 _DEFAULT_COMPILE_MODE = "simd_simt_template"
 
 
-def _inject_default_simt_stack_limit(options: Dict[str, object], stack_limit: int) -> None:
-    if options.get("compile_mode") == "simt_only" and options.get("simt_stack_limit") is None:
-        options["simt_stack_limit"] = stack_limit
-
-
 def _format_autotune_timing(timing) -> str:
     """Format the timing returned by the active autotune benchmarker."""
     if isinstance(timing, (tuple, list)):
@@ -339,7 +334,6 @@ class AutoTilingTuner(Autotuner):
         else:
             self.user_configs = configs
         self.is_simt_mode = False
-        self.simt_stack_limit = 8192
         self.user_specified_warps = None
         self.user_specified_num_stages = None
         self.user_specified_multibuffer = None
@@ -2113,7 +2107,6 @@ class AutoTilingTuner(Autotuner):
         self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
         cache_miss = key not in self.cache
-        _inject_default_simt_stack_limit(kwargs, self.simt_stack_limit)
         did_benchmark = False
         disk_cache_hit = False
         single_config_cache_pending = False
@@ -2158,7 +2151,6 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
-        _inject_default_simt_stack_limit(final_kwargs, self.simt_stack_limit)
         if config.pre_hook is not None:
             config.pre_hook({**self.nargs, **final_kwargs})
         try:
@@ -2224,7 +2216,6 @@ class AutoTilingTuner(Autotuner):
             ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
             if ub_cfg:
                 current.update(ub_cfg)
-            _inject_default_simt_stack_limit(current, self.simt_stack_limit)
 
             # Match the first call made by _batch_bench. Heuristics.run sees
             # grid and warmup before forwarding the remaining arguments to
@@ -2452,7 +2443,6 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         if ub_cfg:
             current.update(ub_cfg)
-        _inject_default_simt_stack_limit(current, self.simt_stack_limit)
         full_nargs = {**self.nargs, **current}
 
         def kernel_call(warmup):
@@ -2493,7 +2483,6 @@ class AutoTilingTuner(Autotuner):
 
         def warmup_config(config):
             compile_options = dict(config.all_kwargs(), **kwargs)
-            _inject_default_simt_stack_limit(compile_options, self.simt_stack_limit)
             return self.fn.warmup(*args, **compile_options)
 
         if self.compile_parallel:

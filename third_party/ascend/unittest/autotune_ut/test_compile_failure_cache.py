@@ -44,7 +44,6 @@ def _compile_key_kernel(
 def _make_compile_key_tuner(monkeypatch, wrapped_fn):
     tuner = object.__new__(AutoTilingTuner)
     tuner.fn = wrapped_fn
-    tuner.simt_stack_limit = 8192
     tuner.compile_parallel = False
     tuner.user_defined_pre_hook = False
 

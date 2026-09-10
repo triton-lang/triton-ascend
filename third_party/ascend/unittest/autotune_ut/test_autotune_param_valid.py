@@ -69,7 +69,6 @@ def _load_autotuner_methods(*method_names):
         "VectorAxes": _load_vector_axes_module().VectorAxes,
         "_InternalNPUOptionInt": ascend_autotuner._InternalNPUOptionInt,
         "_DEFAULT_COMPILE_MODE": ascend_autotuner._DEFAULT_COMPILE_MODE,
-        "_inject_default_simt_stack_limit": ascend_autotuner._inject_default_simt_stack_limit,
     }
     exec(compile(extracted_module, str(AUTOTUNER_PATH), "exec"), namespace)
     return namespace
@@ -1666,7 +1665,7 @@ def test_make_kernel_call_extracts_name_from_jit_run():
         tl.store(x_ptr + offsets, x, mask=mask)
 
     fake_self = SimpleNamespace(fn=test_kernel_jit, pre_hook=lambda full_nargs: None,
-                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
+                                post_hook=lambda full_nargs, exception=None: None, nargs={})
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")
@@ -1692,7 +1691,7 @@ def test_make_kernel_call_extracts_name_from_libentry_tuple():
         tl.store(x_ptr + offsets, x, mask=mask)
 
     fake_self = SimpleNamespace(fn=test_kernel_libentry, pre_hook=lambda full_nargs: None,
-                                post_hook=lambda full_nargs, exception=None: None, nargs={}, simt_stack_limit=8192)
+                                post_hook=lambda full_nargs, exception=None: None, nargs={})
     fake_config = SimpleNamespace(kwargs={"BLOCK_SIZE": 32}, all_kwargs=lambda: {"BLOCK_SIZE": 32}, pre_hook=None)
 
     x = torch.zeros(128, dtype=torch.float32, device="npu")

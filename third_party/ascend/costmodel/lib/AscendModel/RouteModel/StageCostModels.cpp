@@ -136,8 +136,12 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
                              resources.predicate + resources.shuffle +
                              resources.dot;
   else if (stage.features.hasReduction)
+    // A reduction whose accumulation is a tt.dot (hybrid dot+reduction
+    // Stage) must charge the dot on the accumulation chain; pure
+    // reductions keep dot == 0 and are unaffected.
     resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle;
+        resources.compute + resources.predicate + resources.shuffle +
+        resources.dot;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 

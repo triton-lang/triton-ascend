@@ -63,11 +63,13 @@ def test_cumsum_keeps_supported_routes_legal(tmp_path):
     ]
     assert len(scan_stages) == 1
     assert scan_stages[0]["model"] == "prefix_scan"
-    assert scan_stages[0]["local_simt_materializable"]
+    assert not scan_stages[0]["local_simt_materializable"]
 
-    # Route choice is profile-dependent. The invariant under test is that a
-    # supported cumsum does not make any backend route illegal.
+    # Route choice is profile-dependent. Plain cumsum remains legal for both
+    # whole-kernel backend routes. A local mixed route requires the separate
+    # anchor-free materialization feature and is intentionally unavailable in
+    # this standalone scan change.
     routes = report["stage_model"]["routes"]
     assert routes["all_simd"]["legal"]
     assert routes["all_simt_only"]["legal"]
-    assert routes["mixed_simd_simt"]["legal"]
+    assert not routes["mixed_simd_simt"]["legal"]

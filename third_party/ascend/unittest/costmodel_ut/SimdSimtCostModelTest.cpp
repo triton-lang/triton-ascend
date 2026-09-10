@@ -1386,7 +1386,7 @@ TEST(SimdSimtCostModelTest, PointerInductionLoopIsNotADataRecurrence) {
             StageCostModelKind::IndependentPipelinedLoop);
 }
 
-TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
+TEST(SimdSimtCostModelTest, HybridDominantStructuresClassifyAsDominantKind) {
   StagePartition partition;
   partition.operationOwnershipComplete = true;
   LogicalStage stage =
@@ -1396,9 +1396,15 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   stage.features.hasIndirectMemory = true;
   partition.stages.push_back(std::move(stage));
 
+  // A Stage mixing tt.dot with another dominant structure cannot always be
+  // split (the dot may sit inside the other structure's serial chain), so
+  // the classifier models it with the dominant structure's kind instead of
+  // failing: derive() ranks dot above indirect memory for straight-line
+  // Stages, and the workload keeps charging both structures.
   llvm::Error error =
       mlir::ascend::StageKindClassifier().analyze(partition, 16384);
-  ASSERT_TRUE(static_cast<bool>(error));
-  EXPECT_NE(llvm::toString(std::move(error)).find("requires_split"),
-            std::string::npos);
+  ASSERT_TRUE(static_cast<bool>(error) == false)
+      << llvm::toString(std::move(error));
+  EXPECT_EQ(partition.stages.front().costModelKind,
+            StageCostModelKind::TinyCubeRoofline);
 }

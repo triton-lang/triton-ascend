@@ -571,7 +571,6 @@ def _check_bishengir_is_regbased() -> bool:
         return False
 
 
-@functools.lru_cache(None)
 def _get_ascend_path() -> Path:
     path = os.getenv("ASCEND_HOME_PATH", "")
     if path == "":
@@ -629,8 +628,8 @@ def _get_cxx():
     return cxx
 
 
-def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
-                   precompile=False) -> str:
+def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
+                   precompile=False, extra_cflags=()):
     header_path = None
     if src_path is None:
         src_path = header_or_src_path
@@ -641,8 +640,28 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     src_dir = os.path.dirname(src_path)
     so_path = os.path.join(src_dir, f"{obj_name}{suffix}")
     cxx = _get_cxx()
-    cc_cmd = [cxx, src_path]
-    cc_cmd += [f"-w"]
+    asc_path = str(_get_ascend_path())
+    has_runtime_header = os.path.exists(os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h"))
+    policy = backend_policy or "torch_npu"
+    cc_cmd = [cxx, src_path, *_npu_ext_build_options(obj_name, kernel_launcher, asc_path,
+                                                   has_runtime_header, policy)]
+    if header_path is not None:
+        # Preserve the position of this optional include in the original command.
+        cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
+    cc_cmd += list(extra_cflags)
+    cc_cmd += cann_version_compile_args()
+    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    return cc_cmd, so_path
+
+
+@functools.lru_cache(maxsize=32)
+def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_header, policy):
+    """Process-stable Python/framework include and ABI options for a CANN root.
+
+    Loaded framework packages are not hot-swappable. Compiler selection, CANN
+    version and caller flags remain outside this cache and are checked per use.
+    """
+    cc_cmd = ["-w"]
     if hasattr(sysconfig, "get_default_scheme"):
         scheme = sysconfig.get_default_scheme()
     else:
@@ -652,12 +671,7 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     py_include_dir = sysconfig.get_paths(scheme=scheme)["include"]
     cc_cmd += [f"-I{py_include_dir}"]
     cc_cmd += [f"-I{os.path.dirname(os.path.realpath(__file__))}"]
-    asc_path = _get_ascend_path()
-    if header_path is not None:
-        cc_cmd += [f"-I{os.path.dirname(header_path)}"]
-
-    rt_path = os.path.join(asc_path, "include/experiment/runtime/runtime/rt.h")
-    if not os.path.exists(rt_path):
+    if not has_runtime_header:
         cc_cmd += [
             f"-I{os.path.join(asc_path, 'pkg_inc')}",
             f"-I{os.path.join(asc_path, 'pkg_inc/profiling')}",
@@ -678,15 +692,85 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
         else:
             cc_cmd += get_backend_func("get_cc_cmd")
 
-    cc_cmd += cann_version_compile_args()
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    return tuple(cc_cmd)
 
+
+def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_launcher="torch",
+                   precompile=False, extra_cflags=()) -> str:
+    cc_cmd, so_path = _npu_ext_build_command(
+        obj_name, header_or_src_path, src_path, kernel_launcher=kernel_launcher,
+        precompile=precompile, extra_cflags=extra_cflags)
     result = subprocess.run(cc_cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to compile {header_or_src_path}, error: {result.stderr},cmd={cc_cmd}")
+    return so_path
 
-    if result.returncode == 0:
-        return so_path
-    else:
-        raise RuntimeError(f"Failed to compile {src_path}, error: {result.stderr},cmd={cc_cmd}")
+
+@functools.lru_cache()
+def _npu_compiler_version(compiler, identity):
+    return subprocess.check_output([compiler, "--version"], text=True).strip()
+
+
+def _file_identity(path):
+    """Detect replacement as well as normal edits without rereading contents."""
+    stat = os.stat(path)
+    return stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns
+
+
+@functools.lru_cache(maxsize=2)
+def _npu_package_versions(policy):
+    import importlib.metadata
+    names = ("mindspore",) if policy == "mindspore" else ("torch", "torch_npu")
+    return tuple((name, importlib.metadata.version(name)) for name in names)
+
+
+@functools.lru_cache(maxsize=32)
+def _npu_fingerprint(command, compiler, identity, cann, policy):
+    return {
+        "command": list(command), "compiler": compiler,
+        "compiler_version": _npu_compiler_version(compiler, identity),
+        "cann": cann, "packages": dict(_npu_package_versions(policy)),
+        "python_abi": sysconfig.get_config_var("SOABI"),
+    }
+
+
+def npu_extension_fingerprint(obj_name, *, extra_cflags=()):
+    """Fingerprint the command actually used to build a host extension.
+
+    Temporary source/output paths use deterministic placeholders. Runtime source
+    and generated configuration are hashed separately by the cache owner.
+    """
+    command, _ = _npu_ext_build_command(obj_name, "/__triton_build__/source.cpp", extra_cflags=extra_cflags)
+    compiler = os.path.realpath(shutil.which(command[0]) or command[0])
+    info = _npu_fingerprint(tuple(command), compiler, _file_identity(compiler),
+                            get_cann_version(), backend_policy or "torch_npu")
+    # Keep the existing dictionary contract without exposing cached mutable data.
+    return {
+        **info, "command": list(info["command"]), "packages": dict(info["packages"]),
+    }
+
+
+def _get_or_build_npu_artifact(cache, filename, build):
+    """Coordinate default file-cache misses; preserve custom manager queries."""
+    from triton.runtime.cache import FileCacheManager
+
+    path = cache.get_file(filename)
+    if path is not None:
+        return path
+    # Subclasses and remote managers may have different materialization and
+    # access-accounting contracts. Do not infer file locking from attributes.
+    if type(cache) is not FileCacheManager:
+        return cache.put(build(), filename, binary=True)
+
+    import fcntl
+    os.makedirs(cache.cache_dir, exist_ok=True)
+    # Keep this inode after unlocking: another process may already be waiting.
+    with open(cache.lock_path, "a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = cache.get_file(filename)
+        if path is not None:
+            return path
+        return cache.put(build(), filename, binary=True)
 
 
 def _get_kernel_target(metadata: dict):
@@ -836,23 +920,26 @@ def _find_cann_version_file():
 
 
 def get_cann_version():
-    _cann_version = None
     try:
         version_file = _find_cann_version_file()
         if version_file is None:
-            _cann_version = None
             return None
-        with open(version_file, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if "version" in line.lower():
-                    parsed = _parse_cann_version(line)
-                    if parsed is not None:
-                        _cann_version = parsed
-                        return _cann_version
-        _cann_version = None
+        # Some filesystems coalesce same-size writes into one timestamp tick.
+        # Read this small file so an in-place version edit cannot stay stale.
+        text = Path(version_file).read_text(encoding="utf-8", errors="ignore")
+        return _read_cann_version(text)
     except Exception:
         raise EnvironmentError("Could not parse CANN version file")
+
+
+@functools.lru_cache(maxsize=16)
+def _read_cann_version(text):
+    for line in text.splitlines():
+        if "version" in line.lower():
+            parsed = _parse_cann_version(line.strip())
+            if parsed is not None:
+                return parsed
+    return None
 
 
 def is_cann_version_at_least(major: int, minor: int = 0, patch: int = 0) -> bool:

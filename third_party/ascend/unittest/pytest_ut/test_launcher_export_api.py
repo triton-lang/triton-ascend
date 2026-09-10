@@ -8,6 +8,17 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
 
+def _load_program_grid_module():
+    module_name = "triton.backends.ascend.program_grid"
+    program_grid_path = Path(__file__).resolve().parents[2] / "backend" / "program_grid.py"
+    spec = importlib.util.spec_from_file_location(module_name, program_grid_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def _load_driver_module():
     driver_path = Path(__file__).resolve().parents[2] / "backend" / "driver.py"
     spec = importlib.util.spec_from_file_location("ascend_driver_under_test", driver_path)
@@ -17,7 +28,15 @@ def _load_driver_module():
     return module
 
 
+# Let backend discovery import the installed package before replacing only the
+# driver dependency below. The source driver test must not accidentally load a
+# stale installed program_grid module, but the installed compiler may still
+# depend on its own historical module during discovery.
+import triton.backends.compiler  # noqa: E402,F401
+
+_load_program_grid_module()
 driver = _load_driver_module()
+PROGRAM_GRID_TRANSFORMS_VERSION = driver.PROGRAM_GRID_TRANSFORMS_VERSION
 
 
 def _mock_backend_func(name, *args):
@@ -40,6 +59,8 @@ def _make_metadata():
         coalesce_factor=1,
         coalesce_axis=-1,
         coalesce_grid_ceil_div=False,
+        program_grid_transforms=None,
+        program_grid_specialization=None,
         has_auto_blockify_blacklist_op=False,
         row_coalescing_applied=False,
     )
@@ -257,6 +278,162 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
         c_abi_launch, cpp_launch = _split_launch_functions(src)
         assert c_abi_launch.count(cap) == expected_per_launch_path, case
         assert cpp_launch.count(cap) == expected_per_launch_path, case
+
+
+def _program_grid_transform(order, axis, factor, logical_extent, *, persistent=False):
+    return {
+        "order": order,
+        "kind": "ceil_div",
+        "axis": axis,
+        "factor": factor,
+        "logical_extent": logical_extent,
+        "persistent_coverage": persistent,
+        "grid_stride_abi_verified": persistent,
+    }
+
+
+def _program_grid_specialization(*, grid=(65, 17, 1), rule_mask=512):
+    return {
+        "version": 1,
+        "grid": list(grid),
+        "rule_mask": rule_mask,
+    }
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_fixed_program_grid_emits_final_constants_without_runtime_grid_check(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_specialization = _program_grid_specialization()
+    metadata.program_grid_transforms = {
+        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
+        "transforms": [
+            _program_grid_transform(0, 0, 2, 65),
+            _program_grid_transform(1, 0, 3, 65),
+            _program_grid_transform(2, 1, 4, 17),
+        ],
+    }
+
+    src = driver.make_launcher(
+        constants={}, signature={0: "*fp32"}, metadata=metadata,
+    )
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+
+    for forbidden in (
+        "gridAlreadyTransformed",
+        "haccProgramGridSpecializationMatches",
+        "haccGridSpecializationRejected",
+        "runtime grid does not match the compiled hacc.grid_specialization",
+        "logicalGrid0",
+        "gridX = (gridX +",
+    ):
+        assert forbidden not in src
+    for launch_path in (c_abi_launch, cpp_launch):
+        for assignment in ("gridX = 11;", "gridY = 5;", "gridZ = 1;"):
+            assert launch_path.count(assignment) == 1
+            assert launch_path.index(assignment) < launch_path.index(
+                "uint32_t blockNum4Workspace = gridX * gridY * gridZ;")
+        assert "ChunkCoalescing" not in launch_path
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_fixed_persistent_grid_bakes_verified_core_cap_into_both_paths(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_specialization = _program_grid_specialization(grid=(128, 2, 1))
+    metadata.program_grid_transforms = {
+        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
+        "transforms": [_program_grid_transform(0, 0, 2, 128, persistent=True)],
+    }
+
+    src = driver.make_launcher(
+        constants={}, signature={0: "*fp32"}, metadata=metadata,
+    )
+    c_abi_launch, cpp_launch = _split_launch_functions(src)
+    for launch_path in (c_abi_launch, cpp_launch):
+        assert "gridX = 20;" in launch_path
+        assert "gridY = 2;" in launch_path
+        assert "programGridAxisCap" not in launch_path
+        assert "blockNum = std::min(blockNum, (uint32_t)40);" not in launch_path
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_nonpersistent_transform_never_receives_a_global_block_cap(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_specialization = _program_grid_specialization(grid=(68, 1, 1))
+    metadata.program_grid_transforms = {
+        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
+        "transforms": [_program_grid_transform(0, 0, 4, 68)],
+    }
+
+    src = driver.make_launcher(
+        constants={}, signature={0: "*fp32"}, metadata=metadata,
+    )
+    for launch_path in _split_launch_functions(src):
+        assert "gridX = 17;" in launch_path
+        assert "blockNum = std::min(blockNum, (uint32_t)40);" not in launch_path
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_program_grid_transform_requires_fixed_specialization_metadata(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    metadata.program_grid_transforms = {
+        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
+        "transforms": [_program_grid_transform(0, 0, 2, 8)],
+    }
+
+    try:
+        driver.make_launcher(constants={}, signature={0: "*fp32"}, metadata=metadata)
+    except RuntimeError as error:
+        assert "requires fixed program_grid_specialization" in str(error)
+    else:
+        raise AssertionError("expected a missing fixed-specialization contract to fail closed")
 
 
 @patch.object(driver, "NPUUtils")

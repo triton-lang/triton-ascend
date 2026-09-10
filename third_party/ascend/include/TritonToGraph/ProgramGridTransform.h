@@ -39,7 +39,10 @@ struct ResourceSnapshot;
 // backend that does not recognize hacc.* attributes.
 inline constexpr llvm::StringLiteral kProgramGridTransformsAttr =
     "hacc.program_grid_transforms";
-inline constexpr int64_t kProgramGridTransformsVersion = 1;
+// Keep this in lockstep with third_party/ascend/backend/program_grid.py. The
+// Python launcher consumes the serialized contract after graph optimization,
+// so an ABI behavior change must not reuse a pre-migration artifact.
+inline constexpr int64_t kProgramGridTransformsVersion = 2;
 
 // A transform always uses ceil-div.  More transform kinds require a schema
 // version bump so an older launcher rejects them rather than guessing.
@@ -83,7 +86,7 @@ projectProgramMappingLaunch(const ProgramGridSpecialization &specialization,
                             llvm::ArrayRef<ProgramGridTransform> transforms,
                             const ResourceSnapshot &resources);
 
-// Parse and validate the version-1 contract.  It is intentionally fail-closed:
+// Parse and validate the version-2 contract. It is intentionally fail-closed:
 // unknown keys, versions, transform kinds, dynamic/missing logical extents,
 // and unverified persistent coverage all fail.
 FailureOr<ProgramGridTransformContract>

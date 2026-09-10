@@ -16,7 +16,7 @@ optimizations keep their original compile-on-910_95 / pure-SIMT scheduling
 slots, so value-only tests on a B4 cannot prove that the gate-on path ran.
 
 The observer below wraps only test-process call sites.  It records the module
-immediately before compiler metadata export and the launcher source generated
+immediately before compiler metadata export and the launcher plan created
 for the real JIT launch.  Production compiler and launcher behavior is left
 unchanged.  Every test then launches on real hardware and checks both numerical
 results and the pass-to-metadata-to-launcher handoff.
@@ -56,6 +56,7 @@ pytest.importorskip("torch_npu")
 import triton.language as tl
 from triton.backends.ascend import compiler as ascend_compiler
 from triton.backends.ascend import driver as ascend_driver
+from triton.backends.ascend import launcher as launcher_module
 
 pytestmark = pytest.mark.backend("torch_npu")
 
@@ -66,13 +67,13 @@ class _NativePipelineObserver:
 
     pre_export_ir: list[str] = field(default_factory=list)
     metadata_after_export: list[dict[str, Any]] = field(default_factory=list)
-    launcher_sources: list[str] = field(default_factory=list)
+    launcher_specs: list[Any] = field(default_factory=list)
 
     @classmethod
     def install(cls, monkeypatch: pytest.MonkeyPatch) -> "_NativePipelineObserver":
         observer = cls()
         export_metadata = ascend_compiler._export_coalesce_metadata
-        make_launcher = ascend_driver.make_launcher
+        make_launch_spec = ascend_driver.make_launch_spec
 
         def observe_export(module, metadata, **kwargs):
             # This is after Row or T2L's Axis/Chunk/SLS sequence but before
@@ -83,12 +84,12 @@ class _NativePipelineObserver:
             return result
 
         def observe_launcher(*args, **kwargs):
-            source = make_launcher(*args, **kwargs)
-            observer.launcher_sources.append(source)
-            return source
+            spec = make_launch_spec(*args, **kwargs)
+            observer.launcher_specs.append(spec)
+            return spec
 
         monkeypatch.setattr(ascend_compiler, "_export_coalesce_metadata", observe_export)
-        monkeypatch.setattr(ascend_driver, "make_launcher", observe_launcher)
+        monkeypatch.setattr(ascend_driver, "make_launch_spec", observe_launcher)
         return observer
 
     def exported_ir_with(self, needle: str) -> str:
@@ -98,12 +99,12 @@ class _NativePipelineObserver:
         raise AssertionError(f"did not observe {needle!r} before metadata export; captured "
                              f"{len(self.pre_export_ir)} module(s)")
 
-    def launcher_with(self, needle: str) -> str:
-        for source in reversed(self.launcher_sources):
-            if needle in source:
-                return source
-        raise AssertionError(f"did not observe launcher fragment {needle!r}; generated "
-                             f"{len(self.launcher_sources)} launcher(s)")
+    def launcher_with(self, *, factor=None, axis=None, flag=0):
+        for spec in reversed(self.launcher_specs):
+            if (factor is None or spec.coalesce_factor == factor) and (axis is None or spec.coalesce_axis == axis):
+                if not flag or spec.flags & flag:
+                    return spec
+        raise AssertionError(f"did not observe launch plan factor={factor}, axis={axis}, flag={flag}")
 
 
 def _launch_with_observer(monkeypatch, kernel, grid, *args, **compile_options):
@@ -121,7 +122,7 @@ def _launch_with_observer(monkeypatch, kernel, grid, *args, **compile_options):
     compiled = kernel[grid](*args, **compile_options)
     torch.npu.synchronize()
     assert observer.pre_export_ir, "the native compilation never exported metadata"
-    assert observer.launcher_sources, "the native launch never generated a launcher"
+    assert observer.launcher_specs, "the native launch never created a launch plan"
     return compiled, observer
 
 
@@ -221,9 +222,8 @@ def test_row_91095_native_metadata_launcher_and_ir(monkeypatch):
     assert "hacc.coalesce_axis = 0 : i32" in row_ir
     assert "hacc.coalesce_grid_ceil_div = 1 : i32" in row_ir
 
-    launcher = observer.launcher_with("gridX = (gridX + 8 - 1) / 8;")
-    assert launcher.count("gridX = (gridX + 8 - 1) / 8;") == 2
-    assert "ChunkCoalescing: grid[0] not divisible" not in launcher
+    spec = observer.launcher_with(factor=8, axis=0)
+    assert spec.flags & launcher_module.COALESCE_CEIL
 
 
 def test_chunk_91095_native_metadata_launcher_and_ir(monkeypatch):
@@ -261,9 +261,8 @@ def test_chunk_91095_native_metadata_launcher_and_ir(monkeypatch):
     assert "hacc.coalesce_axis = 1 : i32" in chunk_ir
     assert "hacc.coalesce_grid_ceil_div" not in chunk_ir
 
-    launcher = observer.launcher_with("gridY = gridY / 16;")
-    assert launcher.count("gridY = gridY / 16;") == 2
-    assert launcher.count("ChunkCoalescing: grid[1] not divisible by coalesce_factor 16") == 2
+    spec = observer.launcher_with(factor=16, axis=1)
+    assert not spec.flags & launcher_module.COALESCE_CEIL
 
 
 def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
@@ -298,10 +297,8 @@ def test_chunk_axis2_91095_native_metadata_launcher_and_ir(monkeypatch):
     assert "hacc.coalesce_axis = 2 : i32" in chunk_ir
     assert "hacc.coalesce_grid_ceil_div" not in chunk_ir
 
-    launcher = observer.launcher_with("gridZ = gridZ / 16;")
-    # make_launcher emits both the stable ABI and local C++ packing paths.
-    assert launcher.count("gridZ = gridZ / 16;") == 2
-    assert launcher.count("ChunkCoalescing: grid[2] not divisible by coalesce_factor 16") == 2
+    spec = observer.launcher_with(factor=16, axis=2)
+    assert not spec.flags & launcher_module.COALESCE_CEIL
 
 
 def test_chunk_coalesces_through_overflow_sanitizer_91095(monkeypatch):
@@ -336,9 +333,8 @@ def test_chunk_coalesces_through_overflow_sanitizer_91095(monkeypatch):
     assert "hacc.coalesce_axis = 1 : i32" in chunk_ir
     assert "hacc.coalesce_grid_ceil_div" not in chunk_ir
 
-    launcher = observer.launcher_with("gridY = gridY / 16;")
-    assert launcher.count("gridY = gridY / 16;") == 2
-    assert launcher.count("ChunkCoalescing: grid[1] not divisible by coalesce_factor 16") == 2
+    spec = observer.launcher_with(factor=16, axis=1)
+    assert not spec.flags & launcher_module.COALESCE_CEIL
 
 
 def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
@@ -369,7 +365,7 @@ def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
     assert compiled.metadata.coalesce_grid_ceil_div is False
     assert compiled.metadata.row_coalescing_applied is False
     assert all("hacc.coalesce_factor" not in ir_text for ir_text in observer.pre_export_ir)
-    assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
+    assert all(spec.coalesce_factor == 1 for spec in observer.launcher_specs)
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -406,10 +402,5 @@ def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     sls_ir = observer.exported_ir_with("triton_indirect_load")
     assert "parallel_mode = \"mix_simd_simt\"" in sls_ir
 
-    launcher = observer.launcher_with("rtKernelLaunchWithFlagV2")
-    # cfg setup is shared via the cann shim (once); both launch paths call it.
-    assert launcher.count("rtKernelLaunchWithFlagV2") == 1
-    assert launcher.count("rtArgsEx_t argsInfo") == 1
-    # The same historical value must reach cfgInfo via both generated launcher
-    # paths; the target is not allowed to silently pick a different ABI value.
-    assert launcher.count("cann_get_launch_kernel_cfg(221184)") == 2
+    spec = observer.launcher_with(flag=launcher_module.DYNAMIC_SHARED)
+    assert spec.shared_mem_dynamic_size == 221184

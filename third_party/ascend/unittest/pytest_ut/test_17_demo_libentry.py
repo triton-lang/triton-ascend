@@ -26,7 +26,7 @@ import torch_npu
 
 import triton
 import triton.language as tl
-from triton.runtime.libentry import libentry
+from triton.language.extra.runtime.libentry import libentry
 
 DEV = "npu"
 DTYPE = torch.float32

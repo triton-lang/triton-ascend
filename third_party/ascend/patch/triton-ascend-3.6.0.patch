@@ -1,5 +1,5 @@
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index cab58801f..406ed4634 100644
+index 90788d91a..bba39816c 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -15,13 +15,22 @@ include(CTest)
@@ -227,7 +227,7 @@ index cc0b4fa15..82f52f87e 100644
    TritonTestDialect
    TritonTestProton
 diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
-index 48049f026..e96284bc2 100644
+index 48049f026..78eabc5f9 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
 @@ -1,6 +1,36 @@
@@ -267,7 +267,7 @@ index 48049f026..e96284bc2 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +114,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +115,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -287,7 +287,7 @@ index 48049f026..e96284bc2 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +178,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +179,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -336,13 +336,13 @@ index 2d2570771..91ed8b79a 100644
 @@ -1,4 +1,5 @@
  #include "./RegisterTritonDialects.h"
 +#include "ascend/include/DynamicCVPipeline/AllocMultiCache/AddMultiBufferInnerScope.h"
-
+ 
  #include "mlir/Tools/mlir-opt/MlirOptMain.h"
-
+ 
 @@ -6,6 +7,9 @@ int main(int argc, char **argv) {
    mlir::DialectRegistry registry;
    registerTritonDialects(registry);
-
+ 
 +  // Register AddMultiBufferInnerScope pass
 +  mlir::triton::registerAddMultiBufferInnerScopePasses();
 +
@@ -449,7 +449,7 @@ index a3cf0ff0c..28ba11c92 100644
  
      if numel > TRITON_MAX_TENSOR_NUMEL:
 diff --git a/python/triton/compiler/code_generator.py b/python/triton/compiler/code_generator.py
-index c572f81e3..6e06b8477 100644
+index c572f81e3..6bad25d2a 100644
 --- a/python/triton/compiler/code_generator.py
 +++ b/python/triton/compiler/code_generator.py
 @@ -10,8 +10,16 @@ from dataclasses import dataclass
@@ -461,7 +461,7 @@ index c572f81e3..6e06b8477 100644
 +from triton.language.extra.cann.extension.dispatch import ASCEND_WITH_DISPATCH
 +from triton.language.extra.cann.extension.builder import setup_unified_builder
 +
-+from triton.extension.buffer.language.builder import setup_unified_builder_with_buffer_builder
++from triton.language.extra.extension.buffer.language.builder import setup_unified_builder_with_buffer_builder
 +
  from .. import knobs, language
 -from .._C.libtriton import ir, gluon_ir
@@ -721,7 +721,7 @@ index 39e6c4dfb..c72ca65c2 100644
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
-index 582cd876cb..13ff1cef09 100644
+index 582cd876c..13ff1cef0 100644
 --- a/python/triton/language/math.py
 +++ b/python/triton/language/math.py
 @@ -21,8 +21,12 @@ def _check_dtype(dtypes: List[str]) -> T:
@@ -749,7 +749,7 @@ index 582cd876cb..13ff1cef09 100644
  @core._tensor_member_fn
  def exp(x, _semantic=None):
 diff --git a/python/triton/language/semantic.py b/python/triton/language/semantic.py
-index 52192cf3e..241ba3378 100644
+index 42bf7024f..8ab2a95b2 100644
 --- a/python/triton/language/semantic.py
 +++ b/python/triton/language/semantic.py
 @@ -219,7 +219,7 @@ class TritonSemantic(Generic[TensorTy]):
@@ -925,7 +925,7 @@ index 52192cf3e..241ba3378 100644
          return ret
  
      def load(self, ptr: TensorTy, mask: Optional[TensorTy], other: Optional[TensorTy], boundary_check: Tuple,
-@@ -1799,12 +1865,17 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -1837,12 +1903,17 @@ class TritonSemantic(Generic[TensorTy]):
          is_signed = [arg.dtype.is_int_signed() for arg in args]
          return self.tensor(self.builder.create_print(prefix, hex, new_args, is_signed), tl.void)
  
@@ -1121,7 +1121,7 @@ diff --git a/python/triton/runtime/jit.py b/python/triton/runtime/jit.py
 index 0f506818f..43742c328 100644
 --- a/python/triton/runtime/jit.py
 +++ b/python/triton/runtime/jit.py
-@@ -398,14 +398,19 @@ def create_function_from_signature(sig, kparams, backend):
+@@ -398,33 +398,49 @@ def create_function_from_signature(sig, kparams, backend):
      assert len(sig.parameters) == len(kparams)
      # Create the function argument list and the dict entries for the return statement
      specialization = []
@@ -1145,7 +1145,7 @@ index 0f506818f..43742c328 100644
 +                   f"{effective_align})")
              if kp.annotation_type:
                  if isinstance(kp.annotation_type, str):
-@@ -413,7 +418,14 @@ def create_function_from_signature(sig, kparams, backend):
+                     if kp.annotation_type == "u1" or kp.annotation_type[:2] in ["fp", "bf"]:
                          # we do not specialize non-constexpr floats and bools:
                          specialize = False
                  if specialize:
@@ -1161,11 +1161,10 @@ index 0f506818f..43742c328 100644
                  else:
                      # skip runtime specialization:
                      specialization.append(f'("{kp.annotation_type}", None)')
-@@ -420,2 +432,3 @@ def create_function_from_signature(sig, kparams, backend):
              else:
 +                uses_alignment_specialization = uses_alignment_specialization or (align and specialize)
                  specialization.append(f"{ret}")
-@@ -423,8 +436,11 @@ def create_function_from_signature(sig, kparams, backend):
+ 
      # compute argument string for a given parameter
      arg = lambda x: x[0] if x[1].default is inspect.Parameter.empty else f"{x[0]}=default_{x[0]}"
 +    alignment_specialization_init = (f"    {alignment_specialization_name} = "

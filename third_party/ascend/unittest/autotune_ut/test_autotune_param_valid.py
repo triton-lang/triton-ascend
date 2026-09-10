@@ -1680,7 +1680,7 @@ def test_make_kernel_call_extracts_name_from_libentry_tuple():
     namespace = _load_autotuner_methods("_make_kernel_call")
     _make_kernel_call = _normalize_loaded_method(namespace["_make_kernel_call"])
 
-    from triton.runtime.libentry import libentry
+    from triton.language.extra.runtime.libentry import libentry
 
     @libentry()
     @triton.jit

@@ -35,7 +35,7 @@ from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 import triton.language.core as tl
 
-import triton.extension.buffer.language as bl
+import triton.language.extra.extension.buffer.language as bl
 from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
 

@@ -22,7 +22,7 @@ import os
 import pytest
 import triton
 import triton.language as tl
-import triton.extension.buffer.language as bl
+import triton.language.extra.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
 from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir

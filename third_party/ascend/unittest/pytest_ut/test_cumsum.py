@@ -23,7 +23,7 @@ import torch
 import torch_npu
 import triton
 import triton.language as tl
-from triton.runtime.libentry import libentry
+from triton.language.extra.runtime.libentry import libentry
 
 from test_common import _all_dtypes_no_bool, generate_tensor, validate_cmp
 

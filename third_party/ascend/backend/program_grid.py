@@ -9,14 +9,14 @@
 #
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
-"""Versioned host-launch contract for transformed Triton program grids.
+"""Versioned fixed-specialization and host-launch contracts for program grids.
 
 ``hacc.program_grid_transforms`` is deliberately a small, fail-closed ABI.  A
 compiler rule publishes it only after it has retained the original logical
 extent used by its tail masks.  The launcher then applies the listed transforms
-in order.  This module contains the Python-side validation used both when the
-compiler exports the MLIR attr and when the generated launcher consumes the
-serialized metadata.
+in order. Fixed grid/scalar specializations are provided explicitly by the
+caller; this module validates their cache-keyed representation and the
+serialized launcher metadata.
 """
 
 from __future__ import annotations
@@ -26,19 +26,19 @@ import operator
 from typing import Any, Mapping, Sequence
 
 PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
-PROGRAM_GRID_TRANSFORMS_VERSION = 1
+PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
 # ``hacc.grid_specialization`` is intentionally independent from the launcher
-# transform contract above.  It records the *unmodified* launch grid observed
-# by JIT before cache lookup, so a graph rule never has to infer a logical
-# extent from a grid which another rule may already have shrunk.
+# transform contract above. It records the *unmodified* launch grid supplied
+# explicitly by the caller, so a graph rule never has to infer a logical extent
+# from a grid which another rule may already have shrunk.
 PROGRAM_GRID_SPECIALIZATION_ATTR = "hacc.grid_specialization"
 PROGRAM_GRID_SPECIALIZATION_VERSION = 1
 
 # Runtime scalar values are normally intentionally dynamic in TTIR.  Program
 # mapping, however, needs a proof for the *particular* launch before it can
 # turn one physical program into multiple logical lanes.  This opt-in contract
-# carries exact integer argument values from the JIT cache key to
+# carries explicit exact integer argument values from the JIT cache key to
 # GraphOptimize, where they are substituted into the entry function before
 # the dependence analysis runs.  It is separate from the launch-grid contract:
 # the scalar values never reach the generated launcher ABI.
@@ -52,14 +52,17 @@ PROGRAM_MAPPING_SCALAR_SPECIALIZATION_LEGACY_VERSION = 1
 PROGRAM_MAPPING_SCALAR_SPECIALIZATION_VERSION = 2
 
 # These values are owned by the append-only GraphOptimize registry (task_0001).
-# Keep the bridge's trigger set explicit: unrelated future rules must not make
-# a legacy JIT launch evaluate its grid before cache lookup.
+# The production-approved IAT/PTSM pair is selected by default when graph
+# optimization is enabled, but no rule may infer a fixed grid/scalar contract:
+# all mapping rules remain fail-closed until the caller provides one.
 INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = 1 << 9
 STATIC_PROGRAM_AXIS_FUSION_RULE_BIT = 1 << 10
 PERSISTENT_TASK_STRIP_MINING_RULE_BIT = 1 << 11
 PROGRAM_MAPPING_RULE_MASK = (INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
                              | STATIC_PROGRAM_AXIS_FUSION_RULE_BIT
                              | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
+DEFAULT_PROGRAM_MAPPING_RULE_MASK = (INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
+                                     | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
 
 
 class ProgramGridContractError(ValueError):
@@ -148,28 +151,6 @@ def canonicalize_program_grid(grid: Any) -> tuple[int, int, int]:
         raise ProgramGridContractError("grid must contain one to three dimensions")
     dimensions = [_grid_dimension(value, f"grid[{axis}]") for axis, value in enumerate(grid)]
     return tuple((dimensions + [1, 1, 1])[:3])  # type: ignore[return-value]
-
-
-def resolve_program_grid_for_specialization(grid: Any, bound_args: Any) -> tuple[int, int, int]:
-    """Resolve the original grid under the opt-in pure-callable contract.
-
-    Callable grids are evaluated twice *before* cache lookup.  A changed
-    canonical result is rejected rather than compiling one variant and
-    launching another with stale tail/loop bounds.  The caller launches the
-    returned triplet, so it never evaluates the callable a third time.
-    """
-    if not callable(grid):
-        return canonicalize_program_grid(grid)
-
-    try:
-        first = canonicalize_program_grid(grid(bound_args))
-        second = canonicalize_program_grid(grid(bound_args))
-    except Exception as error:
-        raise ProgramGridContractError(
-            "program-mapping grid callable could not be resolved before cache lookup") from error
-    if first != second:
-        raise ProgramGridContractError("program-mapping grid callable is not reproducible before cache lookup")
-    return first
 
 
 def normalize_program_grid_specialization(raw: Any) -> dict[str, Any]:
@@ -358,6 +339,47 @@ def make_program_mapping_scalar_specialization(
     })
 
 
+def make_program_mapping_compile_options(
+    grid: Any,
+    rule_mask: Any,
+    *,
+    scalar_arguments: Sequence[tuple[int, int] | tuple[int, str, int]] | None = None,
+    compile_mode: str | None = None,
+) -> dict[str, Any]:
+    """Create canonical kwargs for one explicit fixed mapping variant.
+
+    Community JIT forms its first-level in-memory key from raw kwargs before
+    ``NPUOptions`` normalizes them. Callers therefore resolve a grid once,
+    pass the same fixed grid to the kernel launch, and pass this mapping
+    unchanged. The scalar list is a rule-specific allowlist; omitted runtime
+    integers remain dynamic.
+    """
+    normalized_rule_mask = normalize_program_mapping_rule_mask(rule_mask)
+    if not normalized_rule_mask:
+        raise ProgramGridContractError(
+            "make_program_mapping_compile_options requires an enabled rule mask")
+    options: dict[str, Any] = {
+        "program_mapping_rule_mask": normalized_rule_mask,
+        "program_grid_specialization": make_program_grid_specialization(
+            grid, normalized_rule_mask),
+        # Keep the launcher ABI in the raw JIT key as well as NPUOptions.hash.
+        "program_grid_transform_schema_version": PROGRAM_GRID_TRANSFORMS_VERSION,
+    }
+    if scalar_arguments is not None:
+        options["program_mapping_scalar_specialization"] = (
+            make_program_mapping_scalar_specialization(scalar_arguments))
+    if compile_mode is not None:
+        if not isinstance(compile_mode, str):
+            raise ProgramGridContractError("compile_mode must be a string when supplied")
+        canonical_compile_mode = {
+            "unstructured_in_simt": "simd_simt_template"
+        }.get(compile_mode, compile_mode)
+        if canonical_compile_mode not in ("simd", "simd_simt_template", "simt_only"):
+            raise ProgramGridContractError(f"invalid compile_mode={compile_mode!r}")
+        options["compile_mode"] = canonical_compile_mode
+    return options
+
+
 def canonical_program_mapping_scalar_specialization_json(raw: Any) -> str:
     """Return the stable cache representation of scalar specialization."""
     return json.dumps(
@@ -495,12 +517,12 @@ def apply_program_grid_transforms(
     *,
     physical_core_count: int | None = None,
 ) -> tuple[int, int, int]:
-    """Reference implementation of the generated launcher arithmetic.
+    """Compute a generated launcher's final grid from fixed metadata.
 
-    It is intentionally pure Python so the contract's ceil-div and persistent
-    coverage semantics can be unit-tested without an NPU.  The generated C++
-    launcher mirrors this order exactly and retains the pre-transform grid for
-    each axis before applying the first transform on that axis.
+    This intentionally pure-Python reference lets the contract's ceil-div and
+    persistent-coverage semantics be unit-tested without an NPU.  Driver
+    generation invokes it only after validating the static specialization, then
+    embeds the resulting constants in both generated launch paths.
     """
     if len(grid) != 3:
         raise ProgramGridContractError("grid must contain exactly three dimensions")

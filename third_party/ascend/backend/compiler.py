@@ -23,7 +23,6 @@ import functools
 import hashlib
 import glob
 import json
-import operator
 import os
 import re
 import shlex
@@ -71,25 +70,21 @@ from triton.backends.ascend.utils import (
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.ascend.program_grid import (
+    DEFAULT_PROGRAM_MAPPING_RULE_MASK,
     PROGRAM_MAPPING_SCALAR_SPECIALIZATION_ATTR,
     PROGRAM_GRID_SPECIALIZATION_ATTR,
     PROGRAM_GRID_SPECIALIZATION_VERSION,
     PROGRAM_GRID_TRANSFORMS_ATTR,
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
-    apply_program_grid_transforms,
     canonical_program_mapping_scalar_specialization_json,
     canonical_program_grid_specialization_json,
     canonical_program_grid_transforms_json,
-    get_persistent_transform,
-    make_program_mapping_scalar_specialization,
-    make_program_grid_specialization,
     normalize_program_mapping_scalar_specialization,
     normalize_program_grid_specialization,
     normalize_program_mapping_rule_mask,
     normalize_program_grid_transforms,
     program_grid_specialization_enabled,
-    resolve_program_grid_for_specialization,
 )
 from triton.backends.compiler import (
     BaseBackend,
@@ -1340,10 +1335,10 @@ class NPUOptions:
     # Backend-only construction input.  AscendBackend.parse_options injects
     # GPUTarget.arch and never forwards a user-supplied compile option.
     arch: InitVar[str] = ""
-    # Explicit opt-in bridge trigger.  Both are InitVars so a legacy launch
-    # with all new bits closed retains the exact pre-bridge options.__dict__
-    # (and therefore the exact legacy JIT/compiler cache identity).
-    program_mapping_rule_mask: InitVar[int] = 0
+    # ``None`` selects the production IAT/PTSM default. Passing ``0`` is an
+    # explicit opt-out. Without an explicit fixed grid, either choice stays
+    # fail-closed in the mapping rules.
+    program_mapping_rule_mask: InitVar[Optional[int]] = None
     program_grid_specialization: InitVar[Any] = None
     program_mapping_scalar_specialization: InitVar[Any] = None
     # This becomes compiler metadata, so its name must also be valid for the
@@ -1459,6 +1454,10 @@ class NPUOptions:
             isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
         )
         try:
+            if program_mapping_rule_mask is None:
+                program_mapping_rule_mask = (
+                    DEFAULT_PROGRAM_MAPPING_RULE_MASK
+                    if self.enable_graph_optimize else 0)
             normalized_mapping_rule_mask = normalize_program_mapping_rule_mask(program_mapping_rule_mask)
             normalized_specialization = (None if program_grid_specialization is None else
                                          normalize_program_grid_specialization(program_grid_specialization))
@@ -1481,11 +1480,13 @@ class NPUOptions:
             if normalized_specialization is None:
                 raise ValueError("program_mapping_scalar_specialization requires "
                                  "program_grid_specialization")
+        # Materialize the resolved selector so the unmodified community JIT
+        # accepts explicit backend options and the compiler cache sees the
+        # same contract as the caller-side canonical factory.
+        object.__setattr__(self, "program_mapping_rule_mask", normalized_mapping_rule_mask)
         if normalized_mapping_rule_mask:
-            object.__setattr__(self, "program_mapping_rule_mask", normalized_mapping_rule_mask)
             # The physical-UB mapping model is an implementation/cache schema,
-            # not a public knob.  Materialize it only for enabled mapping so
-            # legacy no-bit option dictionaries and hashes remain unchanged.
+            # not a public knob.
             object.__setattr__(self, "program_mapping_resource_model_schema_version", 2)
         if normalized_specialization is not None:
             object.__setattr__(self, "program_grid_specialization", normalized_specialization)
@@ -1720,123 +1721,6 @@ class AscendBackend(BaseBackend):
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")
         return options
-
-    def prepare_program_grid_specialization(self, grid, bound_args, raw_options):
-        """Resolve an enabled JIT grid before cache lookup, or fail closed.
-
-        The core JIT calls this optional backend hook only after it has bound
-        arguments but before it computes its cache key.  Returning ``None``
-        preserves the legacy ordering and key byte-for-byte for all-disabled
-        program-mapping rules.
-        """
-        try:
-            rule_mask = normalize_program_mapping_rule_mask(raw_options.get("program_mapping_rule_mask", 0))
-        except ProgramGridContractError as error:
-            raise RuntimeError(f"invalid program_mapping_rule_mask: {error}") from error
-        if not program_grid_specialization_enabled(rule_mask):
-            if raw_options.get("program_grid_specialization") is not None:
-                raise RuntimeError("program_grid_specialization requires an enabled "
-                                   "program_mapping_rule_mask")
-            return None
-        if raw_options.get("program_grid_specialization") is not None:
-            raise RuntimeError("JIT resolves program_grid_specialization from grid; use an AOT "
-                               "compile path to provide a fixed specialization explicitly")
-        try:
-            original_grid = resolve_program_grid_for_specialization(grid, bound_args)
-            specialization = make_program_grid_specialization(original_grid, rule_mask)
-        except ProgramGridContractError as error:
-            raise RuntimeError(f"cannot specialize program grid before cache lookup: {error}") from error
-        return original_grid, {"program_grid_specialization": specialization}
-
-    def prepare_program_mapping_specialization(self, grid, bound_args, raw_options, params):
-        """Add exact runtime integer values to the pre-cache mapping contract.
-
-        ``params`` is the JIT function's ordered parameter list, allowing this
-        backend hook to translate Python parameter order into TTIR entry
-        argument indices while skipping ``tl.constexpr`` values.  The values
-        are cache-keyed compiler inputs, not launcher arguments: GraphOptimize
-        replaces only compatible integer block arguments and leaves all other
-        runtime values dynamic.
-        """
-        prepared = self.prepare_program_grid_specialization(grid, bound_args, raw_options)
-        if prepared is None:
-            return None
-
-        original_grid, compiler_options = prepared
-        runtime_arguments = []
-        runtime_arg_index = 0
-        for param in params:
-            if param.is_constexpr:
-                continue
-            value = bound_args[param.name]
-            # Tensor-like pointers can implement ``__index__`` for a
-            # zero-dimensional value, but they are still pointer arguments,
-            # never scalar-specialization inputs.
-            if isinstance(value, bool) or hasattr(value, "data_ptr"):
-                runtime_arg_index += 1
-                continue
-            try:
-                scalar = operator.index(value)
-            except TypeError:
-                runtime_arg_index += 1
-                continue
-            scalar = int(scalar)
-            # The C++ contract stores signed int64 values.  Omitting a value
-            # outside that range leaves it dynamic and therefore fail-closed
-            # for dependence analysis instead of truncating it.
-            if -(1 << 63) <= scalar <= (1 << 63) - 1:
-                # Retain the Python parameter name as well as its source
-                # ordinal.  Triton's frontend may drop an earlier
-                # known-contiguous argument before the TTIR entry exists; the
-                # C++ bridge then finds the surviving argument by NameLoc
-                # instead of accidentally substituting a later ABI value.
-                runtime_arguments.append((runtime_arg_index, param.name, scalar))
-            runtime_arg_index += 1
-
-        if runtime_arguments:
-            compiler_options = dict(compiler_options)
-            compiler_options["program_mapping_scalar_specialization"] = (
-                make_program_mapping_scalar_specialization(runtime_arguments))
-        return original_grid, compiler_options
-
-    def finalize_program_mapping_launch_grid(self, original_grid, metadata):
-        """Translate a cache-specialized logical grid into the Python launch grid.
-
-        The JIT invokes this only after it has selected the compiled artifact
-        for ``original_grid``.  Keeping the arithmetic here gives Python
-        launches the same final program count as the generated C ABI while
-        preserving a strict check that the artifact was compiled for this
-        exact logical extent.  The C ABI still receives raw grids and performs
-        the equivalent transform inside its exported entry point.
-        """
-        try:
-            original = tuple(int(value) for value in original_grid)
-            if len(original) != 3 or any(value <= 0 for value in original):
-                raise ProgramGridContractError("program-grid launch must contain three positive dimensions")
-
-            raw_specialization = getattr(metadata, "program_grid_specialization", None)
-            if raw_specialization is None:
-                raise ProgramGridContractError(
-                    "program-grid launch transform requires hacc.grid_specialization metadata")
-            specialization = normalize_program_grid_specialization(raw_specialization)
-            expected = tuple(specialization["grid"])
-            if original != expected:
-                raise ProgramGridContractError("runtime grid does not match the compiled hacc.grid_specialization")
-
-            raw_transforms = getattr(metadata, "program_grid_transforms", None)
-            if raw_transforms is None:
-                return original
-            transforms = normalize_program_grid_transforms(raw_transforms)
-
-            physical_core_count = None
-            if get_persistent_transform(transforms) is not None:
-                mix_mode = getattr(metadata, "mix_mode", "aiv")
-                npu_utils = NPUUtils()
-                physical_core_count = (npu_utils.get_aivector_core_num()
-                                       if mix_mode == "aiv" else npu_utils.get_aicore_num())
-            return apply_program_grid_transforms(original, transforms, physical_core_count=physical_core_count)
-        except (ProgramGridContractError, TypeError, ValueError) as error:
-            raise RuntimeError(f"cannot finalize program-mapping launch grid: {error}") from error
 
     def pack_metadata(self, metadata):
         # collect necessary metadata to launch kernels

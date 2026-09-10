@@ -36,8 +36,9 @@ from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, conv
                                           _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
                                           get_backend_func, get_cann_version)
 from triton.backends.ascend.program_grid import (
-    PROGRAM_GRID_SPECIALIZATION_ATTR,
+    PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
+    apply_program_grid_transforms,
     get_persistent_transform,
     normalize_program_grid_specialization,
     normalize_program_grid_transforms,
@@ -1032,13 +1033,10 @@ static void release_npu_tensor_handle(void* handle) {{
 }}
 """
 
-    # New program-grid transforms own their complete host-launch contract.  The
-    # exported C ABI receives an original logical grid and applies the contract
-    # here.  Python JIT launches receive that same contract through metadata,
-    # validate and finalize it before this generated entry point, so the grid
-    # visible at ``CompiledKernel.run`` is already the final program grid.  The
-    # old coalesce ABI remains below as a migration-only path for existing
-    # artifacts.
+    # Versioned program-grid transforms are fixed-specialization launcher
+    # contracts. Both Python JIT and the exported C ABI keep their original
+    # grid argument, while this backend precomputes the one final grid recorded
+    # by the compiled artifact. The legacy coalesce ABI remains separate.
     raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
     if raw_program_grid_transforms is not None:
         try:
@@ -1057,81 +1055,28 @@ static void release_npu_tensor_handle(void* handle) {{
     else:
         program_grid_specialization = None
 
-    # This exact check is inserted in the shared launch preamble below, before
-    # any grid transform or physical-core cap.  C API callers are rejected
-    # before launch; the Python wrapper additionally turns the thread-local
-    # rejection marker into an exception after _launch returns.
-    program_grid_specialization_support = ""
-    program_grid_specialization_check = ""
-    program_grid_specialization_reset = ""
-    program_grid_specialization_python_error = ""
-    if program_grid_specialization is not None:
-        expected_grid = program_grid_specialization["grid"]
-        expected_rule_mask = program_grid_specialization["rule_mask"]
-        program_grid_specialization_support = f"""
-static thread_local bool haccGridSpecializationRejected = false;
-static bool haccProgramGridSpecializationMatches(
-    int grid0, int grid1, int grid2) {{
-  return grid0 == {expected_grid[0]} && grid1 == {expected_grid[1]} &&
-         grid2 == {expected_grid[2]};
-}}
-"""
-        program_grid_specialization_check = f"""// {PROGRAM_GRID_SPECIALIZATION_ATTR} v1: snapshot original grid before transforms.
-  const int originalGrid0 = gridX;
-  const int originalGrid1 = gridY;
-  const int originalGrid2 = gridZ;
-  if (!haccProgramGridSpecializationMatches(
-          originalGrid0, originalGrid1, originalGrid2)) {{
-    haccGridSpecializationRejected = true;
-    printf("ERROR: hacc.grid_specialization mismatch (rule_mask={expected_rule_mask}); "
-           "expected ({expected_grid[0]}, {expected_grid[1]}, {expected_grid[2]}), got (%d, %d, %d)\\n",
-           originalGrid0, originalGrid1, originalGrid2);
-    return;
-  }}"""
-        program_grid_specialization_reset = "haccGridSpecializationRejected = false;"
-        program_grid_specialization_python_error = """if (haccGridSpecializationRejected) {
-    PyErr_SetString(
-        PyExc_ValueError,
-        "runtime grid does not match the compiled hacc.grid_specialization");
-    return nullptr;
-  }"""
-
-    program_grid_transform_apply = ""
-    persistent_grid_cap = ""
+    program_grid_finalization = ""
     if program_grid_transforms is not None:
-        grid_vars = {0: "gridX", 1: "gridY", 2: "gridZ"}
-        logical_extent_by_axis = {}
-        transform_lines = [
-            "// hacc.program_grid_transforms v1: retain pre-transform logical extents for tail proofs.",
-        ]
-        for transform in program_grid_transforms["transforms"]:
-            axis = transform["axis"]
-            grid_var = grid_vars[axis]
-            logical_extent = transform["logical_extent"]
-            if axis not in logical_extent_by_axis:
-                logical_extent_by_axis[axis] = logical_extent
-                transform_lines.extend((
-                    f"const int logicalGrid{axis} = {grid_var};",
-                    f"assert(logicalGrid{axis} == {logical_extent} && "
-                    f"\"program_grid_transforms: grid[{axis}] differs from its proven logical_extent\");",
-                ))
-            factor = transform["factor"]
-            transform_lines.append(f"{grid_var} = ({grid_var} + {factor} - 1) / {factor};")
-        program_grid_transform_apply = "\n  ".join(transform_lines)
-
-        persistent_transform = get_persistent_transform(program_grid_transforms)
-        if persistent_transform is not None:
-            persistent_axis = persistent_transform["axis"]
-            persistent_grid_var = grid_vars[persistent_axis]
-            other_grid_vars = [grid_vars[axis] for axis in range(3) if axis != persistent_axis]
-            persistent_grid_cap = f"""// Persistent coverage is proven to stride by the capped tt.num_programs({persistent_axis}).
-  const uint64_t programGridOtherAxes = static_cast<uint64_t>({other_grid_vars[0]}) *
-      static_cast<uint64_t>({other_grid_vars[1]});
-  if (programGridOtherAxes <= static_cast<uint64_t>({num_physical_blocks})) {{
-    const uint32_t programGridAxisCap = static_cast<uint32_t>(std::max<uint64_t>(
-        1, static_cast<uint64_t>({num_physical_blocks}) / programGridOtherAxes));
-    {persistent_grid_var} = std::min({persistent_grid_var}, static_cast<int>(programGridAxisCap));
-  }}"""
+        if program_grid_specialization is None:
+            raise RuntimeError(
+                "program_grid_transforms requires fixed program_grid_specialization metadata")
+        try:
+            original_grid = tuple(program_grid_specialization["grid"])
+            physical_core_count = (
+                num_physical_blocks
+                if get_persistent_transform(program_grid_transforms) is not None else None)
+            final_grid = apply_program_grid_transforms(
+                original_grid,
+                program_grid_transforms,
+                physical_core_count=physical_core_count,
+            )
+        except (ProgramGridContractError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"cannot finalize fixed program-grid launcher metadata: {error}") from error
+        program_grid_finalization = f"""// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: fixed final launch grid.
+  gridX = {final_grid[0]};
+  gridY = {final_grid[1]};
+  gridZ = {final_grid[2]};"""
 
     # Full-TA tile/strided coalescing: the compiler recorded a coalesce factor H
     # and the program-id/grid axis it applies to. Each program now covers H tiles
@@ -1275,13 +1220,16 @@ static bool haccProgramGridSpecializationMatches(
 
     npu_headers = generate_npu_header_src()
 
+    # The original grid remains visible to the community JIT, but the fixed
+    # mapping artifact supplies its final launch grid in both generated paths.
+    _program_grid_launch_preamble = f"""
+  {program_grid_finalization}
+  {coalesce_grid_div if program_grid_transforms is None else ''}"""
+
     _launch_preamble = f"""
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
-  {program_grid_specialization_check}
-  {program_grid_transform_apply}
-  {persistent_grid_cap}
-  {coalesce_grid_div if program_grid_transforms is None else ''}
+{_program_grid_launch_preamble}
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
@@ -1293,21 +1241,10 @@ static bool haccProgramGridSpecializationMatches(
   }}
   ''' if workspace_size > 0 else ''}"""
 
-    # Python JIT passes a final grid after its backend has checked the original
-    # grid-specialization contract and applied the exact same transform.  Do
-    # not replay the transform in the generated Python path: doing so would
-    # double-divide an IAT/PTSM grid and make the wrapper-visible program count
-    # disagree with the actual launch.  The exported C ABI keeps the raw path
-    # above because it has no JIT-side backend hook.
     _python_launch_preamble = f"""
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
-  if (!gridAlreadyTransformed) {{
-    {program_grid_specialization_check}
-    {program_grid_transform_apply}
-    {persistent_grid_cap}
-  }}
-  {coalesce_grid_div if program_grid_transforms is None else ''}
+{_program_grid_launch_preamble}
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
@@ -1387,8 +1324,6 @@ static bool haccProgramGridSpecializationMatches(
 
 {_CPP_ALIGN_LAUNCH_OFFSET}
 
-{program_grid_specialization_support}
-
 extern "C" {{
 void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_stream stream,
     int gridX, int gridY, int gridZ,
@@ -1400,7 +1335,6 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
            kernelName, gridX, gridY, gridZ);
     return;
   }}
-  {program_grid_specialization_reset}
   std::vector<std::vector<int64_t>> tensorShapes;
   if (shapes_data != nullptr && shape_dims != nullptr) {{
     int shapes_idx = 0;
@@ -1480,7 +1414,6 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
 }} // extern "C"
 
 static void _launch(const char* kernelName, cann_func_handle func, cann_stream stream,
-    bool gridAlreadyTransformed,
     int gridX, int gridY, int gridZ,
     std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
@@ -1587,13 +1520,10 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
 
   // raise exception asap
   {newline.join(ptr_decls)}
-  {program_grid_specialization_reset}
   _launch(kernelName, function, stream,
-          true,
           gridX, gridY, gridZ,
           tensorShapes, tensorKinds
           {', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
-  {program_grid_specialization_python_error}
   if (PyErr_Occurred()) {{
     return nullptr;
   }}

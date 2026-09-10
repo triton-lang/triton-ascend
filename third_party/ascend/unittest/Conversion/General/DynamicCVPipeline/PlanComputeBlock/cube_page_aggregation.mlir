@@ -5,6 +5,7 @@
 // matmul operand (V) and an operand behind transpose (K) must be recognized.
 // The masked scalar metadata load must follow its address users onto CUBE.
 // Classification and materialization both run without an opt-in flag.
+// Keep the metadata mask, but emit page DMA without a rows > 0 guard.
 // COMMON-LABEL: func.func @unrolled_pages
 // CLASSIFY-DAG: memref.load {{.*}}ssbuffer.core_type = "CUBE"
 // CLASSIFY-DAG: arith.andi {{.*}}ssbuffer.core_type = "CUBE"
@@ -13,18 +14,15 @@
 // CLASSIFY-DAG: memref.copy {{.*}}ssbuffer.core_type = "CUBE"
 // CLASSIFY-DAG: tensor.insert_slice {{.*}}ssbuffer.core_type = "CUBE"
 // CLASSIFY-DAG: tensor.insert_slice {{.*}}ssbuffer.core_type = "CUBE"
-// MATERIAL-DAG: memref.load {{.*}}ssbuffer.core_type = "CUBE"
+// MATERIAL: scf.if
+// MATERIAL: memref.load {{.*}}ssbuffer.core_type = "CUBE"
 // MATERIAL: %[[BUFFER:.*]] = memref.alloc() {{.*}}memref<1x1x16x16xf16, #hivm.address_space<cbuf>>
 // MATERIAL: %[[ZERO:.*]] = arith.constant {{.*}} 0.000000e+00 : f16
 // MATERIAL: linalg.fill {{.*}}ins(%[[ZERO]] : f16) outs(%[[BUFFER]]
 // MATERIAL: memref.subview %[[BUFFER]][0, 0, 0, 0] [1, 1, 8, 16]
-// MATERIAL: arith.cmpi sgt
-// MATERIAL: scf.if
-// MATERIAL: hivm.hir.nd2nz {{.*}}dst_continuous{{.*}}ssbuffer.core_type = "CUBE"{{.*}}memref<?x8xf16
+// MATERIAL-NEXT: hivm.hir.nd2nz {{.*}}dst_continuous{{.*}}ssbuffer.core_type = "CUBE"{{.*}}memref<?x8xf16
 // MATERIAL: memref.subview %[[BUFFER]][0, 0, 8, 0] [1, 1, 8, 16]
-// MATERIAL: arith.cmpi sgt
-// MATERIAL: scf.if
-// MATERIAL: hivm.hir.nd2nz {{.*}}dst_continuous{{.*}}ssbuffer.core_type = "CUBE"
+// MATERIAL-NEXT: hivm.hir.nd2nz {{.*}}dst_continuous{{.*}}ssbuffer.core_type = "CUBE"
 // MATERIAL: hivm.hir.convert_layout
 // MATERIAL-NOT: tensor.insert_slice
 // MATERIAL: linalg.matmul {{.*}}ssbuffer.core_type = "CUBE"

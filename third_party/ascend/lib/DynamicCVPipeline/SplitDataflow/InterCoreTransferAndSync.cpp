@@ -2172,6 +2172,16 @@ void InterCoreTransferAndSyncPass::runOnOperation() {
     return;
   }
 
+  // Page aggregation can already have created shared CUBE buffers.
+  intraDepsGroupId = 0;
+  module.walk([&](Operation *op) {
+    auto deps = op->getAttrOfType<ArrayAttr>(CVPipeline::kIntraDeps);
+    if (deps && deps.size() == 2)
+      intraDepsGroupId =
+          std::max(intraDepsGroupId,
+                   static_cast<int>(cast<IntegerAttr>(deps[0]).getInt()) + 1);
+  });
+
   // Phase 1: Initialize FlagIdManager as local variable
   FlagIdManager flagManager(module);
   FlagIdReuseManager flagIdReuseManager;

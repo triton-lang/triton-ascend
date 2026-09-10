@@ -63,6 +63,11 @@ inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
 inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
+// Writes to a shared page buffer execute only in its producer block.
+inline constexpr llvm::StringLiteral kSharedPageWrite =
+    "ssbuffer.shared_page_write";
+inline constexpr llvm::StringLiteral kSharedPageSlots =
+    "ssbuffer.shared_page_slots";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kDepMark = "ssbuffer.dep_mark";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";

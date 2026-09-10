@@ -134,6 +134,13 @@ cloneOpsForBlock(int curId, SmallVector<Operation *> &curOps,
   OpBuilder builder(curOps.front());
 
   for (Operation *op : toClone) {
+    // The consumer reads the producer's shared buffer. Replaying these
+    // writes would also replay its page metadata loads in every consumer.
+    if (op->hasAttr(CVPipeline::kSharedPageWrite)) {
+      assert(op->getNumResults() == 0 &&
+             "shared page writes have no SSA results");
+      continue;
+    }
     Operation *cloned = cloneOpWithMapping(op, builder, valueMap);
     cloned->setAttr(CVPipeline::kBlockId, builder.getI32IntegerAttr(curId));
     if (auto origBlockIdOpt = CVPipeline::getOpBlockId(op)) {
@@ -203,9 +210,12 @@ static bool shouldEraseOpForCube(
     const llvm::DenseMap<Operation *, llvm::SmallPtrSet<Operation *, 4>>
         &sameBlockIdExecAfter,
     const llvm::DenseSet<Operation *> &erasedOps) {
-  // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase
+  // Rule 1: transfers and their notifications belong to the original block.
+  // Multi-buffering wraps them in scf.if; erase those cloned wrappers too,
+  // even when conservative memory dependencies connect them to a live reader.
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
-      isa<hivm::FixpipeOp>(op)) {
+      isa<hivm::FixpipeOp>(op) ||
+      (op->getNumResults() == 0 && isIfOpWithOnlySyncOps(op))) {
     return true;
   }
 

@@ -61,7 +61,8 @@ void MarkMainLoopPass::runOnOperation() {
   };
 
   module.walk([&](Operation *op) {
-    if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op))
+    if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op) &&
+        !op->hasAttr(CVPipeline::kSharedPageWrite))
       return;
 
     if (isL1Fixpipe(op))

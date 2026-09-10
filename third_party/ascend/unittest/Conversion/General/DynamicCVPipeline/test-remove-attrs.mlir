@@ -1,6 +1,17 @@
 // RUN: triton-opt --remove-ssbuf-attr %s | FileCheck %s
 
-module {
+// CHECK-NOT: ssbuffer.reserved_bytes
+module attributes {ssbuffer.reserved_bytes = 768 : i64} {
+  // CHECK-LABEL: func.func @test_remove_shared_page_write
+  // CHECK: linalg.fill ins
+  // CHECK-NOT: ssbuffer.shared_page_write
+  // CHECK-NOT: ssbuffer.shared_page_slots
+  // CHECK: return
+  func.func @test_remove_shared_page_write(%buffer: memref<16xf16>, %zero: f16) {
+    linalg.fill {ssbuffer.shared_page_slots = 2 : i32, ssbuffer.shared_page_write} ins(%zero : f16) outs(%buffer : memref<16xf16>)
+    return
+  }
+
   // CHECK-LABEL: func.func @test_remove_core_type_and_block_id
   func.func @test_remove_core_type_and_block_id(%arg0: memref<1024x1024xf32>) {
     // CHECK: memref.alloc() : memref<1024x1024xf32>

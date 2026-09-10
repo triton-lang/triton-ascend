@@ -26,6 +26,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Types.h"
 #include "mlir/IR/Value.h"
@@ -49,6 +50,13 @@ public:
   static constexpr int SSBUF_ADDR_OFFSET =
       8; // Address offset for each allocation
   static constexpr int SSBUF_ADDR_MAX = 6072; // Maximum allowed address
+  static constexpr int PIPELINE_BANK_BYTES = 1024;
+  static constexpr llvm::StringLiteral RESERVED_BYTES_ATTR =
+      "ssbuffer.reserved_bytes";
+
+  // Reserve the high end of the first pipeline counter bank. The control-flow
+  // pass checks that its counters fit below this range before allocating them.
+  static std::optional<int64_t> reserveBytes(ModuleOp module, int64_t bytes);
 
   // Constructor
   SSBufferManager() = default;

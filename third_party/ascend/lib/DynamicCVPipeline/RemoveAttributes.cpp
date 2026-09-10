@@ -30,6 +30,7 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassRegistry.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/RemoveAttributes.h"
 
@@ -54,7 +55,8 @@ static constexpr llvm::StringLiteral kAttrsToRemove[]{
     kIntraBufCount,     kInterCoreBufCount,
     kLoadStoreBufCount, kInsertionOptimization,
     kDepMark,           kIntraDeps,
-    kSubBlock};
+    kSubBlock,          kSharedPageWrite,
+    kSharedPageSlots,   SSBufferManager::RESERVED_BYTES_ATTR};
 
 void RemoveSsbufAttrPass::runOnOperation() {
   auto module = getOperation();

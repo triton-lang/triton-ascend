@@ -27,6 +27,25 @@
 using namespace mlir;
 using namespace triton;
 
+std::optional<int64_t> SSBufferManager::reserveBytes(ModuleOp module,
+                                                     int64_t bytes) {
+  constexpr int64_t end = PIPELINE_BANK_BYTES;
+  constexpr int64_t capacity = end;
+  int64_t reserved = 0;
+  if (auto attr = module->getAttrOfType<IntegerAttr>(RESERVED_BYTES_ATTR))
+    reserved = attr.getInt();
+  if (bytes <= 0 || bytes > capacity || reserved < 0 || reserved > capacity)
+    return std::nullopt;
+  bytes =
+      (bytes + SSBUF_ADDR_OFFSET - 1) / SSBUF_ADDR_OFFSET * SSBUF_ADDR_OFFSET;
+  if (bytes > capacity - reserved)
+    return std::nullopt;
+  module->setAttr(RESERVED_BYTES_ATTR,
+                  IntegerAttr::get(IntegerType::get(module.getContext(), 64),
+                                   reserved + bytes));
+  return end - reserved - bytes;
+}
+
 // Helper function to check if a type is a scalar type
 // Scalar types include: IntegerType (i1, i8, i16, i32, i64, etc.)
 // and FloatType (f16, f32, f64, bf16, f8, etc.)

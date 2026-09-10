@@ -56,10 +56,12 @@
 #include "llvm/Support/Debug.h"
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "DynamicCVPipeline/Common/SSBufferManager.h"
 #include "DynamicCVPipeline/Common/SyncWall.h"
 #include "DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/Utils/Utils.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "memory-effects-tracker";
@@ -308,6 +310,17 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
   unknown = false;
 
   if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
+    if (markOp->hasAttr(triton::kMemrefExtVolatile)) {
+      auto load = markOp.getSrc().getDefiningOp<memref::LoadOp>();
+      if (load && hivm::getOptionalHIVMAddressSpace(load.getMemRefType()) ==
+                      hivm::AddressSpace::SSBUF) {
+        // The annotation qualifies a read of this SSBuffer. Treating its
+        // scalar result as a written memory location creates false edges to
+        // unrelated L1 writes, retaining their clones and GM metadata reads.
+        MemoryEffects::EffectInstance read(MemoryEffects::Read::get());
+        return {remapEffectValue(read, getViewSource(load.getMemRef()))};
+      }
+    }
     if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
       return {};
     } else {

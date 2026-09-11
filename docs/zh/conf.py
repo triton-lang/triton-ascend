@@ -36,7 +36,11 @@ extensions = [
     'sphinx.ext.mathjax',
     'myst_parser',
     'sphinx_copybutton',
+    'sphinxcontrib.mermaid',
 ]
+
+# Map ```mermaid code fences to the mermaid directive instead of rendering as code blocks.
+myst_fence_as_directive = ['mermaid']
 
 # -- MyST configuration -------------------------------------------------------
 # Enable dollar-math extension so that $$...$$ and $...$ syntax is parsed.

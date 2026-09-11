@@ -2185,8 +2185,20 @@ void TritonToLinalgPass::runOnOperation() {
 
   // ScalarPointerCarrier is a pass-local provenance marker. Keep it through
   // PointerCast post-processing so only known scalar-address carriers use the
-  // new layout path, then remove it before downstream dialects observe the IR.
+  // new layout path. A carrier that is consumed directly (without an
+  // intermediate reinterpret_cast) is not rebuilt by the loop above, so give
+  // that remaining GM pointer the same address-space annotation before the
+  // provenance marker is removed.
   moduleOp.walk([](hivm::PointerCastOp pointerCast) {
+    if (!pointerCast->hasAttr(kScalarPointerCarrierAttr))
+      return;
+    OpBuilder builder(pointerCast);
+    builder.setInsertionPointAfter(pointerCast);
+    auto mark = builder.create<annotation::MarkOp>(pointerCast.getLoc(),
+                                                   pointerCast.getResult());
+    mark->setAttr(hivm::AddressSpaceAttr::getMnemonic(),
+                  {hivm::AddressSpaceAttr::get(pointerCast.getContext(),
+                                               hivm::AddressSpace::GM)});
     pointerCast->removeAttr(kScalarPointerCarrierAttr);
   });
 

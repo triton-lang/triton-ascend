@@ -25,6 +25,7 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -71,6 +72,42 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   return false;
 }
 
+// Follow an i1 tensor to its init only when all corresponding loop edges
+// forward the same value. A while may permute condition/result slots, so do
+// not assume its before and after argument numbers are interchangeable.
+Value getInvariantLoopMaskInit(BlockArgument argument) {
+  Operation *parent = argument.getOwner()->getParentOp();
+  if (auto loop = dyn_cast<scf::ForOp>(parent)) {
+    if (argument == loop.getInductionVar())
+      return {};
+    unsigned slot = argument.getArgNumber() - 1;
+    auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+    return yield.getOperand(slot) == argument ? loop.getInitArgs()[slot]
+                                              : Value();
+  }
+  if (auto loop = dyn_cast<scf::WhileOp>(parent)) {
+    auto condition = loop.getConditionOp();
+    auto yield = loop.getYieldOp();
+    BlockArgument before, after;
+    if (argument.getOwner() == &loop.getBefore().front()) {
+      before = argument;
+      after = dyn_cast<BlockArgument>(yield.getOperand(before.getArgNumber()));
+      if (!after || after.getOwner() != &loop.getAfter().front() ||
+          condition.getArgs()[after.getArgNumber()] != before)
+        return {};
+    } else {
+      after = argument;
+      before =
+          dyn_cast<BlockArgument>(condition.getArgs()[after.getArgNumber()]);
+      if (!before || before.getOwner() != &loop.getBefore().front() ||
+          yield.getOperand(before.getArgNumber()) != after)
+        return {};
+    }
+    return loop.getInits()[before.getArgNumber()];
+  }
+  return {};
+}
+
 } // namespace
 
 OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
@@ -99,6 +136,11 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
   if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
     auto parentOp = blockArgument.getOwner()->getParentOp();
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
+      auto type = dyn_cast<RankedTensorType>(operand.getType());
+      if (type && type.getElementType().isInteger(1)) {
+        Value init = getInvariantLoopMaskInit(blockArgument);
+        return init ? parse(init, loc, builder) : failure();
+      }
       OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
       if (initArgOperand) {
         Value initArg = initArgOperand->get();

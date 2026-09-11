@@ -23,11 +23,14 @@
 #include "Utils/Utils.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
+#include "TritonControlFlowOpt/ControlFlowRewrite.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToStructured/MemOpConverter.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -56,6 +59,200 @@ static bool compileOn91095Flag = false;
 static triton::ascend::CompileMode compileModeFlag =
     triton::ascend::CompileMode::Simd;
 static bool useSyncBlockLockFlag = true;
+
+// Only signed comparisons against the same fixed, zero-based range are
+// accepted. Preserve the original bound's integer semantics, including
+// negative values; MaskState clamps the eventual access extent.
+static OpFoldResult getPrefixBound(Value mask, Value range) {
+  auto cmp = mask.getDefiningOp<arith::CmpIOp>();
+  if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt ||
+      cmp.getLhs() != range)
+    return {};
+  if (auto splat = cmp.getRhs().getDefiningOp<triton::SplatOp>())
+    return splat.getSrc();
+  if (auto constant = cmp.getRhs().getDefiningOp<arith::ConstantOp>()) {
+    auto dense = dyn_cast<DenseIntElementsAttr>(constant.getValue());
+    if (dense && dense.isSplat())
+      return IntegerAttr::get(dense.getElementType(),
+                              dense.getSplatValue<APInt>());
+  }
+  return {};
+}
+
+// (lane < bound) & (lane < limit) == lane < min(bound, limit).
+// Carry the exact scalar boundary instead of a tensor<i1>. This retains the
+// history even when limits grow again, and lets the existing range lowering
+// keep using subview/copy. Do not change CFO-owned descriptor signatures.
+struct CanonicalizeLoopPrefixMask : OpRewritePattern<scf::ForOp> {
+  using OpRewritePattern<scf::ForOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(scf::ForOp loop,
+                                PatternRewriter &rewriter) const override {
+    if (loop->hasAttr(triton::controlflow::kPointerDescriptorBoundaryAttr))
+      return failure();
+
+    std::optional<unsigned> maskSlot;
+    for (auto [slot, init] : llvm::enumerate(loop.getInitArgs())) {
+      auto type = dyn_cast<RankedTensorType>(init.getType());
+      if (!type || !type.getElementType().isInteger(1))
+        continue;
+      if (maskSlot || type.getRank() != 1 || !type.hasStaticShape())
+        return failure();
+      maskSlot = slot;
+    }
+    if (!maskSlot)
+      return failure();
+
+    unsigned slot = *maskSlot;
+    auto iterMask = loop.getRegionIterArgs()[slot];
+    auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+    auto update = yield.getOperand(slot).getDefiningOp<arith::AndIOp>();
+    if (!update || update->getBlock() != loop.getBody())
+      return failure();
+    Value condition;
+    if (update.getLhs() == iterMask)
+      condition = update.getRhs();
+    else if (update.getRhs() == iterMask)
+      condition = update.getLhs();
+    else
+      return failure();
+
+    auto cmp = condition.getDefiningOp<arith::CmpIOp>();
+    if (!cmp)
+      return failure();
+    auto range = cmp.getLhs().getDefiningOp<triton::MakeRangeOp>();
+    auto maskType = cast<RankedTensorType>(iterMask.getType());
+    if (!range || range.getStart() != 0 || range.getEnd() <= 0 ||
+        range.getEnd() != maskType.getDimSize(0) ||
+        !loop.isDefinedOutsideOfLoop(range.getResult()))
+      return failure();
+    OpFoldResult limit = getPrefixBound(condition, range);
+    if (!limit)
+      return failure();
+
+    Value init = loop.getInitArgs()[slot];
+    OpFoldResult initialBound = getPrefixBound(init, range);
+    if (!initialBound) {
+      auto constant = init.getDefiningOp<arith::ConstantOp>();
+      auto dense = constant
+                       ? dyn_cast<DenseIntElementsAttr>(constant.getValue())
+                       : DenseIntElementsAttr();
+      if (!dense || !dense.isSplat())
+        return failure();
+      initialBound = rewriter.getI32IntegerAttr(
+          dense.getSplatValue<APInt>().isZero() ? 0 : range.getEnd());
+    }
+
+    IRMapping mapping;
+    auto materializeBound = [&](OpFoldResult bound) -> Value {
+      if (auto value = dyn_cast<Value>(bound))
+        return mapping.lookupOrDefault(value);
+      return rewriter.create<arith::ConstantOp>(
+          loop.getLoc(), cast<IntegerAttr>(cast<Attribute>(bound)));
+    };
+    auto makeMask = [&](Value bound) -> Value {
+      auto splat = rewriter.create<triton::SplatOp>(loop.getLoc(),
+                                                    range.getType(), bound);
+      return rewriter.create<arith::CmpIOp>(
+          loop.getLoc(), arith::CmpIPredicate::slt, range.getResult(), splat);
+    };
+
+    SmallVector<Value> inits(loop.getInitArgs());
+    inits[slot] = materializeBound(initialBound);
+    auto newLoop = rewriter.create<scf::ForOp>(
+        loop.getLoc(), loop.getLowerBound(), loop.getUpperBound(),
+        loop.getStep(), inits);
+    newLoop->setAttrs(loop->getAttrs());
+    if (!newLoop.getBody()->empty())
+      rewriter.eraseOp(newLoop.getBody()->getTerminator());
+    rewriter.setInsertionPointToStart(newLoop.getBody());
+    mapping.map(loop.getInductionVar(), newLoop.getInductionVar());
+    for (auto [index, argument] : llvm::enumerate(loop.getRegionIterArgs())) {
+      Value replacement = newLoop.getRegionIterArgs()[index];
+      if (index == slot)
+        replacement = makeMask(replacement);
+      mapping.map(argument, replacement);
+    }
+
+    Value nextBound;
+    for (Operation &op : loop.getBody()->without_terminator()) {
+      if (&op == update.getOperation()) {
+        nextBound = rewriter.create<arith::MinSIOp>(
+            update.getLoc(), newLoop.getRegionIterArgs()[slot],
+            materializeBound(limit));
+        mapping.map(update.getResult(), makeMask(nextBound));
+      } else {
+        rewriter.clone(op, mapping);
+      }
+    }
+    SmallVector<Value> yielded;
+    for (auto [index, value] : llvm::enumerate(yield.getOperands()))
+      yielded.push_back(index == slot ? nextBound
+                                      : mapping.lookupOrDefault(value));
+    rewriter.create<scf::YieldOp>(yield.getLoc(), yielded);
+
+    rewriter.setInsertionPointAfter(newLoop);
+    SmallVector<Value> results(newLoop.getResults());
+    // Reconstruct the initial mask too when the loop executes zero times.
+    results[slot] = makeMask(results[slot]);
+    rewriter.replaceOp(loop, results);
+    return success();
+  }
+};
+
+static bool dependsOnLoopMask(Value mask) {
+  if (!mask)
+    return false;
+  SmallVector<Value> worklist{mask};
+  llvm::SmallPtrSet<Value, 16> visited;
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+    auto type = dyn_cast<RankedTensorType>(value.getType());
+    bool isMask = type && type.getElementType().isInteger(1);
+    if (auto argument = dyn_cast<BlockArgument>(value)) {
+      if (isMask &&
+          isa<LoopLikeOpInterface>(argument.getOwner()->getParentOp()))
+        return true;
+      continue;
+    }
+    Operation *producer = value.getDefiningOp();
+    if (!producer)
+      continue;
+    if (isMask && isa<LoopLikeOpInterface>(producer))
+      return true;
+    llvm::append_range(worklist, producer->getOperands());
+    // Follow captured masks through region results, e.g. scf.if yields.
+    for (Region &region : producer->getRegions())
+      for (Block &block : region)
+        llvm::append_range(worklist, block.getTerminator()->getOperands());
+  }
+  return false;
+}
+
+static void markRuntimeLoopMasks(ModuleOp module) {
+  module.walk([](Operation *op) {
+    Value mask;
+    if (auto load = dyn_cast<triton::LoadOp>(op))
+      mask = load.getMask();
+    else if (auto store = dyn_cast<triton::StoreOp>(op))
+      mask = store.getMask();
+    else if (auto atomic = dyn_cast<triton::AtomicRMWOp>(op))
+      mask = atomic.getMask();
+    if (!dependsOnLoopMask(mask))
+      return;
+    OpBuilder builder(op);
+    MaskState state;
+    if (succeeded(state.parse(mask, op->getLoc(), builder)))
+      return;
+    // Unknown loop masks must reach a lowering that consumes the actual mask.
+    // In particular, do not use the SIMD full-load-and-select fallback.
+    op->setAttr(ConverterUtils::runtimeLoopMaskAttrName, builder.getUnitAttr());
+    op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                builder.getUnitAttr());
+  });
+}
 
 static void markSyncBlockLockUnordered(Operation *op) {
   op->setAttr(hivm::SyncBlockLockUnorderedAttr::name,
@@ -519,6 +716,15 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   }
   compileModeFlag = *compileMode;
   auto moduleOp = getOperation();
+  RewritePatternSet loopMaskPatterns(&getContext());
+  loopMaskPatterns.add<CanonicalizeLoopPrefixMask>(&getContext());
+  if (failed(applyPatternsGreedily(moduleOp, std::move(loopMaskPatterns)))) {
+    moduleOp.emitError("failed to canonicalize loop prefix masks");
+    signalPassFailure();
+    return;
+  }
+  markRuntimeLoopMasks(moduleOp);
+
   bool tileNonOverlap = checkAllProgramIdNonOverlap(moduleOp);
   useSyncBlockLockFlag = !tileNonOverlap;
 
@@ -564,8 +770,8 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
 
 void DiscreteMaskAccessConversionPass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry
-      .insert<arith::ArithDialect, triton::TritonDialect, hivm::HIVMDialect>();
+  registry.insert<arith::ArithDialect, scf::SCFDialect, triton::TritonDialect,
+                  hivm::HIVMDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

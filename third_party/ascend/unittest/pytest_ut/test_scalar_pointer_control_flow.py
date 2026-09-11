@@ -96,6 +96,22 @@ def scalar_pointer_select_loop_kernel(x0, x1, out, predicate_ptr, steps_ptr):
 
 
 @triton.jit
+def scalar_pointer_if_with_tensor_mask_kernel(x0, x1, out, predicate_ptr, limit_ptr, BLOCK: tl.constexpr):
+    """Return a scalar pointer and an independently computed tensor mask."""
+    predicate = tl.load(predicate_ptr)
+    limit = tl.load(limit_ptr)
+    lane = tl.arange(0, BLOCK)
+    if predicate != 0:
+        pointer = x0 + 3
+        valid = lane < limit
+    else:
+        pointer = x1 + 7
+        valid = lane < BLOCK - 2
+    value = tl.load(pointer + lane, mask=valid, other=-1.0)
+    tl.store(out + lane, value)
+
+
+@triton.jit
 def tensor_pointer_loop_kernel(tensor_source, tensor_out, steps_ptr, BLOCK: tl.constexpr):
     """Exercise one tensor-of-pointers loop carrier across several iterations."""
     steps = tl.load(steps_ptr)
@@ -220,6 +236,31 @@ def test_scalar_pointer_select_into_loop(predicate, steps):
     source = x0_cpu if predicate else x1_cpu
     expected_index = (4 if predicate else 7) + 2 * steps
     _assert_output(out, source[expected_index:expected_index + 1])
+
+
+@pytest.mark.parametrize("predicate", [0, 1])
+def test_scalar_pointer_if_with_tensor_mask(predicate):
+    """Check mixed scalar-pointer/tensor-mask results across one scf.if."""
+    block = 8
+    limit = 5
+    x0_cpu, x1_cpu, x0, x1 = _inputs()
+    out = torch.empty(block, dtype=torch.float32, device="npu")
+
+    scalar_pointer_if_with_tensor_mask_kernel[(1, )](
+        x0,
+        x1,
+        out,
+        _device_i32(predicate),
+        _device_i32(limit),
+        BLOCK=block,
+    )
+
+    source = x0_cpu if predicate else x1_cpu
+    offset = 3 if predicate else 7
+    valid_count = limit if predicate else block - 2
+    expected = torch.full((block, ), -1.0, dtype=torch.float32)
+    expected[:valid_count] = source[offset:offset + valid_count]
+    _assert_output(out, expected)
 
 
 @pytest.mark.parametrize("steps", [0, 1, 3])

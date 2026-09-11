@@ -659,15 +659,13 @@ public:
                   ConversionPatternRewriter &rewriter) const override {
     // CFO-expanded descriptor loops already carry pointer-free policy values
     // and remain structurally unchanged. This legacy BlockData rewrite is only
-    // valid for explicitly marked loops.
-    SmallVector<unsigned> markedRangeSlots = getMarkedMakeRangeCarrierSlots(op);
-    if (!op->hasAttr("UnhandledLoopOp") && markedRangeSlots.empty())
+    // valid for explicitly marked legacy loops.
+    if (!op->hasAttr("UnhandledLoopOp"))
       return failure();
     llvm::SmallDenseMap<Value, BlockData> known;
 
     rewriter.modifyOpInPlace(op, [&]() { op->removeAttr("UnhandledLoopOp"); });
-    return BlockDataParser::rewriteLoopOp(op, rewriter, known,
-                                          markedRangeSlots);
+    return BlockDataParser::rewriteLoopOp(op, rewriter, known, {});
   }
 };
 

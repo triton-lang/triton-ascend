@@ -2593,56 +2593,6 @@ bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp) {
   return false;
 }
 
-static bool isMakeRangeCarrier(Value value) {
-  Operation *producer = value.getDefiningOp();
-  if (!producer)
-    return false;
-  if (isa<triton::MakeRangeOp>(producer))
-    return true;
-  if (auto cast = dyn_cast<tensor::CastOp>(producer))
-    return isMakeRangeCarrier(cast.getSource());
-  return false;
-}
-
-SmallVector<unsigned>
-getMarkedMakeRangeCarrierSlots(LoopLikeOpInterface loopOp) {
-  SmallVector<unsigned> slots;
-  if (!loopOp || !loopOp->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
-    return slots;
-
-  auto marker = dyn_cast<DenseI32ArrayAttr>(
-      loopOp->getAttr(controlflow::kPointerDescriptorBoundaryAttr));
-  if (!marker)
-    return slots;
-
-  llvm::SmallDenseSet<unsigned> descriptorSlots;
-  for (int32_t slot : marker.asArrayRef()) {
-    if (slot >= 0)
-      descriptorSlots.insert(static_cast<unsigned>(slot));
-  }
-
-  auto isMaskOrAddressUse = [](OpOperand *use) {
-    Operation *user = use->getOwner();
-    return isa<triton::AddPtrOp>(user) ||
-           (isa<triton::LoadOp>(user) && use->getOperandNumber() == 1) ||
-           (isa<triton::StoreOp>(user) && use->getOperandNumber() == 2);
-  };
-
-  for (auto [slot, init] : llvm::enumerate(loopOp.getInits())) {
-    if (descriptorSlots.contains(slot) || !isMakeRangeCarrier(init))
-      continue;
-    auto tensorType = dyn_cast<RankedTensorType>(init.getType());
-    if (!tensorType || !tensorType.hasStaticShape())
-      continue;
-    auto elementType = dyn_cast<IntegerType>(tensorType.getElementType());
-    if (!elementType || elementType.getWidth() == 1)
-      continue;
-    if (isLoopCarriedValueUsedWithCondition(loopOp, slot, isMaskOrAddressUse))
-      slots.push_back(slot);
-  }
-  return slots;
-}
-
 // This function is util function for rewriteLoopOp that create value from data.
 // Assume data is structured, and from regionIterArg from LoopLikeOpInterface.
 //

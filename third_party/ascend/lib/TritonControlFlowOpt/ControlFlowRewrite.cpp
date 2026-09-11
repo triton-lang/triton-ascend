@@ -467,9 +467,9 @@ static LogicalResult bindLoopCarriedPointer(Value oldRegionArgument,
   FailureOr<DecomposedValue> argumentInfo =
       withReplacedComponents(pointerInfo.initInfo, pointerInfo.componentIndices,
                              *carriedComponentValues);
-  if (failed(argumentInfo) ||
-      failed(regionEnv.policy.normalizeControlFlowValue(
-          *argumentInfo, pointerInfo.resultAttributes, builder, loc)))
+  if (failed(argumentInfo) || failed(regionEnv.policy.normalizeLoopCarriedValue(
+                                  *argumentInfo, pointerInfo.componentIndices,
+                                  pointerInfo.resultAttributes, builder, loc)))
     return failure();
 
   Value rebuiltPointer =
@@ -583,8 +583,9 @@ static LogicalResult rewriteLoopTerminatorOperands(
         failed(castPlannedComponents(*nextInfo, pointerInfo->componentIndices,
                                      pointerInfo->componentTypes, builder,
                                      loc)) ||
-        failed(regionEnv.policy.normalizeControlFlowValue(
-            *nextInfo, pointerInfo->resultAttributes, builder, loc))) {
+        failed(regionEnv.policy.normalizeLoopCarriedValue(
+            *nextInfo, pointerInfo->componentIndices,
+            pointerInfo->resultAttributes, builder, loc))) {
       allOperandsValid = false;
       appendFallbackComponents(*pointerInfo);
       continue;
@@ -649,9 +650,10 @@ rebuildAndMapLoopResults(ValueRange oldResults, ValueRange newResults,
     FailureOr<DecomposedValue> resultInfo = withReplacedComponents(
         pointerInfo->initInfo, pointerInfo->componentIndices,
         *resultComponentValues);
-    if (failed(resultInfo) || failed(env.policy.normalizeControlFlowValue(
-                                  *resultInfo, pointerInfo->resultAttributes,
-                                  builder, oldResult.getLoc())))
+    if (failed(resultInfo) ||
+        failed(env.policy.normalizeLoopCarriedValue(
+            *resultInfo, pointerInfo->componentIndices,
+            pointerInfo->resultAttributes, builder, oldResult.getLoc())))
       return failure();
 
     Value rebuiltPointer =
@@ -758,8 +760,9 @@ static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
     FailureOr<DecomposedValue> initInfo =
         env.decomposeValue(forOp.getInitArgs()[idx], builder, forOp.getLoc());
     if (failed(initInfo) ||
-        failed(env.policy.normalizeControlFlowValue(
-            *initInfo, slot.resultAttributes, builder, forOp.getLoc())) ||
+        failed(env.policy.normalizeLoopCarriedValue(
+            *initInfo, slot.componentIndices, slot.resultAttributes, builder,
+            forOp.getLoc())) ||
         failed(castPlannedComponents(*initInfo, slot.componentIndices,
                                      slot.componentTypes, builder,
                                      forOp.getLoc())))
@@ -868,8 +871,9 @@ static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
     FailureOr<DecomposedValue> initInfo =
         env.decomposeValue(whileOp.getInits()[idx], builder, whileOp.getLoc());
     if (failed(initInfo) ||
-        failed(env.policy.normalizeControlFlowValue(
-            *initInfo, slot.resultAttributes, builder, whileOp.getLoc())) ||
+        failed(env.policy.normalizeLoopCarriedValue(
+            *initInfo, slot.componentIndices, slot.resultAttributes, builder,
+            whileOp.getLoc())) ||
         failed(castPlannedComponents(*initInfo, slot.componentIndices,
                                      slot.componentTypes, builder,
                                      whileOp.getLoc())))

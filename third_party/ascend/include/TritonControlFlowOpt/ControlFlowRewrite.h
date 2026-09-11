@@ -143,6 +143,18 @@ public:
     return success();
   }
 
+  /// Normalizes a descriptor used at a loop boundary. The default preserves
+  /// the generic control-flow behavior. Policies may use the exact set of
+  /// loop-carried components to retain a more compact equivalent schema that
+  /// would not be valid for an if or scope result.
+  virtual LogicalResult
+  normalizeLoopCarriedValue(DecomposedValue &value,
+                            ArrayRef<unsigned> carriedComponents,
+                            ArrayRef<Attribute> targetAttributes,
+                            OpBuilder &builder, Location loc) const {
+    return normalizeControlFlowValue(value, targetAttributes, builder, loc);
+  }
+
   virtual FailureOr<DecomposedValue>
   decompose(Value value, const ControlFlowRewriteContext &context,
             OpBuilder &builder, Location loc) const = 0;

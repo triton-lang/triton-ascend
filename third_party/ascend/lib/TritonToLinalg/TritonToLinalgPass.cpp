@@ -1829,12 +1829,6 @@ void TritonToLinalgPass::runOnOperation() {
   auto loopOpLegalFn = [](LoopLikeOpInterface loopOp) {
     Operation *op = loopOp.getOperation();
     if (op->hasAttr(controlflow::kPointerDescriptorBoundaryAttr)) {
-      // CFO descriptor loops may still carry a non-descriptor make_range
-      // tensor used by a load/store mask. Route only those loops through the
-      // narrow legacy mask-carrier rewrite; descriptor and opaque slots remain
-      // on the normal pointer-free boundary path.
-      if (!getMarkedMakeRangeCarrierSlots(loopOp).empty())
-        return false;
       return hasPointerFreeControlFlowBoundary(loopOp);
     }
     return !op->hasAttr("UnhandledLoopOp");
@@ -1869,12 +1863,11 @@ void TritonToLinalgPass::runOnOperation() {
     // that its init is produced by reinterpret_cast does not make it BlockData.
     bool hasExpandedPointerDescriptor =
         op->hasAttr(mlir::triton::controlflow::kPointerDescriptorBoundaryAttr);
-    auto markedRangeSlots = getMarkedMakeRangeCarrierSlots(loopOp);
     if (!op->hasAttr("ExtractedLoadOrStore") &&
-        (needsLegacyBlockDataLoopRewrite(loopOp) || !markedRangeSlots.empty()))
+        needsLegacyBlockDataLoopRewrite(loopOp))
       op->setAttr("UnhandledLoopOp", UnitAttr::get(op->getContext()));
 
-    if (hasExpandedPointerDescriptor && markedRangeSlots.empty())
+    if (hasExpandedPointerDescriptor)
       return;
 
     for (auto res : loopOp->getResults()) {

@@ -291,9 +291,10 @@ void GraphOptimizePass::runOnOperation() {
       patterns.add<FoldHistogramParking>(&getContext());
     FrozenRewritePatternSet frozenPatterns(std::move(patterns));
     GreedyRewriteConfig config;
-    config.strictMode = GreedyRewriteStrictness::ExistingAndNewOps;
-    if (failed(applyOpPatternsAndFold(preGraphRewriteCandidates,
-                                      frozenPatterns, config))) {
+    config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps)
+        .enableFolding();
+    if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
+                                       frozenPatterns, config))) {
       signalPassFailure();
       return;
     }

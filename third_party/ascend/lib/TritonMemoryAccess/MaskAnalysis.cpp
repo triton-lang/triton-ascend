@@ -21,6 +21,7 @@
  */
 
 #include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonMemoryAccess/OpFoldResultUtils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -69,6 +70,35 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   if (auto constant = getConstantIntValue(value))
     return *constant == 0;
   return false;
+}
+
+// The dynamic program-grid ABI deliberately uses `extui + ult`: it avoids
+// signed-overflow ambiguity when a physical lane is reconstructed from a
+// runtime original-grid extent.  MaskState normally refuses unsigned compares
+// because arbitrary integer inputs can change the signed interval semantics.
+// IAT attaches a proof tag only to its non-negative program-id/extent mask.
+// Narrow the operands back to their original integer type for analysis while
+// leaving the emitted comparison and its unsigned semantics untouched.
+static Value unwrapIATRuntimeExtentUnsignedOperand(Value operand,
+                                                   const Location &loc,
+                                                   OpBuilder &builder) {
+  if (auto extend = operand.getDefiningOp<arith::ExtUIOp>())
+    return extend.getIn();
+
+  auto splat = operand.getDefiningOp<triton::SplatOp>();
+  if (!splat)
+    return Value();
+  auto extend = splat.getSrc().getDefiningOp<arith::ExtUIOp>();
+  if (!extend)
+    return Value();
+
+  auto resultType = dyn_cast<RankedTensorType>(splat.getType());
+  if (!resultType || !isa<IntegerType>(extend.getIn().getType()))
+    return Value();
+  auto narrowedType = RankedTensorType::get(resultType.getShape(),
+                                             extend.getIn().getType(),
+                                             resultType.getEncoding());
+  return builder.create<triton::SplatOp>(loc, narrowedType, extend.getIn());
 }
 
 } // namespace
@@ -506,12 +536,22 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
                                   OpBuilder &builder) {
   assert(this->isEmpty());
   auto predicate = cmpOp.getPredicate();
-  // Only support <, <=, >=, =, !=
+  bool isIATRuntimeExtentUnsignedMask = cmpOp->hasAttr(
+      mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG);
+  // Only the explicitly proven IAT extent mask may translate its unsigned
+  // upper bound into MaskState's non-negative continuous interval.  Every
+  // ordinary unsigned comparison remains unsupported and is handled by the
+  // conservative discrete-memory path.
+  bool isTaggedUnsignedUpperBound =
+      isIATRuntimeExtentUnsignedMask &&
+      (predicate == arith::CmpIPredicate::ult ||
+       predicate == arith::CmpIPredicate::ule);
+  // Only support <, <=, >=, =, !=, plus the tagged unsigned tail bound.
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&
       predicate != arith::CmpIPredicate::eq &&
-      predicate != arith::CmpIPredicate::ne) {
+      predicate != arith::CmpIPredicate::ne && !isTaggedUnsignedUpperBound) {
     LLVM_DEBUG({ llvm::dbgs() << "Unsupported cmpi predicate\n"; });
     return failure();
   }
@@ -520,6 +560,16 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   MaskState rhsState;
   auto lhs = cmpOp.getLhs();
   auto rhs = cmpOp.getRhs();
+
+  if (isTaggedUnsignedUpperBound) {
+    lhs = unwrapIATRuntimeExtentUnsignedOperand(lhs, loc, builder);
+    rhs = unwrapIATRuntimeExtentUnsignedOperand(rhs, loc, builder);
+    if (!lhs || !rhs)
+      return failure();
+    predicate = predicate == arith::CmpIPredicate::ult
+                    ? arith::CmpIPredicate::slt
+                    : arith::CmpIPredicate::sle;
+  }
 
   if (predicate == arith::CmpIPredicate::ne) {
     auto selOp = lhs.getDefiningOp<arith::SelectOp>();

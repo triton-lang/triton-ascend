@@ -31,6 +31,13 @@ inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
     "InspectedByStridedLoadStoreRewrite";
 inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
     "RewrittenByStridedLoadStoreRewrite";
+// IAT emits this only for its runtime original-grid extent mask.  The mask is
+// formed from non-negative program IDs and a launcher-provided positive extent,
+// so the unsigned comparison is a contiguous tail bound rather than a general
+// discrete predicate.  MaskState consumes this proof before structured memory
+// lowering; ordinary `ult`/`ule` comparisons remain conservative.
+inline constexpr const char *IATRuntimeExtentUnsignedMaskTAG =
+    "IATRuntimeExtentUnsignedMask";
 
 } // namespace mlir::triton::memory_access
 

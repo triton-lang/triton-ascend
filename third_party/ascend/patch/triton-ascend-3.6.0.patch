@@ -863,17 +863,12 @@ index 52192cf3e..241ba3378 100644
              raise ValueError("wrong type argument to unary invert (" + input_sca_ty.__repr__() + ")")
          _1 = self.tensor(self.builder.get_all_ones_value(input_sca_ty.to_ir(self.builder)), input_sca_ty)
          return self.xor_(input, _1)
-@@ -579,8 +629,11 @@ class TritonSemantic(Generic[TensorTy]):
+@@ -579,8 +629,6 @@ class TritonSemantic(Generic[TensorTy]):
          if end <= start:
              raise ValueError("arange's end argument must be greater than the start argument")
          range = end - start
 -        if (range & (range - 1)) != 0:
 -            raise ValueError("arange's range must be a power of 2")
-+        # Check if compile_mode is simt, then range must be a power of 2
-+        if self.builder.is_simt_mode():
-+            # Check if range is a power of 2
-+            if (range & (range - 1)) != 0:
-+                raise ValueError("arange's range must be a power of 2")
          shape = [range]
          if ret_ty is None:
              ret_ty = tl.block_type(tl.int32, shape)

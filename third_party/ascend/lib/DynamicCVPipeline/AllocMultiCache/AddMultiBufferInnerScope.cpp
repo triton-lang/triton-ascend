@@ -1849,7 +1849,9 @@ static void buildBeforeRegion(scf::WhileOp oldWhile, OpBuilder &bb, Location bl,
   bb.create<scf::ConditionOp>(bl, condValue, carriedValues);
 }
 
-// Build the after-region of the new whileOp
+// Build the after-region of the new whileOp. The counter add-1 is not
+// created here; it is inserted later by insertWhileCounterOps at the right
+// position. counterIterArgOut is yielded as a placeholder and gets replaced.
 static void buildAfterRegion(scf::WhileOp oldWhile, OpBuilder &ab, Location al,
                              ValueRange iterArgs, Value &counterIterArgOut) {
   Block *oldAfter = oldWhile.getAfterBody();
@@ -1871,35 +1873,12 @@ static void buildAfterRegion(scf::WhileOp oldWhile, OpBuilder &ab, Location al,
   if (!oldYield)
     return;
 
-  std::optional<int> counterBlockId;
-  if (Block *doBlock = ab.getInsertionBlock()) {
-    for (Operation &op : llvm::reverse(*doBlock)) {
-      if (auto id = getOpBlockId(&op); id.has_value()) {
-        counterBlockId = id;
-        break;
-      }
-    }
-  }
-  if (!counterBlockId)
-    counterBlockId = getOpBlockId(oldWhile);
-
-  Value one = ab.create<arith::ConstantIntOp>(al, 1, 32);
-  Value nextCounter = ab.create<arith::AddIOp>(al, counterIterArgOut, one);
-  nextCounter.getDefiningOp()->setAttr(kIterCounter, ab.getUnitAttr());
-
-  if (counterBlockId) {
-    one.getDefiningOp()->setAttr(kBlockId,
-                                 ab.getI32IntegerAttr(*counterBlockId));
-    nextCounter.getDefiningOp()->setAttr(kBlockId,
-                                         ab.getI32IntegerAttr(*counterBlockId));
-  }
-
   SmallVector<Value> newYieldOps;
   for (Value operand : oldYield->getOperands()) {
     Value mapped = mapper.lookupOrNull(operand);
     newYieldOps.push_back(mapped ? mapped : operand);
   }
-  newYieldOps.push_back(nextCounter);
+  newYieldOps.push_back(counterIterArgOut);
   ab.create<scf::YieldOp>(al, newYieldOps);
 }
 
@@ -1950,6 +1929,77 @@ setupWhileIterArgCounter(const MainLoop &loop, OpBuilder &builder) {
   oldWhile.erase();
 
   return {counterIterArg, newWhile};
+}
+
+// Insert the iterCounter add-1 (and its constant 1) right after the last op
+// sharing the block_id of the first op that consumes mainLoop.iterCounter.
+// Must run after processTensorDependencies (dispatch ops land there later).
+// Fallback when no counter user exists: last op's block_id, mirroring the
+// legacy buildAfterRegion placement.
+static void insertWhileCounterOps(const MainLoop &mainLoop) {
+  if (!mainLoop.isWhile() || !mainLoop.iterCounter)
+    return;
+
+  auto whileOp = cast<scf::WhileOp>(mainLoop.getOperation());
+  Block *doBlock = whileOp.getAfterBody();
+  if (!doBlock)
+    return;
+
+  std::optional<int> counterBlockId;
+  for (Operation &op : *doBlock) {
+    if (llvm::is_contained(op.getOperands(), mainLoop.iterCounter)) {
+      counterBlockId = getOpBlockId(&op);
+      break;
+    }
+  }
+  if (!counterBlockId) {
+    for (Operation &op : llvm::reverse(*doBlock)) {
+      if (auto id = getOpBlockId(&op); id.has_value()) {
+        counterBlockId = id;
+        break;
+      }
+    }
+    if (!counterBlockId)
+      return;
+  }
+
+  Operation *lastWithBlockId = nullptr;
+  for (Operation &op : *doBlock) {
+    auto id = getOpBlockId(&op);
+    if (id.has_value() && *id == *counterBlockId)
+      lastWithBlockId = &op;
+  }
+
+  Location loc = lastWithBlockId->getLoc();
+  OpBuilder builder(mainLoop.getContext());
+  builder.setInsertionPointAfter(lastWithBlockId);
+  IntegerAttr blockIdAttr = builder.getI32IntegerAttr(*counterBlockId);
+
+  Value one = builder.create<arith::ConstantIntOp>(
+      loc, 1, mainLoop.iterCounter.getType().getIntOrFloatBitWidth());
+  one.getDefiningOp()->setAttr(kBlockId, blockIdAttr);
+
+  Value nextCounter =
+      builder.create<arith::AddIOp>(loc, mainLoop.iterCounter, one);
+  Operation *iterAddOp = nextCounter.getDefiningOp();
+  iterAddOp->setAttr(kBlockId, blockIdAttr);
+  iterAddOp->setAttr(kIterCounter, builder.getUnitAttr());
+
+  // Replace the placeholder counterIterArgOut operand in the yield with
+  // nextCounter so the iter_arg increments each iteration.
+  Operation *yieldOp = doBlock->getTerminator();
+  SmallVector<Value> newOperands(yieldOp->getOperands().begin(),
+                                 yieldOp->getOperands().end());
+  bool replaced = false;
+  for (Value &operand : newOperands) {
+    if (operand == mainLoop.iterCounter) {
+      operand = nextCounter;
+      replaced = true;
+      break;
+    }
+  }
+  if (replaced)
+    yieldOp->setOperands(newOperands);
 }
 
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
@@ -2086,6 +2136,10 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
                                 phase1ClonedDepVals) != 0) {
     return -1;
   }
+
+  // WhileOp only: insert the counter add-1 now that the dispatch ops that
+  // use mainLoop.iterCounter have been emitted.
+  insertWhileCounterOps(mainLoop);
 
   LLVM_DEBUG(llvm::dbgs() << "[addInnerMultiBuffer] DONE\n");
   return 0;

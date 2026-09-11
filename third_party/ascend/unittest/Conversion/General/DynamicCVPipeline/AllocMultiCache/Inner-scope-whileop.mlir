@@ -35,6 +35,9 @@
 //       (3 block-args instead of 2; the new arg is i32).
 //     - arith.addi counter, 1 is present in the do-region for the yield.
 //     - Multi-buffer producer/consumer with scf.if dispatch works as forOp.
+//     - The counter add-1 op (and its constant-1) is relocated to the
+//       block_id of the first op that consumes the counter arg (here: the
+//       producer scf.if at block_id = 7), not its old fallback position.
 
 // CHECK-LABEL: func.func @test_while_mainloop_bufnum_two
 // Two UB allocs (ping/pong).
@@ -42,14 +45,14 @@
 // CHECK-DAG:   memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
 // WhileOp's do-region bb0 has 3 block-args now (the new i32 counter is the last one).
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32, %{{.*}}: i32):
-// Producer scf.if dispatch (the original counter increment lives inside this region).
+// Producer scf.if dispatch.
 // CHECK:       scf.if
 // CHECK:         hivm.hir.copy
+// arith.addi increment for the multi-buffer counter (block_id=7, the first user's block).
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 7 : i32, ssbuffer.iterCounter} : i32
 // Consumer scf.if dispatch returning tensor.
 // CHECK:       scf.if {{.*}} -> (tensor<128xf32>)
 // CHECK:         bufferization.to_tensor
-// arith.addi increment for the multi-buffer counter is present (block_id=10), tagged iterCounter.
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 10 : i32, ssbuffer.iterCounter} : i32
 // Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
 // CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
@@ -63,11 +66,11 @@
 // Producer alloc + copy before the whileOp.
 // CHECK-DAG:   memref.alloc() : memref<64xf16, #hivm.address_space<ub>>
 // CHECK-DAG:   memref.alloc() : memref<64xf16, #hivm.address_space<ub>>
+// arith.addi increment for the multi-buffer counter (block_id=7, the first user's block).
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 7 : i32, ssbuffer.iterCounter} : i32
 // Consumer scf.if + to_tensor inside the do-region.
 // CHECK:       scf.if {{.*}} -> (tensor<64xf16>)
 // CHECK:         bufferization.to_tensor
-// arith.addi increment for the multi-buffer counter is present (block_id=12), tagged iterCounter.
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 12 : i32, ssbuffer.iterCounter} : i32
 // Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
 // CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
@@ -90,8 +93,8 @@
 // Producer-side dispatch.
 // CHECK:       scf.if
 // CHECK:         hivm.hir.copy
-// arith.addi increment for the multi-buffer counter is present (block_id=12), tagged iterCounter.
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 12 : i32, ssbuffer.iterCounter} : i32
+// arith.addi increment for the multi-buffer counter (block_id=8, the first user's block).
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 8 : i32, ssbuffer.iterCounter} : i32
 // Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
 // CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
@@ -120,6 +123,34 @@
 //   refuse via findNestedMainloop (returns WalkResult::interrupt + fallback).
 //   Not implemented in this initial drop — to be added when the negative case
 //   is needed for a regression guard.
+
+// T-while-G: Regression guard for relocateWhileCounterOps.
+//   The counter add-1 (and its constant 1) used to be appended at the end of
+//   the do-region, carrying the whileOp's own block_id (= 99 here, distinct
+//   from both producer and consumer). The pass now relocates them to the
+//   block_id of the first op that consumes the counter iter_arg — the
+//   producer scf.if at block_id = 5.
+//   We assert:
+//     - The counter add-1 carries block_id = 5 (NOT 99, NOT 50).
+//     - The constant 1 used by the addi also carries block_id = 5.
+//     - The scf.yield that consumes the add-1's SSA value still references
+//     // the same %result (SSA is preserved across the move).
+
+// CHECK-LABEL: func.func @test_while_counter_relocation
+// Multi-buffer producer (two allocs at block 5) emits the dispatch.
+// CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+// CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+// CHECK:       scf.if
+// CHECK:         hivm.hir.copy
+// Constant 1 carrying block_id = 5 (relocated with the addi).
+// CHECK:       %{{.+}} = arith.constant {ssbuffer.block_id = 5 : i32} 1 : i32
+// Counter add-1 carries block_id = 5 and is tagged iterCounter.
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 5 : i32, ssbuffer.iterCounter} : i32
+// scf.yield forwards the counter (referenced by the addi's %addi-res), proving
+// SSA is preserved.
+// CHECK:       scf.yield %{{.*}}, %{{.*}}, %{{.+}}
+// Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
+// CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
 // ---- Inputs ----
 
@@ -273,6 +304,39 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">,
         %next = arith.addi %arg0, %c1_i32 : i32
         scf.yield %next, %arg1 : i32, f32
       } attributes {ssbuffer.main_loop = 1 : i64, ssbuffer.block_id = 23 : i32}
+      scope.return
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+    return
+  }
+
+  // T-while-G: dedicated regression test for relocateWhileCounterOps.
+  // Producer at block_id = 5, consumer at block_id = 50, whileOp at block_id = 99.
+  // Before the fix: counter add-1 would land at block_id = 99 (whileOp's own id).
+  // After the fix: counter add-1 (and its constant 1) land at block_id = 5
+  // (the block_id of the first op that consumes the counter iter_arg).
+  func.func @test_while_counter_relocation() {
+    %c0_i32 = arith.constant 0 : i32
+    %c10_i32 = arith.constant 10 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %cst_zero = arith.constant 0.0 : f32
+    %init = tensor.empty() : tensor<16xf32>
+    %carry = linalg.fill ins(%cst_zero : f32) outs(%init : tensor<16xf32>) -> tensor<16xf32>
+    scope.scope : () -> () {
+      %result:2 = scf.while (%arg0 = %carry, %arg1 = %c0_i32)
+          : (tensor<16xf32>, i32) -> (tensor<16xf32>, i32) {
+        %cmp = arith.cmpi slt, %arg1, %c10_i32 {ssbuffer.block_id = 16 : i32} : i32
+        scf.condition(%cmp) %arg0, %arg1 : tensor<16xf32>, i32
+      } do {
+      ^bb0(%arg0: tensor<16xf32>, %arg1: i32):
+        // Producer block_id = 5.
+        %alloc = memref.alloc() {ssbuffer.block_id = 5 : i32} : memref<16xf32>
+        %prod = bufferization.to_tensor %alloc {ssbuffer.block_id = 5 : i32} : memref<16xf32> to tensor<16xf32>
+        // Consumer block_id = 50 (very different from 5, to make the relocation
+        // verdict unambiguous).
+        %consumed = arith.addf %prod, %prod {ssbuffer.block_id = 50 : i32} : tensor<16xf32>
+        %next = arith.addi %arg1, %c1_i32 : i32
+        scf.yield %consumed, %next : tensor<16xf32>, i32
+      } attributes {ssbuffer.main_loop = 1 : i64, ssbuffer.block_id = 99 : i32}
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
     return

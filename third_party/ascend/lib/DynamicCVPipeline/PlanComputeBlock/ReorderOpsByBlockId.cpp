@@ -24,6 +24,7 @@
 #include <string_view>
 #include <utility>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -346,23 +347,91 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
 }
 
 static bool isStoreLikeWithRegion(Operation *op) {
-  if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
-    return true;
-  }
   auto ret = op->walk([&](Operation *subOp) {
     if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(subOp)) {
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
-  return ret == WalkResult::interrupt();
+  return ret.wasInterrupted();
+}
+
+static SmallVector<Operation *>
+orderInOneCBlock(ArrayRef<Operation *> opsInSameBlock,
+                 const MemoryDependenceGraph &memGraph) {
+  // reorder in one compute block following rules:
+  // 1. vecoter block should sink storeLike Op. (only Vector)
+  // 2. Other
+  SmallVector<Operation *> originOrder(opsInSameBlock.begin(),
+                                       opsInSameBlock.end());
+  if (llvm::any_of(opsInSameBlock, [&](Operation *op) {
+        return CVPipeline::getCoreTypeOfSimpleOpOrCf(op) !=
+               CVPipeline::VECTOR_ONLY;
+      })) {
+    // If this is one CUBE block, storeLike Ops no need to sink down.
+    // Considering
+    //  1. CUBE block's store is always use FIXPIPE
+    //  2. C->V always just next to matmul.
+    // So there are no conflict between store and  inter transfer
+    return originOrder;
+  }
+
+  if (llvm::all_of(opsInSameBlock,
+                   [&](Operation *op) { return !isStoreLikeWithRegion(op); })) {
+    // If there are no store-like op, early return.
+    return originOrder;
+  }
+  Block *block = opsInSameBlock.front()->getBlock();
+  BlockOpGraph graph{opsInSameBlock, block, memGraph};
+
+  // Kahn's topological sort. Track in-degree per op and seed the ready set
+  // with all ops that have no predecessors.
+  DenseMap<Operation *, unsigned> inDeg;
+  SmallVector<Operation *> ready;
+  for (Operation *op : opsInSameBlock) {
+    inDeg[op] = graph.preds.at(op).size();
+    if (inDeg[op] == 0) {
+      ready.push_back(op);
+    }
+  }
+
+  // Tie-breaker among ready (in-degree 0) ops:
+  // 1. Non-store-like ops come first (sink store-like ops to the end).
+  // 2. The op with a smaller opIndex wins (preserve original program order).
+  auto comesBefore = [&](Operation *a, Operation *b) {
+    bool aStore = isStoreLikeWithRegion(a);
+    bool bStore = isStoreLikeWithRegion(b);
+    if (aStore != bStore) {
+      return !aStore;
+    }
+    return graph.opIndex.at(a) < graph.opIndex.at(b);
+  };
+
+  SmallVector<Operation *> ordered;
+  ordered.reserve(opsInSameBlock.size());
+  while (!ready.empty()) {
+    // Pick the best candidate under the tie-breaking rules.
+    auto bestIt = std::min_element(ready.begin(), ready.end(), comesBefore);
+    Operation *cur = *bestIt;
+    ready.erase(bestIt);
+
+    ordered.push_back(cur);
+
+    // Release successors; any that drop to in-degree 0 become ready.
+    for (Operation *succ : graph.succs.at(cur)) {
+      if (--inDeg[succ] == 0) {
+        ready.push_back(succ);
+      }
+    }
+  }
+
+  return ordered;
 }
 
 // Stable sort ops based on their group orders
-static llvm::FailureOr<SmallVector<Operation *>>
-buildReorderedOps(const BlockOpGraph &graph,
-                  const DenseMap<Operation *, int> &opBlockId,
-                  ComputeBlockIdManager &bm) {
+static llvm::FailureOr<SmallVector<Operation *>> buildReorderedOps(
+    const BlockOpGraph &graph, const DenseMap<Operation *, int> &opBlockId,
+    ComputeBlockIdManager &bm, const MemoryDependenceGraph &memGraph) {
   SmallVector<Operation *> reordered;
   GroupAdjacencyGraph adjacencyGraph{graph, opBlockId, bm};
   auto groupOrderResult = adjacencyGraph.computeTopologicalOrder();
@@ -371,19 +440,16 @@ buildReorderedOps(const BlockOpGraph &graph,
   }
 
   for (int const blockId : groupOrderResult.value()) {
-    SmallVector<Operation *> storeOps;
+    SmallVector<Operation *>
+        originOrderOp; // collect ops following program order.
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
-        if (isStoreLikeWithRegion(op)) {
-          storeOps.push_back(op);
-          continue;
-        }
-        reordered.push_back(op);
+        originOrderOp.push_back(op);
       }
     }
-    for (auto op : storeOps) {
-      reordered.push_back(op);
-    }
+    SmallVector<Operation *> orderedInOneCBlock =
+        orderInOneCBlock(originOrderOp, memGraph);
+    reordered.append(orderedInOneCBlock);
   }
   return reordered;
 }
@@ -420,7 +486,7 @@ reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
     LOG_DEBUG("  Op: " << *op << ", opBlockId = " << opBlockId[op] << "\n");
   }
 
-  const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm);
+  const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm, memGraph);
   if (failed(reorderedRes)) {
     return failure();
   }

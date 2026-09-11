@@ -50,6 +50,7 @@ inline constexpr llvm::StringLiteral kAddFromMatmul =
 inline constexpr llvm::StringLiteral kMainLoop = "ssbuffer.main_loop";
 inline constexpr llvm::StringLiteral kTcoreType = "hivm.tcore_type";
 inline constexpr llvm::StringLiteral kIf = "ssbuffer.if";
+inline constexpr llvm::StringLiteral kSplittedIf = "ssbuffer.splitted_if";
 inline constexpr llvm::StringLiteral kIntraBuffer = "ssbuffer.intra_buffer";
 inline constexpr llvm::StringLiteral kIntraBufCount =
     "ssbuffer.intra_buf_count";

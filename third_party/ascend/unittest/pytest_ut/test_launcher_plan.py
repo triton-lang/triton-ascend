@@ -25,6 +25,8 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import shutil
+import subprocess
 import threading
 import time
 from types import SimpleNamespace
@@ -615,3 +617,268 @@ def test_native_grid_matches_compiler_reference(native_grid_probe, sequence, mod
             assert values[5:] == [24, 28, 36, 48, 56]
     values = subprocess.check_output([str(native_grid_probe), str(mode), "40", "0", "17", "3"], text=True)
     assert list(map(int, values.split()))[:5] == [0, 17, 3, 0, 0]
+
+
+@pytest.fixture
+def host_compiler(tmp_path, monkeypatch):
+    """A native driver whose version comes from a replaceable shared library."""
+    cxx = utils._get_cxx()
+    source = tmp_path / "driver.cpp"
+    source.write_text('''
+#include <cstdio>
+#include <cstdlib>
+extern "C" const char *tool_version();
+int main() {
+  if (const char *log = std::getenv("TRITON_TEST_VERSION_LOG")) {
+    FILE *f = std::fopen(log, "a");
+    if (!f) return 1;
+    std::fputs("query\\n", f);
+    std::fclose(f);
+  }
+  std::puts(tool_version());
+}
+''')
+    library = tmp_path / "libversion.so"
+
+    def replace_version(version):
+        lib_source = tmp_path / "version.cpp"
+        lib_source.write_text('extern "C" const char *tool_version() { return "' + version + '"; }')
+        replacement = tmp_path / "libversion.new.so"
+        subprocess.run([cxx, str(lib_source), "-shared", "-fPIC", "-Wl,--build-id=sha1", "-o",
+                        str(replacement)], check=True)
+        replacement.replace(library)
+
+    replace_version("test-compiler-v1")
+    compiler = tmp_path / "clang"
+    subprocess.run([
+        cxx,
+        str(source), "-L" + str(tmp_path), "-lversion", "-Wl,-rpath,$ORIGIN", "-Wl,--build-id=sha1", "-o",
+        str(compiler)
+    ], check=True)
+    log = tmp_path / "queries.txt"
+    monkeypatch.setenv("TRITON_TEST_VERSION_LOG", str(log))
+    for name in tuple(os.environ):
+        if ((name.startswith("LD_") and name != "LD_LIBRARY_PATH") or name.startswith(("LC_", "CLANG_"))
+                or name in ("LANGUAGE", "CCC_OVERRIDE_OPTIONS")):
+            monkeypatch.delenv(name)
+    monkeypatch.setenv("LANG", "C")
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "cache"))
+    utils._npu_compiler_version.cache_clear()
+    yield SimpleNamespace(path=str(compiler), library=library, log=log, replace_version=replace_version, root=tmp_path)
+    utils._npu_compiler_version.cache_clear()
+    utils._npu_fingerprint.cache_clear()
+
+
+def _query_host_compiler(path):
+    resolved = os.path.realpath(path)
+    return utils._npu_compiler_version(resolved, utils._file_identity(resolved))
+
+
+def _host_compiler_process(path, cache_dir, start, results):
+    from triton import knobs
+    with knobs.cache.scope():
+        knobs.cache.dir = cache_dir
+        utils._npu_compiler_version.cache_clear()
+        start.wait(30)
+        results.put(_query_host_compiler(path))
+
+
+def _query_host_compiler_processes(path, cache_dir, count):
+    context = multiprocessing.get_context("spawn")
+    start, results = context.Event(), context.Queue()
+    children = [
+        context.Process(target=_host_compiler_process, args=(path, cache_dir, start, results)) for _ in range(count)
+    ]
+    try:
+        for child in children:
+            child.start()
+        start.set()
+        versions = [results.get(timeout=90) for _ in children]
+        for child in children:
+            child.join(timeout=90)
+            assert child.exitcode == 0
+        return versions
+    finally:
+        for child in children:
+            if child.is_alive():
+                child.terminate()
+            child.join(timeout=10)
+
+
+def test_compiler_version_reused_across_processes_and_coordinated(host_compiler):
+    tool = host_compiler
+    cache_dir = str(tool.root / "cache")
+    # Simultaneous cold processes query once, then another fresh process hits disk.
+    assert _query_host_compiler_processes(tool.path, cache_dir, 4) == ["test-compiler-v1"] * 4
+    assert tool.log.read_text().splitlines() == ["query"]
+    assert _query_host_compiler_processes(tool.path, cache_dir, 1) == ["test-compiler-v1"]
+    assert tool.log.read_text().splitlines() == ["query"]
+
+
+def test_compiler_library_build_id_invalidates_even_with_unchanged_stat(host_compiler, monkeypatch):
+    tool = host_compiler
+    old_identity = utils._file_identity(tool.library)
+    file_identity = utils._file_identity
+    monkeypatch.setattr(utils, "_file_identity", lambda path: old_identity
+                        if Path(path) == tool.library else file_identity(path))
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    old_build_id = utils._npu_elf_info(tool.library)[1]
+    tool.replace_version("test-compiler-v2")
+    assert utils._npu_elf_info(tool.library)[1] != old_build_id
+    utils._npu_compiler_version.cache_clear()  # A new process has no LRU entries.
+    assert _query_host_compiler(tool.path) == "test-compiler-v2"
+    assert len(tool.log.read_text().splitlines()) == 2
+
+
+def test_compiler_selection_symlink_and_atomic_replacement(host_compiler, monkeypatch):
+    tool = host_compiler
+    alias = tool.root / "clang++"
+    alias.symlink_to(tool.path)
+    monkeypatch.delenv("CC", raising=False)
+    monkeypatch.setenv("PATH", str(tool.root) + os.pathsep + os.environ["PATH"])
+    selected = lambda: shutil.which(utils._get_cxx()) or utils._get_cxx()
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    replacement_dir = tool.root / "replacement"
+    replacement_dir.mkdir()
+    replacement = replacement_dir / "clang"
+    shutil.copy2(tool.path, replacement)
+    shutil.copy2(tool.library, replacement_dir / tool.library.name)
+    alias.unlink()
+    alias.symlink_to(replacement)
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    monkeypatch.setenv("CC", tool.path)
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    new = tool.root / "clang.new"
+    shutil.copy2(tool.path, new)
+    new.replace(tool.path)
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    (replacement_dir / "clang++").symlink_to(replacement)
+    monkeypatch.delenv("CC")
+    monkeypatch.setenv("PATH", str(replacement_dir) + os.pathsep + os.environ["PATH"])
+    assert _query_host_compiler(selected()) == "test-compiler-v1"
+    # Returning to an already known, unchanged compiler reuses its process entry.
+    assert len(tool.log.read_text().splitlines()) == 3
+
+
+@pytest.mark.parametrize("bad_record", [b"{", b"[]", b'\xff', b'{"key":"wrong","version":"stale"}', None])
+def test_compiler_version_repairs_corrupt_metadata(host_compiler, bad_record):
+    tool = host_compiler
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    record, = (tool.root / "cache").rglob("compiler-version.json")
+    if bad_record is None:
+        data = json.loads(record.read_text())
+        data["sha256"] = "corrupt"
+        record.write_text(json.dumps(data))
+    else:
+        record.write_bytes(bad_record)
+    utils._npu_compiler_version.cache_clear()
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    utils._npu_compiler_version.cache_clear()
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert len(tool.log.read_text().splitlines()) == 2
+
+
+def test_compiler_version_query_failure_retries_without_success_record(host_compiler, monkeypatch):
+    tool = host_compiler
+    check_output = subprocess.check_output
+
+    def fail_version(command, **kwargs):
+        if command == [tool.path, "--version"]:
+            raise subprocess.CalledProcessError(1, command)
+        return check_output(command, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(subprocess, "check_output", fail_version)
+        with pytest.raises(subprocess.CalledProcessError):
+            _query_host_compiler(tool.path)
+    assert list((tool.root / "cache").rglob("compiler-version.json")) == []
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+
+
+def test_compiler_version_cache_roots_deletion_and_write_failure(host_compiler, monkeypatch):
+    from triton.runtime.cache import FileCacheManager
+    tool = host_compiler
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    record, = (tool.root / "cache").rglob("compiler-version.json")
+    record.unlink()
+    utils._npu_compiler_version.cache_clear()
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert record.exists()
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(tool.root / "cache-two"))
+    utils._npu_compiler_version.cache_clear()
+    with monkeypatch.context() as patch:
+
+        def fail_put(*args, **kwargs):
+            raise PermissionError("read-only metadata storage")
+
+        patch.setattr(FileCacheManager, "put", fail_put)
+        assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert not list((tool.root / "cache-two").rglob("compiler-version.json"))
+    utils._npu_compiler_version.cache_clear()
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert len(tool.log.read_text().splitlines()) == 4
+
+
+def test_compiler_version_custom_cache_does_not_add_manager_queries(host_compiler, monkeypatch):
+    from triton import knobs
+    from triton.runtime.cache import FileCacheManager
+
+    class CustomCache(FileCacheManager):
+
+        def __init__(self, *args, **kwargs):
+            pytest.fail("compiler identity must not instantiate a custom cache manager")
+
+    knobs.cache.manager_class = CustomCache
+    monkeypatch.setattr(utils, "_npu_compiler_identity", lambda path: pytest.fail("unexpected identity query"))
+    assert _query_host_compiler(host_compiler.path) == "test-compiler-v1"
+
+
+@pytest.mark.parametrize(
+    "environment",
+    [{"LD_PRELOAD": "/injected.so"}, {"LD_AUDIT": "/audit.so"}, {"LANGUAGE": "de"}, {"CCC_OVERRIDE_OPTIONS": "custom"}])
+def test_compiler_version_unknown_environment_queries_live(host_compiler, monkeypatch, environment):
+    for name, value in environment.items():
+        monkeypatch.setenv(name, value)
+    calls = []
+    monkeypatch.setattr(subprocess, "check_output", lambda command, **kwargs: calls.append(command) or "live version\n")
+    assert _query_host_compiler(host_compiler.path) == "live version"
+    assert calls == [[host_compiler.path, "--version"]]
+
+
+def test_compiler_version_script_wrapper_does_not_persist(tmp_path, monkeypatch):
+    compiler = tmp_path / "clang"
+    compiler.write_text("#!/bin/sh\nprintf 'wrapper-version\\n'\n")
+    compiler.chmod(0o755)
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "cache"))
+    assert _query_host_compiler(str(compiler)) == "wrapper-version"
+    assert not (tmp_path / "cache").exists()
+
+
+def test_compiler_version_unstable_installation_does_not_publish(host_compiler, monkeypatch):
+    tool = host_compiler
+    identity = utils._npu_compiler_identity(tool.path)
+    calls = iter((identity, None))
+    with monkeypatch.context() as patch:
+        patch.setattr(utils, "_npu_compiler_identity", lambda path: next(calls))
+        assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert not list((tool.root / "cache").rglob("compiler-version.json"))
+    utils._npu_compiler_version.cache_clear()
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert len(tool.log.read_text().splitlines()) == 2
+
+
+@pytest.mark.parametrize("loader_result", ["", "unknown output", "libmissing.so => not found"])
+def test_compiler_version_unresolved_dependencies_query_live(host_compiler, monkeypatch, loader_result):
+    tool = host_compiler
+    check_output = subprocess.check_output
+
+    def output(command, **kwargs):
+        if "--list" in command:
+            return loader_result
+        return check_output(command, **kwargs)
+
+    monkeypatch.setattr(subprocess, "check_output", output)
+    assert _query_host_compiler(tool.path) == "test-compiler-v1"
+    assert not list((tool.root / "cache").rglob("compiler-version.json"))

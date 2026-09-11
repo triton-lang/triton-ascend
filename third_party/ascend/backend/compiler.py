@@ -850,6 +850,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
+            # Temporary until the NPU compiler enables batch matmul by default in Q4.
+            if metadata.get("enable_hivm_batch_matmul"):
+                _compile_option_list += ["--enable-hivm-batch-matmul"]
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
@@ -1195,6 +1198,8 @@ class NPUOptions:
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_hivm_auto_cv_balance: bool = None
+    # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
+    enable_hivm_batch_matmul: bool = False
     sync_solver: bool = None
     unit_flag: bool = None
     enable_flatten: bool = None

@@ -12,6 +12,7 @@ add_triton_library(TritonToGraph
   PermutationAnalysis.cpp
   MergeConcatLoadBuffer.cpp
   Passes.cpp
+  LegacyMemoryAccess/AtomicMaskCanonicalization.cpp
   LegacyMemoryAccess/ChunkCoalescing.cpp
   LegacyMemoryAccess/RowCoalescing.cpp
   LegacyMemoryAccess/StridedAxisCoalescing.cpp

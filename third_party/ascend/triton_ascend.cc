@@ -162,7 +162,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         options.compileMode = compileMode;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
-      py::arg("pm"), py::arg("rule_mask") = 511,
+      py::arg("pm"),
+      py::arg("rule_mask") = mlir::triton::cfg::kAllGraphOptimizationRuleMask,
       py::arg("max_rewrites_per_function") = 64,
       py::arg("ub_capacity_bytes") = 0,
       py::arg("compile_mode") = "simd_simt_template");

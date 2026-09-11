@@ -79,6 +79,7 @@ createStoreCoalescingRule(unsigned ubCapacityBytes);
 std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
 std::unique_ptr<GraphOptimizationRule> createDiagonalMaskRemovalRule();
 std::unique_ptr<GraphOptimizationRule> createConvertModuloToMaskRule();
+std::unique_ptr<GraphOptimizationRule> createAtomicMaskCanonicalizationRule();
 
 } // namespace cfg
 } // namespace triton

@@ -51,6 +51,7 @@ enum class GraphOptimizationRuleId : uint16_t {
   // ConvertModuloToMask linearizes wrapped tile addresses.  It runs before the
   // memory-access rules so they see the linear form.
   ConvertModuloToMask = 256,
+  AtomicMaskCanonicalization = 512,
   // The following identities are owned by the layout/memory compatibility
   // passes.  They deliberately are not GraphOptimizationRule candidates and
   // are not added to GraphOptimizePass's per-function phase loop.
@@ -74,6 +75,8 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "DiagonalMaskRemoval";
   case GraphOptimizationRuleId::ConvertModuloToMask:
     return "ConvertModuloToMask";
+  case GraphOptimizationRuleId::AtomicMaskCanonicalization:
+    return "AtomicMaskCanonicalization";
   case GraphOptimizationRuleId::StridedAxisCoalescing:
     return "StridedAxisCoalescing";
   case GraphOptimizationRuleId::ChunkCoalescing:
@@ -89,6 +92,8 @@ constexpr uint16_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
 }
 
 constexpr uint16_t kAllGraphOptimizationRuleMask =
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::AtomicMaskCanonicalization) |
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::TransposePointwiseReorder) |

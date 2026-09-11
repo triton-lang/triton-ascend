@@ -281,6 +281,10 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue, Type,
 FailureOr<Value> specializeTypelessValueToConstant(TypelessValue, Type,
                                                    Location, OpBuilder &);
 
+/// Return the scalar RMW identity, including opcode-specific signedness.
+/// Fails for operations without an identity (XCHG) or unsupported types.
+FailureOr<TypedAttr> getAtomicRMWIdentityAttr(triton::RMWOp, Type, OpBuilder &);
+
 bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter);
 
 bool isDistributedTypeCustomOp(Operation *op);

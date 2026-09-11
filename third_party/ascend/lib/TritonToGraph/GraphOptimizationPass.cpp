@@ -25,6 +25,7 @@
 #include "TritonToGraph/Passes.h"
 #include "Utils/Utils.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "llvm/ADT/DenseMap.h"
@@ -53,7 +54,7 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRuleId, 5> kRulePhases = {
+constexpr std::array<GraphOptimizationRuleId, 6> kRulePhases = {
     // DiagonalMaskRemoval runs first because it deletes a quadratic
     // intermediate tensor, so the later phases match and budget UB against the
     // already shrunken IR.
@@ -61,6 +62,7 @@ constexpr std::array<GraphOptimizationRuleId, 5> kRulePhases = {
     // ConvertModuloToMask runs before the memory-access phases so that they see
     // linear tile addresses instead of wrapped ones.
     GraphOptimizationRuleId::ConvertModuloToMask,
+    GraphOptimizationRuleId::AtomicMaskCanonicalization,
     GraphOptimizationRuleId::LoadStoreTranspose,
     GraphOptimizationRuleId::TransposePointwiseReorder,
     GraphOptimizationRuleId::StoreCoalescing,
@@ -105,7 +107,8 @@ public:
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<tensor::TensorDialect>();
+    registry.insert<arith::ArithDialect, tensor::TensorDialect,
+                    triton::TritonDialect>();
   }
 
   void runOnOperation() override;
@@ -377,6 +380,10 @@ void GraphOptimizePass::runOnOperation() {
 void populateBuiltinGraphOptimizationRules(
     const GraphOptimizationOptions &options,
     SmallVectorImpl<std::unique_ptr<GraphOptimizationRule>> &rules) {
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::AtomicMaskCanonicalization)) {
+    rules.push_back(createAtomicMaskCanonicalizationRule());
+  }
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::DiagonalMaskRemoval)) {
     rules.push_back(createDiagonalMaskRemovalRule());

@@ -140,7 +140,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_emit_remarks": "it is ignored; the backend fixes graph-optimization remarks to False.",
     "graph_optimize_max_rewrites_per_function":
     "it is ignored; the backend fixes the maximum rewrites per function to 64.",
-    "graph_optimize_rule_mask": "it is ignored; the backend fixes the graph-optimization rule mask to 511.",
+    "graph_optimize_rule_mask": "it is ignored; the backend fixes the graph-optimization rule mask to 1023.",
     "graph_optimize_ub_capacity_bytes":
     "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",

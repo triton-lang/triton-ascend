@@ -334,14 +334,20 @@ public:
   }
 
   LogicalResult apply(IRRewriter &rewriter) override {
+    return applyWithResult(rewriter) == RewritePlanApplyResult::Applied
+               ? success()
+               : failure();
+  }
+
+  RewritePlanApplyResult applyWithResult(IRRewriter &rewriter) override {
     (void)rewriter;
     std::optional<RowCandidate> current = analyzeRow(candidate.function);
     if (!current || !matchesCandidate(candidate, *current))
-      return failure();
+      return RewritePlanApplyResult::NotApplicable;
 
     ModuleOp module = candidate.function->getParentOfType<ModuleOp>();
     if (!module)
-      return failure();
+      return RewritePlanApplyResult::Failed;
 
     // The old Row implementation can still encounter a late unsupported
     // shape while materializing.  Run it on a detached one-function module;
@@ -351,7 +357,7 @@ public:
     sandbox.getBody()->push_back(candidate.function->clone());
     auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
     if (!clonedFunction)
-      return failure();
+      return RewritePlanApplyResult::Failed;
 
     RowCoalescing::rewriteRowCoalesce(sandbox);
     auto factor = sandbox->getAttrOfType<IntegerAttr>(kCoalesceFactorAttr);
@@ -362,7 +368,7 @@ public:
         factor.getInt() != candidate.rowsPerProgram ||
         axis.getInt() != candidate.axis || ceilDiv.getInt() != 1 ||
         failed(mlir::verify(sandbox.getOperation())))
-      return failure();
+      return RewritePlanApplyResult::NotApplicable;
 
     // takeBody() is non-failing.  Commit the function IR first, then publish
     // the complete launcher contract as one final, non-failing step.
@@ -373,7 +379,7 @@ public:
     module->setAttr(kCoalesceAxisAttr,
                     IntegerAttr::get(i32Type, candidate.axis));
     module->setAttr(kCoalesceGridCeilDivAttr, IntegerAttr::get(i32Type, 1));
-    return success();
+    return RewritePlanApplyResult::Applied;
   }
 
 private:

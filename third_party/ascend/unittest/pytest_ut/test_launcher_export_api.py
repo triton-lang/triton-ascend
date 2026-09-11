@@ -228,7 +228,7 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
-def test_make_launcher_block_cap_uses_only_env_and_blacklist(
+def test_make_launcher_block_cap_matches_auto_blockify_contract(
     _mock_backend_func_patch,
     _mock_ffts,
     _mock_disable_ffts,
@@ -238,8 +238,14 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    for env_enabled, blacklisted, row_applied in product((False, True), (False, True), (False, True)):
+    for env_enabled, is_pure_simt, blacklisted, row_applied in product(
+            (False, True),
+            (False, True),
+            (False, True),
+            (False, True),
+    ):
         metadata = _make_metadata()
+        metadata.is_pure_simt = is_pure_simt
         metadata.row_coalescing_applied = row_applied
         metadata.has_auto_blockify_blacklist_op = blacklisted
         with patch.object(
@@ -252,8 +258,10 @@ def test_make_launcher_block_cap_uses_only_env_and_blacklist(
                 signature={0: "*fp32", 1: "*fp32"},
                 metadata=metadata,
             )
-        case = f"E={env_enabled}, B={blacklisted}, R={row_applied}"
-        expected_per_launch_path = 1 if env_enabled and not blacklisted else 0
+        case = f"E={env_enabled}, P={is_pure_simt}, B={blacklisted}, R={row_applied}"
+        expected_per_launch_path = 1 if (
+            env_enabled and not row_applied and (is_pure_simt or not blacklisted)
+        ) else 0
         c_abi_launch, cpp_launch = _split_launch_functions(src)
         assert c_abi_launch.count(cap) == expected_per_launch_path, case
         assert cpp_launch.count(cap) == expected_per_launch_path, case

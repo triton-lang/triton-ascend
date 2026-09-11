@@ -350,7 +350,22 @@ void GraphOptimizePass::runOnOperation() {
       continue;
 
     IRRewriter rewriter(&getContext());
-    if (failed(selectedRowPlan->apply(rewriter))) {
+    switch (selectedRowPlan->applyWithResult(rewriter)) {
+    case RewritePlanApplyResult::Applied:
+      break;
+    case RewritePlanApplyResult::NotApplicable:
+      LLVM_DEBUG(llvm::dbgs()
+                 << "[" DEBUG_TYPE << "] declined graph optimization rule "
+                 << static_cast<unsigned>(
+                        GraphOptimizationRuleId::RowCoalescing)
+                 << " ("
+                 << getGraphOptimizationRuleName(
+                        GraphOptimizationRuleId::RowCoalescing)
+                 << ") after detached materialization\n");
+      selectedRowPlan.reset();
+      rowPlans.clear();
+      continue;
+    case RewritePlanApplyResult::Failed:
       selectedRowPlan.reset();
       rowPlans.clear();
       function.emitError() << "graph-optimize failed to apply Row rewrite";

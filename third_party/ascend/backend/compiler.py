@@ -734,7 +734,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if (_is_auto_map_parallel_blocks_enabled()
+                and not metadata.get("has_auto_blockify_blacklist_op", False)):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -946,7 +947,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_libdevice:
             _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if (_is_auto_map_parallel_blocks_enabled()
+                and not metadata.get("has_auto_blockify_blacklist_op", False)):
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -1274,11 +1276,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if bisheng_options is not None:
                 _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
-            # Enable SIMT auto-blockify under the fixed automatic block-mapping
-            # policy, mirroring the SIMD compile paths. driver.py's runtime
-            # block-count cap keys off the same policy, so the two stay in sync.
-            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
-                    and not metadata.get("row_coalescing_applied", False)):
+            # RowCoalescing already reduces the launch grid and expands one
+            # program to multiple logical rows, so it remains the sole
+            # exception to automatic block mapping.  driver.py uses the same
+            # condition for the runtime block-count cap.
+            if _is_auto_map_parallel_blocks_enabled() and not metadata.get("row_coalescing_applied", False):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 1:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

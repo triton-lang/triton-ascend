@@ -22,6 +22,7 @@ import itertools
 import sys
 import types
 import warnings
+from collections import defaultdict
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -392,6 +393,47 @@ def _run_ttir_to_npubin(
     return events, commands[0]
 
 
+def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op):
+    """Capture argv from a non-pure-SIMT linalg compiler entry point."""
+    commands = []
+    parsed_metadata = defaultdict(lambda: None, {
+        "has_auto_blockify_blacklist_op": has_blacklist_op,
+    })
+
+    class FakeNPUUtils:
+
+        def has_device_limit(self):
+            return False
+
+        def get_arch(self):
+            return "Ascend910B"
+
+    def parse_linalg_metadata(linalg, _metadata):
+        return linalg, parsed_metadata
+
+    def run_bisheng(command, **_kwargs):
+        commands.append(list(command))
+        Path(command[command.index("-o") + 1] + "_reloc.o").write_bytes(b"npubin")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(compiler, "_parse_linalg_metadata", parse_linalg_metadata)
+    monkeypatch.setattr(compiler, "get_common_bishengir_compile_options", lambda _metadata: [])
+    monkeypatch.setattr(compiler, "get_auto_bind_sub_block_option", lambda _metadata: False)
+    monkeypatch.setattr(compiler, "NPUUtils", FakeNPUUtils)
+    monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/bishengir-compile", {}))
+    monkeypatch.setattr(compiler, "_is_auto_map_parallel_blocks_enabled", lambda: True)
+    monkeypatch.setattr(compiler.subprocess, "run", run_bisheng)
+
+    result = getattr(compiler, function_name)(
+        "module {}",
+        {},
+        SimpleNamespace(debug=False, target_arch="Ascend950PR"),
+    )
+    assert result == b"npubin"
+    assert len(commands) == 1
+    return commands[0]
+
+
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
 def test_export_coalesce_metadata_removes_attrs_and_marks_row(compiler_module, monkeypatch):
     removed = []
@@ -590,7 +632,7 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
 
 
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
-    """Keep the internal-policy-and-safety pure-SIMT auto-blockify argv contract."""
+    """Pure-SIMT ignores the blacklist but still honors the Row contract."""
     common_options = ["--common-before-pure-simt", "--common-after-pure-simt"]
     pure_simt_prefix = [
         "--enable-hivm-compile=false",
@@ -628,7 +670,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 disable_fma=True,
             )
 
-        second_injection = env_enabled and not blacklisted and not row_applied
+        second_injection = env_enabled and not row_applied
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
         expected_options = [*common_options, *pure_simt_prefix]
@@ -643,6 +685,31 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         assert command[2:-2] == expected_options, case
         assert command[-2] == "-o", case
         assert Path(command[-1]).name == "kernel", case
+
+
+@pytest.mark.parametrize(
+    "function_name",
+    (
+        "linalg_to_bin_enable_npu_compile_910_95",
+        "linalg_to_bin_enable_npu_compile_A2_A3",
+    ),
+)
+@pytest.mark.parametrize("has_blacklist_op", (False, True))
+def test_non_pure_simt_linalg_compilers_keep_blacklist_auto_blockify_gate(
+    compiler_module,
+    monkeypatch,
+    function_name,
+    has_blacklist_op,
+):
+    command = _run_linalg_to_npubin(
+        compiler_module,
+        monkeypatch,
+        function_name,
+        has_blacklist_op,
+    )
+
+    assert ("--enable-auto-blockify-loop" in command) is not has_blacklist_op
+    assert "--pure-simt" not in command
 
 
 def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):

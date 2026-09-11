@@ -70,8 +70,8 @@ private:
   std::array<ProgramAxisDependence, 3> axes;
 };
 
-}
-}
-}
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
 
 #endif

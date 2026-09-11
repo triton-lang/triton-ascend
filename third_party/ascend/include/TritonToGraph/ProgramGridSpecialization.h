@@ -79,8 +79,8 @@ void clearProgramMappingScalarSpecialization(ModuleOp module);
 
 LogicalResult applyProgramMappingScalarSpecialization(ModuleOp module);
 
-}
-}
-}
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
 
 #endif

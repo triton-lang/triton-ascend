@@ -65,9 +65,10 @@ struct ResourceSnapshot {
                                        unsigned ubSafetyPercent = 80,
                                        uint64_t reservedUBBytes = 0);
 
-  static ResourceSnapshot fromHardwareConfig(
-      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
-      uint64_t reservedUBBytes = 0);
+  static ResourceSnapshot
+  fromHardwareConfig(const ascend::HardwareConfig &hardware,
+                     unsigned ubSafetyPercent = 80,
+                     uint64_t reservedUBBytes = 0);
 };
 
 struct LiveTensorInterval {
@@ -202,8 +203,8 @@ private:
   LiveByteEstimate liveBytes;
 };
 
-}
-}
-}
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
 
 #endif

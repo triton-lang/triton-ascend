@@ -71,8 +71,8 @@ LogicalResult
 setProgramGridTransformContract(ModuleOp module,
                                 const ProgramGridTransformContract &contract);
 
-}
-}
-}
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
 
 #endif

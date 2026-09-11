@@ -71,7 +71,7 @@ private:
   unsigned rejectedUnimplemented = 0;
 };
 
-}
+} // namespace
 
 std::unique_ptr<GraphOptimizationRule> cfg::createReservedGraphOptimizationRule(
     ReservedGraphOptimizationRuleOptions options) {

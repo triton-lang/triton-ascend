@@ -29,6 +29,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
@@ -40,23 +41,34 @@ static constexpr const char *DEBUG_TYPE = "refine-args-block-id";
 
 using namespace mlir::triton;
 
-static void eraseOpsWithUnusedUsers(Operation *op, Block *loopBlock) {
-  llvm::SetVector<Operation *> toErase;
-  llvm::SetVector<Operation *> visited;
-  SmallVector<Operation *> worklist;
+static void eraseOpsWithUnusedUsers(Operation *op, Block *loopBlock,
+                                    CVPipeline::ComputeBlockIdManager &bm) {
+  llvm::SetVector<Operation *> worklist;
 
-  worklist.push_back(op);
+  worklist.insert(op);
 
   while (!worklist.empty()) {
     Operation *cur = worklist.pop_back_val();
+    // Stay inside the loop body the caller handed us.
+    if (cur->getBlock() != loopBlock) {
+      continue;
+    }
+    // No users left and no side effects to lose: the only condition under which
+    // erasing is legal.
+    if (!isOpTriviallyDead(cur)) {
+      continue;
+    }
+    // Operands have to be collected before erase(): afterwards `cur` is gone.
+    SmallVector<Operation *> producers;
     for (Value operand : cur->getOperands()) {
       if (Operation *defOp = operand.getDefiningOp()) {
-        if (defOp->getResult(0).getNumUses() == 1) {
-          worklist.push_back(defOp);
-        }
+        producers.push_back(defOp);
       }
     }
+    bm.forgetOp(cur);
     cur->erase();
+    // Re-examine the producers now that their uses have actually been dropped.
+    worklist.insert(producers.begin(), producers.end());
   }
 }
 
@@ -247,7 +259,7 @@ static void processOneLoop(Operation *loopOp,
     yieldOp.setOperand(i, mapping.lookup(yieldDefOp->getResult(0)));
 
     // Erase original yieldDefOp and its upstream ops that have no more users
-    eraseOpsWithUnusedUsers(yieldDefOp, loopBlock);
+    eraseOpsWithUnusedUsers(yieldDefOp, loopBlock, bm);
     LOG_DEBUG("Successfully moved iter_arg " << i << " from block "
                                              << updateBlockId << " to block "
                                              << firstUserBlockId << "\n");

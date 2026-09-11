@@ -278,7 +278,7 @@ void RelocateMemrefDeclPass::runOnOperation() {
   // the pass has no work to do.
   bool hasSync = false;
   module.walk([&](Operation *op) {
-    if (CVPipeline::isSyncOp(op)) {
+    if (CVPipeline::isExternalSyncOp(op)) {
       hasSync = true;
       return WalkResult::interrupt();
     }

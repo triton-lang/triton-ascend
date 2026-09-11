@@ -34,6 +34,8 @@
 // Unknown ops (no SideEffect interface) act as full barriers: they depend on
 // all prior writers/readers and become the sole writer for every slot.
 
+#include <algorithm>
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
@@ -153,8 +155,52 @@ MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
     return;
   }
   analyzeOp(root);
+  buildSyncEdges();
+
   slots.clear();
   valueToSlot.clear();
+}
+
+void MemoryDependenceGraph::buildSyncEdges() {
+  if (root == nullptr) {
+    return;
+  }
+
+  root->walk([&](Block *block) {
+    SyncWall wall(block);
+    auto addSyncEdge = [&, this](Operation *from, Operation *to) {
+      auto &before = execBefore[to];
+      if (!llvm::is_contained(before, from)) {
+        before.push_back(from);
+      }
+      auto &after = execAfter[from];
+      if (!llvm::is_contained(after, to)) {
+        after.push_back(to);
+      }
+      LOG_DEBUG("Add sync edge: " << *from << " -> " << *to);
+    };
+
+    for (auto &op : *block) {
+      auto coreType = CVPipeline::getOpCoreType(&op);
+      if (coreType != CoreType::CUBE_ONLY &&
+          coreType != CoreType::VECTOR_ONLY) {
+        continue;
+      }
+      auto syncs = wall.syncPointsOf(coreType);
+      if (syncs.empty()) {
+        continue;
+      }
+      auto predSync = wall.getPredSyncOpInSameBlock(&op);
+      auto nextSync = wall.getNextSyncOpInSameBlock(&op);
+
+      if (predSync != nullptr) {
+        addSyncEdge(predSync, &op);
+      }
+      if (nextSync != nullptr) {
+        addSyncEdge(&op, nextSync);
+      }
+    }
+  });
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getMemDefs(Operation *op) const {
@@ -175,15 +221,17 @@ ArrayRef<Operation *> MemoryDependenceGraph::getMemUsers(Operation *op) const {
 ArrayRef<Operation *>
 MemoryDependenceGraph::getExecBefore(Operation *op) const {
   auto it = execBefore.find(op);
-  if (it == execBefore.end())
+  if (it == execBefore.end()) {
     return {};
+  }
   return it->second;
 }
 
 ArrayRef<Operation *> MemoryDependenceGraph::getExecAfter(Operation *op) const {
   auto it = execAfter.find(op);
-  if (it == execAfter.end())
+  if (it == execAfter.end()) {
     return {};
+  }
   return it->second;
 }
 
@@ -592,62 +640,21 @@ void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap) {
   }
 }
 
-SyncWall &MemoryDependenceGraph::getWall(Block *block) {
-  auto it = walls.find(block);
-  if (it == walls.end()) {
-    it = walls.try_emplace(block, block).first;
-  }
-  return it->second;
-}
-
-bool MemoryDependenceGraph::isSyncSeparated(Operation *a, Operation *b) {
-  if (!a || !b) {
-    return false;
-  }
-
-  if (Block *block = a->getBlock()) {
-    if (Operation *bAnc = CVPipeline::getAncestorInBlock(b, block)) {
-      return getWall(block).hasSyncBetween(a, bAnc);
-    }
-  }
-
-  if (Block *block = b->getBlock()) {
-    if (Operation *aAnc = CVPipeline::getAncestorInBlock(a, block)) {
-      return getWall(block).hasSyncBetween(b, aAnc);
-    }
-  }
-  return false;
-}
-
 void MemoryDependenceGraph::recordEdges(Operation *op,
                                         ArrayRef<Operation *> defs,
                                         ArrayRef<Operation *> preds) {
-  // Drop memory edges that cross a synchronization op
-  SmallVector<Operation *> syncFreeDefs;
-  for (Operation *p : defs) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreeDefs.push_back(p);
-    }
-  }
-  SmallVector<Operation *> syncFreePreds;
-  for (Operation *p : preds) {
-    if (!isSyncSeparated(op, p)) {
-      syncFreePreds.push_back(p);
-    }
-  }
-
-  if (!syncFreeDefs.empty()) {
+  if (!defs.empty()) {
     auto &defList = memDefs[op];
-    defList.assign(syncFreeDefs.begin(), syncFreeDefs.end());
-    for (Operation *p : syncFreeDefs) {
+    defList.assign(defs.begin(), defs.end());
+    for (Operation *p : defs) {
       memUsers[p].push_back(op);
     }
   }
 
-  if (!syncFreePreds.empty()) {
+  if (!preds.empty()) {
     auto &execBeforeList = execBefore[op];
-    execBeforeList.assign(syncFreePreds.begin(), syncFreePreds.end());
-    for (Operation *p : syncFreePreds) {
+    execBeforeList.assign(preds.begin(), preds.end());
+    for (Operation *p : preds) {
       execAfter[p].push_back(op);
     }
   }

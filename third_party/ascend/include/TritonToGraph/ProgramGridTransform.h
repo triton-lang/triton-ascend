@@ -70,6 +70,12 @@ struct ProgramGridTransformContract {
 LogicalResult addProgramGridHiddenExtentArguments(triton::FuncOp function);
 bool hasProgramGridHiddenExtentArguments(triton::FuncOp function);
 
+// Commit a verified program-mapping sandbox clone to its original function.
+// The signature, complete argument-attribute array, and body form one hidden
+// ABI transaction; callers publish the verified module contract afterwards.
+LogicalResult commitProgramGridFunctionFromSandbox(triton::FuncOp destination,
+                                                   triton::FuncOp source);
+
 // Parse and validate only the three supported dynamic contracts:
 // IAT16, IAT16+PTSM4, and PTSM64. Unknown keys or a fixed logical extent are
 // rejected rather than silently retaining a specialization path.

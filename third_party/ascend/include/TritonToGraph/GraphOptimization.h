@@ -321,6 +321,9 @@ struct IndependentAxisTensorizeRuleOptions {
   // IAT changes a vector/SIMD TTIR shape.  The pure-SIMT pipeline keeps the
   // rule registered for mask compatibility, but must remain a semantic no-op.
   bool enabledForCompileMode = true;
+  // Derived from the existing complete rule mask by GraphOptimize. This is
+  // scheduler state for the atomic SingleMoment IAT+PTSM plan, not an option.
+  bool iatAndPtsmEnabled = false;
 };
 struct StaticProgramAxisFusionRuleOptions {
   // SPAF materializes SIMD tensor work inside an scf loop.  Preserve mask ABI
@@ -354,10 +357,8 @@ struct GraphOptimizationOptions {
   // StoreCoalescing retains its historical conservative budget independently
   // of mapping legality.
   unsigned storeCoalescingUBBudgetBytes = 0;
-  // Resource/cost rules must receive target facts explicitly.  Zero UB/core
-  // values mean unknown and make such candidates fail closed.
-  unsigned deviceCoreCount = 0;
-  unsigned minProgramsPerCore = 1;
+  // The one shared resource model admits candidates from static UB/liveness
+  // facts only. Runtime core count belongs solely to launcher PTSM capping.
   unsigned ubSafetyPercent = 80;
   unsigned reservedUBBytes = 0;
   // RowCoalescing changes the launch grid and is valid only for

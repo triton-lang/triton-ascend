@@ -631,6 +631,41 @@ void init_ascend_ir(py::module &&m) {
 
     py::dict result;
     result["version"] = contract->version;
+    if (!contract->dynamicOriginalGrid) {
+      // StaticProgramAxisFusion keeps its fixed logical extent and can target
+      // Z.  Do not manufacture the dynamic hidden X/Y ABI here: Python uses
+      // the exact legacy schema to route this contract to the old launcher
+      // path.
+      py::list transforms;
+      for (const mlir::triton::cfg::ProgramGridTransform &transform :
+           contract->transforms) {
+        py::dict item;
+        item["order"] = transform.order;
+        item["kind"] = "ceil_div";
+        item["axis"] = transform.axis;
+        item["factor"] = transform.factor;
+        item["logical_extent"] = transform.logicalExtent;
+        item["persistent_coverage"] = transform.persistentCoverage;
+        item["grid_stride_abi_verified"] = transform.gridStrideAbiVerified;
+        transforms.append(std::move(item));
+      }
+      result["transforms"] = std::move(transforms);
+      return std::move(result);
+    }
+
+    result["extent_source"] = "runtime_original_grid";
+    py::list hiddenExtentAxes;
+    hiddenExtentAxes.append(0);
+    hiddenExtentAxes.append(1);
+    result["hidden_extent_axes"] = std::move(hiddenExtentAxes);
+    py::list hiddenArgumentOrder;
+    hiddenArgumentOrder.append("originalGridX");
+    hiddenArgumentOrder.append("originalGridY");
+    result["hidden_argument_order"] = std::move(hiddenArgumentOrder);
+    py::list hiddenArgumentTypes;
+    hiddenArgumentTypes.append("i32");
+    hiddenArgumentTypes.append("i32");
+    result["hidden_argument_types"] = std::move(hiddenArgumentTypes);
     py::list transforms;
     for (const mlir::triton::cfg::ProgramGridTransform &transform :
          contract->transforms) {
@@ -639,7 +674,6 @@ void init_ascend_ir(py::module &&m) {
       item["kind"] = "ceil_div";
       item["axis"] = transform.axis;
       item["factor"] = transform.factor;
-      item["logical_extent"] = transform.logicalExtent;
       item["persistent_coverage"] = transform.persistentCoverage;
       item["grid_stride_abi_verified"] = transform.gridStrideAbiVerified;
       transforms.append(std::move(item));
@@ -797,6 +831,8 @@ void init_ascend_ir(py::module &&m) {
           result["reads_num_programs"] = facts.readsNumPrograms;
           result["is_independent_axis_transform_candidate"] =
               facts.isIndependentAxisTransformCandidate();
+          result["is_program_mapping_transform_candidate"] =
+              facts.isProgramMappingTransformCandidate();
 
           py::list closure;
           for (Operation *operation : facts.dependenceClosure)
@@ -820,6 +856,10 @@ void init_ascend_ir(py::module &&m) {
               break;
             case mlir::triton::cfg::StoreAddressIndependence::ProvenDisjoint:
               summary["address_independence"] = "proven_disjoint";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::
+                CanonicalDynamicStride:
+              summary["address_independence"] = "canonical_dynamic_stride";
               break;
             case mlir::triton::cfg::StoreAddressIndependence::Unknown:
               summary["address_independence"] = "unknown";

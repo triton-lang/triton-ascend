@@ -23,7 +23,7 @@
 #include "TritonToGraph/GraphOptimizationContext.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/Passes.h"
-#include "TritonToGraph/ProgramGridSpecialization.h"
+#include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
 #include "Utils/Utils.h"
 
@@ -140,8 +140,6 @@ public:
     this->ubCapacityBytes = options.ubCapacityBytes;
     this->mappingUBCapacityBytes = options.mappingUBCapacityBytes;
     this->storeCoalescingUBBudgetBytes = options.storeCoalescingUBBudgetBytes;
-    this->deviceCoreCount = options.deviceCoreCount;
-    this->minProgramsPerCore = options.minProgramsPerCore;
     this->ubSafetyPercent = options.ubSafetyPercent;
     this->reservedUBBytes = options.reservedUBBytes;
     this->compileMode = options.compileMode;
@@ -180,8 +178,6 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliMappingUBCapacityBytes = this->mappingUBCapacityBytes;
   const uint64_t cliStoreCoalescingUBBudgetBytes =
       this->storeCoalescingUBBudgetBytes;
-  const uint64_t cliDeviceCoreCount = this->deviceCoreCount;
-  const uint64_t cliMinProgramsPerCore = this->minProgramsPerCore;
   const uint64_t cliUBSafetyPercent = this->ubSafetyPercent;
   const uint64_t cliReservedUBBytes = this->reservedUBBytes;
 
@@ -224,17 +220,12 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
       cliStoreCoalescingUBBudgetBytes != 0 ? cliStoreCoalescingUBBudgetBytes
                                            : cliUBCapacityBytes;
 
-  if (cliDeviceCoreCount > std::numeric_limits<unsigned>::max() ||
-      cliMinProgramsPerCore == 0 ||
-      cliMinProgramsPerCore > std::numeric_limits<unsigned>::max() ||
-      cliUBSafetyPercent == 0 || cliUBSafetyPercent > 100 ||
+  if (cliUBSafetyPercent == 0 || cliUBSafetyPercent > 100 ||
       cliReservedUBBytes > std::numeric_limits<unsigned>::max() ||
       cliReservedUBBytes > effectiveMappingUBCapacity) {
     getOperation().emitError()
-        << "graph-optimize resource options are invalid: cores="
-        << cliDeviceCoreCount
-        << " min-programs-per-core=" << cliMinProgramsPerCore
-        << " ub-safety-percent=" << cliUBSafetyPercent
+        << "graph-optimize resource options are invalid: ub-safety-percent="
+        << cliUBSafetyPercent
         << " reserved-ub-bytes=" << cliReservedUBBytes;
     return failure();
   }
@@ -254,13 +245,16 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
       static_cast<unsigned>(effectiveMappingUBCapacity);
   options.storeCoalescingUBBudgetBytes =
       static_cast<unsigned>(effectiveStoreCoalescingUBBudget);
-  options.deviceCoreCount = static_cast<unsigned>(cliDeviceCoreCount);
-  options.minProgramsPerCore = static_cast<unsigned>(cliMinProgramsPerCore);
   options.ubSafetyPercent = static_cast<unsigned>(cliUBSafetyPercent);
   options.reservedUBBytes = static_cast<unsigned>(cliReservedUBBytes);
   options.compileMode = this->compileMode;
   options.independentAxisTensorize.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
+  options.independentAxisTensorize.iatAndPtsmEnabled =
+      isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::IndependentAxisTensorize) &&
+      isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::PersistentTaskStripMining);
   options.staticProgramAxisFusion.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
   options.persistentTaskStripMining.enabledForCompileMode =
@@ -276,18 +270,6 @@ void GraphOptimizePass::runOnOperation() {
   }
 
   ModuleOp module = getOperation();
-  // The JIT has already placed every exact scalar value in the compiler cache
-  // key.  Materialize compatible integer entry arguments before any analysis
-  // observes program-dependent addresses; all incompatible arguments remain
-  // dynamic and therefore retain the normal fail-closed no-transform path.
-  if (failed(applyProgramMappingScalarSpecialization(module))) {
-    module.emitError()
-        << "graph-optimize received an invalid program-mapping scalar "
-           "specialization";
-    signalPassFailure();
-    return;
-  }
-
   SmallVector<std::unique_ptr<GraphOptimizationRule>> ownedRules;
   populateBuiltinGraphOptimizationRules(options, ownedRules);
 
@@ -318,8 +300,7 @@ void GraphOptimizePass::runOnOperation() {
 
   for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
     const ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
-        options.mappingUBCapacityBytes, options.deviceCoreCount,
-        options.minProgramsPerCore, options.ubSafetyPercent,
+        options.mappingUBCapacityBytes, options.ubSafetyPercent,
         options.reservedUBBytes);
     GraphOptimizationContext context(function, resources);
     unsigned rewriteCount = 0;
@@ -438,6 +419,11 @@ void GraphOptimizePass::runOnOperation() {
     // has already been exhausted.
     if (!isRuleEnabled(options.enabledRuleMask,
                        GraphOptimizationRuleId::RowCoalescing))
+      continue;
+    // A successfully committed dynamic mapping owns launch-grid semantics.
+    // Rule enablement alone is not enough to skip legacy RowCoalescing: a
+    // no-op IAT/PTSM candidate must leave the historical Row path available.
+    if (module->hasAttr(kProgramGridTransformsAttr))
       continue;
 
     GraphOptimizationRule *rowRule = nullptr;

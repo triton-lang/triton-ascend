@@ -33,14 +33,14 @@ from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
+                                          is_ffts_supported, force_disable_ffts,
                                           get_backend_func, get_cann_version)
 from triton.backends.ascend.program_grid import (
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
-    apply_program_grid_transforms,
+    get_legacy_persistent_transform,
     get_persistent_transform,
-    normalize_program_grid_specialization,
+    normalize_legacy_program_grid_transforms,
     normalize_program_grid_transforms,
 )
 # Bind the already-imported utils module once so the launch hot path can write
@@ -956,12 +956,6 @@ def make_launcher(constants, signature, metadata):
     enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
     enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
-    has_auto_blockify_blacklist_op = getattr(
-        metadata,
-        "has_auto_blockify_blacklist_op",
-        False,
-    )
-    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op)
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
@@ -1033,10 +1027,10 @@ static void release_npu_tensor_handle(void* handle) {{
 }}
 """
 
-    # Versioned program-grid transforms are fixed-specialization launcher
-    # contracts. Both Python JIT and the exported C ABI keep their original
-    # grid argument, while this backend precomputes the one final grid recorded
-    # by the compiled artifact. The legacy coalesce ABI remains separate.
+    # The dynamic IAT/PTSM and legacy fixed-grid SPAF contracts are distinct
+    # launch ABIs.  Only the former has the two hidden original-grid arguments;
+    # treating a legacy Z-axis transform as dynamic would silently corrupt both
+    # its launch arithmetic and its device parameter layout.
     raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
     if raw_program_grid_transforms is not None:
         try:
@@ -1046,37 +1040,100 @@ static void release_npu_tensor_handle(void* handle) {{
     else:
         program_grid_transforms = None
 
-    raw_program_grid_specialization = getattr(metadata, "program_grid_specialization", None)
-    if raw_program_grid_specialization is not None:
+    raw_legacy_program_grid_transforms = getattr(metadata, "legacy_program_grid_transforms", None)
+    if raw_legacy_program_grid_transforms is not None:
         try:
-            program_grid_specialization = normalize_program_grid_specialization(raw_program_grid_specialization)
+            legacy_program_grid_transforms = normalize_legacy_program_grid_transforms(
+                raw_legacy_program_grid_transforms)
         except ProgramGridContractError as error:
-            raise RuntimeError(f"invalid program_grid_specialization launcher metadata: {error}") from error
+            raise RuntimeError(
+                f"invalid legacy_program_grid_transforms launcher metadata: {error}") from error
     else:
-        program_grid_specialization = None
+        legacy_program_grid_transforms = None
+    if program_grid_transforms is not None and legacy_program_grid_transforms is not None:
+        raise RuntimeError("dynamic and legacy program-grid transforms cannot coexist")
+
+    mapping_applied = getattr(metadata, "program_grid_mapping_applied", None)
+    auto_blockify_enabled = getattr(metadata, "auto_blockify_enabled", None)
+    ptsm_cap_authorized = getattr(metadata, "ptsm_cap_authorized", None)
+    if not isinstance(mapping_applied, bool):
+        raise RuntimeError("compiler metadata missing program_grid_mapping_applied")
+    if not isinstance(auto_blockify_enabled, bool):
+        raise RuntimeError("compiler metadata missing auto_blockify_enabled")
+    if not isinstance(ptsm_cap_authorized, bool):
+        raise RuntimeError("compiler metadata missing ptsm_cap_authorized")
+    if mapping_applied != (program_grid_transforms is not None or
+                           legacy_program_grid_transforms is not None):
+        raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
+
+    persistent_transform = (
+        get_persistent_transform(program_grid_transforms)
+        if program_grid_transforms is not None else
+        get_legacy_persistent_transform(legacy_program_grid_transforms)
+        if legacy_program_grid_transforms is not None else None)
+    row_coalescing_applied = bool(getattr(metadata, "row_coalescing_applied", False))
+    if (program_grid_transforms is not None or legacy_program_grid_transforms is not None) and row_coalescing_applied:
+        raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
+    if auto_blockify_enabled and (mapping_applied or row_coalescing_applied):
+        raise RuntimeError("auto_blockify_enabled conflicts with a rewritten program mapping")
+    if auto_blockify_enabled and ptsm_cap_authorized:
+        raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
+    if persistent_transform is None:
+        if ptsm_cap_authorized:
+            raise RuntimeError("ptsm_cap_authorized requires a persistent transform")
+    elif not ptsm_cap_authorized:
+        raise RuntimeError("persistent program-grid transform lacks PTSM cap authorization")
+    elif mix_mode != "aiv":
+        raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
 
     program_grid_finalization = ""
     if program_grid_transforms is not None:
-        if program_grid_specialization is None:
-            raise RuntimeError(
-                "program_grid_transforms requires fixed program_grid_specialization metadata")
-        try:
-            original_grid = tuple(program_grid_specialization["grid"])
-            physical_core_count = (
-                num_physical_blocks
-                if get_persistent_transform(program_grid_transforms) is not None else None)
-            final_grid = apply_program_grid_transforms(
-                original_grid,
-                program_grid_transforms,
-                physical_core_count=physical_core_count,
-            )
-        except (ProgramGridContractError, TypeError, ValueError) as error:
-            raise RuntimeError(
-                f"cannot finalize fixed program-grid launcher metadata: {error}") from error
-        program_grid_finalization = f"""// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: fixed final launch grid.
-  gridX = {final_grid[0]};
-  gridY = {final_grid[1]};
-  gridZ = {final_grid[2]};"""
+        finalization_lines = [
+            f"// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: dynamic original-grid ABI.",
+            "uint32_t originalGridX = static_cast<uint32_t>(gridX);",
+            "uint32_t originalGridY = static_cast<uint32_t>(gridY);",
+        ]
+        axis_names = {0: ("gridX", "originalGridX"), 1: ("gridY", "originalGridY")}
+        for transform in program_grid_transforms["transforms"]:
+            grid_name, original_name = axis_names[transform["axis"]]
+            factor = transform["factor"]
+            finalization_lines.append(
+                f"{grid_name} = (uint32_t)(((uint64_t){original_name} + {factor - 1}u) / {factor}u);")
+    elif legacy_program_grid_transforms is not None:
+        finalization_lines = [
+            f"// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: legacy fixed-grid SPAF ABI.",
+        ]
+        axis_names = {0: "gridX", 1: "gridY", 2: "gridZ"}
+        checked_axes: set[int] = set()
+        for transform in legacy_program_grid_transforms["transforms"]:
+            axis = transform["axis"]
+            grid_name = axis_names[axis]
+            if axis not in checked_axes:
+                checked_axes.add(axis)
+                logical_extent = transform["logical_extent"]
+                finalization_lines.extend((
+                    f"if ({grid_name} != {logical_extent}u) {{",
+                    f'  fprintf(stderr, "legacy program-grid transform requires grid[{axis}]={logical_extent}, got %u\\n", '
+                    f"static_cast<unsigned int>({grid_name}));",
+                    "  return;",
+                    "}",
+                ))
+            factor = transform["factor"]
+            finalization_lines.append(
+                f"{grid_name} = (uint32_t)(((uint64_t){grid_name} + {factor - 1}u) / {factor}u);")
+    if persistent_transform is not None:
+        axis = persistent_transform["axis"]
+        grid_name = {0: "gridX", 1: "gridY", 2: "gridZ"}[axis]
+        other_grid_names = tuple(name for index, name in enumerate(("gridX", "gridY", "gridZ"))
+                                 if index != axis)
+        finalization_lines.extend((
+            f"uint64_t otherPrograms = (uint64_t){other_grid_names[0]} * (uint64_t){other_grid_names[1]};",
+            "uint32_t axisCap = std::max((uint32_t)1,",
+            f"    (uint32_t)((uint64_t){num_physical_blocks} / std::max((uint64_t)1, otherPrograms)));",
+            f"{grid_name} = std::min({grid_name}, axisCap);",
+        ))
+    if program_grid_transforms is not None or legacy_program_grid_transforms is not None:
+        program_grid_finalization = "\n  ".join(finalization_lines)
 
     # Full-TA tile/strided coalescing: the compiler recorded a coalesce factor H
     # and the program-id/grid axis it applies to. Each program now covers H tiles
@@ -1099,6 +1156,9 @@ static void release_npu_tensor_handle(void* handle) {{
             f"  {_coalesce_grid_var} = {_coalesce_grid_expr};")
     else:
         coalesce_grid_div = ""
+    if (program_grid_transforms is not None or legacy_program_grid_transforms is not None) and coalesce_factor > 1:
+        raise RuntimeError("program-grid transforms conflict with legacy coalesce metadata")
+    has_dynamic_program_grid_abi = program_grid_transforms is not None
 
     cpp_device_pointer = _CPP_DEVICE_POINTER
     cpp_msprof_extern = _CPP_MSPROF_EXTERN
@@ -1220,8 +1280,9 @@ static void release_npu_tensor_handle(void* handle) {{
 
     npu_headers = generate_npu_header_src()
 
-    # The original grid remains visible to the community JIT, but the fixed
-    # mapping artifact supplies its final launch grid in both generated paths.
+    # Both launch entry points preserve the original grid, perform the same
+    # inline dynamic mapping, and then use the resulting grid for workspace
+    # sizing and device block count.
     _program_grid_launch_preamble = f"""
   {program_grid_finalization}
   {coalesce_grid_div if program_grid_transforms is None else ''}"""
@@ -1267,7 +1328,7 @@ static void release_npu_tensor_handle(void* handle) {{
         warned = true;
     }}
     #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks and program_grid_transforms is None else ''}
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if auto_blockify_enabled else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
@@ -1386,6 +1447,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
       args_offset = _align_launch_offset(args_offset, alignment);
       args_offset += launch_arg_sizes[arg_idx];
     }}
+    {'size_t original_grid_x_offset = reserve_slot(sizeof(uint32_t), 4); size_t original_grid_y_offset = reserve_slot(sizeof(uint32_t), 4);' if has_dynamic_program_grid_abi else ''}
     size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
@@ -1405,6 +1467,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
       memcpy(launch_args.data() + kernel_arg_offset, copied_kernel_args[arg_idx].data(), launch_arg_sizes[arg_idx]);
       kernel_arg_offset += launch_arg_sizes[arg_idx];
     }}
+    {'memcpy(launch_args.data() + original_grid_x_offset, &originalGridX, sizeof(uint32_t)); memcpy(launch_args.data() + original_grid_y_offset, &originalGridY, sizeof(uint32_t));' if has_dynamic_program_grid_abi else ''}
     memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + sizeof(int32_t), &gridY, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + 2 * sizeof(int32_t), &gridZ, sizeof(int32_t));
@@ -1428,6 +1491,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
+      {'uint32_t originalGridX __attribute__((aligned(4))); uint32_t originalGridY __attribute__((aligned(4)));' if has_dynamic_program_grid_abi else ''}
       {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
@@ -1439,6 +1503,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
+      {'static_cast<uint32_t>(originalGridX), static_cast<uint32_t>(originalGridY),' if has_dynamic_program_grid_abi else ''}
       {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}

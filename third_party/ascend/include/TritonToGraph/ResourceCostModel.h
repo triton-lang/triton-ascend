@@ -51,49 +51,31 @@ enum class ResourceCostRejectReason : uint8_t {
   UnknownElementType,
   Overflow,
   UBOverflow,
-  InsufficientParallelism,
   InvalidCandidate,
 };
 
 const char *getResourceCostRejectReasonName(ResourceCostRejectReason reason);
 
-// The normal policy requires every candidate to expose at least
-// deviceCoreCount * minProgramsPerCore programs.  MergeSplit is the one
-// validated exception: a nonpersistent, fully launched small grid may use
-// fewer programs than cores after its head lanes have been tensorized.  Keep
-// that exception explicit on the candidate instead of relaxing the global
-// resource snapshot or the default policy used by other rules.
-enum class ParallelismPolicy : uint8_t {
-  DefaultMinProgramsPerCore,
-  MergeSplitSmallGridAllowSubCore,
-};
-
-// A per-device snapshot.  A snapshot is intentionally explicit rather than a
-// collection of target-name heuristics: callers must not accidentally apply a
-// 910B default to a different device.  A zero capacity/core count therefore
-// means unknown and causes conservative rejection.
+// A per-function snapshot shared by every mapping rule. It carries only the
+// static UB/liveness facts that are available during compilation.
 struct ResourceSnapshot {
   uint64_t ubCapacityBytes = 0;
   uint64_t reservedUBBytes = 0;
-  unsigned deviceCoreCount = 0;
-  unsigned minProgramsPerCore = 1;
   unsigned ubSafetyPercent = 80;
 
   bool isKnown() const;
   std::optional<uint64_t> getSafeUBBudget() const;
 
   static ResourceSnapshot fromExplicit(uint64_t ubCapacityBytes,
-                                       unsigned deviceCoreCount,
-                                       unsigned minProgramsPerCore = 1,
                                        unsigned ubSafetyPercent = 80,
                                        uint64_t reservedUBBytes = 0);
 
   // Reads the vendored hardware-information interface when it is enabled by
-  // the build.  A missing UB/core field (or a build without that interface)
-  // returns an unknown snapshot instead of guessing.
+  // the build. A missing UB field (or a build without that interface) returns
+  // an unknown snapshot instead of guessing.
   static ResourceSnapshot fromHardwareConfig(
-      const ascend::HardwareConfig &hardware, unsigned minProgramsPerCore = 1,
-      unsigned ubSafetyPercent = 80, uint64_t reservedUBBytes = 0);
+      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
+      uint64_t reservedUBBytes = 0);
 };
 
 struct LiveTensorInterval {
@@ -136,8 +118,6 @@ struct CandidatePlan {
 // increasing Block Num because it is no longer eligible for legacy auto-map.
 struct CandidateCost {
   CandidatePlan plan;
-  ParallelismPolicy parallelismPolicy =
-      ParallelismPolicy::DefaultMinProgramsPerCore;
   uint64_t logicalTasksBefore = 0;
   uint64_t logicalTasksAfter = 0;
   uint64_t actualProgramsBefore = 0;

@@ -22,8 +22,8 @@
 
 #include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
+#include "TritonToGraph/IndependentRowReductionAnalysis.h"
 #include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
-#include "TritonToGraph/ProgramGridSpecialization.h"
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
 
@@ -61,20 +61,16 @@ namespace {
 constexpr int32_t kTokenAxis = 0;
 constexpr llvm::StringLiteral kPersistentTaskStripMiningMarkerAttr =
     "hacc.persistent_task_strip_mining";
-// Keep the Phase A/B factors and extend the same production candidate set.
-// There is deliberately no environment-variable force path: every value is
-// materialized, resource-checked, and ranked by the ordinary planner.
-constexpr std::array<unsigned, 7> kBlockTCandidates = {2,  4,  8,  16,
-                                                       32, 64, 128};
+constexpr unsigned kSingleMomentBlockT = 4;
+constexpr unsigned kTwoMomentBlockT = 64;
 
 struct PTSMCandidate {
   triton::FuncOp function;
   Operation *anchor = nullptr;
-  int64_t logicalTokens = 0;
-  uint64_t logicalTiles = 0;
-  uint64_t otherAxisPrograms = 0;
   unsigned blockT = 0;
   unsigned existingTransformCount = 0;
+  IndependentRowReductionKind reductionKind =
+      IndependentRowReductionKind::Other;
   CandidateEvaluation evaluation;
 };
 
@@ -90,13 +86,6 @@ struct MappedValue {
   Value value;
   bool tensorized = false;
 };
-
-bool checkedMul(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  if (lhs != 0 && rhs > std::numeric_limits<uint64_t>::max() / lhs)
-    return false;
-  result = lhs * rhs;
-  return true;
-}
 
 bool isPublicEntry(triton::FuncOp function) {
   auto visibility = function->getAttrOfType<StringAttr>("sym_visibility");
@@ -169,61 +158,9 @@ bool hasVoidReturn(triton::FuncOp function) {
   return result && result.getNumOperands() == 0;
 }
 
-bool hasPersistentNormReductionForm(triton::FuncOp function) {
-  bool matched = false;
-  bool hasMergeReduction = false;
-  function.walk([&](triton::ReduceOp reduce) {
-    if (reduce.getSrcs().size() != 1 || reduce.getResults().size() != 1)
-      return;
-    auto source =
-        dyn_cast<RankedTensorType>(reduce.getSrcs().front().getType());
-    if (!source || !source.hasStaticShape())
-      return;
-    Type result = reduce.getResults().front().getType();
-    // Before IAT, norm reductions are rank-1 to scalar along their only
-    // dimension. After IAT, the added lane is retained and the same semantic
-    // reduction is rank-2 to rank-1 along dimension one. Both forms are
-    // structural contracts; no entry-function spelling participates here.
-    if (source.getRank() == 1 && reduce.getAxis() == 0 &&
-        !isa<RankedTensorType>(result)) {
-      matched = true;
-      return;
-    }
-    auto rankedResult = dyn_cast<RankedTensorType>(result);
-    if (source.getRank() == 2 && reduce.getAxis() == 0 && rankedResult &&
-        rankedResult.hasStaticShape() && rankedResult.getRank() == 1 &&
-        source.getShape()[1] == rankedResult.getShape()[0]) {
-      // MergeSplit's scalar peak/total reductions are auxiliary. Its rank-2
-      // state reduction is a stronger structural exclusion than those scalar
-      // reductions are an inclusion for PTSM.
-      hasMergeReduction = true;
-      return;
-    }
-    if (source.getRank() == 2 && reduce.getAxis() == 1 && rankedResult &&
-        rankedResult.hasStaticShape() && rankedResult.getRank() == 1 &&
-        source.getShape()[0] == rankedResult.getShape()[0])
-      matched = true;
-  });
-  return matched && !hasMergeReduction;
-}
-
-std::optional<ProgramGridSpecialization>
-getGridSpecialization(ModuleOp module, triton::FuncOp function) {
-  auto moduleSpecialization = parseProgramGridSpecialization(
-      module->getAttr(kProgramGridSpecializationAttr));
-  auto functionSpecialization = parseProgramGridSpecialization(
-      function->getAttr(kProgramGridSpecializationAttr));
-  if (failed(moduleSpecialization) || failed(functionSpecialization) ||
-      moduleSpecialization->grid != functionSpecialization->grid ||
-      moduleSpecialization->ruleMask != functionSpecialization->ruleMask)
-    return std::nullopt;
-  return *moduleSpecialization;
-}
-
-bool isPTSMEnabled(const ProgramGridSpecialization &specialization) {
-  return (specialization.ruleMask &
-          getGraphOptimizationRuleMask(
-              GraphOptimizationRuleId::PersistentTaskStripMining)) != 0;
+bool hasPersistentRowReductionForm(triton::FuncOp function,
+                                   IndependentRowReductionKind expected) {
+  return classifyIndependentRowReduction(function) == expected;
 }
 
 // Stores must be non-overlapping and must not read an unknown/aliased output
@@ -249,11 +186,14 @@ bool hasDisjointWriteReadRoots(
 std::optional<ProgramGridTransformContract>
 getComposableLaunchContract(ModuleOp module) {
   Attribute attribute = module->getAttr(kProgramGridTransformsAttr);
-  if (!attribute)
-    return ProgramGridTransformContract{};
+  if (!attribute) {
+    ProgramGridTransformContract contract;
+    contract.dynamicOriginalGrid = true;
+    return contract;
+  }
   FailureOr<ProgramGridTransformContract> parsed =
       parseProgramGridTransformContract(attribute);
-  if (failed(parsed))
+  if (failed(parsed) || !parsed->dynamicOriginalGrid)
     return std::nullopt;
   for (const ProgramGridTransform &transform : parsed->transforms) {
     // PTSM owns the token axis and is the sole publisher of persistent
@@ -269,9 +209,7 @@ CandidateCost
 buildResourceCandidate(const PTSMCandidate &candidate,
                        const ProgramAxisDependence &dependence,
                        const LiveByteEstimate &baselineLiveBytes,
-                       const LiveByteEstimate *finalLiveBytes,
-                       const ProgramMappingLaunchProjection &before,
-                       const ProgramMappingLaunchProjection &after) {
+                       const LiveByteEstimate *finalLiveBytes) {
   CandidateCost cost;
   cost.plan.tensorizeFactor = 1;
   cost.plan.blockT = candidate.blockT;
@@ -279,24 +217,12 @@ buildResourceCandidate(const PTSMCandidate &candidate,
   cost.plan.stableId = (llvm::Twine("persistent-task-strip-mining.b") +
                         llvm::Twine(candidate.blockT))
                            .str();
-  cost.logicalTasksBefore = before.logicalPrograms;
-  cost.logicalTasksAfter = after.logicalPrograms;
-  cost.actualProgramsBefore = before.physicalPrograms;
-  cost.actualProgramsAfter = after.physicalPrograms;
-  cost.physicalWavesBefore = before.physicalWaves;
-  cost.physicalWavesAfter = after.physicalWaves;
   cost.launchesBefore = 1;
   cost.launchesAfter = 1;
   cost.storeCountBefore = dependence.stores.size();
   cost.storeCountAfter = dependence.stores.size();
   cost.addressCalculationsBefore = dependence.dependenceClosure.size();
   cost.addressCalculationsAfter = dependence.dependenceClosure.size();
-  cost.workPerProgramBefore = cost.physicalWavesBefore;
-  cost.workPerProgramAfter = cost.physicalWavesAfter;
-  cost.persistentLoopTripsBefore = cost.physicalWavesBefore;
-  cost.persistentLoopTripsAfter = cost.physicalWavesAfter;
-  cost.legacyAutoMapBefore = before.legacyAutoMap;
-  cost.legacyAutoMapAfter = after.legacyAutoMap;
   cost.persistent = true;
 
   if (!baselineLiveBytes.known || !finalLiveBytes || !finalLiveBytes->known) {
@@ -324,23 +250,27 @@ analyzeCandidate(GraphOptimizationContext &context, bool emitRejectRemark,
                  bool deferIntermediateResourceRejection = false) {
   triton::FuncOp function = context.getFunction();
   ModuleOp module = function->getParentOfType<ModuleOp>();
+  const IndependentRowReductionKind reductionKind =
+      classifyIndependentRowReduction(function);
   if (!module || module->hasAttr(kPersistentTaskStripMiningMarkerAttr) ||
       !isPublicEntry(function) || !isOnlyPublicEntry(module, function) ||
-      !hasPersistentNormReductionForm(function) || !hasVoidReturn(function) ||
+      reductionKind == IndependentRowReductionKind::Other ||
+      !hasVoidReturn(function) ||
       hasDirectCall(function) || hasDisallowedEffectOrControlFlow(function))
     return std::nullopt;
 
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(module, function);
-  if (!specialization || !isPTSMEnabled(*specialization))
-    return std::nullopt;
   std::optional<ProgramGridTransformContract> launchContract =
       getComposableLaunchContract(module);
   if (!launchContract)
     return std::nullopt;
-
-  const int64_t logicalTokens = specialization->grid[kTokenAxis];
-  if (logicalTokens < 1)
+  const bool hasIAT = launchContract->transforms.size() == 1;
+  if (launchContract->transforms.size() > 1 ||
+      (hasIAT && reductionKind != IndependentRowReductionKind::SingleMoment) ||
+      (!hasIAT && reductionKind != IndependentRowReductionKind::TwoMoment))
+    return std::nullopt;
+  const unsigned expectedBlockT =
+      hasIAT ? kSingleMomentBlockT : kTwoMomentBlockT;
+  if (requestedBlockT && *requestedBlockT != expectedBlockT)
     return std::nullopt;
   std::optional<triton::GetProgramIdOp> tokenPid =
       findOnlyProgramId(function, kTokenAxis);
@@ -349,105 +279,30 @@ analyzeCandidate(GraphOptimizationContext &context, bool emitRejectRemark,
 
   const ProgramAxisDependence &dependence =
       context.getProgramAxisDependenceAnalysis().get(kTokenAxis);
-  if (!dependence.isIndependentAxisTransformCandidate() ||
+  if (!dependence.isProgramMappingTransformCandidate() ||
       !hasDisjointWriteReadRoots(function, dependence,
                                  context.getEntryArgPointerAliasAnalysis()))
     return std::nullopt;
 
   const LiveByteEstimate &liveBytes =
       context.getResourceCostAnalysis().getLiveByteEstimate();
-  const ResourceSnapshot &resources =
-      context.getResourceCostAnalysis().getResourceSnapshot();
-  std::optional<ProgramMappingLaunchProjection> beforeProjection =
-      projectProgramMappingLaunch(*specialization, launchContract->transforms,
-                                  resources);
-  if (!beforeProjection)
-    return std::nullopt;
-  uint64_t otherAxisPrograms = 0;
-  if (!checkedMul(beforeProjection->logicalGrid[1],
-                  beforeProjection->logicalGrid[2], otherAxisPrograms))
-    return std::nullopt;
-  SmallVector<CandidateEvaluation, kBlockTCandidates.size()> evaluations;
-  for (unsigned blockT : kBlockTCandidates) {
-    if (requestedBlockT && blockT != *requestedBlockT)
-      continue;
-    ProgramGridTransformContract finalContract = *launchContract;
-    finalContract.transforms.push_back(ProgramGridTransform{
-        static_cast<int32_t>(finalContract.transforms.size()), kTokenAxis,
-        static_cast<int64_t>(blockT), logicalTokens,
-        /*persistentCoverage=*/true,
-        /*gridStrideAbiVerified=*/true});
-    std::optional<ProgramMappingLaunchProjection> afterProjection =
-        projectProgramMappingLaunch(*specialization, finalContract.transforms,
-                                    resources);
-    if (!afterProjection || afterProjection->logicalGrid[kTokenAxis] == 0)
-      continue;
-    const uint64_t logicalTiles = afterProjection->logicalGrid[kTokenAxis];
-
-    PTSMCandidate prototype;
-    prototype.function = function;
-    prototype.anchor = tokenPid->getOperation();
-    prototype.logicalTokens = logicalTokens;
-    prototype.logicalTiles = logicalTiles;
-    prototype.otherAxisPrograms = otherAxisPrograms;
-    prototype.blockT = blockT;
-    prototype.existingTransformCount = launchContract->transforms.size();
-    std::optional<LiveByteEstimate> finalLiveBytes =
-        estimateFinalPersistentPeak(function, prototype);
-    CandidateEvaluation evaluation = context.getResourceCostAnalysis().evaluate(
-        buildResourceCandidate(prototype, dependence, liveBytes,
-                               finalLiveBytes ? &*finalLiveBytes : nullptr,
-                               *beforeProjection, *afterProjection));
-    if (emitRejectRemark)
-      emitCandidateRemark(tokenPid->getOperation(), evaluation);
-    evaluations.push_back(std::move(evaluation));
-  }
-  if (evaluations.empty())
-    return std::nullopt;
-
-  sortCandidateEvaluations(evaluations);
-  const CandidateEvaluation *selected = nullptr;
-  for (const CandidateEvaluation &evaluation : evaluations) {
-    const bool mayDeferResourceRejection =
-        requestedBlockT && deferIntermediateResourceRejection;
-    if ((!evaluation.accepted && !mayDeferResourceRejection) ||
-        (!requestedBlockT && evaluation.benefitScore <= 0))
-      continue;
-    // Final legality comes first. Among legal plans the production order is
-    // fewer persistent waves, then less repeated token-only work, then the
-    // normal deterministic resource score/tie break.
-    if (requestedBlockT) {
-      selected = &evaluation;
-      break;
-    }
-    if (!selected ||
-        evaluation.persistentLoopTripsAfter <
-            selected->persistentLoopTripsAfter ||
-        (evaluation.persistentLoopTripsAfter ==
-             selected->persistentLoopTripsAfter &&
-         evaluation.tokenOnlyRepeatedBytesAfter <
-             selected->tokenOnlyRepeatedBytesAfter) ||
-        (evaluation.persistentLoopTripsAfter ==
-             selected->persistentLoopTripsAfter &&
-         evaluation.tokenOnlyRepeatedBytesAfter ==
-             selected->tokenOnlyRepeatedBytesAfter &&
-         evaluation.benefitScore > selected->benefitScore))
-      selected = &evaluation;
-  }
-  if (!selected)
-    return std::nullopt;
-
   PTSMCandidate candidate;
   candidate.function = function;
   candidate.anchor = tokenPid->getOperation();
-  candidate.logicalTokens = logicalTokens;
-  candidate.blockT = static_cast<unsigned>(selected->candidate.plan.blockT);
-  candidate.logicalTiles =
-      static_cast<uint64_t>(logicalTokens) / candidate.blockT +
-      (static_cast<uint64_t>(logicalTokens) % candidate.blockT != 0);
-  candidate.otherAxisPrograms = otherAxisPrograms;
+  candidate.blockT = expectedBlockT;
   candidate.existingTransformCount = launchContract->transforms.size();
-  candidate.evaluation = *selected;
+  candidate.reductionKind = reductionKind;
+  std::optional<LiveByteEstimate> finalLiveBytes =
+      estimateFinalPersistentPeak(function, candidate);
+  candidate.evaluation = context.getResourceCostAnalysis().evaluate(
+      buildResourceCandidate(candidate, dependence, liveBytes,
+                             finalLiveBytes ? &*finalLiveBytes : nullptr));
+  const bool mayDeferResourceRejection =
+      requestedBlockT && deferIntermediateResourceRejection;
+  if (!candidate.evaluation.accepted && !mayDeferResourceRejection)
+    return std::nullopt;
+  if (emitRejectRemark)
+    emitCandidateRemark(tokenPid->getOperation(), candidate.evaluation);
   return candidate;
 }
 
@@ -471,7 +326,7 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
   ProgramGridTransformContract contract = *existing;
   contract.transforms.push_back(ProgramGridTransform{
       static_cast<int32_t>(contract.transforms.size()), kTokenAxis,
-      static_cast<int64_t>(candidate.blockT), candidate.logicalTokens,
+      static_cast<int64_t>(candidate.blockT), /*logicalExtent=*/0,
       /*persistentCoverage=*/true,
       /*gridStrideAbiVerified=*/true});
   if (failed(setProgramGridTransformContract(module, contract)))
@@ -483,11 +338,9 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
 
 bool sameCandidate(const PTSMCandidate &lhs, const PTSMCandidate &rhs) {
   return lhs.function == rhs.function &&
-         lhs.logicalTokens == rhs.logicalTokens &&
-         lhs.logicalTiles == rhs.logicalTiles &&
-         lhs.otherAxisPrograms == rhs.otherAxisPrograms &&
          lhs.blockT == rhs.blockT &&
-         lhs.existingTransformCount == rhs.existingTransformCount;
+         lhs.existingTransformCount == rhs.existingTransformCount &&
+         lhs.reductionKind == rhs.reductionKind;
 }
 
 std::optional<RankedTensorType> getBatchedTensorType(Type originalType,
@@ -613,8 +466,16 @@ Value alignTensor(IRRewriter &rewriter, Location loc, Value source,
 LogicalResult
 materializePersistentTaskStripMining(triton::FuncOp function,
                                      const PTSMCandidate &candidate) {
-  if (!hasVoidReturn(function) || !hasPersistentNormReductionForm(function) ||
-      hasDisallowedEffectOrControlFlow(function))
+  if (!hasVoidReturn(function) ||
+      !hasPersistentRowReductionForm(function, candidate.reductionKind) ||
+      hasDisallowedEffectOrControlFlow(function) ||
+      failed(addProgramGridHiddenExtentArguments(function)))
+    return failure();
+  Value originalTokenExtent =
+      function.getArgument(function.getNumArguments() - 2);
+  auto originalTokenExtentType =
+      dyn_cast<IntegerType>(originalTokenExtent.getType());
+  if (!originalTokenExtentType || originalTokenExtentType.getWidth() != 32)
     return failure();
   std::optional<triton::GetProgramIdOp> tokenPid =
       findOnlyProgramId(function, kTokenAxis);
@@ -623,7 +484,7 @@ materializePersistentTaskStripMining(triton::FuncOp function,
 
   ProgramAxisDependenceAnalysis axisAnalysis(function);
   const ProgramAxisDependence &dependence = axisAnalysis.get(kTokenAxis);
-  if (!dependence.isIndependentAxisTransformCandidate())
+  if (!dependence.isProgramMappingTransformCandidate())
     return failure();
   DenseSet<Operation *> tokenClosure;
   for (Operation *operation : dependence.dependenceClosure)
@@ -678,7 +539,7 @@ materializePersistentTaskStripMining(triton::FuncOp function,
   if (!physicalPid)
     return failure();
   auto pidType = dyn_cast<IntegerType>(physicalPid.getType());
-  if (!pidType)
+  if (!pidType || pidType.getWidth() != 32)
     return failure();
 
   const Location loc = tokenPid->getLoc();
@@ -686,19 +547,31 @@ materializePersistentTaskStripMining(triton::FuncOp function,
       rewriter.create<triton::GetNumProgramsOp>(loc, triton::ProgramIDDim::X);
   if (actualPrograms.getType() != physicalPid.getType())
     return failure();
-  Value logicalTiles = rewriter.create<arith::ConstantIntOp>(
-      loc, static_cast<int64_t>(candidate.logicalTiles), pidType.getWidth());
-  auto outerLoop = rewriter.create<scf::ForOp>(loc, physicalPid, logicalTiles,
-                                               actualPrograms);
+  Type i64 = rewriter.getI64Type();
+  Value originalTokenExtentI64 = rewriter.create<arith::ExtUIOp>(
+      loc, i64, originalTokenExtent);
+  Value blockT64 = rewriter.create<arith::ConstantIntOp>(
+      loc, candidate.blockT, 64);
+  Value ceilNumerator = rewriter.create<arith::AddIOp>(
+      loc, originalTokenExtentI64,
+      rewriter.create<arith::ConstantIntOp>(loc, candidate.blockT - 1, 64));
+  Value logicalTiles =
+      rewriter.create<arith::DivUIOp>(loc, ceilNumerator, blockT64);
+  Value physicalPidI64 =
+      rewriter.create<arith::ExtUIOp>(loc, i64, physicalPid);
+  Value actualProgramsI64 =
+      rewriter.create<arith::ExtUIOp>(loc, i64, actualPrograms);
+  auto outerLoop = rewriter.create<scf::ForOp>(loc, physicalPidI64,
+                                               logicalTiles, actualProgramsI64);
   Block *loopBody = outerLoop.getBody();
   if (!loopBody || !loopBody->mightHaveTerminator())
     return failure();
   rewriter.setInsertionPointToStart(loopBody);
 
-  Value blockT = rewriter.create<arith::ConstantIntOp>(loc, candidate.blockT,
-                                                       pidType.getWidth());
+  Value tokenBaseI64 = rewriter.create<arith::MulIOp>(
+      loc, outerLoop.getInductionVar(), blockT64);
   Value tokenBase =
-      rewriter.create<arith::MulIOp>(loc, outerLoop.getInductionVar(), blockT);
+      rewriter.create<arith::TruncIOp>(loc, pidType, tokenBaseI64);
   auto tokenType = RankedTensorType::get(
       {static_cast<int64_t>(candidate.blockT)}, physicalPid.getType());
   Value tokenRange = rewriter.create<triton::MakeRangeOp>(
@@ -707,12 +580,14 @@ materializePersistentTaskStripMining(triton::FuncOp function,
       rewriter.create<triton::SplatOp>(loc, tokenType, tokenBase);
   Value logicalTokens =
       rewriter.create<arith::AddIOp>(loc, tokenBaseSplat, tokenRange);
-  Value tokenExtent = rewriter.create<arith::ConstantIntOp>(
-      loc, candidate.logicalTokens, pidType.getWidth());
-  Value tokenExtentSplat =
-      rewriter.create<triton::SplatOp>(loc, tokenType, tokenExtent);
+  auto tokenI64Type =
+      RankedTensorType::get({static_cast<int64_t>(candidate.blockT)}, i64);
+  Value logicalTokensI64 = rewriter.create<arith::ExtUIOp>(
+      loc, tokenI64Type, logicalTokens);
+  Value tokenExtentSplat = rewriter.create<triton::SplatOp>(
+      loc, tokenI64Type, originalTokenExtentI64);
   Value tokenTailMask = rewriter.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::slt, logicalTokens, tokenExtentSplat);
+      loc, arith::CmpIPredicate::ult, logicalTokensI64, tokenExtentSplat);
   values[tokenPid->getResult()] = {logicalTokens, true};
 
   auto copyMissingAttrs = [](Operation *from, Operation *to) {
@@ -1022,10 +897,6 @@ public:
       return failure();
 
     ModuleOp sandbox = ModuleOp::create(candidate.function.getLoc());
-    Attribute specialization = module->getAttr(kProgramGridSpecializationAttr);
-    if (!specialization)
-      return failure();
-    sandbox->setAttr(kProgramGridSpecializationAttr, specialization);
     if (Attribute oldContract = module->getAttr(kProgramGridTransformsAttr))
       sandbox->setAttr(kProgramGridTransformsAttr, oldContract);
     sandbox.getBody()->push_back(candidate.function->clone());
@@ -1034,9 +905,14 @@ public:
                                sandbox, clonedFunction, candidate)))
       return failure();
 
+    Attribute transforms = sandbox->getAttr(kProgramGridTransformsAttr);
+    if (!transforms || failed(parseProgramGridTransformContract(transforms)) ||
+        !hasProgramGridHiddenExtentArguments(clonedFunction))
+      return failure();
+    candidate.function.setFunctionType(clonedFunction.getFunctionType());
     candidate.function->getRegion(0).takeBody(clonedFunction->getRegion(0));
     module->setAttr(kProgramGridTransformsAttr,
-                    sandbox->getAttr(kProgramGridTransformsAttr));
+                    transforms);
     module->setAttr(kPersistentTaskStripMiningMarkerAttr,
                     sandbox->getAttr(kPersistentTaskStripMiningMarkerAttr));
     return success();
@@ -1072,11 +948,8 @@ public:
                << "[" DEBUG_TYPE "] matched graph optimization rule "
                << static_cast<unsigned>(getId()) << " ("
                << getGraphOptimizationRuleName(getId()) << ") in @"
-               << candidate->function.getName() << ": tokens="
-               << candidate->logicalTokens << " block_t=" << candidate->blockT
-               << " logical_tiles=" << candidate->logicalTiles
-               << " actual-programs="
-               << candidate->evaluation.candidate.actualProgramsAfter << "\n");
+               << candidate->function.getName() << ": dynamic-token-extent"
+               << " block_t=" << candidate->blockT << "\n");
     plans.push_back(std::make_unique<PersistentTaskStripMiningPlan>(
         std::move(*candidate), context.getEpoch()));
     return success();

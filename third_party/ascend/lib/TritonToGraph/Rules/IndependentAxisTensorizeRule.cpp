@@ -22,8 +22,8 @@
 
 #include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
+#include "TritonToGraph/IndependentRowReductionAnalysis.h"
 #include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
-#include "TritonToGraph/ProgramGridSpecialization.h"
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
 
@@ -95,6 +95,7 @@ constexpr uint64_t kMergeSplitMaxTensorizedPlanes = 16;
 // local dataflow before changing any tensor type.
 constexpr int64_t kMergeSplitD192SourceTile = 256;
 constexpr int64_t kMergeSplitD192TargetTile = 192;
+constexpr unsigned kDynamicSingleMomentBlockT = 4;
 
 enum class TensorizeForm : uint8_t {
   MergeSplit,
@@ -119,7 +120,6 @@ struct IATCandidate {
   // [F, D].  A single global insertion index cannot represent both shapes.
   int64_t splitExtent = 0;
   int64_t dimExtent = 0;
-  int64_t logicalExtent = 0;
   unsigned factor = 1;
   // This is set only after the static small-grid checks for MergeSplit F16/F32
   // succeed. It is consumed by CandidateCost, not by any global graph option.
@@ -164,40 +164,8 @@ struct MappedValue {
   int64_t laneAxis = 0;
 };
 
-bool multiplyNoOverflow(uint64_t lhs, uint64_t rhs, uint64_t &result) {
-  return !__builtin_mul_overflow(lhs, rhs, &result);
-}
 
-bool getGridTaskProduct(const std::array<int64_t, 3> &grid, uint64_t &product) {
-  product = 1;
-  for (int64_t extent : grid) {
-    if (extent < 1 ||
-        !multiplyNoOverflow(product, static_cast<uint64_t>(extent), product))
-      return false;
-  }
-  return true;
-}
 
-bool isMergeSplitLargeFactor(unsigned factor) {
-  return factor == 16 || factor == 32;
-}
-
-// This is a performance-selection gate for the statically specialized
-// MergeSplit primary form, not a generic nonpersistent legality rule. A
-// nonpersistent transform must already prove that it launches every logical
-// program; only then may its complete small grid occupy fewer than all cores.
-bool hasMergeSplitSmallGridEligibility(
-    TensorizeForm form, const TensorizeReductionShape &reduction,
-    unsigned factor, const ProgramMappingLaunchProjection &after,
-    const ResourceSnapshot &resources) {
-  return form == TensorizeForm::MergeSplit && isMergeSplitLargeFactor(factor) &&
-         reduction.splitExtent > 0 && reduction.dimExtent > 0 &&
-         resources.deviceCoreCount != 0 && !after.persistentCoverage &&
-         !after.legacyAutoMap && after.logicalPrograms != 0 &&
-         after.physicalPrograms == after.logicalPrograms &&
-         after.physicalWaves == 1 &&
-         after.logicalPrograms <= resources.deviceCoreCount;
-}
 
 std::optional<triton::GetProgramIdOp> findOnlyProgramId(triton::FuncOp function,
                                                         int32_t axis) {
@@ -270,56 +238,6 @@ bool hasSupportedControlFlow(triton::FuncOp function) {
   return true;
 }
 
-std::optional<ProgramGridSpecialization>
-getGridSpecialization(triton::FuncOp function) {
-  Attribute attribute =
-      function->getAttr(mlir::triton::cfg::kProgramGridSpecializationAttr);
-  if (!attribute) {
-    if (ModuleOp module = function->getParentOfType<ModuleOp>())
-      attribute =
-          module->getAttr(mlir::triton::cfg::kProgramGridSpecializationAttr);
-  }
-  if (!attribute)
-    return std::nullopt;
-  FailureOr<ProgramGridSpecialization> parsed =
-      parseProgramGridSpecialization(attribute);
-  if (failed(parsed))
-    return std::nullopt;
-  return *parsed;
-}
-
-bool isIATRuleEnabled(const ProgramGridSpecialization &specialization) {
-  return (specialization.ruleMask &
-          getGraphOptimizationRuleMask(
-              GraphOptimizationRuleId::IndependentAxisTensorize)) != 0;
-}
-
-bool isPTSMRuleEnabled(const ProgramGridSpecialization &specialization) {
-  return (specialization.ruleMask &
-          getGraphOptimizationRuleMask(
-              GraphOptimizationRuleId::PersistentTaskStripMining)) != 0;
-}
-
-// The direct IAT launch limit is 32768 logical programs.  For a Norm+RoPE
-// chain we may exceed it transiently only when a later PTSM block candidate
-// can bring the final, launcher-visible logical grid back into that validated
-// range.  Materialization is still revalidated transactionally below.
-bool canPotentiallyFitPersistentNormLaunch(
-    const std::array<int64_t, 3> &iatGrid) {
-  constexpr uint64_t kNormRopeMaxTensorizedLaunchPrograms = 32768;
-  if (iatGrid[0] < 1 || iatGrid[1] < 1 || iatGrid[2] < 1)
-    return false;
-  for (unsigned blockT : kNormPersistentBlockTCandidates) {
-    std::array<int64_t, 3> finalGrid = iatGrid;
-    finalGrid[0] = finalGrid[0] / static_cast<int64_t>(blockT) +
-                   (finalGrid[0] % static_cast<int64_t>(blockT) != 0);
-    uint64_t tasks = 0;
-    if (getGridTaskProduct(finalGrid, tasks) &&
-        tasks <= kNormRopeMaxTensorizedLaunchPrograms)
-      return true;
-  }
-  return false;
-}
 
 bool hasConflictingLaunchContract(ModuleOp module) {
   return module->hasAttr(kIndependentAxisTensorizeMarkerAttr) ||
@@ -352,276 +270,6 @@ bool hasDisjointWriteReadRoots(
   return true;
 }
 
-CandidateCost
-buildResourceCandidate(const IATCandidate &candidate,
-                       const ProgramAxisDependence &dependence,
-                       const LiveByteEstimate &liveBytes,
-                       const ProgramMappingLaunchProjection &before,
-                       const ProgramMappingLaunchProjection &after,
-                       const LiveByteEstimate *finalLiveBytes = nullptr) {
-  CandidateCost cost;
-  cost.plan.tensorizeFactor = candidate.factor;
-  cost.plan.blockT = 1;
-  cost.plan.staticAxisFusionFactor = 1;
-  cost.parallelismPolicy =
-      candidate.usesMergeSplitSubCorePolicy
-          ? ParallelismPolicy::MergeSplitSmallGridAllowSubCore
-          : ParallelismPolicy::DefaultMinProgramsPerCore;
-  const llvm::StringRef stablePrefix =
-      candidate.form == TensorizeForm::MergeSplit
-          ? (candidate.usesMergeSplitSubCorePolicy ? "iat.merge.large"
-                                                   : "iat.merge")
-          : "iat.norm";
-  cost.plan.stableId =
-      (llvm::Twine(stablePrefix) + ".f" + llvm::Twine(candidate.factor) +
-       (candidate.usesMergeSplitD192Tile ? ".d192" : ""))
-          .str();
-  cost.logicalTasksBefore = before.logicalPrograms;
-  cost.logicalTasksAfter = after.logicalPrograms;
-  cost.actualProgramsBefore = before.physicalPrograms;
-  cost.actualProgramsAfter = after.physicalPrograms;
-  cost.physicalWavesBefore = before.physicalWaves;
-  cost.physicalWavesAfter = after.physicalWaves;
-  cost.launchesBefore = 1;
-  cost.launchesAfter = 1;
-  cost.storeCountBefore = dependence.stores.size();
-  cost.storeCountAfter = dependence.stores.size();
-  cost.addressCalculationsBefore = dependence.dependenceClosure.size();
-  cost.addressCalculationsAfter = dependence.dependenceClosure.size();
-  cost.workPerProgramBefore = before.physicalWaves;
-  cost.workPerProgramAfter = after.physicalWaves;
-  cost.legacyAutoMapBefore = before.legacyAutoMap;
-  cost.legacyAutoMapAfter = after.legacyAutoMap;
-  cost.persistent = false;
-
-  const LiveByteEstimate &candidateLiveBytes =
-      finalLiveBytes ? *finalLiveBytes : liveBytes;
-  if (!liveBytes.known || !candidateLiveBytes.known) {
-    const ResourceCostRejectReason reason =
-        !liveBytes.known ? liveBytes.reason : candidateLiveBytes.reason;
-    cost.hasDynamicShape = reason == ResourceCostRejectReason::DynamicShape;
-    cost.hasUnknownResource = !cost.hasDynamicShape;
-    return cost;
-  }
-
-  cost.hasPeakLiveBytes = true;
-  cost.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
-  if (finalLiveBytes) {
-    cost.estimatedPeakLiveBytes = finalLiveBytes->peakLiveBytes;
-    return cost;
-  }
-
-  uint64_t estimated = 0;
-  if (!multiplyNoOverflow(liveBytes.peakLiveBytes, candidate.factor,
-                          estimated)) {
-    cost.hasUnknownResource = true;
-    return cost;
-  }
-  cost.estimatedPeakLiveBytes = estimated;
-  return cost;
-}
-
-std::optional<IATCandidate>
-analyzeCandidate(GraphOptimizationContext &context, bool emitRejectRemark,
-                 std::optional<unsigned> requestedFactor = std::nullopt,
-                 IATCandidateScope scope = IATCandidateScope::Default) {
-  triton::FuncOp function = context.getFunction();
-  ModuleOp module = function->getParentOfType<ModuleOp>();
-  if (!module || hasConflictingLaunchContract(module) ||
-      !hasSupportedControlFlow(function))
-    return std::nullopt;
-
-  std::optional<TensorizeFormMatch> formMatch = classifyTensorizeForm(function);
-  if (!formMatch)
-    return std::nullopt;
-  const TensorizeForm form = formMatch->form;
-  const TensorizeReductionShape &reductionShape = formMatch->reduction;
-  if (scope == IATCandidateScope::MergeSplitLarge &&
-      form != TensorizeForm::MergeSplit)
-    return std::nullopt;
-
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(function);
-  if (!specialization || !isIATRuleEnabled(*specialization))
-    return std::nullopt;
-
-  constexpr int32_t kTargetAxis = 1;
-  // The Ascend Norm+RoPE IAT kernel has a bounded validated logical-launch
-  // range.  A standalone transformed grid above this boundary reaches a
-  // vector-core runtime failure (the first observed failing shape is
-  // 32768 x 16 -> 32768 x 2 = 65536 logical programs).  The only exception is
-  // a transactionally materialized IAT->PTSM chain whose final launcher grid
-  // is back inside the same bound.
-  constexpr uint64_t kNormRopeMaxTensorizedLaunchPrograms = 32768;
-  const int64_t logicalExtent = specialization->grid[kTargetAxis];
-  if (logicalExtent < 1)
-    return std::nullopt;
-  // The norm K form has a single head and must remain a stable no-op. Merge
-  // intentionally still permits H=1 so tail-mask tests cover F-1.
-  if (form == TensorizeForm::NormRope && logicalExtent == 1)
-    return std::nullopt;
-
-  const ProgramAxisDependence &dependence =
-      context.getProgramAxisDependenceAnalysis().get(kTargetAxis);
-  if (!dependence.isIndependentAxisTransformCandidate() ||
-      !hasDisjointWriteReadRoots(dependence,
-                                 context.getEntryArgPointerAliasAnalysis()))
-    return std::nullopt;
-  std::optional<triton::GetProgramIdOp> targetPid =
-      findOnlyProgramId(function, kTargetAxis);
-  if (!targetPid)
-    return std::nullopt;
-  // Large MergeSplit candidates deliberately preserve the token PID as the
-  // outer address dimension. Do not infer a one-PID form from an arbitrary
-  // structural merge reduction; the established regular IAT path remains
-  // unchanged for its broader regression coverage.
-  if (scope == IATCandidateScope::MergeSplitLarge &&
-      !findOnlyProgramId(function, /*axis=*/0))
-    return std::nullopt;
-
-  const LiveByteEstimate &liveBytes =
-      context.getResourceCostAnalysis().getLiveByteEstimate();
-  const ResourceSnapshot &resources =
-      context.getResourceCostAnalysis().getResourceSnapshot();
-  std::optional<ProgramMappingLaunchProjection> beforeProjection =
-      projectProgramMappingLaunch(*specialization, {}, resources);
-  if (!beforeProjection)
-    return std::nullopt;
-  llvm::ArrayRef<unsigned> factors;
-  if (scope == IATCandidateScope::MergeSplitLarge) {
-    factors = llvm::ArrayRef<unsigned>(kMergeLargeTensorizeFactors.data(),
-                                       kMergeLargeTensorizeFactors.size());
-  } else if (form == TensorizeForm::MergeSplit) {
-    factors = llvm::ArrayRef<unsigned>(kMergeTensorizeFactors.data(),
-                                       kMergeTensorizeFactors.size());
-  } else if (isPTSMRuleEnabled(*specialization)) {
-    factors = llvm::ArrayRef<unsigned>(kNormTensorizeFactors.data(),
-                                       kNormTensorizeFactors.size());
-  } else {
-    factors = llvm::ArrayRef<unsigned>(kMergeTensorizeFactors.data(),
-                                       kMergeTensorizeFactors.size());
-  }
-  SmallVector<CandidateEvaluation, 4> evaluations;
-  for (unsigned factor : factors) {
-    if (requestedFactor && factor != *requestedFactor)
-      continue;
-    std::array<int64_t, 3> transformedGrid = specialization->grid;
-    transformedGrid[kTargetAxis] =
-        logicalExtent / factor + (logicalExtent % factor != 0);
-    ProgramGridTransform transform{0,
-                                   kTargetAxis,
-                                   static_cast<int64_t>(factor),
-                                   logicalExtent,
-                                   /*persistentCoverage=*/false,
-                                   /*gridStrideAbiVerified=*/false};
-    std::optional<ProgramMappingLaunchProjection> afterProjection =
-        projectProgramMappingLaunch(*specialization, {transform}, resources);
-    if (!afterProjection)
-      continue;
-    const bool usesMergeSplitSubCorePolicy =
-        scope == IATCandidateScope::MergeSplitLarge &&
-        hasMergeSplitSmallGridEligibility(form, reductionShape, factor,
-                                          *afterProjection, resources);
-    if (scope == IATCandidateScope::MergeSplitLarge &&
-        !usesMergeSplitSubCorePolicy)
-      continue;
-    const uint64_t tasksAfter = afterProjection->logicalPrograms;
-    const bool requiresPersistentChaining =
-        form == TensorizeForm::NormRope && isPTSMRuleEnabled(*specialization);
-    const bool needsPersistentForLaunch =
-        form == TensorizeForm::NormRope &&
-        tasksAfter > kNormRopeMaxTensorizedLaunchPrograms;
-    if (needsPersistentForLaunch &&
-        (!requiresPersistentChaining ||
-         !canPotentiallyFitPersistentNormLaunch(transformedGrid)))
-      continue;
-
-    IATCandidate prototype;
-    prototype.function = function;
-    prototype.anchor = targetPid->getOperation();
-    prototype.form = form;
-    prototype.axis = kTargetAxis;
-    prototype.splitExtent = reductionShape.splitExtent;
-    prototype.dimExtent = reductionShape.dimExtent;
-    prototype.logicalExtent = logicalExtent;
-    prototype.factor = factor;
-    prototype.usesMergeSplitSubCorePolicy = usesMergeSplitSubCorePolicy;
-    prototype.requiresPersistentChaining = requiresPersistentChaining;
-    prototype.resources = resources;
-    evaluations.push_back(context.getResourceCostAnalysis().evaluate(
-        buildResourceCandidate(prototype, dependence, liveBytes,
-                               *beforeProjection, *afterProjection)));
-  }
-  if (evaluations.empty())
-    return std::nullopt;
-
-  sortCandidateEvaluations(evaluations);
-  const CandidateEvaluation *selected = nullptr;
-  if (requestedFactor) {
-    for (const CandidateEvaluation &evaluation : evaluations) {
-      if (evaluation.candidate.plan.tensorizeFactor == *requestedFactor) {
-        selected = &evaluation;
-        break;
-      }
-    }
-    if (!selected)
-      return std::nullopt;
-  } else if (!evaluations.front().accepted) {
-    if (emitRejectRemark)
-      emitCandidateRemark(targetPid->getOperation(), evaluations.front());
-    return std::nullopt;
-  } else {
-    selected = &evaluations.front();
-  }
-  if (!requestedFactor && scope == IATCandidateScope::Default &&
-      form == TensorizeForm::MergeSplit) {
-    if (reductionShape.splitExtent <= 0 ||
-        static_cast<uint64_t>(reductionShape.splitExtent) >
-            kMergeSplitMaxTensorizedPlanes)
-      return std::nullopt;
-    const uint64_t maxFactor =
-        kMergeSplitMaxTensorizedPlanes /
-        static_cast<uint64_t>(reductionShape.splitExtent);
-    selected = nullptr;
-    for (const CandidateEvaluation &evaluation : evaluations) {
-      const uint64_t factor = evaluation.candidate.plan.tensorizeFactor;
-      if (!evaluation.accepted || factor == 0 || factor > maxFactor)
-        continue;
-      if (!selected || factor > selected->candidate.plan.tensorizeFactor)
-        selected = &evaluation;
-    }
-    if (!selected)
-      return std::nullopt;
-  }
-
-  IATCandidate candidate;
-  candidate.function = function;
-  candidate.anchor = targetPid->getOperation();
-  candidate.form = form;
-  candidate.axis = kTargetAxis;
-  candidate.splitExtent = reductionShape.splitExtent;
-  candidate.dimExtent = reductionShape.dimExtent;
-  candidate.logicalExtent = logicalExtent;
-  candidate.factor =
-      static_cast<unsigned>(selected->candidate.plan.tensorizeFactor);
-  candidate.usesMergeSplitSubCorePolicy =
-      scope == IATCandidateScope::MergeSplitLarge;
-  candidate.requiresPersistentChaining =
-      form == TensorizeForm::NormRope && isPTSMRuleEnabled(*specialization);
-  candidate.resources = resources;
-  candidate.evaluation = *selected;
-  return candidate;
-}
-
-bool sameCandidate(const IATCandidate &lhs, const IATCandidate &rhs) {
-  return lhs.function == rhs.function && lhs.form == rhs.form &&
-         lhs.axis == rhs.axis && lhs.splitExtent == rhs.splitExtent &&
-         lhs.dimExtent == rhs.dimExtent &&
-         lhs.logicalExtent == rhs.logicalExtent && lhs.factor == rhs.factor &&
-         lhs.usesMergeSplitSubCorePolicy == rhs.usesMergeSplitSubCorePolicy &&
-         lhs.usesMergeSplitD192Tile == rhs.usesMergeSplitD192Tile &&
-         lhs.requiresPersistentChaining == rhs.requiresPersistentChaining;
-}
 
 // Keep the lane next to the logical dimension which carries the data, rather
 // than applying a fixed insertion point to every value.  In merge, S-shaped
@@ -698,6 +346,12 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
                                IRRewriter &rewriter) {
   if (!hasSupportedControlFlow(function))
     return false;
+  if (failed(addProgramGridHiddenExtentArguments(function)))
+    return false;
+  Value originalExtent = function.getArgument(function.getNumArguments() - 1);
+  auto originalExtentType = dyn_cast<IntegerType>(originalExtent.getType());
+  if (!originalExtentType || originalExtentType.getWidth() != 32)
+    return false;
   std::optional<triton::GetProgramIdOp> targetPid =
       findOnlyProgramId(function, candidate.axis);
   if (!targetPid)
@@ -705,7 +359,7 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
 
   ProgramAxisDependenceAnalysis analysis(function);
   const ProgramAxisDependence &dependence = analysis.get(candidate.axis);
-  if (!dependence.isIndependentAxisTransformCandidate())
+  if (!dependence.isProgramMappingTransformCandidate())
     return false;
   DenseSet<Operation *> closure;
   for (Operation *operation : dependence.dependenceClosure)
@@ -960,13 +614,17 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
           rewriter.create<triton::SplatOp>(operation->getLoc(), laneType, base);
       Value logicalIds =
           rewriter.create<arith::AddIOp>(operation->getLoc(), baseSplat, lane);
-      Value extent = rewriter.create<arith::ConstantIntOp>(
-          operation->getLoc(), candidate.logicalExtent, integer.getWidth());
-      Value extentSplat = rewriter.create<triton::SplatOp>(operation->getLoc(),
-                                                           laneType, extent);
+      Type i64 = rewriter.getI64Type();
+      auto laneI64Type = RankedTensorType::get({candidate.factor}, i64);
+      Value logicalIdsI64 = rewriter.create<arith::ExtUIOp>(
+          operation->getLoc(), laneI64Type, logicalIds);
+      Value extentI64 = rewriter.create<arith::ExtUIOp>(operation->getLoc(),
+                                                        i64, originalExtent);
+      Value extentSplat = rewriter.create<triton::SplatOp>(
+          operation->getLoc(), laneI64Type, extentI64);
       laneMask = rewriter.create<arith::CmpIOp>(operation->getLoc(),
-                                                arith::CmpIPredicate::slt,
-                                                logicalIds, extentSplat);
+                                                arith::CmpIPredicate::ult,
+                                                logicalIdsI64, extentSplat);
       values[operation->getResult(0)] = {logicalIds, true, 0};
       continue;
     }
@@ -1276,40 +934,6 @@ LogicalResult runProgramMappingStructuralCleanup(ModuleOp module) {
   return cleanup.run(module);
 }
 
-bool hasBoundedPersistentNormLaunch(ModuleOp module, triton::FuncOp function) {
-  constexpr uint64_t kNormRopeMaxTensorizedLaunchPrograms = 32768;
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(function);
-  Attribute rawContract = module->getAttr(kProgramGridTransformsAttr);
-  if (!specialization || !rawContract)
-    return false;
-  FailureOr<ProgramGridTransformContract> parsed =
-      parseProgramGridTransformContract(rawContract);
-  if (failed(parsed) || parsed->transforms.size() != 2)
-    return false;
-
-  const ProgramGridTransform &iat = parsed->transforms[0];
-  const ProgramGridTransform &ptsm = parsed->transforms[1];
-  if (iat.order != 0 || iat.axis != 1 || iat.factor < 2 ||
-      iat.logicalExtent != specialization->grid[1] || iat.persistentCoverage ||
-      iat.gridStrideAbiVerified || ptsm.order != 1 || ptsm.axis != 0 ||
-      ptsm.factor < 2 || ptsm.logicalExtent != specialization->grid[0] ||
-      !ptsm.persistentCoverage || !ptsm.gridStrideAbiVerified)
-    return false;
-
-  std::array<int64_t, 3> finalGrid = specialization->grid;
-  for (const ProgramGridTransform &transform : parsed->transforms) {
-    const int32_t axis = transform.axis;
-    if (axis < 0 || axis >= static_cast<int32_t>(finalGrid.size()) ||
-        finalGrid[axis] < 1 || transform.factor < 2)
-      return false;
-    finalGrid[axis] = finalGrid[axis] / transform.factor +
-                      (finalGrid[axis] % transform.factor != 0);
-  }
-  uint64_t finalTasks = 0;
-  return getGridTaskProduct(finalGrid, finalTasks) &&
-         finalTasks <= kNormRopeMaxTensorizedLaunchPrograms;
-}
 
 LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
                                                triton::FuncOp function,
@@ -1321,9 +945,10 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
   if (!rebuildTensorizedFunction(function, candidate, rewriter))
     return failure();
   ProgramGridTransformContract contract;
+  contract.dynamicOriginalGrid = true;
   contract.transforms.push_back(ProgramGridTransform{
       0, candidate.axis, static_cast<int64_t>(candidate.factor),
-      candidate.logicalExtent,
+      /*logicalExtent=*/0,
       /*persistentCoverage=*/false,
       /*gridStrideAbiVerified=*/false});
   if (failed(setProgramGridTransformContract(module, contract)))
@@ -1334,766 +959,87 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
 }
 
 ModuleOp createProgramMappingSandbox(ModuleOp module, triton::FuncOp function) {
+  (void)module;
   ModuleOp sandbox = ModuleOp::create(function.getLoc());
-  if (Attribute specialization =
-          module->getAttr(kProgramGridSpecializationAttr))
-    sandbox->setAttr(kProgramGridSpecializationAttr, specialization);
   sandbox.getBody()->push_back(function->clone());
   return sandbox;
 }
 
-bool hasD192SourceTile(Type type) {
-  auto tensor = dyn_cast<RankedTensorType>(type);
-  if (!tensor)
-    return false;
-  return llvm::any_of(tensor.getShape(), [](int64_t extent) {
-    return extent == kMergeSplitD192SourceTile;
-  });
-}
 
-std::optional<Type> getD192TileType(Type originalType) {
-  auto tensor = dyn_cast<RankedTensorType>(originalType);
-  if (!tensor)
-    return originalType;
-
-  SmallVector<int64_t> shape(tensor.getShape().begin(),
-                             tensor.getShape().end());
-  unsigned sourceTileCount = 0;
-  for (int64_t &extent : shape) {
-    if (extent != kMergeSplitD192SourceTile)
-      continue;
-    extent = kMergeSplitD192TargetTile;
-    ++sourceTileCount;
-  }
-  // A rank-two [256, 256] value has no unambiguous D-axis interpretation in
-  // this narrow rule. Keep the rule fail-closed instead of shrinking both.
-  if (sourceTileCount > 1)
-    return std::nullopt;
-  if (sourceTileCount == 0)
-    return originalType;
-  return RankedTensorType::get(shape, tensor.getElementType());
-}
-
-bool isD192Bound(Value value) {
-  auto constant = value.getDefiningOp<arith::ConstantOp>();
-  if (!constant)
-    return false;
-  auto dense = dyn_cast<DenseElementsAttr>(constant.getValue());
-  if (!dense || !dense.isSplat() || !isa<IntegerType>(dense.getElementType()))
-    return false;
-  auto tensor = dyn_cast<RankedTensorType>(value.getType());
-  return tensor && tensor.getRank() == 1 &&
-         tensor.getShape().front() == kMergeSplitD192SourceTile &&
-         dense.getSplatValue<llvm::APInt>().getSExtValue() ==
-             kMergeSplitD192TargetTile;
-}
-
-std::optional<triton::MakeRangeOp>
-findMergeSplitD192Range(triton::FuncOp function) {
-  std::optional<triton::MakeRangeOp> result;
-  bool ambiguous = false;
-  function.walk([&](triton::MakeRangeOp range) {
-    auto tensor = dyn_cast<RankedTensorType>(range.getType());
-    if (!tensor || tensor.getRank() != 1 ||
-        tensor.getShape().front() != kMergeSplitD192SourceTile ||
-        range.getStart() != 0 || range.getEnd() != kMergeSplitD192SourceTile)
-      return;
-
-    unsigned boundMasks = 0;
-    for (Operation *user : range.getResult().getUsers()) {
-      auto compare = dyn_cast<arith::CmpIOp>(user);
-      if (!compare || compare.getPredicate() != arith::CmpIPredicate::slt ||
-          compare.getLhs() != range.getResult() ||
-          !isD192Bound(compare.getRhs()))
-        continue;
-      ++boundMasks;
-    }
-    if (boundMasks != 1)
-      return;
-    if (result)
-      ambiguous = true;
-    else
-      result = range;
-  });
-  return ambiguous ? std::nullopt : result;
-}
-
-bool operationTouchesD192SourceTile(Operation *operation) {
-  for (Value operand : operation->getOperands())
-    if (hasD192SourceTile(operand.getType()))
-      return true;
-  for (Value result : operation->getResults())
-    if (hasD192SourceTile(result.getType()))
-      return true;
-  return false;
-}
-
-// Rebuild only the closed D256 dataflow rooted at the exact range/mask pair.
-// This is intentionally not a generic shape substitution: any unrelated D256
-// tensor, non-splat constant, control-flow edge, or multi-D256 value rejects
-// the Phase-B tile while leaving the already-valid Phase-A IAT candidate
-// intact.
-bool rebuildMergeSplitD192Function(triton::FuncOp function) {
-  if (!hasSupportedControlFlow(function))
-    return false;
-  std::optional<triton::MakeRangeOp> range = findMergeSplitD192Range(function);
-  if (!range)
-    return false;
-
-  Block &block = function.getBody().front();
-  SmallVector<Operation *> originals;
-  originals.reserve(block.getOperations().size());
-  for (Operation &operation : block)
-    originals.push_back(&operation);
-
-  DenseSet<Operation *> tileClosure;
-  SmallVector<Operation *> worklist;
-  auto addToClosure = [&](Operation *operation) {
-    if (!operation || operation->getBlock() != &block ||
-        !tileClosure.insert(operation).second)
-      return;
-    worklist.push_back(operation);
-  };
-  addToClosure(range->getOperation());
-  for (size_t index = 0; index < worklist.size(); ++index) {
-    Operation *operation = worklist[index];
-    for (Value result : operation->getResults())
-      for (Operation *user : result.getUsers())
-        addToClosure(user);
-    for (Value operand : operation->getOperands()) {
-      if (!hasD192SourceTile(operand.getType()))
-        continue;
-      Operation *definingOperation = operand.getDefiningOp();
-      if (!definingOperation || definingOperation->getBlock() != &block)
-        return false;
-      addToClosure(definingOperation);
-    }
-  }
-
-  bool hasTileLoad = false;
-  bool hasTileStore = false;
-  bool hasTileReduce = false;
-  for (Operation *operation : originals) {
-    if (operationTouchesD192SourceTile(operation) &&
-        !tileClosure.contains(operation))
-      return false;
-    if (!tileClosure.contains(operation))
-      continue;
-    hasTileLoad |= isa<triton::LoadOp>(operation);
-    hasTileStore |= isa<triton::StoreOp>(operation);
-    hasTileReduce |= isa<triton::ReduceOp>(operation);
-    if (operation->getNumSuccessors() != 0 ||
-        (operation->getNumRegions() != 0 && !isa<triton::ReduceOp>(operation)))
-      return false;
-  }
-  if (!hasTileLoad || !hasTileStore || !hasTileReduce)
-    return false;
-
-  IRRewriter rewriter(function.getContext());
-  DenseMap<Value, Value> values;
-  auto mapValue = [&](Value value) -> std::optional<Value> {
-    if (auto it = values.find(value); it != values.end())
-      return it->second;
-    if (isa<BlockArgument>(value))
-      return value;
-    return std::nullopt;
-  };
-  auto mapResults = [&](Operation *original, Operation *replacement) -> bool {
-    if (!replacement ||
-        original->getNumResults() != replacement->getNumResults())
-      return false;
-    for (auto [oldResult, newResult] :
-         llvm::zip(original->getResults(), replacement->getResults()))
-      values[oldResult] = newResult;
-    return true;
-  };
-  auto collectMappedOperands = [&](Operation *operation,
-                                   SmallVectorImpl<Value> &operands) -> bool {
-    operands.clear();
-    operands.reserve(operation->getNumOperands());
-    for (Value operand : operation->getOperands()) {
-      std::optional<Value> mapped = mapValue(operand);
-      if (!mapped)
-        return false;
-      operands.push_back(*mapped);
-    }
-    return true;
-  };
-  auto collectD192ResultTypes =
-      [&](Operation *operation, SmallVectorImpl<Type> &resultTypes) -> bool {
-    resultTypes.clear();
-    resultTypes.reserve(operation->getNumResults());
-    for (Value result : operation->getResults()) {
-      std::optional<Type> type = getD192TileType(result.getType());
-      if (!type)
-        return false;
-      resultTypes.push_back(*type);
-    }
-    return true;
-  };
-
-  for (Operation *operation : originals) {
-    rewriter.setInsertionPoint(operation);
-    if (!tileClosure.contains(operation)) {
-      IRMapping mapping;
-      for (Value operand : operation->getOperands()) {
-        std::optional<Value> mapped = mapValue(operand);
-        if (!mapped)
-          return false;
-        mapping.map(operand, *mapped);
-      }
-      if (!mapResults(operation, rewriter.clone(*operation, mapping)))
-        return false;
-      continue;
-    }
-
-    if (auto constant = dyn_cast<arith::ConstantOp>(operation)) {
-      auto dense = dyn_cast<DenseElementsAttr>(constant.getValue());
-      std::optional<Type> type =
-          getD192TileType(constant.getResult().getType());
-      RankedTensorType tensor =
-          type ? dyn_cast<RankedTensorType>(*type) : RankedTensorType();
-      if (!dense || !dense.isSplat() || !tensor)
-        return false;
-      SmallVector<Attribute, 1> elements = {dense.getSplatValue<Attribute>()};
-      auto replacement = rewriter.create<arith::ConstantOp>(
-          operation->getLoc(), tensor,
-          DenseElementsAttr::get(tensor, elements));
-      if (!mapResults(operation, replacement.getOperation()))
-        return false;
-      continue;
-    }
-
-    if (auto makeRange = dyn_cast<triton::MakeRangeOp>(operation)) {
-      if (makeRange != *range)
-        return false;
-      std::optional<Type> type = getD192TileType(makeRange.getType());
-      RankedTensorType tensor =
-          type ? dyn_cast<RankedTensorType>(*type) : RankedTensorType();
-      if (!tensor)
-        return false;
-      auto replacement = rewriter.create<triton::MakeRangeOp>(
-          operation->getLoc(), tensor, makeRange.getStart(),
-          kMergeSplitD192TargetTile);
-      if (!mapResults(operation, replacement.getOperation()))
-        return false;
-      continue;
-    }
-
-    SmallVector<Value> operands;
-    SmallVector<Type> resultTypes;
-    if (!collectMappedOperands(operation, operands) ||
-        !collectD192ResultTypes(operation, resultTypes))
-      return false;
-
-    if (auto reduce = dyn_cast<triton::ReduceOp>(operation)) {
-      auto replacement = rewriter.create<triton::ReduceOp>(
-          operation->getLoc(), operands, reduce.getAxis());
-      rewriter.cloneRegionBefore(reduce.getCombineOp(),
-                                 replacement.getCombineOp(),
-                                 replacement.getCombineOp().end());
-      for (NamedAttribute attribute : operation->getAttrs())
-        if (!replacement->hasAttr(attribute.getName()))
-          replacement->setAttr(attribute.getName(), attribute.getValue());
-      if (replacement.getResults().size() != resultTypes.size())
-        return false;
-      for (auto [result, expected] :
-           llvm::zip(replacement.getResults(), resultTypes))
-        if (result.getType() != expected)
-          return false;
-      if (!mapResults(operation, replacement.getOperation()))
-        return false;
-      continue;
-    }
-
-    if (operation->getNumRegions() != 0 || operation->getNumSuccessors() != 0)
-      return false;
-    OperationState state(operation->getLoc(), operation->getName());
-    state.addOperands(operands);
-    state.addTypes(resultTypes);
-    state.addAttributes(operation->getAttrs());
-    if (!mapResults(operation, rewriter.create(state)))
-      return false;
-  }
-
-  for (Operation *operation : llvm::reverse(originals)) {
-    operation->dropAllUses();
-    rewriter.eraseOp(operation);
-  }
-  return succeeded(mlir::verify(function.getOperation()));
-}
-
-bool tryMaterializeMergeSplitD192Tile(ModuleOp module, triton::FuncOp function,
-                                      const IATCandidate &candidate) {
-  if (!module || candidate.form != TensorizeForm::MergeSplit ||
-      !candidate.usesMergeSplitSubCorePolicy ||
-      !isMergeSplitLargeFactor(candidate.factor) ||
-      candidate.dimExtent != kMergeSplitD192SourceTile)
-    return false;
-
-  // Phase B is an independent transaction inside the already detached IAT
-  // sandbox. Its rejection must retain the valid D256 Phase-A body rather than
-  // rejecting the complete mapping candidate.
-  ModuleOp trial = createProgramMappingSandbox(module, function);
-  auto trialFunction = dyn_cast<triton::FuncOp>(&trial.getBody()->front());
-  if (!trialFunction || !rebuildMergeSplitD192Function(trialFunction) ||
-      failed(runProgramMappingStructuralCleanup(trial)) ||
-      failed(mlir::verify(trial.getOperation())))
-    return false;
-  function.getRegion().takeBody(trialFunction.getRegion());
-  return true;
-}
-
-bool hasExpectedMergeSplitLargeLaunch(
-    ModuleOp module, triton::FuncOp function, const IATCandidate &candidate,
-    const ResourceSnapshot &resources,
-    ProgramMappingLaunchProjection *projection = nullptr) {
-  if (!candidate.usesMergeSplitSubCorePolicy ||
-      candidate.form != TensorizeForm::MergeSplit ||
-      !isMergeSplitLargeFactor(candidate.factor))
-    return false;
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(function);
-  FailureOr<ProgramGridTransformContract> contract =
-      parseProgramGridTransformContract(
-          module->getAttr(kProgramGridTransformsAttr));
-  if (!specialization || failed(contract) || contract->transforms.size() != 1)
-    return false;
-  const ProgramGridTransform &iat = contract->transforms.front();
-  if (iat.order != 0 || iat.axis != candidate.axis ||
-      iat.factor != static_cast<int64_t>(candidate.factor) ||
-      iat.logicalExtent != candidate.logicalExtent || iat.persistentCoverage ||
-      iat.gridStrideAbiVerified)
-    return false;
-
-  std::optional<ProgramMappingLaunchProjection> current =
-      projectProgramMappingLaunch(*specialization, contract->transforms,
-                                  resources);
-  if (!current || current->persistentCoverage || current->legacyAutoMap ||
-      current->logicalPrograms == 0 ||
-      current->physicalPrograms != current->logicalPrograms ||
-      current->physicalWaves != 1 ||
-      current->logicalPrograms > resources.deviceCoreCount)
-    return false;
-  if (projection)
-    *projection = *current;
-  return true;
-}
-
-// The early candidate cost uses baseline-live-bytes * factor as a conservative
-// pruning bound. The selected F16/F32 candidate must additionally survive the
-// actual tensorized-and-cleaned sandbox liveness calculation before it can
-// become a rewrite plan.
-std::optional<IATCandidate>
-evaluateMergeSplitLargeCandidate(GraphOptimizationContext &context,
-                                 unsigned factor) {
-  std::optional<IATCandidate> iat =
-      analyzeCandidate(context, /*emitRejectRemark=*/false, factor,
-                       IATCandidateScope::MergeSplitLarge);
-  if (!iat || iat->form != TensorizeForm::MergeSplit ||
-      !iat->usesMergeSplitSubCorePolicy)
-    return std::nullopt;
-  if (!iat->evaluation.accepted)
-    return iat;
-
-  ModuleOp module = iat->function->getParentOfType<ModuleOp>();
-  if (!module || hasConflictingLaunchContract(module))
-    return std::nullopt;
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(iat->function);
-  if (!specialization)
-    return std::nullopt;
-  const ResourceSnapshot &resources =
-      context.getResourceCostAnalysis().getResourceSnapshot();
-  std::optional<ProgramMappingLaunchProjection> before =
-      projectProgramMappingLaunch(*specialization, {}, resources);
-  if (!before)
-    return std::nullopt;
-
-  ModuleOp sandbox = createProgramMappingSandbox(module, iat->function);
-  auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
-  if (!clonedFunction ||
-      failed(materializeIATCandidateToSandbox(sandbox, clonedFunction, *iat)) ||
-      failed(runProgramMappingStructuralCleanup(sandbox)) ||
-      failed(mlir::verify(sandbox.getOperation())))
-    return std::nullopt;
-
-  // D192 is a separate, fail-closed optimization transaction. A mismatch
-  // leaves this candidate as the already-validated D256 Phase-A plan.
-  iat->usesMergeSplitD192Tile =
-      tryMaterializeMergeSplitD192Tile(sandbox, clonedFunction, *iat);
-
-  ProgramMappingLaunchProjection after;
-  if (!hasExpectedMergeSplitLargeLaunch(sandbox, clonedFunction, *iat,
-                                        resources, &after))
-    return std::nullopt;
-  const ProgramAxisDependence &headDependence =
-      context.getProgramAxisDependenceAnalysis().get(iat->axis);
-  LiveByteEstimate finalLiveBytes =
-      estimatePeakLiveBytes(clonedFunction.getOperation());
-  iat->evaluation = evaluateCandidateCost(
-      resources, buildResourceCandidate(
-                     *iat, headDependence,
-                     context.getResourceCostAnalysis().getLiveByteEstimate(),
-                     *before, after, &finalLiveBytes));
-  return iat;
-}
-
-bool isBetterMergeSplitLargeCandidate(const IATCandidate &lhs,
-                                      const IATCandidate &rhs) {
-  // This is deliberately a fixed compile-time policy. Profiling calibrates
-  // its weights offline; it never enters candidate discovery at compile time.
-  if (lhs.evaluation.benefitScore != rhs.evaluation.benefitScore)
-    return lhs.evaluation.benefitScore > rhs.evaluation.benefitScore;
-  if (lhs.evaluation.candidate.estimatedPeakLiveBytes !=
-      rhs.evaluation.candidate.estimatedPeakLiveBytes)
-    return lhs.evaluation.candidate.estimatedPeakLiveBytes <
-           rhs.evaluation.candidate.estimatedPeakLiveBytes;
-  if (lhs.evaluation.candidate.actualProgramsAfter !=
-      rhs.evaluation.candidate.actualProgramsAfter)
-    return lhs.evaluation.candidate.actualProgramsAfter >
-           rhs.evaluation.candidate.actualProgramsAfter;
-  return lhs.factor < rhs.factor;
-}
 
 std::optional<IATCandidate>
-selectMergeSplitLargeCandidate(GraphOptimizationContext &context,
-                               bool emitRemarks) {
-  std::optional<IATCandidate> selected;
-  for (unsigned factor : kMergeLargeTensorizeFactors) {
-    std::optional<IATCandidate> candidate =
-        evaluateMergeSplitLargeCandidate(context, factor);
-    if (!candidate)
-      continue;
-    if (emitRemarks)
-      emitCandidateRemark(candidate->anchor, candidate->evaluation);
-    // The generic score prices the extra F lane as a live-byte penalty.  It
-    // can therefore be negative even after this MergeSplit-only candidate has
-    // passed the explicit small-grid, full-launch, alias, tail, cleanup, and
-    // final-UB checks.  Its dedicated ordering below is the selection policy;
-    // a positive generic score is not an additional legality requirement.
-    if (!candidate->evaluation.accepted)
-      continue;
-    if (!selected || isBetterMergeSplitLargeCandidate(*candidate, *selected))
-      selected = std::move(candidate);
-  }
-  return selected;
-}
+analyzeDynamicSingleMomentCandidate(GraphOptimizationContext &context) {
+  triton::FuncOp function = context.getFunction();
+  ModuleOp module = function->getParentOfType<ModuleOp>();
+  if (!module || hasConflictingLaunchContract(module) ||
+      !hasSupportedControlFlow(function) ||
+      classifyIndependentRowReduction(function) !=
+          IndependentRowReductionKind::SingleMoment ||
+      !findOnlyProgramId(function, /*axis=*/0))
+    return std::nullopt;
 
-bool calculateTokenOnlyRepeatedBytes(uint64_t headGroups, uint64_t tokens,
-                                     int64_t dimExtent, uint64_t &bytes) {
-  bytes = 0;
-  if (headGroups <= 1)
-    return true;
-  if (dimExtent <= 0)
-    return false;
-  // This is a conservative lower bound for one token-only FP32 vector. The
-  // final IR ownership model prevents broadcasts/views from adding extra UB
-  // allocations; the repeated-work term records only cross-head-group replay.
-  uint64_t perTokenBytes = 0;
-  if (!multiplyNoOverflow(static_cast<uint64_t>(dimExtent), sizeof(float),
-                          perTokenBytes))
-    return false;
-  uint64_t repeatedGroups = headGroups - 1;
-  uint64_t repeatedTokens = 0;
-  return multiplyNoOverflow(repeatedGroups, tokens, repeatedTokens) &&
-         multiplyNoOverflow(repeatedTokens, perTokenBytes, bytes);
-}
+  std::optional<TensorizeFormMatch> formMatch = classifyTensorizeForm(function);
+  if (!formMatch || formMatch->form != TensorizeForm::NormRope)
+    return std::nullopt;
+  std::optional<triton::GetProgramIdOp> headPid =
+      findOnlyProgramId(function, /*axis=*/1);
+  if (!headPid)
+    return std::nullopt;
 
-CandidateCost buildJointResourceCandidate(
-    const IATCandidate &iat, const ProgramAxisDependence &tokenDependence,
-    const LiveByteEstimate &baselineLiveBytes,
-    const LiveByteEstimate &finalLiveBytes,
-    const ProgramMappingLaunchProjection &before,
-    const ProgramMappingLaunchProjection &after, unsigned blockT) {
+  const ProgramAxisDependence &dependence =
+      context.getProgramAxisDependenceAnalysis().get(/*axis=*/1);
+  if (!dependence.isProgramMappingTransformCandidate() ||
+      !hasDisjointWriteReadRoots(dependence,
+                                 context.getEntryArgPointerAliasAnalysis()))
+    return std::nullopt;
+  const LiveByteEstimate &liveBytes =
+      context.getResourceCostAnalysis().getLiveByteEstimate();
+  if (!liveBytes.known)
+    return std::nullopt;
+  uint64_t estimatedPeak = 0;
+  if (__builtin_mul_overflow(liveBytes.peakLiveBytes, uint64_t{16},
+                             &estimatedPeak))
+    return std::nullopt;
+
+  IATCandidate candidate;
+  candidate.function = function;
+  candidate.anchor = headPid->getOperation();
+  candidate.form = TensorizeForm::NormRope;
+  candidate.axis = 1;
+  candidate.dimExtent = formMatch->reduction.dimExtent;
+  candidate.factor = 16;
+  candidate.requiresPersistentChaining = true;
+  candidate.resources = context.getResourceCostAnalysis().getResourceSnapshot();
+
   CandidateCost cost;
-  cost.plan.tensorizeFactor = iat.factor;
-  cost.plan.blockT = blockT;
+  cost.plan.tensorizeFactor = candidate.factor;
+  cost.plan.blockT = kDynamicSingleMomentBlockT;
   cost.plan.staticAxisFusionFactor = 1;
-  cost.plan.stableId = (llvm::Twine("program-mapping.iat") +
-                        llvm::Twine(iat.factor) + ".ptsm" + llvm::Twine(blockT))
-                           .str();
-  cost.logicalTasksBefore = before.logicalPrograms;
-  cost.logicalTasksAfter = after.logicalPrograms;
-  cost.actualProgramsBefore = before.physicalPrograms;
-  cost.actualProgramsAfter = after.physicalPrograms;
-  cost.physicalWavesBefore = before.physicalWaves;
-  cost.physicalWavesAfter = after.physicalWaves;
-  cost.persistentLoopTripsBefore = before.physicalWaves;
-  cost.persistentLoopTripsAfter = after.physicalWaves;
-  cost.launchesBefore = 1;
-  cost.launchesAfter = 1;
-  cost.storeCountBefore = tokenDependence.stores.size();
-  cost.storeCountAfter = tokenDependence.stores.size();
-  cost.addressCalculationsBefore = tokenDependence.dependenceClosure.size();
-  cost.addressCalculationsAfter = tokenDependence.dependenceClosure.size();
-  cost.workPerProgramBefore = before.physicalWaves;
-  cost.workPerProgramAfter = after.physicalWaves;
-  cost.legacyAutoMapBefore = before.legacyAutoMap;
-  cost.legacyAutoMapAfter = after.legacyAutoMap;
-  cost.persistent = true;
-
-  if (!baselineLiveBytes.known || !finalLiveBytes.known) {
-    const ResourceCostRejectReason reason = !baselineLiveBytes.known
-                                                ? baselineLiveBytes.reason
-                                                : finalLiveBytes.reason;
-    cost.hasDynamicShape = reason == ResourceCostRejectReason::DynamicShape;
-    cost.hasUnknownResource = !cost.hasDynamicShape;
-    return cost;
-  }
-
-  uint64_t repeatedBefore = 0;
-  uint64_t repeatedAfter = 0;
-  if (!calculateTokenOnlyRepeatedBytes(before.logicalGrid[1],
-                                       before.logicalGrid[0], iat.dimExtent,
-                                       repeatedBefore) ||
-      !calculateTokenOnlyRepeatedBytes(after.logicalGrid[1],
-                                       before.logicalGrid[0], iat.dimExtent,
-                                       repeatedAfter)) {
-    cost.hasUnknownResource = true;
-    return cost;
-  }
-  cost.tokenOnlyRepeatedBytesBefore = repeatedBefore;
-  cost.tokenOnlyRepeatedBytesAfter = repeatedAfter;
+  cost.plan.stableId = "iat.ptsm.single-moment.dynamic.f16.b4";
+  cost.storeCountBefore = dependence.stores.size();
+  cost.storeCountAfter = dependence.stores.size();
+  cost.addressCalculationsBefore = dependence.dependenceClosure.size();
+  cost.addressCalculationsAfter = dependence.dependenceClosure.size();
   cost.hasPeakLiveBytes = true;
-  cost.baselinePeakLiveBytes = baselineLiveBytes.peakLiveBytes;
-  cost.estimatedPeakLiveBytes = finalLiveBytes.peakLiveBytes;
-  return cost;
+  cost.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
+  cost.estimatedPeakLiveBytes = estimatedPeak;
+  candidate.evaluation = context.getResourceCostAnalysis().evaluate(cost);
+  return candidate.evaluation.accepted ? std::optional<IATCandidate>(candidate)
+                                       : std::nullopt;
 }
 
-bool hasExpectedJointLaunch(ModuleOp module, triton::FuncOp function,
-                            unsigned iatFactor, unsigned blockT,
-                            const ResourceSnapshot &resources,
-                            ProgramMappingLaunchProjection *projection) {
-  if (!hasBoundedPersistentNormLaunch(module, function))
-    return false;
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(function);
-  FailureOr<ProgramGridTransformContract> contract =
-      parseProgramGridTransformContract(
-          module->getAttr(kProgramGridTransformsAttr));
-  if (!specialization || failed(contract) || contract->transforms.size() != 2)
-    return false;
-  const ProgramGridTransform &iat = contract->transforms[0];
-  const ProgramGridTransform &ptsm = contract->transforms[1];
-  if (iat.factor != static_cast<int64_t>(iatFactor) ||
-      ptsm.factor != static_cast<int64_t>(blockT))
-    return false;
-  std::optional<ProgramMappingLaunchProjection> current =
-      projectProgramMappingLaunch(*specialization, contract->transforms,
-                                  resources);
-  if (!current || !current->persistentCoverage || current->legacyAutoMap)
-    return false;
-  if (projection)
-    *projection = *current;
-  return true;
-}
+bool sameDynamicSingleMomentCandidate(const IATCandidate &lhs,
+                                      const IATCandidate &rhs);
 
-std::optional<JointProgramMappingCandidate>
-evaluateJointCandidate(GraphOptimizationContext &context, unsigned iatFactor,
-                       unsigned blockT) {
-  std::optional<IATCandidate> iat =
-      analyzeCandidate(context, /*emitRejectRemark=*/false, iatFactor);
-  if (!iat || iat->form != TensorizeForm::NormRope ||
-      !iat->requiresPersistentChaining)
-    return std::nullopt;
-  ModuleOp module = iat->function->getParentOfType<ModuleOp>();
-  if (!module || hasConflictingLaunchContract(module))
-    return std::nullopt;
-  std::optional<ProgramGridSpecialization> specialization =
-      getGridSpecialization(iat->function);
-  if (!specialization)
-    return std::nullopt;
-  const ResourceSnapshot &resources =
-      context.getResourceCostAnalysis().getResourceSnapshot();
-  std::optional<ProgramMappingLaunchProjection> before =
-      projectProgramMappingLaunch(*specialization, {}, resources);
-  if (!before)
-    return std::nullopt;
-
-  ModuleOp sandbox = createProgramMappingSandbox(module, iat->function);
-  auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
-  if (!clonedFunction ||
-      failed(materializeIATCandidateToSandbox(sandbox, clonedFunction, *iat)))
-    return std::nullopt;
-  CandidateEvaluation ptsmEvaluation;
-  if (failed(materializePersistentTaskStripMiningCandidate(
-          sandbox, clonedFunction, resources, blockT, &ptsmEvaluation,
-          /*deferIntermediateResourceRejection=*/true)) ||
-      failed(runProgramMappingStructuralCleanup(sandbox)) ||
-      failed(mlir::verify(sandbox.getOperation())))
-    return std::nullopt;
-
-  ProgramMappingLaunchProjection after;
-  if (!hasExpectedJointLaunch(sandbox, clonedFunction, iatFactor, blockT,
-                              resources, &after))
-    return std::nullopt;
-  LiveByteEstimate finalLiveBytes =
-      estimatePeakLiveBytes(clonedFunction.getOperation());
-  const ProgramAxisDependence &tokenDependence =
-      context.getProgramAxisDependenceAnalysis().get(0);
-  CandidateEvaluation evaluation = evaluateCandidateCost(
-      resources, buildJointResourceCandidate(
-                     *iat, tokenDependence,
-                     context.getResourceCostAnalysis().getLiveByteEstimate(),
-                     finalLiveBytes, *before, after, blockT));
-
-  JointProgramMappingCandidate candidate;
-  candidate.iat = std::move(*iat);
-  candidate.blockT = blockT;
-  candidate.finalLogicalGrid = after.logicalGrid;
-  candidate.finalPhysicalGrid = after.physicalGrid;
-  candidate.evaluation = std::move(evaluation);
-  return candidate;
-}
-
-bool sameJointCandidate(const JointProgramMappingCandidate &lhs,
-                        const JointProgramMappingCandidate &rhs) {
-  return sameCandidate(lhs.iat, rhs.iat) && lhs.blockT == rhs.blockT &&
-         lhs.finalLogicalGrid == rhs.finalLogicalGrid &&
-         lhs.finalPhysicalGrid == rhs.finalPhysicalGrid;
-}
-
-bool isBetterJointCandidate(const JointProgramMappingCandidate &lhs,
-                            const JointProgramMappingCandidate &rhs) {
-  const CandidateEvaluation &left = lhs.evaluation;
-  const CandidateEvaluation &right = rhs.evaluation;
-  if (left.tokenOnlyRepeatedBytesAfter != right.tokenOnlyRepeatedBytesAfter)
-    return left.tokenOnlyRepeatedBytesAfter < right.tokenOnlyRepeatedBytesAfter;
-  if (left.persistentLoopTripsAfter != right.persistentLoopTripsAfter)
-    return left.persistentLoopTripsAfter < right.persistentLoopTripsAfter;
-  if (left.candidate.actualProgramsAfter != right.candidate.actualProgramsAfter)
-    return left.candidate.actualProgramsAfter >
-           right.candidate.actualProgramsAfter;
-  if (left.candidate.estimatedPeakLiveBytes !=
-      right.candidate.estimatedPeakLiveBytes)
-    return left.candidate.estimatedPeakLiveBytes <
-           right.candidate.estimatedPeakLiveBytes;
-  if (left.benefitScore != right.benefitScore)
-    return left.benefitScore > right.benefitScore;
-  return std::tie(lhs.iat.factor, lhs.blockT) <
-         std::tie(rhs.iat.factor, rhs.blockT);
-}
-
-std::optional<JointProgramMappingCandidate>
-selectJointCandidate(GraphOptimizationContext &context, bool emitRemarks) {
-  // An empty selection is the explicit factor-1/no-op candidate.  It leaves
-  // both the IR and launcher contract untouched when no transformed pair is
-  // profitable and resource-safe.
-  std::optional<JointProgramMappingCandidate> selected;
-  for (unsigned iatFactor : kNormTensorizeFactors) {
-    for (unsigned blockT : kNormPersistentBlockTCandidates) {
-      std::optional<JointProgramMappingCandidate> candidate =
-          evaluateJointCandidate(context, iatFactor, blockT);
-      if (!candidate)
-        continue;
-      if (emitRemarks)
-        emitCandidateRemark(candidate->iat.anchor, candidate->evaluation);
-      if (!candidate->evaluation.accepted ||
-          candidate->evaluation.benefitScore <= 0)
-        continue;
-      if (!selected || isBetterJointCandidate(*candidate, *selected))
-        selected = std::move(candidate);
-    }
-  }
-  return selected;
-}
-
-class JointProgramMappingPlan final : public RewritePlan {
+class DynamicSingleMomentProgramMappingPlan final : public RewritePlan {
 public:
-  JointProgramMappingPlan(JointProgramMappingCandidate candidate,
-                          unsigned epoch)
-      : candidate(std::move(candidate)), epoch(epoch) {}
-
-  GraphOptimizationRuleId getRuleId() const override {
-    // This is still the IAT rule's scheduling phase; PTSM's public rule id
-    // remains unchanged and observes the committed marker later.
-    return GraphOptimizationRuleId::IndependentAxisTensorize;
-  }
-  unsigned getBenefit() const override {
-    const int64_t score = candidate.evaluation.benefitScore;
-    if (score <= 0)
-      return 1;
-    return static_cast<unsigned>(std::min<int64_t>(
-        score, static_cast<int64_t>(std::numeric_limits<unsigned>::max())));
-  }
-  Operation *getAnchor() const override { return candidate.iat.anchor; }
-  unsigned getCreationEpoch() const override { return epoch; }
-
-  LogicalResult revalidate(GraphOptimizationContext &context) const override {
-    if (context.getFunction() != candidate.iat.function)
-      return failure();
-    std::optional<JointProgramMappingCandidate> current =
-        evaluateJointCandidate(context, candidate.iat.factor, candidate.blockT);
-    return current && current->evaluation.accepted &&
-                   current->evaluation.benefitScore > 0 &&
-                   sameJointCandidate(candidate, *current)
-               ? success()
-               : failure();
-  }
-
-  LogicalResult apply(IRRewriter &rewriter) override {
-    (void)rewriter;
-    ModuleOp module = candidate.iat.function->getParentOfType<ModuleOp>();
-    if (!module || !candidate.iat.requiresPersistentChaining ||
-        hasConflictingLaunchContract(module))
-      return failure();
-
-    ModuleOp sandbox =
-        createProgramMappingSandbox(module, candidate.iat.function);
-    auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
-    if (!clonedFunction ||
-        failed(materializeIATCandidateToSandbox(sandbox, clonedFunction,
-                                                candidate.iat)) ||
-        failed(materializePersistentTaskStripMiningCandidate(
-            sandbox, clonedFunction, candidate.iat.resources, candidate.blockT,
-            nullptr, /*deferIntermediateResourceRejection=*/true)) ||
-        failed(runProgramMappingStructuralCleanup(sandbox)) ||
-        failed(mlir::verify(sandbox.getOperation())))
-      return failure();
-
-    ProgramMappingLaunchProjection finalProjection;
-    if (!hasExpectedJointLaunch(sandbox, clonedFunction, candidate.iat.factor,
-                                candidate.blockT, candidate.iat.resources,
-                                &finalProjection) ||
-        finalProjection.logicalGrid != candidate.finalLogicalGrid ||
-        finalProjection.physicalGrid != candidate.finalPhysicalGrid)
-      return failure();
-
-    Attribute transforms = sandbox->getAttr(kProgramGridTransformsAttr);
-    Attribute iatMarker = sandbox->getAttr(kIndependentAxisTensorizeMarkerAttr);
-    Attribute ptsmMarker =
-        sandbox->getAttr(kPersistentTaskStripMiningMarkerAttr);
-    if (!transforms || !iatMarker || !ptsmMarker)
-      return failure();
-
-    // All fallible work was done in the detached sandbox. Publishing the body
-    // and the three coupled metadata fields is consequently all-or-nothing.
-    candidate.iat.function->getRegion(0).takeBody(clonedFunction->getRegion(0));
-    module->setAttr(kProgramGridTransformsAttr, transforms);
-    module->setAttr(kIndependentAxisTensorizeMarkerAttr, iatMarker);
-    module->setAttr(kPersistentTaskStripMiningMarkerAttr, ptsmMarker);
-    return success();
-  }
-
-private:
-  JointProgramMappingCandidate candidate;
-  unsigned epoch;
-};
-
-class IndependentAxisTensorizePlan final : public RewritePlan {
-public:
-  IndependentAxisTensorizePlan(IATCandidate candidate, unsigned epoch)
+  DynamicSingleMomentProgramMappingPlan(IATCandidate candidate, unsigned epoch)
       : candidate(std::move(candidate)), epoch(epoch) {}
 
   GraphOptimizationRuleId getRuleId() const override {
     return GraphOptimizationRuleId::IndependentAxisTensorize;
   }
-  unsigned getBenefit() const override {
-    return candidate.evaluation.benefitScore > 0
-               ? static_cast<unsigned>(candidate.evaluation.benefitScore)
-               : 1;
-  }
+  unsigned getBenefit() const override { return 1; }
   Operation *getAnchor() const override { return candidate.anchor; }
   unsigned getCreationEpoch() const override { return epoch; }
 
@@ -2101,81 +1047,190 @@ public:
     if (context.getFunction() != candidate.function)
       return failure();
     std::optional<IATCandidate> current =
-        candidate.usesMergeSplitSubCorePolicy
-            ? selectMergeSplitLargeCandidate(context, /*emitRemarks=*/false)
-            : analyzeCandidate(context, false);
-    if (!current || !sameCandidate(candidate, *current))
-      return failure();
-    if (candidate.usesMergeSplitSubCorePolicy &&
-        (candidate.evaluation.benefitScore !=
-             current->evaluation.benefitScore ||
-         candidate.evaluation.candidate.estimatedPeakLiveBytes !=
-             current->evaluation.candidate.estimatedPeakLiveBytes))
-      return failure();
-    return success();
+        analyzeDynamicSingleMomentCandidate(context);
+    return current && sameDynamicSingleMomentCandidate(candidate, *current)
+               ? success()
+               : failure();
   }
 
   LogicalResult apply(IRRewriter &rewriter) override {
     (void)rewriter;
     ModuleOp module = candidate.function->getParentOfType<ModuleOp>();
-    if (!module || candidate.requiresPersistentChaining ||
-        hasConflictingLaunchContract(module))
+    if (!module || hasConflictingLaunchContract(module))
       return failure();
 
-    // Materialize in a detached module. All late failures (unsupported tensor
-    // relation, verifier failure, or contract serialization failure) therefore
-    // leave the source function and its metadata untouched.
     ModuleOp sandbox = createProgramMappingSandbox(module, candidate.function);
     auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
-    if (!clonedFunction)
+    CandidateEvaluation persistentEvaluation;
+    if (!clonedFunction ||
+        failed(materializeIATCandidateToSandbox(sandbox, clonedFunction,
+                                                candidate)) ||
+        failed(materializePersistentTaskStripMiningCandidate(
+            sandbox, clonedFunction, candidate.resources,
+            kDynamicSingleMomentBlockT, &persistentEvaluation,
+            /*deferIntermediateResourceRejection=*/true)) ||
+        failed(runProgramMappingStructuralCleanup(sandbox)) ||
+        failed(mlir::verify(sandbox.getOperation())))
       return failure();
 
-    if (failed(materializeIATCandidateToSandbox(sandbox, clonedFunction,
-                                                candidate)))
+    const LiveByteEstimate baseline =
+        estimatePeakLiveBytes(candidate.function.getOperation());
+    const LiveByteEstimate final =
+        estimatePeakLiveBytes(clonedFunction.getOperation());
+    if (!baseline.known || !final.known)
+      return failure();
+    CandidateCost finalCost;
+    finalCost.plan.tensorizeFactor = candidate.factor;
+    finalCost.plan.blockT = kDynamicSingleMomentBlockT;
+    finalCost.plan.staticAxisFusionFactor = 1;
+    finalCost.plan.stableId = "iat.ptsm.single-moment.dynamic.f16.b4";
+    finalCost.hasPeakLiveBytes = true;
+    finalCost.baselinePeakLiveBytes = baseline.peakLiveBytes;
+    finalCost.estimatedPeakLiveBytes = final.peakLiveBytes;
+    if (!evaluateCandidateCost(candidate.resources, finalCost).accepted)
       return failure();
 
-    if (candidate.usesMergeSplitSubCorePolicy) {
-      if (failed(runProgramMappingStructuralCleanup(sandbox)) ||
-          failed(mlir::verify(sandbox.getOperation())))
-        return failure();
-      if (candidate.usesMergeSplitD192Tile &&
-          !tryMaterializeMergeSplitD192Tile(sandbox, clonedFunction, candidate))
-        return failure();
-      std::optional<ProgramGridSpecialization> specialization =
-          getGridSpecialization(candidate.function);
-      std::optional<ProgramMappingLaunchProjection> before;
-      if (specialization)
-        before = projectProgramMappingLaunch(*specialization, {},
-                                             candidate.resources);
-      ProgramMappingLaunchProjection after;
-      if (!before ||
-          !hasExpectedMergeSplitLargeLaunch(sandbox, clonedFunction, candidate,
-                                            candidate.resources, &after))
-        return failure();
-      ProgramAxisDependenceAnalysis analysis(candidate.function);
-      const ProgramAxisDependence &headDependence =
-          analysis.get(candidate.axis);
-      LiveByteEstimate finalLiveBytes =
-          estimatePeakLiveBytes(clonedFunction.getOperation());
-      CandidateEvaluation finalEvaluation = evaluateCandidateCost(
-          candidate.resources,
-          buildResourceCandidate(
-              candidate, headDependence,
-              estimatePeakLiveBytes(candidate.function.getOperation()), *before,
-              after, &finalLiveBytes));
-      if (!finalEvaluation.accepted ||
-          finalEvaluation.benefitScore != candidate.evaluation.benefitScore ||
-          finalEvaluation.candidate.estimatedPeakLiveBytes !=
-              candidate.evaluation.candidate.estimatedPeakLiveBytes)
-        return failure();
-    }
+    Attribute transforms = sandbox->getAttr(kProgramGridTransformsAttr);
+    if (!transforms)
+      return failure();
+    FailureOr<ProgramGridTransformContract> parsed =
+        parseProgramGridTransformContract(transforms);
+    if (failed(parsed) || parsed->transforms.size() != 2 ||
+        !hasProgramGridHiddenExtentArguments(clonedFunction))
+      return failure();
 
-    // All potentially failing large-factor work has completed in the detached
-    // sandbox. The body transfer has no allocation path and the generic
-    // attribute was created in the same MLIRContext.
-    candidate.function->getRegion(0).takeBody(clonedFunction->getRegion(0));
-    module->setAttr(kProgramGridTransformsAttr,
-                    sandbox->getAttr(kProgramGridTransformsAttr));
+    candidate.function.setFunctionType(clonedFunction.getFunctionType());
+    candidate.function.getRegion().takeBody(clonedFunction.getRegion());
+    module->setAttr(kProgramGridTransformsAttr, transforms);
+    module->setAttr(kIndependentAxisTensorizeMarkerAttr,
+                    UnitAttr::get(module.getContext()));
+    module->setAttr(kPersistentTaskStripMiningMarkerAttr,
+                    UnitAttr::get(module.getContext()));
+    return success();
+  }
+
+private:
+  IATCandidate candidate;
+  unsigned epoch;
+};
+
+std::optional<IATCandidate>
+analyzeDynamicMergeSplitCandidate(GraphOptimizationContext &context) {
+  triton::FuncOp function = context.getFunction();
+  ModuleOp module = function->getParentOfType<ModuleOp>();
+  if (!module || hasConflictingLaunchContract(module) ||
+      !hasSupportedControlFlow(function))
+    return std::nullopt;
+
+  std::optional<TensorizeFormMatch> formMatch = classifyTensorizeForm(function);
+  if (!formMatch || formMatch->form != TensorizeForm::MergeSplit ||
+      !findOnlyProgramId(function, /*axis=*/0))
+    return std::nullopt;
+  std::optional<triton::GetProgramIdOp> headPid =
+      findOnlyProgramId(function, /*axis=*/1);
+  if (!headPid)
+    return std::nullopt;
+
+  const ProgramAxisDependence &dependence =
+      context.getProgramAxisDependenceAnalysis().get(/*axis=*/1);
+  if (!dependence.isProgramMappingTransformCandidate() ||
+      !hasDisjointWriteReadRoots(dependence,
+                                 context.getEntryArgPointerAliasAnalysis()))
+    return std::nullopt;
+  const LiveByteEstimate &liveBytes =
+      context.getResourceCostAnalysis().getLiveByteEstimate();
+  if (!liveBytes.known)
+    return std::nullopt;
+  uint64_t estimatedPeak = 0;
+  if (__builtin_mul_overflow(liveBytes.peakLiveBytes, uint64_t{16},
+                             &estimatedPeak))
+    return std::nullopt;
+
+  IATCandidate candidate;
+  candidate.function = function;
+  candidate.anchor = headPid->getOperation();
+  candidate.form = TensorizeForm::MergeSplit;
+  candidate.axis = 1;
+  candidate.splitExtent = formMatch->reduction.splitExtent;
+  candidate.dimExtent = formMatch->reduction.dimExtent;
+  candidate.factor = 16;
+  candidate.resources = context.getResourceCostAnalysis().getResourceSnapshot();
+
+  CandidateCost cost;
+  cost.plan.tensorizeFactor = candidate.factor;
+  cost.plan.blockT = 1;
+  cost.plan.staticAxisFusionFactor = 1;
+  cost.plan.stableId = "iat.merge.dynamic.f16";
+  cost.storeCountBefore = dependence.stores.size();
+  cost.storeCountAfter = dependence.stores.size();
+  cost.addressCalculationsBefore = dependence.dependenceClosure.size();
+  cost.addressCalculationsAfter = dependence.dependenceClosure.size();
+  cost.hasPeakLiveBytes = true;
+  cost.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
+  cost.estimatedPeakLiveBytes = estimatedPeak;
+  candidate.evaluation = context.getResourceCostAnalysis().evaluate(cost);
+  return candidate.evaluation.accepted ? std::optional<IATCandidate>(candidate)
+                                       : std::nullopt;
+}
+
+bool sameDynamicMergeSplitCandidate(const IATCandidate &lhs,
+                                    const IATCandidate &rhs) {
+  return lhs.function == rhs.function && lhs.anchor == rhs.anchor &&
+         lhs.form == rhs.form && lhs.axis == rhs.axis &&
+         lhs.splitExtent == rhs.splitExtent && lhs.dimExtent == rhs.dimExtent &&
+         lhs.factor == rhs.factor;
+}
+
+bool sameDynamicSingleMomentCandidate(const IATCandidate &lhs,
+                                      const IATCandidate &rhs) {
+  return lhs.function == rhs.function && lhs.anchor == rhs.anchor &&
+         lhs.form == rhs.form && lhs.axis == rhs.axis &&
+         lhs.dimExtent == rhs.dimExtent && lhs.factor == rhs.factor &&
+         lhs.requiresPersistentChaining == rhs.requiresPersistentChaining;
+}
+
+class DynamicMergeSplitIATPlan final : public RewritePlan {
+public:
+  DynamicMergeSplitIATPlan(IATCandidate candidate, unsigned epoch)
+      : candidate(std::move(candidate)), epoch(epoch) {}
+
+  GraphOptimizationRuleId getRuleId() const override {
+    return GraphOptimizationRuleId::IndependentAxisTensorize;
+  }
+  unsigned getBenefit() const override { return 1; }
+  Operation *getAnchor() const override { return candidate.anchor; }
+  unsigned getCreationEpoch() const override { return epoch; }
+
+  LogicalResult revalidate(GraphOptimizationContext &context) const override {
+    if (context.getFunction() != candidate.function)
+      return failure();
+    std::optional<IATCandidate> current = analyzeDynamicMergeSplitCandidate(context);
+    return current && sameDynamicMergeSplitCandidate(candidate, *current)
+               ? success()
+               : failure();
+  }
+
+  LogicalResult apply(IRRewriter &rewriter) override {
+    (void)rewriter;
+    ModuleOp module = candidate.function->getParentOfType<ModuleOp>();
+    if (!module || hasConflictingLaunchContract(module))
+      return failure();
+    ModuleOp sandbox = createProgramMappingSandbox(module, candidate.function);
+    auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
+    if (!clonedFunction ||
+        failed(materializeIATCandidateToSandbox(sandbox, clonedFunction,
+                                                candidate)) ||
+        failed(runProgramMappingStructuralCleanup(sandbox)) ||
+        failed(mlir::verify(sandbox.getOperation())))
+      return failure();
+    Attribute transforms = sandbox->getAttr(kProgramGridTransformsAttr);
+    if (!transforms || failed(parseProgramGridTransformContract(transforms)) ||
+        !hasProgramGridHiddenExtentArguments(clonedFunction))
+      return failure();
+
+    candidate.function.setFunctionType(clonedFunction.getFunctionType());
+    candidate.function.getRegion().takeBody(clonedFunction.getRegion());
+    module->setAttr(kProgramGridTransformsAttr, transforms);
     module->setAttr(kIndependentAxisTensorizeMarkerAttr,
                     UnitAttr::get(module.getContext()));
     return success();
@@ -2186,97 +1241,53 @@ private:
   unsigned epoch;
 };
 
-class IndependentAxisTensorizeRule final : public GraphOptimizationRule {
+class DynamicIndependentAxisTensorizeRule final : public GraphOptimizationRule {
 public:
-  explicit IndependentAxisTensorizeRule(bool enabledForCompileMode)
-      : enabledForCompileMode(enabledForCompileMode) {}
+  DynamicIndependentAxisTensorizeRule(bool enabledForCompileMode,
+                                      bool iatAndPtsmEnabled)
+      : enabledForCompileMode(enabledForCompileMode),
+        iatAndPtsmEnabled(iatAndPtsmEnabled) {}
 
   GraphOptimizationRuleId getId() const override {
     return GraphOptimizationRuleId::IndependentAxisTensorize;
   }
-
   AnalysisRequirement getAnalysisRequirements() const override {
     return AnalysisRequirement::EntryArgPointerAlias |
            AnalysisRequirement::ProgramAxisDependence |
            AnalysisRequirement::ResourceCost;
   }
-
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
     if (!enabledForCompileMode)
       return success();
-    triton::FuncOp function = context.getFunction();
-    std::optional<TensorizeFormMatch> formMatch =
-        classifyTensorizeForm(function);
-    std::optional<ProgramGridSpecialization> specialization =
-        getGridSpecialization(function);
-    if (formMatch && formMatch->form == TensorizeForm::NormRope &&
-        specialization && isPTSMRuleEnabled(*specialization)) {
-      std::optional<JointProgramMappingCandidate> candidate =
-          selectJointCandidate(context, /*emitRemarks=*/true);
-      if (!candidate)
-        return success();
-      LLVM_DEBUG(llvm::dbgs()
-                 << "[" DEBUG_TYPE "] selected joint program mapping in @"
-                 << candidate->iat.function.getName()
-                 << ": iat_factor=" << candidate->iat.factor
-                 << " block_t=" << candidate->blockT << " logical="
-                 << candidate->evaluation.candidate.logicalTasksBefore << "->"
-                 << candidate->evaluation.candidate.logicalTasksAfter
-                 << " physical="
-                 << candidate->evaluation.candidate.actualProgramsBefore << "->"
-                 << candidate->evaluation.candidate.actualProgramsAfter
-                 << "\n");
-      plans.push_back(std::make_unique<JointProgramMappingPlan>(
+    std::optional<IATCandidate> candidate = analyzeDynamicMergeSplitCandidate(context);
+    if (candidate) {
+      emitCandidateRemark(candidate->anchor, candidate->evaluation);
+      plans.push_back(std::make_unique<DynamicMergeSplitIATPlan>(
           std::move(*candidate), context.getEpoch()));
       return success();
     }
-    if (formMatch && formMatch->form == TensorizeForm::MergeSplit) {
-      std::optional<IATCandidate> candidate =
-          selectMergeSplitLargeCandidate(context, /*emitRemarks=*/true);
-      if (candidate) {
-        LLVM_DEBUG(llvm::dbgs()
-                   << "[" DEBUG_TYPE "] selected MergeSplit large IAT in @"
-                   << candidate->function.getName()
-                   << ": factor=" << candidate->factor << " logical="
-                   << candidate->evaluation.candidate.logicalTasksBefore << "->"
-                   << candidate->evaluation.candidate.logicalTasksAfter
-                   << " physical="
-                   << candidate->evaluation.candidate.actualProgramsBefore
-                   << "->"
-                   << candidate->evaluation.candidate.actualProgramsAfter
-                   << "\n");
-        plans.push_back(std::make_unique<IndependentAxisTensorizePlan>(
-            std::move(*candidate), context.getEpoch()));
-        return success();
-      }
-    }
-    std::optional<IATCandidate> candidate = analyzeCandidate(context, true);
-    if (!candidate)
+    if (!iatAndPtsmEnabled)
       return success();
-
-    emitCandidateRemark(candidate->anchor, candidate->evaluation);
-    LLVM_DEBUG(llvm::dbgs()
-               << "[" DEBUG_TYPE "] matched graph optimization rule "
-               << static_cast<unsigned>(getId()) << " ("
-               << getGraphOptimizationRuleName(getId()) << ") in @"
-               << candidate->function.getName() << ": axis=" << candidate->axis
-               << " factor=" << candidate->factor
-               << " logical_extent=" << candidate->logicalExtent << "\n");
-    plans.push_back(std::make_unique<IndependentAxisTensorizePlan>(
-        std::move(*candidate), context.getEpoch()));
+    candidate = analyzeDynamicSingleMomentCandidate(context);
+    if (candidate) {
+      emitCandidateRemark(candidate->anchor, candidate->evaluation);
+      plans.push_back(std::make_unique<DynamicSingleMomentProgramMappingPlan>(
+          std::move(*candidate), context.getEpoch()));
+    }
     return success();
   }
 
 private:
   bool enabledForCompileMode;
+  bool iatAndPtsmEnabled;
 };
 
 } // namespace
 
 std::unique_ptr<GraphOptimizationRule> cfg::createIndependentAxisTensorizeRule(
     const IndependentAxisTensorizeRuleOptions &options) {
-  return std::make_unique<IndependentAxisTensorizeRule>(
-      options.enabledForCompileMode);
+  return std::make_unique<DynamicIndependentAxisTensorizeRule>(
+      options.enabledForCompileMode, options.iatAndPtsmEnabled);
 }

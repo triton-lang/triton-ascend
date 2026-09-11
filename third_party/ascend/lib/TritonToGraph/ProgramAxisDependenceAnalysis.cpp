@@ -130,6 +130,25 @@ OffsetForm scaleOffsetForm(const OffsetForm &input, int64_t factor) {
 
 bool valueDependsOnAxis(Value value, int32_t targetAxis, DenseSet<Value> &seen);
 
+// The dynamic stride contract is intentionally narrow.  A scalar parameter
+// may be materialized as one or more shape-only Triton operations before it
+// reaches an addptr, but a load, call, or arbitrary arithmetic result is not
+// an ABI value that the program-mapping materializer can safely preserve.
+bool isRuntimeIntegerEntryArgument(Value value) {
+  if (auto argument = dyn_cast<BlockArgument>(value)) {
+    auto integer = dyn_cast<IntegerType>(argument.getType());
+    return integer && argument.getOwner() &&
+           isa<triton::FuncOp>(argument.getOwner()->getParentOp());
+  }
+  if (auto splat = value.getDefiningOp<triton::SplatOp>())
+    return isRuntimeIntegerEntryArgument(splat.getSrc());
+  if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>())
+    return isRuntimeIntegerEntryArgument(broadcast.getSrc());
+  if (auto expand = value.getDefiningOp<triton::ExpandDimsOp>())
+    return isRuntimeIntegerEntryArgument(expand.getSrc());
+  return false;
+}
+
 OffsetForm analyzeOffset(Value value, int32_t targetAxis,
                          DenseSet<Value> &visited) {
   if (!visited.insert(value).second)
@@ -201,6 +220,7 @@ OffsetForm analyzeOffset(Value value, int32_t targetAxis,
     if (lhsDepends == rhsDepends)
       return finish(invalidOffsetForm());
     Value pidTerm = lhsDepends ? multiply.getLhs() : multiply.getRhs();
+    Value strideTerm = lhsDepends ? multiply.getRhs() : multiply.getLhs();
     DenseSet<Value> pidSeen;
     OffsetForm pidForm = analyzeOffset(pidTerm, targetAxis, pidSeen);
     // Accept only the canonical `pid * runtime_stride` shape. The dynamic
@@ -208,7 +228,7 @@ OffsetForm analyzeOffset(Value value, int32_t targetAxis,
     // are accumulated by the surrounding addptr chain.
     if (!pidForm.valid || pidForm.symbolicStride ||
         pidForm.programCoefficient != 1 || pidForm.laneMin != 0 ||
-        pidForm.laneMax != 0)
+        pidForm.laneMax != 0 || !isRuntimeIntegerEntryArgument(strideTerm))
       return finish(invalidOffsetForm());
     OffsetForm form;
     form.symbolicStride = true;
@@ -363,15 +383,11 @@ StoreAddressIndependence classifyStoreAddress(triton::StoreOp store,
       offset.laneMax < offset.laneMin)
     return StoreAddressIndependence::Unknown;
 
-  // A `pid * runtime_stride` term is affine, but the runtime value cannot
-  // prove that adjacent program lanes are separated by more than their static
-  // lane interval.  The original launch may happen not to overlap for a
-  // particular call, but program mapping changes one physical program into
-  // several logical lanes; accepting an unbounded stride would make that
-  // rewrite depend on an unrecorded ABI precondition.  Keep the transform
-  // fail-closed until a future contract carries a checked lower bound.
+  // Dynamic IAT/PTSM has an explicit program-independence contract and keeps
+  // this stride as a runtime scalar through splat/broadcast.  Do not weaken
+  // the legacy strict proof: consumers must explicitly opt into this state.
   if (offset.symbolicStride)
-    return StoreAddressIndependence::Unknown;
+    return StoreAddressIndependence::CanonicalDynamicStride;
 
   // Distinct program ids are one coefficient apart.  A static per-program
   // lane interval that is narrower than that coefficient cannot overlap.
@@ -468,9 +484,25 @@ bool ProgramAxisDependence::hasOnlyDisjointStoreAddresses() const {
   });
 }
 
+bool ProgramAxisDependence::
+    hasOnlyLiftableStoreAddressesForProgramMapping() const {
+  return !stores.empty() && llvm::all_of(stores, [](const auto &store) {
+    return store.pointerDependsOnAxis &&
+           (store.independence == StoreAddressIndependence::ProvenDisjoint ||
+            store.independence ==
+                StoreAddressIndependence::CanonicalDynamicStride);
+  });
+}
+
 bool ProgramAxisDependence::isIndependentAxisTransformCandidate() const {
   return hasProgramId() && !escapes && !hasUnsupportedSideEffects &&
          !readsNumPrograms && hasOnlyDisjointStoreAddresses();
+}
+
+bool ProgramAxisDependence::isProgramMappingTransformCandidate() const {
+  return hasProgramId() && !escapes && !hasUnsupportedSideEffects &&
+         !readsNumPrograms &&
+         hasOnlyLiftableStoreAddressesForProgramMapping();
 }
 
 ProgramAxisDependenceAnalysis::ProgramAxisDependenceAnalysis(

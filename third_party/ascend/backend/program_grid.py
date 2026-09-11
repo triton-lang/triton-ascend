@@ -10,16 +10,6 @@
 # The above copyright notice and this permission notice shall be included in
 # all copies or substantial portions of the Software.
 
-"""Fail-closed dynamic original-grid launcher contracts.
-
-The contract is emitted by GraphOptimize only after a TTIR rewrite has added
-the fixed pair of internal original-grid arguments. Original launch grid and
-runtime strides deliberately stay outside compiler-cache identity; generated
-launchers preserve the grid at invocation time, inline the supported
-ceil-div/cap arithmetic, and append the two hidden arguments to the device
-ABI.
-"""
-
 from __future__ import annotations
 
 import json
@@ -42,7 +32,7 @@ HIDDEN_ARGUMENT_TYPES = ("i32", "i32")
 
 
 class ProgramGridContractError(ValueError):
-    """Raised when compiler metadata cannot safely drive a launcher."""
+    pass
 
 
 _TOP_LEVEL_KEYS = frozenset((
@@ -106,7 +96,6 @@ def _exact_sequence(value: Any, expected: tuple[Any, ...], name: str) -> None:
 
 
 def normalize_graph_optimization_rule_mask(raw: Any) -> int:
-    """Validate the existing complete GraphOptimize rule mask."""
     mask = _integer(raw, "rule_mask", minimum=0)
     if mask > GRAPH_OPTIMIZATION_KNOWN_RULE_MASK:
         raise ProgramGridContractError("rule_mask contains unsupported graph-optimization bits")
@@ -114,12 +103,6 @@ def normalize_graph_optimization_rule_mask(raw: Any) -> int:
 
 
 def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
-    """Normalize exactly the three dynamic IAT/PTSM launch plans.
-
-    This schema intentionally has no logical extent. The only legal extent
-    source is the caller's current original X/Y grid, carried to the device
-    through the fixed two-i32 internal ABI.
-    """
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -217,15 +200,6 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
 
 
 def normalize_legacy_program_grid_transforms(raw: Any) -> dict[str, Any]:
-    """Normalize the fixed-grid SPAF launcher contract.
-
-    StaticProgramAxisFusion predates the dynamic original-grid ABI.  Its
-    ``logical_extent`` is a compile-time proof and its axis may be Z, so it
-    must never be passed through :func:`normalize_program_grid_transforms`.
-    Keeping this parser separate makes that boundary explicit: IAT/PTSM retain
-    their strict X/Y-only runtime contract while old fixed-grid artifacts keep
-    their original launcher semantics.
-    """
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
@@ -314,7 +288,6 @@ def normalize_legacy_program_grid_transforms(raw: Any) -> dict[str, Any]:
 
 
 def get_legacy_persistent_transform(contract: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    """Return the one legacy fixed-grid transform allowed to cap physical work."""
     for transform in normalize_legacy_program_grid_transforms(contract)["transforms"]:
         if transform["persistent_coverage"]:
             return transform
@@ -338,11 +311,6 @@ def apply_program_grid_transforms(
     *,
     physical_core_count: int | None = None,
 ) -> tuple[int, int, int]:
-    """Reference dynamic launcher arithmetic for tests only.
-
-    Generated C++ emits this arithmetic directly. It never calls this helper
-    at launch time and never checks an exact-grid specialization.
-    """
     if len(grid) != 3:
         raise ProgramGridContractError("grid must contain exactly three dimensions")
     launch_grid = [_integer(value, f"grid[{axis}]", minimum=1)

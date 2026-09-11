@@ -40,13 +40,16 @@ struct BufferAllocPair {
   Operation *markOp = nullptr;
 };
 
-/// Transfer operation chain for sender or receiver side
+/// Transfer chain for one side. Tag+dataflow classification:
+/// - writes a group buffer: sender
+/// - first value-read of a group buffer: receiver head
 struct TransferOpChain {
   Operation *waitOp = nullptr;
-  Operation *transferOp =
-      nullptr; // fixpipe / hir.copy / memory_space_cast / convert_layout
+  Operation *transferOp = nullptr;
+  // Group-buffer operand of transferOp; remapped to the spare buffer on wrap
+  Value bufferOperand;
   Operation *toTensorOp =
-      nullptr; // bufferization.to_tensor (memory_space_cast scenario only)
+      nullptr; // memref→tensor boundary op terminating the receiver chain
   Operation *setOp = nullptr;
 };
 

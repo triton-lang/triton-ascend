@@ -37,15 +37,9 @@ using namespace triton;
 
 // Functions that should use at most double buffering.
 static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
-    "sdf02_tc01_c2v_war",
-    "sdf02_tc02_c2v_war",
     "_attn_fwd",
     "kernel_sdpa_fwd",
     "kernel_sdpa_bwd_q",
-    "pcb08_tc01_kernel",
-    "pcb08_tc02_kernel",
-    "pcb09_tc01_kernel",
-    "pcb09_tc02_kernel",
     "_swa_paged_decode_kernel",
     "_mqa_logits_kernel",
     "parallel_path_fwd_kernel",
@@ -53,11 +47,8 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "chunk_fwd_kernel_h",
     "_jagged_dense_flash_attention_bwd_dk_kernel",
     "_gqa_sparse_decode_kernel",
-    "pcb14_tc01_while_matmul_scalar",
-    "pcb14_tc02_while_matmul_scalar",
     "paged_decode_fd_reduce_kernel",
-    "paged_decode_fd_kernel",
-    "flash_fwd_kernel"};
+    "paged_decode_fd_kernel"};
 
 static constexpr const char *DEBUG_TYPE = "pre-check-disable-preload";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")

@@ -65,9 +65,27 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
+    ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
 )
 from triton.backends.ascend.driver import (NPUUtils)
+from triton.backends.ascend.program_grid import (
+    DEFAULT_PROGRAM_MAPPING_RULE_MASK,
+    PROGRAM_MAPPING_SCALAR_SPECIALIZATION_ATTR,
+    PROGRAM_GRID_SPECIALIZATION_ATTR,
+    PROGRAM_GRID_SPECIALIZATION_VERSION,
+    PROGRAM_GRID_TRANSFORMS_ATTR,
+    PROGRAM_GRID_TRANSFORMS_VERSION,
+    ProgramGridContractError,
+    canonical_program_mapping_scalar_specialization_json,
+    canonical_program_grid_specialization_json,
+    canonical_program_grid_transforms_json,
+    normalize_program_mapping_scalar_specialization,
+    normalize_program_grid_specialization,
+    normalize_program_mapping_rule_mask,
+    normalize_program_grid_transforms,
+    program_grid_specialization_enabled,
+)
 from triton.backends.compiler import (
     BaseBackend,
     GPUTarget,
@@ -87,7 +105,14 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
     if get_int_attr is None:
         return -1
-    attr_value = get_int_attr(mod, attr_name)
+    # Keep metadata-only legacy callers usable when this Python module is
+    # imported next to an installed C++ extension: their stand-in is not an
+    # OpState, so pybind rightfully rejects it.  A real compiler module still
+    # always takes the binding path below.
+    try:
+        attr_value = get_int_attr(mod, attr_name)
+    except TypeError:
+        return -1
 
     if remove_attr:
         remove_attr(mod, attr_name)
@@ -96,6 +121,155 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
         return -1
 
     return attr_value
+
+
+def _get_then_remove_program_grid_transforms(mod):
+    """Read the C++-validated generic attr and always remove it from MLIR.
+
+    The vendor compilers below this boundary reject unknown ``hacc.*`` attrs.
+    A missing binding is safe only when the module demonstrably has no contract;
+    otherwise fail rather than sending an unrecognized attr to a backend.
+    """
+    get_transforms = getattr(ascend.ir, "get_program_grid_transforms", None)
+    remove_attr = getattr(ascend.ir, "remove_attr", None)
+    if get_transforms is None:
+        if PROGRAM_GRID_TRANSFORMS_ATTR in str(mod):
+            raise RuntimeError("hacc.program_grid_transforms requires the matching Ascend C++ binding")
+        return None
+    # The production pipeline always passes an MLIR OpState.  Some legacy
+    # metadata-only callers, however, use a lightweight module stand-in that
+    # deliberately has no C++ OpState binding.  Preserve that old no-attr
+    # behavior while remaining fail-closed if the stand-in advertises the new
+    # contract (which must be parsed by the C++ validator).
+    try:
+        raw = get_transforms(mod)
+    except TypeError:
+        if PROGRAM_GRID_TRANSFORMS_ATTR in str(mod):
+            raise RuntimeError("hacc.program_grid_transforms requires an MLIR module accepted by "
+                               "the Ascend C++ binding")
+        return None
+    if raw is not None and remove_attr:
+        remove_attr(mod, PROGRAM_GRID_TRANSFORMS_ATTR)
+    return raw
+
+
+def _get_then_clear_program_grid_specialization(mod):
+    """Read a C++-validated original-grid input and remove every copy.
+
+    ``set_program_grid_specialization`` writes the attr on both the module and
+    its ``tt.func`` operations so GraphOptimize can consume a local static
+    input.  The lower vendor toolchain does not accept arbitrary ``hacc.*``
+    attrs, therefore clearing only the module copy would be unsafe.
+    """
+    get_specialization = getattr(ascend.ir, "get_program_grid_specialization", None)
+    clear_specialization = getattr(ascend.ir, "clear_program_grid_specialization", None)
+    if get_specialization is None or clear_specialization is None:
+        if PROGRAM_GRID_SPECIALIZATION_ATTR in str(mod):
+            raise RuntimeError("hacc.grid_specialization requires the matching Ascend C++ binding")
+        return None
+    try:
+        raw = get_specialization(mod)
+    except TypeError:
+        if PROGRAM_GRID_SPECIALIZATION_ATTR in str(mod):
+            raise RuntimeError("hacc.grid_specialization requires an MLIR module accepted by "
+                               "the Ascend C++ binding")
+        return None
+    if raw is not None:
+        clear_specialization(mod)
+    return raw
+
+
+def _get_then_clear_program_mapping_scalar_specialization(mod):
+    """Remove the JIT-only scalar contract before vendor lowering.
+
+    GraphOptimize normally consumes this contract before the exporter runs.
+    This fallback covers disabled graph optimization and compiler failures
+    before that pass, so an internal ``hacc.*`` attr can never leak into the
+    downstream toolchain.
+    """
+    get_specialization = getattr(ascend.ir, "get_program_mapping_scalar_specialization", None)
+    clear_specialization = getattr(ascend.ir, "clear_program_mapping_scalar_specialization", None)
+    if get_specialization is None or clear_specialization is None:
+        if PROGRAM_MAPPING_SCALAR_SPECIALIZATION_ATTR in str(mod):
+            raise RuntimeError("hacc.program_mapping_scalar_specialization requires the "
+                               "matching Ascend C++ binding")
+        return None
+    try:
+        raw = get_specialization(mod)
+    except TypeError:
+        if PROGRAM_MAPPING_SCALAR_SPECIALIZATION_ATTR in str(mod):
+            raise RuntimeError("hacc.program_mapping_scalar_specialization requires an MLIR "
+                               "module accepted by the Ascend C++ binding")
+        return None
+    if raw is not None:
+        clear_specialization(mod)
+    return raw
+
+
+def _inject_program_grid_specialization(mod, metadata, opt):
+    """Publish pre-transform grid and exact scalar values before GraphOptimize."""
+    raw_specialization = getattr(opt, "program_grid_specialization", None)
+    raw_scalar_specialization = getattr(opt, "program_mapping_scalar_specialization", None)
+    if raw_specialization is None:
+        if raw_scalar_specialization is not None:
+            raise RuntimeError("program_mapping_scalar_specialization requires "
+                               "program_grid_specialization")
+        # AOT/C API compilation may enable a program-mapping bit without a
+        # fixed grid.  Those rules must be no-op rather than inventing an
+        # extent, so deliberately inject nothing in that case.
+        return None
+
+    try:
+        specialization = normalize_program_grid_specialization(raw_specialization)
+        scalar_specialization = (None if raw_scalar_specialization is None else
+                                 normalize_program_mapping_scalar_specialization(raw_scalar_specialization))
+        rule_mask = normalize_program_mapping_rule_mask(getattr(opt, "program_mapping_rule_mask", 0))
+    except ProgramGridContractError as error:
+        raise RuntimeError(f"invalid program-grid specialization option: {error}") from error
+    if not program_grid_specialization_enabled(rule_mask):
+        raise RuntimeError("hacc.grid_specialization requires an enabled program-mapping rule bit")
+    if specialization["rule_mask"] != rule_mask:
+        raise RuntimeError("hacc.grid_specialization rule_mask disagrees with program_mapping_rule_mask")
+
+    set_specialization = getattr(ascend.ir, "set_program_grid_specialization", None)
+    if set_specialization is None:
+        raise RuntimeError("hacc.grid_specialization requires the matching Ascend C++ binding")
+    try:
+        set_specialization(
+            mod,
+            specialization["version"],
+            *specialization["grid"],
+            specialization["rule_mask"],
+        )
+    except Exception as error:
+        raise RuntimeError(f"could not inject hacc.grid_specialization: {error}") from error
+
+    if scalar_specialization is not None:
+        set_scalar_specialization = getattr(ascend.ir, "set_program_mapping_scalar_specialization", None)
+        if set_scalar_specialization is None:
+            raise RuntimeError("hacc.program_mapping_scalar_specialization requires the "
+                               "matching Ascend C++ binding")
+        try:
+            scalar_arguments = scalar_specialization["arguments"]
+            set_scalar_specialization(
+                mod,
+                scalar_specialization["version"],
+                [((argument["index"], argument["name"], argument["value"]) if "name" in argument else
+                  (argument["index"], argument["value"])) for argument in scalar_arguments],
+            )
+        except Exception as error:
+            raise RuntimeError("could not inject hacc.program_mapping_scalar_specialization: "
+                               f"{error}") from error
+
+    # Preserve exactly the canonical object that C++ wrote.  It is part of
+    # compiler metadata and is consumed by both generated launcher paths.
+    metadata["program_grid_specialization"] = specialization
+    metadata["program_grid_specialization_cache_key"] = (canonical_program_grid_specialization_json(specialization))
+    if scalar_specialization is not None:
+        metadata["program_mapping_scalar_specialization"] = scalar_specialization
+        metadata["program_mapping_scalar_specialization_cache_key"] = (
+            canonical_program_mapping_scalar_specialization_json(scalar_specialization))
+    return specialization
 
 
 def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
@@ -127,6 +301,95 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
     metadata["coalesce_axis"] = axis if valid_axis else -1
     metadata["coalesce_grid_ceil_div"] = valid_ceil_div
     metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
+
+
+def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
+    """Export one launcher contract and strip all hacc launch attrs.
+
+    Migration policy is intentionally strict: a module may use the legacy
+    three-attribute coalesce contract *or* versioned program-grid transforms,
+    never both.  The legacy path is retained byte-for-byte in metadata so old
+    Row/Chunk artifacts continue to launch unchanged while new mapping rules
+    publish the richer schema.
+    """
+    raw_scalar_specialization = _get_then_clear_program_mapping_scalar_specialization(mod)
+    if raw_scalar_specialization is not None:
+        try:
+            scalar_specialization = normalize_program_mapping_scalar_specialization(raw_scalar_specialization)
+        except ProgramGridContractError as error:
+            raise RuntimeError("invalid hacc.program_mapping_scalar_specialization: "
+                               f"{error}") from error
+        requested_scalar_specialization = metadata.get("program_mapping_scalar_specialization")
+        if requested_scalar_specialization is not None:
+            try:
+                requested_scalar_specialization = (
+                    normalize_program_mapping_scalar_specialization(requested_scalar_specialization))
+            except ProgramGridContractError as error:
+                raise RuntimeError("invalid program_mapping_scalar_specialization metadata: "
+                                   f"{error}") from error
+            if requested_scalar_specialization != scalar_specialization:
+                raise RuntimeError("hacc.program_mapping_scalar_specialization disagrees "
+                                   "with compiler metadata")
+        metadata["program_mapping_scalar_specialization"] = scalar_specialization
+        metadata["program_mapping_scalar_specialization_cache_key"] = (
+            canonical_program_mapping_scalar_specialization_json(scalar_specialization))
+
+    raw_specialization = _get_then_clear_program_grid_specialization(mod)
+    if raw_specialization is not None:
+        try:
+            specialization = normalize_program_grid_specialization(raw_specialization)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid hacc.grid_specialization: {error}") from error
+        requested_specialization = metadata.get("program_grid_specialization")
+        if requested_specialization is not None:
+            try:
+                requested_specialization = normalize_program_grid_specialization(requested_specialization)
+            except ProgramGridContractError as error:
+                raise RuntimeError(f"invalid program_grid_specialization metadata: {error}") from error
+            if requested_specialization != specialization:
+                raise RuntimeError("hacc.grid_specialization disagrees with compiler metadata")
+        metadata["program_grid_specialization"] = specialization
+        metadata["program_grid_specialization_cache_key"] = (canonical_program_grid_specialization_json(specialization))
+    elif metadata.get("program_grid_specialization") is not None:
+        # Never send a stale cache option to a launcher when the compiler did
+        # not actually observe the corresponding static attr.
+        raise RuntimeError("program_grid_specialization metadata was supplied without hacc.grid_specialization")
+
+    raw_transforms = _get_then_remove_program_grid_transforms(mod)
+
+    if raw_transforms is not None:
+        # Read/remove the legacy attrs whenever the new contract is present so
+        # no unknown hacc.* launch metadata can reach BishengIR/HIVM.
+        factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
+        axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+        ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
+        has_legacy_attrs = any(value != -1 for value in (factor, axis, ceil_div))
+        if has_legacy_attrs:
+            raise RuntimeError("hacc.program_grid_transforms conflicts with legacy hacc.coalesce_* metadata")
+        try:
+            transforms = normalize_program_grid_transforms(raw_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid hacc.program_grid_transforms: {error}") from error
+        metadata["program_grid_transforms"] = transforms
+        metadata["program_grid_transform_schema_version"] = transforms["version"]
+        metadata["program_grid_transforms_cache_key"] = canonical_program_grid_transforms_json(transforms)
+        metadata["coalesce_factor"] = 1
+        metadata["coalesce_axis"] = -1
+        metadata["coalesce_grid_ceil_div"] = False
+        metadata["row_coalescing_applied"] = False
+        return
+
+    # Keep the no-transform path on the original exporter.  This preserves
+    # the legacy Row/Axis/Chunk metadata behavior and its observability seam;
+    # only versioned program-grid transforms need the new branch above.
+    metadata["program_grid_transforms"] = None
+    metadata["program_grid_transform_schema_version"] = 0
+    metadata["program_grid_transforms_cache_key"] = "legacy"
+    _export_coalesce_metadata(
+        mod,
+        metadata,
+        require_row_contract=require_row_contract,
+    )
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -163,9 +426,55 @@ def _with_debug_line(npubin_stage, options):
     return stage
 
 
+def _graph_optimize_device_core_count() -> int:
+    """Return an explicit target fact for resource-gated mapping rules.
+
+    A failed runtime query deliberately becomes zero.  The C++ cost model
+    treats zero as unknown and rejects a candidate instead of applying a
+    program-axis transformation using a target-name guess.
+    """
+    try:
+        # Program-mapping kernels execute on the vector path, so the cap and
+        # resource model must observe the same physical-program limit as the
+        # launcher rather than the cube-core count.
+        count = NPUUtils().get_aivector_core_num()
+    except Exception:
+        return 0
+    if isinstance(count, bool) or not isinstance(count, int):
+        return 0
+    return count if 0 < count <= (2**32 - 1) else 0
+
+
+def _graph_optimize_kwargs(opt):
+    """Keep legacy graph optimization byte-for-byte unchanged by default."""
+    kwargs = {
+        "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
+        "compile_mode": opt.compile_mode,
+    }
+    mapping_mask = normalize_program_mapping_rule_mask(getattr(opt, "program_mapping_rule_mask", 0))
+    if mapping_mask:
+        # Mapping bits have a distinct enablement boundary from the legacy
+        # graph bundle.  Forward the exact mask so RowCoalescing cannot
+        # compete with a program-grid transform through the legacy mask.
+        kwargs["rule_mask"] = mapping_mask
+        kwargs["device_core_count"] = _graph_optimize_device_core_count()
+        kwargs["min_programs_per_core"] = 1
+        kwargs["ub_safety_percent"] = 80
+        kwargs["reserved_ub_bytes"] = 0
+        # Program mapping prices the actual target UB.  StoreCoalescing keeps
+        # the legacy half-UB admission budget passed through ub_capacity_bytes
+        # above.  Supplying both explicit fields only on the mapping path keeps
+        # all-disabled compilations and their cache identity byte-for-byte
+        # compatible with the historical call contract.
+        kwargs["mapping_ub_capacity_bytes"] = (ub_size_in_kbytes_for_arch(opt.target_arch) * 1024)
+        kwargs["store_coalescing_ub_budget_bytes"] = (graph_ub_budget_bytes_for_arch(opt.target_arch))
+    return kwargs
+
+
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
+    _inject_program_grid_specialization(mod, metadata, opt)
     # the same optimize pass for triton-ir as all other backends
     pm = ir.pass_manager(mod.context)
     pm.enable_debug()
@@ -180,11 +489,7 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
     if opt.enable_graph_optimize:
-        ascend.passes.ttir.add_graph_optimize(
-            pm,
-            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
-            compile_mode=opt.compile_mode,
-        )
+        ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -304,7 +609,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
-        _export_coalesce_metadata(mod, metadata)
+        _export_program_grid_metadata(mod, metadata)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
@@ -1053,6 +1358,12 @@ class NPUOptions:
     # Backend-only construction input.  AscendBackend.parse_options injects
     # GPUTarget.arch and never forwards a user-supplied compile option.
     arch: InitVar[str] = ""
+    # ``None`` selects the production IAT/PTSM default. Passing ``0`` is an
+    # explicit opt-out. Without an explicit fixed grid, either choice stays
+    # fail-closed in the mapping rules.
+    program_mapping_rule_mask: InitVar[Optional[int]] = None
+    program_grid_specialization: InitVar[Any] = None
+    program_mapping_scalar_specialization: InitVar[Any] = None
     # This becomes compiler metadata, so its name must also be valid for the
     # namedtuple constructed by CompiledKernel on Python 3.10.
     target_arch: str = field(init=False, repr=False)
@@ -1144,7 +1455,16 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
-    def __post_init__(self, arch):
+    # Versioned launcher ABI.  This is an option (rather than a module-only
+    # detail) so a wheel that changes the schema never reuses a cache entry
+    # produced by an older launcher/compiler pair.
+    program_grid_transform_schema_version: int = PROGRAM_GRID_TRANSFORMS_VERSION
+    # Future mapping rules may change arithmetic precision.  Preserve it in
+    # the cache key now, even while stage 00 only carries the policy through.
+    precision_policy: str = "strict_exact"
+
+    def __post_init__(self, arch, program_mapping_rule_mask, program_grid_specialization,
+                      program_mapping_scalar_specialization):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
@@ -1156,6 +1476,45 @@ class NPUOptions:
             "compile_on_910_95",
             isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
         )
+        try:
+            if program_mapping_rule_mask is None:
+                program_mapping_rule_mask = (
+                    DEFAULT_PROGRAM_MAPPING_RULE_MASK
+                    if self.enable_graph_optimize else 0)
+            normalized_mapping_rule_mask = normalize_program_mapping_rule_mask(program_mapping_rule_mask)
+            normalized_specialization = (None if program_grid_specialization is None else
+                                         normalize_program_grid_specialization(program_grid_specialization))
+            normalized_scalar_specialization = (
+                None if program_mapping_scalar_specialization is None else
+                normalize_program_mapping_scalar_specialization(program_mapping_scalar_specialization))
+        except ProgramGridContractError as error:
+            raise ValueError(f"invalid program-grid specialization option: {error}") from error
+        if normalized_specialization is not None:
+            if not program_grid_specialization_enabled(normalized_mapping_rule_mask):
+                raise ValueError("program_grid_specialization requires an enabled "
+                                 "program_mapping_rule_mask")
+            if normalized_specialization["rule_mask"] != normalized_mapping_rule_mask:
+                raise ValueError("program_grid_specialization.rule_mask must equal "
+                                 "program_mapping_rule_mask")
+        if normalized_scalar_specialization is not None:
+            if not program_grid_specialization_enabled(normalized_mapping_rule_mask):
+                raise ValueError("program_mapping_scalar_specialization requires an enabled "
+                                 "program_mapping_rule_mask")
+            if normalized_specialization is None:
+                raise ValueError("program_mapping_scalar_specialization requires "
+                                 "program_grid_specialization")
+        # Materialize the resolved selector so the unmodified community JIT
+        # accepts explicit backend options and the compiler cache sees the
+        # same contract as the caller-side canonical factory.
+        object.__setattr__(self, "program_mapping_rule_mask", normalized_mapping_rule_mask)
+        if normalized_mapping_rule_mask:
+            # The physical-UB mapping model is an implementation/cache schema,
+            # not a public knob.
+            object.__setattr__(self, "program_mapping_resource_model_schema_version", 2)
+        if normalized_specialization is not None:
+            object.__setattr__(self, "program_grid_specialization", normalized_specialization)
+        if normalized_scalar_specialization is not None:
+            object.__setattr__(self, "program_mapping_scalar_specialization", normalized_scalar_specialization)
         # The core compiler serializes ``options.__dict__`` into launch
         # metadata.  An init=False field with its class-level default alone is
         # not present there, so materialize the false state before the
@@ -1164,6 +1523,12 @@ class NPUOptions:
 
         if self.simt_stack_limit is not None:
             _validate_simt_stack_limit(self.simt_stack_limit)
+
+        if self.program_grid_transform_schema_version != PROGRAM_GRID_TRANSFORMS_VERSION:
+            raise ValueError("program_grid_transform_schema_version must equal "
+                             f"{PROGRAM_GRID_TRANSFORMS_VERSION}")
+        if self.precision_policy not in ("off", "strict_exact", "relaxed"):
+            raise ValueError("precision_policy must be one of: off, strict_exact, relaxed")
 
         compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
         object.__setattr__(self, "compile_mode", compile_mode)
@@ -1234,14 +1599,21 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
 
 
 def ttir_to_npubin(mod, metadata, opt):
+    # Pure-SIMT hands TTIR directly to the vendor compiler.  When an enabled
+    # bridge attr is present, strip it before taking the first textual snapshot
+    # so neither module nor function copies can leak downstream.
+    pure_simt_grid_metadata_exported = False
+    if opt.is_pure_simt and getattr(opt, "program_grid_specialization", None) is not None:
+        _export_program_grid_metadata(mod, metadata, require_row_contract=True)
+        pure_simt_grid_metadata_exported = True
     # Get Triton-MLIR as string
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    if opt.is_pure_simt:
+    if opt.is_pure_simt and not pure_simt_grid_metadata_exported:
         # RowCoalescing is now the pure-SIMT graph rule in make_ttir().  This
-        # stage only transfers its complete launch contract to metadata before
-        # handing TTIR to pure-SIMT codegen.
-        _export_coalesce_metadata(mod, metadata, require_row_contract=True)
+        # stage transfers either its legacy contract or the new versioned
+        # launcher contract before handing TTIR to pure-SIMT codegen.
+        _export_program_grid_metadata(mod, metadata, require_row_contract=True)
         ttir_code = str(mod)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input

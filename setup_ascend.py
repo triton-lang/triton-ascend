@@ -355,6 +355,43 @@ def _copy_ascend_tools(extdir, cmake_dir):
             print(f"Copied {name} to {dst}")
 
 
+_BISHENGIR_PAYLOAD_ENV = "TRITON_ASCEND_BISHENGIR_PATH"
+
+
+def _get_bishengir_payload_source():
+    """Return the optional BishengIR tree selected for this wheel build."""
+    raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
+    if not raw_path:
+        return None
+
+    source = Path(raw_path).expanduser().resolve()
+    required_paths = [
+        source / "bin" / "bishengir-compile",
+        source / "bin" / "bishengir-opt",
+        source / "lib",
+    ]
+    if not source.is_dir() or any(not path.exists() for path in required_paths):
+        raise RuntimeError(
+            f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+            "bin/bishengir-compile, bin/bishengir-opt, and lib"
+        )
+    return source
+
+
+def _copy_bishengir_payload(build_lib):
+    """Stage an optional BishengIR payload where the runtime resolver expects it."""
+    source = _get_bishengir_payload_source()
+    if source is None:
+        return
+
+    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination, symlinks=True)
+    print(f"Bundled BishengIR payload from {source} into {destination}")
+
+
 def _get_ascend_cmake_args():
     cmake_args = []
     ascendnpu_ir_tag = os.getenv("ASCENDNPU_IR_TAG")
@@ -470,7 +507,18 @@ def _patch_module(mod):
 
     mod.CMakeBuild = CMakeBuild
 
-    # 4. Replace BuildWheel (bdist_wheel) with Ascend auditwheel variant.
+    # 4. Optionally bundle a prebuilt BishengIR tree into the wheel.
+    _OrigCMakeBuildPy = mod.CMakeBuildPy
+
+    class AscendBuildPy(_OrigCMakeBuildPy):
+
+        def run(self):
+            super().run()
+            _copy_bishengir_payload(self.build_lib)
+
+    mod.AscendBuildPy = AscendBuildPy
+
+    # 5. Replace BuildWheel (bdist_wheel) with Ascend auditwheel variant.
     is_manylinux = mod.check_env_flag("IS_MANYLINUX", "FALSE")
 
     class BuildWheel(bdist_wheel):
@@ -502,7 +550,7 @@ def _patch_module(mod):
 
     mod.BuildWheel = BuildWheel
 
-    # 5. Patch get_package_dirs to include distributed package.
+    # 6. Patch get_package_dirs to include distributed package.
     _orig_get_package_dirs = mod.get_package_dirs
 
     def get_package_dirs():
@@ -513,7 +561,7 @@ def _patch_module(mod):
 
     mod.get_package_dirs = get_package_dirs
 
-    # 6. Patch get_packages to include distributed subpackages.
+    # 7. Patch get_packages to include distributed subpackages.
     _orig_get_packages = mod.get_packages
 
     def get_packages():
@@ -532,7 +580,7 @@ def _patch_module(mod):
 
     mod.get_packages = get_packages
 
-    # 7. Patch add_links to include distributed symlink.
+    # 8. Patch add_links to include distributed symlink.
     _orig_add_links = mod.add_links
 
     def add_links(external_only):
@@ -573,10 +621,11 @@ def _build_setup_kwargs(mod, kwargs):
     if package_data:
         kwargs["package_data"] = package_data
 
-    # cmdclass: replace bdist_wheel with BuildWheel, build_ext with CMakeBuild
+    # cmdclass: replace bdist_wheel/build_ext/build_py with Ascend variants
     cmdclass = dict(kwargs.get("cmdclass") or {})
     cmdclass["bdist_wheel"] = mod.BuildWheel
     cmdclass["build_ext"] = mod.CMakeBuild
+    cmdclass["build_py"] = mod.AscendBuildPy
     kwargs["cmdclass"] = cmdclass
 
     # packages / package_dir must be re-evaluated (they were computed with

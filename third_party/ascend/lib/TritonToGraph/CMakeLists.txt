@@ -5,11 +5,15 @@ add_triton_library(TritonToGraph
   DataflowGraph.cpp
   EntryArgPointerAliasAnalysis.cpp
   GraphOptimizationContext.cpp
+  ResourceCostModel.cpp
   GraphOptimizationPass.cpp
   LayoutMemoryCompatibilityPass.cpp
   MemorySsaBuilder.cpp
   MergeConcatLoadBuffer.cpp
   PermutationAnalysis.cpp
+  ProgramAxisDependenceAnalysis.cpp
+  ProgramGridSpecialization.cpp
+  ProgramGridTransform.cpp
   MergeConcatLoadBuffer.cpp
   Passes.cpp
   LegacyMemoryAccess/ChunkCoalescing.cpp
@@ -17,7 +21,15 @@ add_triton_library(TritonToGraph
   LegacyMemoryAccess/StridedAxisCoalescing.cpp
   LegacyMemoryAccess/StridedLoadStoreRewrite.cpp
   Rules/ConvertModuloToMaskRule.cpp
+  Rules/ReservedGraphOptimizationRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
+  Rules/IndependentAxisTensorizeRule.cpp
+  Rules/StaticProgramAxisFusionRule.cpp
+  Rules/PersistentTaskStripMiningRule.cpp
+  Rules/ResidentLoadForwardingRule.cpp
+  Rules/IntermediatePrecisionBoundaryElisionRule.cpp
+  Rules/StoreCoveragePlanningRule.cpp
+  Rules/ContiguousBlockAccessFormationRule.cpp
   Rules/LoadStoreTransposeRule.cpp
   Rules/RowCoalescingRule.cpp
   Rules/TransposePointwiseReorderRule.cpp

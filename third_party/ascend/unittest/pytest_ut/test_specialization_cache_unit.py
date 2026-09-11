@@ -4,14 +4,46 @@ These tests exercise binder/native-specializer policy without CANN or an NPU.
 The NPU integration suite separately verifies compilation counts and outputs.
 """
 
+import importlib.util
 import inspect
+import sys
+from pathlib import Path
 
 import pytest
 import torch
 
-from triton.backends.ascend.compiler import AscendBackend
 from triton.backends.compiler import GPUTarget
 from triton.runtime.jit import KernelParam, compute_cache_key, create_function_from_signature
+
+
+def _load_source_specialization_backend():
+    """Load the changed backend files instead of an installed wheel copy."""
+    backend_root = Path(__file__).resolve().parents[2] / "backend"
+    program_grid_name = "triton.backends.ascend.program_grid"
+    program_grid_spec = importlib.util.spec_from_file_location(
+        program_grid_name, backend_root / "program_grid.py")
+    program_grid = importlib.util.module_from_spec(program_grid_spec)
+    assert program_grid_spec.loader is not None
+    sys.modules[program_grid_name] = program_grid
+    program_grid_spec.loader.exec_module(program_grid)
+
+    compiler_spec = importlib.util.spec_from_file_location(
+        "triton.backends.ascend.compiler_specialization_cache_under_test",
+        backend_root / "compiler.py")
+    compiler = importlib.util.module_from_spec(compiler_spec)
+    assert compiler_spec.loader is not None
+    sys.modules[compiler_spec.name] = compiler
+    compiler_spec.loader.exec_module(compiler)
+    return compiler, program_grid
+
+
+_source_compiler, _source_program_grid = _load_source_specialization_backend()
+AscendBackend = _source_compiler.AscendBackend
+DEFAULT_PROGRAM_MAPPING_RULE_MASK = _source_program_grid.DEFAULT_PROGRAM_MAPPING_RULE_MASK
+INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = _source_program_grid.INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
+PERSISTENT_TASK_STRIP_MINING_RULE_BIT = _source_program_grid.PERSISTENT_TASK_STRIP_MINING_RULE_BIT
+ProgramGridContractError = _source_program_grid.ProgramGridContractError
+make_program_mapping_compile_options = _source_program_grid.make_program_mapping_compile_options
 
 pytestmark = pytest.mark.backend("native")
 
@@ -251,3 +283,72 @@ def test_annotated_integer_do_not_specialize_keeps_legacy_cache_key(options, val
 
     assert first_specialization == second_specialization == [("i32", None)]
     assert first_key == second_key
+
+
+def test_program_mapping_factory_canonicalizes_raw_jit_options_and_backend_hash():
+    rule_mask = INDEPENDENT_AXIS_TENSORIZE_RULE_BIT | PERSISTENT_TASK_STRIP_MINING_RULE_BIT
+    first = make_program_mapping_compile_options(
+        (65, 1),
+        rule_mask,
+        scalar_arguments=[(3, "tokens", 19)],
+        compile_mode="unstructured_in_simt",
+    )
+    equivalent = make_program_mapping_compile_options(
+        [65, 1, 1],
+        rule_mask,
+        scalar_arguments=((3, "tokens", 19), ),
+        compile_mode="simd_simt_template",
+    )
+
+    assert first == equivalent
+    assert repr(first) == repr(equivalent)
+    assert list(first) == [
+        "program_mapping_rule_mask",
+        "program_grid_specialization",
+        "program_grid_transform_schema_version",
+        "program_mapping_scalar_specialization",
+        "compile_mode",
+    ]
+
+    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
+    first_options = backend.parse_options(dict(first))
+    equivalent_options = backend.parse_options(dict(equivalent))
+    for option_name in (
+            "program_mapping_rule_mask",
+            "program_grid_specialization",
+            "program_mapping_scalar_specialization",
+    ):
+        assert option_name in first_options.__dict__
+    assert first_options.hash() == equivalent_options.hash()
+
+    specialization = [("i32", "")]
+    assert compute_cache_key({}, specialization, first) == compute_cache_key({}, specialization, equivalent)
+
+    changed = make_program_mapping_compile_options(
+        (66, 1, 1),
+        rule_mask,
+        scalar_arguments=[(3, "tokens", 19)],
+    )
+    changed_options = backend.parse_options(changed)
+    assert compute_cache_key({}, specialization, first) != compute_cache_key({}, specialization, changed)
+    assert first_options.hash() != changed_options.hash()
+
+
+def test_program_mapping_default_stays_explicit_and_no_jit_hook_exists():
+    backend = AscendBackend(GPUTarget("npu", "Ascend910B", 32))
+    default_options = backend.parse_options({})
+    assert default_options.program_mapping_rule_mask == DEFAULT_PROGRAM_MAPPING_RULE_MASK
+    assert "program_grid_specialization" not in default_options.__dict__
+
+    with pytest.raises(ProgramGridContractError, match="enabled rule mask"):
+        make_program_mapping_compile_options((1, ), 0)
+    with pytest.raises(ProgramGridContractError, match="must not be empty"):
+        make_program_mapping_compile_options(
+            (1, ),
+            INDEPENDENT_AXIS_TENSORIZE_RULE_BIT,
+            scalar_arguments=[],
+        )
+
+    assert not hasattr(AscendBackend, "prepare_program_grid_specialization")
+    assert not hasattr(AscendBackend, "prepare_program_mapping_specialization")
+    assert not hasattr(AscendBackend, "finalize_program_mapping_launch_grid")

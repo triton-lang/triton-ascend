@@ -35,6 +35,14 @@ from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
                                           _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
                                           get_backend_func, get_cann_version)
+from triton.backends.ascend.program_grid import (
+    PROGRAM_GRID_TRANSFORMS_VERSION,
+    ProgramGridContractError,
+    apply_program_grid_transforms,
+    get_persistent_transform,
+    normalize_program_grid_specialization,
+    normalize_program_grid_transforms,
+)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -1025,6 +1033,51 @@ static void release_npu_tensor_handle(void* handle) {{
 }}
 """
 
+    # Versioned program-grid transforms are fixed-specialization launcher
+    # contracts. Both Python JIT and the exported C ABI keep their original
+    # grid argument, while this backend precomputes the one final grid recorded
+    # by the compiled artifact. The legacy coalesce ABI remains separate.
+    raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
+    if raw_program_grid_transforms is not None:
+        try:
+            program_grid_transforms = normalize_program_grid_transforms(raw_program_grid_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
+    else:
+        program_grid_transforms = None
+
+    raw_program_grid_specialization = getattr(metadata, "program_grid_specialization", None)
+    if raw_program_grid_specialization is not None:
+        try:
+            program_grid_specialization = normalize_program_grid_specialization(raw_program_grid_specialization)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid program_grid_specialization launcher metadata: {error}") from error
+    else:
+        program_grid_specialization = None
+
+    program_grid_finalization = ""
+    if program_grid_transforms is not None:
+        if program_grid_specialization is None:
+            raise RuntimeError(
+                "program_grid_transforms requires fixed program_grid_specialization metadata")
+        try:
+            original_grid = tuple(program_grid_specialization["grid"])
+            physical_core_count = (
+                num_physical_blocks
+                if get_persistent_transform(program_grid_transforms) is not None else None)
+            final_grid = apply_program_grid_transforms(
+                original_grid,
+                program_grid_transforms,
+                physical_core_count=physical_core_count,
+            )
+        except (ProgramGridContractError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"cannot finalize fixed program-grid launcher metadata: {error}") from error
+        program_grid_finalization = f"""// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: fixed final launch grid.
+  gridX = {final_grid[0]};
+  gridY = {final_grid[1]};
+  gridZ = {final_grid[2]};"""
+
     # Full-TA tile/strided coalescing: the compiler recorded a coalesce factor H
     # and the program-id/grid axis it applies to. Each program now covers H tiles
     # along that axis, so the host shrinks the matching grid dim by H here (the
@@ -1167,10 +1220,31 @@ static void release_npu_tensor_handle(void* handle) {{
 
     npu_headers = generate_npu_header_src()
 
+    # The original grid remains visible to the community JIT, but the fixed
+    # mapping artifact supplies its final launch grid in both generated paths.
+    _program_grid_launch_preamble = f"""
+  {program_grid_finalization}
+  {coalesce_grid_div if program_grid_transforms is None else ''}"""
+
     _launch_preamble = f"""
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
-  {coalesce_grid_div}
+{_program_grid_launch_preamble}
+  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  {get_backend_func("pre_launch", True)}
+  {f'''
+  uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;
+  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
+  ''' if workspace_size > 0 else ''}"""
+
+    _python_launch_preamble = f"""
+  void* workspace_addr_ptr = nullptr;
+  void* workspace_handle = nullptr;
+{_program_grid_launch_preamble}
   uint32_t blockNum4Workspace = gridX * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
@@ -1193,7 +1267,7 @@ static void release_npu_tensor_handle(void* handle) {{
         warned = true;
     }}
     #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks and program_grid_transforms is None else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
@@ -1347,7 +1421,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
     printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
     return;
   }}
-{_launch_preamble}
+{_python_launch_preamble}
 {_launch_lambda_pre}
     struct __attribute__((packed)) {{
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}

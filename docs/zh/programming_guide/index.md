@@ -117,9 +117,17 @@ def add_kernel(x_ptr,
         tl.store(out_ptr + offsets, output, mask=mask)
 ```
 
-### 尽量保证Tensor的尾轴（最后一个维度）大小数据对齐
+### 保证Tensor尾轴大小对齐
 
-【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴（最后一个维度）大小能被32Byte整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Byte整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
+【描述】昇腾硬件的UB（Unified Buffer，统一缓冲区）对Tensor的尾轴（最后一个维度）大小有对齐要求：尾轴数据量需为对齐单位的整数倍，若尾轴长度不足，硬件会自动补齐。不同算子类型的对齐要求如下表所示。
+
+| 算子类型 | 使用的计算单元 | 尾轴对齐要求 |
+| --- | --- | --- |
+| VV类算子（Vector-Vector，纯向量计算类算子） | 仅使用Vector核 | 尾轴大小能被32B整除 |
+| CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子） | 使用Cube核+Vector核 | 尾轴大小能被512B整除 |
+
+【描述】对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。
+同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
 
 - 注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector Core。
 - 示例
@@ -168,12 +176,17 @@ def pick_kernel(
 
 通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\*.csv文件，该文件可以帮助分析流水情况。注：“\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。
 
-||Op Name|aiv_mte2_time(μs)|aiv_mte2_ratio|
+|优化状态|Op Name|aiv_mte2_time(μs)|aiv_mte2_ratio|
 |:---- |:--------|:--------|:--------|
 |未优化|pick_kernel|0.686|0.008|
 |优化|pick_kernel|1.041|0.066|
 
-通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(us)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。
+各指标含义说明：
+
+- **aiv_mte2_time(μs)**：AI Vector（AIV）核上 MTE2（Move Engine 2）搬运阶段耗时，单位为微秒（μs），反映数据从全局内存搬运到片上内存（UB）的时间开销。
+- **aiv_mte2_ratio**：MTE2 搬运时间占算子总执行时间的比例，数值越大说明搬运耗时占比越高，可用于评估搬运与计算的重叠程度。
+
+通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(μs)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。
 
 ### 存算并行
 
@@ -237,7 +250,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 
 - 简单示例
 
-    ```diff
+    ```python
     import triton.language as tl
 
     @triton.autotune(
@@ -263,7 +276,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 
 - 注：设置以下环境变量，便可打印出最优参数信息。
 
-    ```diff
+    ```bash
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
@@ -278,7 +291,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 
 - 简单示例
 
-    ```diff
+    ```python
     from triton.backends.ascend.runtime import max_autotune
 
     @max_autotune(
@@ -304,9 +317,13 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 
 ### 如何在NPU上避免UB OVERFLOW
 
-【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。
+【描述】在NPU上，UB（Unified Buffer，统一缓冲区）与L1（一级片上缓存）等片上内存的容量存在硬件上限。当核函数单个tile（分块）搬运、计算所需的片上缓冲区超过该上限时，编译器会在编译期报`ub overflow`错误，核函数无法编译通过。该错误高发于以下场景：块大小参数（如BLOCK_SIZE）设置过大、长序列被一次性整段搬运、核函数内中间张量过多，以及multi-buffer（存算并行多缓冲）默认开启导致部分张量需要保留多份副本。出现该错误时，需要减少单次搬运的数据量：调小块大小参数，或在核函数内以for循环按序列维度分块处理长序列场景。
 
-```diff
+#### 错误信息示例
+
+以下为pytest回显的Triton编译失败日志：每行开头的`E`为pytest错误输出前缀（表示该行来自pytest捕获的错误输出），并非日志本身内容。
+
+```text
 E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
@@ -316,7 +333,115 @@ E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":3:3): error: ub overflow, require
 large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer. )
 ```
 
-【注意】A2系列产品UB大小为192KB(1572864bit)。
+#### 错误原因分析
+
+1. **触发阶段：** 该错误发生在核函数编译期——昇腾后端在将MLIR转换为二进制（BishengHIR编译流水线）阶段失败，而非程序运行期；编译失败意味着核函数未生成可执行二进制。
+
+2. **直接原因：** 编译器估算单个tile所需UB为3,072,256bit，而硬件可用UB上限为1,572,864bit（A2系列，即192KB），需求量超出上限1,499,392bit（3,072,256 − 1,572,864 = 1,499,392），约为可用容量的1.95倍，因此判定ub overflow。
+
+3. **根本原因：** ①块大小参数（如BLOCK_SIZE）过大，单个tile元素数过多；②编译器默认开启multi-buffer存算并行（编译器侧配置项为`multiBuffer=True`，用户在`triton.Config`或kernel launch中通过`multibuffer`参数控制，默认开启），为搬运与计算的流水重叠创建多份张量副本，部分算子需要额外local buffer，使UB占用成倍放大；③核函数内中间张量过多，累积占用超过上限。
+
+日志关键字段解读如下：
+
+| 日志关键字段 | 含义 |
+| --- | --- |
+| `triton.compiler.errors.MLIRCompilationError` | Triton编译器在MLIR编译阶段抛出的编译错误，核函数未生成可执行二进制 |
+| `[ConvertLinalgRToBinary] encounters error`、`Failed to run BishengHIR pipeline` | 昇腾后端在MLIR到二进制的转换阶段（BishengHIR编译流水线）失败 |
+| `ub overflow` | UB（统一缓冲区）溢出：编译期估算的片上缓冲区需求量超过硬件容量上限 |
+| `requires 3072256 bits` | 本次编译中单个tile所需的UB位数：3,072,256bit（约375KB） |
+| `1572864 bits available` | 当前硬件可用UB上限：1,572,864bit，即192KB（A2系列） |
+| `multi-buffer feature is enabled and some ops need extra local buffer` | 编译器提示：multi-buffer（存算并行多缓冲）已开启，部分算子需要额外local buffer副本，会放大UB占用 |
+
+#### 解决步骤
+
+按以下顺序处理，每完成一步即重新编译验证；任一步骤后溢出消失即可停止：
+
+1. **调小块大小参数。** 将BLOCK_SIZE等块大小参数按2的幂次逐级调小（如由4096调至2048、1024），grid会随块大小自动扩大（grid = ceil(n_elements / BLOCK_SIZE)），处理的元素总量不变。
+
+    修改前（BLOCK_SIZE过大，触发ub overflow）：
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4096)
+    ```
+
+    修改后（调小BLOCK_SIZE）：
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)
+    ```
+
+2. **for循环按序列维度分块处理长序列。** 当序列长度远大于单个tile可安全容纳的元素数时，在核函数内部用for循环按序列轴切分：load、计算、store均在循环体内完成，每次只处理BLOCK_SIZE_SUB个元素，任一时刻UB中仅驻留一个子块的数据。参数约束：BLOCK_SIZE_SUB应不大于BLOCK_SIZE，建议取2的幂次（如1024、2048）且最好能整除BLOCK_SIZE；不能整除时尾块由mask自动处理，不影响正确性。完整核函数示例如下：
+
+    ```python
+    @triton.jit
+    def add_kernel_tiled(x_ptr, y_ptr, out_ptr, n_elements,
+                        BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        base_offset = pid * BLOCK_SIZE
+
+        # 计算当前program需要处理的子块总数
+        num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
+
+        # 按序列维度循环分块：每次只搬运/计算BLOCK_SIZE_SUB个元素
+        for sub_block_idx in range(num_sub_blocks):
+            sub_offset = base_offset + sub_block_idx * BLOCK_SIZE_SUB
+            offsets = sub_offset + tl.arange(0, BLOCK_SIZE_SUB)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask, other=0)
+            y = tl.load(y_ptr + offsets, mask=mask, other=0)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+    ```
+
+    与触发溢出的大块写法（核函数内一次性load整个BLOCK_SIZE，如`offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)`）相比，关键差异是：分块写法把同样的数据量拆到for循环中逐子块搬运和计算，单次搬运数据量从BLOCK_SIZE降为BLOCK_SIZE_SUB。
+
+3. **关闭multi-buffer存算并行。** 若调小块大小后仍溢出，可在autotune配置中设置`multibuffer=False`关闭多缓冲（对应编译器侧默认开启的`multiBuffer=True`配置），减少张量副本带来的额外local buffer占用：
+
+    ```python
+    @triton.autotune(
+        configs=[
+            triton.Config({'BLOCK_SIZE': 1024}, multibuffer=False),
+            triton.Config({'BLOCK_SIZE': 2048}, multibuffer=False),
+        ],
+        key=['n_elements'],
+    )
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        tl.store(out_ptr + offsets, x + y, mask=mask)
+    ```
+
+    也可在kernel launch时作为meta-parameter传入：
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=False)
+    ```
+
+    关闭multi-buffer会降低搬运与计算的流水重叠度、可能影响性能，建议仅在UB紧张时使用，并优先通过autotune在多组配置间对比取舍（参见本文档「存算并行」章节）。
+
+4. **重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见文末规格表）。
+
+#### 预防措施
+
+| 预防措施 | 说明 |
+| --- | --- |
+| 编码前估算UB占用 | 单个tile的UB占用（bit）≈ tile元素数 × 每元素字节数 × buffer份数 × 8；实际还需叠加多个中间张量与对齐开销，应预留充足余量。建议BLOCK_SIZE_SUB从1024~4096起步并以autotune实测为准 |
+| 优先使用autotune | 用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「triton.autotune 自动调优」章节） |
+| 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
+| 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
+
+UB占用估算示例：65,536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65,536×4×2×8 = 4,194,304bit，已超过A2系列可用的1,572,864bit；按A2系列1,572,864bit上限反推，单张量float16、双缓冲下的理论上限约49,152个元素（1,572,864÷8÷2÷2 = 49,152）。
+
+【注意】A2系列产品UB大小为192KB（即1572864bit）。各产品系列片上内存规格如下：
+
+| 产品系列 | UB容量 | L1容量 |
+| --- | --- | --- |
+| A2系列 | 192KB | 512KB |
+| A3系列 | 192KB | 512KB |
+| A5系列 | 248KB | 512KB |
 
 ## 通用单核数据运算
 
@@ -334,7 +459,7 @@ large or block number is more than what user expect due to multi-buffer feature 
     单核运算通常对应块级的数据处理。
     单核数据运算示例：向量加法
 
-    ```diff
+    ```python
 
     @triton.jit
     def add_kernel(x_ptr, # Pointer to first input vector.
@@ -356,7 +481,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
     调用：
 
-    ```diff
+    ```python
     def add(x: torch.Tensor, y: torch.Tensor):
         output = torch.empty_like(x)
         n_elements = output.numel()
@@ -367,7 +492,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
     使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性
 
-    ```diff
+    ```python
     torch.manual_seed(0)
     size = 98432
     x = torch.rand(size, device='npu')
@@ -401,7 +526,7 @@ large or block number is more than what user expect due to multi-buffer feature 
     输入输出 buffer 在分配时保证对齐，避免访存性能下降。
     例：
 
-    ```diff
+    ```python
     BLOCK_SIZE = 256  # 256 * 4 Byte = 1024 Byte，对齐良好
 
     @triton.jit
@@ -445,7 +570,7 @@ large or block number is more than what user expect due to multi-buffer feature 
     -子块划分要兼顾访存连续性和计算单元利用率。
     例：
 
-    ```diff
+    ```python
     BLOCK_M = 64   # 每个 block 处理 64 行
     BLOCK_N = 64   # 每个 block 处理 64 列
     BLOCK_K = 32   # 内部累加维度

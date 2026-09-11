@@ -108,6 +108,26 @@ constexpr bool requiresProgramMappingCleanup(GraphOptimizationRuleId ruleId) {
          ruleId == GraphOptimizationRuleId::PersistentTaskStripMining;
 }
 
+// Keep the pre-graph canonicalization limited to operations that its two
+// patterns can rewrite. A module-wide greedy driver also folds and erases
+// unrelated dead operations before graph analyses observe them. Some graph
+// rules intentionally use that visibility to reject incompatible IR.
+bool isNarrowUnsignedTensorCandidate(Operation *op) {
+  if (op->getNumResults() != 1 || op->getNumOperands() < 2 ||
+      !isa<arith::SelectOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp,
+           arith::ShRSIOp, arith::ShRUIOp, arith::CmpIOp>(op))
+    return false;
+  auto type = dyn_cast<RankedTensorType>(op->getOperand(0).getType());
+  if (isa<arith::SelectOp>(op))
+    type = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+  return type && type.getElementType().isInteger(64);
+}
+
+bool isFoldHistogramParkingCandidate(Operation *op) {
+  auto sub = dyn_cast<arith::SubIOp>(op);
+  return sub && isa_and_nonnull<HistogramOp>(sub.getLhs().getDefiningOp());
+}
+
 constexpr bool isPlanHigherPriority(unsigned lhsBenefit, unsigned lhsOrder,
                                     GraphOptimizationRuleId lhsRuleId,
                                     unsigned rhsBenefit, unsigned rhsOrder,
@@ -256,15 +276,27 @@ void GraphOptimizePass::runOnOperation() {
     return;
   }
 
-  // Simplify tensor values before constructing any graph analyses so layout
-  // rules observe the reduced workload, without retaining stale graph state.
-  RewritePatternSet patterns(&getContext());
-  patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
-  if (options.compileOn91095)
-    patterns.add<FoldHistogramParking>(&getContext());
-  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
-    signalPassFailure();
-    return;
+  SmallVector<Operation *> preGraphRewriteCandidates;
+  getOperation().walk([&](Operation *op) {
+    if (isNarrowUnsignedTensorCandidate(op) ||
+        (options.compileOn91095 && isFoldHistogramParkingCandidate(op)))
+      preGraphRewriteCandidates.push_back(op);
+  });
+  if (!preGraphRewriteCandidates.empty()) {
+    // Rewrite only the known pattern roots. In particular, do not invoke the
+    // greedy driver's module-wide folding/DCE before graph rules inspect IR.
+    RewritePatternSet patterns(&getContext());
+    patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
+    if (options.compileOn91095)
+      patterns.add<FoldHistogramParking>(&getContext());
+    FrozenRewritePatternSet frozenPatterns(std::move(patterns));
+    GreedyRewriteConfig config;
+    config.strictMode = GreedyRewriteStrictness::ExistingAndNewOps;
+    if (failed(applyOpPatternsAndFold(preGraphRewriteCandidates,
+                                      frozenPatterns, config))) {
+      signalPassFailure();
+      return;
+    }
   }
 
   ModuleOp module = getOperation();

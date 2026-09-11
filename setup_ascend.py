@@ -370,10 +370,8 @@ def _get_bishengir_payload_source():
         source / "lib",
     ]
     if not source.is_dir() or any(not path.exists() for path in required_paths):
-        raise RuntimeError(
-            f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
-            "bin/bishengir-compile, bin/bishengir-opt, and lib"
-        )
+        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+                           "bin/bishengir-compile, bin/bishengir-opt, and lib")
     return source
 
 

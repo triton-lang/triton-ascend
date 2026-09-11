@@ -52,10 +52,12 @@ inline bool isMergeStyleReduction(ReduceOp reduce) {
   if (reduce.getSrcs().size() != 1 || reduce.getResults().size() != 1)
     return false;
   auto source = dyn_cast<RankedTensorType>(reduce.getSrcs().front().getType());
-  auto result = dyn_cast<RankedTensorType>(reduce.getResults().front().getType());
-  return source && result && source.hasStaticShape() && result.hasStaticShape() &&
-         source.getRank() == 2 && result.getRank() == 1 &&
-         reduce.getAxis() == 0 && source.getShape()[1] == result.getShape()[0];
+  auto result =
+      dyn_cast<RankedTensorType>(reduce.getResults().front().getType());
+  return source && result && source.hasStaticShape() &&
+         result.hasStaticShape() && source.getRank() == 2 &&
+         result.getRank() == 1 && reduce.getAxis() == 0 &&
+         source.getShape()[1] == result.getShape()[0];
 }
 
 inline Value stripIdentityReshapes(Value value) {
@@ -112,7 +114,8 @@ inline bool hasMomentDownstreamUse(Value reductionResult) {
 }
 
 inline bool hasJointMomentDownstreamUse(triton::FuncOp function,
-                                        Value directResult, Value squareResult) {
+                                        Value directResult,
+                                        Value squareResult) {
   llvm::DenseSet<Value> directFlow;
   llvm::DenseSet<Value> squareFlow;
   collectMomentDataflow(directResult, directFlow);
@@ -164,7 +167,7 @@ classifyIndependentRowReduction(triton::FuncOp function) {
       directReductions.size() != 1)
     return IndependentRowReductionKind::Other;
   return stripIdentityReshapes(directReductions.front().getSrcs().front()) ==
-                 squareReductions.front().second &&
+                     squareReductions.front().second &&
                  hasMomentDownstreamUse(
                      directReductions.front().getResults().front()) &&
                  hasMomentDownstreamUse(
@@ -176,8 +179,8 @@ classifyIndependentRowReduction(triton::FuncOp function) {
              : IndependentRowReductionKind::Other;
 }
 
-}
-}
-}
+} // namespace cfg
+} // namespace triton
+} // namespace mlir
 
 #endif

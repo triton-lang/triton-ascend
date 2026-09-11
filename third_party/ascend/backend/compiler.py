@@ -250,12 +250,8 @@ def _finalize_program_launch_policy(metadata, opt):
         raise RuntimeError("program-grid mapping conflicts with legacy RowCoalescing")
 
     blacklist_policy_allows = bool(opt.is_pure_simt) or not has_auto_blockify_blacklist_op
-    auto_blockify_enabled = (
-        _is_auto_map_parallel_blocks_enabled()
-        and blacklist_policy_allows
-        and not row_coalescing_applied
-        and not mapping_applied
-    )
+    auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and blacklist_policy_allows
+                             and not row_coalescing_applied and not mapping_applied)
 
     persistent_transform = (
         get_persistent_transform(transforms) if transforms is not None else
@@ -264,8 +260,7 @@ def _finalize_program_launch_policy(metadata, opt):
     if persistent_transform is not None:
         if metadata["mix_mode"] != "aiv":
             raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
-        if not (persistent_transform["persistent_coverage"]
-                and persistent_transform["grid_stride_abi_verified"]):
+        if not (persistent_transform["persistent_coverage"] and persistent_transform["grid_stride_abi_verified"]):
             raise RuntimeError("persistent program-grid transform lacks coverage/ABI verification")
         ptsm_cap_authorized = True
 

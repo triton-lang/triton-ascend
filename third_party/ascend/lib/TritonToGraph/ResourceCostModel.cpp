@@ -229,7 +229,7 @@ CandidateEvaluation reject(const CandidateCost &candidate,
   return evaluation;
 }
 
-}
+} // namespace
 
 const char *
 cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
@@ -285,9 +285,10 @@ ResourceSnapshot ResourceSnapshot::fromExplicit(uint64_t ubCapacity,
   return result;
 }
 
-ResourceSnapshot ResourceSnapshot::fromHardwareConfig(
-    const ascend::HardwareConfig &hardware, unsigned safetyPercent,
-    uint64_t reservedUB) {
+ResourceSnapshot
+ResourceSnapshot::fromHardwareConfig(const ascend::HardwareConfig &hardware,
+                                     unsigned safetyPercent,
+                                     uint64_t reservedUB) {
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   const ascend::MemorySpace *ub = hardware.getMemorySpace("ub");
   if (!ub || ub->sizeBytes == 0 ||
@@ -523,12 +524,15 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
     return reject(candidate, ResourceCostRejectReason::Overflow);
 
   if (candidate.hasDynamicShape)
-    return reject(candidate, ResourceCostRejectReason::DynamicShape, *safeBudget);
+    return reject(candidate, ResourceCostRejectReason::DynamicShape,
+                  *safeBudget);
   if (candidate.hasUnknownResource || !candidate.hasPeakLiveBytes)
-    return reject(candidate, ResourceCostRejectReason::UnknownResource, *safeBudget);
+    return reject(candidate, ResourceCostRejectReason::UnknownResource,
+                  *safeBudget);
   if (candidate.plan.tensorizeFactor == 0 || candidate.plan.blockT == 0 ||
       candidate.plan.staticAxisFusionFactor == 0)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate, *safeBudget);
+    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
+                  *safeBudget);
   if (candidate.estimatedPeakLiveBytes > *safeBudget)
     return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget);
 

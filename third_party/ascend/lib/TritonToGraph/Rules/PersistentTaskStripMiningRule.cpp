@@ -312,9 +312,7 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
   ProgramGridTransformContract contract = *existing;
   contract.transforms.push_back(ProgramGridTransform{
       static_cast<int32_t>(contract.transforms.size()), kTokenAxis,
-      static_cast<int64_t>(candidate.blockT), 0,
-      true,
-      true});
+      static_cast<int64_t>(candidate.blockT), 0, true, true});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
   module->setAttr(kPersistentTaskStripMiningMarkerAttr,
@@ -589,8 +587,8 @@ materializePersistentTaskStripMining(triton::FuncOp function,
                                             mapped.value);
   };
   auto tailMaskFor = [&](Location location, RankedTensorType target) -> Value {
-    return alignTensor(rewriter, location, tokenTailMask, target,
-                       true, candidate.blockT);
+    return alignTensor(rewriter, location, tokenTailMask, target, true,
+                       candidate.blockT);
   };
   auto createElementwise = [&](Operation *operation) -> bool {
     if (operation->getNumResults() == 0)
@@ -933,7 +931,7 @@ private:
   bool enabledForCompileMode;
 };
 
-}
+} // namespace
 
 LogicalResult cfg::materializePersistentTaskStripMiningCandidate(
     ModuleOp module, triton::FuncOp function, const ResourceSnapshot &resources,
@@ -949,9 +947,8 @@ LogicalResult cfg::materializePersistentTaskStripMiningCandidate(
       AnalysisRequirement::ResourceCost;
   if (failed(context.ensure(requirements)))
     return failure();
-  std::optional<PTSMCandidate> candidate =
-      analyzeCandidate(context, false, requestedBlockT,
-                       deferIntermediateResourceRejection);
+  std::optional<PTSMCandidate> candidate = analyzeCandidate(
+      context, false, requestedBlockT, deferIntermediateResourceRejection);
   if (!candidate ||
       failed(applyPersistentCandidateToSandbox(module, function, *candidate)))
     return failure();

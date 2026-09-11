@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 from typing import Any, Mapping, Sequence
 
-
 PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
 PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
@@ -62,9 +61,9 @@ _LEGACY_TRANSFORM_KEYS = frozenset((
     "grid_stride_abi_verified",
 ))
 _SUPPORTED_SEQUENCES = frozenset((
-    ((1, 16, False, False),),
+    ((1, 16, False, False), ),
     ((1, 16, False, False), (0, 4, True, True)),
-    ((0, 64, True, True),),
+    ((0, 64, True, True), ),
 ))
 
 
@@ -107,8 +106,7 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         try:
             raw = json.loads(raw)
         except json.JSONDecodeError as error:
-            raise ProgramGridContractError(
-                "program_grid_transforms must be valid JSON when encoded as text") from error
+            raise ProgramGridContractError("program_grid_transforms must be valid JSON when encoded as text") from error
 
     contract = _mapping(raw, "program_grid_transforms")
     if set(contract) != _TOP_LEVEL_KEYS:
@@ -129,10 +127,8 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
     if contract["extent_source"] != RUNTIME_ORIGINAL_GRID:
         raise ProgramGridContractError("extent_source must be runtime_original_grid")
     _exact_sequence(contract["hidden_extent_axes"], HIDDEN_EXTENT_AXES, "hidden_extent_axes")
-    _exact_sequence(contract["hidden_argument_order"], HIDDEN_ARGUMENT_ORDER,
-                    "hidden_argument_order")
-    _exact_sequence(contract["hidden_argument_types"], HIDDEN_ARGUMENT_TYPES,
-                    "hidden_argument_types")
+    _exact_sequence(contract["hidden_argument_order"], HIDDEN_ARGUMENT_ORDER, "hidden_argument_order")
+    _exact_sequence(contract["hidden_argument_types"], HIDDEN_ARGUMENT_TYPES, "hidden_argument_types")
 
     transforms_raw = contract["transforms"]
     if isinstance(transforms_raw, (str, bytes)) or not isinstance(transforms_raw, Sequence):
@@ -168,8 +164,7 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
             raise ProgramGridContractError("dynamic program-grid transforms may not repeat an axis")
         seen_axes.add(axis)
         factor = _integer(transform["factor"], f"transforms[{expected_order}].factor", minimum=2)
-        persistent = _boolean(transform["persistent_coverage"],
-                              f"transforms[{expected_order}].persistent_coverage")
+        persistent = _boolean(transform["persistent_coverage"], f"transforms[{expected_order}].persistent_coverage")
         grid_stride = _boolean(transform["grid_stride_abi_verified"],
                                f"transforms[{expected_order}].grid_stride_abi_verified")
         if persistent != grid_stride:
@@ -242,32 +237,28 @@ def normalize_legacy_program_grid_transforms(raw: Any) -> dict[str, Any]:
                 detail.append("missing " + ", ".join(missing))
             if unknown:
                 detail.append("unknown " + ", ".join(unknown))
-            raise ProgramGridContractError(
-                f"legacy transforms[{expected_order}] has an invalid schema" +
-                (": " + "; ".join(detail) if detail else ""))
+            raise ProgramGridContractError(f"legacy transforms[{expected_order}] has an invalid schema" +
+                                           (": " + "; ".join(detail) if detail else ""))
         order = _integer(transform["order"], f"legacy transforms[{expected_order}].order", minimum=0)
         if order != expected_order:
             raise ProgramGridContractError("legacy transform order must be contiguous from zero")
         if transform["kind"] != "ceil_div":
-            raise ProgramGridContractError(
-                f"legacy transforms[{expected_order}].kind must be 'ceil_div'")
+            raise ProgramGridContractError(f"legacy transforms[{expected_order}].kind must be 'ceil_div'")
         axis = _integer(transform["axis"], f"legacy transforms[{expected_order}].axis", minimum=0)
         if axis > 2:
             raise ProgramGridContractError("legacy program-grid transforms support only axes 0, 1, and 2")
         factor = _integer(transform["factor"], f"legacy transforms[{expected_order}].factor", minimum=2)
-        logical_extent = _integer(transform["logical_extent"],
-                                  f"legacy transforms[{expected_order}].logical_extent", minimum=1)
+        logical_extent = _integer(transform["logical_extent"], f"legacy transforms[{expected_order}].logical_extent",
+                                  minimum=1)
         previous_extent = original_extent_by_axis.setdefault(axis, logical_extent)
         if previous_extent != logical_extent:
-            raise ProgramGridContractError(
-                "legacy transforms for one axis must retain the same logical_extent")
+            raise ProgramGridContractError("legacy transforms for one axis must retain the same logical_extent")
         persistent = _boolean(transform["persistent_coverage"],
                               f"legacy transforms[{expected_order}].persistent_coverage")
         grid_stride = _boolean(transform["grid_stride_abi_verified"],
                                f"legacy transforms[{expected_order}].grid_stride_abi_verified")
         if persistent != grid_stride:
-            raise ProgramGridContractError(
-                "legacy persistent coverage and grid-stride ABI verification must agree")
+            raise ProgramGridContractError("legacy persistent coverage and grid-stride ABI verification must agree")
         persistent_count += int(persistent)
         if persistent_count > 1:
             raise ProgramGridContractError("legacy transforms may contain at most one persistent entry")
@@ -313,8 +304,7 @@ def apply_program_grid_transforms(
 ) -> tuple[int, int, int]:
     if len(grid) != 3:
         raise ProgramGridContractError("grid must contain exactly three dimensions")
-    launch_grid = [_integer(value, f"grid[{axis}]", minimum=1)
-                   for axis, value in enumerate(grid)]
+    launch_grid = [_integer(value, f"grid[{axis}]", minimum=1) for axis, value in enumerate(grid)]
     normalized = normalize_program_grid_transforms(contract)
     for transform in normalized["transforms"]:
         axis = transform["axis"]

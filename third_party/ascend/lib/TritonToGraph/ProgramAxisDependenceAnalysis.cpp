@@ -440,7 +440,7 @@ void buildClosure(ProgramAxisDependence &info) {
   }
 }
 
-}
+} // namespace
 
 bool ProgramAxisDependence::hasOnlyDisjointStoreAddresses() const {
   return !stores.empty() && llvm::all_of(stores, [](const auto &store) {
@@ -449,8 +449,8 @@ bool ProgramAxisDependence::hasOnlyDisjointStoreAddresses() const {
   });
 }
 
-bool ProgramAxisDependence::
-    hasOnlyLiftableStoreAddressesForProgramMapping() const {
+bool ProgramAxisDependence::hasOnlyLiftableStoreAddressesForProgramMapping()
+    const {
   return !stores.empty() && llvm::all_of(stores, [](const auto &store) {
     return store.pointerDependsOnAxis &&
            (store.independence == StoreAddressIndependence::ProvenDisjoint ||
@@ -466,8 +466,7 @@ bool ProgramAxisDependence::isIndependentAxisTransformCandidate() const {
 
 bool ProgramAxisDependence::isProgramMappingTransformCandidate() const {
   return hasProgramId() && !escapes && !hasUnsupportedSideEffects &&
-         !readsNumPrograms &&
-         hasOnlyLiftableStoreAddressesForProgramMapping();
+         !readsNumPrograms && hasOnlyLiftableStoreAddressesForProgramMapping();
 }
 
 ProgramAxisDependenceAnalysis::ProgramAxisDependenceAnalysis(

@@ -125,7 +125,7 @@ std::optional<BlockArgument> findEntryArgumentByName(triton::FuncOp function,
   return found;
 }
 
-}
+} // namespace
 
 FailureOr<ProgramGridSpecialization>
 mlir::triton::cfg::parseProgramGridSpecialization(Attribute attribute) {

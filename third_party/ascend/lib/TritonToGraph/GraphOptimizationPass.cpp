@@ -215,8 +215,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
       cliReservedUBBytes > effectiveMappingUBCapacity) {
     getOperation().emitError()
         << "graph-optimize resource options are invalid: ub-safety-percent="
-        << cliUBSafetyPercent
-        << " reserved-ub-bytes=" << cliReservedUBBytes;
+        << cliUBSafetyPercent << " reserved-ub-bytes=" << cliReservedUBBytes;
     return failure();
   }
 

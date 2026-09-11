@@ -739,7 +739,7 @@ private:
   bool enabledForCompileMode;
 };
 
-}
+} // namespace
 
 std::unique_ptr<GraphOptimizationRule> cfg::createStaticProgramAxisFusionRule(
     const StaticProgramAxisFusionRuleOptions &options) {

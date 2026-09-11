@@ -32,9 +32,8 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          is_ffts_supported, force_disable_ffts,
-                                          get_backend_func, get_cann_version)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int, is_ffts_supported,
+                                          force_disable_ffts, get_backend_func, get_cann_version)
 from triton.backends.ascend.program_grid import (
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
@@ -1060,8 +1059,7 @@ static void release_npu_tensor_handle(void* handle) {{
                 legacy_program_grid_transforms = normalize_legacy_program_grid_transforms(
                     raw_legacy_program_grid_transforms)
             except ProgramGridContractError as error:
-                raise RuntimeError(
-                    f"invalid legacy_program_grid_transforms launcher metadata: {error}") from error
+                raise RuntimeError(f"invalid legacy_program_grid_transforms launcher metadata: {error}") from error
         else:
             legacy_program_grid_transforms = None
         if program_grid_transforms is not None and legacy_program_grid_transforms is not None:
@@ -1069,11 +1067,9 @@ static void release_npu_tensor_handle(void* handle) {{
         if program_grid_transforms is None and legacy_program_grid_transforms is None:
             raise RuntimeError("program_grid_mapping_applied requires program_grid_transforms")
 
-    persistent_transform = (
-        get_persistent_transform(program_grid_transforms)
-        if program_grid_transforms is not None else
-        get_legacy_persistent_transform(legacy_program_grid_transforms)
-        if legacy_program_grid_transforms is not None else None)
+    persistent_transform = (get_persistent_transform(program_grid_transforms) if program_grid_transforms is not None
+                            else get_legacy_persistent_transform(legacy_program_grid_transforms)
+                            if legacy_program_grid_transforms is not None else None)
     if (program_grid_transforms is not None or legacy_program_grid_transforms is not None) and row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
     if auto_blockify_enabled and (mapping_applied or row_coalescing_applied):
@@ -1121,13 +1117,11 @@ static void release_npu_tensor_handle(void* handle) {{
                     "}",
                 ))
             factor = transform["factor"]
-            finalization_lines.append(
-                f"{grid_name} = (uint32_t)(((uint64_t){grid_name} + {factor - 1}u) / {factor}u);")
+            finalization_lines.append(f"{grid_name} = (uint32_t)(((uint64_t){grid_name} + {factor - 1}u) / {factor}u);")
     if persistent_transform is not None:
         axis = persistent_transform["axis"]
         grid_name = {0: "gridX", 1: "gridY", 2: "gridZ"}[axis]
-        other_grid_names = tuple(name for index, name in enumerate(("gridX", "gridY", "gridZ"))
-                                 if index != axis)
+        other_grid_names = tuple(name for index, name in enumerate(("gridX", "gridY", "gridZ")) if index != axis)
         finalization_lines.extend((
             f"uint64_t otherPrograms = (uint64_t){other_grid_names[0]} * (uint64_t){other_grid_names[1]};",
             "uint32_t axisCap = std::max((uint32_t)1,",
@@ -1337,21 +1331,19 @@ static void release_npu_tensor_handle(void* handle) {{
   ''' if workspace_size > 0 else ''}"""
 
     preserve_legacy_launcher_layout = mapping_applied or row_coalescing_applied
-    original_grid_offset_decls = (
-        "    size_t original_grid_x_offset = reserve_slot(sizeof(uint32_t), 4); "
-        "size_t original_grid_y_offset = reserve_slot(sizeof(uint32_t), 4);\n"
-        if has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
-    original_grid_copy = (
-        "    memcpy(launch_args.data() + original_grid_x_offset, &originalGridX, sizeof(uint32_t)); "
-        "memcpy(launch_args.data() + original_grid_y_offset, &originalGridY, sizeof(uint32_t));\n"
-        if has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
-    original_grid_struct_fields = (
-        "      uint32_t originalGridX __attribute__((aligned(4))); "
-        "uint32_t originalGridY __attribute__((aligned(4)));\n"
-        if has_dynamic_program_grid_abi else "      \n" if preserve_legacy_launcher_layout else "")
-    original_grid_struct_values = (
-        "      static_cast<uint32_t>(originalGridX), static_cast<uint32_t>(originalGridY),\n"
-        if has_dynamic_program_grid_abi else "      \n" if preserve_legacy_launcher_layout else "")
+    original_grid_offset_decls = ("    size_t original_grid_x_offset = reserve_slot(sizeof(uint32_t), 4); "
+                                  "size_t original_grid_y_offset = reserve_slot(sizeof(uint32_t), 4);\n" if
+                                  has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
+    original_grid_copy = ("    memcpy(launch_args.data() + original_grid_x_offset, &originalGridX, sizeof(uint32_t)); "
+                          "memcpy(launch_args.data() + original_grid_y_offset, &originalGridY, sizeof(uint32_t));\n"
+                          if has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
+    original_grid_struct_fields = ("      uint32_t originalGridX __attribute__((aligned(4))); "
+                                   "uint32_t originalGridY __attribute__((aligned(4)));\n"
+                                   if has_dynamic_program_grid_abi else
+                                   "      \n" if preserve_legacy_launcher_layout else "")
+    original_grid_struct_values = ("      static_cast<uint32_t>(originalGridX), static_cast<uint32_t>(originalGridY),\n"
+                                   if has_dynamic_program_grid_abi else
+                                   "      \n" if preserve_legacy_launcher_layout else "")
 
     _launch_lambda_pre = f"""  {'std::function<cann_error()> launch_call = [=]() -> cann_error' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}

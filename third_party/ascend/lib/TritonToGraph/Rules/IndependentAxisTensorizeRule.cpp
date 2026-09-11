@@ -20,13 +20,13 @@
  * THE SOFTWARE.
  */
 
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/IndependentRowReductionAnalysis.h"
 #include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
-#include "TritonMemoryAccess/MemoryAccessTags.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -129,9 +129,6 @@ struct MappedValue {
   int64_t laneAxis = 0;
 };
 
-
-
-
 std::optional<triton::GetProgramIdOp> findOnlyProgramId(triton::FuncOp function,
                                                         int32_t axis) {
   std::optional<triton::GetProgramIdOp> result;
@@ -168,9 +165,7 @@ classifyTensorizeForm(triton::FuncOp function) {
             TensorizeReductionShape{source.getShape()[0], source.getShape()[1]};
     } else if (source.getRank() == 1 && !isa<RankedTensorType>(result)) {
       if (!normReduction)
-        normReduction =
-            TensorizeReductionShape{0,
-                                    source.getShape()[0]};
+        normReduction = TensorizeReductionShape{0, source.getShape()[0]};
     }
   });
   if (mergeReduction)
@@ -198,7 +193,6 @@ bool hasSupportedControlFlow(triton::FuncOp function) {
   return true;
 }
 
-
 bool hasConflictingLaunchContract(ModuleOp module) {
   return module->hasAttr(kIndependentAxisTensorizeMarkerAttr) ||
          module->hasAttr(kProgramGridTransformsAttr) ||
@@ -225,7 +219,6 @@ bool hasDisjointWriteReadRoots(
   }
   return true;
 }
-
 
 int64_t getPreferredLaneAxis(Type originalType, const IATCandidate &candidate) {
   auto tensor = dyn_cast<RankedTensorType>(originalType);
@@ -874,7 +867,6 @@ LogicalResult runProgramMappingStructuralCleanup(ModuleOp module) {
   return cleanup.run(module);
 }
 
-
 LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
                                                triton::FuncOp function,
                                                const IATCandidate &candidate) {
@@ -887,9 +879,7 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
   ProgramGridTransformContract contract;
   contract.dynamicOriginalGrid = true;
   contract.transforms.push_back(ProgramGridTransform{
-      0, candidate.axis, static_cast<int64_t>(candidate.factor),
-      0,
-      false,
+      0, candidate.axis, static_cast<int64_t>(candidate.factor), 0, false,
       false});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
@@ -904,8 +894,6 @@ ModuleOp createProgramMappingSandbox(ModuleOp module, triton::FuncOp function) {
   sandbox.getBody()->push_back(function->clone());
   return sandbox;
 }
-
-
 
 std::optional<IATCandidate>
 analyzeDynamicSingleMomentCandidate(GraphOptimizationContext &context) {
@@ -1007,8 +995,7 @@ public:
                                                 candidate)) ||
         failed(materializePersistentTaskStripMiningCandidate(
             sandbox, clonedFunction, candidate.resources,
-            kDynamicSingleMomentBlockT, &persistentEvaluation,
-            true)) ||
+            kDynamicSingleMomentBlockT, &persistentEvaluation, true)) ||
         failed(runProgramMappingStructuralCleanup(sandbox)) ||
         failed(mlir::verify(sandbox.getOperation())))
       return failure();
@@ -1145,7 +1132,8 @@ public:
   LogicalResult revalidate(GraphOptimizationContext &context) const override {
     if (context.getFunction() != candidate.function)
       return failure();
-    std::optional<IATCandidate> current = analyzeDynamicMergeSplitCandidate(context);
+    std::optional<IATCandidate> current =
+        analyzeDynamicMergeSplitCandidate(context);
     return current && sameDynamicMergeSplitCandidate(candidate, *current)
                ? success()
                : failure();
@@ -1203,7 +1191,8 @@ public:
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
     if (!enabledForCompileMode)
       return success();
-    std::optional<IATCandidate> candidate = analyzeDynamicMergeSplitCandidate(context);
+    std::optional<IATCandidate> candidate =
+        analyzeDynamicMergeSplitCandidate(context);
     if (candidate) {
       emitCandidateRemark(candidate->anchor, candidate->evaluation);
       plans.push_back(std::make_unique<DynamicMergeSplitIATPlan>(
@@ -1226,7 +1215,7 @@ private:
   bool iatAndPtsmEnabled;
 };
 
-}
+} // namespace
 
 std::unique_ptr<GraphOptimizationRule> cfg::createIndependentAxisTensorizeRule(
     const IndependentAxisTensorizeRuleOptions &options) {

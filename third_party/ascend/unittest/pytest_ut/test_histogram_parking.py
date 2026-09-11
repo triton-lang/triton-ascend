@@ -49,8 +49,7 @@ def test_histogram_parking(size, bins, park, wrong_mask, mask_kind):
     # The unmasked zero-parking shape is the FoldHistogramParking positive
     # case. It is enabled only for A5; on A3 its 8192-element baseline exceeds
     # UB capacity before the A5 rewrite is eligible to run.
-    if (not is_compile_on_910_95() and size == 8192 and park == 0 and
-            not wrong_mask):
+    if (not is_compile_on_910_95() and size == 8192 and park == 0 and not wrong_mask):
         pytest.skip("A5-only zero-parking histogram shape exceeds A3 UB")
     _check_parking(size, bins, park, wrong_mask, mask_kind)
 

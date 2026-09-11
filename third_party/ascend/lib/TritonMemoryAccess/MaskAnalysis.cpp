@@ -21,6 +21,7 @@
  */
 
 #include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonMemoryAccess/OpFoldResultUtils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -69,6 +70,28 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   if (auto constant = getConstantIntValue(value))
     return *constant == 0;
   return false;
+}
+
+static Value unwrapRuntimeExtentUnsignedOperand(Value operand,
+                                                const Location &loc,
+                                                OpBuilder &builder) {
+  if (auto extend = operand.getDefiningOp<arith::ExtUIOp>())
+    return extend.getIn();
+
+  auto splat = operand.getDefiningOp<triton::SplatOp>();
+  if (!splat)
+    return Value();
+  auto extend = splat.getSrc().getDefiningOp<arith::ExtUIOp>();
+  if (!extend)
+    return Value();
+
+  auto resultType = dyn_cast<RankedTensorType>(splat.getType());
+  if (!resultType || !isa<IntegerType>(extend.getIn().getType()))
+    return Value();
+  auto narrowedType =
+      RankedTensorType::get(resultType.getShape(), extend.getIn().getType(),
+                            resultType.getEncoding());
+  return builder.create<triton::SplatOp>(loc, narrowedType, extend.getIn());
 }
 
 } // namespace
@@ -506,12 +529,19 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
                                   OpBuilder &builder) {
   assert(this->isEmpty());
   auto predicate = cmpOp.getPredicate();
-  // Only support <, <=, >=, =, !=
+  bool isProvenRuntimeExtentUnsignedMask =
+      cmpOp->hasAttr(
+          mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG) ||
+      cmpOp->hasAttr(
+          mlir::triton::memory_access::PTSMRuntimeExtentUnsignedMaskTAG);
+  bool isTaggedUnsignedUpperBound = isProvenRuntimeExtentUnsignedMask &&
+                                    (predicate == arith::CmpIPredicate::ult ||
+                                     predicate == arith::CmpIPredicate::ule);
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&
       predicate != arith::CmpIPredicate::eq &&
-      predicate != arith::CmpIPredicate::ne) {
+      predicate != arith::CmpIPredicate::ne && !isTaggedUnsignedUpperBound) {
     LLVM_DEBUG({ llvm::dbgs() << "Unsupported cmpi predicate\n"; });
     return failure();
   }
@@ -520,6 +550,16 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   MaskState rhsState;
   auto lhs = cmpOp.getLhs();
   auto rhs = cmpOp.getRhs();
+
+  if (isTaggedUnsignedUpperBound) {
+    lhs = unwrapRuntimeExtentUnsignedOperand(lhs, loc, builder);
+    rhs = unwrapRuntimeExtentUnsignedOperand(rhs, loc, builder);
+    if (!lhs || !rhs)
+      return failure();
+    predicate = predicate == arith::CmpIPredicate::ult
+                    ? arith::CmpIPredicate::slt
+                    : arith::CmpIPredicate::sle;
+  }
 
   if (predicate == arith::CmpIPredicate::ne) {
     auto selOp = lhs.getDefiningOp<arith::SelectOp>();

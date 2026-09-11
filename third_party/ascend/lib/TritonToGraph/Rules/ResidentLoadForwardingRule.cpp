@@ -5,8 +5,8 @@
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
+ * copies of the Software, and to permit persons to do so, subject to the
+ * following conditions:
  *
  * The above copyright notice and this permission notice shall be included in
  * all copies or substantial portions of the Software.
@@ -20,22 +20,18 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_MEMORY_ACCESS_TAGS_H
-#define TRITON_MEMORY_ACCESS_TAGS_H
+#include "TritonToGraph/GraphOptimizationRule.h"
 
-namespace mlir::triton::memory_access {
+#include <memory>
 
-inline constexpr const char *ImplicitPermuteHandledTAG =
-    "ImplicitPermuteHandled";
-inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
-    "InspectedByStridedLoadStoreRewrite";
-inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
-    "RewrittenByStridedLoadStoreRewrite";
-inline constexpr const char *IATRuntimeExtentUnsignedMaskTAG =
-    "IATRuntimeExtentUnsignedMask";
-inline constexpr const char *PTSMRuntimeExtentUnsignedMaskTAG =
-    "PTSMRuntimeExtentUnsignedMask";
+using namespace mlir;
+using namespace triton;
+using namespace cfg;
 
-} // namespace mlir::triton::memory_access
-
-#endif // TRITON_MEMORY_ACCESS_TAGS_H
+std::unique_ptr<GraphOptimizationRule> cfg::createResidentLoadForwardingRule(
+    const ResidentLoadForwardingRuleOptions &options) {
+  static_cast<void>(options);
+  return createReservedGraphOptimizationRule(
+      {GraphOptimizationRuleId::ResidentLoadForwarding,
+       "resident-load-forwarding"});
+}

@@ -30,6 +30,9 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/TritonToGraph/ProgramAxisDependenceAnalysis.h"
+#include "ascend/include/TritonToGraph/ProgramGridTransform.h"
+#include "ascend/include/TritonToGraph/ProgramMappingScalarSpecialization.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -47,6 +50,8 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/IR/Instructions.h"
 #include <Python.h>
+#include <utility>
+#include <vector>
 
 using namespace mlir;
 namespace py = pybind11;
@@ -613,6 +618,195 @@ void init_ascend_ir(py::module &&m) {
     }
     return py::cast(ret.getInt());
   });
+  m.def("get_program_grid_transforms", [](OpState &op) -> py::object {
+    Attribute attribute =
+        op->getAttr(mlir::triton::cfg::kProgramGridTransformsAttr);
+    if (!attribute)
+      return py::none();
+    FailureOr<mlir::triton::cfg::ProgramGridTransformContract> contract =
+        mlir::triton::cfg::parseProgramGridTransformContract(attribute);
+    if (failed(contract))
+      throw std::runtime_error("invalid hacc.program_grid_transforms contract");
+
+    py::dict result;
+    result["version"] = contract->version;
+    result["extent_source"] = "runtime_original_grid";
+    py::list hiddenExtentAxes;
+    hiddenExtentAxes.append(0);
+    hiddenExtentAxes.append(1);
+    result["hidden_extent_axes"] = std::move(hiddenExtentAxes);
+    py::list hiddenArgumentOrder;
+    hiddenArgumentOrder.append("originalGridX");
+    hiddenArgumentOrder.append("originalGridY");
+    result["hidden_argument_order"] = std::move(hiddenArgumentOrder);
+    py::list hiddenArgumentTypes;
+    hiddenArgumentTypes.append("i32");
+    hiddenArgumentTypes.append("i32");
+    result["hidden_argument_types"] = std::move(hiddenArgumentTypes);
+    py::list transforms;
+    for (const mlir::triton::cfg::ProgramGridTransform &transform :
+         contract->transforms) {
+      py::dict item;
+      item["order"] = transform.order;
+      item["kind"] = "ceil_div";
+      item["axis"] = transform.axis;
+      item["factor"] = transform.factor;
+      item["persistent_coverage"] = transform.persistentCoverage;
+      item["grid_stride_abi_verified"] = transform.gridStrideAbiVerified;
+      transforms.append(std::move(item));
+    }
+    result["transforms"] = std::move(transforms);
+    return std::move(result);
+  });
+  m.def("get_program_mapping_scalar_specialization",
+        [](OpState &op) -> py::object {
+          Attribute attribute = op->getAttr(
+              mlir::triton::cfg::kProgramMappingScalarSpecializationAttr);
+          if (!attribute)
+            return py::none();
+          FailureOr<mlir::triton::cfg::ProgramMappingScalarSpecialization>
+              specialization =
+                  mlir::triton::cfg::parseProgramMappingScalarSpecialization(
+                      attribute);
+          if (failed(specialization))
+            throw std::runtime_error(
+                "invalid hacc.program_mapping_scalar_specialization contract");
+
+          py::dict result;
+          result["version"] = specialization->version;
+          py::list arguments;
+          for (const mlir::triton::cfg::ProgramMappingScalarArgument &argument :
+               specialization->arguments) {
+            py::dict item;
+            item["index"] = argument.index;
+            if (specialization->version ==
+                mlir::triton::cfg::kProgramMappingScalarSpecializationVersion)
+              item["name"] = argument.name;
+            item["value"] = argument.value;
+            arguments.append(std::move(item));
+          }
+          result["arguments"] = std::move(arguments);
+          return std::move(result);
+        });
+  m.def(
+      "set_program_mapping_scalar_specialization",
+      [](OpState &op, int64_t version, const py::iterable &arguments) {
+        auto module = dyn_cast<ModuleOp>(op.getOperation());
+        if (!module)
+          throw std::invalid_argument("set_program_mapping_scalar_"
+                                      "specialization expects an MLIR module");
+        mlir::triton::cfg::ProgramMappingScalarSpecialization specialization;
+        specialization.version = version;
+        const bool isLegacy =
+            version ==
+            mlir::triton::cfg::kProgramMappingScalarSpecializationLegacyVersion;
+        const bool isNamed =
+            version ==
+            mlir::triton::cfg::kProgramMappingScalarSpecializationVersion;
+        if (!isLegacy && !isNamed)
+          throw std::invalid_argument(
+              "unsupported program_mapping_scalar_specialization version");
+        for (const py::handle &rawArgument : arguments) {
+          if (!py::isinstance<py::sequence>(rawArgument) ||
+              py::isinstance<py::str>(rawArgument))
+            throw std::invalid_argument("program_mapping_scalar_specialization "
+                                        "argument must be a sequence");
+          py::sequence argument =
+              py::reinterpret_borrow<py::sequence>(rawArgument);
+          const size_t expectedSize = isLegacy ? 2 : 3;
+          if (argument.size() != expectedSize)
+            throw std::invalid_argument("program_mapping_scalar_specialization "
+                                        "argument has invalid arity");
+          uint32_t index = argument[0].cast<uint32_t>();
+          if (isLegacy) {
+            specialization.arguments.push_back(
+                {index, "", argument[1].cast<int64_t>()});
+          } else {
+            specialization.arguments.push_back({index,
+                                                argument[1].cast<std::string>(),
+                                                argument[2].cast<int64_t>()});
+          }
+        }
+        if (failed(mlir::triton::cfg::setProgramMappingScalarSpecialization(
+                module, specialization)))
+          throw std::runtime_error(
+              "invalid hacc.program_mapping_scalar_specialization contract");
+      },
+      py::arg("module"), py::arg("version"), py::arg("arguments"));
+  m.def("clear_program_mapping_scalar_specialization", [](OpState &op) {
+    auto module = dyn_cast<ModuleOp>(op.getOperation());
+    if (!module)
+      throw std::invalid_argument(
+          "clear_program_mapping_scalar_specialization expects an MLIR module");
+    mlir::triton::cfg::clearProgramMappingScalarSpecialization(module);
+  });
+  m.def(
+      "analyze_program_axis_dependence",
+      [](OpState &op) -> py::list {
+        auto function = llvm::dyn_cast<mlir::triton::FuncOp>(op.getOperation());
+        if (!function)
+          throw std::invalid_argument(
+              "analyze_program_axis_dependence expects a tt.func operation");
+
+        mlir::triton::cfg::ProgramAxisDependenceAnalysis analysis(function);
+        py::list axes;
+        for (int32_t axis = 0; axis < 3; ++axis) {
+          const mlir::triton::cfg::ProgramAxisDependence &facts =
+              analysis.get(axis);
+          py::dict result;
+          result["axis"] = facts.axis;
+          result["program_id_count"] = facts.programIds.size();
+          result["escapes"] = facts.escapes;
+          result["has_side_effects"] = facts.hasSideEffects;
+          result["has_unsupported_side_effects"] =
+              facts.hasUnsupportedSideEffects;
+          result["reads_num_programs"] = facts.readsNumPrograms;
+          result["is_independent_axis_transform_candidate"] =
+              facts.isIndependentAxisTransformCandidate();
+          result["is_program_mapping_transform_candidate"] =
+              facts.isProgramMappingTransformCandidate();
+
+          py::list closure;
+          for (Operation *operation : facts.dependenceClosure)
+            closure.append(operation->getName().getStringRef().str());
+          result["dependence_closure"] = std::move(closure);
+
+          py::list reductions;
+          for (int32_t reductionAxis : facts.reductionAxes)
+            reductions.append(reductionAxis);
+          result["reduction_axes"] = std::move(reductions);
+
+          py::list stores;
+          for (const mlir::triton::cfg::StoreAddressDependence &store :
+               facts.stores) {
+            py::dict summary;
+            summary["pointer_depends_on_axis"] = store.pointerDependsOnAxis;
+            switch (store.independence) {
+            case mlir::triton::cfg::StoreAddressIndependence::
+                NotProgramDependent:
+              summary["address_independence"] = "not_program_dependent";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::ProvenDisjoint:
+              summary["address_independence"] = "proven_disjoint";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::
+                CanonicalDynamicStride:
+              summary["address_independence"] = "canonical_dynamic_stride";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::Unknown:
+              summary["address_independence"] = "unknown";
+              break;
+            }
+            stores.append(std::move(summary));
+          }
+          result["stores"] = std::move(stores);
+          axes.append(std::move(result));
+        }
+        return axes;
+      },
+      py::arg("function"),
+      "Return conservative per-axis ProgramAxisDependenceAnalysis facts for a "
+      "tt.func.");
   m.def("remove_attr",
         [](OpState &op, std::string &name) -> void { op->removeAttr(name); });
   py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());

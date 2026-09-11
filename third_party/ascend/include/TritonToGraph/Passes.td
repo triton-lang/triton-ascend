@@ -74,11 +74,19 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
     Option<"ruleMask", "rule-mask", "uint64_t", "511",
-           "Bitmask of registered graph rule identities; this pass executes only native graph-rule phases">,
+           "Bitmask of known 32-bit graph rule identities; default 511 preserves the legacy native bundle. Only IAT/SPAF/PTSM may later be considered for default enablement; RLF/IPBE/SCP/CBAF remain explicit opt-in no-ops">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
            "64", "Maximum graph rewrites per function">,
     Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",
-           "Unified-buffer capacity available to StoreCoalescing">,
+           "Legacy unified-buffer budget; explicit mapping/store budgets fall back to this value when omitted">,
+    Option<"mappingUBCapacityBytes", "mapping-ub-capacity-bytes", "uint64_t", "0",
+           "Physical unified-buffer capacity available to program-mapping resource checks">,
+    Option<"storeCoalescingUBBudgetBytes", "store-coalescing-ub-budget-bytes", "uint64_t", "0",
+           "Conservative unified-buffer budget available to StoreCoalescing">,
+    Option<"ubSafetyPercent", "ub-safety-percent", "uint64_t", "80",
+           "Percent of UB capacity available to resource candidates">,
+    Option<"reservedUBBytes", "reserved-ub-bytes", "uint64_t", "0",
+           "UB bytes reserved for lowering/backend workspace before candidate budgeting">,
     Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
            "Compilation mode; RowCoalescing is enabled only for simt_only">,
   ];

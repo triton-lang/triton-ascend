@@ -32,9 +32,14 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
-                                          get_backend_func, get_cann_version)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int, is_ffts_supported,
+                                          force_disable_ffts, get_backend_func, get_cann_version)
+from triton.backends.ascend.program_grid import (
+    PROGRAM_GRID_TRANSFORMS_VERSION,
+    ProgramGridContractError,
+    get_persistent_transform,
+    normalize_program_grid_transforms,
+)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -948,12 +953,6 @@ def make_launcher(constants, signature, metadata):
     enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
     enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
-    has_auto_blockify_blacklist_op = getattr(
-        metadata,
-        "has_auto_blockify_blacklist_op",
-        False,
-    )
-    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op)
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
@@ -1025,6 +1024,73 @@ static void release_npu_tensor_handle(void* handle) {{
 }}
 """
 
+    mapping_applied = getattr(metadata, "program_grid_mapping_applied", None)
+    row_coalescing_applied = getattr(metadata, "row_coalescing_applied", None)
+    auto_blockify_enabled = getattr(metadata, "auto_blockify_enabled", None)
+    ptsm_cap_authorized = getattr(metadata, "ptsm_cap_authorized", None)
+    if not isinstance(mapping_applied, bool):
+        raise RuntimeError("compiler metadata missing program_grid_mapping_applied")
+    if not isinstance(row_coalescing_applied, bool):
+        raise RuntimeError("compiler metadata missing row_coalescing_applied")
+    if not isinstance(auto_blockify_enabled, bool):
+        raise RuntimeError("compiler metadata missing auto_blockify_enabled")
+    if not isinstance(ptsm_cap_authorized, bool):
+        raise RuntimeError("compiler metadata missing ptsm_cap_authorized")
+    raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
+    if not mapping_applied:
+        if raw_program_grid_transforms is not None:
+            raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
+        program_grid_transforms = None
+    else:
+        if raw_program_grid_transforms is None:
+            raise RuntimeError("program_grid_mapping_applied requires program_grid_transforms")
+        try:
+            program_grid_transforms = normalize_program_grid_transforms(raw_program_grid_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
+
+    persistent_transform = (get_persistent_transform(program_grid_transforms)
+                            if program_grid_transforms is not None else None)
+    if program_grid_transforms is not None and row_coalescing_applied:
+        raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
+    if auto_blockify_enabled and (mapping_applied or row_coalescing_applied):
+        raise RuntimeError("auto_blockify_enabled conflicts with a rewritten program mapping")
+    if auto_blockify_enabled and ptsm_cap_authorized:
+        raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
+    if persistent_transform is None:
+        if ptsm_cap_authorized:
+            raise RuntimeError("ptsm_cap_authorized requires a persistent transform")
+    elif not ptsm_cap_authorized:
+        raise RuntimeError("persistent program-grid transform lacks PTSM cap authorization")
+    elif mix_mode != "aiv":
+        raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
+
+    program_grid_finalization = ""
+    if program_grid_transforms is not None:
+        finalization_lines = [
+            f"// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: dynamic original-grid ABI.",
+            "uint32_t originalGridX = static_cast<uint32_t>(gridX);",
+            "uint32_t originalGridY = static_cast<uint32_t>(gridY);",
+        ]
+        axis_names = {0: ("gridX", "originalGridX"), 1: ("gridY", "originalGridY")}
+        for transform in program_grid_transforms["transforms"]:
+            grid_name, original_name = axis_names[transform["axis"]]
+            factor = transform["factor"]
+            finalization_lines.append(
+                f"{grid_name} = (uint32_t)(((uint64_t){original_name} + {factor - 1}u) / {factor}u);")
+    if persistent_transform is not None:
+        axis = persistent_transform["axis"]
+        grid_name = {0: "gridX", 1: "gridY", 2: "gridZ"}[axis]
+        other_grid_names = tuple(name for index, name in enumerate(("gridX", "gridY", "gridZ")) if index != axis)
+        finalization_lines.extend((
+            f"uint64_t otherPrograms = (uint64_t){other_grid_names[0]} * (uint64_t){other_grid_names[1]};",
+            "uint32_t axisCap = std::max((uint32_t)1,",
+            f"    (uint32_t)((uint64_t){num_physical_blocks} / std::max((uint64_t)1, otherPrograms)));",
+            f"{grid_name} = std::min({grid_name}, static_cast<int>(axisCap));",
+        ))
+    if program_grid_transforms is not None:
+        program_grid_finalization = "\n  ".join(finalization_lines)
+
     # Full-TA tile/strided coalescing: the compiler recorded a coalesce factor H
     # and the program-id/grid axis it applies to. Each program now covers H tiles
     # along that axis, so the host shrinks the matching grid dim by H here (the
@@ -1046,6 +1112,14 @@ static void release_npu_tensor_handle(void* handle) {{
             f"  {_coalesce_grid_var} = {_coalesce_grid_expr};")
     else:
         coalesce_grid_div = ""
+    if program_grid_transforms is not None and coalesce_factor > 1:
+        raise RuntimeError("program-grid transforms conflict with legacy coalesce metadata")
+    if row_coalescing_applied:
+        if coalesce_factor <= 1 or coalesce_axis not in (0, 1, 2):
+            raise RuntimeError("row_coalescing_applied requires valid coalesce metadata")
+    elif coalesce_factor != 1 or coalesce_axis != -1 or coalesce_grid_ceil_div:
+        raise RuntimeError("unmatched RowCoalescing must retain default coalesce metadata")
+    has_dynamic_program_grid_abi = program_grid_transforms is not None
 
     cpp_device_pointer = _CPP_DEVICE_POINTER
     cpp_msprof_extern = _CPP_MSPROF_EXTERN
@@ -1167,7 +1241,8 @@ static void release_npu_tensor_handle(void* handle) {{
 
     npu_headers = generate_npu_header_src()
 
-    _launch_preamble = f"""
+    if not mapping_applied and not row_coalescing_applied:
+        _launch_preamble = f"""
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
   {coalesce_grid_div}
@@ -1181,6 +1256,54 @@ static void release_npu_tensor_handle(void* handle) {{
     {workspace_fail_code}
   }}
   ''' if workspace_size > 0 else ''}"""
+        _python_launch_preamble = _launch_preamble
+    else:
+        _program_grid_launch_preamble = f"""
+  {program_grid_finalization}
+  {coalesce_grid_div if program_grid_transforms is None else ''}"""
+        _launch_preamble = f"""
+  void* workspace_addr_ptr = nullptr;
+  void* workspace_handle = nullptr;
+{_program_grid_launch_preamble}
+  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  {get_backend_func("pre_launch", True)}
+  {f'''
+  uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;
+  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
+  ''' if workspace_size > 0 else ''}"""
+        _python_launch_preamble = f"""
+  void* workspace_addr_ptr = nullptr;
+  void* workspace_handle = nullptr;
+{_program_grid_launch_preamble}
+  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  {get_backend_func("pre_launch", True)}
+  {f'''
+  uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;
+  {get_backend_func("allocate_memory", "totalWorkSpaceSize", "stream")}
+  std::shared_ptr<void> workspace_handle_guard(workspace_handle, release_npu_tensor_handle);
+  if (!workspace_addr_ptr) {{
+    {workspace_fail_code}
+  }}
+  ''' if workspace_size > 0 else ''}"""
+
+    preserve_legacy_launcher_layout = mapping_applied or row_coalescing_applied
+    original_grid_offset_decls = ("    size_t original_grid_x_offset = reserve_slot(sizeof(uint32_t), 4); "
+                                  "size_t original_grid_y_offset = reserve_slot(sizeof(uint32_t), 4);\n" if
+                                  has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
+    original_grid_copy = ("    memcpy(launch_args.data() + original_grid_x_offset, &originalGridX, sizeof(uint32_t)); "
+                          "memcpy(launch_args.data() + original_grid_y_offset, &originalGridY, sizeof(uint32_t));\n"
+                          if has_dynamic_program_grid_abi else "    \n" if preserve_legacy_launcher_layout else "")
+    original_grid_struct_fields = ("      uint32_t originalGridX __attribute__((aligned(4))); "
+                                   "uint32_t originalGridY __attribute__((aligned(4)));\n"
+                                   if has_dynamic_program_grid_abi else
+                                   "      \n" if preserve_legacy_launcher_layout else "")
+    original_grid_struct_values = ("      static_cast<uint32_t>(originalGridX), static_cast<uint32_t>(originalGridY),\n"
+                                   if has_dynamic_program_grid_abi else
+                                   "      \n" if preserve_legacy_launcher_layout else "")
 
     _launch_lambda_pre = f"""  {'std::function<cann_error()> launch_call = [=]() -> cann_error' if enable_taskqueue else ''} {{
     {get_backend_func("pre_launch", False)}
@@ -1193,7 +1316,7 @@ static void release_npu_tensor_handle(void* handle) {{
         warned = true;
     }}
     #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if auto_blockify_enabled else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;
@@ -1312,7 +1435,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
       args_offset = _align_launch_offset(args_offset, alignment);
       args_offset += launch_arg_sizes[arg_idx];
     }}
-    size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
+{original_grid_offset_decls}    size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     {'reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
@@ -1331,7 +1454,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
       memcpy(launch_args.data() + kernel_arg_offset, copied_kernel_args[arg_idx].data(), launch_arg_sizes[arg_idx]);
       kernel_arg_offset += launch_arg_sizes[arg_idx];
     }}
-    memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));
+{original_grid_copy}    memcpy(launch_args.data() + grid_offset, &gridX, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + sizeof(int32_t), &gridY, sizeof(int32_t));
     memcpy(launch_args.data() + grid_offset + 2 * sizeof(int32_t), &gridZ, sizeof(int32_t));
     {'memcpy(launch_args.data() + dtdata_offset, &DTData, sizeof(void*));' if enable_device_print else ''}
@@ -1347,14 +1470,14 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
     printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
     return;
   }}
-{_launch_preamble}
+{_python_launch_preamble}
 {_launch_lambda_pre}
     struct __attribute__((packed)) {{
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
-      {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
+{original_grid_struct_fields}      {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* DTData __attribute__((aligned(8)));'}
@@ -1365,7 +1488,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
-      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
+{original_grid_struct_values}      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(DTData)' if enable_device_print else ', static_cast<void*>(nullptr)'}

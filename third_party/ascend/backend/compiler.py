@@ -65,9 +65,18 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
+    ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
 )
 from triton.backends.ascend.driver import (NPUUtils)
+from triton.backends.ascend.program_grid import (
+    DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
+    PROGRAM_GRID_TRANSFORMS_ATTR,
+    ProgramGridContractError,
+    get_persistent_transform,
+    normalize_graph_optimization_rule_mask,
+    normalize_program_grid_transforms,
+)
 from triton.backends.compiler import (
     BaseBackend,
     GPUTarget,
@@ -87,7 +96,10 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
     if get_int_attr is None:
         return -1
-    attr_value = get_int_attr(mod, attr_name)
+    try:
+        attr_value = get_int_attr(mod, attr_name)
+    except TypeError:
+        return -1
 
     if remove_attr:
         remove_attr(mod, attr_name)
@@ -96,6 +108,25 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
         return -1
 
     return attr_value
+
+
+def _get_then_remove_program_grid_transforms(mod):
+    get_transforms = getattr(ascend.ir, "get_program_grid_transforms", None)
+    remove_attr = getattr(ascend.ir, "remove_attr", None)
+    if get_transforms is None:
+        if PROGRAM_GRID_TRANSFORMS_ATTR in str(mod):
+            raise RuntimeError("hacc.program_grid_transforms requires the matching Ascend C++ binding")
+        return None
+    try:
+        raw = get_transforms(mod)
+    except TypeError:
+        if PROGRAM_GRID_TRANSFORMS_ATTR in str(mod):
+            raise RuntimeError("hacc.program_grid_transforms requires an MLIR module accepted by "
+                               "the Ascend C++ binding")
+        return None
+    if raw is not None and remove_attr:
+        remove_attr(mod, PROGRAM_GRID_TRANSFORMS_ATTR)
+    return raw
 
 
 def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
@@ -127,6 +158,89 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
     metadata["coalesce_axis"] = axis if valid_axis else -1
     metadata["coalesce_grid_ceil_div"] = valid_ceil_div
     metadata["row_coalescing_applied"] = metadata["coalesce_factor"] > 1
+
+
+def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
+    raw_transforms = _get_then_remove_program_grid_transforms(mod)
+    if raw_transforms is not None:
+        factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
+        axis = _get_then_remove_rc(mod, "hacc.coalesce_axis")
+        ceil_div = _get_then_remove_rc(mod, "hacc.coalesce_grid_ceil_div")
+        has_legacy_attrs = any(value != -1 for value in (factor, axis, ceil_div))
+        if has_legacy_attrs:
+            raise RuntimeError("hacc.program_grid_transforms conflicts with legacy hacc.coalesce_* metadata")
+        try:
+            transforms = normalize_program_grid_transforms(raw_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid hacc.program_grid_transforms: {error}") from error
+        metadata["program_grid_transforms"] = transforms
+        metadata["program_grid_mapping_applied"] = True
+        metadata["coalesce_factor"] = 1
+        metadata["coalesce_axis"] = -1
+        metadata["coalesce_grid_ceil_div"] = False
+        metadata["row_coalescing_applied"] = False
+        return
+
+    metadata["program_grid_transforms"] = None
+    metadata["program_grid_mapping_applied"] = False
+    _export_coalesce_metadata(
+        mod,
+        metadata,
+        require_row_contract=require_row_contract,
+    )
+
+
+def _finalize_program_launch_policy(metadata, opt):
+    required_fields = (
+        "program_grid_transforms",
+        "program_grid_mapping_applied",
+        "row_coalescing_applied",
+        "has_auto_blockify_blacklist_op",
+        "mix_mode",
+    )
+    missing = [name for name in required_fields if name not in metadata]
+    if missing:
+        raise RuntimeError("cannot finalize program launch policy; missing metadata: " + ", ".join(missing))
+
+    raw_transforms = metadata["program_grid_transforms"]
+    mapping_applied = metadata["program_grid_mapping_applied"]
+    row_coalescing_applied = metadata["row_coalescing_applied"]
+    has_auto_blockify_blacklist_op = metadata["has_auto_blockify_blacklist_op"]
+    if not isinstance(mapping_applied, bool):
+        raise RuntimeError("program_grid_mapping_applied must be a boolean")
+    if not isinstance(row_coalescing_applied, bool):
+        raise RuntimeError("row_coalescing_applied must be a boolean")
+    if not isinstance(has_auto_blockify_blacklist_op, bool):
+        raise RuntimeError("has_auto_blockify_blacklist_op must be a boolean")
+
+    transforms = None
+    if raw_transforms is not None:
+        try:
+            transforms = normalize_program_grid_transforms(raw_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid exported program_grid_transforms: {error}") from error
+    if mapping_applied != (transforms is not None):
+        raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
+    if mapping_applied and row_coalescing_applied:
+        raise RuntimeError("program-grid mapping conflicts with legacy RowCoalescing")
+
+    blacklist_policy_allows = bool(opt.is_pure_simt) or not has_auto_blockify_blacklist_op
+    auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and blacklist_policy_allows
+                             and not row_coalescing_applied and not mapping_applied)
+
+    persistent_transform = get_persistent_transform(transforms) if transforms is not None else None
+    ptsm_cap_authorized = False
+    if persistent_transform is not None:
+        if metadata["mix_mode"] != "aiv":
+            raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
+        if not (persistent_transform["persistent_coverage"] and persistent_transform["grid_stride_abi_verified"]):
+            raise RuntimeError("persistent program-grid transform lacks coverage/ABI verification")
+        ptsm_cap_authorized = True
+
+    if auto_blockify_enabled and ptsm_cap_authorized:
+        raise RuntimeError("AutoBlockify and persistent-grid cap cannot both be enabled")
+    metadata["auto_blockify_enabled"] = auto_blockify_enabled
+    metadata["ptsm_cap_authorized"] = ptsm_cap_authorized
 
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
@@ -163,6 +277,20 @@ def _with_debug_line(npubin_stage, options):
     return stage
 
 
+def _graph_optimize_kwargs(opt):
+    kwargs = {
+        "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
+        "compile_mode": opt.compile_mode,
+    }
+    rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
+    if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
+        kwargs["rule_mask"] = rule_mask
+        kwargs["ub_safety_percent"] = 80
+        kwargs["reserved_ub_bytes"] = 0
+        kwargs["mapping_ub_capacity_bytes"] = (ub_size_in_kbytes_for_arch(opt.target_arch) * 1024)
+    return kwargs
+
+
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -180,11 +308,7 @@ def make_ttir(mod, metadata, opt):
     passes.common.add_symbol_dce(pm)
     passes.ttir.add_loop_unroll(pm)
     if opt.enable_graph_optimize:
-        ascend.passes.ttir.add_graph_optimize(
-            pm,
-            ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
-            compile_mode=opt.compile_mode,
-        )
+        ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -304,7 +428,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
-        _export_coalesce_metadata(mod, metadata)
+        _export_program_grid_metadata(mod, metadata)
 
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
@@ -564,6 +688,7 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
 
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
+    _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
@@ -717,7 +842,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 _compile_option_list += \
                     [f"--link-aicore-bitcode={bitcode}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if metadata["auto_blockify_enabled"]:
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -789,6 +914,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
 def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
+    _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp_file_name = "kernel.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
@@ -926,7 +1052,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_libdevice:
             _compile_option_list += [f"--link-aicore-bitcode={get_libdevice()}"]
 
-        if _is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False):
+        if metadata["auto_blockify_enabled"]:
             _compile_option_list += ["--enable-auto-blockify-loop"]
         npu_compiler_path, env = _get_npucompiler_path()
         if npu_compiler_path.endswith("bishengir-compile"):
@@ -1030,6 +1156,7 @@ class NPUOptions:
     # Backend-only construction input.  AscendBackend.parse_options injects
     # GPUTarget.arch and never forwards a user-supplied compile option.
     arch: InitVar[str] = ""
+    rule_mask: InitVar[int] = DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
     # This becomes compiler metadata, so its name must also be valid for the
     # namedtuple constructed by CompiledKernel on Python 3.10.
     target_arch: str = field(init=False, repr=False)
@@ -1121,7 +1248,7 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
-    def __post_init__(self, arch):
+    def __post_init__(self, arch, rule_mask):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
@@ -1133,6 +1260,12 @@ class NPUOptions:
             "compile_on_910_95",
             isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950")),
         )
+        try:
+            normalized_rule_mask = normalize_graph_optimization_rule_mask(rule_mask)
+        except ProgramGridContractError as error:
+            raise ValueError(f"invalid GraphOptimize rule_mask: {error}") from error
+        if normalized_rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
+            object.__setattr__(self, "rule_mask", normalized_rule_mask)
         # The core compiler serializes ``options.__dict__`` into launch
         # metadata.  An init=False field with its class-level default alone is
         # not present there, so materialize the false state before the
@@ -1211,15 +1344,10 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
 
 
 def ttir_to_npubin(mod, metadata, opt):
-    # Get Triton-MLIR as string
+    _export_program_grid_metadata(mod, metadata, require_row_contract=True)
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
-    if opt.is_pure_simt:
-        # RowCoalescing is now the pure-SIMT graph rule in make_ttir().  This
-        # stage only transfers its complete launch contract to metadata before
-        # handing TTIR to pure-SIMT codegen.
-        _export_coalesce_metadata(mod, metadata, require_row_contract=True)
-        ttir_code = str(mod)
+    _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
@@ -1251,11 +1379,7 @@ def ttir_to_npubin(mod, metadata, opt):
             if bisheng_options is not None:
                 _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
-            # Enable SIMT auto-blockify under the fixed automatic block-mapping
-            # policy, mirroring the SIMD compile paths. driver.py's runtime
-            # block-count cap keys off the same policy, so the two stay in sync.
-            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
-                    and not metadata.get("row_coalescing_applied", False)):
+            if metadata["auto_blockify_enabled"]:
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 1:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

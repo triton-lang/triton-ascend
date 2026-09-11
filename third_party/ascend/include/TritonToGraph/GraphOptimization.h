@@ -26,6 +26,8 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -35,9 +37,9 @@ namespace triton {
 namespace cfg {
 
 // The identity of every rule is one bit of the pass rule mask, so the mask
-// width bounds how many rules can ever be registered.  It is 16-bit because
-// the 8-bit range is already fully assigned.
-enum class GraphOptimizationRuleId : uint16_t {
+using GraphOptimizationRuleMask = uint32_t;
+
+enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   LoadStoreTranspose = 1,
   TransposePointwiseReorder = 2,
   StoreCoalescing = 4,
@@ -57,6 +59,28 @@ enum class GraphOptimizationRuleId : uint16_t {
   StridedAxisCoalescing = 16,
   ChunkCoalescing = 32,
   StridedLoadStoreRewrite = 64,
+  IndependentAxisTensorize = 512,
+  PersistentTaskStripMining = 2048,
+  ResidentLoadForwarding = 4096,
+  IntermediatePrecisionBoundaryElision = 8192,
+  StoreCoveragePlanning = 16384,
+  ContiguousBlockAccessFormation = 32768,
+};
+
+enum class GraphOptimizationRulePhase : uint8_t {
+  DiagonalMaskRemoval,
+  ConvertModuloToMask,
+  ProgramMapping,
+  PersistentTaskMapping,
+  LoadStoreTranspose,
+  TransposePointwiseReorder,
+  ResidentLoadForwarding,
+  IntermediatePrecisionBoundaryElision,
+  StoreCoveragePlanning,
+  StoreCoalescing,
+  ContiguousBlockAccessFormation,
+  RowCoalescing,
+  Compatibility,
 };
 
 constexpr const char *
@@ -80,15 +104,102 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "ChunkCoalescing";
   case GraphOptimizationRuleId::StridedLoadStoreRewrite:
     return "StridedLoadStoreRewrite";
+  case GraphOptimizationRuleId::IndependentAxisTensorize:
+    return "IndependentAxisTensorizeRule";
+  case GraphOptimizationRuleId::PersistentTaskStripMining:
+    return "PersistentTaskStripMiningRule";
+  case GraphOptimizationRuleId::ResidentLoadForwarding:
+    return "ResidentLoadForwardingRule";
+  case GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision:
+    return "IntermediatePrecisionBoundaryElisionRule";
+  case GraphOptimizationRuleId::StoreCoveragePlanning:
+    return "StoreCoveragePlanningRule";
+  case GraphOptimizationRuleId::ContiguousBlockAccessFormation:
+    return "ContiguousBlockAccessFormationRule";
   }
   return "Unknown";
 }
 
-constexpr uint16_t getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
-  return static_cast<uint16_t>(rule);
+constexpr GraphOptimizationRuleMask
+getGraphOptimizationRuleMask(GraphOptimizationRuleId rule) {
+  return static_cast<GraphOptimizationRuleMask>(rule);
 }
 
-constexpr uint16_t kAllGraphOptimizationRuleMask =
+constexpr GraphOptimizationRulePhase
+getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
+  switch (rule) {
+  case GraphOptimizationRuleId::DiagonalMaskRemoval:
+    return GraphOptimizationRulePhase::DiagonalMaskRemoval;
+  case GraphOptimizationRuleId::ConvertModuloToMask:
+    return GraphOptimizationRulePhase::ConvertModuloToMask;
+  case GraphOptimizationRuleId::IndependentAxisTensorize:
+    return GraphOptimizationRulePhase::ProgramMapping;
+  case GraphOptimizationRuleId::PersistentTaskStripMining:
+    return GraphOptimizationRulePhase::PersistentTaskMapping;
+  case GraphOptimizationRuleId::LoadStoreTranspose:
+    return GraphOptimizationRulePhase::LoadStoreTranspose;
+  case GraphOptimizationRuleId::TransposePointwiseReorder:
+    return GraphOptimizationRulePhase::TransposePointwiseReorder;
+  case GraphOptimizationRuleId::ResidentLoadForwarding:
+    return GraphOptimizationRulePhase::ResidentLoadForwarding;
+  case GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision:
+    return GraphOptimizationRulePhase::IntermediatePrecisionBoundaryElision;
+  case GraphOptimizationRuleId::StoreCoveragePlanning:
+    return GraphOptimizationRulePhase::StoreCoveragePlanning;
+  case GraphOptimizationRuleId::StoreCoalescing:
+    return GraphOptimizationRulePhase::StoreCoalescing;
+  case GraphOptimizationRuleId::ContiguousBlockAccessFormation:
+    return GraphOptimizationRulePhase::ContiguousBlockAccessFormation;
+  case GraphOptimizationRuleId::RowCoalescing:
+    return GraphOptimizationRulePhase::RowCoalescing;
+  case GraphOptimizationRuleId::StridedAxisCoalescing:
+  case GraphOptimizationRuleId::ChunkCoalescing:
+  case GraphOptimizationRuleId::StridedLoadStoreRewrite:
+    return GraphOptimizationRulePhase::Compatibility;
+  }
+  return GraphOptimizationRulePhase::Compatibility;
+}
+
+constexpr std::array<GraphOptimizationRuleId, 15>
+    kGraphOptimizationRuleRegistry = {
+        GraphOptimizationRuleId::LoadStoreTranspose,
+        GraphOptimizationRuleId::TransposePointwiseReorder,
+        GraphOptimizationRuleId::StoreCoalescing,
+        GraphOptimizationRuleId::RowCoalescing,
+        GraphOptimizationRuleId::DiagonalMaskRemoval,
+        GraphOptimizationRuleId::ConvertModuloToMask,
+        GraphOptimizationRuleId::StridedAxisCoalescing,
+        GraphOptimizationRuleId::ChunkCoalescing,
+        GraphOptimizationRuleId::StridedLoadStoreRewrite,
+        GraphOptimizationRuleId::IndependentAxisTensorize,
+        GraphOptimizationRuleId::PersistentTaskStripMining,
+        GraphOptimizationRuleId::ResidentLoadForwarding,
+        GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision,
+        GraphOptimizationRuleId::StoreCoveragePlanning,
+        GraphOptimizationRuleId::ContiguousBlockAccessFormation,
+};
+
+constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
+  for (std::size_t index = 0; index < kGraphOptimizationRuleRegistry.size();
+       ++index) {
+    const GraphOptimizationRuleMask mask =
+        getGraphOptimizationRuleMask(kGraphOptimizationRuleRegistry[index]);
+    if (mask == 0 || (mask & (mask - 1)) != 0)
+      return false;
+    for (std::size_t other = index + 1;
+         other < kGraphOptimizationRuleRegistry.size(); ++other) {
+      if (mask ==
+          getGraphOptimizationRuleMask(kGraphOptimizationRuleRegistry[other]))
+        return false;
+    }
+  }
+  return true;
+}
+
+static_assert(hasUniqueSingleBitGraphOptimizationRuleIds(),
+              "GraphOptimizationRuleId values must be unique single bits");
+
+constexpr GraphOptimizationRuleMask kLegacyGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::TransposePointwiseReorder) |
@@ -102,23 +213,111 @@ constexpr uint16_t kAllGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
-constexpr bool isValidGraphOptimizationRuleMask(uint16_t ruleMask) {
-  constexpr uint16_t unknownRuleBits =
-      static_cast<uint16_t>(~kAllGraphOptimizationRuleMask);
+constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
+    kLegacyGraphOptimizationRuleMask |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::IndependentAxisTensorize) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::PersistentTaskStripMining) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::ResidentLoadForwarding) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::StoreCoveragePlanning) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::ContiguousBlockAccessFormation);
+
+constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
+    kLegacyGraphOptimizationRuleMask |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::IndependentAxisTensorize) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::PersistentTaskStripMining);
+
+constexpr GraphOptimizationRuleMask kFixedDefaultOffGraphOptimizationRuleMask =
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::ResidentLoadForwarding) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::StoreCoveragePlanning) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::ContiguousBlockAccessFormation);
+
+constexpr GraphOptimizationRuleMask kDefaultGraphOptimizationRuleMask =
+    kLegacyGraphOptimizationRuleMask;
+
+constexpr GraphOptimizationRuleMask kAllGraphOptimizationRuleMask =
+    kKnownGraphOptimizationRuleMask;
+
+static_assert(kLegacyGraphOptimizationRuleMask == 511,
+              "legacy graph optimization rule mask is an ABI contract");
+static_assert(kDefaultGraphOptimizationRuleMask ==
+                  kLegacyGraphOptimizationRuleMask,
+              "stage-00 rules must remain disabled by default");
+static_assert(kKnownGraphOptimizationRuleMask ==
+                  (kDefaultEligibleGraphOptimizationRuleMask |
+                   kFixedDefaultOffGraphOptimizationRuleMask),
+              "known graph rule identities must retain their scope partition");
+static_assert((kDefaultEligibleGraphOptimizationRuleMask &
+               kFixedDefaultOffGraphOptimizationRuleMask) == 0,
+              "fixed-default-off rules must not become default candidates");
+static_assert((kDefaultGraphOptimizationRuleMask &
+               ~kDefaultEligibleGraphOptimizationRuleMask) == 0,
+              "default graph rules must stay within the approved candidates");
+static_assert(static_cast<unsigned>(getGraphOptimizationRulePhase(
+                  GraphOptimizationRuleId::ResidentLoadForwarding)) <
+                  static_cast<unsigned>(getGraphOptimizationRulePhase(
+                      GraphOptimizationRuleId::StoreCoveragePlanning)),
+              "resident forwarding must run before store planning");
+static_assert(static_cast<unsigned>(getGraphOptimizationRulePhase(
+                  GraphOptimizationRuleId::StoreCoveragePlanning)) <
+                  static_cast<unsigned>(getGraphOptimizationRulePhase(
+                      GraphOptimizationRuleId::ContiguousBlockAccessFormation)),
+              "store planning must run before access formation");
+
+constexpr bool
+isValidGraphOptimizationRuleMask(GraphOptimizationRuleMask ruleMask) {
+  constexpr GraphOptimizationRuleMask unknownRuleBits =
+      ~kKnownGraphOptimizationRuleMask;
   return (ruleMask & unknownRuleBits) == 0;
 }
+
+struct IndependentAxisTensorizeRuleOptions {
+  bool enabledForCompileMode = true;
+  bool iatAndPtsmEnabled = false;
+};
+struct PersistentTaskStripMiningRuleOptions {
+  bool enabledForCompileMode = true;
+};
+struct ResidentLoadForwardingRuleOptions {};
+struct IntermediatePrecisionBoundaryElisionRuleOptions {};
+struct StoreCoveragePlanningRuleOptions {};
+struct ContiguousBlockAccessFormationRuleOptions {};
 
 struct GraphOptimizationOptions {
   // A zero mask intentionally disables every native GraphOptimizationRule.
   // Layout/memory compatibility stages retain their original fixed scheduling
   // and do not use this option as a new opt-out.
-  uint16_t enabledRuleMask = kAllGraphOptimizationRuleMask;
+  GraphOptimizationRuleMask enabledRuleMask = kDefaultGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
   unsigned ubCapacityBytes = 0;
+  unsigned mappingUBCapacityBytes = 0;
+  unsigned storeCoalescingUBBudgetBytes = 0;
+  unsigned ubSafetyPercent = 80;
+  unsigned reservedUBBytes = 0;
   // RowCoalescing changes the launch grid and is valid only for
   // compile_mode="simt_only".  Keep the source selector rather than a
   // second derived force flag so every consumer follows one mode contract.
   std::string compileMode = "simd_simt_template";
+  IndependentAxisTensorizeRuleOptions independentAxisTensorize;
+  PersistentTaskStripMiningRuleOptions persistentTaskStripMining;
+  ResidentLoadForwardingRuleOptions residentLoadForwarding;
+  IntermediatePrecisionBoundaryElisionRuleOptions
+      intermediatePrecisionBoundaryElision;
+  StoreCoveragePlanningRuleOptions storeCoveragePlanning;
+  ContiguousBlockAccessFormationRuleOptions contiguousBlockAccessFormation;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>>

@@ -15,17 +15,21 @@
 ```python
 import torch
 import torch_npu
+import triton
 from triton.backends.ascend.testing import do_bench_npu
 
 @triton.jit
 def kernel(
     x_ptr,
-    y_ptr,
     out_ptr
 ):
-
+    pass
+size = 1024 * 128
+x = torch.randn(size, device='npu')
+out = torch.empty(size, device='npu')
+grid = (1, )
 def fn():
-    kernel[grid](x, y, out)
+    kernel[grid](x, out)
 
 ms = do_bench_npu(fn)
 print(f"Kernel execution time: {ms} ms")
@@ -49,7 +53,15 @@ print(f"Kernel execution time: {ms} ms")
 为了实现与社区 `do_bench` 相当的运行速度，`do_bench_npu` 默认尝试使用轻量级的 `mspti` 库。要启用此功能：
 
 - 必须可以导入 `mspti` 包。
-- 如果 CANN 版本低于 9.1.0，必须在 LD_PRELOAD 环境变量中设置 `libmspti.so`。否则，系统将抛出 `RuntimeError` 提示您进行设置。
+- 如果 CANN 版本低于 9.1.0，需要在 LD_PRELOAD 环境变量中设置 `libmspti.so`。否则，系统将打印警告提示您进行设置。
+  - `libmspti.so`设置方式：
+
+    ```bash
+    source ${install_path}/set_env.sh
+    export LD_PRELOAD=${ASCEND_HOME_PATH}/lib64/libmspti.so
+    ```
+
+    其中 `${install_path}` 为 CANN 安装路径，例如 `/usr/local/Ascend/cann`。
 - 如果 `mspti` 不可用，`do_bench_npu` 将打印警告并自动回退到 `torch_npu.profiler` 路径，该路径较慢但功能完整。
 
 ## 使用说明
@@ -66,7 +78,9 @@ time_ms = do_bench_npu(fn_A)
 times_ms = do_bench_npu([fn_A, fn_B, fn_C])
 ```
 
-约束： 当传入函数列表时，`do_bench_npu` 只有在每个函数只包含一个 kernel 时，才能准确返回每个函数的 Device 侧时间。如果函数包含多个 kernel，`do_bench_npu` 无法正确区分哪个 kernel 属于哪个函数。请避免测试复杂函数的列表。
+约束：
+- 当传入单个函数时，`do_bench_npu`会测量`fn`中所有指令的总时间，包括非kernel的指令。因此不要在传入的`fn`中包含无需测量的指令，或者使用`target_kernel_name` 参数。
+- 当传入多个函数时，`do_bench_npu` 只有在每个函数只包含一个 kernel 时，才能准确返回每个函数的 Device 侧时间。如果函数包含多个 kernel（包括非kernel的其他指令），`do_bench_npu` 无法正确区分哪个 kernel 属于哪个函数。请避免测试复杂函数的列表。
 
 ### 2. 清除 L2 Cache
 

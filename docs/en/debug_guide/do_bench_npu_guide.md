@@ -15,17 +15,21 @@ On Triton-Ascend, the recommended usage is to import and use `do_bench_npu` when
 ```python
 import torch
 import torch_npu
+import triton
 from triton.backends.ascend.testing import do_bench_npu
 
 @triton.jit
 def kernel(
     x_ptr,
-    y_ptr,
     out_ptr
 ):
-
+    pass
+size = 1024 * 128
+x = torch.randn(size, device='npu')
+out = torch.empty(size, device='npu')
+grid = (1, )
 def fn():
-    kernel[grid](x, y, out)
+    kernel[grid](x, out)
 
 ms = do_bench_npu(fn)
 print(f"Kernel execution time: {ms} ms")
@@ -49,7 +53,15 @@ The community `triton.testing.do_bench` uses `Event` to measure, and the recorde
 To achieve a runtime speed comparable to community `do_bench`, `do_bench_npu` attempts to use the lightweight `mspti` library by default. To enable this:
 
 - The `mspti` package must be importable.
-- If the CANN version is earlier than 9.1.0, `libmspti.so` must be set in the `LD_PRELOAD` environment variable. If not, the system will raise a `RuntimeError` guiding you to set it.
+- If the CANN version is earlier than 9.1.0, `libmspti.so` must be set in the `LD_PRELOAD` environment variable. If not, the system will print a warning guiding you to set it.
+  - `libmspti.so` setting method:
+
+    ```bash
+    source ${install_path}/set_env.sh
+    export LD_PRELOAD=${ASCEND_HOME_PATH}/lib64/libmspti.so
+    ```
+
+    Here, `${install_path}` is the CANN installation path, for example, `/usr/local/Ascend/cann`.
 - If `mspti` is unavailable, `do_bench_npu` will print a warning and automatically fall back to the `torch_npu.profiler` path, which is slower but functionally complete.
 
 ## Practical Notes
@@ -66,7 +78,9 @@ time_ms = do_bench_npu(fn_A)
 times_ms = do_bench_npu([fn_A, fn_B, fn_C])
 ```
 
-Constraint: When passing a list of functions, `do_bench_npu` can accurately return the per-function Device-side time only if each function contains exactly one kernel. If a function contains multiple kernels, `do_bench_npu` can not correctly attribute which kernel belongs to which function. Avoid testing lists of complex functions.
+Constraint:
+- When a single function is passed in, `do_bench_npu` measures the total time of all instructions in `fn`, including non kernel instructions. Therefore, do not include instructions that do not require measurement in the passed `fn`, or use the `target_kernel_name` parameter.
+- When a list of functions is passed in, `do_bench_npu` can accurately return the per-function Device-side time only if each function contains exactly one kernel. If a function contains multiple kernels (including non kernel instructions), `do_bench_npu` can not correctly attribute which kernel belongs to which function. Avoid testing lists of complex functions.
 
 ### 2. Clearing the L2 Cache
 

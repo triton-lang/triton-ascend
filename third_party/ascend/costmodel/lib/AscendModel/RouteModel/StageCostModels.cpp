@@ -44,10 +44,10 @@ static double controlBody(const StageResourceCycles &resources) {
 }
 
 static double serialBody(const StageResourceCycles &resources) {
-  const double execution = resources.scalar + resources.load + resources.store +
-                           resources.compute + resources.predicate +
-                           resources.shuffle + resources.dot +
-                           controlBody(resources) + resources.spill;
+  const double execution =
+      resources.scalar + resources.load + resources.store + resources.atomic +
+      resources.compute + resources.predicate + resources.shuffle +
+      resources.dot + controlBody(resources) + resources.spill;
   // Issue is a shared front-end throughput bound, not an extra instruction
   // stream.  Adding it to execution double-counts every instruction.
   return std::max(execution, resources.issue);
@@ -98,23 +98,48 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
         instructions / rate->second.throughput * rate->second.factor;
   }
   resources.scalar = work.scalarOperations / profile.scalarOperationsPerCycle;
-  if (stage.features.hasIndirectMemory) {
-    const double loads =
-        std::max(work.loadWarpInstructions, work.loadBytes > 0.0 ? 1.0 : 0.0);
-    const double stores =
-        std::max(work.storeWarpInstructions, work.storeBytes > 0.0 ? 1.0 : 0.0);
-    resources.load = loads / profile.indirectLoadTransactionsPerCycle;
-    resources.store = stores / profile.indirectStoreTransactionsPerCycle;
-    if (loads + stores > 0.0)
-      resources.load += profile.indirectDependencyLatencyCycles;
-  } else if (simd) {
-    resources.load = work.loadBytes / profile.loadBytesPerCycle;
-    resources.store = work.storeBytes / profile.storeBytesPerCycle;
+  const double directLoadBytes = work.loadBytes - work.indirectLoadBytes;
+  const double directStoreBytes = work.storeBytes - work.indirectStoreBytes;
+  const double directLoadInstructions =
+      work.loadWarpInstructions - work.indirectLoadTransactions;
+  const double directStoreInstructions =
+      work.storeWarpInstructions - work.indirectStoreTransactions;
+  if (simd) {
+    resources.load = directLoadBytes / profile.loadBytesPerCycle;
+    resources.store = directStoreBytes / profile.storeBytesPerCycle;
   } else {
     resources.load =
-        work.loadWarpInstructions / profile.loadWarpInstructionsPerCycle;
+        directLoadInstructions / profile.loadWarpInstructionsPerCycle;
     resources.store =
-        work.storeWarpInstructions / profile.storeWarpInstructionsPerCycle;
+        directStoreInstructions / profile.storeWarpInstructionsPerCycle;
+  }
+  resources.load +=
+      work.indirectLoadTransactions / profile.indirectLoadTransactionsPerCycle;
+  resources.store += work.indirectStoreTransactions /
+                     profile.indirectStoreTransactionsPerCycle;
+  // Preserve one uncovered loaded-index dependency latency per Stage
+  // iteration, but charge it only when an actual indirect access exists.
+  if (work.indirectLoadTransactions > 0.0)
+    resources.load += profile.indirectDependencyLatencyCycles;
+  else if (work.indirectStoreTransactions > 0.0)
+    resources.store += profile.indirectDependencyLatencyCycles;
+
+  for (const AtomicWorkload &atomic : work.atomicWorkloads) {
+    auto rate = profile.atomicRates.find(atomic.profileKey());
+    if (rate == profile.atomicRates.end())
+      rate = profile.atomicRates.find("default");
+    if (rate == profile.atomicRates.end())
+      continue;
+    const StageAtomicRate &atomicRate = rate->second;
+    const double base =
+        atomic.logicalOperationInstances * atomicRate.operationStartupCycles +
+        atomic.logicalElements / atomicRate.logicalElementsPerCycle;
+    const double contention =
+        atomic.contentionUnknown ? atomicRate.unknownContentionMultiplier : 1.0;
+    resources.atomic += base * contention;
+    if (atomic.resultUsed)
+      resources.atomic +=
+          atomic.logicalOperationInstances * atomicRate.resultDependencyCycles;
   }
   resources.predicate =
       (simd ? std::ceil(work.predicateElements /
@@ -153,9 +178,9 @@ static double applySuperBlock(const LogicalStage &stage,
   const double factor = static_cast<double>(implementation.superblockFactor);
   const double effectiveFactor = std::min(
       factor, static_cast<double>(profile.superblockUsefulFactorLimit));
-  const double latencySensitivePerIteration = resources.load + resources.store +
-                                              resources.shuffle +
-                                              resources.divergence;
+  const double latencySensitivePerIteration =
+      resources.load + resources.store + resources.atomic + resources.shuffle +
+      resources.divergence;
   const double latencySensitive =
       iterations(stage) * latencySensitivePerIteration;
   // SuperBlock creates `factor` independent logical-program groups on one
@@ -220,24 +245,27 @@ static double estimateStage(const LogicalStage &stage,
   case StageCostModelKind::ContinuousTileStore:
   case StageCostModelKind::ContinuousShortLoad:
   case StageCostModelKind::CachePolicyStore:
+  case StageCostModelKind::AtomicMemory:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
-      return r.setup + count * (r.scalar + r.predicate + controlBody(r) +
-                                r.spill + std::max({r.load, r.store, r.issue}));
+      return r.setup +
+             count * (r.scalar + r.predicate + controlBody(r) + r.spill +
+                      std::max({r.load, r.store, r.atomic, r.issue}));
     return serial;
   case StageCostModelKind::IndependentPipelinedLoop:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
       return r.setup +
              count *
-                 (std::max({r.load, r.store, r.compute + r.dot + r.shuffle,
+                 (std::max({r.load, r.store, r.atomic,
+                            r.compute + r.dot + r.shuffle,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
     return serial;
   case StageCostModelKind::LoopCarriedRecurrence: {
-    const double critical = r.criticalPath > 0.0
-                                ? std::max(r.criticalPath + r.load + r.store +
-                                               controlBody(r) + r.spill,
-                                           r.issue)
-                                : serialBody(r);
+    const double critical =
+        r.criticalPath > 0.0 ? std::max(r.criticalPath + r.load + r.store +
+                                            r.atomic + controlBody(r) + r.spill,
+                                        r.issue)
+                             : serialBody(r);
     if (mode == StageMode::SIMD) {
       // A loop-carried tensor is not ordinary embarrassingly-parallel vector
       // work: the updated state must remain live until the next recurrence
@@ -259,8 +287,8 @@ static double estimateStage(const LogicalStage &stage,
   }
   case StageCostModelKind::RowwiseReduction:
     return r.setup +
-           count * std::max(r.scalar + r.load + r.store + r.criticalPath +
-                                controlBody(r) + r.spill,
+           count * std::max(r.scalar + r.load + r.store + r.atomic +
+                                r.criticalPath + controlBody(r) + r.spill,
                             r.issue);
   case StageCostModelKind::PrefixScan: {
     const double scanCritical =
@@ -269,23 +297,23 @@ static double estimateStage(const LogicalStage &stage,
                          ? profile.simd.prefixScanDependencyFactor
                          : profile.simt.prefixScanDependencyFactor);
     return r.setup +
-           count * std::max(r.scalar + r.load + r.store + scanCritical +
-                                controlBody(r) + r.spill,
+           count * std::max(r.scalar + r.load + r.store + r.atomic +
+                                scanCritical + controlBody(r) + r.spill,
                             r.issue);
   }
   case StageCostModelKind::CubeRoofline:
   case StageCostModelKind::TinyCubeRoofline:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
-      return r.setup +
-             count * (r.scalar + r.predicate + controlBody(r) + r.shuffle +
-                      r.spill +
-                      std::max({r.load, r.compute + r.dot, r.store, r.issue}));
+      return r.setup + count * (r.scalar + r.predicate + controlBody(r) +
+                                r.shuffle + r.spill +
+                                std::max({r.load, r.compute + r.dot, r.store,
+                                          r.atomic, r.issue}));
     return serial;
   case StageCostModelKind::ConversionPack:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
       return r.setup + count * (r.predicate + controlBody(r) + r.spill +
                                 std::max({r.scalar + r.compute, r.load, r.store,
-                                          r.issue}));
+                                          r.atomic, r.issue}));
     return serial;
   default:
     return serial;
@@ -340,6 +368,8 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "indirect_scalar_memory";
   case StageCostModelKind::IndirectGatherMemory:
     return "indirect_gather_memory";
+  case StageCostModelKind::AtomicMemory:
+    return "atomic_memory";
   case StageCostModelKind::IndependentPipelinedLoop:
     return "independent_pipelined_loop";
   case StageCostModelKind::LoopCarriedRecurrence:
@@ -365,6 +395,17 @@ bool StageControlFlowRates::isFiniteAndNonNegative() const {
   return std::all_of(values.begin(), values.end(), [](double value) {
     return std::isfinite(value) && value >= 0.0;
   });
+}
+
+bool StageAtomicRate::isValid() const {
+  return std::isfinite(logicalElementsPerCycle) &&
+         logicalElementsPerCycle > 0.0 &&
+         std::isfinite(operationStartupCycles) &&
+         operationStartupCycles >= 0.0 &&
+         std::isfinite(resultDependencyCycles) &&
+         resultDependencyCycles >= 0.0 &&
+         std::isfinite(unknownContentionMultiplier) &&
+         unknownContentionMultiplier >= 1.0;
 }
 
 bool StageModeProfile::isValid(StageMode mode) const {
@@ -395,11 +436,16 @@ bool StageModeProfile::isValid(StageMode mode) const {
                storeWarpInstructionsPerCycle > 0.0)) {
     return false;
   }
-  return llvm::all_of(operationRates, [](const auto &entry) {
-    return std::isfinite(entry.second.throughput) &&
-           entry.second.throughput > 0.0 &&
-           std::isfinite(entry.second.factor) && entry.second.factor > 0.0;
-  });
+  return llvm::all_of(operationRates,
+                      [](const auto &entry) {
+                        return std::isfinite(entry.second.throughput) &&
+                               entry.second.throughput > 0.0 &&
+                               std::isfinite(entry.second.factor) &&
+                               entry.second.factor > 0.0;
+                      }) &&
+         atomicRates.contains("default") &&
+         llvm::all_of(atomicRates,
+                      [](const auto &entry) { return entry.second.isValid(); });
 }
 
 bool HardwareProfile::isValid() const {

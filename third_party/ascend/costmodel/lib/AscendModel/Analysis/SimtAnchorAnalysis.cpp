@@ -641,7 +641,8 @@ bool mlir::ascend::isLoadedIndexDependentMemoryOp(Operation *op) {
   if (!op)
     return false;
   llvm::StringRef name = op->getName().getStringRef();
-  return (name == "tt.load" || name == "tt.store") &&
+  return (name == "tt.load" || name == "tt.store" || name == "tt.atomic_rmw" ||
+          name == "tt.atomic_cas") &&
          hasTensorPointerOperand(op) && pointerDependsOnLoadedIndex(op);
 }
 

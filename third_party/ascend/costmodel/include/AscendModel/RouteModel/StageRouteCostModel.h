@@ -54,6 +54,7 @@ struct StageModelFeatures {
   bool hasPointerInduction = false;
   bool hasContiguousMemory = false;
   bool hasIndirectMemory = false;
+  bool hasAtomicMemory = false;
   bool hasReduction = false;
   bool hasPrefixScan = false;
   bool hasDot = false;
@@ -79,6 +80,33 @@ struct StageModelFeatures {
   llvm::json::Object toJSON() const;
 };
 
+/// Route-independent semantic description of one dynamically executed TTIR
+/// atomic operation.  This deliberately preserves information that ordinary
+/// store byte counts cannot represent.  Physical instruction/transaction
+/// counts remain a route-specific profile concern.
+struct AtomicWorkload {
+  std::string kind;
+  std::string dataType;
+  std::string memorySemantic;
+  std::string memoryScope;
+  double logicalElements = 0.0;
+  double logicalOperationInstances = 0.0;
+  /// Zero means that TTIR did not prove a contiguous address run width.  Do
+  /// not infer it from tensor shape alone: a shaped pointer may still contain
+  /// arbitrary loaded indices.
+  double provenContiguousRunWidth = 0.0;
+  bool resultUsed = false;
+  bool addressDependsOnLoadedIndex = false;
+  /// Runtime pointer values can alias even when SSA has no data recurrence.
+  /// Until an injectivity proof or launch hint exists, route scoring must use
+  /// the profile's explicit unknown-contention policy.
+  bool contentionUnknown = true;
+
+  std::string profileKey() const;
+  bool isFiniteAndNonNegative() const;
+  llvm::json::Object toJSON() const;
+};
+
 /// Mode-independent work owned exactly once by one Stage.  Values are
 /// logical elements/bytes, not mode-specific instructions or cycles.
 struct StageWorkload {
@@ -88,6 +116,15 @@ struct StageWorkload {
   double storeBytes = 0.0;
   double loadWarpInstructions = 0.0;
   double storeWarpInstructions = 0.0;
+  /// Subsets of the total load/store fields whose address depends on loaded
+  /// data (or is an explicit gather).  Keeping totals and subsets preserves
+  /// report compatibility while allowing direct and indirect work to be
+  /// priced independently.  Atomic RMW work is never included in store totals.
+  double indirectLoadBytes = 0.0;
+  double indirectStoreBytes = 0.0;
+  double indirectLoadTransactions = 0.0;
+  double indirectStoreTransactions = 0.0;
+  std::vector<AtomicWorkload> atomicWorkloads;
   double predicateElements = 0.0;
   double shuffleLaneSteps = 0.0;
   double dotFlops = 0.0;
@@ -107,6 +144,7 @@ struct StageResourceCycles {
   double scalar = 0.0;
   double load = 0.0;
   double store = 0.0;
+  double atomic = 0.0;
   double compute = 0.0;
   double predicate = 0.0;
   double shuffle = 0.0;

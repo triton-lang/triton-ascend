@@ -105,9 +105,9 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
                                         const SimtAnchorPlan &plan,
                                         int64_t superblockFactor = 1);
 
-/// True when a load/store pointer has an SSA backward slice that reaches a
-/// loaded/gathered index.  This is a real data-dependence test and must not be
-/// confused with the legacy rank-based laneDependentPointerOps proxy.
+/// True when a load/store/atomic pointer has an SSA backward slice that reaches
+/// a loaded/gathered index.  This is a real data-dependence test and must not
+/// be confused with the legacy rank-based laneDependentPointerOps proxy.
 bool isLoadedIndexDependentMemoryOp(Operation *op);
 
 /// Build the non-overlapping shared plan in pre-order.

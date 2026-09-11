@@ -37,6 +37,7 @@ enum class StageCostModelKind {
   CachePolicyStore,
   IndirectScalarMemory,
   IndirectGatherMemory,
+  AtomicMemory,
   IndependentPipelinedLoop,
   LoopCarriedRecurrence,
   RowwiseReduction,
@@ -109,6 +110,18 @@ struct StageOperationRate {
   double factor = 1.0;
 };
 
+struct StageAtomicRate {
+  double logicalElementsPerCycle = 0.0;
+  double operationStartupCycles = 0.0;
+  double resultDependencyCycles = 0.0;
+  /// Relative penalty used when address collision is a runtime property.  It
+  /// is a versioned selection-score policy, not a claim that absolute latency
+  /// grows by this factor on every workload.
+  double unknownContentionMultiplier = 1.0;
+
+  bool isValid() const;
+};
+
 struct StageModeProfile {
   double setupCycles = 0.0;
   int64_t vectorWidth = 1;
@@ -132,6 +145,7 @@ struct StageModeProfile {
   double indirectLoadTransactionsPerCycle = 0.0;
   double indirectStoreTransactionsPerCycle = 0.0;
   double indirectDependencyLatencyCycles = 0.0;
+  llvm::StringMap<StageAtomicRate> atomicRates;
   StageControlFlowRates controlFlow;
 
   bool isValid(StageMode mode) const;

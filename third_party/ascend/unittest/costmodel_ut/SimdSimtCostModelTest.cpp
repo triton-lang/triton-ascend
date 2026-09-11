@@ -78,6 +78,7 @@ HardwareProfile hardwareProfile(StageTransitionCost transition = {}) {
     mode.indirectLoadTransactionsPerCycle = 0.5;
     mode.indirectStoreTransactionsPerCycle = 0.5;
     mode.indirectDependencyLatencyCycles = 20.0;
+    mode.atomicRates["default"] = {8.0, 0.0, 0.0, 1.0};
     mode.controlFlow = {2.0, 3.0, 10.0, 7.0};
   };
   fill(profile.simd);
@@ -606,6 +607,8 @@ TEST(SimdSimtCostModelTest, IndirectMemoryUsesDependencyProfile) {
   stage.features.hasIndirectMemory = true;
   stage.workload.loadBytes = 1024.0;
   stage.workload.loadWarpInstructions = 8.0;
+  stage.workload.indirectLoadBytes = 1024.0;
+  stage.workload.indirectLoadTransactions = 8.0;
 
   HardwareProfile profile = hardwareProfile();
   profile.simd.indirectLoadTransactionsPerCycle = 0.25;
@@ -620,6 +623,105 @@ TEST(SimdSimtCostModelTest, IndirectMemoryUsesDependencyProfile) {
   EXPECT_DOUBLE_EQ(costs[0].resources.load, 112.0);
   EXPECT_DOUBLE_EQ(costs[1].resources.load, 28.0);
   EXPECT_LT(costs[1].totalCycles, costs[0].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest,
+     AtomicCostDoesNotRepriceOrdinaryLoadsAsIndirectMemory) {
+  LogicalStage stage = logicalStage("atomic", StageCostModelKind::AtomicMemory,
+                                    StageScheduleKind::PartiallyDependent);
+  stage.features.hasAtomicMemory = true;
+  stage.features.hasIndirectMemory = true;
+  stage.features.hasContiguousMemory = true;
+  stage.workload.loadBytes = 1024.0;
+  stage.workload.loadWarpInstructions = 8.0;
+  mlir::ascend::AtomicWorkload atomic;
+  atomic.kind = "fadd";
+  atomic.dataType = "f32";
+  atomic.memorySemantic = "acq_rel";
+  atomic.memoryScope = "gpu";
+  atomic.logicalElements = 64.0;
+  atomic.logicalOperationInstances = 1.0;
+  atomic.contentionUnknown = true;
+  stage.workload.atomicWorkloads.push_back(atomic);
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.atomicRates["fadd.f32"] = {8.0, 2.0, 5.0, 3.0};
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &simd = table->stages.front().implementations.front();
+  EXPECT_DOUBLE_EQ(simd.resources.load, 32.0);
+  EXPECT_DOUBLE_EQ(simd.resources.store, 0.0);
+  EXPECT_DOUBLE_EQ(simd.resources.atomic, 30.0);
+}
+
+TEST(SimdSimtCostModelTest,
+     WorkloadPreservesAtomicSemanticsWithoutCountingAStore) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.allowUnregisteredDialects();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module {
+      func.func @kernel(%load_pointer: tensor<64x!tt.ptr<f32>>,
+                        %index_pointer: tensor<64x!tt.ptr<i64>>,
+                        %base_pointer: tensor<64x!tt.ptr<f32>>,
+                        %value: tensor<64xf32>) {
+        %regular = "tt.load"(%load_pointer)
+          : (tensor<64x!tt.ptr<f32>>) -> tensor<64xf32>
+        %index = "tt.load"(%index_pointer)
+          : (tensor<64x!tt.ptr<i64>>) -> tensor<64xi64>
+        %address = "tt.addptr"(%base_pointer, %index)
+          : (tensor<64x!tt.ptr<f32>>, tensor<64xi64>)
+            -> tensor<64x!tt.ptr<f32>>
+        %mask = arith.constant dense<true> : tensor<64xi1>
+        %old = "tt.atomic_rmw"(%address, %value, %mask)
+          {atomic_rmw_op = 5 : i32, sem = 4 : i32, scope = 1 : i32}
+          : (tensor<64x!tt.ptr<f32>>, tensor<64xf32>, tensor<64xi1>)
+            -> tensor<64xf32>
+        return
+      }
+    }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+
+  StagePartition partition;
+  partition.operationOwnershipComplete = true;
+  LogicalStage stage =
+      logicalStage("atomic_workload", StageCostModelKind::AtomicMemory);
+  auto function = module->lookupSymbol<mlir::func::FuncOp>("kernel");
+  ASSERT_TRUE(function);
+  mlir::Block &body = function.getBody().front();
+  for (mlir::Operation &operation : body.without_terminator())
+    stage.operations.push_back(&operation);
+  partition.stages.push_back(std::move(stage));
+
+  if (llvm::Error error = StageFeatureAnalysis().analyze(partition))
+    FAIL() << llvm::toString(std::move(error));
+  if (llvm::Error error = StageWorkloadAnalysis().analyze(partition))
+    FAIL() << llvm::toString(std::move(error));
+  if (llvm::Error error =
+          mlir::ascend::StageKindClassifier().analyze(partition, 8192))
+    FAIL() << llvm::toString(std::move(error));
+
+  const LogicalStage &analyzed = partition.stages.front();
+  EXPECT_TRUE(analyzed.features.hasAtomicMemory);
+  EXPECT_TRUE(analyzed.features.hasIndirectMemory);
+  EXPECT_TRUE(analyzed.features.hasContiguousMemory);
+  EXPECT_DOUBLE_EQ(analyzed.workload.storeBytes, 0.0);
+  EXPECT_DOUBLE_EQ(analyzed.workload.storeWarpInstructions, 0.0);
+  ASSERT_EQ(analyzed.workload.atomicWorkloads.size(), 1u);
+  const auto &atomic = analyzed.workload.atomicWorkloads.front();
+  EXPECT_EQ(atomic.kind, "fadd");
+  EXPECT_EQ(atomic.dataType, "f32");
+  EXPECT_EQ(atomic.memorySemantic, "acq_rel");
+  EXPECT_EQ(atomic.memoryScope, "gpu");
+  EXPECT_DOUBLE_EQ(atomic.logicalElements, 64.0);
+  EXPECT_FALSE(atomic.resultUsed);
+  EXPECT_TRUE(atomic.addressDependsOnLoadedIndex);
+  EXPECT_TRUE(atomic.contentionUnknown);
+  EXPECT_EQ(analyzed.costModelKind, StageCostModelKind::AtomicMemory);
 }
 
 TEST(SimdSimtCostModelTest, MixedRouteRejectsUnmaterializableSimtStage) {

@@ -23,8 +23,8 @@
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
     },
     "schema_version": {
-      "const": 10,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 10 removes workload-specific Stage templates; workload and Stage structure are always produced online from transformed TTIR."
+      "const": 11,
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy."
     },
     "profile_version": {
       "type": "string",
@@ -438,6 +438,46 @@
       },
       "additionalProperties": false
     },
+    "atomic_rate": {
+      "type": "object",
+      "required": [
+        "logical_elements_per_system_cycle",
+        "operation_startup_system_cycles",
+        "result_dependency_system_cycles",
+        "unknown_contention_multiplier",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "logical_elements_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Effective source-level atomic elements processed per system-cycle selection score."
+        },
+        "operation_startup_system_cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "result_dependency_system_cycles": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Additional latency per dynamic TTIR atomic invocation when its returned old value is consumed."
+        },
+        "unknown_contention_multiplier": {
+          "type": "number",
+          "minimum": 1,
+          "description": "Route-relative conservative multiplier when TTIR cannot prove the runtime address collision distribution."
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "$ref": "#/definitions/confidence"
+        }
+      },
+      "additionalProperties": false
+    },
     "stage_resources": {
       "type": "object",
       "description": "Generic mode-specific resources consumed by StageCostModel formulas; no workload name or shape is permitted here.",
@@ -447,6 +487,7 @@
         "issue_instructions_per_system_cycle",
         "spill_transactions_per_system_cycle",
         "indirect_memory",
+        "atomic_memory",
         "control_flow",
         "source"
       ],
@@ -504,6 +545,31 @@
             "dependency_latency_system_cycles": {
               "type": "number",
               "minimum": 0
+            }
+          },
+          "additionalProperties": false
+        },
+        "atomic_memory": {
+          "type": "object",
+          "required": [
+            "description",
+            "default",
+            "operations"
+          ],
+          "properties": {
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "default": {
+              "$ref": "#/definitions/atomic_rate"
+            },
+            "operations": {
+              "type": "object",
+              "description": "Operation-and-dtype overrides keyed as kind.dtype, for example fadd.f32.",
+              "additionalProperties": {
+                "$ref": "#/definitions/atomic_rate"
+              }
             }
           },
           "additionalProperties": false

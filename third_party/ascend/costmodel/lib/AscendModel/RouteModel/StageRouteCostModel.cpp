@@ -156,24 +156,67 @@ bool StageModelFeatures::permitsSimdRoofline() const {
   return !hasLoopCarriedDataDependency;
 }
 
+std::string AtomicWorkload::profileKey() const { return kind + "." + dataType; }
+
+bool AtomicWorkload::isFiniteAndNonNegative() const {
+  const std::array<double, 3> values = {
+      logicalElements, logicalOperationInstances, provenContiguousRunWidth};
+  return !kind.empty() && !dataType.empty() && !memorySemantic.empty() &&
+         !memoryScope.empty() &&
+         std::all_of(values.begin(), values.end(), [](double value) {
+           return std::isfinite(value) && value >= 0.0;
+         });
+}
+
+llvm::json::Object AtomicWorkload::toJSON() const {
+  llvm::json::Object result;
+  result["kind"] = kind;
+  result["data_type"] = dataType;
+  result["memory_semantic"] = memorySemantic;
+  result["memory_scope"] = memoryScope;
+  result["logical_elements_per_iteration"] = logicalElements;
+  result["logical_operation_instances_per_iteration"] =
+      logicalOperationInstances;
+  if (provenContiguousRunWidth > 0.0)
+    result["proven_contiguous_run_width"] = provenContiguousRunWidth;
+  else
+    result["proven_contiguous_run_width"] = nullptr;
+  result["result_used"] = resultUsed;
+  result["address_depends_on_loaded_index"] = addressDependsOnLoadedIndex;
+  result["contention"] = contentionUnknown ? "runtime_unknown" : "proven";
+  return result;
+}
+
 bool StageWorkload::isFiniteAndNonNegative() const {
-  const std::array<double, 10> values = {scalarOperations,
+  const std::array<double, 14> values = {scalarOperations,
                                          loadBytes,
                                          storeBytes,
                                          loadWarpInstructions,
                                          storeWarpInstructions,
+                                         indirectLoadBytes,
+                                         indirectStoreBytes,
+                                         indirectLoadTransactions,
+                                         indirectStoreTransactions,
                                          predicateElements,
                                          shuffleLaneSteps,
                                          dotFlops,
                                          issueElements,
                                          estimatedSpillTransactions};
-  if (!std::all_of(values.begin(), values.end(), [](double value) {
-        return std::isfinite(value) && value >= 0.0;
-      }))
+  if (!std::all_of(
+          values.begin(), values.end(),
+          [](double value) { return std::isfinite(value) && value >= 0.0; }) ||
+      indirectLoadBytes > loadBytes || indirectStoreBytes > storeBytes ||
+      indirectLoadTransactions > loadWarpInstructions ||
+      indirectStoreTransactions > storeWarpInstructions)
     return false;
-  return llvm::all_of(operationElements, [](const auto &entry) {
-    return std::isfinite(entry.second) && entry.second >= 0.0;
-  });
+  return llvm::all_of(operationElements,
+                      [](const auto &entry) {
+                        return std::isfinite(entry.second) &&
+                               entry.second >= 0.0;
+                      }) &&
+         llvm::all_of(atomicWorkloads, [](const AtomicWorkload &atomic) {
+           return atomic.isFiniteAndNonNegative();
+         });
 }
 
 llvm::json::Object StageWorkload::toJSON() const {
@@ -187,6 +230,21 @@ llvm::json::Object StageWorkload::toJSON() const {
   result["store_bytes_per_iteration"] = storeBytes;
   result["load_warp_instructions_per_iteration"] = loadWarpInstructions;
   result["store_warp_instructions_per_iteration"] = storeWarpInstructions;
+  result["direct_load_bytes_per_iteration"] = loadBytes - indirectLoadBytes;
+  result["direct_store_bytes_per_iteration"] = storeBytes - indirectStoreBytes;
+  result["direct_load_warp_instructions_per_iteration"] =
+      loadWarpInstructions - indirectLoadTransactions;
+  result["direct_store_warp_instructions_per_iteration"] =
+      storeWarpInstructions - indirectStoreTransactions;
+  result["indirect_load_bytes_per_iteration"] = indirectLoadBytes;
+  result["indirect_store_bytes_per_iteration"] = indirectStoreBytes;
+  result["indirect_load_transactions_per_iteration"] = indirectLoadTransactions;
+  result["indirect_store_transactions_per_iteration"] =
+      indirectStoreTransactions;
+  llvm::json::Array atomics;
+  for (const AtomicWorkload &atomic : atomicWorkloads)
+    atomics.push_back(atomic.toJSON());
+  result["atomic_workloads"] = std::move(atomics);
   result["predicate_elements_per_iteration"] = predicateElements;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
   result["dot_flops_per_iteration"] = dotFlops;
@@ -204,6 +262,7 @@ llvm::json::Object StageModelFeatures::toJSON() const {
   result["has_pointer_induction"] = hasPointerInduction;
   result["has_contiguous_memory"] = hasContiguousMemory;
   result["has_indirect_memory"] = hasIndirectMemory;
+  result["has_atomic_memory"] = hasAtomicMemory;
   result["has_reduction"] = hasReduction;
   result["has_prefix_scan"] = hasPrefixScan;
   result["has_dot"] = hasDot;
@@ -220,10 +279,10 @@ llvm::json::Object StageModelFeatures::toJSON() const {
 }
 
 bool StageResourceCycles::isFiniteAndNonNegative() const {
-  const std::array<double, 15> values = {
-      setup,      scalar,          load,  store,       compute,
-      predicate,  shuffle,         dot,   loopControl, branchControl,
-      divergence, synchronization, spill, issue,       criticalPath};
+  const std::array<double, 16> values = {
+      setup,           scalar,  load,  store,       atomic,        compute,
+      predicate,       shuffle, dot,   loopControl, branchControl, divergence,
+      synchronization, spill,   issue, criticalPath};
   return std::all_of(values.begin(), values.end(), [](double value) {
     return std::isfinite(value) && value >= 0.0;
   });
@@ -235,6 +294,7 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   result["scalar_per_iteration"] = scalar;
   result["load_per_iteration"] = load;
   result["store_per_iteration"] = store;
+  result["atomic_per_iteration"] = atomic;
   result["compute_per_iteration"] = compute;
   result["predicate_per_iteration"] = predicate;
   result["shuffle_per_iteration"] = shuffle;

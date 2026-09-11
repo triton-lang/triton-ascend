@@ -2176,7 +2176,9 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
     return WalkResult::advance();
   });
   if (walkResult.wasInterrupted()) {
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
     return;
   }
 

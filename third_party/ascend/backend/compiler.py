@@ -1124,15 +1124,17 @@ class NPUOptions:
     is_pure_simt: bool = field(default=False, init=False)
     # Only takes effect on the pure-SIMT path.
     shared_mem_dynamic_size: int = None
-    # A5 pure-SIMT-only option passed as -enable-bishengir-simt-optimization
+    # A5 pure-SIMT-only option passed as -simt-optimization-mode
     # to bishengir-compile. Its value grammar belongs to the toolchain.
-    enable_bishengir_simt_optimization: int = 000
+    # Individual digits are passed to various passes to control behavior,
+    # and are parsed right-to-left.
+    # For example, a value of 101 is interpreted as 0000101.
+    # If left as 0, bishengir-compile sets this to 900101
+    simt_optimization_mode: int = 0000000
     # Canonical modes: SIMD (D), SIMD with template-SIMT (P), and pure-SIMT
     # (T). ``unstructured_in_simt`` is an equivalent P spelling.
     compile_mode: str = "simd_simt_template"
     simt_stack_limit: int = None
-    # take effect on the reorder instruction pattern for SIMT. The pattern is disabled by default.
-    enable_simt_reorder_instruction: bool = False
     # disable simt fma optimization to get high precision
     disable_fma: bool = False
 
@@ -1215,7 +1217,7 @@ def _is_internal_npu_options(options, target_arch: str) -> bool:
 
 def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_options) -> None:
     """Restrict the vendor SIMT optimization switch to its A5 pure-SIMT path."""
-    option_name = "enable_bishengir_simt_optimization"
+    option_name = "simt_optimization_mode"
     if option_name not in raw_options:
         return
 
@@ -1225,7 +1227,7 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
         return
 
     warnings.warn(
-        "enable_bishengir_simt_optimization only takes effect for A5 "
+        "simt_optimization_mode only takes effect for A5 "
         "pure-SIMT compilation; ignoring the explicit value.",
         UserWarning,
         stacklevel=3,
@@ -1258,15 +1260,11 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += ["--pure-simt"]
             _compile_option_list += [f"--num-warps={opt.num_warps}"]
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
-            if opt.enable_bishengir_simt_optimization != 000:
-                _compile_option_list += [
-                    f"--enable-bishengir-simt-optimization={opt.enable_bishengir_simt_optimization}"
-                ]
+            if opt.simt_optimization_mode != 0000000:
+                _compile_option_list += [f"--simt-optimization-mode={opt.simt_optimization_mode}"]
             _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit(opt.simt_stack_limit)}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
-            if opt.enable_simt_reorder_instruction:
-                _compile_option_list += ["--enable-simt-reorder-instruction=true"]
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
 

@@ -288,20 +288,18 @@ def _make_opt(
     *,
     is_pure_simt,
     superblock_factor=0,
-    enable_bishengir_simt_optimization=0,
+    simt_optimization_mode=0,
     simt_stack_limit=None,
     shared_mem_dynamic_size=None,
-    enable_simt_reorder_instruction=False,
     disable_fma=False,
 ):
     return SimpleNamespace(
         is_pure_simt=is_pure_simt,
         num_warps=4,
         warp_size=32,
-        enable_bishengir_simt_optimization=enable_bishengir_simt_optimization,
+        simt_optimization_mode=simt_optimization_mode,
         simt_stack_limit=simt_stack_limit,
         shared_mem_dynamic_size=shared_mem_dynamic_size,
-        enable_simt_reorder_instruction=enable_simt_reorder_instruction,
         disable_fma=disable_fma,
         superblock_factor=superblock_factor,
     )
@@ -317,11 +315,10 @@ def _run_ttir_to_npubin(
     row_coalescing_applied=False,
     superblock_factor=0,
     common_options=(),
-    enable_bishengir_simt_optimization=0,
+    simt_optimization_mode=0,
     simt_stack_limit=None,
     resolved_simt_stack_limit=1152,
     shared_mem_dynamic_size=None,
-    enable_simt_reorder_instruction=False,
     disable_fma=False,
 ):
     events = []
@@ -380,10 +377,9 @@ def _run_ttir_to_npubin(
         _make_opt(
             is_pure_simt=is_pure_simt,
             superblock_factor=superblock_factor,
-            enable_bishengir_simt_optimization=enable_bishengir_simt_optimization,
+            simt_optimization_mode=simt_optimization_mode,
             simt_stack_limit=simt_stack_limit,
             shared_mem_dynamic_size=shared_mem_dynamic_size,
-            enable_simt_reorder_instruction=enable_simt_reorder_instruction,
             disable_fma=disable_fma,
         ),
     )
@@ -598,10 +594,9 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         "--pure-simt",
         "--num-warps=4",
         "--threads-per-warp=32",
-        "--enable-bishengir-simt-optimization=17",
+        "--simt-optimization-mode=1000017",
         "--simt-stack-limit=64",
         "--shared-mem-dynamic-size=4096",
-        "--enable-simt-reorder-instruction=true",
         "--disable-fma",
     ]
     auto_blockify_flag = "--enable-auto-blockify-loop"
@@ -621,10 +616,9 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 row_coalescing_applied=row_applied,
                 superblock_factor=superblock,
                 common_options=common_options,
-                enable_bishengir_simt_optimization=17,
+                simt_optimization_mode=1000017,
                 resolved_simt_stack_limit=64,
                 shared_mem_dynamic_size=4096,
-                enable_simt_reorder_instruction=True,
                 disable_fma=True,
             )
 

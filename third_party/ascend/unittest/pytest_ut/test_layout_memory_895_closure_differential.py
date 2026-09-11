@@ -197,10 +197,9 @@ def _make_opt(
         is_pure_simt=True,
         num_warps=4,
         warp_size=32,
-        enable_bishengir_simt_optimization=17,
+        simt_optimization_mode=1000017,
         simt_stack_limit=64,
         shared_mem_dynamic_size=4096,
-        enable_simt_reorder_instruction=True,
         disable_fma=True,
         superblock_factor=superblock_factor,
     )
@@ -312,10 +311,9 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
-        "--enable-bishengir-simt-optimization=17",
+        "--simt-optimization-mode=1000017",
         "--simt-stack-limit=64",
         "--shared-mem-dynamic-size=4096",
-        "--enable-simt-reorder-instruction=true",
         "--disable-fma",
     ]
     cases = itertools.product((False, True),  # E: TRITON_ALL_BLOCKS_PARALLEL

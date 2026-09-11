@@ -31,6 +31,7 @@
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToGraph/ProgramAxisDependenceAnalysis.h"
+#include "ascend/include/TritonToGraph/ProgramMappingScalarSpecialization.h"
 #include "ascend/include/TritonToGraph/ProgramGridTransform.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"

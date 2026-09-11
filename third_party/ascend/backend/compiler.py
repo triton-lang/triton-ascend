@@ -98,10 +98,6 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
     if get_int_attr is None:
         return -1
-    # Keep metadata-only legacy callers usable when this Python module is
-    # imported next to an installed C++ extension: their stand-in is not an
-    # OpState, so pybind rightfully rejects it.  A real compiler module still
-    # always takes the binding path below.
     try:
         attr_value = get_int_attr(mod, attr_name)
     except TypeError:
@@ -129,11 +125,6 @@ def _get_then_remove_program_grid_transforms(mod):
         if PROGRAM_GRID_TRANSFORMS_ATTR in str(mod):
             raise RuntimeError("hacc.program_grid_transforms requires the matching Ascend C++ binding")
         return None
-    # The production pipeline always passes an MLIR OpState.  Some legacy
-    # metadata-only callers, however, use a lightweight module stand-in that
-    # deliberately has no C++ OpState binding.  Preserve that old no-attr
-    # behavior while remaining fail-closed if the stand-in advertises the new
-    # contract (which must be parsed by the C++ validator).
     try:
         raw = get_transforms(mod)
     except TypeError:
@@ -348,14 +339,9 @@ def _graph_optimize_kwargs(opt):
     }
     rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
     if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
-        # ``rule_mask`` is the complete, existing GraphOptimize mask.  The
-        # dynamic path must preserve legacy 511 bits in production rather than
-        # forwarding a mapping-only substitute.
         kwargs["rule_mask"] = rule_mask
         kwargs["ub_safety_percent"] = 80
         kwargs["reserved_ub_bytes"] = 0
-        # Keep the existing StoreCoalescing budget untouched while mapping
-        # evaluates static UB/liveness against the physical UB capacity.
         kwargs["mapping_ub_capacity_bytes"] = (ub_size_in_kbytes_for_arch(opt.target_arch) * 1024)
     return kwargs
 
@@ -1225,8 +1211,6 @@ class NPUOptions:
     # Backend-only construction input.  AscendBackend.parse_options injects
     # GPUTarget.arch and never forwards a user-supplied compile option.
     arch: InitVar[str] = ""
-    # Existing complete GraphOptimize mask.  Leave the legacy default as an
-    # InitVar so it does not perturb an otherwise unchanged cache key.
     rule_mask: InitVar[int] = DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
     # This becomes compiler metadata, so its name must also be valid for the
     # namedtuple constructed by CompiledKernel on Python 3.10.
@@ -1336,8 +1320,6 @@ class NPUOptions:
         except ProgramGridContractError as error:
             raise ValueError(f"invalid GraphOptimize rule_mask: {error}") from error
         if normalized_rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
-            # Explicitly non-default masks are part of the ordinary option
-            # cache identity.  The default remains an InitVar/class default.
             object.__setattr__(self, "rule_mask", normalized_rule_mask)
         # The core compiler serializes ``options.__dict__`` into launch
         # metadata.  An init=False field with its class-level default alone is
@@ -1417,9 +1399,6 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
 
 
 def ttir_to_npubin(mod, metadata, opt):
-    # Pure-SIMT hands TTIR directly to the vendor compiler.  Export and strip
-    # either launch contract before the first textual snapshot so no hacc.*
-    # metadata reaches the lower toolchain.
     _export_program_grid_metadata(mod, metadata, require_row_contract=True)
     ttir_code = str(mod)
     metadata = _parse_ttir_metadata(ttir_code, metadata)

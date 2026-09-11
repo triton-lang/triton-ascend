@@ -146,9 +146,6 @@ private:
   ResourceSnapshot resources;
   unsigned epoch = 0;
 
-  // Declaration order makes normal destruction mirror invalidate(): resource
-  // cost, program-axis dependence, DFG, entry-argument pointer aliases,
-  // AliasAnalysis, then CFG.
   std::unique_ptr<ControlFlowGraph> controlFlowGraph;
   std::unique_ptr<AliasAnalysis> aliasAnalysis;
   std::unique_ptr<EntryArgPointerAliasAnalysis> entryArgPointerAliasAnalysis;

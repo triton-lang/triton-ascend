@@ -632,10 +632,6 @@ void init_ascend_ir(py::module &&m) {
     py::dict result;
     result["version"] = contract->version;
     if (!contract->dynamicOriginalGrid) {
-      // StaticProgramAxisFusion keeps its fixed logical extent and can target
-      // Z.  Do not manufacture the dynamic hidden X/Y ABI here: Python uses
-      // the exact legacy schema to route this contract to the old launcher
-      // path.
       py::list transforms;
       for (const mlir::triton::cfg::ProgramGridTransform &transform :
            contract->transforms) {

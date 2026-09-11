@@ -190,7 +190,7 @@ parseLegacyStaticProgramAxisFusionContract(DictionaryAttr contract) {
   return parsed;
 }
 
-} // namespace
+}
 
 bool mlir::triton::cfg::hasProgramGridHiddenExtentArguments(
     triton::FuncOp function) {
@@ -222,9 +222,6 @@ LogicalResult mlir::triton::cfg::addProgramGridHiddenExtentArguments(
   }
 
   Type i32 = IntegerType::get(context, 32);
-  // Do not rely on FunctionOpInterface::insertArgument's version-dependent
-  // treatment of arg_attrs. Preserve the original array explicitly and give
-  // the two hidden ABI arguments empty dictionaries.
   DictionaryAttr hiddenArgAttrs =
       hasArgAttrs ? DictionaryAttr::get(context) : DictionaryAttr();
   if (failed(function.insertArgument(
@@ -262,9 +259,6 @@ LogicalResult mlir::triton::cfg::commitProgramGridFunctionFromSandbox(
       return failure();
   }
 
-  // All fallible validation has completed on the detached sandbox. Keep the
-  // original function's type, argument attributes, and entry block in lockstep
-  // so a main-dev JIT input with tt.divisibility cannot leave stale arg_attrs.
   destination.setFunctionType(source.getFunctionType());
   if (sourceHasArgAttrs)
     destination.setAllArgAttrs(sourceArgAttrs);
@@ -328,7 +322,7 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
     seenAxis[*axis] = true;
     parsed.transforms.push_back(ProgramGridTransform{
         static_cast<int32_t>(*order), static_cast<int32_t>(*axis), *factor,
-        /*logicalExtent=*/0, *persistent, *gridStride});
+        0, *persistent, *gridStride});
   }
   if (!isSupportedSequence(parsed.transforms))
     return failure();

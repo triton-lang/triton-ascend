@@ -39,10 +39,6 @@ namespace {
 
 struct OffsetForm {
   bool valid = true;
-  // A canonical `program_id(axis) * runtime_stride` expression remains
-  // affine in the program id, but cannot be represented by a static integer
-  // coefficient. Keep it separate from ordinary arithmetic so unknown forms
-  // remain fail-closed.
   bool symbolicStride = false;
   int64_t programCoefficient = 0;
   int64_t laneMin = 0;
@@ -68,9 +64,6 @@ std::optional<int64_t> getConstantInt(Value value) {
   return constant.getSExtValue();
 }
 
-// Triton canonicalization commonly materializes a runtime scalar as a splat
-// DenseElementsAttr before graph optimization.  Keep this helper deliberately
-// narrow: only integer splats are exact scalar bounds.
 std::optional<int64_t> getUniformConstantInt(Value value) {
   if (std::optional<int64_t> constant = getConstantInt(value))
     return constant;
@@ -130,10 +123,6 @@ OffsetForm scaleOffsetForm(const OffsetForm &input, int64_t factor) {
 
 bool valueDependsOnAxis(Value value, int32_t targetAxis, DenseSet<Value> &seen);
 
-// The dynamic stride contract is intentionally narrow.  A scalar parameter
-// may be materialized as one or more shape-only Triton operations before it
-// reaches an addptr, but a load, call, or arbitrary arithmetic result is not
-// an ABI value that the program-mapping materializer can safely preserve.
 bool isRuntimeIntegerEntryArgument(Value value) {
   if (auto argument = dyn_cast<BlockArgument>(value)) {
     auto integer = dyn_cast<IntegerType>(argument.getType());
@@ -182,9 +171,6 @@ OffsetForm analyzeOffset(Value value, int32_t targetAxis,
     form.laneMax = range.getEnd() - 1;
     return finish(form);
   }
-  // Target-independent dynamic terms (token bases, runtime shape values,
-  // etc.) shift every logical task equally and do not weaken a selected-axis
-  // non-overlap proof.
   DenseSet<Value> dependenceSeen;
   if (!valueDependsOnAxis(value, targetAxis, dependenceSeen))
     return finish(OffsetForm{});
@@ -197,12 +183,12 @@ OffsetForm analyzeOffset(Value value, int32_t targetAxis,
   if (auto add = value.getDefiningOp<arith::AddIOp>()) {
     OffsetForm lhs = analyzeOffset(add.getLhs(), targetAxis, visited);
     OffsetForm rhs = analyzeOffset(add.getRhs(), targetAxis, visited);
-    return finish(addOffsetForms(lhs, rhs, /*subtractRhs=*/false));
+    return finish(addOffsetForms(lhs, rhs, false));
   }
   if (auto subtract = value.getDefiningOp<arith::SubIOp>()) {
     OffsetForm lhs = analyzeOffset(subtract.getLhs(), targetAxis, visited);
     OffsetForm rhs = analyzeOffset(subtract.getRhs(), targetAxis, visited);
-    return finish(addOffsetForms(lhs, rhs, /*subtractRhs=*/true));
+    return finish(addOffsetForms(lhs, rhs, true));
   }
   if (auto multiply = value.getDefiningOp<arith::MulIOp>()) {
     if (std::optional<int64_t> lhs = getConstantInt(multiply.getLhs()))
@@ -223,9 +209,6 @@ OffsetForm analyzeOffset(Value value, int32_t targetAxis,
     Value strideTerm = lhsDepends ? multiply.getRhs() : multiply.getLhs();
     DenseSet<Value> pidSeen;
     OffsetForm pidForm = analyzeOffset(pidTerm, targetAxis, pidSeen);
-    // Accept only the canonical `pid * runtime_stride` shape. The dynamic
-    // multiplicand is target-independent by the test above; lane intervals
-    // are accumulated by the surrounding addptr chain.
     if (!pidForm.valid || pidForm.symbolicStride ||
         pidForm.programCoefficient != 1 || pidForm.laneMin != 0 ||
         pidForm.laneMax != 0 || !isRuntimeIntegerEntryArgument(strideTerm))
@@ -251,10 +234,6 @@ bool valueDependsOnAxis(Value value, int32_t targetAxis,
   });
 }
 
-// The final store pointer often adds a D-lane range after the head-dependent
-// base. Walk the full addptr/splat/broadcast chain instead of inspecting only
-// that last range, otherwise a valid `head * stride + dim` store looks
-// target-independent at the final operation.
 OffsetForm analyzePointerOffset(Value pointer, int32_t targetAxis,
                                 DenseSet<Value> &visited) {
   if (!visited.insert(pointer).second)
@@ -270,7 +249,7 @@ OffsetForm analyzePointerOffset(Value pointer, int32_t targetAxis,
     DenseSet<Value> offsetVisited;
     OffsetForm offset =
         analyzeOffset(addPtr.getOffset(), targetAxis, offsetVisited);
-    return finish(addOffsetForms(base, offset, /*subtractRhs=*/false));
+    return finish(addOffsetForms(base, offset, false));
   }
   if (auto splat = pointer.getDefiningOp<triton::SplatOp>())
     return finish(analyzePointerOffset(splat.getSrc(), targetAxis, visited));
@@ -286,10 +265,6 @@ OffsetForm analyzePointerOffset(Value pointer, int32_t targetAxis,
                     : OffsetForm{});
 }
 
-// Return a proven exclusive upper bound only when an active store lane must
-// satisfy `offset < constant`.  It is safe to discover that condition through
-// conjunctions: every true `andi` result implies each operand.  Do not infer
-// bounds through ors, selects, casts, or arbitrary boolean arithmetic.
 std::optional<int64_t>
 getConjunctiveOffsetUpperBound(Value mask, Value offset,
                                DenseSet<Value> &visited) {
@@ -334,11 +309,6 @@ Value peelPointerShapeOps(Value pointer) {
   }
 }
 
-// `analyzePointerOffset` intentionally knows nothing about a memory op's
-// mask.  For a final addptr, however, an exact offset bound in that store's
-// mask narrows the active lane interval and is sufficient to prove a padded
-// row's non-overlap.  Restrict this to the exact final offset Value so a
-// superficially similar mask cannot be applied to a different address term.
 OffsetForm analyzeStorePointerOffset(triton::StoreOp store,
                                      int32_t targetAxis) {
   Value pointer = peelPointerShapeOps(store.getPtr());
@@ -365,7 +335,7 @@ OffsetForm analyzeStorePointerOffset(triton::StoreOp store,
     if (maskedMax < offset.laneMax)
       offset.laneMax = maskedMax;
   }
-  return addOffsetForms(base, offset, /*subtractRhs=*/false);
+  return addOffsetForms(base, offset, false);
 }
 
 StoreAddressIndependence classifyStoreAddress(triton::StoreOp store,
@@ -383,14 +353,9 @@ StoreAddressIndependence classifyStoreAddress(triton::StoreOp store,
       offset.laneMax < offset.laneMin)
     return StoreAddressIndependence::Unknown;
 
-  // Dynamic IAT/PTSM has an explicit program-independence contract and keeps
-  // this stride as a runtime scalar through splat/broadcast.  Do not weaken
-  // the legacy strict proof: consumers must explicitly opt into this state.
   if (offset.symbolicStride)
     return StoreAddressIndependence::CanonicalDynamicStride;
 
-  // Distinct program ids are one coefficient apart.  A static per-program
-  // lane interval that is narrower than that coefficient cannot overlap.
   const uint64_t span = static_cast<uint64_t>(offset.laneMax) -
                         static_cast<uint64_t>(offset.laneMin);
   const uint64_t coefficient =
@@ -475,7 +440,7 @@ void buildClosure(ProgramAxisDependence &info) {
   }
 }
 
-} // namespace
+}
 
 bool ProgramAxisDependence::hasOnlyDisjointStoreAddresses() const {
   return !stores.empty() && llvm::all_of(stores, [](const auto &store) {

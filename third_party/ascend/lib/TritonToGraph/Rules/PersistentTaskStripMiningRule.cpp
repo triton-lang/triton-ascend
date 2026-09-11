@@ -114,9 +114,6 @@ bool hasDirectCall(triton::FuncOp function) {
   return hasCall;
 }
 
-// Phase A introduces one outer scf.for. Existing control flow or observable
-// ordering would make replaying a program unsafe, so reject it before trying
-// to materialize anything.
 bool hasDisallowedEffectOrControlFlow(triton::FuncOp function) {
   bool disallowed = false;
   function.walk([&](Operation *operation) {
@@ -164,8 +161,6 @@ bool hasPersistentRowReductionForm(triton::FuncOp function,
   return classifyIndependentRowReduction(function) == expected;
 }
 
-// Stores must be non-overlapping and must not read an unknown/aliased output
-// root. This closes both write/write and write/read coverage holes.
 bool hasDisjointWriteReadRoots(
     triton::FuncOp function, const ProgramAxisDependence &dependence,
     const EntryArgPointerAliasAnalysis &entryPointerAliases) {
@@ -197,8 +192,6 @@ getComposableLaunchContract(ModuleOp module) {
   if (failed(parsed) || !parsed->dynamicOriginalGrid)
     return std::nullopt;
   for (const ProgramGridTransform &transform : parsed->transforms) {
-    // PTSM owns the token axis and is the sole publisher of persistent
-    // coverage. Another token transform would make its tail extent ambiguous.
     if (transform.axis == kTokenAxis || transform.persistentCoverage ||
         transform.gridStrideAbiVerified)
       return std::nullopt;
@@ -235,9 +228,6 @@ CandidateCost buildResourceCandidate(const PTSMCandidate &candidate,
     cost.hasUnknownResource = !cost.hasDynamicShape;
     return cost;
   }
-  // The materialized, cleanup'ed candidate owns the legality proof. Do not
-  // extrapolate baseline peak by block_t: that falsely charges SSA views,
-  // head broadcasts, and loop invariants as independent UB buffers.
   cost.hasPeakLiveBytes = true;
   cost.baselinePeakLiveBytes = baselineLiveBytes.peakLiveBytes;
   cost.estimatedPeakLiveBytes = finalLiveBytes->peakLiveBytes;
@@ -306,10 +296,6 @@ analyzeCandidate(GraphOptimizationContext &context, bool emitRejectRemark,
   return candidate;
 }
 
-// This helper intentionally operates on a caller-owned sandbox.  The normal
-// standalone plan wraps it in its own clone; the joint IAT/PTSM planner wraps
-// both rewrites in one outer clone, so a failure cannot publish an IAT-only
-// launch contract.
 LogicalResult
 applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
                                   const PTSMCandidate &candidate) {
@@ -326,9 +312,9 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
   ProgramGridTransformContract contract = *existing;
   contract.transforms.push_back(ProgramGridTransform{
       static_cast<int32_t>(contract.transforms.size()), kTokenAxis,
-      static_cast<int64_t>(candidate.blockT), /*logicalExtent=*/0,
-      /*persistentCoverage=*/true,
-      /*gridStrideAbiVerified=*/true});
+      static_cast<int64_t>(candidate.blockT), 0,
+      true,
+      true});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
   module->setAttr(kPersistentTaskStripMiningMarkerAttr,
@@ -390,10 +376,6 @@ Value makeZero(IRRewriter &rewriter, Location loc, Type type) {
   return Value();
 }
 
-// Embed source in target using only expand-dims and broadcast. A token-batched
-// source keeps its leading block_t dimension pinned; an invariant source always
-// has a new leading block_t dimension inserted before it is captured by the
-// loop body.
 Value alignTensor(IRRewriter &rewriter, Location loc, Value source,
                   RankedTensorType target, bool sourceIsBatched,
                   unsigned blockT) {
@@ -514,9 +496,6 @@ materializePersistentTaskStripMining(triton::FuncOp function,
     return true;
   };
 
-  // Only genuine task invariants are cloned into the preheader. In particular,
-  // positions/cos/sin remain in the closure because their addresses include the
-  // logical token, while weight/bias loads are captured read-only by the loop.
   Value physicalPid;
   for (Operation *operation : originals) {
     if (operation == tokenPid->getOperation()) {
@@ -532,7 +511,7 @@ materializePersistentTaskStripMining(triton::FuncOp function,
     for (Value operand : operation->getOperands())
       mapping.map(operand, lookup(operand).value);
     Operation *replacement = rewriter.clone(*operation, mapping);
-    if (!mapResults(operation, replacement, /*tensorized=*/false))
+    if (!mapResults(operation, replacement, false))
       return failure();
   }
   if (!physicalPid)
@@ -586,10 +565,6 @@ materializePersistentTaskStripMining(triton::FuncOp function,
       loc, tokenI64Type, originalTokenExtentI64);
   auto tokenTailMask = rewriter.create<arith::CmpIOp>(
       loc, arith::CmpIPredicate::ult, logicalTokensI64, tokenExtentSplat);
-  // The PTSM token range is reconstructed from a non-negative physical
-  // program-id space and bounded by the launcher-provided original extent.
-  // Preserve its unsigned IR form while proving that it is a contiguous tail
-  // mask, so structured x/out accesses stay on the direct load/store path.
   tokenTailMask->setAttr(
       mlir::triton::memory_access::PTSMRuntimeExtentUnsignedMaskTAG,
       rewriter.getUnitAttr());
@@ -604,10 +579,10 @@ materializePersistentTaskStripMining(triton::FuncOp function,
     MappedValue mapped = lookup(original);
     if (mapped.tensorized)
       return alignTensor(rewriter, original.getLoc(), mapped.value, target,
-                         /*sourceIsBatched=*/true, candidate.blockT);
+                         true, candidate.blockT);
     if (isa<RankedTensorType>(mapped.value.getType()))
       return alignTensor(rewriter, original.getLoc(), mapped.value, target,
-                         /*sourceIsBatched=*/false, candidate.blockT);
+                         false, candidate.blockT);
     if (mapped.value.getType() != target.getElementType())
       return Value();
     return rewriter.create<triton::SplatOp>(original.getLoc(), target,
@@ -615,7 +590,7 @@ materializePersistentTaskStripMining(triton::FuncOp function,
   };
   auto tailMaskFor = [&](Location location, RankedTensorType target) -> Value {
     return alignTensor(rewriter, location, tokenTailMask, target,
-                       /*sourceIsBatched=*/true, candidate.blockT);
+                       true, candidate.blockT);
   };
   auto createElementwise = [&](Operation *operation) -> bool {
     if (operation->getNumResults() == 0)
@@ -824,8 +799,6 @@ materializePersistentTaskStripMining(triton::FuncOp function,
       return failure();
   }
 
-  // Verify after removing the old body. This is run only in a detached clone,
-  // so every late failure rolls back IR and metadata together.
   for (Operation *operation : llvm::reverse(originals)) {
     operation->dropAllUses();
     rewriter.eraseOp(operation);
@@ -846,10 +819,6 @@ LogicalResult runProgramMappingCandidateCleanup(ModuleOp module) {
 std::optional<LiveByteEstimate>
 estimateFinalPersistentPeak(triton::FuncOp function,
                             const PTSMCandidate &candidate) {
-  // Candidate discovery is read-only with respect to the caller. The clone is
-  // also the exact IR epoch used for the final resource estimate, so late
-  // materialization/cleanup/verifier failures become ordinary candidate
-  // rejection rather than a partially committed transform.
   ModuleOp sandbox = ModuleOp::create(function.getLoc());
   sandbox.getBody()->push_back(function->clone());
   auto clonedFunction = dyn_cast<triton::FuncOp>(&sandbox.getBody()->front());
@@ -964,7 +933,7 @@ private:
   bool enabledForCompileMode;
 };
 
-} // namespace
+}
 
 LogicalResult cfg::materializePersistentTaskStripMiningCandidate(
     ModuleOp module, triton::FuncOp function, const ResourceSnapshot &resources,
@@ -981,7 +950,7 @@ LogicalResult cfg::materializePersistentTaskStripMiningCandidate(
   if (failed(context.ensure(requirements)))
     return failure();
   std::optional<PTSMCandidate> candidate =
-      analyzeCandidate(context, /*emitRejectRemark=*/false, requestedBlockT,
+      analyzeCandidate(context, false, requestedBlockT,
                        deferIntermediateResourceRejection);
   if (!candidate ||
       failed(applyPersistentCandidateToSandbox(module, function, *candidate)))

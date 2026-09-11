@@ -72,14 +72,6 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   return false;
 }
 
-// The dynamic program-grid ABI deliberately uses `extui + ult`: it avoids
-// signed-overflow ambiguity when a physical lane is reconstructed from a
-// runtime original-grid extent.  MaskState normally refuses unsigned compares
-// because arbitrary integer inputs can change the signed interval semantics.
-// IAT/PTSM attach a proof tag only to their non-negative program-id/extent
-// masks.
-// Narrow the operands back to their original integer type for analysis while
-// leaving the emitted comparison and its unsigned semantics untouched.
 static Value unwrapRuntimeExtentUnsignedOperand(Value operand,
                                                 const Location &loc,
                                                 OpBuilder &builder) {
@@ -542,14 +534,9 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
           mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG) ||
       cmpOp->hasAttr(
           mlir::triton::memory_access::PTSMRuntimeExtentUnsignedMaskTAG);
-  // Only the explicitly proven IAT/PTSM extent masks may translate their
-  // unsigned upper bounds into MaskState's non-negative continuous interval.
-  // Every ordinary unsigned comparison remains unsupported and is handled by
-  // the conservative discrete-memory path.
   bool isTaggedUnsignedUpperBound = isProvenRuntimeExtentUnsignedMask &&
                                     (predicate == arith::CmpIPredicate::ult ||
                                      predicate == arith::CmpIPredicate::ule);
-  // Only support <, <=, >=, =, !=, plus the tagged unsigned tail bound.
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&

@@ -72,9 +72,6 @@ void populateBuiltinGraphOptimizationRules(
     const GraphOptimizationOptions &options,
     SmallVectorImpl<std::unique_ptr<GraphOptimizationRule>> &rules);
 
-// Stage-00 factories use this shared implementation until their dedicated
-// matcher/materializer lands. It registers a stable, diagnostic no-op rather
-// than silently dropping an explicitly enabled rule bit.
 struct ReservedGraphOptimizationRuleOptions {
   GraphOptimizationRuleId id;
   const char *optionNamespace;
@@ -97,14 +94,6 @@ std::unique_ptr<GraphOptimizationRule> createStaticProgramAxisFusionRule(
 std::unique_ptr<GraphOptimizationRule> createPersistentTaskStripMiningRule(
     const PersistentTaskStripMiningRuleOptions &options);
 
-// Internal scheduler entry point used by the IAT/PTSM joint transaction.  It
-// never registers a new rule or exposes a force environment variable: the
-// requested factor is still analyzed against the current sandbox and must
-// pass the ordinary legality/resource checks before IR and metadata are
-// materialized together.  A joint IAT/PTSM plan may defer a rejected
-// *intermediate* PTSM resource estimate to its outer sandbox: the combined
-// cleanup then computes the authoritative final-plan legality before anything
-// is committed.  Standalone PTSM callers keep the ordinary resource gate.
 LogicalResult materializePersistentTaskStripMiningCandidate(
     ModuleOp module, triton::FuncOp function, const ResourceSnapshot &resources,
     unsigned requestedBlockT, CandidateEvaluation *evaluation = nullptr,

@@ -118,8 +118,6 @@ std::optional<BlockArgument> findEntryArgumentByName(triton::FuncOp function,
     auto namedLocation = dyn_cast<NameLoc>(argument.getLoc());
     if (!namedLocation || namedLocation.getName().getValue() != name)
       continue;
-    // A duplicate argument spelling cannot prove which original ABI argument
-    // the JIT intended.  Leave it dynamic rather than guessing.
     if (found)
       return std::nullopt;
     found = argument;
@@ -127,7 +125,7 @@ std::optional<BlockArgument> findEntryArgumentByName(triton::FuncOp function,
   return found;
 }
 
-} // namespace
+}
 
 FailureOr<ProgramGridSpecialization>
 mlir::triton::cfg::parseProgramGridSpecialization(Attribute attribute) {
@@ -277,9 +275,6 @@ mlir::triton::cfg::applyProgramMappingScalarSpecialization(ModuleOp module) {
   Attribute attribute =
       module->getAttr(kProgramMappingScalarSpecializationAttr);
   if (!attribute) {
-    // A function-local orphan is never a valid compiler input.  Remove it so
-    // it cannot leak to a lower toolchain, but do not make an otherwise
-    // ordinary graph-optimize invocation fail.
     clearProgramMappingScalarSpecialization(module);
     return success();
   }

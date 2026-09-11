@@ -27,9 +27,6 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
-// The reduction shape is a compile-time property of the TTIR variant.  It is
-// intentionally shared by IAT and PTSM so the two rules cannot infer Q/K
-// ownership from function spelling or drift into independent heuristics.
 enum class IndependentRowReductionKind : uint8_t {
   Other,
   SingleMoment,
@@ -61,10 +58,6 @@ inline bool isMergeStyleReduction(ReduceOp reduce) {
          reduce.getAxis() == 0 && source.getShape()[1] == result.getShape()[0];
 }
 
-// The TTIR producer may retain a shape-preserving reshape immediately before a
-// row reduction.  It changes neither the row identity nor the reduction
-// domain, so normalize only an exact type-preserving chain.  Do not look
-// through a rank/layout-changing reshape: that would weaken the row proof.
 inline Value stripIdentityReshapes(Value value) {
   while (auto reshape = value.getDefiningOp<triton::ReshapeOp>()) {
     Value source = reshape.getOperand();
@@ -90,9 +83,6 @@ inline Value getSquareOperand(Value value) {
   return Value();
 }
 
-// Restrict the moment proof to pure shape propagation and elementwise math.
-// This makes the proof independent of spelling while preventing a coincidental
-// shared store or control-flow edge from being treated as LayerNorm dataflow.
 inline bool isMomentDataflowCarrier(Operation *operation) {
   return operation->hasTrait<OpTrait::Elementwise>() ||
          isa<triton::SplatOp, triton::BroadcastOp, triton::ExpandDimsOp,
@@ -163,8 +153,6 @@ classifyIndependentRowReduction(triton::FuncOp function) {
     else
       directReductions.push_back(reduce);
   }
-  // RMS-style row normalization has only sum-of-squares.  Do not accept an
-  // arbitrary single scalar reduction.
   if (reductions.size() == 1)
     return squareReductions.size() == 1 &&
                    hasMomentDownstreamUse(
@@ -172,9 +160,6 @@ classifyIndependentRowReduction(triton::FuncOp function) {
                ? IndependentRowReductionKind::SingleMoment
                : IndependentRowReductionKind::Other;
 
-  // LayerNorm's two-moment shape is one sum-of-squares reduction and one
-  // direct sum over the same row value.  This captures the static dataflow
-  // choice made by constexpr expansion without consulting a function name.
   if (reductions.size() != 2 || squareReductions.size() != 1 ||
       directReductions.size() != 1)
     return IndependentRowReductionKind::Other;
@@ -191,8 +176,8 @@ classifyIndependentRowReduction(triton::FuncOp function) {
              : IndependentRowReductionKind::Other;
 }
 
-} // namespace cfg
-} // namespace triton
-} // namespace mlir
+}
+}
+}
 
-#endif // TRITON_TO_GRAPH_INDEPENDENT_ROW_REDUCTION_ANALYSIS_H
+#endif

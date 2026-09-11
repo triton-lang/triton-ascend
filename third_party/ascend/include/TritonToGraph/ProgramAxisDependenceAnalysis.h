@@ -27,17 +27,9 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
-// The analysis intentionally distinguishes a pointer which is merely derived
-// from a program id from one whose program intervals are proven disjoint.  A
-// future mapping rule may only use the latter as its store-coverage proof.
 enum class StoreAddressIndependence : uint8_t {
   NotProgramDependent,
   ProvenDisjoint,
-  // The pointer has the canonical `uniform_base + pid * runtime_stride +
-  // bounded_lane_offset` form.  This is not a general non-overlap proof: it
-  // is accepted only by the dynamic IAT/PTSM materializers, which preserve
-  // the runtime stride through their lane/loop rewrites under the existing
-  // program-independence contract.
   CanonicalDynamicStride,
   Unknown,
 };
@@ -49,9 +41,6 @@ struct StoreAddressDependence {
       StoreAddressIndependence::NotProgramDependent;
 };
 
-// Per tt.get_program_id(axis) closure and safety facts.  The facts are
-// conservative: unsupported control flow or effects are recorded as unsafe,
-// never treated as proof that a transform is legal.
 struct ProgramAxisDependence {
   int32_t axis = 0;
   SmallVector<Value> programIds;
@@ -71,9 +60,6 @@ struct ProgramAxisDependence {
   bool isProgramMappingTransformCandidate() const;
 };
 
-// Shared, function-epoch-local analysis for the program-mapping rules.  It is
-// intentionally available through GraphOptimizationContext, but can also be
-// constructed directly by lower-level or unit-test code.
 class ProgramAxisDependenceAnalysis {
 public:
   explicit ProgramAxisDependenceAnalysis(triton::FuncOp function);
@@ -84,8 +70,8 @@ private:
   std::array<ProgramAxisDependence, 3> axes;
 };
 
-} // namespace cfg
-} // namespace triton
-} // namespace mlir
+}
+}
+}
 
-#endif // TRITON_TO_GRAPH_PROGRAM_AXIS_DEPENDENCE_ANALYSIS_H
+#endif

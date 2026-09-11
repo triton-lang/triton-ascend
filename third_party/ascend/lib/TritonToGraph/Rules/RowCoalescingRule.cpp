@@ -55,8 +55,6 @@ constexpr llvm::StringLiteral kCoalesceFactorAttr = "hacc.coalesce_factor";
 constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
-// IndependentAxisTensorize owns an incompatible launcher contract.  A module
-// carrying this marker must never receive the legacy Row rewrite afterwards.
 constexpr llvm::StringLiteral kIndependentAxisTensorizeMarkerAttr =
     "hacc.independent_axis_tensorize";
 constexpr llvm::StringLiteral kPersistentTaskStripMiningMarkerAttr =
@@ -127,9 +125,6 @@ bool isScalarIntegerLike(Value value) {
   return integerType && integerType.getWidth() > 1;
 }
 
-// Row rewrites only accept the frontend's own overflow instrumentation.  A
-// user-authored tt.assert can have externally meaningful trap behavior, so it
-// must continue to make the candidate fail closed.
 bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
   if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
     return false;

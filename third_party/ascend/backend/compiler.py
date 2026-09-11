@@ -113,12 +113,6 @@ def _get_then_remove_rc(mod, attr_name: str) -> int:
 
 
 def _get_then_remove_program_grid_transforms(mod):
-    """Read the C++-validated generic attr and always remove it from MLIR.
-
-    The vendor compilers below this boundary reject unknown ``hacc.*`` attrs.
-    A missing binding is safe only when the module demonstrably has no contract;
-    otherwise fail rather than sending an unrecognized attr to a backend.
-    """
     get_transforms = getattr(ascend.ir, "get_program_grid_transforms", None)
     remove_attr = getattr(ascend.ir, "remove_attr", None)
     if get_transforms is None:
@@ -169,13 +163,6 @@ def _export_coalesce_metadata(mod, metadata, *, require_row_contract=False):
 
 
 def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
-    """Export exactly one validated program-grid launcher contract.
-
-    Dynamic IAT/PTSM output carries the fixed X/Y hidden ABI.  The pre-existing
-    SPAF output is instead a fixed-grid contract whose ``logical_extent`` may
-    be on Z.  They deliberately take separate metadata paths so a legacy
-    artifact can never be interpreted as dynamic original-grid metadata.
-    """
     raw_transforms = _get_then_remove_program_grid_transforms(mod)
     if raw_transforms is not None:
         factor = _get_then_remove_rc(mod, "hacc.coalesce_factor")
@@ -219,15 +206,6 @@ def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
 
 
 def _finalize_program_launch_policy(metadata, opt):
-    """Write the two compiler-owned launcher permissions once final mode is known.
-
-    The dynamic transform itself is a fact exported from GraphOptimize.  The
-    vendor AutoBlockify and the launch-time persistent cap are separate
-    permissions which are only meaningful after Linalg/TTIR parsing has
-    established the final task kind.  Keep their derivation here so neither
-    individual vendor path nor driver.py can recreate an almost-equivalent
-    policy.
-    """
     required_fields = (
         "program_grid_transforms",
         "legacy_program_grid_transforms",
@@ -332,7 +310,6 @@ def _with_debug_line(npubin_stage, options):
 
 
 def _graph_optimize_kwargs(opt):
-    """Keep legacy graph optimization byte-for-byte unchanged by default."""
     kwargs = {
         "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
         "compile_mode": opt.compile_mode,
@@ -688,14 +665,12 @@ def get_common_bishengir_compile_options(metadata):
 
 
 def _needs_lib_call_no_inline(metadata):
-    """Return whether the target needs the CANN 9.1 hacc.noinline workaround."""
     arch = metadata['target'].arch
     return arch.startswith("Ascend950")
 
 
 @functools.lru_cache()
 def _npu_compiler_supports_option(compiler_path: str, option: str) -> bool:
-    """Check an optional BiShengIR flag instead of assuming toolchain parity."""
     try:
         result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                                 timeout=10, check=False)

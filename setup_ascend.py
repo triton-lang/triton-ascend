@@ -359,7 +359,6 @@ _BISHENGIR_PAYLOAD_ENV = "TRITON_ASCEND_BISHENGIR_PATH"
 
 
 def _get_bishengir_payload_source():
-    """Return the optional BishengIR tree selected for this wheel build."""
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
     if not raw_path:
         return None
@@ -379,7 +378,6 @@ def _get_bishengir_payload_source():
 
 
 def _copy_bishengir_payload(build_lib):
-    """Stage an optional BishengIR payload where the runtime resolver expects it."""
     source = _get_bishengir_payload_source()
     if source is None:
         return

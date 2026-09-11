@@ -213,17 +213,64 @@ LogicalResult mlir::triton::cfg::addProgramGridHiddenExtentArguments(
   }
 
   MLIRContext *context = function.getContext();
+  SmallVector<DictionaryAttr> originalArgAttrs;
+  const bool hasArgAttrs = static_cast<bool>(function.getAllArgAttrs());
+  if (hasArgAttrs) {
+    function.getAllArgAttrs(originalArgAttrs);
+    if (originalArgAttrs.size() != function.getNumArguments())
+      return failure();
+  }
+
   Type i32 = IntegerType::get(context, 32);
+  // Do not rely on FunctionOpInterface::insertArgument's version-dependent
+  // treatment of arg_attrs. Preserve the original array explicitly and give
+  // the two hidden ABI arguments empty dictionaries.
+  DictionaryAttr hiddenArgAttrs =
+      hasArgAttrs ? DictionaryAttr::get(context) : DictionaryAttr();
   if (failed(function.insertArgument(
-          function.getNumArguments(), i32, nullptr,
+          function.getNumArguments(), i32, hiddenArgAttrs,
           NameLoc::get(StringAttr::get(context, kHiddenXName),
                        function.getLoc()))))
     return failure();
   if (failed(function.insertArgument(
-          function.getNumArguments(), i32, nullptr,
+          function.getNumArguments(), i32, hiddenArgAttrs,
           NameLoc::get(StringAttr::get(context, kHiddenYName),
                        function.getLoc()))))
     return failure();
+
+  if (hasArgAttrs) {
+    originalArgAttrs.push_back(DictionaryAttr::get(context));
+    originalArgAttrs.push_back(DictionaryAttr::get(context));
+    function.setAllArgAttrs(originalArgAttrs);
+  } else {
+    function->removeAttr("arg_attrs");
+  }
+  return success();
+}
+
+LogicalResult mlir::triton::cfg::commitProgramGridFunctionFromSandbox(
+    triton::FuncOp destination, triton::FuncOp source) {
+  if (source.getNumArguments() != source.getFunctionType().getNumInputs() ||
+      !hasProgramGridHiddenExtentArguments(source))
+    return failure();
+
+  SmallVector<DictionaryAttr> sourceArgAttrs;
+  const bool sourceHasArgAttrs = static_cast<bool>(source.getAllArgAttrs());
+  if (sourceHasArgAttrs) {
+    source.getAllArgAttrs(sourceArgAttrs);
+    if (sourceArgAttrs.size() != source.getNumArguments())
+      return failure();
+  }
+
+  // All fallible validation has completed on the detached sandbox. Keep the
+  // original function's type, argument attributes, and entry block in lockstep
+  // so a main-dev JIT input with tt.divisibility cannot leave stale arg_attrs.
+  destination.setFunctionType(source.getFunctionType());
+  if (sourceHasArgAttrs)
+    destination.setAllArgAttrs(sourceArgAttrs);
+  else
+    destination->removeAttr("arg_attrs");
+  destination.getRegion().takeBody(source.getRegion());
   return success();
 }
 

@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonToGraph/EntryArgPointerAliasAnalysis.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/IndependentRowReductionAnalysis.h"
@@ -205,11 +206,10 @@ getComposableLaunchContract(ModuleOp module) {
   return *parsed;
 }
 
-CandidateCost
-buildResourceCandidate(const PTSMCandidate &candidate,
-                       const ProgramAxisDependence &dependence,
-                       const LiveByteEstimate &baselineLiveBytes,
-                       const LiveByteEstimate *finalLiveBytes) {
+CandidateCost buildResourceCandidate(const PTSMCandidate &candidate,
+                                     const ProgramAxisDependence &dependence,
+                                     const LiveByteEstimate &baselineLiveBytes,
+                                     const LiveByteEstimate *finalLiveBytes) {
   CandidateCost cost;
   cost.plan.tensorizeFactor = 1;
   cost.plan.blockT = candidate.blockT;
@@ -255,8 +255,8 @@ analyzeCandidate(GraphOptimizationContext &context, bool emitRejectRemark,
   if (!module || module->hasAttr(kPersistentTaskStripMiningMarkerAttr) ||
       !isPublicEntry(function) || !isOnlyPublicEntry(module, function) ||
       reductionKind == IndependentRowReductionKind::Other ||
-      !hasVoidReturn(function) ||
-      hasDirectCall(function) || hasDisallowedEffectOrControlFlow(function))
+      !hasVoidReturn(function) || hasDirectCall(function) ||
+      hasDisallowedEffectOrControlFlow(function))
     return std::nullopt;
 
   std::optional<ProgramGridTransformContract> launchContract =
@@ -337,8 +337,7 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
 }
 
 bool sameCandidate(const PTSMCandidate &lhs, const PTSMCandidate &rhs) {
-  return lhs.function == rhs.function &&
-         lhs.blockT == rhs.blockT &&
+  return lhs.function == rhs.function && lhs.blockT == rhs.blockT &&
          lhs.existingTransformCount == rhs.existingTransformCount &&
          lhs.reductionKind == rhs.reductionKind;
 }
@@ -548,17 +547,16 @@ materializePersistentTaskStripMining(triton::FuncOp function,
   if (actualPrograms.getType() != physicalPid.getType())
     return failure();
   Type i64 = rewriter.getI64Type();
-  Value originalTokenExtentI64 = rewriter.create<arith::ExtUIOp>(
-      loc, i64, originalTokenExtent);
-  Value blockT64 = rewriter.create<arith::ConstantIntOp>(
-      loc, candidate.blockT, 64);
+  Value originalTokenExtentI64 =
+      rewriter.create<arith::ExtUIOp>(loc, i64, originalTokenExtent);
+  Value blockT64 =
+      rewriter.create<arith::ConstantIntOp>(loc, candidate.blockT, 64);
   Value ceilNumerator = rewriter.create<arith::AddIOp>(
       loc, originalTokenExtentI64,
       rewriter.create<arith::ConstantIntOp>(loc, candidate.blockT - 1, 64));
   Value logicalTiles =
       rewriter.create<arith::DivUIOp>(loc, ceilNumerator, blockT64);
-  Value physicalPidI64 =
-      rewriter.create<arith::ExtUIOp>(loc, i64, physicalPid);
+  Value physicalPidI64 = rewriter.create<arith::ExtUIOp>(loc, i64, physicalPid);
   Value actualProgramsI64 =
       rewriter.create<arith::ExtUIOp>(loc, i64, actualPrograms);
   auto outerLoop = rewriter.create<scf::ForOp>(loc, physicalPidI64,
@@ -582,12 +580,19 @@ materializePersistentTaskStripMining(triton::FuncOp function,
       rewriter.create<arith::AddIOp>(loc, tokenBaseSplat, tokenRange);
   auto tokenI64Type =
       RankedTensorType::get({static_cast<int64_t>(candidate.blockT)}, i64);
-  Value logicalTokensI64 = rewriter.create<arith::ExtUIOp>(
-      loc, tokenI64Type, logicalTokens);
+  Value logicalTokensI64 =
+      rewriter.create<arith::ExtUIOp>(loc, tokenI64Type, logicalTokens);
   Value tokenExtentSplat = rewriter.create<triton::SplatOp>(
       loc, tokenI64Type, originalTokenExtentI64);
-  Value tokenTailMask = rewriter.create<arith::CmpIOp>(
+  auto tokenTailMask = rewriter.create<arith::CmpIOp>(
       loc, arith::CmpIPredicate::ult, logicalTokensI64, tokenExtentSplat);
+  // The PTSM token range is reconstructed from a non-negative physical
+  // program-id space and bounded by the launcher-provided original extent.
+  // Preserve its unsigned IR form while proving that it is a contiguous tail
+  // mask, so structured x/out accesses stay on the direct load/store path.
+  tokenTailMask->setAttr(
+      mlir::triton::memory_access::PTSMRuntimeExtentUnsignedMaskTAG,
+      rewriter.getUnitAttr());
   values[tokenPid->getResult()] = {logicalTokens, true};
 
   auto copyMissingAttrs = [](Operation *from, Operation *to) {
@@ -909,10 +914,10 @@ public:
     if (!transforms || failed(parseProgramGridTransformContract(transforms)) ||
         !hasProgramGridHiddenExtentArguments(clonedFunction))
       return failure();
-    candidate.function.setFunctionType(clonedFunction.getFunctionType());
-    candidate.function->getRegion(0).takeBody(clonedFunction->getRegion(0));
-    module->setAttr(kProgramGridTransformsAttr,
-                    transforms);
+    if (failed(commitProgramGridFunctionFromSandbox(candidate.function,
+                                                    clonedFunction)))
+      return failure();
+    module->setAttr(kProgramGridTransformsAttr, transforms);
     module->setAttr(kPersistentTaskStripMiningMarkerAttr,
                     sandbox->getAttr(kPersistentTaskStripMiningMarkerAttr));
     return success();

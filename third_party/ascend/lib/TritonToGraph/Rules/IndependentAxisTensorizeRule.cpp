@@ -1109,8 +1109,9 @@ public:
         !hasProgramGridHiddenExtentArguments(clonedFunction))
       return failure();
 
-    candidate.function.setFunctionType(clonedFunction.getFunctionType());
-    candidate.function.getRegion().takeBody(clonedFunction.getRegion());
+    if (failed(commitProgramGridFunctionFromSandbox(candidate.function,
+                                                    clonedFunction)))
+      return failure();
     module->setAttr(kProgramGridTransformsAttr, transforms);
     module->setAttr(kIndependentAxisTensorizeMarkerAttr,
                     UnitAttr::get(module.getContext()));
@@ -1238,8 +1239,9 @@ public:
         !hasProgramGridHiddenExtentArguments(clonedFunction))
       return failure();
 
-    candidate.function.setFunctionType(clonedFunction.getFunctionType());
-    candidate.function.getRegion().takeBody(clonedFunction.getRegion());
+    if (failed(commitProgramGridFunctionFromSandbox(candidate.function,
+                                                    clonedFunction)))
+      return failure();
     module->setAttr(kProgramGridTransformsAttr, transforms);
     module->setAttr(kIndependentAxisTensorizeMarkerAttr,
                     UnitAttr::get(module.getContext()));

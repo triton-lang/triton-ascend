@@ -1130,7 +1130,7 @@ static void release_npu_tensor_handle(void* handle) {{
             f"uint64_t otherPrograms = (uint64_t){other_grid_names[0]} * (uint64_t){other_grid_names[1]};",
             "uint32_t axisCap = std::max((uint32_t)1,",
             f"    (uint32_t)((uint64_t){num_physical_blocks} / std::max((uint64_t)1, otherPrograms)));",
-            f"{grid_name} = std::min({grid_name}, axisCap);",
+            f"{grid_name} = std::min({grid_name}, static_cast<int>(axisCap));",
         ))
     if program_grid_transforms is not None or legacy_program_grid_transforms is not None:
         program_grid_finalization = "\n  ".join(finalization_lines)

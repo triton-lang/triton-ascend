@@ -108,10 +108,11 @@ jobs:
             exit 0
           fi
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+          ARCH=$(uname -m)
+          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
           if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
             exit 1
           fi
           echo "Downloading: ${BISHENG_FILENAME}"

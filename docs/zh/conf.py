@@ -61,6 +61,16 @@ language = 'zh'
 # The name of the Pygments (syntax highlighting) style to use
 pygments_style = 'sphinx'
 
+# ── Register a passthrough Pygments lexer for Mermaid ────────────────────
+# Pygments doesn't ship a mermaid lexer, so Sphinx falls back to
+# highlight-default and emits a warning.  Aliasing the built-in TextLexer
+# ensures the correct highlight-mermaid CSS class is generated so our
+# mermaid.js can find and render the blocks.
+from pygments.lexers.special import TextLexer  # noqa: E402
+from sphinx.highlighting import lexers  # noqa: E402
+
+lexers['mermaid'] = TextLexer()
+
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 html_theme = "sphinx_rtd_theme"
@@ -71,6 +81,10 @@ html_static_path = ["_static"]
 
 html_css_files = [
     "custom.css",
+]
+
+html_js_files = [
+    "mermaid.js",
 ]
 
 import os as _os

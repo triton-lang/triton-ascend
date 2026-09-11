@@ -171,10 +171,10 @@ struct RewriteEnv {
   }
 
   /// Records both ways in which later rewriting must understand an original
-  /// value. oldValue is the key from the original IR, info is its
-  /// component descriptor, and rebuiltValue is the pointer-like SSA value
-  /// created in the replacement IR. Pointer-aware code reads info from
-  /// decomposedValues; ordinary cloned users read rebuiltValue through
+  /// value. oldValue is the key from the original IR, info is its component
+  /// descriptor, and rebuiltValue is the pointer-like SSA value created in the
+  /// replacement IR. Pointer-aware code may encounter either SSA value, so
+  /// both keys resolve to info; ordinary cloned users read rebuiltValue through
   /// valueMapping.
   ///
   /// For example, after rebuilding an expanded loop argument:
@@ -189,13 +189,20 @@ struct RewriteEnv {
   void recordDecomposition(Value oldValue, const DecomposedValue &info,
                            Value rebuiltValue) {
     decomposedValues[oldValue] = info;
+    // A later cloned operation may consume the rebuilt value directly rather
+    // than the original value. Cache the same descriptor under that SSA value
+    // so chained pointer producers reuse the existing decomposition when the
+    // active policy says that the rebuilt representation is downstream-safe.
+    if (policy.shouldCacheRebuiltDecomposition(info))
+      decomposedValues[rebuiltValue] = info;
     valueMapping.map(oldValue, rebuiltValue);
   }
 
   // Maps values from the original region to values in the replacement region.
   IRMapping valueMapping;
-  // Concrete component state keyed by original values. Keeping this alongside
-  // the mapping lets pointer producers be flattened across nested rewrites.
+  // Concrete component state keyed by original and rebuilt pointer values.
+  // Keeping this alongside the mapping lets chained pointer producers and
+  // nested rewrites reuse an already materialized descriptor.
   DenseMap<Value, DecomposedValue> decomposedValues;
   const ControlFlowRewritePolicy &policy;
   const ControlFlowRewritePlan &plan;

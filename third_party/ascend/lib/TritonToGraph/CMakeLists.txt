@@ -12,6 +12,7 @@ add_triton_library(TritonToGraph
   MergeConcatLoadBuffer.cpp
   PermutationAnalysis.cpp
   ProgramAxisDependenceAnalysis.cpp
+  ProgramMappingScalarSpecialization.cpp
   ProgramGridTransform.cpp
   MergeConcatLoadBuffer.cpp
   Passes.cpp

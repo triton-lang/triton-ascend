@@ -238,8 +238,6 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
                     GraphOptimizationRuleId::IndependentAxisTensorize) &&
       isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::PersistentTaskStripMining);
-  options.staticProgramAxisFusion.enabledForCompileMode =
-      *compileMode != triton::ascend::CompileMode::SimtOnly;
   options.persistentTaskStripMining.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
   return success();

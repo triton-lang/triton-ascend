@@ -44,7 +44,6 @@ def _make_metadata():
         has_auto_blockify_blacklist_op=False,
         row_coalescing_applied=False,
         program_grid_transforms=None,
-        legacy_program_grid_transforms=None,
         program_grid_mapping_applied=False,
         auto_blockify_enabled=False,
         ptsm_cap_authorized=False,

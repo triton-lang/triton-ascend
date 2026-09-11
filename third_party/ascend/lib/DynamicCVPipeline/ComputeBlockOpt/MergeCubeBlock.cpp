@@ -52,7 +52,6 @@ static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
     "pcb06_tc02_c2v2v2c_chain",
     "flex_attention_backward_dq_kernel",
     "parallel_deltaformer_bwd_kernel_qk",
-    "_parallel_hstu_attn_bwd",
     "chunk_kda_bwd_kernel_intra",
     "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
 };

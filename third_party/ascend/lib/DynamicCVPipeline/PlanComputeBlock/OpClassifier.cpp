@@ -702,14 +702,20 @@ void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
       findIterArgUpstreamOps(operand, upstreamOps);
     }
   }
-  if (!isa<bufferization::ToTensorOp>(cur)) {
-    // Only consider memory dependencies for non-to_tensor ops,
-    // as to_tensor already has SSA deps to its memref source
+  auto toTensor = dyn_cast<bufferization::ToTensorOp>(cur);
+  if (!toTensor) {
+    // Not to_tensor: SSA operands above already cover it. Stop.
     return;
   }
-  // Collect memory dependencies
+  // Bug if fill is missing: Vector clone of a masked load has garbage pad.
+  //
+  // Chain: fill (pad) then partial copy. getMemDefs = last writer = copy.
+  // Fill has no SSA result, so BFS never sees it.
+  //
+  // Fix: push fill here too. Then fill is CUBE_AND_VECTOR like copy, and
+  // the existing split clones pad onto the Vector alloc.
+  // Do not expand getMemDefs globally (false deps).
   if (memDepGraph) {
-    // Get operations that define memory used by current op
     for (Operation *memDef : memDepGraph->getMemDefs(cur)) {
       LLVM_DEBUG(DBGS() << "memDef: cur " << *cur << " -> memDef " << *memDef
                         << "\n");
@@ -717,6 +723,17 @@ void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
         LLVM_DEBUG(DBGS() << "push op: " << *memDef << "\n");
         upstreamOps.push_back(memDef);
       }
+    }
+  }
+  Value buf = toTensor.getBuffer();
+  if (Operation *def = buf.getDefiningOp()) {
+    for (Operation *user : def->getUsers()) {
+      auto fill = dyn_cast<linalg::FillOp>(user);
+      if (!fill || fill.getDpsInits().size() != 1 ||
+          fill.getDpsInits()[0] != buf)
+        continue;
+      LLVM_DEBUG(DBGS() << "push fill writer: " << *fill << "\n");
+      upstreamOps.push_back(fill);
     }
   }
 }

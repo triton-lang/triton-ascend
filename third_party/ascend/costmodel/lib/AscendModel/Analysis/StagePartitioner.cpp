@@ -165,7 +165,7 @@ static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
 }
 
 static void accumulateReductionWorkload(Operation *operation,
-                                        StageWorkload &work) {
+                                        StageWorkload &work, bool isScan) {
   if (operation->getNumOperands() == 0)
     return;
   auto input = dyn_cast<ShapedType>(operation->getOperand(0).getType());
@@ -181,7 +181,10 @@ static void accumulateReductionWorkload(Operation *operation,
   if (extent <= 1)
     return;
   const double depth = std::ceil(std::log2(static_cast<double>(extent)));
-  work.shuffleLaneSteps += getTypeElementCount(input) * depth;
+  const double steps = getTypeElementCount(input) * depth;
+  work.shuffleLaneSteps += steps;
+  if (isScan)
+    work.scanShuffleLaneSteps += steps;
 }
 
 static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
@@ -210,7 +213,7 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
     return;
   }
   if (name == "tt.reduce" || name == "tt.scan")
-    accumulateReductionWorkload(operation, work);
+    accumulateReductionWorkload(operation, work, name == "tt.scan");
   if (name == "arith.cmpi" || name == "arith.cmpf") {
     work.predicateElements += elements;
     return;
@@ -235,6 +238,7 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   work.storeWarpInstructions *= scale;
   work.predicateElements *= scale;
   work.shuffleLaneSteps *= scale;
+  work.scanShuffleLaneSteps *= scale;
   work.dotFlops *= scale;
   work.estimatedSpillTransactions *= scale;
   for (auto &entry : work.operationElements)
@@ -323,6 +327,7 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   into.storeWarpInstructions += from.storeWarpInstructions;
   into.predicateElements += from.predicateElements;
   into.shuffleLaneSteps += from.shuffleLaneSteps;
+  into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;
   into.dotFlops += from.dotFlops;
   into.estimatedSpillTransactions += from.estimatedSpillTransactions;
   for (const auto &[name, elements] : from.operationElements)

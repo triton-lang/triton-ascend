@@ -90,6 +90,10 @@ struct StageWorkload {
   double storeWarpInstructions = 0.0;
   double predicateElements = 0.0;
   double shuffleLaneSteps = 0.0;
+  /// Portion of shuffleLaneSteps contributed by tt.scan (prefix-scan class).
+  /// The remainder is contributed by tt.reduce.  Only the scan portion
+  /// consumes the prefix-scan dependency factor inside recurrence stages.
+  double scanShuffleLaneSteps = 0.0;
   double dotFlops = 0.0;
   double issueElements = 0.0;
   double estimatedSpillTransactions = 0.0;
@@ -110,6 +114,8 @@ struct StageResourceCycles {
   double compute = 0.0;
   double predicate = 0.0;
   double shuffle = 0.0;
+  /// Cycles for the tt.scan-contributed portion of shuffle at the ideal rate.
+  double scanShuffle = 0.0;
   double dot = 0.0;
   double loopControl = 0.0;
   double branchControl = 0.0;

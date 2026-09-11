@@ -122,6 +122,8 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
             : work.predicateElements) /
       profile.predicateOperationsPerCycle;
   resources.shuffle = work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
+  resources.scanShuffle =
+      work.scanShuffleLaneSteps / profile.shuffleLanesPerCycle;
   if (work.dotFlops > 0.0) {
     resources.setup += profile.dotSetupCycles;
     resources.dot = work.dotFlops / profile.dotFlopsPerCycle;
@@ -233,11 +235,29 @@ static double estimateStage(const LogicalStage &stage,
                   r.spill);
     return serial;
   case StageCostModelKind::LoopCarriedRecurrence: {
-    const double critical = r.criticalPath > 0.0
-                                ? std::max(r.criticalPath + r.load + r.store +
-                                               controlBody(r) + r.spill,
-                                           r.issue)
-                                : serialBody(r);
+    // A prefix scan nested inside a recurrence keeps its lane dependency
+    // chain: each scan level must complete before the next starts, so the
+    // scan's shuffle traffic cannot reach the ideal vector throughput.
+    // Scale only the tt.scan-contributed portion of the shuffle critical
+    // path with the same mode-specific dependency factor the standalone
+    // PrefixScan model uses (identity for SIMT).  tt.reduce-contributed
+    // shuffle keeps the ideal rate: tree reductions halve their active
+    // lanes per level, so the N*log2(N) lane-step billing already carries
+    // enough slack to absorb per-level inefficiency.
+    double critical = r.criticalPath > 0.0
+                          ? std::max(r.criticalPath + r.load + r.store +
+                                         controlBody(r) + r.spill,
+                                     r.issue)
+                          : serialBody(r);
+    if (r.criticalPath > 0.0 && stage.features.hasPrefixScan) {
+      const double dependencyFactor =
+          mode == StageMode::SIMD ? profile.simd.prefixScanDependencyFactor
+                                  : profile.simt.prefixScanDependencyFactor;
+      critical =
+          std::max(r.criticalPath + (dependencyFactor - 1.0) * r.scanShuffle +
+                       r.load + r.store + controlBody(r) + r.spill,
+                   r.issue);
+    }
     if (mode == StageMode::SIMD) {
       // A loop-carried tensor is not ordinary embarrassingly-parallel vector
       // work: the updated state must remain live until the next recurrence

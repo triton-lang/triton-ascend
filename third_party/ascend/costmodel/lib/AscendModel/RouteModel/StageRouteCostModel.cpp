@@ -157,13 +157,14 @@ bool StageModelFeatures::permitsSimdRoofline() const {
 }
 
 bool StageWorkload::isFiniteAndNonNegative() const {
-  const std::array<double, 10> values = {scalarOperations,
+  const std::array<double, 11> values = {scalarOperations,
                                          loadBytes,
                                          storeBytes,
                                          loadWarpInstructions,
                                          storeWarpInstructions,
                                          predicateElements,
                                          shuffleLaneSteps,
+                                         scanShuffleLaneSteps,
                                          dotFlops,
                                          issueElements,
                                          estimatedSpillTransactions};
@@ -189,6 +190,7 @@ llvm::json::Object StageWorkload::toJSON() const {
   result["store_warp_instructions_per_iteration"] = storeWarpInstructions;
   result["predicate_elements_per_iteration"] = predicateElements;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
+  result["scan_shuffle_lane_steps_per_iteration"] = scanShuffleLaneSteps;
   result["dot_flops_per_iteration"] = dotFlops;
   result["issue_elements_per_iteration"] = issueElements;
   result["estimated_spill_transactions_per_iteration"] =
@@ -220,10 +222,13 @@ llvm::json::Object StageModelFeatures::toJSON() const {
 }
 
 bool StageResourceCycles::isFiniteAndNonNegative() const {
-  const std::array<double, 15> values = {
-      setup,      scalar,          load,  store,       compute,
-      predicate,  shuffle,         dot,   loopControl, branchControl,
-      divergence, synchronization, spill, issue,       criticalPath};
+  const std::array<double, 16> values = {
+      setup,           scalar,        load,
+      store,           compute,       predicate,
+      shuffle,         scanShuffle,   dot,
+      loopControl,     branchControl, divergence,
+      synchronization, spill,         issue,
+      criticalPath};
   return std::all_of(values.begin(), values.end(), [](double value) {
     return std::isfinite(value) && value >= 0.0;
   });
@@ -238,6 +243,7 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   result["compute_per_iteration"] = compute;
   result["predicate_per_iteration"] = predicate;
   result["shuffle_per_iteration"] = shuffle;
+  result["scan_shuffle_per_iteration"] = scanShuffle;
   result["dot_per_iteration"] = dot;
   result["loop_control_per_iteration"] = loopControl;
   result["branch_control_per_iteration"] = branchControl;

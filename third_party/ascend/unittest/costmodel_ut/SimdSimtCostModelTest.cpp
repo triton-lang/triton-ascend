@@ -367,6 +367,75 @@ TEST(SimdSimtCostModelTest, PrefixScanUsesModeSpecificDependencyFactor) {
   EXPECT_GT(implementations[0].totalCycles, implementations[1].totalCycles);
 }
 
+TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {
+  auto buildStage = [] {
+    LogicalStage stage = logicalStage(
+        "recurrence_scan", StageCostModelKind::LoopCarriedRecurrence,
+        StageScheduleKind::LoopCarriedSerial, /*iterations=*/4);
+    stage.features.hasLoop = true;
+    stage.features.hasLoopCarriedDataDependency = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    // Mixed shuffle pool: 320 scan-class steps (tt.scan) + 320 reduce-class
+    // steps (tt.reduce).
+    stage.workload.shuffleLaneSteps = 640.0;
+    stage.workload.scanShuffleLaneSteps = 320.0;
+    return stage;
+  };
+
+  // Identity factors keep the legacy recurrence scoring.
+  HardwareProfile baselineProfile = hardwareProfile();
+  baselineProfile.simd.prefixScanDependencyFactor = 1.0;
+  baselineProfile.simt.prefixScanDependencyFactor = 1.0;
+  auto baseline = evaluateOneStage(buildStage(), baselineProfile);
+  if (!baseline)
+    FAIL() << llvm::toString(baseline.takeError());
+  ASSERT_EQ(baseline->stages.front().implementations.size(), 2u);
+
+  // Scan factors: SIMD 2.5 / SIMT 1.0 (production profile shape).
+  HardwareProfile scanProfile = baselineProfile;
+  scanProfile.simd.prefixScanDependencyFactor = 2.5;
+  auto scaled = evaluateOneStage(buildStage(), scanProfile);
+  if (!scaled)
+    FAIL() << llvm::toString(scaled.takeError());
+  ASSERT_EQ(scaled->stages.front().implementations.size(), 2u);
+
+  // Only the scan-class half is scaled: SIMD scan-shuffle cycles grow from
+  // 320/32 = 10 to 10 * 2.5 = 25, so the stage total grows by 4 iterations *
+  // (25 - 10) = 60 cycles.  The reduce-class half keeps the ideal rate and
+  // SIMT keeps the identity factor, so both must not move.
+  EXPECT_DOUBLE_EQ(scaled->stages.front().implementations[0].totalCycles,
+                   baseline->stages.front().implementations[0].totalCycles +
+                       60.0);
+  EXPECT_DOUBLE_EQ(scaled->stages.front().implementations[1].totalCycles,
+                   baseline->stages.front().implementations[1].totalCycles);
+  EXPECT_GT(scaled->stages.front().implementations[0].totalCycles,
+            scaled->stages.front().implementations[1].totalCycles);
+
+  // A recurrence whose shuffle pool is purely reduce-class must not consume
+  // the scan factor even though the scan feature flag is set.
+  LogicalStage reduceOnlyStage = buildStage();
+  reduceOnlyStage.workload.scanShuffleLaneSteps = 0.0;
+  auto reduceOnlyScaled =
+      evaluateOneStage(std::move(reduceOnlyStage), scanProfile);
+  if (!reduceOnlyScaled)
+    FAIL() << llvm::toString(reduceOnlyScaled.takeError());
+  EXPECT_DOUBLE_EQ(
+      reduceOnlyScaled->stages.front().implementations[0].totalCycles,
+      baseline->stages.front().implementations[0].totalCycles);
+
+  // A recurrence without a prefix scan must not consume the scan factor.
+  LogicalStage plainStage = buildStage();
+  plainStage.features.hasPrefixScan = false;
+  auto plainScaled = evaluateOneStage(std::move(plainStage), scanProfile);
+  if (!plainScaled)
+    FAIL() << llvm::toString(plainScaled.takeError());
+  EXPECT_DOUBLE_EQ(plainScaled->stages.front().implementations[0].totalCycles,
+                   baseline->stages.front().implementations[0].totalCycles);
+}
+
 TEST(SimdSimtCostModelTest, IndependentLoopUsesSimdRooflineAndSerialSimtCost) {
   LogicalStage stage =
       logicalStage("independent", StageCostModelKind::IndependentPipelinedLoop,

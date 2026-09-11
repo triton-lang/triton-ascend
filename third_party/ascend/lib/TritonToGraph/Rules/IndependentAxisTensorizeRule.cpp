@@ -26,6 +26,7 @@
 #include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
 #include "TritonToGraph/ProgramGridTransform.h"
 #include "TritonToGraph/ResourceCostModel.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -622,9 +623,18 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
                                                         i64, originalExtent);
       Value extentSplat = rewriter.create<triton::SplatOp>(
           operation->getLoc(), laneI64Type, extentI64);
-      laneMask = rewriter.create<arith::CmpIOp>(operation->getLoc(),
-                                                arith::CmpIPredicate::ult,
-                                                logicalIdsI64, extentSplat);
+      auto runtimeExtentMask = rewriter.create<arith::CmpIOp>(
+          operation->getLoc(), arith::CmpIPredicate::ult, logicalIdsI64,
+          extentSplat);
+      // Preserve the exact unsigned IR contract while proving the one case
+      // that is safe to lower as a continuous tail: both sides originate from
+      // the non-negative program-id space and the runtime launch extent.
+      // Generic unsigned comparisons intentionally retain the conservative
+      // discrete-memory path.
+      runtimeExtentMask->setAttr(
+          mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG,
+          rewriter.getUnitAttr());
+      laneMask = runtimeExtentMask;
       values[operation->getResult(0)] = {logicalIds, true, 0};
       continue;
     }

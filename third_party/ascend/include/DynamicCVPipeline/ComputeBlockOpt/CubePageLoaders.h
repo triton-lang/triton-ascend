@@ -20,43 +20,31 @@
  * THE SOFTWARE.
  */
 
-#ifndef TRITON_ADAPTER_BLOCK_ID_OPT_PASS_H
-#define TRITON_ADAPTER_BLOCK_ID_OPT_PASS_H
+#ifndef TRITON_ASCEND_DYNAMIC_CV_PIPELINE_CUBE_PAGE_LOADERS_H
+#define TRITON_ASCEND_DYNAMIC_CV_PIPELINE_CUBE_PAGE_LOADERS_H
 
-#include "mlir/Dialect/Linalg/TransformOps/DialectExtension.h"
-#include "mlir/Dialect/Linalg/Transforms/TilingInterfaceImpl.h"
-#include "mlir/Dialect/SCF/TransformOps/SCFTransformOps.h"
-#include "mlir/IR/BuiltinOps.h"
-#include "mlir/Pass/Pass.h"
+#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "llvm/ADT/SmallVector.h"
+#include <optional>
 
-namespace mlir {
-namespace triton {
+namespace mlir::CVPipeline {
 
-class ComputeBlockOptPass
-    : public PassWrapper<ComputeBlockOptPass, OperationPass<ModuleOp>> {
-public:
-  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(ComputeBlockOptPass)
-
-  ComputeBlockOptPass() = default;
-
-  void getDependentDialects(DialectRegistry &registry) const override;
-
-  void runOnOperation() override;
-
-  StringRef getArgument() const override { return "compute-block-opt"; }
-
-  StringRef getDescription() const override {
-    return "Optimize block_id assignment and operation sequencing";
-  }
-
-private:
+struct CubePageLoader {
+  tensor::InsertSliceOp insert;
+  bufferization::ToTensorOp tensor;
+  memref::CopyOp copy;
+  // The private page buffer, its views, and its zero initialization.
+  SmallVector<Operation *> bufferOps;
 };
 
-std::unique_ptr<OperationPass<ModuleOp>> createComputeBlockOptPass();
+// Recognize a complete, ordered row concatenation of private GM page loads.
+// Shared by classification and materialization: a chain must be lowerable to
+// direct GM-to-L1 DMA before it can be assigned to CUBE.
+std::optional<SmallVector<CubePageLoader>>
+getCubePageLoaders(tensor::InsertSliceOp root);
 
-void registerComputeBlockOptPasses();
+} // namespace mlir::CVPipeline
 
-} // namespace triton
-} // namespace mlir
-
-#endif // TRITON_ADAPTER_BLOCK_ID_OPT_PASS_H
+#endif

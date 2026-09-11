@@ -6,6 +6,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
@@ -41,7 +42,10 @@ static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
 namespace mlir {
 namespace CVPipeline {
 
-static bool g_enableCubeBlockMerge = false;
+static llvm::cl::opt<bool> g_enableCubeBlockMerge(
+    "enable-cube-block-merge",
+    llvm::cl::desc("Assign and merge matmul loader blocks on CUBE"),
+    llvm::cl::init(false));
 static bool g_enableUBRefineOpt = false;
 
 void setEnableCubeBlockMerge(bool enable) { g_enableCubeBlockMerge = enable; }

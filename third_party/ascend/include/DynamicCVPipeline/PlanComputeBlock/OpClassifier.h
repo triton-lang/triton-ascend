@@ -103,6 +103,7 @@ private:
 
   // Upstream pattern matching helpers
   void matchToTensorPattern(Operation *def);
+  void matchInsertSlicePattern(Operation *def);
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
   void matchEmptyPattern(Operation *def);

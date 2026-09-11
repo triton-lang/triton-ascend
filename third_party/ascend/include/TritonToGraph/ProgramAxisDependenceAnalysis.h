@@ -33,6 +33,12 @@ namespace cfg {
 enum class StoreAddressIndependence : uint8_t {
   NotProgramDependent,
   ProvenDisjoint,
+  // The pointer has the canonical `uniform_base + pid * runtime_stride +
+  // bounded_lane_offset` form.  This is not a general non-overlap proof: it
+  // is accepted only by the dynamic IAT/PTSM materializers, which preserve
+  // the runtime stride through their lane/loop rewrites under the existing
+  // program-independence contract.
+  CanonicalDynamicStride,
   Unknown,
 };
 
@@ -60,7 +66,9 @@ struct ProgramAxisDependence {
 
   bool hasProgramId() const { return !programIds.empty(); }
   bool hasOnlyDisjointStoreAddresses() const;
+  bool hasOnlyLiftableStoreAddressesForProgramMapping() const;
   bool isIndependentAxisTransformCandidate() const;
+  bool isProgramMappingTransformCandidate() const;
 };
 
 // Shared, function-epoch-local analysis for the program-mapping rules.  It is

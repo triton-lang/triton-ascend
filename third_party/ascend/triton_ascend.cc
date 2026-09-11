@@ -147,8 +147,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          std::uint64_t maxRewritesPerFunction, std::uint64_t ubCapacityBytes,
          std::uint64_t mappingUBCapacityBytes,
          std::uint64_t storeCoalescingUBBudgetBytes,
-         const std::string &compileMode, std::uint64_t deviceCoreCount,
-         std::uint64_t minProgramsPerCore, std::uint64_t ubSafetyPercent,
+         const std::string &compileMode, std::uint64_t ubSafetyPercent,
          std::uint64_t reservedUBBytes) {
         if (ruleMask > std::numeric_limits<std::uint32_t>::max())
           throw py::value_error("rule_mask must fit in uint32_t");
@@ -169,12 +168,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         if (storeCoalescingUBBudgetBytes > std::numeric_limits<unsigned>::max())
           throw py::value_error(
               "store_coalescing_ub_budget_bytes must fit in unsigned");
-        if (deviceCoreCount > std::numeric_limits<unsigned>::max())
-          throw py::value_error("device_core_count must fit in unsigned");
-        if (minProgramsPerCore == 0 ||
-            minProgramsPerCore > std::numeric_limits<unsigned>::max())
-          throw py::value_error(
-              "min_programs_per_core must be a non-zero unsigned value");
         if (ubSafetyPercent == 0 || ubSafetyPercent > 100 ||
             ubSafetyPercent > std::numeric_limits<unsigned>::max())
           throw py::value_error(
@@ -195,12 +188,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             static_cast<unsigned>(mappingUBCapacityBytes);
         options.storeCoalescingUBBudgetBytes =
             static_cast<unsigned>(storeCoalescingUBBudgetBytes);
-        options.deviceCoreCount = static_cast<unsigned>(deviceCoreCount);
-        options.minProgramsPerCore = static_cast<unsigned>(minProgramsPerCore);
         options.ubSafetyPercent = static_cast<unsigned>(ubSafetyPercent);
         options.reservedUBBytes = static_cast<unsigned>(reservedUBBytes);
         options.compileMode = compileMode;
-        options.deviceCoreCount = static_cast<unsigned>(deviceCoreCount);
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
       py::arg("pm"),
@@ -211,7 +201,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("mapping_ub_capacity_bytes") = 0,
       py::arg("store_coalescing_ub_budget_bytes") = 0,
       py::arg("compile_mode") = "simd_simt_template",
-      py::arg("device_core_count") = 0, py::arg("min_programs_per_core") = 1,
       py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,

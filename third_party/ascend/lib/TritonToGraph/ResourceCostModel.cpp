@@ -71,12 +71,6 @@ bool checkedAccumulate(uint64_t value, uint64_t &total) {
   return true;
 }
 
-std::optional<uint64_t> ceilDiv(uint64_t numerator, uint64_t denominator) {
-  if (denominator == 0)
-    return std::nullopt;
-  return numerator / denominator + (numerator % denominator != 0);
-}
-
 bool isTensorValue(Value value) {
   return value && isa<RankedTensorType, UnrankedTensorType>(value.getType());
 }
@@ -257,8 +251,6 @@ cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
     return "overflow";
   case ResourceCostRejectReason::UBOverflow:
     return "ub_overflow";
-  case ResourceCostRejectReason::InsufficientParallelism:
-    return "insufficient_parallelism";
   case ResourceCostRejectReason::InvalidCandidate:
     return "invalid_candidate";
   }
@@ -267,7 +259,6 @@ cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
 
 bool ResourceSnapshot::isKnown() const {
   return ubCapacityBytes != 0 && reservedUBBytes <= ubCapacityBytes &&
-         deviceCoreCount != 0 && minProgramsPerCore != 0 &&
          ubSafetyPercent > 0 && ubSafetyPercent <= 100;
 }
 
@@ -290,34 +281,27 @@ std::optional<uint64_t> ResourceSnapshot::getSafeUBBudget() const {
 }
 
 ResourceSnapshot ResourceSnapshot::fromExplicit(uint64_t ubCapacity,
-                                                unsigned coreCount,
-                                                unsigned minPrograms,
                                                 unsigned safetyPercent,
                                                 uint64_t reservedUB) {
   ResourceSnapshot result;
   result.ubCapacityBytes = ubCapacity;
   result.reservedUBBytes = reservedUB;
-  result.deviceCoreCount = coreCount;
-  result.minProgramsPerCore = minPrograms;
   result.ubSafetyPercent = safetyPercent;
   return result;
 }
 
 ResourceSnapshot ResourceSnapshot::fromHardwareConfig(
-    const ascend::HardwareConfig &hardware, unsigned minPrograms,
-    unsigned safetyPercent, uint64_t reservedUB) {
+    const ascend::HardwareConfig &hardware, unsigned safetyPercent,
+    uint64_t reservedUB) {
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   const ascend::MemorySpace *ub = hardware.getMemorySpace("ub");
-  const int vectorCores = hardware.getNumAIVCores();
   if (!ub || ub->sizeBytes == 0 ||
-      ub->sizeBytes > std::numeric_limits<uint64_t>::max() || vectorCores <= 0)
+      ub->sizeBytes > std::numeric_limits<uint64_t>::max())
     return {};
-  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes),
-                      static_cast<unsigned>(vectorCores), minPrograms,
-                      safetyPercent, reservedUB);
+  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes), safetyPercent,
+                      reservedUB);
 #else
   (void)hardware;
-  (void)minPrograms;
   (void)safetyPercent;
   (void)reservedUB;
   return {};
@@ -553,108 +537,19 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
   if (!safeBudget)
     return reject(candidate, ResourceCostRejectReason::Overflow);
 
-  uint64_t requiredParallelPrograms = 0;
-  if (!checkedMul(resources.deviceCoreCount, resources.minProgramsPerCore,
-                  requiredParallelPrograms))
-    return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget);
-
   if (candidate.hasDynamicShape)
-    return reject(candidate, ResourceCostRejectReason::DynamicShape,
-                  *safeBudget, requiredParallelPrograms);
+    return reject(candidate, ResourceCostRejectReason::DynamicShape, *safeBudget);
   if (candidate.hasUnknownResource || !candidate.hasPeakLiveBytes)
-    return reject(candidate, ResourceCostRejectReason::UnknownResource,
-                  *safeBudget, requiredParallelPrograms);
+    return reject(candidate, ResourceCostRejectReason::UnknownResource, *safeBudget);
   if (candidate.plan.tensorizeFactor == 0 || candidate.plan.blockT == 0 ||
-      candidate.plan.staticAxisFusionFactor == 0 ||
-      candidate.logicalTasksBefore == 0 || candidate.logicalTasksAfter == 0 ||
-      candidate.actualProgramsBefore == 0 || candidate.actualProgramsAfter == 0)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, requiredParallelPrograms);
-  if (candidate.persistent &&
-      candidate.actualProgramsAfter > candidate.logicalTasksAfter)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, requiredParallelPrograms);
-  // A plan that cannot occupy the required number of vector cores is normally
-  // unconditionally unprofitable. Diagnose that primary launch-contract
-  // failure before UB so a K=128 candidate that is both oversized and only
-  // exposes 32 tiles is recorded as insufficient parallelism, rather than
-  // obscuring the actionable 32 < 56 rejection behind its secondary UB cost.
-  //
-  // MergeSplit's large head tile is the deliberately narrow exception. It is
-  // valid only when the transformed nonpersistent grid is completely launched
-  // (no persistent replay and no physical cap) and contains at most one wave
-  // of vector cores. The rule can set this policy only after its structural,
-  // alias, tail, and cleanup checks have established that contract.
-  switch (candidate.parallelismPolicy) {
-  case ParallelismPolicy::DefaultMinProgramsPerCore:
-    if (candidate.actualProgramsAfter < requiredParallelPrograms)
-      return reject(candidate,
-                    ResourceCostRejectReason::InsufficientParallelism,
-                    *safeBudget, requiredParallelPrograms);
-    break;
-  case ParallelismPolicy::MergeSplitSmallGridAllowSubCore:
-    if (candidate.persistent ||
-        candidate.actualProgramsAfter != candidate.logicalTasksAfter ||
-        candidate.actualProgramsAfter > resources.deviceCoreCount)
-      return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                    *safeBudget, requiredParallelPrograms);
-    break;
-  }
+      candidate.plan.staticAxisFusionFactor == 0)
+    return reject(candidate, ResourceCostRejectReason::InvalidCandidate, *safeBudget);
   if (candidate.estimatedPeakLiveBytes > *safeBudget)
-    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget,
-                  requiredParallelPrograms);
-
-  uint64_t workBefore = candidate.workPerProgramBefore;
-  if (workBefore == 0)
-    workBefore =
-        candidate.logicalTasksBefore / candidate.actualProgramsBefore +
-        (candidate.logicalTasksBefore % candidate.actualProgramsBefore != 0);
-  uint64_t workAfter = candidate.workPerProgramAfter;
-  if (workAfter == 0)
-    workAfter =
-        candidate.logicalTasksAfter / candidate.actualProgramsAfter +
-        (candidate.logicalTasksAfter % candidate.actualProgramsAfter != 0);
-  if (workBefore == 0 || workAfter == 0)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, requiredParallelPrograms);
-
-  const std::optional<uint64_t> derivedWavesBefore =
-      ceilDiv(candidate.logicalTasksBefore, candidate.actualProgramsBefore);
-  const std::optional<uint64_t> derivedWavesAfter =
-      ceilDiv(candidate.logicalTasksAfter, candidate.actualProgramsAfter);
-  const uint64_t physicalWavesBefore = candidate.physicalWavesBefore != 0
-                                           ? candidate.physicalWavesBefore
-                                           : derivedWavesBefore.value_or(0);
-  const uint64_t physicalWavesAfter = candidate.physicalWavesAfter != 0
-                                          ? candidate.physicalWavesAfter
-                                          : derivedWavesAfter.value_or(0);
-  if (physicalWavesBefore == 0 || physicalWavesAfter == 0)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, requiredParallelPrograms);
-
-  uint64_t persistentLoopTripsBefore = candidate.persistentLoopTripsBefore;
-  if (persistentLoopTripsBefore == 0)
-    persistentLoopTripsBefore =
-        candidate.logicalTasksBefore / candidate.actualProgramsBefore +
-        (candidate.logicalTasksBefore % candidate.actualProgramsBefore != 0);
-  uint64_t persistentLoopTripsAfter = candidate.persistentLoopTripsAfter;
-  if (persistentLoopTripsAfter == 0)
-    persistentLoopTripsAfter =
-        candidate.logicalTasksAfter / candidate.actualProgramsAfter +
-        (candidate.logicalTasksAfter % candidate.actualProgramsAfter != 0);
-  if (persistentLoopTripsBefore == 0 || persistentLoopTripsAfter == 0)
-    return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, requiredParallelPrograms);
+    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget);
 
   uint64_t gains = 0;
   uint64_t penalties = 0;
-  if (!addWeightedChange(candidate.logicalTasksBefore,
-                         candidate.logicalTasksAfter,
-                         weights.logicalProgramReduction, gains, penalties) ||
-      !addWeightedChange(candidate.actualProgramsBefore,
-                         candidate.actualProgramsAfter,
-                         weights.programReduction, gains, penalties) ||
-      !addWeightedChange(candidate.launchesBefore, candidate.launchesAfter,
+  if (!addWeightedChange(candidate.launchesBefore, candidate.launchesAfter,
                          weights.launchReduction, gains, penalties) ||
       !addWeightedChange(candidate.gmReadBytesBefore,
                          candidate.gmReadBytesAfter, weights.gmByte, gains,
@@ -670,15 +565,13 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
       !addWeightedChange(candidate.baselinePeakLiveBytes,
                          candidate.estimatedPeakLiveBytes, weights.liveByte,
                          gains, penalties) ||
-      !addWeightedChange(persistentLoopTripsBefore, persistentLoopTripsAfter,
-                         weights.persistentLoopTrip, gains, penalties) ||
       !addWeightedChange(candidate.tokenOnlyRepeatedBytesBefore,
                          candidate.tokenOnlyRepeatedBytesAfter,
                          weights.tokenOnlyRepeatedByte, gains, penalties) ||
       gains > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       penalties > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
-                  requiredParallelPrograms);
+                  /*requiredParallelPrograms=*/0);
 
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;
@@ -687,12 +580,12 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
   evaluation.benefitScore =
       static_cast<int64_t>(gains) - static_cast<int64_t>(penalties);
   evaluation.safeUBBudgetBytes = *safeBudget;
-  evaluation.requiredParallelPrograms = requiredParallelPrograms;
-  evaluation.effectiveWorkPerProgram = workAfter;
-  evaluation.physicalWavesBefore = physicalWavesBefore;
-  evaluation.physicalWavesAfter = physicalWavesAfter;
-  evaluation.persistentLoopTripsBefore = persistentLoopTripsBefore;
-  evaluation.persistentLoopTripsAfter = persistentLoopTripsAfter;
+  evaluation.requiredParallelPrograms = 0;
+  evaluation.effectiveWorkPerProgram = 0;
+  evaluation.physicalWavesBefore = 0;
+  evaluation.physicalWavesAfter = 0;
+  evaluation.persistentLoopTripsBefore = 0;
+  evaluation.persistentLoopTripsAfter = 0;
   evaluation.tokenOnlyRepeatedBytesBefore =
       candidate.tokenOnlyRepeatedBytesBefore;
   evaluation.tokenOnlyRepeatedBytesAfter =

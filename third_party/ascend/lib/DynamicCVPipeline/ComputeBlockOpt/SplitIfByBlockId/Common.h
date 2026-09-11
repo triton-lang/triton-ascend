@@ -69,15 +69,6 @@ public:
   std::pair<SmallVector<Operation *>, IRMapping> capture(int blockId);
 };
 
-struct WalkMainLoopResult {
-  CoreType coreType = UNDETERMINED;
-  bool containsMainLoop = false;
-};
-
-llvm::FailureOr<WalkMainLoopResult>
-walkMainLoop(Operation *op,
-             llvm::function_ref<llvm::LogicalResult(Operation *)> pred);
-
 } // namespace mlir::CVPipeline::SplitIf
 
 #endif

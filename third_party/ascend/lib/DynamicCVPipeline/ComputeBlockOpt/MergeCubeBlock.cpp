@@ -81,7 +81,7 @@ void MergeCubeBlockPass::runOnOperation() {
 
   // Collect main loop body blocks via the shared walkMainLoop helper.
   llvm::SmallVector<Block *> mainLoopBlocks;
-  if (failed(CVPipeline::SplitIf::walkMainLoop(
+  if (failed(CVPipeline::walkMainLoop(
           moduleOp, [&](Operation *loop) -> llvm::LogicalResult {
             mainLoopBlocks.push_back(&loop->getRegion(0).front());
             return llvm::success();

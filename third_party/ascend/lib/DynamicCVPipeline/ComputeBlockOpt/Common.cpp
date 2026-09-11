@@ -28,6 +28,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
@@ -35,9 +36,12 @@
 #include "triton/Analysis/Utility.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 
 static constexpr const char *DEBUG_TYPE = "compute-block-opt-common";
 #define LOG_DEBUG(...)                                                         \
@@ -221,6 +225,42 @@ bool collectViewOpsAndCheckGlobalMemory(Value viewValue,
     return false;
   }
   return false;
+}
+
+void setSkipExtraReorder(ModuleOp module, bool skip) {
+  module->setAttr(CVPipeline::kSkipExtraReorder,
+                  BoolAttr::get(module->getContext(), skip));
+}
+
+llvm::FailureOr<WalkMainLoopResult>
+walkMainLoop(Operation *op,
+             llvm::function_ref<llvm::LogicalResult(Operation *)> pred) {
+  CoreType coreType = CVPipeline::getOpCoreType(op);
+  bool containsMainLoop = false;
+  for (auto &region : op->getRegions()) {
+    for (auto &block : region.getBlocks()) {
+      for (auto &nestedOp : block) {
+        auto nestedResult = walkMainLoop(&nestedOp, pred);
+        if (failed(nestedResult)) {
+          return failure();
+        }
+        auto nested = nestedResult.value();
+        coreType =
+            static_cast<CVPipeline::CoreType>(coreType | nested.coreType);
+        containsMainLoop = containsMainLoop || nested.containsMainLoop;
+      }
+    }
+  }
+
+  if (llvm::isa<scf::WhileOp, scf::ForOp>(op) && coreType == CUBE_AND_VECTOR &&
+      !containsMainLoop) {
+    if (pred(op).failed()) {
+      return failure();
+    }
+    containsMainLoop = true;
+  }
+
+  return WalkMainLoopResult{coreType, containsMainLoop};
 }
 
 } // namespace CVPipeline

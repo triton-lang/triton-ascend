@@ -293,6 +293,7 @@ def _make_opt(
     shared_mem_dynamic_size=None,
     enable_simt_reorder_instruction=False,
     disable_fma=False,
+    compile_on_910_95=False,
 ):
     return SimpleNamespace(
         is_pure_simt=is_pure_simt,
@@ -304,6 +305,7 @@ def _make_opt(
         enable_simt_reorder_instruction=enable_simt_reorder_instruction,
         disable_fma=disable_fma,
         superblock_factor=superblock_factor,
+        compile_on_910_95=compile_on_910_95,
     )
 
 

@@ -25,9 +25,11 @@
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/DialectRegistry.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace mlir {
 namespace triton {
@@ -81,11 +83,13 @@ struct TransferGroupInfo {
   TransferOpChain senderChain;
   TransferOpChain receiverChain;
 
-  // Input/output buffer values
-  Value senderInputBuffer;
-  Value senderOutputBuffer;
-  Value receiverInputBuffer;
-  Value receiverOutputBuffer;
+  // All buffers for the sender side (size = interCoreBufNum).
+  // First element is the original (input) alloc, the rest are output
+  // buffers created by this pass.
+  SmallVector<Value> senderBuffers;
+
+  // Same for the receiver side.
+  SmallVector<Value> receiverBuffers;
 
   // TCB ID shared across all 4 buffers in the same transfer group
   int tcbId = -1;

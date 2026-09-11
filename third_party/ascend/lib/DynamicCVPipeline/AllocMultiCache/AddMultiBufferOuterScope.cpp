@@ -583,9 +583,10 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
 
   // NOTE: output alloc carries no ssbuffer.crossCoreDeps — alloc is a
   // buffer-creation op, not a behavior op. Producer tag lives on the
-  // fixpipe/copy clone inside scf.if (set in wrapTransferOpWithScfIf*),
-  // and consumer tag lives on the scf.if wrapper itself (set in
-  // wrapReceiverChainWithScfIf). Do NOT re-introduce crossDeps here.
+  // fixpipe/copy transferOp itself (pre-tagged by upstream passes such as
+  // AddControlFlowCondition), and consumer tag also lives on the receiver
+  // transferOp (memref.memory_space_cast / hivm.convert_layout). Do NOT
+  // re-introduce crossDeps here.
 
   auto outputMark = builder.create<annotation::MarkOp>(loc, outputBuffer);
   outputMark->setAttr("effects", builder.getStrArrayAttr({"write", "read"}));
@@ -602,78 +603,50 @@ static int createOutputBufferPair(Operation *inputAllocOp, int tid, int tcbId,
   return 0;
 }
 
-static constexpr unsigned kBits32 = 32;
-
-static int attachSsbufferTags(Operation *op, int blockId, int transferId) {
-  MLIRContext *ctx = op->getContext();
-  op->setAttr(mlir::CVPipeline::kBlockId,
-              IntegerAttr::get(IntegerType::get(ctx, kBits32), blockId));
-  op->setAttr(mlir::CVPipeline::kTransferId,
-              IntegerAttr::get(IntegerType::get(ctx, kBits32), transferId));
-  op->setAttr("ssbuffer.analyze_flag_id", UnitAttr::get(ctx));
-  return 0;
-}
-
-static hivm::SyncBlockSetOp createOutputSyncSetOp(Operation *origSetOp,
-                                                  int outputFlag, int tid,
-                                                  OpBuilder &builder) {
-  auto setOp = cast<hivm::SyncBlockSetOp>(origSetOp);
-  builder.setInsertionPointAfter(origSetOp);
-  auto newSetOp = builder.create<hivm::SyncBlockSetOp>(
-      setOp.getLoc(), setOp.getTcoreType(), setOp.getTpipe(), setOp.getPipe(),
-      builder.getI64IntegerAttr(outputFlag));
-  attachSsbufferTags(newSetOp.getOperation(), getBlockId(setOp), tid);
-  return newSetOp;
-}
-
-static hivm::SyncBlockWaitOp createOutputSyncWaitOp(Operation *origWaitOp,
-                                                    int outputFlag, int tid,
-                                                    OpBuilder &builder) {
-  auto waitOp = cast<hivm::SyncBlockWaitOp>(origWaitOp);
-  builder.setInsertionPointAfter(origWaitOp);
-  auto newWaitOp = builder.create<hivm::SyncBlockWaitOp>(
-      waitOp.getLoc(), waitOp.getTcoreType(), waitOp.getTpipe(),
-      waitOp.getPipe(), builder.getI64IntegerAttr(outputFlag));
-  attachSsbufferTags(newWaitOp.getOperation(), getBlockId(waitOp), tid);
-  return newWaitOp;
-}
-
-/// Create output buffer for a single transfer group, with output flag sync ops
-static int createOutputBufferForGroup(TransferGroupInfo &g,
-                                      OpBuilder &builder) {
-  if (createOutputBufferPair(g.senderBuf.allocOp, g.tid, g.tcbId,
-                             g.senderInputBuffer, g.senderOutputBuffer, builder,
-                             true)) {
-    return -1;
-  }
-  if (createOutputBufferPair(g.receiverBuf.allocOp, g.tid, g.tcbId,
-                             g.receiverInputBuffer, g.receiverOutputBuffer,
-                             builder, false)) {
-    return -1;
-  }
-  // Insert output sync set at extra_sync position
-  if (g.extraSyncSetOp) {
-    createOutputSyncSetOp(g.extraSyncSetOp, g.outputFlag, g.tid, builder);
-    LDBG("Created output sync set with flag=" << g.outputFlag << " at block_id="
-                                              << getBlockId(g.extraSyncSetOp)
-                                              << " (sender scope).");
+/// Create output buffers for a single transfer group.
+///
+/// With the select-chain refactor, we no longer create additional sync
+/// ops for the output buffer — the existing wait/set ops (carrying the
+/// original flag) cover the synchronization for both buffers. Only the
+/// output alloc + mark are produced here.
+///
+/// For interCoreBufNum = N, creates N-1 extra output buffers per side,
+/// all sharing the same tcb id. The original input buffer is element 0
+/// of g.senderBuffers / g.receiverBuffers.
+static int createOutputBuffersForGroup(TransferGroupInfo &g,
+                                       OpBuilder &builder,
+                                       int interCoreBufNum) {
+  // First buffer is the original input alloc (kept as-is).
+  g.senderBuffers.push_back(g.senderBuf.allocOp->getResult(0));
+  for (int i = 1; i < interCoreBufNum; ++i) {
+    Value inputBuf;
+    Value outBuf;
+    if (createOutputBufferPair(g.senderBuf.allocOp, g.tid, g.tcbId,
+                               inputBuf, outBuf, builder,
+                               /*isSender=*/true)) {
+      return -1;
+    }
+    g.senderBuffers.push_back(outBuf);
   }
 
-  // Insert output sync wait at extra_sync position
-  Operation *outputWaitInsertOp =
-      g.extraSyncWaitOp ? g.extraSyncWaitOp : g.receiverChain.waitOp;
-  if (outputWaitInsertOp) {
-    createOutputSyncWaitOp(outputWaitInsertOp, g.outputFlag, g.tid, builder);
-    LDBG("Created output sync wait with flag="
-         << g.outputFlag << " at block_id=" << getBlockId(outputWaitInsertOp)
-         << " (receiver scope).");
+  // Same for receiver.
+  g.receiverBuffers.push_back(g.receiverBuf.allocOp->getResult(0));
+  for (int i = 1; i < interCoreBufNum; ++i) {
+    Value inputBuf;
+    Value outBuf;
+    if (createOutputBufferPair(g.receiverBuf.allocOp, g.tid, g.tcbId,
+                               inputBuf, outBuf, builder,
+                               /*isSender=*/false)) {
+      return -1;
+    }
+    g.receiverBuffers.push_back(outBuf);
   }
   return 0;
 }
 
 /// Create output buffers for all transfer groups
 static int createOutputBuffers(DenseMap<int, TransferGroupInfo> &groups,
-                               ModuleOp module) {
+                               ModuleOp module, int interCoreBufNum) {
   OpBuilder builder(module.getContext());
   std::set<int> usedTcbIds;
 
@@ -712,7 +685,7 @@ static int createOutputBuffers(DenseMap<int, TransferGroupInfo> &groups,
 
     nextTcbId = g.tcbId + 1;
 
-    createOutputBufferForGroup(g, builder);
+    createOutputBuffersForGroup(g, builder, interCoreBufNum);
   }
   return 0;
 }
@@ -832,403 +805,215 @@ static Value ensureWhileOpHasCounter(scf::WhileOp whileOp) {
   return counterIterArg;
 }
 
-/// Create polling condition: (iter / step) % 2 == 0 (true=input, false=output)
-static Value createPollingCondition(scf::ForOp forOp, OpBuilder &builder,
-                                    int blockId, int tid) {
-  Location loc = forOp.getLoc();
-  Value iterVar = forOp.getInductionVar();
-  Value step = forOp.getStep();
+/// Build an arith.select chain that selects one of `buffers` based on
+/// `counter % N` where N = buffers.size(). The result is a single Value
+/// that can be used directly as the transferOp's output operand.
+///
+/// For N == 2:
+///   %remsi = arith.remsi %counter, %c2
+///   %cond0 = arith.cmpi eq, %remsi, %c0
+///   return arith.select %cond0, %buffers[0], %buffers[1]
+///
+/// For N > 2:
+///   Nested selects with cmpi(remsi, k) for k = 1..N-1, producing
+///   %sel = select(cmp_eq_0, b0,
+///                 select(cmp_eq_1, b1,
+///                        ...select(cmp_eq_{N-1}, b_{N-1}, b_N))).
+///
+/// For N == 1: returns buffers[0] without emitting any op.
+///
+/// All emitted ops (except the constants) are tagged with
+/// kBlockId / kTransferId via setSsbufferTags.
+static Value buildBufferSelectChain(OpBuilder &builder, Location loc,
+                                    Value counter, ArrayRef<Value> buffers,
+                                    int blockId, int transferId) {
+  assert(!buffers.empty() && "buildBufferSelectChain requires >=1 buffer");
 
-  auto divOp = builder.create<arith::DivSIOp>(loc, iterVar, step);
-  setSsbufferTags(divOp.getOperation(), builder, blockId, tid);
-
-  Type counterType = divOp.getResult().getType();
-  int bitWidth = counterType.getIntOrFloatBitWidth();
-  auto c2Val = builder.create<arith::ConstantIntOp>(loc, 2, bitWidth);
-  setSsbufferTags(c2Val.getOperation(), builder, blockId, tid);
-  auto remOp =
-      builder.create<arith::RemSIOp>(loc, divOp.getResult(), c2Val.getResult());
-  setSsbufferTags(remOp.getOperation(), builder, blockId, tid);
-
-  auto c0Val = builder.create<arith::ConstantIntOp>(loc, 0, bitWidth);
-  auto cmpOp = builder.create<arith::CmpIOp>(
-      loc, arith::CmpIPredicate::eq, remOp.getResult(), c0Val.getResult());
-  setSsbufferTags(cmpOp.getOperation(), builder, blockId, tid);
-  setSsbufferTags(c0Val.getOperation(), builder, blockId, tid);
-
-  return cmpOp.getResult();
-}
-
-/// Wrap a sync op (wait/set) in scf.if: then=clone original, else=create
-/// alternative
-template <typename OpTy>
-static Operation *wrapSyncOpWithScfIf(
-    Operation *op, Value cond, int outputFlag, OpBuilder &builder,
-    std::function<Operation *(OpBuilder &, Location)> createAltFn) {
-  static_assert(std::is_same<OpTy, hivm::SyncBlockWaitOp>::value ||
-                    std::is_same<OpTy, hivm::SyncBlockSetOp>::value,
-                "OpTy must be SyncBlockWaitOp or SyncBlockSetOp");
-
-  OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(op);
-
-  Location loc = op->getLoc();
-  auto ifOp = builder.create<scf::IfOp>(loc, TypeRange{}, cond,
-                                        true /* withElseRegion */);
-  ifOp->setAttr(mlir::CVPipeline::kBlockId,
-                builder.getI32IntegerAttr(getBlockId(op)));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-
-  // then branch: clone original op
-  auto thenBuilder = ifOp.getThenBodyBuilder();
-  Operation *cloned = thenBuilder.clone(*op);
-
-  // else branch: create alternative op
-  auto elseBuilder = ifOp.getElseBodyBuilder();
-  Operation *altOp = createAltFn(elseBuilder, loc);
-
-  // Copy ssbuffer tags
-  int bid = getBlockId(op);
-  int tid = getTransferId(op);
-  if (bid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-    altOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  }
-  if (tid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kTransferId,
-                    builder.getI32IntegerAttr(tid));
-    altOp->setAttr(mlir::CVPipeline::kTransferId,
-                   builder.getI32IntegerAttr(tid));
-  }
-  if (op->hasAttr("ssbuffer.analyze_flag_id")) {
-    cloned->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
-    altOp->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
+  if (buffers.size() == 1) {
+    return buffers.front();
   }
 
-  op->replaceAllUsesWith(ifOp.getOperation());
-  op->erase();
-  return ifOp.getOperation();
-}
-
-/// Wrap a transfer op (with external uses) in scf.if with yield
-static Operation *wrapTransferOpWithScfIfYield(Operation *transferOp,
-                                               Value cond, Value inputBuffer,
-                                               Value outputBuffer, int bid,
-                                               int tid, bool isProducer,
-                                               OpBuilder &builder) {
-  OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(transferOp);
-
-  Location loc = transferOp->getLoc();
-  auto ifOp = builder.create<scf::IfOp>(loc, transferOp->getResultTypes(), cond,
-                                        true /* withElseRegion */);
-
-  // then branch: use inputBuffer
-  Operation *thenCloned = nullptr;
-  {
-    auto thenBuilder = ifOp.getThenBodyBuilder();
-    IRMapping inputMap;
-    if (transferOp->getNumOperands() > 0) {
-      inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
-                   inputBuffer);
+  // Counter may be index or any int width; arith.remsi / arith.cmpi require
+  // both operands to share the type. Emit cN/ck with the counter's type
+  // instead of hard-coding i32 (which would fail MLIR verification when
+  // counter is i64 / index).
+  Type counterTy = counter.getType();
+  auto buildCounterConst = [&](int64_t v) -> Value {
+    Operation *cOp = nullptr;
+    if (counterTy.isIndex()) {
+      cOp = builder.create<arith::ConstantIndexOp>(loc, v);
+    } else {
+      cOp = builder.create<arith::ConstantIntOp>(
+          loc, v, counterTy.getIntOrFloatBitWidth());
     }
-    thenCloned = thenBuilder.clone(*transferOp, inputMap);
-    thenBuilder.create<scf::YieldOp>(loc, thenCloned->getResults());
-  }
+    setSsbufferTags(cOp, builder, blockId, transferId);
+    return cOp->getResult(0);
+  };
 
-  // else branch: use outputBuffer
-  Operation *elseCloned = nullptr;
-  {
-    auto elseBuilder = ifOp.getElseBodyBuilder();
-    IRMapping outputMap;
-    if (transferOp->getNumOperands() > 0) {
-      outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
-                    outputBuffer);
-    }
-    elseCloned = elseBuilder.clone(*transferOp, outputMap);
-    elseBuilder.create<scf::YieldOp>(loc, elseCloned->getResults());
-  }
+  Value cN = buildCounterConst(buffers.size());
 
-  // Producer: tag the cloned transferOps (the actual behavior ops) with
-  // [tid, 1]. The ifOp wrapper itself does NOT carry crossDeps because
-  // scf.if is the polling-flow control structure, not the data-movement
-  // behavior op — the producer role follows the inner fixpipe/copy clones.
-  if (isProducer) {
-    auto crossDeps = builder.getArrayAttr(
-        {builder.getI32IntegerAttr(tid), builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-    elseCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-  }
+  auto remsiOp = builder.create<arith::RemSIOp>(loc, counter, cN);
+  setSsbufferTags(remsiOp, builder, blockId, transferId);
+  Value remsi = remsiOp.getResult();
 
-  // Tag the ifOp
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
+  // Build selects from the inside out: start with buffers[N-1] as the
+  // fallback, then wrap each earlier buffer in a select(cmp_eq_k, buf_k,
+  // prevSel).
+  auto mkCondEq = [&](int k) -> Value {
+    Value ck = buildCounterConst(k);
+    auto cmpOp =
+        builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, remsi, ck);
+    setSsbufferTags(cmpOp, builder, blockId, transferId);
+    return cmpOp.getResult();
+  };
 
-  // Replace all uses of the original transferOp
-  for (auto [oldResult, newResult] :
-       llvm::zip_equal(transferOp->getResults(), ifOp->getResults())) {
-    oldResult.replaceAllUsesWith(newResult);
+  Value selected = buffers.back();
+  // k = N-2 down to 1: each new layer wraps the prior with select(cmp_eq_k,
+  // buf_k, prev). We start at N-2 because buffers[N-1] is already the
+  // initial fallback (selected); emitting select(eq_{N-1}, buf_{N-1},
+  // buf_{N-1}) would be a redundant op. k = 0 is emitted last as the
+  // outermost select.
+  for (int k = static_cast<int>(buffers.size()) - 2; k >= 1; --k) {
+    Value cond = mkCondEq(k);
+    auto newSelectedOp =
+        builder.create<arith::SelectOp>(loc, cond, buffers[k], selected);
+    setSsbufferTags(newSelectedOp, builder, blockId, transferId);
+    selected = newSelectedOp.getResult();
   }
-  transferOp->erase();
-  return ifOp.getOperation();
+  Value cond0 = mkCondEq(0);
+  auto resultOp =
+      builder.create<arith::SelectOp>(loc, cond0, buffers[0], selected);
+  setSsbufferTags(resultOp, builder, blockId, transferId);
+  return resultOp.getResult();
 }
 
-/// Wrap a transfer op (no external uses) in scf.if without yield
-static Operation *wrapTransferOpWithScfIfSimple(Operation *transferOp,
-                                                Value cond, Value inputBuffer,
-                                                Value outputBuffer, int bid,
-                                                int tid, bool isProducer,
+/// Insert an arith.select chain before `transferOp` that selects one of
+/// `buffers` based on `counter % buffers.size()`, then mutate
+/// `transferOp`'s last operand to use the selected buffer. This replaces
+/// the previous scf.if/clone approach with a single SSA value that flows
+/// directly through the transferOp's existing operand. Existing wait/set
+/// ops are left untouched.
+///
+/// `buffers` may have any size N (1, 2, 3, ...). For N == 1 the transferOp
+/// is mutated to use the buffer directly; for N >= 2 an arith.select chain
+/// selects among them.
+///
+/// Cross-core deps: producer transferOps arrive pre-tagged with
+/// crossCoreDeps = [tid, 1] from upstream tagging (e.g.
+/// AddControlFlowCondition); the same is true for receiver transferOps with
+/// [tid, 0]. Since we do not clone or wrap, those attrs are preserved as-is on
+/// the transferOp itself — no re-tagging needed.
+static Operation *wrapTransferOpWithSelectChain(Operation *transferOp,
+                                                Value counter,
+                                                ArrayRef<Value> buffers,
+                                                int bid, int tid,
                                                 OpBuilder &builder) {
   OpBuilder::InsertionGuard guard(builder);
   builder.setInsertionPoint(transferOp);
 
   Location loc = transferOp->getLoc();
-  auto ifOp = builder.create<scf::IfOp>(loc, TypeRange{}, cond,
-                                        true /* withElseRegion */);
 
-  // then branch: clone directly
-  Operation *thenCloned = nullptr;
-  {
-    auto thenBuilder = ifOp.getThenBodyBuilder();
-    thenCloned = thenBuilder.clone(*transferOp);
+  Value selected =
+      buildBufferSelectChain(builder, loc, counter, buffers, bid, tid);
+
+  // Mutate the transferOp's last operand (outs for fixpipe/copy, source for
+  // memory_space_cast/convert_layout which have a single operand).
+  if (transferOp->getNumOperands() > 0) {
+    transferOp->setOperand(transferOp->getNumOperands() - 1, selected);
   }
 
-  // else branch: use outputBuffer
-  Operation *elseCloned = nullptr;
-  {
-    auto elseBuilder = ifOp.getElseBodyBuilder();
-    IRMapping outputMap;
-    if (transferOp->getNumOperands() > 0) {
-      outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
-                    outputBuffer);
-    }
-    elseCloned = elseBuilder.clone(*transferOp, outputMap);
-  }
-
-  // Producer: tag the cloned transferOps (the actual behavior ops) with
-  // [tid, 1]. Mirror of wrapTransferOpWithScfIfYield: behavior op, not
-  // the ifOp wrapper, carries the producer role.
-  if (isProducer) {
-    auto crossDeps = builder.getArrayAttr(
-        {builder.getI32IntegerAttr(tid), builder.getI32IntegerAttr(1)});
-    thenCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-    elseCloned->setAttr(mlir::CVPipeline::kCrossCoreDeps, crossDeps);
-  }
-
-  // Tag the ifOp
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-
-  transferOp->erase();
-  return ifOp.getOperation();
+  return transferOp;
 }
 
-/// Wrap a receiver transfer chain (transferOp + trailing memspace_cast +
-/// to_tensor) in scf.if so that the if returns tensor type directly.
-static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
-                                             Operation *toTensorOp, Value cond,
-                                             Value inputBuffer,
-                                             Value outputBuffer, int bid,
-                                             int tid, OpBuilder &builder) {
-  OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(transferOp);
-  Location loc = transferOp->getLoc();
-
-  // Collect the chain from transferOp to toTensorOp: ops whose result flows
-  // into toTensorOp (e.g. memref.memory_space_cast between convert_layout and
-  // bufferization.to_tensor for V→C transfers).
-  SmallVector<Operation *> trailingOps;
-  Value curVal = transferOp->getResult(0);
-  while (curVal != toTensorOp->getOperand(0)) {
-    bool found = false;
-    for (auto &use : curVal.getUses()) {
-      Operation *user = use.getOwner();
-      if (user->isBeforeInBlock(toTensorOp) || user == toTensorOp) {
-        curVal = user->getResult(0);
-        if (user != toTensorOp)
-          trailingOps.push_back(user);
-        found = true;
-        break;
-      }
-    }
-    if (!found)
-      break;
-  }
-
-  auto tensorType = toTensorOp->getResult(0).getType();
-  auto ifOp = builder.create<scf::IfOp>(loc, tensorType, cond,
-                                        true /* withElseRegion */);
-
-  // then branch: use inputBuffer → clone chain + to_tensor
-  {
-    auto thenBuilder = ifOp.getThenBodyBuilder();
-    IRMapping inputMap;
-    if (transferOp->getNumOperands() > 0)
-      inputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
-                   inputBuffer);
-    Operation *clonedTransfer = thenBuilder.clone(*transferOp, inputMap);
-    // Strip crossDeps from the cloned transferOp: clone() inherits attrs
-    // from the original (which may carry [tid, 0] from upstream tagging),
-    // but consumer role is owned by the ifOp wrapper below. Inner clone
-    // must stay clean.
-    clonedTransfer->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-    Value chainResult = clonedTransfer->getResult(0);
-    auto thenMapper = inputMap;
-    thenMapper.map(transferOp->getResult(0), chainResult);
-    for (Operation *op : trailingOps) {
-      Operation *cloned = thenBuilder.clone(*op, thenMapper);
-      cloned->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-      thenMapper.map(op->getResult(0), cloned->getResult(0));
-    }
-    Operation *clonedToTensor = thenBuilder.clone(*toTensorOp, thenMapper);
-    clonedToTensor->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-    thenBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
-  }
-
-  // else branch: use outputBuffer → clone chain + to_tensor
-  {
-    auto elseBuilder = ifOp.getElseBodyBuilder();
-    IRMapping outputMap;
-    if (transferOp->getNumOperands() > 0)
-      outputMap.map(transferOp->getOperand(transferOp->getNumOperands() - 1),
-                    outputBuffer);
-    Operation *clonedTransfer = elseBuilder.clone(*transferOp, outputMap);
-    clonedTransfer->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-    Value chainResult = clonedTransfer->getResult(0);
-    auto elseMapper = outputMap;
-    elseMapper.map(transferOp->getResult(0), chainResult);
-    for (Operation *op : trailingOps) {
-      Operation *cloned = elseBuilder.clone(*op, elseMapper);
-      cloned->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-      elseMapper.map(op->getResult(0), cloned->getResult(0));
-    }
-    Operation *clonedToTensor = elseBuilder.clone(*toTensorOp, elseMapper);
-    clonedToTensor->removeAttr(mlir::CVPipeline::kCrossCoreDeps);
-    elseBuilder.create<scf::YieldOp>(loc, clonedToTensor->getResult(0));
-  }
-
-  // Tag the wrapper — single source of truth for consumer role
-  ifOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  ifOp->setAttr(mlir::CVPipeline::kTransferId, builder.getI32IntegerAttr(tid));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-  ifOp->setAttr(mlir::CVPipeline::kCrossCoreDeps,
-                builder.getArrayAttr({builder.getI32IntegerAttr(tid),
-                                      builder.getI32IntegerAttr(0)}));
-
-  // Replace and erase from outermost to innermost to avoid use-after-free
-  toTensorOp->getResult(0).replaceAllUsesWith(ifOp.getResult(0));
-  toTensorOp->erase();
-  for (Operation *op : llvm::reverse(trailingOps))
-    op->erase();
-  transferOp->erase();
-
-  return ifOp.getOperation();
+/// Receiver-side variant: the cross-core buffer flows through a chain of
+/// ops (transferOp → memref.memory_space_cast → bufferization.to_tensor).
+/// Since the buffer is now a single SSA Value (selected via arith.select),
+/// all of those ops read from it directly without any cloning or
+/// scf.if wrapping. The transferOp's existing crossCoreDeps = [tid, 0]
+/// is preserved as-is.
+static Operation *
+wrapReceiverChainWithSelectChain(Operation *transferOp, Value counter,
+                                 ArrayRef<Value> buffers, int bid, int tid,
+                                 OpBuilder &builder) {
+  return wrapTransferOpWithSelectChain(transferOp, counter, buffers, bid, tid,
+                                       builder);
 }
 
-/// Process polling for a sender or receiver transfer chain
-static int processTransferChain(TransferOpChain &chain, Value cond,
-                                Value inputBuffer, Value outputBuffer,
-                                int outputFlag, bool isProducer,
+/// Process polling for a sender or receiver transfer chain.
+///
+/// With the select-chain refactor, this function no longer wraps any ops
+/// in scf.if. Instead it inserts an arith.select chain before the
+/// transferOp and mutates the transferOp's last operand to consume the
+/// selected buffer. Existing wait/set ops are left in place — they
+/// already carry the original (input) flag and the pass no longer
+/// generates output-flag wait/set ops (see createOutputBuffersForGroup).
+///
+/// `buffers` may have any size N (1, 2, 3, ...); the same logic applies
+/// for sender and receiver — the trailing ops (memory_space_cast /
+/// to_tensor) on the receiver side read from the same SSA value selected
+/// by the chain, so no special-casing is needed.
+static int processTransferChain(TransferOpChain &chain, Value counter,
+                                ArrayRef<Value> buffers,
                                 OpBuilder &builder) {
   if (!chain.waitOp) {
     return -1;
   }
 
-  Location loc = chain.waitOp->getLoc();
-
-  // 1. Wrap waitOp in polling if
-  chain.waitOp = wrapSyncOpWithScfIf<hivm::SyncBlockWaitOp>(
-      chain.waitOp, cond, outputFlag, builder,
-      [&](OpBuilder &b, Location l) -> Operation * {
-        auto waitOp = cast<hivm::SyncBlockWaitOp>(chain.waitOp);
-        return b
-            .create<hivm::SyncBlockWaitOp>(l, waitOp.getTcoreType(),
-                                           waitOp.getTpipe(), waitOp.getPipe(),
-                                           b.getI64IntegerAttr(outputFlag))
-            .getOperation();
-      });
-
-  // 2. Wrap transferOp in polling if (then=use inputBuffer, else=use
-  // outputBuffer)
   if (chain.transferOp) {
     int bid = getBlockId(chain.transferOp);
     int tid = getTransferId(chain.transferOp);
 
-    // For receiver chains with toTensorOp, wrap the full chain
-    // (transferOp → memspace_cast → to_tensor) so the scf.if returns tensor.
-    if (!isProducer && chain.toTensorOp) {
-      LDBG("transferOp: " << chain.transferOp->getName()
-                          << " (receiver, wrapping to_tensor).");
-      chain.transferOp = wrapReceiverChainWithScfIf(
-          chain.transferOp, chain.toTensorOp, cond, inputBuffer, outputBuffer,
-          bid, tid, builder);
-      chain.toTensorOp = nullptr;
-    } else {
-      bool hasExternalUses = !chain.transferOp->getResults().empty() &&
-                             !chain.transferOp->getResult(0).getUses().empty();
+    LDBG("transferOp: " << chain.transferOp->getName()
+                        << ", bufferCount=" << buffers.size()
+                        << ", hasToTensor="
+                        << (chain.toTensorOp ? "yes" : "no") << ".");
 
-      LDBG("transferOp: " << chain.transferOp->getName()
-                          << ", hasExternalUses=" << hasExternalUses << ".");
-
-      chain.transferOp =
-          hasExternalUses
-              ? wrapTransferOpWithScfIfYield(chain.transferOp, cond,
-                                             inputBuffer, outputBuffer, bid,
-                                             tid, isProducer, builder)
-              : wrapTransferOpWithScfIfSimple(chain.transferOp, cond,
-                                              inputBuffer, outputBuffer, bid,
-                                              tid, isProducer, builder);
-    }
-  }
-
-  // 3. Wrap setOp in polling if
-  if (chain.setOp) {
-    chain.setOp = wrapSyncOpWithScfIf<hivm::SyncBlockSetOp>(
-        chain.setOp, cond, outputFlag, builder,
-        [&](OpBuilder &b, Location l) -> Operation * {
-          auto setOp = cast<hivm::SyncBlockSetOp>(chain.setOp);
-          return b
-              .create<hivm::SyncBlockSetOp>(l, setOp.getTcoreType(),
-                                            setOp.getTpipe(), setOp.getPipe(),
-                                            b.getI64IntegerAttr(outputFlag))
-              .getOperation();
-        });
+    chain.transferOp = wrapReceiverChainWithSelectChain(
+        chain.transferOp, counter, buffers, bid, tid, builder);
   }
   return 0;
 }
 
-/// Create polling condition and builder for a loop op (ForOp or WhileOp).
-/// Returns the condition Value; `builderOut` is set to the insertion point
-/// for subsequent wrapping ops (before the loop terminator).
+/// Build a counter Value for a loop op (ForOp or WhileOp) and set the
+/// insertion point for subsequent ops. The counter is the per-round
+/// iteration counter that the select chain uses to choose between
+/// inputBuffer and outputBuffer.
+///
+/// For scf.for: counter = iterVar / step (matches the previous cond
+/// computation, where polling alternated per round rather than per
+/// iteration).
+///
+/// For scf.while: the counter was injected as the last iter-arg by
+/// `ensureWhileOpHasCounter` during preprocessing; we just look it up.
+///
+/// `builderOut` is positioned at the loop's terminator (or, for ForOp,
+/// just before waitOp) so subsequent `buildBufferSelectChain` calls
+/// emit ops at the right place.
 static Value prepareLoopPolling(Operation *loopOp, Operation *waitOp,
                                 OpBuilder &builderOut) {
   int bid = getBlockId(waitOp);
   int tid = getTransferId(waitOp);
 
   if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
-    OpBuilder condBuilder(forOp.getBody(), Block::iterator(waitOp));
-    Value cond = createPollingCondition(forOp, condBuilder, bid, tid);
+    OpBuilder counterBuilder(forOp.getBody(), Block::iterator(waitOp));
+    Location loc = forOp.getLoc();
+    Value iterVar = forOp.getInductionVar();
+    Value step = forOp.getStep();
+    auto divOp = counterBuilder.create<arith::DivSIOp>(loc, iterVar, step);
+    setSsbufferTags(divOp.getOperation(), counterBuilder, bid, tid);
+    Value counter = divOp.getResult();
+
+    // Builder for subsequent select-chain ops: just before the forOp
+    // terminator (yield).
     builderOut.setInsertionPoint(forOp.getBody()->getTerminator());
-    return cond;
+    return counter;
   }
 
   if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp)) {
-    // Counter was already injected in preprocessing. Polling condition:
-    // (counter % 2) == 0
     Block &after = whileOp.getAfter().front();
     Value counter = after.getArgument(after.getNumArguments() - 1);
     builderOut.setInsertionPoint(after.getTerminator());
-    OpBuilder condBuilder(builderOut);
-    Value c2 =
-        condBuilder.create<arith::ConstantIntOp>(whileOp.getLoc(), 2, 32);
-    Value rem =
-        condBuilder.create<arith::RemSIOp>(whileOp.getLoc(), counter, c2);
-    Value c0 =
-        condBuilder.create<arith::ConstantIntOp>(whileOp.getLoc(), 0, 32);
-    return condBuilder.create<arith::CmpIOp>(whileOp.getLoc(),
-                                             arith::CmpIPredicate::eq, rem, c0);
+    return counter;
   }
 
   llvm_unreachable("unexpected loop op type");
@@ -1242,37 +1027,34 @@ static int addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups) {
     // Get sender's loop op (ForOp or WhileOp)
     Operation *senderWaitParent = g.senderChain.waitOp->getParentOp();
 
-    // Prepare polling condition and builder for sender loop
+    // Prepare counter Value and builder for sender loop
     OpBuilder senderBuilder(senderWaitParent->getContext());
-    Value senderCond = prepareLoopPolling(senderWaitParent,
-                                          g.senderChain.waitOp, senderBuilder);
+    Value senderCounter = prepareLoopPolling(
+        senderWaitParent, g.senderChain.waitOp, senderBuilder);
 
-    // Process sender chain (isProducer=true)
-    if (processTransferChain(g.senderChain, senderCond, g.senderInputBuffer,
-                             g.senderOutputBuffer, g.outputFlag, true,
+    // Process sender chain
+    if (processTransferChain(g.senderChain, senderCounter, g.senderBuffers,
                              senderBuilder) != 0) {
       return -1;
     }
 
-    // Process receiver chain (may use different loop op) (isProducer=false)
+    // Process receiver chain (may use different loop op)
     if (g.receiverChain.waitOp) {
       Operation *receiverWaitParent = g.receiverChain.waitOp->getParentOp();
 
       if (receiverWaitParent == senderWaitParent) {
-        // Use the same cond and builder
-        if (processTransferChain(g.receiverChain, senderCond,
-                                 g.receiverInputBuffer, g.receiverOutputBuffer,
-                                 g.outputFlag, false, senderBuilder) != 0) {
+        // Use the same counter and builder
+        if (processTransferChain(g.receiverChain, senderCounter,
+                                 g.receiverBuffers, senderBuilder) != 0) {
           return -1;
         }
       } else {
-        // Receiver uses a different loop op, prepare new cond and builder
+        // Receiver uses a different loop op, prepare new counter and builder
         OpBuilder receiverBuilder(receiverWaitParent->getContext());
-        Value receiverCond = prepareLoopPolling(
+        Value receiverCounter = prepareLoopPolling(
             receiverWaitParent, g.receiverChain.waitOp, receiverBuilder);
-        if (processTransferChain(g.receiverChain, receiverCond,
-                                 g.receiverInputBuffer, g.receiverOutputBuffer,
-                                 g.outputFlag, false, receiverBuilder) != 0) {
+        if (processTransferChain(g.receiverChain, receiverCounter,
+                                 g.receiverBuffers, receiverBuilder) != 0) {
           return -1;
         }
       }
@@ -1409,7 +1191,7 @@ void AddMultiBufferOuterScopePass::runOnOperation() {
 
   if (isDoubleBuf) {
     LDBG("[Step 2/3] Start: output buffer creation.");
-    if (createOutputBuffers(groups, module)) {
+    if (createOutputBuffers(groups, module, interCoreBufNum)) {
       LDBG("FALLBACK: Step 2/3 failed, output buffer creation failed, rc="
            << CVPipeline::ERRCODE_FAILED << ".");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);

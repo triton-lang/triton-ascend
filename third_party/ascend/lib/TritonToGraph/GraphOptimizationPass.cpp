@@ -20,6 +20,8 @@
  * THE SOFTWARE.
  */
 
+#include "Rules/FoldHistogramParking.h"
+#include "Rules/NarrowUnsignedTensor.h"
 #include "TritonToGraph/GraphOptimizationContext.h"
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/Passes.h"
@@ -27,6 +29,7 @@
 
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
@@ -102,10 +105,12 @@ public:
     this->maxRewritesPerFunction = options.maxRewritesPerFunction;
     this->ubCapacityBytes = options.ubCapacityBytes;
     this->compileMode = options.compileMode;
+    this->compileOn91095 = options.compileOn91095;
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<tensor::TensorDialect>();
+    registry.insert<tensor::TensorDialect, arith::ArithDialect,
+                    triton::TritonDialect>();
   }
 
   void runOnOperation() override;
@@ -152,12 +157,24 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.maxRewritesPerFunction = static_cast<unsigned>(cliMaxRewrites);
   options.ubCapacityBytes = static_cast<unsigned>(cliUBCapacityBytes);
   options.compileMode = this->compileMode;
+  options.compileOn91095 = this->compileOn91095;
   return success();
 }
 
 void GraphOptimizePass::runOnOperation() {
   GraphOptimizationOptions options;
   if (failed(getStableOptions(options))) {
+    signalPassFailure();
+    return;
+  }
+
+  // Simplify tensor values before constructing any graph analyses so layout
+  // rules observe the reduced workload, without retaining stale graph state.
+  RewritePatternSet patterns(&getContext());
+  patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
+  if (compileOn91095)
+    patterns.add<FoldHistogramParking>(&getContext());
+  if (failed(applyPatternsGreedily(getOperation(), std::move(patterns)))) {
     signalPassFailure();
     return;
   }

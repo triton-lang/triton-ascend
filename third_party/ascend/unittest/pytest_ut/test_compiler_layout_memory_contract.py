@@ -540,7 +540,7 @@ def _run_make_ttir_with_recorded_graph_options(compiler, monkeypatch, options):
         compiler,
         "ascend",
         SimpleNamespace(passes=SimpleNamespace(ttir=SimpleNamespace(
-            add_graph_optimize=lambda _pm, **kwargs: graph_calls.append(kwargs)))),
+            add_graph_optimize=lambda _pm, **kwargs: (events.append("graph_optimize"), graph_calls.append(kwargs))))),
     )
 
     assert compiler.make_ttir(module, {}, options) is module
@@ -551,6 +551,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     options = SimpleNamespace(
         enable_graph_optimize=True,
         target_arch="Ascend910B1",
+        compile_on_910_95=False,
         compile_mode="simt_only",
         debug=False,
     )
@@ -560,8 +561,17 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     assert graph_calls == [{
         "ub_capacity_bytes": 96 * 1024,
         "compile_mode": "simt_only",
+        "compile_on_910_95": False,
     }]
     assert events[-1] == "run_row"
+    assert events.index(("loop_unroll", (), {})) < events.index("graph_optimize")
+
+
+def test_make_ttir_disables_graph_pipeline(compiler_module, monkeypatch):
+    options = SimpleNamespace(enable_graph_optimize=False, debug=False)
+    events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
+    assert "graph_optimize" not in events
+    assert graph_calls == []
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")

@@ -119,6 +119,7 @@ struct GraphOptimizationOptions {
   // compile_mode="simt_only".  Keep the source selector rather than a
   // second derived force flag so every consumer follows one mode contract.
   std::string compileMode = "simd_simt_template";
+  bool compileOn91095 = false;
 };
 
 std::unique_ptr<OperationPass<ModuleOp>>

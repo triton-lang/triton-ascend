@@ -184,6 +184,7 @@ def make_ttir(mod, metadata, opt):
             pm,
             ub_capacity_bytes=graph_ub_budget_bytes_for_arch(opt.target_arch),
             compile_mode=opt.compile_mode,
+            compile_on_910_95=opt.compile_on_910_95,
         )
     pm.run(mod, 'make_ttir')
     if opt.debug:

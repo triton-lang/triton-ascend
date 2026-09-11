@@ -114,10 +114,6 @@ else()
   set(TRITON_ASCEND_HAS_INPROC_COSTMODEL 0)
 endif()
 
-# TritonToGraph is configured before the optional costmodel subtree, but the
-# target properties below are resolved after the complete configure.  Set them
-# here so ResourceCostModel.cpp can read HardwareConfig when it is available,
-# while retaining an explicit conservative fallback in minimal builds.
 if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   target_include_directories(TritonToGraph PRIVATE
     "${_costmodel_gen_include}"

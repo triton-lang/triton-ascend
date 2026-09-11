@@ -60,12 +60,8 @@ namespace cfg {
 namespace {
 
 constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
-    // Keep legacy phases separate so a default (0..511) compilation observes
-    // the same order as before stage 00.
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
-    // IndependentAxisTensorize and StaticProgramAxisFusion intentionally share
-    // this phase: candidates for one target axis compete by benefit.
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
     GraphOptimizationRulePhase::LoadStoreTranspose,
@@ -122,8 +118,6 @@ constexpr bool isPlanHigherPriority(unsigned lhsBenefit, unsigned lhsOrder,
          getGraphOptimizationRuleMask(rhsRuleId);
 }
 
-// This is the mock/no-op scheduling contract: equal-benefit plans anchored at
-// the same operation receive a stable rule-ID tie break inside one phase.
 static_assert(isPlanHigherPriority(
                   1, 7, GraphOptimizationRuleId::IndependentAxisTensorize, 1, 7,
                   GraphOptimizationRuleId::StaticProgramAxisFusion),
@@ -157,10 +151,6 @@ private:
 };
 
 LogicalResult GraphOptimizePass::runStructuralCleanup() {
-  // Program-mapping rules introduce loop bodies and new broadcast chains.
-  // Canonicalize/CSE/LICM immediately after each successful structural rewrite
-  // so the next phase discovers candidates against a stable IR epoch rather
-  // than stale pre-rewrite definitions.
   PassManager cleanup(&getContext(), getOperation().getOperationName());
   cleanup.addPass(createCanonicalizerPass());
   cleanup.addPass(createCSEPass());
@@ -380,10 +370,6 @@ void GraphOptimizePass::runOnOperation() {
           signalPassFailure();
           return;
         }
-        // Preserve the legacy rule and RowCoalescing IR contracts exactly.
-        // The cleanup is required only between the new program-mapping
-        // rewrites, where it establishes the next analysis epoch after the
-        // rule has introduced loops or pointer/broadcast structure.
         if (requiresProgramMappingCleanup(appliedRuleId) &&
             failed(runStructuralCleanup())) {
           selectedPlan.reset();
@@ -420,9 +406,6 @@ void GraphOptimizePass::runOnOperation() {
     if (!isRuleEnabled(options.enabledRuleMask,
                        GraphOptimizationRuleId::RowCoalescing))
       continue;
-    // A successfully committed dynamic mapping owns launch-grid semantics.
-    // Rule enablement alone is not enough to skip legacy RowCoalescing: a
-    // no-op IAT/PTSM candidate must leave the historical Row path available.
     if (module->hasAttr(kProgramGridTransformsAttr))
       continue;
 

@@ -158,7 +158,6 @@ private:
   // 分析splat操作
   void analyzeSplatOp(mlir::triton::SplatOp splatOp);
 
-  // 分析expand_dims操作
   void analyzeExpandDimsOp(mlir::triton::ExpandDimsOp expandDimsOp);
 
   SmallVector<std::unique_ptr<TensorObject>> ownedTensorObjects;

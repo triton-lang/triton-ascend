@@ -34,9 +34,6 @@ using namespace cfg;
 
 namespace {
 
-// A stage-00 reservation is deliberately not a fake matcher.  It participates
-// in normal mask/phase registration, records an explicit rejection reason, and
-// leaves IR untouched until the owning rule implementation replaces it.
 class ReservedGraphOptimizationRule final : public GraphOptimizationRule {
 public:
   explicit ReservedGraphOptimizationRule(
@@ -74,7 +71,7 @@ private:
   unsigned rejectedUnimplemented = 0;
 };
 
-} // namespace
+}
 
 std::unique_ptr<GraphOptimizationRule> cfg::createReservedGraphOptimizationRule(
     ReservedGraphOptimizationRuleOptions options) {

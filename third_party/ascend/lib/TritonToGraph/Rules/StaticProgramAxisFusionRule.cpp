@@ -55,10 +55,6 @@ constexpr int32_t kGroupAxis = 2;
 constexpr llvm::StringLiteral kStaticFusionStableId =
     "static-program-axis-fusion";
 
-// This rule deliberately recognizes one narrow, auditable shape: an unrolled
-// logits-like group suffix with a single group-major store. It is preferable
-// to reject a superficially similar program than to move an unproven effect
-// into a sequential loop.
 struct StaticFusionStructure {
   triton::FuncOp function;
   triton::GetProgramIdOp groupPid;
@@ -106,14 +102,9 @@ bool hasDirectCall(triton::FuncOp function) {
 bool hasDisallowedEffect(triton::FuncOp function) {
   bool disallowed = false;
   function.walk([&](Operation *operation) {
-    // Operation::walk includes the function root. Its region is the normal
-    // entry body, not nested control flow introduced by the candidate.
     if (operation == function.getOperation())
       return;
     const StringRef name = operation->getName().getStringRef();
-    // Atomics, barriers, random state, printing, and nested control flow all
-    // make execution order observable. SPAF has no synchronization or RNG
-    // contract, so each is an unconditional legality rejection.
     if (operation->getNumRegions() != 0 || isa<CallOpInterface>(operation) ||
         name.contains_insensitive("atomic") ||
         name.contains_insensitive("barrier") ||
@@ -231,11 +222,6 @@ bool hasRawGroupLeafImpl(Value value, Value group, DenseSet<Value> &seen) {
   });
 }
 
-// A store is accepted only when its pointer contains one group*span term and
-// its mask bounds a zero-based logical row range by that exact span. The
-// standard logits row-major pointer may have an additional dynamic row stride
-// and key offset, but those are downstream of the disjoint logical row IDs.
-// This intentionally rejects a pointer with another raw group contribution.
 bool hasProvenGroupMajorStore(triton::StoreOp store, Value group) {
   Value pointer = store.getPtr();
   Value mask = store.getMask();
@@ -305,9 +291,6 @@ bool collectSuffixLoadsAndDots(StaticFusionStructure &structure,
           return false;
         foundGroupLoad = true;
       } else {
-        // Any load moved through the new loop would be duplicated. Only
-        // group-dependent Q/weight loads are allowed in the suffix; the K
-        // tile must be the one retained in the outer program body.
         return false;
       }
     }
@@ -364,8 +347,6 @@ matchStaticFusion(triton::FuncOp function,
     return std::nullopt;
 
   const int64_t groups = moduleSpecialization->grid[kGroupAxis];
-  // G=1 is intentionally a no-op: do not change the grid or introduce a
-  // loop merely to replay one original program.
   if (groups <= 1)
     return std::nullopt;
 
@@ -517,8 +498,6 @@ bool buildCandidateCost(const StaticFusionStructure &structure, unsigned factor,
   cost.gmWriteBytesAfter = writes;
   cost.storeCountBefore = programsBefore;
   cost.storeCountAfter = programsBefore;
-  // The K address and load are executed once per physical program after
-  // fusion. All group-local address work remains once per logical group.
   cost.addressCalculationsBefore = programsBefore;
   cost.addressCalculationsAfter = programsAfter;
   cost.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
@@ -556,8 +535,6 @@ selectStaticFusionCandidate(GraphOptimizationContext &context,
       continue;
     CandidateEvaluation evaluation =
         context.getResourceCostAnalysis().evaluate(cost);
-    // This is intentionally a remark rather than a hidden heuristic: a
-    // rejected UB/parallelism candidate must be inspectable in a compiler log.
     if (emitRemarks)
       emitCandidateRemark(structure->keyLoad, evaluation);
     evaluations.push_back(std::move(evaluation));
@@ -627,11 +604,6 @@ LogicalResult materializeStaticFusion(triton::FuncOp function,
   if (!body || !body->mightHaveTerminator())
     return failure();
   rewriter.setInsertionPointToStart(body);
-  // In both full and partial fusion the induction variable identifies the
-  // logical group handled by this loop iteration.  Full fusion starts at
-  // group zero, while partial fusion adds the physical-program base.  Do not
-  // substitute the zero lower bound for full fusion: that would replay group
-  // zero for every iteration and leave the remaining group-major rows stale.
   Value fusedGroup = loop.getInductionVar();
   if (factor != structure.groups)
     fusedGroup = rewriter.create<arith::AddIOp>(loc, groupBase, fusedGroup);
@@ -645,9 +617,6 @@ LogicalResult materializeStaticFusion(triton::FuncOp function,
   if (factor == structure.groups && structure.groupPid.getResult().use_empty())
     rewriter.eraseOp(structure.groupPid.getOperation());
 
-  // No loop-carried values are created. In particular, each moved f32 dot
-  // accumulator is defined in the body and is dead before the next IV, while
-  // the K tile remains defined before the scf.for and is captured read-only.
   return mlir::verify(function.getOperation());
 }
 
@@ -678,7 +647,7 @@ public:
     if (context.getFunction() != candidate.structure.function)
       return failure();
     std::optional<StaticFusionCandidate> current =
-        selectStaticFusionCandidate(context, /*emitRemarks=*/false);
+        selectStaticFusionCandidate(context, false);
     return current && sameCandidate(candidate, *current) ? success()
                                                          : failure();
   }
@@ -689,8 +658,6 @@ public:
     if (!module)
       return failure();
 
-    // Clone into a detached one-function module. A late verifier failure must
-    // leave both the original IR and launcher metadata unchanged.
     ModuleOp sandbox = ModuleOp::create(candidate.structure.function.getLoc());
     Attribute specialization = module->getAttr(kProgramGridSpecializationAttr);
     if (!specialization)
@@ -712,12 +679,12 @@ public:
 
     ProgramGridTransformContract contract;
     contract.transforms.push_back(ProgramGridTransform{
-        /*order=*/0,
-        /*axis=*/kGroupAxis,
-        /*factor=*/static_cast<int64_t>(candidate.factor),
-        /*logicalExtent=*/candidate.structure.groups,
-        /*persistentCoverage=*/false,
-        /*gridStrideAbiVerified=*/false,
+        0,
+        kGroupAxis,
+        static_cast<int64_t>(candidate.factor),
+        candidate.structure.groups,
+        false,
+        false,
     });
     if (failed(setProgramGridTransformContract(sandbox, contract)) ||
         failed(mlir::verify(sandbox.getOperation())))
@@ -772,7 +739,7 @@ private:
   bool enabledForCompileMode;
 };
 
-} // namespace
+}
 
 std::unique_ptr<GraphOptimizationRule> cfg::createStaticProgramAxisFusionRule(
     const StaticProgramAxisFusionRuleOptions &options) {

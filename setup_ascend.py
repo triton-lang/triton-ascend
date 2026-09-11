@@ -507,7 +507,6 @@ def _patch_module(mod):
 
     mod.CMakeBuild = CMakeBuild
 
-    # 4. Optionally bundle a prebuilt BishengIR tree into the wheel.
     _OrigCMakeBuildPy = mod.CMakeBuildPy
 
     class AscendBuildPy(_OrigCMakeBuildPy):
@@ -518,7 +517,6 @@ def _patch_module(mod):
 
     mod.AscendBuildPy = AscendBuildPy
 
-    # 5. Replace BuildWheel (bdist_wheel) with Ascend auditwheel variant.
     is_manylinux = mod.check_env_flag("IS_MANYLINUX", "FALSE")
 
     class BuildWheel(bdist_wheel):
@@ -550,7 +548,6 @@ def _patch_module(mod):
 
     mod.BuildWheel = BuildWheel
 
-    # 6. Patch get_package_dirs to include distributed package.
     _orig_get_package_dirs = mod.get_package_dirs
 
     def get_package_dirs():
@@ -561,7 +558,6 @@ def _patch_module(mod):
 
     mod.get_package_dirs = get_package_dirs
 
-    # 7. Patch get_packages to include distributed subpackages.
     _orig_get_packages = mod.get_packages
 
     def get_packages():
@@ -580,7 +576,6 @@ def _patch_module(mod):
 
     mod.get_packages = get_packages
 
-    # 8. Patch add_links to include distributed symlink.
     _orig_add_links = mod.add_links
 
     def add_links(external_only):
@@ -621,7 +616,6 @@ def _build_setup_kwargs(mod, kwargs):
     if package_data:
         kwargs["package_data"] = package_data
 
-    # cmdclass: replace bdist_wheel/build_ext/build_py with Ascend variants
     cmdclass = dict(kwargs.get("cmdclass") or {})
     cmdclass["bdist_wheel"] = mod.BuildWheel
     cmdclass["build_ext"] = mod.CMakeBuild

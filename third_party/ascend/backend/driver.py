@@ -1027,10 +1027,6 @@ static void release_npu_tensor_handle(void* handle) {{
 }}
 """
 
-    # The dynamic IAT/PTSM and legacy fixed-grid SPAF contracts are distinct
-    # launch ABIs.  Only the former has the two hidden original-grid arguments;
-    # treating a legacy Z-axis transform as dynamic would silently corrupt both
-    # its launch arithmetic and its device parameter layout.
     raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
     if raw_program_grid_transforms is not None:
         try:
@@ -1280,9 +1276,6 @@ static void release_npu_tensor_handle(void* handle) {{
 
     npu_headers = generate_npu_header_src()
 
-    # Both launch entry points preserve the original grid, perform the same
-    # inline dynamic mapping, and then use the resulting grid for workspace
-    # sizing and device block count.
     _program_grid_launch_preamble = f"""
   {program_grid_finalization}
   {coalesce_grid_div if program_grid_transforms is None else ''}"""

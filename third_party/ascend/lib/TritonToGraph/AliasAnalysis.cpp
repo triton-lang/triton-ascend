@@ -278,10 +278,6 @@ void AliasAnalysis::analyzeSplatOp(mlir::triton::SplatOp splatOp) {
 
 void AliasAnalysis::analyzeExpandDimsOp(
     mlir::triton::ExpandDimsOp expandDimsOp) {
-  // ``tt.expand_dims`` only changes the tensor shape.  In particular, IAT
-  // inserts it between a pointer tensor and a broadcast, so losing this edge
-  // would incorrectly turn a known entry-pointer root into Unknown in the
-  // next graph-optimization epoch.
   Value src = expandDimsOp.getSrc();
   Value result = expandDimsOp.getResult();
   if (!isPointerType(getElementTypeOrSelf(src.getType())))

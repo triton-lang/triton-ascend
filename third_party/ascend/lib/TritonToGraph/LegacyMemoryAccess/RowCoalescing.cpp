@@ -94,9 +94,6 @@ static bool isScalarIntegerLike(Value value) {
   return intTy && intTy.getWidth() > 1;
 }
 
-// Preserve only the compiler-generated overflow instrumentation while
-// lifting a row.  User assertions remain a deliberate bailout so their trap
-// behavior is never changed by this optimization.
 static bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
   if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
     return false;

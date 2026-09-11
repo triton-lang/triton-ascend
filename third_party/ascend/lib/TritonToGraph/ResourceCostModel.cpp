@@ -75,9 +75,6 @@ bool isTensorValue(Value value) {
   return value && isa<RankedTensorType, UnrankedTensorType>(value.getType());
 }
 
-// ResourceCostModel estimates resident UB storage, not every SSA/register
-// value. Pointer/index/mask vectors are intentionally excluded from this
-// byte model; their register pressure is handled by the lowering backend.
 bool isUBResidentTensor(Value value) {
   if (!value)
     return false;
@@ -99,8 +96,6 @@ bool isVirtualTensorOperation(Operation *operation) {
   if (!operation)
     return false;
   const StringRef name = operation->getName().getStringRef();
-  // Ranges and scalar splats are vector/register construction, not a new UB
-  // allocation. Their floating consumers still receive their own intervals.
   return name == "tt.make_range" || name == "tt.splat" ||
          name == "arith.constant";
 }
@@ -234,7 +229,7 @@ CandidateEvaluation reject(const CandidateCost &candidate,
   return evaluation;
 }
 
-} // namespace
+}
 
 const char *
 cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
@@ -371,10 +366,6 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
           findCanonicalValue(terminator->getOperand(index), canonicalValues);
   }
 
-  // Tensor reshapes and broadcasts are views of the same resident storage.
-  // Canonicalizing them before interval construction prevents a single
-  // materialized tile (notably token-only cos/sin broadcast over heads) from
-  // being charged once per SSA view.
   for (Operation *operation : operations) {
     if (!isStorageViewOperation(operation) || operation->getNumOperands() != 1)
       continue;
@@ -445,9 +436,6 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
     }
   }
 
-  // Values captured from an enclosing scope are required by every dynamic loop
-  // iteration.  Extending them to the end of the body prevents a lexical
-  // single-iteration walk from dropping an invariant between iterations.
   for (Operation *loop : operations) {
     if (!isForLikeLoop(loop))
       continue;
@@ -491,9 +479,6 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
       if (state.begin <= position && position <= state.end)
         live.push_back(&state);
     }
-    // If two values are produced in opposite branches of the same scf.if,
-    // retain the larger allocation at the point rather than charging both.
-    // Sorting by bytes first keeps the result conservative and deterministic.
     llvm::sort(live, [](const IntervalState *lhs, const IntervalState *rhs) {
       if (lhs->bytes != rhs->bytes)
         return lhs->bytes > rhs->bytes;
@@ -571,7 +556,7 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
       gains > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       penalties > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
-                  /*requiredParallelPrograms=*/0);
+                  0);
 
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;

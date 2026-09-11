@@ -68,32 +68,14 @@ constexpr llvm::StringLiteral kCoalesceAxisAttr = "hacc.coalesce_axis";
 constexpr llvm::StringLiteral kCoalesceGridCeilDivAttr =
     "hacc.coalesce_grid_ceil_div";
 
-// Keep the accepted MergeSplit policy isolated from the Norm+RoPE joint
-// planner. Factor 16 is available only to the latter; merely expanding a
-// global array must not alter existing Merge primary selection.
 constexpr std::array<unsigned, 3> kMergeTensorizeFactors = {2, 4, 8};
-// These factors are intentionally a second, MergeSplit-only candidate set.
-// Norm+RoPE's standalone and joint paths keep their existing factor domains.
 constexpr std::array<unsigned, 2> kMergeLargeTensorizeFactors = {16, 32};
 constexpr std::array<unsigned, 4> kNormTensorizeFactors = {2, 4, 8, 16};
 constexpr std::array<unsigned, 7> kNormPersistentBlockTCandidates = {
     2, 4, 8, 16, 32, 64, 128};
 
-// MergeSplit keeps the split-reduction dimension and the newly tensorized head
-// dimension live in the same state tile.  On Ascend950PR, a 2x head fusion at
-// the primary shapes left too many small physical programs, while the resource
-// model still selected it because it priced only the extra live bytes.  Bound
-// the product of those two live dimensions and, within the existing UB and
-// parallelism gates, prefer the largest legal factor.  This gives 2x8 lanes
-// for BLOCK_S=2 and 4x4 lanes for BLOCK_S=4, but falls back to 2x for
-// BLOCK_S=8 and rejects larger unvalidated planes instead of over-tiling.
 constexpr uint64_t kMergeSplitMaxTensorizedPlanes = 16;
 
-// Phase B is deliberately narrower than the large-factor mapping policy: it
-// removes the known padding tail only after the original DSL has materialized
-// the exact ``range(0, 256) < 192`` data-tile form.  Do not turn this into a
-// generic non-power-of-two tile rewrite; the matcher below validates the full
-// local dataflow before changing any tensor type.
 constexpr int64_t kMergeSplitD192SourceTile = 256;
 constexpr int64_t kMergeSplitD192TargetTile = 192;
 constexpr unsigned kDynamicSingleMomentBlockT = 4;
@@ -104,10 +86,7 @@ enum class TensorizeForm : uint8_t {
 };
 
 enum class IATCandidateScope : uint8_t {
-  // Existing F2/F4/F8 MergeSplit and Norm+RoPE candidate selection.
   Default,
-  // The only path allowed to bypass default min-programs-per-core: a
-  // statically small, nonpersistent MergeSplit F16/F32 launch.
   MergeSplitLarge,
 };
 
@@ -116,29 +95,16 @@ struct IATCandidate {
   Operation *anchor = nullptr;
   TensorizeForm form = TensorizeForm::MergeSplit;
   int32_t axis = 1;
-  // The split and D extents make the merge form's lane placement explicit:
-  // [S, D] becomes [S, F, D], while values already reduced over S become
-  // [F, D].  A single global insertion index cannot represent both shapes.
   int64_t splitExtent = 0;
   int64_t dimExtent = 0;
   unsigned factor = 1;
-  // This is set only after the static small-grid checks for MergeSplit F16/F32
-  // succeed. It is consumed by CandidateCost, not by any global graph option.
   bool usesMergeSplitSubCorePolicy = false;
-  // Set only when a detached post-IAT sandbox proves that the primary D256
-  // data-tile can be rewritten to its statically masked D192 extent.
   bool usesMergeSplitD192Tile = false;
-  // With both mapping bits enabled a Norm+RoPE IAT candidate is a joint IAT
-  // plus PTSM transaction. No launcher-visible IAT-only intermediate is ever
-  // committed when that required second half cannot validate.
   bool requiresPersistentChaining = false;
   ResourceSnapshot resources;
   CandidateEvaluation evaluation;
 };
 
-// This is scheduler state for two existing rules, not a fourth rule or a new
-// rule-mask bit. The IAT id remains the owning phase so the later standalone
-// PTSM phase sees the committed marker and becomes a no-op.
 struct JointProgramMappingCandidate {
   IATCandidate iat;
   unsigned blockT = 0;
@@ -160,8 +126,6 @@ struct TensorizeFormMatch {
 struct MappedValue {
   Value value;
   bool tensorized = false;
-  // Position of the newly introduced F dimension in `value` when tensorized.
-  // Scalars tensorize to tensor<F>, so their lane axis is always zero.
   int64_t laneAxis = 0;
 };
 
@@ -205,15 +169,10 @@ classifyTensorizeForm(triton::FuncOp function) {
     } else if (source.getRank() == 1 && !isa<RankedTensorType>(result)) {
       if (!normReduction)
         normReduction =
-            TensorizeReductionShape{/*splitExtent=*/0,
-                                    /*dimExtent=*/source.getShape()[0]};
+            TensorizeReductionShape{0,
+                                    source.getShape()[0]};
     }
   });
-  // MergeSplit has auxiliary rank-1 scalar reductions for peak and total
-  // before its rank-2 state reduction. The latter carries the actual split
-  // and data dimensions and is therefore the more specific structural form.
-  // Only fall back to the rank-1 scalar form when that merge signature is
-  // absent; a function name never resolves this choice.
   if (mergeReduction)
     return TensorizeFormMatch{TensorizeForm::MergeSplit, *mergeReduction};
   if (normReduction)
@@ -248,10 +207,6 @@ bool hasConflictingLaunchContract(ModuleOp module) {
          module->hasAttr(kCoalesceGridCeilDivAttr);
 }
 
-// Every transformed store has its own selected-axis disjointness proof from
-// ProgramAxisDependenceAnalysis.  A write/read relation still needs a pointer
-// root proof: an in-place or unknown-alias read could observe another lane's
-// write even when each store interval is individually disjoint.
 bool hasDisjointWriteReadRoots(
     const ProgramAxisDependence &dependence,
     const EntryArgPointerAliasAnalysis &entryPointerAliases) {
@@ -272,11 +227,6 @@ bool hasDisjointWriteReadRoots(
 }
 
 
-// Keep the lane next to the logical dimension which carries the data, rather
-// than applying a fixed insertion point to every value.  In merge, S-shaped
-// values carry the split reduction and become [S, F, ...]; D-shaped values
-// live after that reduction and become [F, D].  Norm has only the D dimension
-// and always puts F first.
 int64_t getPreferredLaneAxis(Type originalType, const IATCandidate &candidate) {
   auto tensor = dyn_cast<RankedTensorType>(originalType);
   if (!tensor || candidate.form == TensorizeForm::NormRope)
@@ -286,8 +236,6 @@ int64_t getPreferredLaneAxis(Type originalType, const IATCandidate &candidate) {
     return 0;
   if (rank == 1)
     return tensor.getShape().front() == candidate.splitExtent ? 1 : 0;
-  // Scalars broadcast over a leading split dimension retain that dimension on
-  // the left of F as well (for example tensor<1xD> -> tensor<1xF xD>).
   if (tensor.getShape().front() == candidate.splitExtent ||
       tensor.getShape().front() == 1)
     return 1;
@@ -393,10 +341,6 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
                : rewriter.create<triton::BroadcastOp>(loc, target, value);
   };
 
-  // Embed an already tensorized value in a target shape without moving data:
-  // only singleton dimensions are inserted and all non-singleton dimensions
-  // must preserve their relative order.  This rejects instead of guessing a
-  // transpose when an unfamiliar shape relation reaches the MVP.
   auto alignTensorized = [&](Location loc, MappedValue mapped,
                              RankedTensorType target,
                              int64_t targetLaneAxis) -> Value {
@@ -500,13 +444,6 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
   };
 
   auto createUnchanged = [&](Operation *operation) -> bool {
-    // `tt.reduce` and `tt.scan` carry a combiner region.  Rebuilding a
-    // non-tensorized operation through the generic OperationState overload
-    // loses that region, which leaves malformed IR when a MergeSplit kernel
-    // has an auxiliary scalar reduction next to the tensorized state
-    // reduction.  Clone with an operand mapping instead so unchanged
-    // operations retain every nested region while still consuming the
-    // rewritten operands that dominate this insertion point.
     IRMapping mapping;
     for (Value operand : operation->getOperands()) {
       Value mapped = lookup(operand).value;
@@ -626,11 +563,6 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
       auto runtimeExtentMask = rewriter.create<arith::CmpIOp>(
           operation->getLoc(), arith::CmpIPredicate::ult, logicalIdsI64,
           extentSplat);
-      // Preserve the exact unsigned IR contract while proving the one case
-      // that is safe to lower as a continuous tail: both sides originate from
-      // the non-negative program-id space and the runtime launch extent.
-      // Generic unsigned comparisons intentionally retain the conservative
-      // discrete-memory path.
       runtimeExtentMask->setAttr(
           mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG,
           rewriter.getUnitAttr());
@@ -906,8 +838,6 @@ bool rebuildTensorizedFunction(triton::FuncOp function,
     }
 
     if (isa<triton::ReturnOp>(operation)) {
-      // The target kernels have no return values. Returning a tensorized value
-      // would require changing the callable ABI, so reject it.
       for (Value operand : operation->getOperands())
         if (lookup(operand).tensorized)
           return false;
@@ -958,9 +888,9 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
   contract.dynamicOriginalGrid = true;
   contract.transforms.push_back(ProgramGridTransform{
       0, candidate.axis, static_cast<int64_t>(candidate.factor),
-      /*logicalExtent=*/0,
-      /*persistentCoverage=*/false,
-      /*gridStrideAbiVerified=*/false});
+      0,
+      false,
+      false});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
   module->setAttr(kIndependentAxisTensorizeMarkerAttr,
@@ -985,19 +915,19 @@ analyzeDynamicSingleMomentCandidate(GraphOptimizationContext &context) {
       !hasSupportedControlFlow(function) ||
       classifyIndependentRowReduction(function) !=
           IndependentRowReductionKind::SingleMoment ||
-      !findOnlyProgramId(function, /*axis=*/0))
+      !findOnlyProgramId(function, 0))
     return std::nullopt;
 
   std::optional<TensorizeFormMatch> formMatch = classifyTensorizeForm(function);
   if (!formMatch || formMatch->form != TensorizeForm::NormRope)
     return std::nullopt;
   std::optional<triton::GetProgramIdOp> headPid =
-      findOnlyProgramId(function, /*axis=*/1);
+      findOnlyProgramId(function, 1);
   if (!headPid)
     return std::nullopt;
 
   const ProgramAxisDependence &dependence =
-      context.getProgramAxisDependenceAnalysis().get(/*axis=*/1);
+      context.getProgramAxisDependenceAnalysis().get(1);
   if (!dependence.isProgramMappingTransformCandidate() ||
       !hasDisjointWriteReadRoots(dependence,
                                  context.getEntryArgPointerAliasAnalysis()))
@@ -1078,7 +1008,7 @@ public:
         failed(materializePersistentTaskStripMiningCandidate(
             sandbox, clonedFunction, candidate.resources,
             kDynamicSingleMomentBlockT, &persistentEvaluation,
-            /*deferIntermediateResourceRejection=*/true)) ||
+            true)) ||
         failed(runProgramMappingStructuralCleanup(sandbox)) ||
         failed(mlir::verify(sandbox.getOperation())))
       return failure();
@@ -1135,15 +1065,15 @@ analyzeDynamicMergeSplitCandidate(GraphOptimizationContext &context) {
 
   std::optional<TensorizeFormMatch> formMatch = classifyTensorizeForm(function);
   if (!formMatch || formMatch->form != TensorizeForm::MergeSplit ||
-      !findOnlyProgramId(function, /*axis=*/0))
+      !findOnlyProgramId(function, 0))
     return std::nullopt;
   std::optional<triton::GetProgramIdOp> headPid =
-      findOnlyProgramId(function, /*axis=*/1);
+      findOnlyProgramId(function, 1);
   if (!headPid)
     return std::nullopt;
 
   const ProgramAxisDependence &dependence =
-      context.getProgramAxisDependenceAnalysis().get(/*axis=*/1);
+      context.getProgramAxisDependenceAnalysis().get(1);
   if (!dependence.isProgramMappingTransformCandidate() ||
       !hasDisjointWriteReadRoots(dependence,
                                  context.getEntryArgPointerAliasAnalysis()))
@@ -1296,7 +1226,7 @@ private:
   bool iatAndPtsmEnabled;
 };
 
-} // namespace
+}
 
 std::unique_ptr<GraphOptimizationRule> cfg::createIndependentAxisTensorizeRule(
     const IndependentAxisTensorizeRuleOptions &options) {

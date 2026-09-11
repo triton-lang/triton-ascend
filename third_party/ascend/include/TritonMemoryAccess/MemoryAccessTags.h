@@ -31,11 +31,6 @@ inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
     "InspectedByStridedLoadStoreRewrite";
 inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
     "RewrittenByStridedLoadStoreRewrite";
-// IAT/PTSM emit these only for their runtime original-grid extent masks. The
-// masks are formed from non-negative program IDs and a launcher-provided
-// extent, so the unsigned comparison is a contiguous tail bound rather than a
-// general discrete predicate. MaskState consumes this proof before structured
-// memory lowering; ordinary `ult`/`ule` comparisons remain conservative.
 inline constexpr const char *IATRuntimeExtentUnsignedMaskTAG =
     "IATRuntimeExtentUnsignedMask";
 inline constexpr const char *PTSMRuntimeExtentUnsignedMaskTAG =

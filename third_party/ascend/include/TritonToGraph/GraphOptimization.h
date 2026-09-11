@@ -37,9 +37,6 @@ namespace triton {
 namespace cfg {
 
 // The identity of every rule is one bit of the pass rule mask, so the mask
-// width bounds how many rules can ever be registered. Keep this type wider
-// than the currently assigned 16 bits: stage-00 reserves seven new identities
-// while preserving every legacy value through bit 8.
 using GraphOptimizationRuleMask = uint32_t;
 
 enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
@@ -62,8 +59,6 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   StridedAxisCoalescing = 16,
   ChunkCoalescing = 32,
   StridedLoadStoreRewrite = 64,
-  // New rule IDs are append-only.  Do not renumber the legacy identities:
-  // external rule masks in the 0..511 range are part of the pass ABI.
   IndependentAxisTensorize = 512,
   StaticProgramAxisFusion = 1024,
   PersistentTaskStripMining = 2048,
@@ -73,10 +68,6 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   ContiguousBlockAccessFormation = 32768,
 };
 
-// The phase order is deliberately independent of numeric rule IDs.  New
-// program-mapping and memory rules can therefore share a phase when their
-// candidates must compete by benefit, while later structural phases remain
-// explicitly ordered and testable.
 enum class GraphOptimizationRulePhase : uint8_t {
   DiagonalMaskRemoval,
   ConvertModuloToMask,
@@ -213,8 +204,6 @@ constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
 static_assert(hasUniqueSingleBitGraphOptimizationRuleIds(),
               "GraphOptimizationRuleId values must be unique single bits");
 
-// 0..511 is the pre-stage-00 ABI. Keep it distinct from both the complete set
-// of known IDs and the default set so newly registered rules can remain opt-in.
 constexpr GraphOptimizationRuleMask kLegacyGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(GraphOptimizationRuleId::LoadStoreTranspose) |
     getGraphOptimizationRuleMask(
@@ -246,9 +235,6 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ContiguousBlockAccessFormation);
 
-// The Stage-06 release gate may evaluate only the active program-mapping
-// rules for future default enablement.  The four out-of-scope reservations
-// remain explicitly opt-in even after their identities are known.
 constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask |
     getGraphOptimizationRuleMask(
@@ -271,8 +257,6 @@ constexpr GraphOptimizationRuleMask kFixedDefaultOffGraphOptimizationRuleMask =
 constexpr GraphOptimizationRuleMask kDefaultGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask;
 
-// Kept for source compatibility with callers that used the old name.  Unlike
-// the default, this denotes every currently known identity.
 constexpr GraphOptimizationRuleMask kAllGraphOptimizationRuleMask =
     kKnownGraphOptimizationRuleMask;
 
@@ -314,25 +298,14 @@ isValidGraphOptimizationRuleMask(GraphOptimizationRuleMask ruleMask) {
   return (ruleMask & unknownRuleBits) == 0;
 }
 
-// Stage 00 reserves one option namespace per new rule. The rule mask remains
-// the only enablement control until a matcher/materializer exists; notably no
-// num_stages or mayDiscretememaccess knobs are introduced here.
 struct IndependentAxisTensorizeRuleOptions {
-  // IAT changes a vector/SIMD TTIR shape.  The pure-SIMT pipeline keeps the
-  // rule registered for mask compatibility, but must remain a semantic no-op.
   bool enabledForCompileMode = true;
-  // Derived from the existing complete rule mask by GraphOptimize. This is
-  // scheduler state for the atomic SingleMoment IAT+PTSM plan, not an option.
   bool iatAndPtsmEnabled = false;
 };
 struct StaticProgramAxisFusionRuleOptions {
-  // SPAF materializes SIMD tensor work inside an scf loop.  Preserve mask ABI
-  // in simt_only mode while rejecting the structural rewrite itself.
   bool enabledForCompileMode = true;
 };
 struct PersistentTaskStripMiningRuleOptions {
-  // PTSM creates SIMD tensor shapes and a grid-stride loop. Keep the rule
-  // registered for ABI compatibility in simt_only mode, but make it a no-op.
   bool enabledForCompileMode = true;
 };
 struct ResidentLoadForwardingRuleOptions {};
@@ -346,19 +319,9 @@ struct GraphOptimizationOptions {
   // and do not use this option as a new opt-out.
   GraphOptimizationRuleMask enabledRuleMask = kDefaultGraphOptimizationRuleMask;
   unsigned maxRewritesPerFunction = 64;
-  // Kept as the command-line/cache compatibility spelling.  New callers must
-  // provide the two explicit budgets below; a zero explicit budget falls back
-  // to this value so old IR tests and out-of-tree pass users retain their
-  // previous behavior.
   unsigned ubCapacityBytes = 0;
-  // Program-mapping rules model the physical UB capacity, not the legacy
-  // half-UB StoreCoalescing admission limit.
   unsigned mappingUBCapacityBytes = 0;
-  // StoreCoalescing retains its historical conservative budget independently
-  // of mapping legality.
   unsigned storeCoalescingUBBudgetBytes = 0;
-  // The one shared resource model admits candidates from static UB/liveness
-  // facts only. Runtime core count belongs solely to launcher PTSM capping.
   unsigned ubSafetyPercent = 80;
   unsigned reservedUBBytes = 0;
   // RowCoalescing changes the launch grid and is valid only for

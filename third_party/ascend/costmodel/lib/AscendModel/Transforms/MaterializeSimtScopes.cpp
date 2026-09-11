@@ -10,6 +10,7 @@
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -163,9 +164,9 @@ static LogicalResult wrapAnchorRange(ArrayRef<Operation *> ops,
 LogicalResult materializeSimtAnchorPlan(ModuleOp module,
                                         const SimtAnchorPlan &plan,
                                         int64_t superblockFactor) {
-  if (superblockFactor <= 0 || (superblockFactor & (superblockFactor - 1)) != 0)
-    return module.emitError(
-        "SIMT scope superblock factor must be a positive power of two");
+  if (!isSupportedSuperBlockFactor(superblockFactor))
+    return module.emitError("SIMT scope superblock factor must be one of ")
+           << kSupportedSuperBlockFactorsDescription;
   struct PlannedRange {
     SmallVector<Operation *> operations;
     Operation *insertionPoint = nullptr;

@@ -23,6 +23,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "ascend/include/AutoBlockifyV1/AutoBlockifyV1.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -103,9 +104,9 @@ public:
     }
 
     unsigned factor = superBlockFactor;
-    if (!llvm::isPowerOf2_32(factor)) {
-      ttFunc.emitError(
-          "superblock-factor must be a power of 2 and greater than zero, got ")
+    if (!ascend::isSupportedSuperBlockFactor(factor)) {
+      ttFunc.emitError("superblock-factor must be one of ")
+          << ascend::kSupportedSuperBlockFactorsDescription << ", got "
           << factor;
       return signalPassFailure();
     }
@@ -264,9 +265,9 @@ public:
   void runOnOperation() override {
     FuncOp ttFunc = getOperation();
     const unsigned factor = superBlockFactor;
-    if (!llvm::isPowerOf2_32(factor)) {
-      ttFunc.emitError(
-          "superblock-factor must be a power of 2 and greater than zero, got ")
+    if (!ascend::isSupportedSuperBlockFactor(factor)) {
+      ttFunc.emitError("superblock-factor must be one of ")
+          << ascend::kSupportedSuperBlockFactorsDescription << ", got "
           << factor;
       return signalPassFailure();
     }

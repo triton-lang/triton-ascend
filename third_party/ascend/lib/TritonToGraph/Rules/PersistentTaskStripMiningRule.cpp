@@ -182,14 +182,11 @@ bool hasDisjointWriteReadRoots(
 std::optional<ProgramGridTransformContract>
 getComposableLaunchContract(ModuleOp module) {
   Attribute attribute = module->getAttr(kProgramGridTransformsAttr);
-  if (!attribute) {
-    ProgramGridTransformContract contract;
-    contract.dynamicOriginalGrid = true;
-    return contract;
-  }
+  if (!attribute)
+    return ProgramGridTransformContract{};
   FailureOr<ProgramGridTransformContract> parsed =
       parseProgramGridTransformContract(attribute);
-  if (failed(parsed) || !parsed->dynamicOriginalGrid)
+  if (failed(parsed))
     return std::nullopt;
   for (const ProgramGridTransform &transform : parsed->transforms) {
     if (transform.axis == kTokenAxis || transform.persistentCoverage ||
@@ -312,7 +309,7 @@ applyPersistentCandidateToSandbox(ModuleOp module, triton::FuncOp function,
   ProgramGridTransformContract contract = *existing;
   contract.transforms.push_back(ProgramGridTransform{
       static_cast<int32_t>(contract.transforms.size()), kTokenAxis,
-      static_cast<int64_t>(candidate.blockT), 0, true, true});
+      static_cast<int64_t>(candidate.blockT), true, true});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
   module->setAttr(kPersistentTaskStripMiningMarkerAttr,

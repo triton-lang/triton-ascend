@@ -19,9 +19,8 @@ PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
 PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
 DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK = 511
-GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0xFFFF
+GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0xFBFF
 INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = 1 << 9
-STATIC_PROGRAM_AXIS_FUSION_RULE_BIT = 1 << 10
 PERSISTENT_TASK_STRIP_MINING_RULE_BIT = 1 << 11
 
 RUNTIME_ORIGINAL_GRID = "runtime_original_grid"
@@ -47,16 +46,6 @@ _TRANSFORM_KEYS = frozenset((
     "kind",
     "axis",
     "factor",
-    "persistent_coverage",
-    "grid_stride_abi_verified",
-))
-_LEGACY_TOP_LEVEL_KEYS = frozenset(("version", "transforms"))
-_LEGACY_TRANSFORM_KEYS = frozenset((
-    "order",
-    "kind",
-    "axis",
-    "factor",
-    "logical_extent",
     "persistent_coverage",
     "grid_stride_abi_verified",
 ))
@@ -96,7 +85,7 @@ def _exact_sequence(value: Any, expected: tuple[Any, ...], name: str) -> None:
 
 def normalize_graph_optimization_rule_mask(raw: Any) -> int:
     mask = _integer(raw, "rule_mask", minimum=0)
-    if mask > GRAPH_OPTIMIZATION_KNOWN_RULE_MASK:
+    if mask & ~GRAPH_OPTIMIZATION_KNOWN_RULE_MASK:
         raise ProgramGridContractError("rule_mask contains unsupported graph-optimization bits")
     return mask
 
@@ -192,97 +181,6 @@ def normalize_program_grid_transforms(raw: Any) -> dict[str, Any]:
         "hidden_argument_types": list(HIDDEN_ARGUMENT_TYPES),
         "transforms": transforms,
     }
-
-
-def normalize_legacy_program_grid_transforms(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, str):
-        try:
-            raw = json.loads(raw)
-        except json.JSONDecodeError as error:
-            raise ProgramGridContractError(
-                "legacy program_grid_transforms must be valid JSON when encoded as text") from error
-
-    contract = _mapping(raw, "legacy program_grid_transforms")
-    if set(contract) != _LEGACY_TOP_LEVEL_KEYS:
-        missing = sorted(_LEGACY_TOP_LEVEL_KEYS - set(contract))
-        unknown = sorted(set(contract) - _LEGACY_TOP_LEVEL_KEYS)
-        detail = []
-        if missing:
-            detail.append("missing " + ", ".join(missing))
-        if unknown:
-            detail.append("unknown " + ", ".join(unknown))
-        raise ProgramGridContractError("legacy program_grid_transforms has an invalid top-level schema" +
-                                       (": " + "; ".join(detail) if detail else ""))
-
-    version = _integer(contract["version"], "legacy version", minimum=1)
-    if version != PROGRAM_GRID_TRANSFORMS_VERSION:
-        raise ProgramGridContractError(f"unsupported legacy program_grid_transforms version {version}; "
-                                       f"expected {PROGRAM_GRID_TRANSFORMS_VERSION}")
-    transforms_raw = contract["transforms"]
-    if isinstance(transforms_raw, (str, bytes)) or not isinstance(transforms_raw, Sequence):
-        raise ProgramGridContractError("legacy transforms must be a sequence")
-    if not transforms_raw:
-        raise ProgramGridContractError("legacy transforms must not be empty")
-
-    transforms: list[dict[str, Any]] = []
-    original_extent_by_axis: dict[int, int] = {}
-    persistent_count = 0
-    for expected_order, raw_transform in enumerate(transforms_raw):
-        transform = _mapping(raw_transform, f"legacy transforms[{expected_order}]")
-        if set(transform) != _LEGACY_TRANSFORM_KEYS:
-            missing = sorted(_LEGACY_TRANSFORM_KEYS - set(transform))
-            unknown = sorted(set(transform) - _LEGACY_TRANSFORM_KEYS)
-            detail = []
-            if missing:
-                detail.append("missing " + ", ".join(missing))
-            if unknown:
-                detail.append("unknown " + ", ".join(unknown))
-            raise ProgramGridContractError(f"legacy transforms[{expected_order}] has an invalid schema" +
-                                           (": " + "; ".join(detail) if detail else ""))
-        order = _integer(transform["order"], f"legacy transforms[{expected_order}].order", minimum=0)
-        if order != expected_order:
-            raise ProgramGridContractError("legacy transform order must be contiguous from zero")
-        if transform["kind"] != "ceil_div":
-            raise ProgramGridContractError(f"legacy transforms[{expected_order}].kind must be 'ceil_div'")
-        axis = _integer(transform["axis"], f"legacy transforms[{expected_order}].axis", minimum=0)
-        if axis > 2:
-            raise ProgramGridContractError("legacy program-grid transforms support only axes 0, 1, and 2")
-        factor = _integer(transform["factor"], f"legacy transforms[{expected_order}].factor", minimum=2)
-        logical_extent = _integer(transform["logical_extent"], f"legacy transforms[{expected_order}].logical_extent",
-                                  minimum=1)
-        previous_extent = original_extent_by_axis.setdefault(axis, logical_extent)
-        if previous_extent != logical_extent:
-            raise ProgramGridContractError("legacy transforms for one axis must retain the same logical_extent")
-        persistent = _boolean(transform["persistent_coverage"],
-                              f"legacy transforms[{expected_order}].persistent_coverage")
-        grid_stride = _boolean(transform["grid_stride_abi_verified"],
-                               f"legacy transforms[{expected_order}].grid_stride_abi_verified")
-        if persistent != grid_stride:
-            raise ProgramGridContractError("legacy persistent coverage and grid-stride ABI verification must agree")
-        persistent_count += int(persistent)
-        if persistent_count > 1:
-            raise ProgramGridContractError("legacy transforms may contain at most one persistent entry")
-        transforms.append({
-            "order": order,
-            "kind": "ceil_div",
-            "axis": axis,
-            "factor": factor,
-            "logical_extent": logical_extent,
-            "persistent_coverage": persistent,
-            "grid_stride_abi_verified": grid_stride,
-        })
-
-    return {
-        "version": PROGRAM_GRID_TRANSFORMS_VERSION,
-        "transforms": transforms,
-    }
-
-
-def get_legacy_persistent_transform(contract: Mapping[str, Any]) -> Mapping[str, Any] | None:
-    for transform in normalize_legacy_program_grid_transforms(contract)["transforms"]:
-        if transform["persistent_coverage"]:
-            return transform
-    return None
 
 
 def canonical_program_grid_transforms_json(raw: Any) -> str:

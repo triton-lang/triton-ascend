@@ -31,7 +31,6 @@
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/TritonToGraph/ProgramAxisDependenceAnalysis.h"
-#include "ascend/include/TritonToGraph/ProgramGridSpecialization.h"
 #include "ascend/include/TritonToGraph/ProgramGridTransform.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -50,7 +49,6 @@
 #include "mlir/Support/LLVM.h"
 #include "llvm/IR/Instructions.h"
 #include <Python.h>
-#include <limits>
 #include <utility>
 #include <vector>
 
@@ -631,24 +629,6 @@ void init_ascend_ir(py::module &&m) {
 
     py::dict result;
     result["version"] = contract->version;
-    if (!contract->dynamicOriginalGrid) {
-      py::list transforms;
-      for (const mlir::triton::cfg::ProgramGridTransform &transform :
-           contract->transforms) {
-        py::dict item;
-        item["order"] = transform.order;
-        item["kind"] = "ceil_div";
-        item["axis"] = transform.axis;
-        item["factor"] = transform.factor;
-        item["logical_extent"] = transform.logicalExtent;
-        item["persistent_coverage"] = transform.persistentCoverage;
-        item["grid_stride_abi_verified"] = transform.gridStrideAbiVerified;
-        transforms.append(std::move(item));
-      }
-      result["transforms"] = std::move(transforms);
-      return std::move(result);
-    }
-
     result["extent_source"] = "runtime_original_grid";
     py::list hiddenExtentAxes;
     hiddenExtentAxes.append(0);
@@ -676,51 +656,6 @@ void init_ascend_ir(py::module &&m) {
     }
     result["transforms"] = std::move(transforms);
     return std::move(result);
-  });
-  m.def("get_program_grid_specialization", [](OpState &op) -> py::object {
-    Attribute attribute =
-        op->getAttr(mlir::triton::cfg::kProgramGridSpecializationAttr);
-    if (!attribute)
-      return py::none();
-    FailureOr<mlir::triton::cfg::ProgramGridSpecialization> specialization =
-        mlir::triton::cfg::parseProgramGridSpecialization(attribute);
-    if (failed(specialization))
-      throw std::runtime_error("invalid hacc.grid_specialization contract");
-
-    py::dict result;
-    result["version"] = specialization->version;
-    py::list grid;
-    for (int64_t dimension : specialization->grid)
-      grid.append(dimension);
-    result["grid"] = std::move(grid);
-    result["rule_mask"] = specialization->ruleMask;
-    return std::move(result);
-  });
-  m.def(
-      "set_program_grid_specialization",
-      [](OpState &op, int64_t version, int64_t grid0, int64_t grid1,
-         int64_t grid2, uint64_t ruleMask) {
-        auto module = dyn_cast<ModuleOp>(op.getOperation());
-        if (!module)
-          throw std::invalid_argument(
-              "set_program_grid_specialization expects an MLIR module");
-        if (ruleMask > std::numeric_limits<uint32_t>::max())
-          throw std::invalid_argument(
-              "program grid specialization rule_mask must fit in uint32_t");
-        mlir::triton::cfg::ProgramGridSpecialization specialization{
-            version, {grid0, grid1, grid2}, static_cast<uint32_t>(ruleMask)};
-        if (failed(mlir::triton::cfg::setProgramGridSpecialization(
-                module, specialization)))
-          throw std::runtime_error("invalid hacc.grid_specialization contract");
-      },
-      py::arg("module"), py::arg("version"), py::arg("grid_0"),
-      py::arg("grid_1"), py::arg("grid_2"), py::arg("rule_mask"));
-  m.def("clear_program_grid_specialization", [](OpState &op) {
-    auto module = dyn_cast<ModuleOp>(op.getOperation());
-    if (!module)
-      throw std::invalid_argument(
-          "clear_program_grid_specialization expects an MLIR module");
-    mlir::triton::cfg::clearProgramGridSpecialization(module);
   });
   m.def("get_program_mapping_scalar_specialization",
         [](OpState &op) -> py::object {

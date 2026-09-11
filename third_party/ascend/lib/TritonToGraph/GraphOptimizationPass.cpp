@@ -102,7 +102,6 @@ bool isRuleEnabled(GraphOptimizationRuleMask ruleMask,
 
 constexpr bool requiresProgramMappingCleanup(GraphOptimizationRuleId ruleId) {
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
-         ruleId == GraphOptimizationRuleId::StaticProgramAxisFusion ||
          ruleId == GraphOptimizationRuleId::PersistentTaskStripMining;
 }
 
@@ -117,11 +116,6 @@ constexpr bool isPlanHigherPriority(unsigned lhsBenefit, unsigned lhsOrder,
   return getGraphOptimizationRuleMask(lhsRuleId) <
          getGraphOptimizationRuleMask(rhsRuleId);
 }
-
-static_assert(isPlanHigherPriority(
-                  1, 7, GraphOptimizationRuleId::IndependentAxisTensorize, 1, 7,
-                  GraphOptimizationRuleId::StaticProgramAxisFusion),
-              "program-mapping phase tie breaks must be reproducible");
 
 class GraphOptimizePass final
     : public impl::GraphOptimizeBase<GraphOptimizePass> {
@@ -505,11 +499,6 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::IndependentAxisTensorize)) {
     rules.push_back(
         createIndependentAxisTensorizeRule(options.independentAxisTensorize));
-  }
-  if (isRuleEnabled(options.enabledRuleMask,
-                    GraphOptimizationRuleId::StaticProgramAxisFusion)) {
-    rules.push_back(
-        createStaticProgramAxisFusionRule(options.staticProgramAxisFusion));
   }
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::PersistentTaskStripMining)) {

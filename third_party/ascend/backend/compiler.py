@@ -73,10 +73,8 @@ from triton.backends.ascend.program_grid import (
     DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
     PROGRAM_GRID_TRANSFORMS_ATTR,
     ProgramGridContractError,
-    get_legacy_persistent_transform,
     get_persistent_transform,
     normalize_graph_optimization_rule_mask,
-    normalize_legacy_program_grid_transforms,
     normalize_program_grid_transforms,
 )
 from triton.backends.compiler import (
@@ -174,20 +172,8 @@ def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
         try:
             transforms = normalize_program_grid_transforms(raw_transforms)
         except ProgramGridContractError as error:
-            try:
-                legacy_transforms = normalize_legacy_program_grid_transforms(raw_transforms)
-            except ProgramGridContractError as legacy_error:
-                raise RuntimeError(f"invalid hacc.program_grid_transforms: {error}") from legacy_error
-            metadata["program_grid_transforms"] = None
-            metadata["legacy_program_grid_transforms"] = legacy_transforms
-            metadata["program_grid_mapping_applied"] = True
-            metadata["coalesce_factor"] = 1
-            metadata["coalesce_axis"] = -1
-            metadata["coalesce_grid_ceil_div"] = False
-            metadata["row_coalescing_applied"] = False
-            return
+            raise RuntimeError(f"invalid hacc.program_grid_transforms: {error}") from error
         metadata["program_grid_transforms"] = transforms
-        metadata["legacy_program_grid_transforms"] = None
         metadata["program_grid_mapping_applied"] = True
         metadata["coalesce_factor"] = 1
         metadata["coalesce_axis"] = -1
@@ -196,7 +182,6 @@ def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
         return
 
     metadata["program_grid_transforms"] = None
-    metadata["legacy_program_grid_transforms"] = None
     metadata["program_grid_mapping_applied"] = False
     _export_coalesce_metadata(
         mod,
@@ -208,7 +193,6 @@ def _export_program_grid_metadata(mod, metadata, *, require_row_contract=False):
 def _finalize_program_launch_policy(metadata, opt):
     required_fields = (
         "program_grid_transforms",
-        "legacy_program_grid_transforms",
         "program_grid_mapping_applied",
         "row_coalescing_applied",
         "has_auto_blockify_blacklist_op",
@@ -219,7 +203,6 @@ def _finalize_program_launch_policy(metadata, opt):
         raise RuntimeError("cannot finalize program launch policy; missing metadata: " + ", ".join(missing))
 
     raw_transforms = metadata["program_grid_transforms"]
-    raw_legacy_transforms = metadata["legacy_program_grid_transforms"]
     mapping_applied = metadata["program_grid_mapping_applied"]
     row_coalescing_applied = metadata["row_coalescing_applied"]
     has_auto_blockify_blacklist_op = metadata["has_auto_blockify_blacklist_op"]
@@ -236,15 +219,7 @@ def _finalize_program_launch_policy(metadata, opt):
             transforms = normalize_program_grid_transforms(raw_transforms)
         except ProgramGridContractError as error:
             raise RuntimeError(f"invalid exported program_grid_transforms: {error}") from error
-    legacy_transforms = None
-    if raw_legacy_transforms is not None:
-        try:
-            legacy_transforms = normalize_legacy_program_grid_transforms(raw_legacy_transforms)
-        except ProgramGridContractError as error:
-            raise RuntimeError(f"invalid exported legacy_program_grid_transforms: {error}") from error
-    if transforms is not None and legacy_transforms is not None:
-        raise RuntimeError("dynamic and legacy program-grid transforms cannot coexist")
-    if mapping_applied != (transforms is not None or legacy_transforms is not None):
+    if mapping_applied != (transforms is not None):
         raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
     if mapping_applied and row_coalescing_applied:
         raise RuntimeError("program-grid mapping conflicts with legacy RowCoalescing")
@@ -253,9 +228,7 @@ def _finalize_program_launch_policy(metadata, opt):
     auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and blacklist_policy_allows
                              and not row_coalescing_applied and not mapping_applied)
 
-    persistent_transform = (
-        get_persistent_transform(transforms) if transforms is not None else
-        get_legacy_persistent_transform(legacy_transforms) if legacy_transforms is not None else None)
+    persistent_transform = get_persistent_transform(transforms) if transforms is not None else None
     ptsm_cap_authorized = False
     if persistent_transform is not None:
         if metadata["mix_mode"] != "aiv":

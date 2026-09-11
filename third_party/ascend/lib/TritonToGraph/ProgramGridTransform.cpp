@@ -45,7 +45,6 @@ constexpr llvm::StringLiteral kOrder = "order";
 constexpr llvm::StringLiteral kKind = "kind";
 constexpr llvm::StringLiteral kAxis = "axis";
 constexpr llvm::StringLiteral kFactor = "factor";
-constexpr llvm::StringLiteral kLogicalExtent = "logical_extent";
 constexpr llvm::StringLiteral kPersistentCoverage = "persistent_coverage";
 constexpr llvm::StringLiteral kGridStrideAbiVerified =
     "grid_stride_abi_verified";
@@ -139,55 +138,6 @@ bool isSupportedSequence(ArrayRef<ProgramGridTransform> transforms) {
          isPTSM4(transforms[1]);
 }
 
-FailureOr<ProgramGridTransformContract>
-parseLegacyStaticProgramAxisFusionContract(DictionaryAttr contract) {
-  if (!hasExactKeys(contract, {kVersion, kTransforms}))
-    return failure();
-  std::optional<int64_t> version = getInteger(contract, kVersion);
-  if (!version || *version != kProgramGridTransformsVersion)
-    return failure();
-  auto transforms = dyn_cast_or_null<ArrayAttr>(contract.get(kTransforms));
-  if (!transforms || transforms.empty())
-    return failure();
-
-  ProgramGridTransformContract parsed;
-  parsed.version = *version;
-  std::array<std::optional<int64_t>, 3> originalExtentByAxis;
-  unsigned persistentTransformCount = 0;
-  for (auto [expectedOrder, attribute] : llvm::enumerate(transforms)) {
-    auto transform = dyn_cast<DictionaryAttr>(attribute);
-    if (!transform ||
-        !hasExactKeys(transform, {kOrder, kKind, kAxis, kFactor, kLogicalExtent,
-                                  kPersistentCoverage, kGridStrideAbiVerified}))
-      return failure();
-    std::optional<int64_t> order = getInteger(transform, kOrder);
-    auto kind = dyn_cast_or_null<StringAttr>(transform.get(kKind));
-    std::optional<int64_t> axis = getInteger(transform, kAxis);
-    std::optional<int64_t> factor = getInteger(transform, kFactor);
-    std::optional<int64_t> logicalExtent =
-        getInteger(transform, kLogicalExtent);
-    std::optional<bool> persistent = getBoolean(transform, kPersistentCoverage);
-    std::optional<bool> gridStride =
-        getBoolean(transform, kGridStrideAbiVerified);
-    if (!order || !kind || !axis || !factor || !logicalExtent || !persistent ||
-        !gridStride || *order != static_cast<int64_t>(expectedOrder) ||
-        kind.getValue() != kCeilDiv || *axis < 0 || *axis > 2 || *factor < 2 ||
-        *logicalExtent < 1 || *persistent != *gridStride)
-      return failure();
-    std::optional<int64_t> &originalExtent = originalExtentByAxis[*axis];
-    if (originalExtent && *originalExtent != *logicalExtent)
-      return failure();
-    originalExtent = *logicalExtent;
-    persistentTransformCount += *persistent ? 1 : 0;
-    if (persistentTransformCount > 1)
-      return failure();
-    parsed.transforms.push_back(ProgramGridTransform{
-        static_cast<int32_t>(*order), static_cast<int32_t>(*axis), *factor,
-        *logicalExtent, *persistent, *gridStride});
-  }
-  return parsed;
-}
-
 } // namespace
 
 bool mlir::triton::cfg::hasProgramGridHiddenExtentArguments(
@@ -271,11 +221,9 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
   auto contract = dyn_cast_or_null<DictionaryAttr>(attribute);
   if (!contract)
     return failure();
-  if (hasExactKeys(contract, {kVersion, kTransforms}))
-    return parseLegacyStaticProgramAxisFusionContract(contract);
-  if (!hasExactKeys(contract,
-                    {kVersion, kExtentSource, kHiddenExtentAxes,
-                     kHiddenArgumentOrder, kHiddenArgumentTypes, kTransforms}))
+  if (!hasExactKeys(contract, {kVersion, kExtentSource, kHiddenExtentAxes,
+                               kHiddenArgumentOrder, kHiddenArgumentTypes,
+                               kTransforms}))
     return failure();
 
   std::optional<int64_t> version = getInteger(contract, kVersion);
@@ -298,7 +246,6 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
 
   ProgramGridTransformContract parsed;
   parsed.version = *version;
-  parsed.dynamicOriginalGrid = true;
   bool seenAxis[2] = {false, false};
   for (auto [expectedOrder, rawTransform] : llvm::enumerate(transforms)) {
     auto transform = dyn_cast<DictionaryAttr>(rawTransform);
@@ -320,7 +267,7 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
       return failure();
     seenAxis[*axis] = true;
     parsed.transforms.push_back(ProgramGridTransform{
-        static_cast<int32_t>(*order), static_cast<int32_t>(*axis), *factor, 0,
+        static_cast<int32_t>(*order), static_cast<int32_t>(*axis), *factor,
         *persistent, *gridStride});
   }
   if (!isSupportedSequence(parsed.transforms))
@@ -331,32 +278,6 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
 DictionaryAttr mlir::triton::cfg::serializeProgramGridTransformContract(
     MLIRContext *context, const ProgramGridTransformContract &contract) {
   Builder builder(context);
-  if (!contract.dynamicOriginalGrid) {
-    SmallVector<Attribute> legacyTransforms;
-    legacyTransforms.reserve(contract.transforms.size());
-    for (const ProgramGridTransform &transform : contract.transforms) {
-      legacyTransforms.push_back(DictionaryAttr::get(
-          context,
-          {{builder.getStringAttr(kOrder),
-            builder.getI32IntegerAttr(transform.order)},
-           {builder.getStringAttr(kKind), builder.getStringAttr(kCeilDiv)},
-           {builder.getStringAttr(kAxis),
-            builder.getI32IntegerAttr(transform.axis)},
-           {builder.getStringAttr(kFactor),
-            builder.getI64IntegerAttr(transform.factor)},
-           {builder.getStringAttr(kLogicalExtent),
-            builder.getI64IntegerAttr(transform.logicalExtent)},
-           {builder.getStringAttr(kPersistentCoverage),
-            builder.getBoolAttr(transform.persistentCoverage)},
-           {builder.getStringAttr(kGridStrideAbiVerified),
-            builder.getBoolAttr(transform.gridStrideAbiVerified)}}));
-    }
-    return DictionaryAttr::get(context,
-                               {{builder.getStringAttr(kVersion),
-                                 builder.getI64IntegerAttr(contract.version)},
-                                {builder.getStringAttr(kTransforms),
-                                 ArrayAttr::get(context, legacyTransforms)}});
-  }
   SmallVector<Attribute> transforms;
   transforms.reserve(contract.transforms.size());
   for (const ProgramGridTransform &transform : contract.transforms) {
@@ -400,18 +321,16 @@ LogicalResult mlir::triton::cfg::setProgramGridTransformContract(
   if (failed(parseProgramGridTransformContract(serialized)))
     return failure();
 
-  if (contract.dynamicOriginalGrid) {
-    triton::FuncOp entry;
-    for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
-      if (!isPublicEntry(function))
-        continue;
-      if (entry)
-        return failure();
-      entry = function;
-    }
-    if (!entry || !hasProgramGridHiddenExtentArguments(entry))
+  triton::FuncOp entry;
+  for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
+    if (!isPublicEntry(function))
+      continue;
+    if (entry)
       return failure();
+    entry = function;
   }
+  if (!entry || !hasProgramGridHiddenExtentArguments(entry))
+    return failure();
   module->setAttr(kProgramGridTransformsAttr, serialized);
   return success();
 }

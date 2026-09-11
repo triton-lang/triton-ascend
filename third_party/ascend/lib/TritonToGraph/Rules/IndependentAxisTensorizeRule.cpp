@@ -877,9 +877,8 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
   if (!rebuildTensorizedFunction(function, candidate, rewriter))
     return failure();
   ProgramGridTransformContract contract;
-  contract.dynamicOriginalGrid = true;
   contract.transforms.push_back(ProgramGridTransform{
-      0, candidate.axis, static_cast<int64_t>(candidate.factor), 0, false,
+      0, candidate.axis, static_cast<int64_t>(candidate.factor), false,
       false});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();

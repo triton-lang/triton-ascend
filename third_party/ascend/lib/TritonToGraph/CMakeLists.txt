@@ -12,7 +12,6 @@ add_triton_library(TritonToGraph
   MergeConcatLoadBuffer.cpp
   PermutationAnalysis.cpp
   ProgramAxisDependenceAnalysis.cpp
-  ProgramGridSpecialization.cpp
   ProgramGridTransform.cpp
   MergeConcatLoadBuffer.cpp
   Passes.cpp
@@ -24,7 +23,6 @@ add_triton_library(TritonToGraph
   Rules/ReservedGraphOptimizationRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
   Rules/IndependentAxisTensorizeRule.cpp
-  Rules/StaticProgramAxisFusionRule.cpp
   Rules/PersistentTaskStripMiningRule.cpp
   Rules/ResidentLoadForwardingRule.cpp
   Rules/IntermediatePrecisionBoundaryElisionRule.cpp

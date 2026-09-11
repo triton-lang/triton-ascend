@@ -60,7 +60,6 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   ChunkCoalescing = 32,
   StridedLoadStoreRewrite = 64,
   IndependentAxisTensorize = 512,
-  StaticProgramAxisFusion = 1024,
   PersistentTaskStripMining = 2048,
   ResidentLoadForwarding = 4096,
   IntermediatePrecisionBoundaryElision = 8192,
@@ -107,8 +106,6 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "StridedLoadStoreRewrite";
   case GraphOptimizationRuleId::IndependentAxisTensorize:
     return "IndependentAxisTensorizeRule";
-  case GraphOptimizationRuleId::StaticProgramAxisFusion:
-    return "StaticProgramAxisFusionRule";
   case GraphOptimizationRuleId::PersistentTaskStripMining:
     return "PersistentTaskStripMiningRule";
   case GraphOptimizationRuleId::ResidentLoadForwarding:
@@ -136,7 +133,6 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   case GraphOptimizationRuleId::ConvertModuloToMask:
     return GraphOptimizationRulePhase::ConvertModuloToMask;
   case GraphOptimizationRuleId::IndependentAxisTensorize:
-  case GraphOptimizationRuleId::StaticProgramAxisFusion:
     return GraphOptimizationRulePhase::ProgramMapping;
   case GraphOptimizationRuleId::PersistentTaskStripMining:
     return GraphOptimizationRulePhase::PersistentTaskMapping;
@@ -164,7 +160,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   return GraphOptimizationRulePhase::Compatibility;
 }
 
-constexpr std::array<GraphOptimizationRuleId, 16>
+constexpr std::array<GraphOptimizationRuleId, 15>
     kGraphOptimizationRuleRegistry = {
         GraphOptimizationRuleId::LoadStoreTranspose,
         GraphOptimizationRuleId::TransposePointwiseReorder,
@@ -176,7 +172,6 @@ constexpr std::array<GraphOptimizationRuleId, 16>
         GraphOptimizationRuleId::ChunkCoalescing,
         GraphOptimizationRuleId::StridedLoadStoreRewrite,
         GraphOptimizationRuleId::IndependentAxisTensorize,
-        GraphOptimizationRuleId::StaticProgramAxisFusion,
         GraphOptimizationRuleId::PersistentTaskStripMining,
         GraphOptimizationRuleId::ResidentLoadForwarding,
         GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision,
@@ -223,8 +218,6 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
     getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::StaticProgramAxisFusion) |
-    getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::PersistentTaskStripMining) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::ResidentLoadForwarding) |
@@ -239,8 +232,6 @@ constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
-    getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::StaticProgramAxisFusion) |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::PersistentTaskStripMining);
 
@@ -275,11 +266,6 @@ static_assert((kDefaultEligibleGraphOptimizationRuleMask &
 static_assert((kDefaultGraphOptimizationRuleMask &
                ~kDefaultEligibleGraphOptimizationRuleMask) == 0,
               "default graph rules must stay within the approved candidates");
-static_assert(getGraphOptimizationRulePhase(
-                  GraphOptimizationRuleId::IndependentAxisTensorize) ==
-                  getGraphOptimizationRulePhase(
-                      GraphOptimizationRuleId::StaticProgramAxisFusion),
-              "program-mapping rules must compete in one deterministic phase");
 static_assert(static_cast<unsigned>(getGraphOptimizationRulePhase(
                   GraphOptimizationRuleId::ResidentLoadForwarding)) <
                   static_cast<unsigned>(getGraphOptimizationRulePhase(
@@ -301,9 +287,6 @@ isValidGraphOptimizationRuleMask(GraphOptimizationRuleMask ruleMask) {
 struct IndependentAxisTensorizeRuleOptions {
   bool enabledForCompileMode = true;
   bool iatAndPtsmEnabled = false;
-};
-struct StaticProgramAxisFusionRuleOptions {
-  bool enabledForCompileMode = true;
 };
 struct PersistentTaskStripMiningRuleOptions {
   bool enabledForCompileMode = true;
@@ -329,7 +312,6 @@ struct GraphOptimizationOptions {
   // second derived force flag so every consumer follows one mode contract.
   std::string compileMode = "simd_simt_template";
   IndependentAxisTensorizeRuleOptions independentAxisTensorize;
-  StaticProgramAxisFusionRuleOptions staticProgramAxisFusion;
   PersistentTaskStripMiningRuleOptions persistentTaskStripMining;
   ResidentLoadForwardingRuleOptions residentLoadForwarding;
   IntermediatePrecisionBoundaryElisionRuleOptions

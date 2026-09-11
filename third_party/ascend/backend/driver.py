@@ -37,9 +37,7 @@ from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, conv
 from triton.backends.ascend.program_grid import (
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
-    get_legacy_persistent_transform,
     get_persistent_transform,
-    normalize_legacy_program_grid_transforms,
     normalize_program_grid_transforms,
 )
 # Bind the already-imported utils module once so the launch hot path can write
@@ -1038,39 +1036,22 @@ static void release_npu_tensor_handle(void* handle) {{
         raise RuntimeError("compiler metadata missing auto_blockify_enabled")
     if not isinstance(ptsm_cap_authorized, bool):
         raise RuntimeError("compiler metadata missing ptsm_cap_authorized")
-
     raw_program_grid_transforms = getattr(metadata, "program_grid_transforms", None)
-    raw_legacy_program_grid_transforms = getattr(metadata, "legacy_program_grid_transforms", None)
     if not mapping_applied:
-        if raw_program_grid_transforms is not None or raw_legacy_program_grid_transforms is not None:
+        if raw_program_grid_transforms is not None:
             raise RuntimeError("program_grid_mapping_applied disagrees with program_grid_transforms")
         program_grid_transforms = None
-        legacy_program_grid_transforms = None
     else:
-        if raw_program_grid_transforms is not None:
-            try:
-                program_grid_transforms = normalize_program_grid_transforms(raw_program_grid_transforms)
-            except ProgramGridContractError as error:
-                raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
-        else:
-            program_grid_transforms = None
-        if raw_legacy_program_grid_transforms is not None:
-            try:
-                legacy_program_grid_transforms = normalize_legacy_program_grid_transforms(
-                    raw_legacy_program_grid_transforms)
-            except ProgramGridContractError as error:
-                raise RuntimeError(f"invalid legacy_program_grid_transforms launcher metadata: {error}") from error
-        else:
-            legacy_program_grid_transforms = None
-        if program_grid_transforms is not None and legacy_program_grid_transforms is not None:
-            raise RuntimeError("dynamic and legacy program-grid transforms cannot coexist")
-        if program_grid_transforms is None and legacy_program_grid_transforms is None:
+        if raw_program_grid_transforms is None:
             raise RuntimeError("program_grid_mapping_applied requires program_grid_transforms")
+        try:
+            program_grid_transforms = normalize_program_grid_transforms(raw_program_grid_transforms)
+        except ProgramGridContractError as error:
+            raise RuntimeError(f"invalid program_grid_transforms launcher metadata: {error}") from error
 
-    persistent_transform = (get_persistent_transform(program_grid_transforms) if program_grid_transforms is not None
-                            else get_legacy_persistent_transform(legacy_program_grid_transforms)
-                            if legacy_program_grid_transforms is not None else None)
-    if (program_grid_transforms is not None or legacy_program_grid_transforms is not None) and row_coalescing_applied:
+    persistent_transform = (get_persistent_transform(program_grid_transforms)
+                            if program_grid_transforms is not None else None)
+    if program_grid_transforms is not None and row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
     if auto_blockify_enabled and (mapping_applied or row_coalescing_applied):
         raise RuntimeError("auto_blockify_enabled conflicts with a rewritten program mapping")
@@ -1097,27 +1078,6 @@ static void release_npu_tensor_handle(void* handle) {{
             factor = transform["factor"]
             finalization_lines.append(
                 f"{grid_name} = (uint32_t)(((uint64_t){original_name} + {factor - 1}u) / {factor}u);")
-    elif legacy_program_grid_transforms is not None:
-        finalization_lines = [
-            f"// hacc.program_grid_transforms v{PROGRAM_GRID_TRANSFORMS_VERSION}: legacy fixed-grid SPAF ABI.",
-        ]
-        axis_names = {0: "gridX", 1: "gridY", 2: "gridZ"}
-        checked_axes: set[int] = set()
-        for transform in legacy_program_grid_transforms["transforms"]:
-            axis = transform["axis"]
-            grid_name = axis_names[axis]
-            if axis not in checked_axes:
-                checked_axes.add(axis)
-                logical_extent = transform["logical_extent"]
-                finalization_lines.extend((
-                    f"if ({grid_name} != {logical_extent}u) {{",
-                    f'  fprintf(stderr, "legacy program-grid transform requires grid[{axis}]={logical_extent}, got %u\\n", '
-                    f"static_cast<unsigned int>({grid_name}));",
-                    "  return;",
-                    "}",
-                ))
-            factor = transform["factor"]
-            finalization_lines.append(f"{grid_name} = (uint32_t)(((uint64_t){grid_name} + {factor - 1}u) / {factor}u);")
     if persistent_transform is not None:
         axis = persistent_transform["axis"]
         grid_name = {0: "gridX", 1: "gridY", 2: "gridZ"}[axis]
@@ -1128,7 +1088,7 @@ static void release_npu_tensor_handle(void* handle) {{
             f"    (uint32_t)((uint64_t){num_physical_blocks} / std::max((uint64_t)1, otherPrograms)));",
             f"{grid_name} = std::min({grid_name}, static_cast<int>(axisCap));",
         ))
-    if program_grid_transforms is not None or legacy_program_grid_transforms is not None:
+    if program_grid_transforms is not None:
         program_grid_finalization = "\n  ".join(finalization_lines)
 
     # Full-TA tile/strided coalescing: the compiler recorded a coalesce factor H
@@ -1152,7 +1112,7 @@ static void release_npu_tensor_handle(void* handle) {{
             f"  {_coalesce_grid_var} = {_coalesce_grid_expr};")
     else:
         coalesce_grid_div = ""
-    if (program_grid_transforms is not None or legacy_program_grid_transforms is not None) and coalesce_factor > 1:
+    if program_grid_transforms is not None and coalesce_factor > 1:
         raise RuntimeError("program-grid transforms conflict with legacy coalesce metadata")
     if row_coalescing_applied:
         if coalesce_factor <= 1 or coalesce_axis not in (0, 1, 2):

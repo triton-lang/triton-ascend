@@ -44,14 +44,12 @@ struct ProgramGridTransform {
   int32_t order = 0;
   int32_t axis = 0;
   int64_t factor = 1;
-  int64_t logicalExtent = 0;
   bool persistentCoverage = false;
   bool gridStrideAbiVerified = false;
 };
 
 struct ProgramGridTransformContract {
   int64_t version = kProgramGridTransformsVersion;
-  bool dynamicOriginalGrid = false;
   SmallVector<ProgramGridTransform> transforms;
 };
 

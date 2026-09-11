@@ -32,8 +32,8 @@ pytestmark = pytest.mark.backend("none")
 _UNSET = object()
 
 
-def _stub_graph_ub_budget_bytes_for_arch(arch):
-    """Mirror the documented architecture table for the compiler import shim.
+def _stub_ub_size_in_kbytes_for_arch(arch):
+    """Mirror the raw UB architecture table for the compiler import shim.
 
     The table itself is covered by the source-loaded backend-utils test.  This
     local shim keeps this compiler-only contract independent of the installed
@@ -42,7 +42,7 @@ def _stub_graph_ub_budget_bytes_for_arch(arch):
     if not isinstance(arch, str) or not arch:
         return 0
     if arch.startswith(("Ascend910_95", "Ascend950")):
-        return 128 * 1024
+        return 256
     if arch.startswith((
             "Ascend910A",
             "Ascend910B",
@@ -50,8 +50,12 @@ def _stub_graph_ub_budget_bytes_for_arch(arch):
             "Ascend910_93",
             "Ascend310B",
     )):
-        return 96 * 1024
+        return 192
     return 0
+
+
+def _stub_graph_ub_budget_bytes_for_arch(arch):
+    return _stub_ub_size_in_kbytes_for_arch(arch) * 1024 // 2
 
 
 class _FakeModule:
@@ -134,6 +138,7 @@ def compiler_module():
     utils_stub.downgrade_llir = lambda llir: llir
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
+    utils_stub.ub_size_in_kbytes_for_arch = _stub_ub_size_in_kbytes_for_arch
 
     class UnusedNPUUtils:
         pass
@@ -334,6 +339,7 @@ def _run_ttir_to_npubin(
         return {
             **metadata,
             "has_auto_blockify_blacklist_op": has_blacklist_op,
+            "mix_mode": "aiv",
             "row_coalescing_applied": row_coalescing_applied,
         }
 
@@ -628,7 +634,7 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
                 disable_fma=True,
             )
 
-        second_injection = env_enabled and not blacklisted and not row_applied
+        second_injection = env_enabled and not row_applied
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
         expected_options = [*common_options, *pure_simt_prefix]

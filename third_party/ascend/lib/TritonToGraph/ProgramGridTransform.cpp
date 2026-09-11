@@ -221,9 +221,9 @@ mlir::triton::cfg::parseProgramGridTransformContract(Attribute attribute) {
   auto contract = dyn_cast_or_null<DictionaryAttr>(attribute);
   if (!contract)
     return failure();
-  if (!hasExactKeys(contract, {kVersion, kExtentSource, kHiddenExtentAxes,
-                               kHiddenArgumentOrder, kHiddenArgumentTypes,
-                               kTransforms}))
+  if (!hasExactKeys(contract,
+                    {kVersion, kExtentSource, kHiddenExtentAxes,
+                     kHiddenArgumentOrder, kHiddenArgumentTypes, kTransforms}))
     return failure();
 
   std::optional<int64_t> version = getInteger(contract, kVersion);

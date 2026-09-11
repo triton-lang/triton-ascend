@@ -878,8 +878,7 @@ LogicalResult materializeIATCandidateToSandbox(ModuleOp module,
     return failure();
   ProgramGridTransformContract contract;
   contract.transforms.push_back(ProgramGridTransform{
-      0, candidate.axis, static_cast<int64_t>(candidate.factor), false,
-      false});
+      0, candidate.axis, static_cast<int64_t>(candidate.factor), false, false});
   if (failed(setProgramGridTransformContract(module, contract)))
     return failure();
   module->setAttr(kIndependentAxisTensorizeMarkerAttr,

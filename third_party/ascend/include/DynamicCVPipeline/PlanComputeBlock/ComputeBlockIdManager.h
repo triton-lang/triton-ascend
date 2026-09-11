@@ -52,6 +52,8 @@ public:
   void updateBlockIdWithInner(Operation *parentOp, int targetId);
   void updateBlockId(Operation *op, int blockId);
 
+  void forgetOp(Operation *op);
+
   bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
   llvm::LogicalResult inheritFromParent(Block *block);
 

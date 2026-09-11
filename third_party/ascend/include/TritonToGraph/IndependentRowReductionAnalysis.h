@@ -61,11 +61,32 @@ inline bool isMergeStyleReduction(ReduceOp reduce) {
          reduce.getAxis() == 0 && source.getShape()[1] == result.getShape()[0];
 }
 
+// The TTIR producer may retain a shape-preserving reshape immediately before a
+// row reduction.  It changes neither the row identity nor the reduction
+// domain, so normalize only an exact type-preserving chain.  Do not look
+// through a rank/layout-changing reshape: that would weaken the row proof.
+inline Value stripIdentityReshapes(Value value) {
+  while (auto reshape = value.getDefiningOp<triton::ReshapeOp>()) {
+    Value source = reshape.getOperand();
+    if (source.getType() != value.getType())
+      break;
+    value = source;
+  }
+  return value;
+}
+
 inline Value getSquareOperand(Value value) {
-  if (auto multiply = value.getDefiningOp<arith::MulFOp>())
-    return multiply.getLhs() == multiply.getRhs() ? multiply.getLhs() : Value();
-  if (auto multiply = value.getDefiningOp<arith::MulIOp>())
-    return multiply.getLhs() == multiply.getRhs() ? multiply.getLhs() : Value();
+  value = stripIdentityReshapes(value);
+  if (auto multiply = value.getDefiningOp<arith::MulFOp>()) {
+    Value lhs = stripIdentityReshapes(multiply.getLhs());
+    Value rhs = stripIdentityReshapes(multiply.getRhs());
+    return lhs == rhs ? lhs : Value();
+  }
+  if (auto multiply = value.getDefiningOp<arith::MulIOp>()) {
+    Value lhs = stripIdentityReshapes(multiply.getLhs());
+    Value rhs = stripIdentityReshapes(multiply.getRhs());
+    return lhs == rhs ? lhs : Value();
+  }
   return Value();
 }
 
@@ -157,7 +178,7 @@ classifyIndependentRowReduction(triton::FuncOp function) {
   if (reductions.size() != 2 || squareReductions.size() != 1 ||
       directReductions.size() != 1)
     return IndependentRowReductionKind::Other;
-  return directReductions.front().getSrcs().front() ==
+  return stripIdentityReshapes(directReductions.front().getSrcs().front()) ==
                  squareReductions.front().second &&
                  hasMomentDownstreamUse(
                      directReductions.front().getResults().front()) &&

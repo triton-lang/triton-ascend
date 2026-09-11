@@ -951,7 +951,7 @@ CONSTRAINTS = {
     },
     "triton.language.extra.cann.extension.scope": {
         "constraints": [
-            "core_mode: must be 'vector', 'cube', 'SIMT', or 'SIMD'.",
+            "core_mode: must be 'vector', 'cube'.",
             "Each kernel supports one cube scope and one vector scope; they execute in parallel.",
             "Explicit synchronization (sync_block_set/sync_block_wait) required for cross-scope data dependencies.",
         ],

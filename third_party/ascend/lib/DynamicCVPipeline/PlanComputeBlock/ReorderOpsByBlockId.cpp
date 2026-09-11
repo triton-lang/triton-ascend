@@ -59,7 +59,7 @@ using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "ReorderOpsByBlockIdPass";
 
 #define DBGS(...) LLVM_DEBUG(llvm::dbgs() << __VA_ARGS__)
-#define LOG_DEBUG(...) DBGS("\n[" << DEBUG_TYPE << "] " << __VA_ARGS__)
+#define LOG_DEBUG(...) DBGS("[" << DEBUG_TYPE << "] " << __VA_ARGS__)
 
 using namespace triton;
 using namespace CVPipeline;
@@ -345,6 +345,19 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
   return llvm::failure();
 }
 
+static bool isStoreLikeWithRegion(Operation *op) {
+  if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+    return true;
+  }
+  auto ret = op->walk([&](Operation *subOp) {
+    if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(subOp)) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return ret == WalkResult::interrupt();
+}
+
 // Stable sort ops based on their group orders
 static llvm::FailureOr<SmallVector<Operation *>>
 buildReorderedOps(const BlockOpGraph &graph,
@@ -361,7 +374,7 @@ buildReorderedOps(const BlockOpGraph &graph,
     SmallVector<Operation *> storeOps;
     for (Operation *op : graph.ops) {
       if (opBlockId.at(op) == blockId) {
-        if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp>(op)) {
+        if (isStoreLikeWithRegion(op)) {
           storeOps.push_back(op);
           continue;
         }
@@ -459,6 +472,18 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
 
   if (CVPipeline::hasFallbackAttr(moduleOp)) {
     return;
+  }
+
+  // MergeComputeBlockPass sets kMergeComputeBlockApplied to record whether it
+  // actually merged blocks. Skip reorder only when it ran but merged nothing;
+  // consume the marker either way so it does not leak into the output IR.
+  if (auto applied = moduleOp->getAttrOfType<BoolAttr>(
+          CVPipeline::kMergeComputeBlockApplied)) {
+    moduleOp->removeAttr(CVPipeline::kMergeComputeBlockApplied);
+    if (!applied.getValue()) {
+      LOG_DEBUG("Skip reorder: MergeComputeBlock ran but merged nothing");
+      return;
+    }
   }
 
   LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");

@@ -252,7 +252,7 @@ UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
   SmallVector<SmallVector<Value>> ssbufferMemrefs;
   SmallVector<Value> ssbufferVec0Memrefs;
   SmallVector<Value> ssbufferVec1Memrefs;
-  int numBuffers = info->crossCoreDependentMap.size();
+  int numBuffers = countProducerGroups(info->crossCoreDependentMap);
   if (numBuffers == 0) {
     LDBG("crossCoreDependentMap is empty!" << "\n");
     return ssbufferMemrefs;
@@ -301,8 +301,10 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
     // Collect crossCoreBuffers for this op
     auto it = info->crossCoreDependentMap.find(op);
     if (it != info->crossCoreDependentMap.end()) {
-      crossCoreBuffers[crossCoreIdx][op] = it->second;
-      crossCoreIdx++;
+      for (SmallVector<Operation *> &producers : it->second) {
+        crossCoreBuffers[crossCoreIdx][op] = producers;
+        crossCoreIdx++;
+      }
     }
 
     return WalkResult::advance();
@@ -394,15 +396,16 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
 
 // Helper function to build buffer dependency mappings (fully Operation* based)
 // Outputs two reverse lookup tables for O(1) lookup during IR walk:
-//   - consumerToGroup: consumer Op -> groupIdx
+//   - consumerToGroups: consumer Op -> [groupIdx] (one op may consume several
+//     groups)
 //   - producerToGroups: producer Op -> [groupIdx]
 static int buildBufferDependencyMappings(
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>> &buffers,
-    DenseMap<Operation *, int> &consumerToGroup,
+    DenseMap<Operation *, SmallVector<int>> &consumerToGroups,
     DenseMap<Operation *, SmallVector<int>> &outputToGroups) {
   for (auto &[groupIdx, deps] : buffers) {
     for (auto &[consumer, producers] : deps) {
-      consumerToGroup[consumer] = groupIdx;
+      consumerToGroups[consumer].push_back(groupIdx);
 
       for (Operation *producer : producers) {
         outputToGroups[producer].push_back(groupIdx);
@@ -455,18 +458,18 @@ int UpdateConditionInfoPass::getInputOutputValues(
   DenseMap<Operation *, SmallVector<int>> intraCoreOutputToGroups;
 
   // Add consumer mappings for input dependency identification
-  DenseMap<Operation *, int> crossCoreConsumerToGroup;
-  DenseMap<Operation *, int> intraCoreConsumerToGroup;
+  DenseMap<Operation *, SmallVector<int>> crossCoreConsumerToGroups;
+  DenseMap<Operation *, SmallVector<int>> intraCoreConsumerToGroups;
 
   // Build cross-core mappings
-  if (buildBufferDependencyMappings(crossCoreBuffers, crossCoreConsumerToGroup,
+  if (buildBufferDependencyMappings(crossCoreBuffers, crossCoreConsumerToGroups,
                                     crossCoreOutputToGroups) ==
       UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
   // Build intra-core mappings
-  if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroup,
+  if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroups,
                                     intraCoreOutputToGroups) ==
       UPDATE_CONDITION_INFO_FAILED) {
     return UPDATE_CONDITION_INFO_FAILED;
@@ -478,11 +481,13 @@ int UpdateConditionInfoPass::getInputOutputValues(
       return WalkResult::advance();
 
     // Check if this op is a consumer (for input dependency)
-    if (crossCoreConsumerToGroup.count(op)) {
-      crossCoreInputSet.insert(crossCoreConsumerToGroup[op]);
+    if (crossCoreConsumerToGroups.count(op)) {
+      for (int idx : crossCoreConsumerToGroups[op])
+        crossCoreInputSet.insert(idx);
     }
-    if (intraCoreConsumerToGroup.count(op)) {
-      intraCoreInputSet.insert(intraCoreConsumerToGroup[op]);
+    if (intraCoreConsumerToGroups.count(op)) {
+      for (int idx : intraCoreConsumerToGroups[op])
+        intraCoreInputSet.insert(idx);
     }
 
     // Check if this op is a producer (for output dependency)

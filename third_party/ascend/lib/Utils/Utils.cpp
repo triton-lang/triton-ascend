@@ -60,6 +60,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <map>
@@ -422,8 +423,24 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
   OpFoldResult offsetShift = subOpFoldResult(
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
-  for (int i = 0; i < shapedType.getRank(); ++i) {
-    OpFoldResult curStride = fullShapeReCast.getConstifiedMixedStrides()[i];
+  auto strides = fullShapeReCast.getConstifiedMixedStrides();
+  SmallVector<int> axisOrder;
+  axisOrder.reserve(shapedType.getRank());
+  for (int i = 0; i < shapedType.getRank(); ++i)
+    axisOrder.push_back(i);
+
+  bool allStridesConstant = llvm::all_of(strides, [](OpFoldResult stride) {
+    return getConstantIntValue(stride).has_value();
+  });
+  if (allStridesConstant) {
+    llvm::stable_sort(axisOrder, [&strides](int lhs, int rhs) {
+      return std::abs(*getConstantIntValue(strides[lhs])) >
+             std::abs(*getConstantIntValue(strides[rhs]));
+    });
+  }
+
+  for (int i : axisOrder) {
+    OpFoldResult curStride = strides[i];
     if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
       if (isZero(curStride)) {
         emitWarning(loc)

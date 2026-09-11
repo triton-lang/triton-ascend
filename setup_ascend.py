@@ -23,6 +23,7 @@ def _set_default_env_vars():
     os.environ.setdefault("TRITON_BUILD_WITH_CLANG_LLD", "true")
     os.environ.setdefault("TRITON_BUILD_PROTON", "OFF")
     os.environ.setdefault("TRITON_BUILD_TD", "OFF")
+    os.environ.setdefault("TRITON_BUILD_NPUIR", "OFF")
     os.environ.setdefault("TRITON_WHEEL_NAME", "triton_ascend")
     os.environ.setdefault("TRITON_APPEND_CMAKE_ARGS", "-DTRITON_BUILD_UT=OFF")
 
@@ -283,6 +284,13 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
             else:
                 print(f"Command '{' '.join(cmd)}' failed after {retries} attempts.")
     raise last_error
+
+
+def _ensure_npuir_submodule():
+    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+        return
+    import build_npuir
+    build_npuir.build_npuir()
 
 
 def _ensure_distributed_submodule():
@@ -585,6 +593,7 @@ def _build_setup_kwargs(mod, kwargs):
 
 def main():
     _set_default_env_vars()
+    _ensure_npuir_submodule()
     _ensure_distributed_submodule()
 
     # Import the community setup_triton module without executing its setup()

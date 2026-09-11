@@ -57,11 +57,9 @@ static int findIfOpIndexInList(Operation *op, SmallVector<scf::IfOp> &ifOps,
 }
 
 // Filter out entries where consumer op is not inside the specified forOp
-static llvm::DenseMap<Operation *, SmallVector<Operation *>>
-filterCrossCoreMapByForOp(
-    scf::ForOp forOp,
-    llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossCoreMap) {
-  llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredMap;
+static ConsumerProducerMap
+filterCrossCoreMapByForOp(scf::ForOp forOp, ConsumerProducerMap &crossCoreMap) {
+  ConsumerProducerMap filteredMap;
   for (auto &entry : crossCoreMap) {
     Operation *consumerOp = entry.first;
     if (!forOp->isAncestor(consumerOp)) {
@@ -144,9 +142,8 @@ static scf::ForOp getOtherScopeMainloop(ModuleOp module, bool currentIsCube,
 // has any consumer defOp Returns true if the current compute block runs first
 // (no consumer in first ifOp) Returns false if the current compute block runs
 // later (has consumer in first ifOp)
-static bool
-isRunFirst(SmallVector<scf::IfOp> &ifOps,
-           llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossDeps) {
+static bool isRunFirst(SmallVector<scf::IfOp> &ifOps,
+                       ConsumerProducerMap &crossDeps) {
   if (ifOps.empty()) {
     return true;
   }
@@ -321,7 +318,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
   // Calculate cross-core factor and merge with intra-core factor
   if (hasCrossDeps) {
     // Filter out entries where consumer op is not inside current forOp
-    llvm::DenseMap<Operation *, SmallVector<Operation *>> filteredCrossCoreMap =
+    ConsumerProducerMap filteredCrossCoreMap =
         filterCrossCoreMapByForOp(forOp, info->crossCoreDependentMap);
 
     // for caculating the crossdeps, need to filter ifblocks without
@@ -475,8 +472,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
 // scope
 std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
     scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-    DenseMap<Operation *, int> &ifOpIndex,
-    llvm::DenseMap<Operation *, SmallVector<Operation *>> &crossDeps) {
+    DenseMap<Operation *, int> &ifOpIndex, ConsumerProducerMap &crossDeps) {
   int maxRequiredBuffers = 1;
   int maxX = 1;
 
@@ -514,56 +510,57 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
 
   // Iterate all cross-core dependencies
   for (auto &entry : crossDeps) {
-    Operation *consumerOp = entry.first;                 // Consumer operation
-    SmallVector<Operation *> producerOps = entry.second; // Producer op list
-    int x = producerOps.size(); // Producer op count (one buffer has
-                                // two ops in different scope)
-    // some special buffer is not Symmetrical
-    if (producerOps.size() == 1) {
-      x = 1;
-    }
+    Operation *consumerOp = entry.first; // Consumer operation
+    for (SmallVector<Operation *> &producerOps : entry.second) {
+      int x = producerOps.size(); // Producer op count (one buffer has
+                                  // two ops in different scope)
+      // some special buffer is not Symmetrical
+      if (producerOps.size() == 1) {
+        x = 1;
+      }
 
-    // Find the IfOp index that consumer belongs to (comsumerIdx)
-    int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
-    if (comsumerIdx == -1) {
-      return {-1, -1};
-    }
+      // Find the IfOp index that consumer belongs to (comsumerIdx)
+      int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
+      if (comsumerIdx == -1) {
+        return {-1, -1};
+      }
 
-    // Find producer's position in the other side's ifOps (producerIdx)
-    int producerIdx = getProducerIfOpIndex(producerOps, otherSideIfOps,
-                                           otherSideIfOpIndexMap);
-    if (producerIdx == -1) {
-      return {-1, -1};
-    }
+      // Find producer's position in the other side's ifOps (producerIdx)
+      int producerIdx = getProducerIfOpIndex(producerOps, otherSideIfOps,
+                                             otherSideIfOpIndexMap);
+      if (producerIdx == -1) {
+        return {-1, -1};
+      }
 
-    // If consumer is after producer (comsumerIdx >= producerIdx), calculate
-    // required buffer count comsumerIdx - producerIdx + 1 represents the buffer
-    // count needed to cover this distance If the current compute block executes
-    // first (firstIfOp has no consumer), subtract 1
-    if (comsumerIdx < producerIdx) {
-      // case : C1 -> V1V2V3 -> C2
-      // in this case comsumerIdx < producerIdx, crossDeps hard to process, do
-      // not change the loop iteration times
-      LDBG("there is complex case!");
-      return {1, 1};
-    }
-    int requiredBuffers = comsumerIdx - producerIdx + 1;
-    if (runFirst) {
-      requiredBuffers = requiredBuffers - 1;
-    }
-    LDBG("consumer : " << *consumerOp);
-    LDBG("consumer comsumerIdx: " << comsumerIdx
-                                  << ", producerIdx: " << producerIdx);
-    LDBG("requiredBuffers: " << requiredBuffers);
-    LDBG("buffer: " << x);
-    LDBG("runFirst: " << runFirst);
+      // If consumer is after producer (comsumerIdx >= producerIdx), calculate
+      // required buffer count comsumerIdx - producerIdx + 1 represents the
+      // buffer count needed to cover this distance If the current compute
+      // block executes first (firstIfOp has no consumer), subtract 1
+      if (comsumerIdx < producerIdx) {
+        // case : C1 -> V1V2V3 -> C2
+        // in this case comsumerIdx < producerIdx, crossDeps hard to process, do
+        // not change the loop iteration times
+        LDBG("there is complex case!");
+        return {1, 1};
+      }
+      int requiredBuffers = comsumerIdx - producerIdx + 1;
+      if (runFirst) {
+        requiredBuffers = requiredBuffers - 1;
+      }
+      LDBG("consumer : " << *consumerOp);
+      LDBG("consumer comsumerIdx: " << comsumerIdx
+                                    << ", producerIdx: " << producerIdx);
+      LDBG("requiredBuffers: " << requiredBuffers);
+      LDBG("buffer: " << x);
+      LDBG("runFirst: " << runFirst);
 
-    // Update max value using fraction comparison to avoid precision issues
-    // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
-    // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
-    if (requiredBuffers * maxX > maxRequiredBuffers * x) {
-      maxRequiredBuffers = requiredBuffers;
-      maxX = x;
+      // Update max value using fraction comparison to avoid precision issues
+      // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
+      // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
+      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+        maxRequiredBuffers = requiredBuffers;
+        maxX = x;
+      }
     }
   }
 

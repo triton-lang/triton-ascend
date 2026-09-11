@@ -28,6 +28,7 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -55,8 +56,11 @@ using namespace triton;
 class AddDynamicCVPipelinePass
     : public ::impl::AddDynamicCVPipelineBase<AddDynamicCVPipelinePass> {
 public:
+  using Base = ::impl::AddDynamicCVPipelineBase<AddDynamicCVPipelinePass>;
+
   explicit AddDynamicCVPipelinePass(const AddDynamicCVPipelineOptions &options);
   void runOnOperation() override;
+  void getDependentDialects(DialectRegistry &registry) const override;
 };
 
 } // namespace

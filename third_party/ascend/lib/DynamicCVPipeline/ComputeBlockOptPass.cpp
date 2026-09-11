@@ -25,6 +25,7 @@
 #include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
 #include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/MergeCubeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 
@@ -76,6 +77,11 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
+  pm.addPass(createMergeComputeBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+
+  pm.addPass(createMergeCubeBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createRelocateMemrefDeclPass());
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
@@ -110,6 +116,8 @@ void registerComputeBlockOptPasses() {
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);
+  registerPass(createMergeComputeBlockPass);
+  registerPass(createMergeCubeBlockPass);
   registerPass(createRelocateMemrefDeclPass);
 }
 

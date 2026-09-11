@@ -30,6 +30,22 @@
 namespace mlir {
 namespace triton {
 
+// Pass for analyzing tensor args in main_loop forOps
+class AnalyzeArgsPass
+    : public PassWrapper<AnalyzeArgsPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeArgsPass)
+
+  AnalyzeArgsPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-args"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze tensor args in main_loop forOps";
+  }
+};
+
 // Pass for analyzing function names
 class AnalyzeNamePass
     : public PassWrapper<AnalyzeNamePass, OperationPass<ModuleOp>> {
@@ -135,6 +151,7 @@ public:
   }
 };
 
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeNamePass();
 std::unique_ptr<OperationPass<ModuleOp>>

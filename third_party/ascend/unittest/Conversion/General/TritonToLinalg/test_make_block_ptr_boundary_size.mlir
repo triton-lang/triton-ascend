@@ -7,7 +7,7 @@
 // `tl.make_block_ptr` is lowered to `tt.make_tensor_ptr` before
 // TritonToLinalg runs.  getBoundarySizes() reconstructs the per-axis
 // in-bounds size by decomposing the flat block offset with the full-shape
-// strides; two defects in that decomposition are covered here:
+// strides; three defects in that decomposition are covered here:
 //
 //  1. (primary) An axis that is *not* boundary-checked never reduced the
 //     flat offset (offset % stride), so a checked trailing axis saw the
@@ -19,6 +19,11 @@
 //     reached divOpFoldResult(offsetShift, 0), which emits "cannot div 0!"
 //     and returns an empty OpFoldResult, crashing the compiler.  The fix
 //     skips such axes (emitting a warning) and keeps the current block size.
+//
+//  3. Logical axis order need not be physical major-to-minor order.  For a
+//     permuted layout with strides [1, 800, 20], decomposing axes as [0, 1, 2]
+//     treats the entire linear offset as axis 0.  The fix visits axes in
+//     descending stride order [1, 2, 0].
 
 // The skipped zero-stride axis of the second case is reported through a
 // warning instead of the previous "cannot div 0!" error (the diagnostic
@@ -78,6 +83,38 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
     %data = tt.load %load_ptr {boundaryCheck = array<i32: 0, 1>} : !tt.ptr<tensor<16x32xf32>>
     %store_ptr = tt.make_tensor_ptr %out_ptr, [%c64_i64, %c60_i64], [%c64_i64, %c1_i64], [%c0_i32, %c36_i32] {order = array<i32: 1, 0>} : <tensor<16x32xf32>>
     tt.store %store_ptr, %data {boundaryCheck = array<i32: 1>} : !tt.ptr<tensor<16x32xf32>>
+    tt.return
+  }
+}
+
+// -----
+// Permuted layout: logical axes [0, 1, 2] have physical strides [1, 800, 20].
+// The block starts at logical offset [7, 18, 32] in shape [20, 30, 40].  Its
+// flat offset is 7 + 18*800 + 32*20 = 15047.  Decomposing in physical order
+// [1, 2, 0] recovers [18, 32, 7], which maps back to logical boundary sizes
+// [1, min(16, 30-18), min(64, 40-32)] = [1, 12, 8].
+
+// CHECK-LABEL: func.func @boundary_size_permuted_strides
+// CHECK: memref.subview {{.*}}[0, 0, 0] [1, 12, 8] [1, 1, 1]
+// CHECK: memref.copy
+module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
+  tt.func public @boundary_size_permuted_strides(
+      %base_ptr: !tt.ptr<f32> {tt.divisibility = 16 : i32},
+      %out_ptr: !tt.ptr<f32> {tt.divisibility = 16 : i32}
+  ) attributes {noinline = false} {
+    %c1_i64 = arith.constant 1 : i64
+    %c7_i32 = arith.constant 7 : i32
+    %c18_i32 = arith.constant 18 : i32
+    %c32_i32 = arith.constant 32 : i32
+    %c20_i64 = arith.constant 20 : i64
+    %c30_i64 = arith.constant 30 : i64
+    %c40_i64 = arith.constant 40 : i64
+    %c800_i64 = arith.constant 800 : i64
+    %c1200_i64 = arith.constant 1200 : i64
+    %load_ptr = tt.make_tensor_ptr %base_ptr, [%c20_i64, %c30_i64, %c40_i64], [%c1_i64, %c800_i64, %c20_i64], [%c7_i32, %c18_i32, %c32_i32] {order = array<i32: 2, 1, 0>} : <tensor<1x16x64xf32>>
+    %data = tt.load %load_ptr {boundaryCheck = array<i32: 0, 1, 2>} : !tt.ptr<tensor<1x16x64xf32>>
+    %store_ptr = tt.make_tensor_ptr %out_ptr, [%c20_i64, %c30_i64, %c40_i64], [%c1200_i64, %c40_i64, %c1_i64], [%c7_i32, %c18_i32, %c32_i32] {order = array<i32: 2, 1, 0>} : <tensor<1x16x64xf32>>
+    tt.store %store_ptr, %data {boundaryCheck = array<i32: 0, 1, 2>} : !tt.ptr<tensor<1x16x64xf32>>
     tt.return
   }
 }

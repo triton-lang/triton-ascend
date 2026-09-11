@@ -15,7 +15,8 @@ from triton.language.core import (
 from typing import Optional, Tuple, List, overload, Union
 from triton._C.libtriton import ir
 
-from ._utils import _convert_elem_to_ir_value, _deprecated
+from ..utils import _deprecated
+from ._utils import _convert_elem_to_ir_value
 
 
 @_deprecated()

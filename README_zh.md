@@ -1,11 +1,6 @@
 <!-- markdownlint-disable-file MD041 -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
-  </picture>
-</p>
 
-<h3 align="center"><font size="68">
+<h3 align="center"><font size="6">
 Triton-Ascend
 </font></h3>
 
@@ -112,9 +107,9 @@ pip install -e .
 # 检出指定版本的LLVM源码并应用补丁
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
-git apply fad3272.patch
+git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+git apply llvm_patch_f6ded0b.patch
 
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 

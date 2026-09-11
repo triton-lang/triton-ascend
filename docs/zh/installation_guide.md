@@ -8,14 +8,13 @@
 
 - Ascend产品：支持Atlas A2/A3/950系列。
 
-- NPU配置：建议至少单卡32GB内存。
+- NPU配置：建议单卡32GB及以上内存。
 
-- 操作系统：需Linux系统，具体请参考<a href="https://www.hiascend.com/hardware/compatibility" style="text-decoration: none; color: #0066cc;">兼容性查询助手</a>。本文接下来所有操作均以**Ubuntu**环境演示。
+- 操作系统：需Linux系统，具体请参考[兼容性查询助手](https://www.hiascend.com/hardware/compatibility)。本文接下来所有操作均以**Ubuntu**环境演示。
 
 **软件依赖**
 
-确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》
-完成驱动与固件安装。
+确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
 
 - CANN版本：9.1.0
 - Python版本：python3.11
@@ -47,14 +46,15 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 ### 编译Triton-Ascend
 
 ```bash
-git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+git clone https://github.com/triton-lang/triton-ascend.git
+cd triton-ascend
 git checkout main
 pip install -e .
 ```
 
 ### 自定义LLVM构建（可选）
 
-如果需要自定义构建LLVM过程的，可以执行下面的步骤去编译Triton-Ascend。
+如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend。
 
 1. **代码准备**：通过`git checkout`检出指定版本的LLVM源码并应用补丁。
 
@@ -62,11 +62,11 @@ pip install -e .
     git clone --no-checkout https://github.com/llvm/llvm-project.git
     cd llvm-project
     git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/refs/heads/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
     git apply llvm_patch_f6ded0b.patch
     ```
 
-2. **构建LLVM**：路径 `/path/llvm-install` 为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
+2. **构建LLVM**：路径`/path/llvm-install`为用户规划的LLVM安装路径，需根据实际调整；路径`{PATH_TO}`为用户第一步检出LLVM源码的路径。
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
@@ -89,10 +89,11 @@ pip install -e .
     cp  {PATH_TO}/llvm-project/build/bin/FileCheck ${LLVM_INSTALL_PREFIX}/bin/FileCheck
     ```
 
-3. **编译Triton-Ascend**
+3. **编译Triton-Ascend**：通过配置LLVM路径定位依赖库，启用ccache加速编译，并关闭proton和单元测试来减少构建开销。
 
     ```bash
-    git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
+    git clone https://github.com/triton-lang/triton-ascend.git
+    cd triton-ascend
     LLVM_SYSPATH=${LLVM_INSTALL_PREFIX} \
     TRITON_BUILD_WITH_CCACHE=true \
     TRITON_BUILD_WITH_CLANG_LLD=true \
@@ -145,7 +146,7 @@ pip install -e .
 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11     | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11/Dockerfile)     | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11     |
 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11  | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11/Dockerfile)  | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11  |
 
-更多镜像参见[OVERVIEW.md](../../docker/OVERVIEW.zh.md)
+更多镜像请参考[OVERVIEW.md](../../docker/OVERVIEW.zh.md)
 
 #### 镜像使用
 
@@ -354,20 +355,20 @@ third_party/ascend/unittest/pytest_ut/test_add.py ......
 pip install torch==2.7.1+cpu --index-url https://download.pytorch.org/whl/cpu
 ```
 
-**问题二：编译安装Triton-Ascend时，如果GCC < 9.4.0，可能报错 “ld.lld: error: unable to find library -lstdc++fs”**
+**问题二：编译安装Triton-Ascend时，如果GCC < 9.4.0，可能报错“ld.lld: error: unable to find library -lstdc++fs”**
 
 **解决措施**
 
 一般是链接器无法找到stdc++fs库引起的报错。该库用于支持GCC 9之前版本的文件系统特性。此时需要手动把CMake文件中以下相关代码片段的注释打开。
 文件路径：triton-ascend/CMakeLists.txt
 
-```bash
+```cmake
 if (NOT WIN32 AND NOT APPLE)
 link_libraries(stdc++fs)
 endif()
 ```
 
-**问题三：执行算子时报错 ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package**
+**问题三：执行算子时报错“ModuleNotFoundError: No module named 'triton._C.libtriton.ascend'; 'triton._C.libtriton' is not a package”**
 
 **根因分析**
 
@@ -375,7 +376,7 @@ triton-ascend目录被triton覆盖，导致triton-ascend功能受损。
 
 **解决措施**
 
-卸载已损坏的triton-ascend，重新安装即可。以3.2.1 版本为例，可执行如下命令修复：
+卸载已损坏的triton-ascend，重新安装即可。以3.2.1版本为例，可执行如下命令修复：
 
 ```bash
 pip uninstall triton-ascend triton
@@ -392,21 +393,15 @@ ERROR: pip's dependency resolver does not currently take into account all the pa
 triton-ascend 3.2.1 requires triton==3.5.0, but you have triton 3.5.1 which is incompatible.
 ```
 
-若用户遇到且想恢复Triton-Ascend功能，可做如下操作：
-
-```bash
-pip uninstall triton-ascend triton
-pip install triton-ascend==3.2.1 --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
-
-```
+若用户遇到且想恢复Triton-Ascend功能，可根据问题三的解决措施进行命令修复。
 
 **问题五：Triton-Ascend 3.2.1版本依赖的Triton版本为何不一致？**
 
-答复：X86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供X86安装包，而Arm安装包是从Triton 3.5版本开始提供的。
+答复：x86与Arm使用不同版本的社区Triton安装包，是因为社区从Triton 3.2版本开始提供x86安装包，而Arm安装包是从Triton 3.5版本开始提供的。
 
-**问题六：如何确认芯片类型**
+**问题六：如何确认芯片类型？**
 
-您可以使用npu-smi命令查看系统上的NPU型号。例如，在npu-smi info命令的输出中，"910B4" 对应芯片类型A2（昇腾910b系列）：
+可以使用npu-smi命令查看系统上的NPU型号。例如，在npu-smi info命令的输出中，“910B4”对应芯片类型A2（昇腾910b系列）：
 
 ```Text
 root@localhost:/# npu-smi  info

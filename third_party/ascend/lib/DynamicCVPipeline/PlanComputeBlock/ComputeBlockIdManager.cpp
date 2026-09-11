@@ -32,6 +32,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "mlir/Support/WalkResult.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -75,6 +76,43 @@ bool ComputeBlockIdManager::isSameBlock(Operation *a, Operation *b) {
 }
 
 int ComputeBlockIdManager::getNextId() { return cntComputeBlockId++; }
+
+void ComputeBlockIdManager::updateBlockIdWithInner(Operation *parentOp,
+                                                   int targetId) {
+  // If the parentOp's blockId is the same as every op's id in each of its
+  // blocks, we need to change the ops inside its blocks to targetId as well.
+  int parentBlockId = getBlockIdByOp(parentOp);
+  if (parentBlockId == -1) {
+    updateBlockId(parentOp, targetId);
+    return;
+  }
+  // LinalgDialect should have targetId only in prarent, the inner op shouldn't
+  // have blockId.
+  if (isa<linalg::LinalgDialect>(parentOp->getDialect())) {
+    updateBlockId(parentOp, targetId);
+    return;
+  }
+
+  auto ret = parentOp->walk([&](Operation *op) {
+    auto innerBlockId = getBlockIdByOp(op);
+    if (innerBlockId != -1 && innerBlockId != parentBlockId) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  if (ret != WalkResult::interrupt()) {
+    parentOp->walk([&](Operation *op) {
+      // Never fold a sync into a compute block: it must keep its own unique
+      // block id so the fence between before/after ops survives.
+      if (CVPipeline::isSyncOp(op)) {
+        return;
+      }
+      updateBlockId(op, targetId);
+    });
+  }
+  updateBlockId(parentOp, targetId);
+}
 
 void ComputeBlockIdManager::updateBlockId(Operation *op, int blockId) {
   if (!op) {

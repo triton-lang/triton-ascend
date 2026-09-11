@@ -276,27 +276,30 @@ void GraphOptimizePass::runOnOperation() {
     return;
   }
 
-  SmallVector<Operation *> preGraphRewriteCandidates;
-  getOperation().walk([&](Operation *op) {
-    if (isNarrowUnsignedTensorCandidate(op) ||
-        (options.compileOn91095 && isFoldHistogramParkingCandidate(op)))
-      preGraphRewriteCandidates.push_back(op);
-  });
-  if (!preGraphRewriteCandidates.empty()) {
-    // Rewrite only the known pattern roots. In particular, do not invoke the
-    // greedy driver's module-wide folding/DCE before graph rules inspect IR.
-    RewritePatternSet patterns(&getContext());
-    patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
-    if (options.compileOn91095)
-      patterns.add<FoldHistogramParking>(&getContext());
-    FrozenRewritePatternSet frozenPatterns(std::move(patterns));
-    GreedyRewriteConfig config;
-    config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps)
-        .enableFolding();
-    if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
-                                       frozenPatterns, config))) {
-      signalPassFailure();
-      return;
+  // The narrowed integer representation and parked histogram template are
+  // valid only for 910_95/950 lowering. Keep A3 on its established TTIR so
+  // neither pre-graph canonicalization changes its code generation.
+  if (options.compileOn91095) {
+    SmallVector<Operation *> preGraphRewriteCandidates;
+    getOperation().walk([&](Operation *op) {
+      if (isNarrowUnsignedTensorCandidate(op) ||
+          isFoldHistogramParkingCandidate(op))
+        preGraphRewriteCandidates.push_back(op);
+    });
+    if (!preGraphRewriteCandidates.empty()) {
+      // Rewrite only the known pattern roots. In particular, do not invoke the
+      // greedy driver's module-wide folding/DCE before graph rules inspect IR.
+      RewritePatternSet patterns(&getContext());
+      patterns.add<narrow_unsigned_tensor::Narrow, FoldHistogramParking>(
+          &getContext());
+      FrozenRewritePatternSet frozenPatterns(std::move(patterns));
+      GreedyRewriteConfig config;
+      config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps);
+      if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
+                                         frozenPatterns, config))) {
+        signalPassFailure();
+        return;
+      }
     }
   }
 

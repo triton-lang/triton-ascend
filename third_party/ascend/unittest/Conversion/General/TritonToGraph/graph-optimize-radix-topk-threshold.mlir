@@ -14,7 +14,7 @@
 // CHECK-NOT: arith.subi
 // CHECK: tt.return
 // OTHER-LABEL: tt.func @radix_topk_threshold_round(
-// OTHER: arith.shrui {{.*}} : tensor<8192xi32>
+// OTHER: arith.shrui {{.*}} : tensor<8192xi64>
 // OTHER: tt.histogram
 // OTHER: tt.reduce
 // OTHER: arith.subi

@@ -1,0 +1,1347 @@
+
+<!DOCTYPE html>
+
+
+<html lang="en" data-content_root="./" >
+
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Triton-Ascend autotune 使用指南 &#8212; Triton Ascend</title>
+  
+  
+  
+  <script data-cfasync="false">
+    document.documentElement.dataset.mode = localStorage.getItem("mode") || "";
+    document.documentElement.dataset.theme = localStorage.getItem("theme") || "";
+  </script>
+  <!--
+    this give us a css class that will be invisible only if js is disabled
+  -->
+  <noscript>
+    <style>
+      .pst-js-only { display: none !important; }
+
+    </style>
+  </noscript>
+  
+  <!-- Loaded before other Sphinx assets -->
+  <link href="_static/styles/theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+<link href="_static/styles/pydata-sphinx-theme.css?digest=90905a2f556bf617f1a9" rel="stylesheet" />
+
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=8f2a1f02" />
+    <link rel="stylesheet" type="text/css" href="_static/styles/sphinx-book-theme.css?v=4418a689" />
+    <link rel="stylesheet" type="text/css" href="_static/copybutton.css?v=76b2166b" />
+    <link rel="stylesheet" type="text/css" href="_static/custom.css?v=0a8fdc84" />
+  
+  <!-- So that users can add custom icons -->
+  <script defer src="_static/scripts/fontawesome.js?digest=90905a2f556bf617f1a9"></script>
+  <!-- Pre-loaded scripts that we'll load fully later -->
+  <link rel="preload" as="script" href="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9" />
+<link rel="preload" as="script" href="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9" />
+
+    <script src="_static/documentation_options.js?v=b1def801"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <script src="_static/clipboard.min.js?v=a7894cd8"></script>
+    <script src="_static/copybutton.js?v=f281be69"></script>
+    <script src="_static/scripts/sphinx-book-theme.js?v=fab101a9"></script>
+    <script>DOCUMENTATION_OPTIONS.pagename = 'autotune_guide';</script>
+    <script>DOCUMENTATION_OPTIONS.search_as_you_type = false;</script>
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Tutorials" href="examples/index.html" />
+    <link rel="prev" title="CV 融合算子开发" href="programming_guide/cv_fusion_operator.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <meta name="docsearch:language" content="en"/>
+  <meta name="docsearch:version" content="" />
+    <meta name="docbuild:last-update" content="Sep 11, 2026"/>
+  
+    
+    <script src="_static/searchtools.js"></script>
+    <script src="_static/language_data.js"></script>
+    <script src="searchindex.js"></script>
+  
+  </head>
+  <body data-default-mode="">
+  
+  
+  <div id="pst-skip-link" class="skip-link d-print-none"><a href="#main-content">Skip to main content</a></div>
+
+  
+  <div id="pst-scroll-pixel-helper"></div>
+  
+  <button type="button" class="btn rounded-pill" id="pst-back-to-top">
+    <i class="fa-solid fa-arrow-up"></i>Back to top</button>
+  
+  
+  
+  
+  <dialog id="pst-search-dialog">
+    
+<form class="bd-search d-flex align-items-center"
+      action="search.html"
+      method="get">
+  <i class="fa-solid fa-magnifying-glass"></i>
+  <input type="search"
+         class="form-control"
+         name="q"
+         placeholder="Search..."
+         aria-label="Search..."
+         autocomplete="off"
+         autocorrect="off"
+         autocapitalize="off"
+         spellcheck="false"/>
+  <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd>K</kbd></span>
+</form>
+  </dialog>
+
+  <div class="pst-async-banner-revealer d-none">
+  <aside id="bd-header-version-warning" class="d-none d-print-none" aria-label="Version warning"></aside>
+</div>
+
+  
+    <header id="pst-header" class="bd-header navbar navbar-expand-lg bd-navbar d-print-none">
+    </header>
+  
+
+  <div class="bd-container">
+    <div class="bd-container__inner bd-page-width">
+      
+      
+      
+      <dialog id="pst-primary-sidebar-modal"></dialog>
+      <div id="pst-primary-sidebar" class="bd-sidebar-primary bd-sidebar">
+        
+
+  
+  <div class="sidebar-header-items sidebar-primary__section">
+    
+    
+    
+    
+  </div>
+  
+    <div class="sidebar-primary-items__start sidebar-primary__section">
+        <div class="sidebar-primary-item">
+
+  
+    
+  
+
+<a class="navbar-brand logo" href="index.html">
+  
+  
+  
+  
+  
+  
+    <p class="title logo__title">Triton Ascend</p>
+  
+</a></div>
+        <div class="sidebar-primary-item">
+
+<button class="btn search-button-field search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <span class="search-button__default-text">Search</span>
+ <span class="search-button__kbd-shortcut"><kbd class="kbd-shortcut__modifier">Ctrl</kbd>+<kbd class="kbd-shortcut__modifier">K</kbd></span>
+</button></div>
+        <div class="sidebar-primary-item"><nav class="bd-links bd-docs-nav" aria-label="Main">
+    <div class="bd-toc-item navbar-nav active">
+        <p aria-level="2" class="caption" role="heading"><span class="caption-text">从这里开始</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="release_note.html">版本说明</a></li>
+<li class="toctree-l1"><a class="reference internal" href="quick_start.html">快速入门</a></li>
+<li class="toctree-l1"><a class="reference internal" href="installation_guide.html">安装指南</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">教程与样例</span></p>
+<ul class="current nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="programming_guide/vector_operator.html">Vector算子开发</a></li>
+<li class="toctree-l1"><a class="reference internal" href="programming_guide/cube_operator.html">Cube算子开发</a></li>
+<li class="toctree-l1"><a class="reference internal" href="programming_guide/cv_fusion_operator.html">融合算子开发</a></li>
+<li class="toctree-l1 current active"><a class="current reference internal" href="#">Triton-Ascend autotune</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="examples/index.html">典型算子样例</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="examples/01_vector_add_example.html">向量相加 （Vector Addition）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/02_fused_softmax_example.html">融合 Softmax （Fused Softmax）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/03_layer_norm_example.html">层标准化 （Layer Normalization）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/04_fused_attention_example.html">融合注意力（Fused Attention）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/05_matrix_multiplication_example.html">矩阵乘法 （Matrix Multiplication）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/06_autotune_example.html">自动调优 （Autotune）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/07_accuracy_comparison_example.html">精度比对 （Accuracy Comparison）</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/08_max_autotune_example.html">max_autotune 使用示例</a></li>
+<li class="toctree-l2"><a class="reference internal" href="examples/09_costmodel_example.html">Costmodel 端到端示例</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">开发指南</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="programming_guide/index.html">Triton-Ascend算子开发</a></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="migration_guide/index.html">Triton-Ascend算子迁移</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="migration_guide/architecture_difference.html">昇腾与GPU的开发差异</a></li>
+<li class="toctree-l2"><a class="reference internal" href="migration_guide/migrate_from_gpu.html">GPU Triton算子迁移</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="debug_guide/index.html">Triton-Ascend算子调试与调优</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="debug_guide/debugging.html">Triton-Ascend 调试指南</a></li>
+<li class="toctree-l2"><a class="reference internal" href="debug_guide/profiling.html">Triton-Ascend 性能分析方法</a></li>
+<li class="toctree-l2"><a class="reference internal" href="debug_guide/precision.html">精度对比与误差分析</a></li>
+<li class="toctree-l2"><a class="reference internal" href="debug_guide/ub_overflow.html">UB Overflow 问题排查指南</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1"><a class="reference internal" href="environment_variable_and_compiler_options_reference.html">环境变量与编译选项</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">API参考</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1 has-children"><a class="reference internal" href="python-api/triton.html">triton</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.jit.html">triton.jit</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.autotune.html">triton.autotune</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.heuristics.html">triton.heuristics</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.Config.html">triton.Config</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="python-api/triton.language.html">triton.language</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/programming_model.html">Programming Model</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.tensor.html">triton.language.tensor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.tensor_descriptor.html">triton.language.tensor_descriptor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.program_id.html">triton.language.program_id</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.num_programs.html">triton.language.num_programs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.map_elementwise.html">triton.language.map_elementwise</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/creation_ops.html">Creation Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.arange.html">triton.language.arange</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cat.html">triton.language.cat</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.full.html">triton.language.full</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.zeros.html">triton.language.zeros</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.zeros_like.html">triton.language.zeros_like</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cast.html">triton.language.cast</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/shape_manipulation_ops.html">Shape Manipulation Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.broadcast.html">triton.language.broadcast</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.broadcast_to.html">triton.language.broadcast_to</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.expand_dims.html">triton.language.expand_dims</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.interleave.html">triton.language.interleave</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.join.html">triton.language.join</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.permute.html">triton.language.permute</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.ravel.html">triton.language.ravel</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.reshape.html">triton.language.reshape</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.split.html">triton.language.split</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.trans.html">triton.language.trans</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.view.html">triton.language.view</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/linear_algebra_ops.html">Linear Algebra Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.dot.html">triton.language.dot</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.dot_scaled.html">triton.language.dot_scaled</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/memory_pointer_ops.html">Memory/Pointer Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.load.html">triton.language.load</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.store.html">triton.language.store</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.make_tensor_descriptor.html">triton.language.make_tensor_descriptor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.load_tensor_descriptor.html">triton.language.load_tensor_descriptor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.store_tensor_descriptor.html">triton.language.store_tensor_descriptor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.make_block_ptr.html">triton.language.make_block_ptr</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.advance.html">triton.language.advance</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/indexing_ops.html">Indexing Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.flip.html">triton.language.flip</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.where.html">triton.language.where</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.swizzle2d.html">triton.language.swizzle2d</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.gather.html">triton.language.gather</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/math_ops.html">Math Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.abs.html">triton.language.abs</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.add.html">triton.language.add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cdiv.html">triton.language.cdiv</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.ceil.html">triton.language.ceil</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.clamp.html">triton.language.clamp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cos.html">triton.language.cos</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.div.html">triton.language.div</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.div_rn.html">triton.language.div_rn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.erf.html">triton.language.erf</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.exp.html">triton.language.exp</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.exp2.html">triton.language.exp2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.fdiv.html">triton.language.fdiv</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.floordiv.html">triton.language.floordiv</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.floor.html">triton.language.floor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.fma.html">triton.language.fma</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.log.html">triton.language.log</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.log2.html">triton.language.log2</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.maximum.html">triton.language.maximum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.minimum.html">triton.language.minimum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.mod.html">triton.language.mod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.mul.html">triton.language.mul</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.neg.html">triton.language.neg</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.rsqrt.html">triton.language.rsqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sigmoid.html">triton.language.sigmoid</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sin.html">triton.language.sin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.softmax.html">triton.language.softmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sqrt.html">triton.language.sqrt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sqrt_rn.html">triton.language.sqrt_rn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sub.html">triton.language.sub</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.umulhi.html">triton.language.umulhi</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/logical_ops.html">Logical Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.and.html">triton.language.and</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.or.html">triton.language.or</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.xor.html">triton.language.xor</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.not.html">triton.language.not</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.logical_and.html">triton.language.logical_and</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.logical_or.html">triton.language.logical_or</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.invert.html">triton.language.invert</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.lshift.html">triton.language.lshift</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.rshift.html">triton.language.rshift</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/comparison_ops.html">Comparison Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.gt.html">triton.language.gt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.ge.html">triton.language.ge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.lt.html">triton.language.lt</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.le.html">triton.language.le</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.eq.html">triton.language.eq</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.ne.html">triton.language.ne</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/reduction_ops.html">Reduction Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.argmax.html">triton.language.argmax</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.argmin.html">triton.language.argmin</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.max.html">triton.language.max</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.min.html">triton.language.min</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.reduce.html">triton.language.reduce</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.reduce_or.html">triton.language.reduce_or</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sum.html">triton.language.sum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.xor_sum.html">triton.language.xor_sum</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/scan_sort_ops.html">Scan/Sort Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.associative_scan.html">triton.language.associative_scan</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.bitonic_merge.html">triton.language.bitonic_merge</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cumprod.html">triton.language.cumprod</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.cumsum.html">triton.language.cumsum</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.histogram.html">triton.language.histogram</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.sort.html">triton.language.sort</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.topk.html">triton.language.topk</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/atomic_ops.html">Atomic Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_add.html">triton.language.atomic_add</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_and.html">triton.language.atomic_and</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_cas.html">triton.language.atomic_cas</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_max.html">triton.language.atomic_max</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_min.html">triton.language.atomic_min</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_or.html">triton.language.atomic_or</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_xchg.html">triton.language.atomic_xchg</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.atomic_xor.html">triton.language.atomic_xor</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/random_number_generation.html">Random Number Generation</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.randint4x.html">triton.language.randint4x</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.randint.html">triton.language.randint</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.rand.html">triton.language.rand</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.rand4x.html">triton.language.rand4x</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.randn.html">triton.language.randn</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.randn4x.html">triton.language.randn4x</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/iterators.html">Iterators</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.range.html">triton.language.range</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.static_range.html">triton.language.static_range</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.condition.html">triton.language.condition</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/compiler_hint_ops.html">Compiler Hint Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.assume.html">triton.language.assume</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.debug_barrier.html">triton.language.debug_barrier</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.max_constancy.html">triton.language.max_constancy</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.max_contiguous.html">triton.language.max_contiguous</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.multiple_of.html">triton.language.multiple_of</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/debug_ops.html">Debug Ops</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.static_print.html">triton.language.static_print</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.static_assert.html">triton.language.static_assert</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.device_print.html">triton.language.device_print</a></li>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.device_assert.html">triton.language.device_assert</a></li>
+</ul>
+</details></li>
+<li class="toctree-l2 has-children"><a class="reference internal" href="python-api/triton.language/inline_assembly.html">Inline Assembly</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l3"><a class="reference internal" href="python-api/generated/triton.language.inline_asm_elementwise.html">triton.language.inline_asm_elementwise</a></li>
+</ul>
+</details></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="python-api/triton.testing.html">triton.testing</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.testing.Benchmark.html">triton.testing.Benchmark</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.testing.do_bench.html">triton.testing.do_bench</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.testing.do_bench_cudagraph.html">triton.testing.do_bench_cudagraph</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.testing.perf_report.html">triton.testing.perf_report</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.testing.assert_close.html">triton.testing.assert_close</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="python-api/triton.language.extra.cann.extension.html">triton.language.extra.cann.extension</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.scope.html">triton.language.extra.cann.extension.scope</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.ascend_address_space.html">triton.language.extra.cann.extension.ascend_address_space</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.compile_hint.html">triton.language.extra.cann.extension.compile_hint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.multibuffer.html">triton.language.extra.cann.extension.multibuffer</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.parallel.html">triton.language.extra.cann.extension.parallel</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.copy.html">triton.language.extra.cann.extension.copy</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.copy_from_ub_to_l1.html">triton.language.extra.cann.extension.copy_from_ub_to_l1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.fixpipe.html">triton.language.extra.cann.extension.fixpipe</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sync_block_all.html">triton.language.extra.cann.extension.sync_block_all</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sync_block_set.html">triton.language.extra.cann.extension.sync_block_set</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sync_block_wait.html">triton.language.extra.cann.extension.sync_block_wait</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.debug_barrier.html">triton.language.extra.cann.extension.debug_barrier</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sub_vec_id.html">triton.language.extra.cann.extension.sub_vec_id</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sub_vec_num.html">triton.language.extra.cann.extension.sub_vec_num</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.conv1d.html">triton.language.extra.cann.extension.conv1d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.dot.html">triton.language.extra.cann.extension.dot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.PIPE.html">triton.language.extra.cann.extension.PIPE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.MODE.html">triton.language.extra.cann.extension.MODE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.CORE.html">triton.language.extra.cann.extension.CORE</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.SYNC_IN_VF.html">triton.language.extra.cann.extension.SYNC_IN_VF</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.IteratorType.html">triton.language.extra.cann.extension.IteratorType</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.FixpipeDMAMode.html">triton.language.extra.cann.extension.FixpipeDMAMode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.FixpipeDualDstMode.html">triton.language.extra.cann.extension.FixpipeDualDstMode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.FixpipePreQuantMode.html">triton.language.extra.cann.extension.FixpipePreQuantMode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.FixpipePreReluMode.html">triton.language.extra.cann.extension.FixpipePreReluMode</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.extract_slice.html">triton.language.extra.cann.extension.extract_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.insert_slice.html">triton.language.extra.cann.extension.insert_slice</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.get_element.html">triton.language.extra.cann.extension.get_element</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.sort.html">triton.language.extra.cann.extension.sort</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.flip.html">triton.language.extra.cann.extension.flip</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.cast.html">triton.language.extra.cann.extension.cast</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.index_put.html">triton.language.extra.cann.extension.index_put</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.gather_out_to_ub.html">triton.language.extra.cann.extension.gather_out_to_ub</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.scatter_ub_to_out.html">triton.language.extra.cann.extension.scatter_ub_to_out</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.index_select_simd.html">triton.language.extra.cann.extension.index_select_simd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.custom.html">triton.language.extra.cann.extension.custom</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.custom_semantic.html">triton.language.extra.cann.extension.custom_semantic</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.register_custom_op.html">triton.language.extra.cann.extension.register_custom_op</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_expr.html">triton.language.extra.cann.extension.affine_expr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_constant_expr.html">triton.language.extra.cann.extension.affine_constant_expr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_dim_expr.html">triton.language.extra.cann.extension.affine_dim_expr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_symbol_expr.html">triton.language.extra.cann.extension.affine_symbol_expr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_binary_op_expr.html">triton.language.extra.cann.extension.affine_binary_op_expr</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.extension.affine_map.html">triton.language.extra.cann.extension.affine_map</a></li>
+</ul>
+</details></li>
+<li class="toctree-l1 has-children"><a class="reference internal" href="python-api/triton.language.extra.cann.libdevice.html">triton.language.extra.cann.libdevice</a><details><summary><span class="toctree-toggle" role="presentation"><i class="fa-solid fa-chevron-down"></i></span></summary><ul>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.abs.html">triton.language.extra.cann.libdevice.abs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.acos.html">triton.language.extra.cann.libdevice.acos</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.acosh.html">triton.language.extra.cann.libdevice.acosh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.add_rd.html">triton.language.extra.cann.libdevice.add_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.add_rn.html">triton.language.extra.cann.libdevice.add_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.add_ru.html">triton.language.extra.cann.libdevice.add_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.add_rz.html">triton.language.extra.cann.libdevice.add_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.asin.html">triton.language.extra.cann.libdevice.asin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.asinh.html">triton.language.extra.cann.libdevice.asinh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.atan.html">triton.language.extra.cann.libdevice.atan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.atan2.html">triton.language.extra.cann.libdevice.atan2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.atanh.html">triton.language.extra.cann.libdevice.atanh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.brev.html">triton.language.extra.cann.libdevice.brev</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.byte_perm.html">triton.language.extra.cann.libdevice.byte_perm</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cbrt.html">triton.language.extra.cann.libdevice.cbrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ceil.html">triton.language.extra.cann.libdevice.ceil</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.clz.html">triton.language.extra.cann.libdevice.clz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.copysign.html">triton.language.extra.cann.libdevice.copysign</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cos.html">triton.language.extra.cann.libdevice.cos</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cosh.html">triton.language.extra.cann.libdevice.cosh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cospi.html">triton.language.extra.cann.libdevice.cospi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cyl_bessel_i0.html">triton.language.extra.cann.libdevice.cyl_bessel_i0</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.cyl_bessel_i1.html">triton.language.extra.cann.libdevice.cyl_bessel_i1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.div_rd.html">triton.language.extra.cann.libdevice.div_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.div_rn.html">triton.language.extra.cann.libdevice.div_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.div_ru.html">triton.language.extra.cann.libdevice.div_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.div_rz.html">triton.language.extra.cann.libdevice.div_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.erf.html">triton.language.extra.cann.libdevice.erf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.erfc.html">triton.language.extra.cann.libdevice.erfc</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.erfcinv.html">triton.language.extra.cann.libdevice.erfcinv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.erfcx.html">triton.language.extra.cann.libdevice.erfcx</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.erfinv.html">triton.language.extra.cann.libdevice.erfinv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.exp.html">triton.language.extra.cann.libdevice.exp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.exp10.html">triton.language.extra.cann.libdevice.exp10</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.exp2.html">triton.language.extra.cann.libdevice.exp2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.expm1.html">triton.language.extra.cann.libdevice.expm1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_cosf.html">triton.language.extra.cann.libdevice.fast_cosf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_dividef.html">triton.language.extra.cann.libdevice.fast_dividef</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_exp10f.html">triton.language.extra.cann.libdevice.fast_exp10f</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_expf.html">triton.language.extra.cann.libdevice.fast_expf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_log10f.html">triton.language.extra.cann.libdevice.fast_log10f</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_log2f.html">triton.language.extra.cann.libdevice.fast_log2f</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_logf.html">triton.language.extra.cann.libdevice.fast_logf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_powf.html">triton.language.extra.cann.libdevice.fast_powf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_sinf.html">triton.language.extra.cann.libdevice.fast_sinf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_tanf.html">triton.language.extra.cann.libdevice.fast_tanf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fast_tanhf.html">triton.language.extra.cann.libdevice.fast_tanhf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fdim.html">triton.language.extra.cann.libdevice.fdim</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ffs.html">triton.language.extra.cann.libdevice.ffs</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.finitef.html">triton.language.extra.cann.libdevice.finitef</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2half_rn.html">triton.language.extra.cann.libdevice.float2half_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2int_rd.html">triton.language.extra.cann.libdevice.float2int_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2int_rn.html">triton.language.extra.cann.libdevice.float2int_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2int_ru.html">triton.language.extra.cann.libdevice.float2int_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2int_rz.html">triton.language.extra.cann.libdevice.float2int_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ll_rd.html">triton.language.extra.cann.libdevice.float2ll_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ll_rn.html">triton.language.extra.cann.libdevice.float2ll_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ll_ru.html">triton.language.extra.cann.libdevice.float2ll_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ll_rz.html">triton.language.extra.cann.libdevice.float2ll_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2uint_rd.html">triton.language.extra.cann.libdevice.float2uint_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2uint_rn.html">triton.language.extra.cann.libdevice.float2uint_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2uint_ru.html">triton.language.extra.cann.libdevice.float2uint_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2uint_rz.html">triton.language.extra.cann.libdevice.float2uint_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ull_rd.html">triton.language.extra.cann.libdevice.float2ull_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ull_rn.html">triton.language.extra.cann.libdevice.float2ull_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ull_ru.html">triton.language.extra.cann.libdevice.float2ull_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float2ull_rz.html">triton.language.extra.cann.libdevice.float2ull_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float_as_int.html">triton.language.extra.cann.libdevice.float_as_int</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.float_as_uint.html">triton.language.extra.cann.libdevice.float_as_uint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.floor.html">triton.language.extra.cann.libdevice.floor</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fma.html">triton.language.extra.cann.libdevice.fma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fma_rd.html">triton.language.extra.cann.libdevice.fma_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fma_rn.html">triton.language.extra.cann.libdevice.fma_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fma_ru.html">triton.language.extra.cann.libdevice.fma_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fma_rz.html">triton.language.extra.cann.libdevice.fma_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.fmod.html">triton.language.extra.cann.libdevice.fmod</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.gamma.html">triton.language.extra.cann.libdevice.gamma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.hadd.html">triton.language.extra.cann.libdevice.hadd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.half2float.html">triton.language.extra.cann.libdevice.half2float</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.hypot.html">triton.language.extra.cann.libdevice.hypot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ilogb.html">triton.language.extra.cann.libdevice.ilogb</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.int2float_rd.html">triton.language.extra.cann.libdevice.int2float_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.int2float_rn.html">triton.language.extra.cann.libdevice.int2float_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.int2float_ru.html">triton.language.extra.cann.libdevice.int2float_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.int2float_rz.html">triton.language.extra.cann.libdevice.int2float_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.int_as_float.html">triton.language.extra.cann.libdevice.int_as_float</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.isinf.html">triton.language.extra.cann.libdevice.isinf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.isnan.html">triton.language.extra.cann.libdevice.isnan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.j0.html">triton.language.extra.cann.libdevice.j0</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.j1.html">triton.language.extra.cann.libdevice.j1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.jn.html">triton.language.extra.cann.libdevice.jn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ldexp.html">triton.language.extra.cann.libdevice.ldexp</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.lgamma.html">triton.language.extra.cann.libdevice.lgamma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ll2float_rd.html">triton.language.extra.cann.libdevice.ll2float_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ll2float_rn.html">triton.language.extra.cann.libdevice.ll2float_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ll2float_ru.html">triton.language.extra.cann.libdevice.ll2float_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ll2float_rz.html">triton.language.extra.cann.libdevice.ll2float_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.llrint.html">triton.language.extra.cann.libdevice.llrint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.llround.html">triton.language.extra.cann.libdevice.llround</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.log.html">triton.language.extra.cann.libdevice.log</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.log10.html">triton.language.extra.cann.libdevice.log10</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.log1p.html">triton.language.extra.cann.libdevice.log1p</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.log2.html">triton.language.extra.cann.libdevice.log2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.logb.html">triton.language.extra.cann.libdevice.logb</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.max.html">triton.language.extra.cann.libdevice.max</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.min.html">triton.language.extra.cann.libdevice.min</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mul24.html">triton.language.extra.cann.libdevice.mul24</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mul_rd.html">triton.language.extra.cann.libdevice.mul_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mul_rn.html">triton.language.extra.cann.libdevice.mul_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mul_ru.html">triton.language.extra.cann.libdevice.mul_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mul_rz.html">triton.language.extra.cann.libdevice.mul_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.mulhi.html">triton.language.extra.cann.libdevice.mulhi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.nan.html">triton.language.extra.cann.libdevice.nan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.nearbyint.html">triton.language.extra.cann.libdevice.nearbyint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.nextafter.html">triton.language.extra.cann.libdevice.nextafter</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.norm3d.html">triton.language.extra.cann.libdevice.norm3d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.norm4d.html">triton.language.extra.cann.libdevice.norm4d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.normcdf.html">triton.language.extra.cann.libdevice.normcdf</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.normcdfinv.html">triton.language.extra.cann.libdevice.normcdfinv</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.popc.html">triton.language.extra.cann.libdevice.popc</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.pow.html">triton.language.extra.cann.libdevice.pow</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rcbrt.html">triton.language.extra.cann.libdevice.rcbrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rcp_rd.html">triton.language.extra.cann.libdevice.rcp_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rcp_rn.html">triton.language.extra.cann.libdevice.rcp_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rcp_ru.html">triton.language.extra.cann.libdevice.rcp_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rcp_rz.html">triton.language.extra.cann.libdevice.rcp_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.reciprocal.html">triton.language.extra.cann.libdevice.reciprocal</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.relu.html">triton.language.extra.cann.libdevice.relu</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.remainder.html">triton.language.extra.cann.libdevice.remainder</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rhadd.html">triton.language.extra.cann.libdevice.rhadd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rhypot.html">triton.language.extra.cann.libdevice.rhypot</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rint.html">triton.language.extra.cann.libdevice.rint</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rnorm3d.html">triton.language.extra.cann.libdevice.rnorm3d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rnorm4d.html">triton.language.extra.cann.libdevice.rnorm4d</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.round.html">triton.language.extra.cann.libdevice.round</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rsqrt.html">triton.language.extra.cann.libdevice.rsqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.rsqrt_rn.html">triton.language.extra.cann.libdevice.rsqrt_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sad.html">triton.language.extra.cann.libdevice.sad</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.saturatef.html">triton.language.extra.cann.libdevice.saturatef</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.scalbn.html">triton.language.extra.cann.libdevice.scalbn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.signbit.html">triton.language.extra.cann.libdevice.signbit</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sin.html">triton.language.extra.cann.libdevice.sin</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sinh.html">triton.language.extra.cann.libdevice.sinh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sinpi.html">triton.language.extra.cann.libdevice.sinpi</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sqrt.html">triton.language.extra.cann.libdevice.sqrt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sqrt_rd.html">triton.language.extra.cann.libdevice.sqrt_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sqrt_rn.html">triton.language.extra.cann.libdevice.sqrt_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sqrt_ru.html">triton.language.extra.cann.libdevice.sqrt_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sqrt_rz.html">triton.language.extra.cann.libdevice.sqrt_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sub_rd.html">triton.language.extra.cann.libdevice.sub_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sub_rn.html">triton.language.extra.cann.libdevice.sub_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sub_ru.html">triton.language.extra.cann.libdevice.sub_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.sub_rz.html">triton.language.extra.cann.libdevice.sub_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.tan.html">triton.language.extra.cann.libdevice.tan</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.tanh.html">triton.language.extra.cann.libdevice.tanh</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.tgamma.html">triton.language.extra.cann.libdevice.tgamma</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.trunc.html">triton.language.extra.cann.libdevice.trunc</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.uint2float_rd.html">triton.language.extra.cann.libdevice.uint2float_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.uint2float_rn.html">triton.language.extra.cann.libdevice.uint2float_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.uint2float_ru.html">triton.language.extra.cann.libdevice.uint2float_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.uint2float_rz.html">triton.language.extra.cann.libdevice.uint2float_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.uint_as_float.html">triton.language.extra.cann.libdevice.uint_as_float</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ull2float_rd.html">triton.language.extra.cann.libdevice.ull2float_rd</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ull2float_rn.html">triton.language.extra.cann.libdevice.ull2float_rn</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ull2float_ru.html">triton.language.extra.cann.libdevice.ull2float_ru</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.ull2float_rz.html">triton.language.extra.cann.libdevice.ull2float_rz</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.y0.html">triton.language.extra.cann.libdevice.y0</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.y1.html">triton.language.extra.cann.libdevice.y1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="python-api/generated/triton.language.extra.cann.libdevice.yn.html">triton.language.extra.cann.libdevice.yn</a></li>
+</ul>
+</details></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">特性说明</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="architecture_design_and_core_features.html">架构设计与核心特性</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">常见问题</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="FAQ.html">Triton-Ascend FAQ</a></li>
+</ul>
+<p aria-level="2" class="caption" role="heading"><span class="caption-text">社区</span></p>
+<ul class="nav bd-sidenav">
+<li class="toctree-l1"><a class="reference internal" href="community/CONTRIBUTING_zh.html">贡献指南</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/CODE_OF_CONDUCT_zh.html">贡献者公约</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/GOVERNANCE_zh.html">治理机制</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/community_technical_meeting.html">技术例会</a></li>
+<li class="toctree-l1"><a class="reference internal" href="community/SECURITYNOTE_zh.html">安全声明</a></li>
+</ul>
+
+    </div>
+</nav></div>
+    </div>
+  
+  
+  <div class="sidebar-primary-items__end sidebar-primary__section">
+      <div class="sidebar-primary-item">
+<div id="ethical-ad-placement"
+      class="flat"
+      data-ea-publisher="readthedocs"
+      data-ea-type="readthedocs-sidebar"
+      data-ea-manual="true">
+</div></div>
+  </div>
+
+
+      </div>
+      
+      <main id="main-content" class="bd-main" role="main">
+        
+        
+
+<div class="sbt-scroll-pixel-helper"></div>
+
+          <div class="bd-content">
+            <div class="bd-article-container">
+              
+              <div class="bd-header-article d-print-none">
+<div class="header-article-items header-article__inner">
+  
+    <div class="header-article-items__start">
+      
+        <div class="header-article-item"><button class="sidebar-toggle primary-toggle btn btn-sm" title="Toggle primary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+  <span class="fa-solid fa-bars"></span>
+</button></div>
+      
+    </div>
+  
+  
+    <div class="header-article-items__end">
+      
+        <div class="header-article-item">
+
+<div class="article-header-buttons">
+
+
+
+
+
+<div class="dropdown dropdown-source-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Source repositories">
+    <i class="fab fa-github"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="https://github.com/triton-lang/triton-ascend" target="_blank"
+   class="btn btn-sm btn-source-repository-button dropdown-item"
+   title="Source repository"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fab fa-github"></i>
+  </span>
+<span class="btn__text-container">Repository</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li><a href="https://github.com/triton-lang/triton-ascend/edit/main/docs/zh/autotune_guide.md" target="_blank"
+   class="btn btn-sm btn-source-edit-button dropdown-item"
+   title="Suggest edit"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-pencil-alt"></i>
+  </span>
+<span class="btn__text-container">Suggest edit</span>
+</a>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+
+
+<div class="dropdown dropdown-download-buttons">
+  <button class="btn dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-expanded="false" aria-label="Download this page">
+    <i class="fas fa-download"></i>
+  </button>
+  <ul class="dropdown-menu">
+      
+      
+      
+      <li><a href="_sources/autotune_guide.md" target="_blank"
+   class="btn btn-sm btn-download-source-button dropdown-item"
+   title="Download source file"
+   data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file"></i>
+  </span>
+<span class="btn__text-container">.md</span>
+</a>
+</li>
+      
+      
+      
+      
+      <li>
+<button onclick="window.print()"
+  class="btn btn-sm btn-download-pdf-button dropdown-item"
+  title="Print to PDF"
+  data-bs-placement="left" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-file-pdf"></i>
+  </span>
+<span class="btn__text-container">.pdf</span>
+</button>
+</li>
+      
+  </ul>
+</div>
+
+
+
+
+<button onclick="toggleFullScreen()"
+  class="btn btn-sm btn-fullscreen-button pst-navbar-icon"
+  title="Fullscreen mode"
+  data-bs-placement="bottom" data-bs-toggle="tooltip"
+>
+  
+
+<span class="btn__icon-container">
+  <i class="fas fa-expand"></i>
+  </span>
+
+</button>
+
+
+
+<div class="theme-switch-container dropdown pst-js-only" data-bs-toggle="tooltip" data-bs-placement="bottom" title="Color mode">
+  <button class="btn btn-sm nav-link pst-navbar-icon theme-switch-button dropdown-toggle" aria-label="Color mode" data-bs-toggle="dropdown">
+    <i class="theme-switch fa-solid fa-sun fa-lg fa-fw" data-mode="light" title="Light"></i>
+    <i class="theme-switch fa-solid fa-moon fa-lg fa-fw" data-mode="dark" title="Dark"></i>
+    <i class="theme-switch fa-solid fa-circle-half-stroke fa-lg fa-fw" data-mode="auto" title="System Settings"></i>
+  </button>
+  <ul class="dropdown-menu dropdown-menu-end">
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="auto"><i class="fa-solid fa-circle-half-stroke fa-lg fa-fw me-1"></i>System Settings</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="light"><i class="fa-solid fa-sun fa-lg fa-fw me-1"></i>Light</button></li>
+    <li><button class="dropdown-item d-flex align-items-center theme-change-button" data-mode="dark"><i class="fa-solid fa-moon fa-lg fa-fw me-1"></i>Dark</button></li>
+  </ul>
+</div>
+
+
+<button class="btn btn-sm pst-navbar-icon search-button search-button__button pst-js-only" title="Search" aria-label="Search" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <i class="fa-solid fa-magnifying-glass fa-lg"></i>
+</button>
+<button class="sidebar-toggle secondary-toggle btn btn-sm pst-navbar-icon" title="Toggle secondary sidebar" data-bs-placement="bottom" data-bs-toggle="tooltip">
+    <span class="fa-solid fa-list"></span>
+</button>
+</div></div>
+      
+    </div>
+  
+</div>
+</div>
+              
+              
+
+<div id="jb-print-docs-body" class="onlyprint">
+    <h1>Triton-Ascend autotune 使用指南</h1>
+    <!-- Table of contents -->
+    <div id="print-main-content">
+        <div id="jb-print-toc">
+            
+            <div>
+                <h2> Contents </h2>
+            </div>
+            <nav aria-label="Page">
+                <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">文档定位</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">快速上手</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-autotune">1. 先启用 Ascend 对 autotune 的扩展</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-autotune-triton-jit">2. <code class="docutils literal notranslate"><span class="pre">@triton.autotune</span></code> 必须直接包在 <code class="docutils literal notranslate"><span class="pre">@triton.jit</span></code> 外层</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key">3. <code class="docutils literal notranslate"><span class="pre">key</span></code> 的含义与社区一致</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">4. 希望参与自动调优的参数不要被提前固定</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling-grid-grid-lambda">5. 如果 Tiling 参数会影响 grid，grid 必须写成 lambda 形式</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id4">使用注意事项</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id5">Triton-Ascend 相比社区 autotune 的扩展</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configs">1. 支持 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 自动生成候选配置</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#config">2. 支持多个 config 的并行编译</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiler-kernel">3. 支持使用 profiler 采集 kernel 性能</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling">自动 Tiling 生成能力的范围与行为</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id6">1. 自动生成范围聚焦在 Tiling 参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend">2. 候选配置会带上 Ascend 硬件约束</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">3. 自动 Tiling 模式的目标是方便给出“性能不错”的配置</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling-triton-config">4. 自动 Tiling 生成失败时需要用户手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-config">手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code> 模式</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id8">进阶用法：自动 Tiling 与其他参数联合调优</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#autotune">1. 社区 autotune：手工枚举全部调优参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-ascend-tiling-ascend">2. Triton-Ascend：手工枚举 Tiling 参数和 Ascend 编译参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-ascend-tiling">3. Triton-Ascend：自动生成 Tiling，同时联合调优其他参数</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id9">autotune 示例</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id10">小结</a></li>
+</ul>
+            </nav>
+        </div>
+    </div>
+</div>
+
+              
+                
+<div id="searchbox"></div>
+                <article class="bd-article">
+                  
+  <section class="tex2jax_ignore mathjax_ignore" id="triton-ascend-autotune">
+<h1>Triton-Ascend autotune 使用指南<a class="headerlink" href="#triton-ascend-autotune" title="Link to this heading">#</a></h1>
+<section id="id1">
+<h2>文档定位<a class="headerlink" href="#id1" title="Link to this heading">#</a></h2>
+<p>本文面向已经会写 Triton kernel、也了解社区版 <code class="docutils literal notranslate"><span class="pre">triton.autotune</span></code> 基本概念的用户，重点说明 Triton-Ascend 的推荐用法：</p>
+<ul class="simple">
+<li><p>Triton-Ascend 上的推荐 autotune 写法；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 在 Ascend 后端中的含义；</p></li>
+<li><p>自动 Tiling 模式的适用边界，以及何时回到手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code>。</p></li>
+</ul>
+</section>
+<section id="id2">
+<h2>快速上手<a class="headerlink" href="#id2" title="Link to this heading">#</a></h2>
+<p>在 Triton-Ascend 上，推荐保留社区版 <code class="docutils literal notranslate"><span class="pre">&#64;triton.autotune</span></code> 的基本写法；当希望系统自动生成并评估候选配置时，将 <code class="docutils literal notranslate"><span class="pre">configs</span></code> 设为 <code class="docutils literal notranslate"><span class="pre">[]</span></code>：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">Vector Add</span>
+<span class="sd">=============</span>
+<span class="sd">&quot;&quot;&quot;</span>
+
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">torch_npu</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton.language</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">tl</span>
+<span class="kn">import</span><span class="w"> </span><span class="nn">triton.backends.ascend.runtime</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">triton.backends.ascend.testing</span><span class="w"> </span><span class="kn">import</span> <span class="n">do_bench_npu</span>
+
+
+<span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span><span class="n">configs</span><span class="o">=</span><span class="p">[],</span> <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;n_elements&quot;</span><span class="p">])</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">add_kernel</span><span class="p">(</span><span class="n">x_ptr</span><span class="p">,</span>  <span class="c1"># *Pointer* to first input vector.</span>
+               <span class="n">y_ptr</span><span class="p">,</span>  <span class="c1"># *Pointer* to second input vector.</span>
+               <span class="n">output_ptr</span><span class="p">,</span>  <span class="c1"># *Pointer* to output vector.</span>
+               <span class="n">n_elements</span><span class="p">,</span>  <span class="c1"># Size of the vector.</span>
+               <span class="n">BLOCK_SIZE</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span><span class="p">,</span>  <span class="c1"># Number of elements each program should process.</span>
+               <span class="c1"># NOTE: `constexpr` so it can be used as a shape value.</span>
+               <span class="p">):</span>
+    <span class="c1"># There are multiple &#39;programs&#39; processing different data. We identify which program</span>
+    <span class="c1"># we are here:</span>
+    <span class="n">pid</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">program_id</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span>  <span class="c1"># We use a 1D launch grid so axis is 0.</span>
+    <span class="c1"># This program will process inputs that are offset from the initial data.</span>
+    <span class="c1"># For instance, if you had a vector of length 256 and block_size of 64, the programs</span>
+    <span class="c1"># would each access the elements [0:64, 64:128, 128:192, 192:256].</span>
+    <span class="c1"># Note that offsets is a list of pointers:</span>
+    <span class="n">block_start</span> <span class="o">=</span> <span class="n">pid</span> <span class="o">*</span> <span class="n">BLOCK_SIZE</span>
+    <span class="n">offsets</span> <span class="o">=</span> <span class="n">block_start</span> <span class="o">+</span> <span class="n">tl</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="n">BLOCK_SIZE</span><span class="p">)</span>
+    <span class="c1"># Create a mask to guard memory operations against out-of-bounds accesses.</span>
+    <span class="n">mask</span> <span class="o">=</span> <span class="n">offsets</span> <span class="o">&lt;</span> <span class="n">n_elements</span>
+    <span class="c1"># Load x and y from DRAM, masking out any extra elements in case the input is not a</span>
+    <span class="c1"># multiple of the block size.</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">x_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">tl</span><span class="o">.</span><span class="n">load</span><span class="p">(</span><span class="n">y_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+    <span class="c1"># Write x + y back to DRAM.</span>
+    <span class="n">tl</span><span class="o">.</span><span class="n">store</span><span class="p">(</span><span class="n">output_ptr</span> <span class="o">+</span> <span class="n">offsets</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">mask</span><span class="o">=</span><span class="n">mask</span><span class="p">)</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_torch</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="k">return</span> <span class="n">x</span> <span class="o">+</span> <span class="n">y</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">add_autotune</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">):</span>
+    <span class="n">output</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">empty_like</span><span class="p">(</span><span class="n">x</span><span class="p">)</span>
+    <span class="n">n_elements</span> <span class="o">=</span> <span class="n">output</span><span class="o">.</span><span class="n">numel</span><span class="p">()</span>
+    <span class="n">add_kernel</span><span class="p">[</span><span class="k">lambda</span> <span class="n">meta</span><span class="p">:</span> <span class="p">(</span><span class="n">triton</span><span class="o">.</span><span class="n">cdiv</span><span class="p">(</span><span class="n">n_elements</span><span class="p">,</span> <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;BLOCK_SIZE&quot;</span><span class="p">]),</span> <span class="p">)](</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">n_elements</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">output</span>
+
+
+<span class="k">def</span><span class="w"> </span><span class="nf">test_add</span><span class="p">(</span><span class="n">size</span><span class="p">:</span> <span class="nb">int</span><span class="p">):</span>
+    <span class="n">x</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;npu&quot;</span><span class="p">)</span>
+    <span class="n">y</span> <span class="o">=</span> <span class="n">torch</span><span class="o">.</span><span class="n">rand</span><span class="p">(</span><span class="n">size</span><span class="p">,</span> <span class="n">device</span><span class="o">=</span><span class="s2">&quot;npu&quot;</span><span class="p">)</span>
+
+    <span class="n">output_torch</span> <span class="o">=</span> <span class="n">add_torch</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="n">output_triton</span> <span class="o">=</span> <span class="n">add_autotune</span><span class="p">(</span><span class="n">x</span><span class="p">,</span> <span class="n">y</span><span class="p">)</span>
+    <span class="k">assert</span> <span class="n">torch</span><span class="o">.</span><span class="n">allclose</span><span class="p">(</span><span class="n">output_triton</span><span class="p">,</span> <span class="n">output_torch</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Vector Add </span><span class="si">{</span><span class="n">size</span><span class="si">}</span><span class="s2"> PASSED!&quot;</span><span class="p">)</span>
+
+
+<span class="k">if</span> <span class="vm">__name__</span> <span class="o">==</span> <span class="s2">&quot;__main__&quot;</span><span class="p">:</span>
+    <span class="n">test_add</span><span class="p">(</span><span class="mi">98432</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>这表示：</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">key</span></code> 的语义与社区版保持一致，用于决定哪些输入变化会触发重新选择配置；</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 在 Triton-Ascend 中表示“由 Ascend backend 自动生成候选配置并完成寻优”，而不是“没有可选配置”。</p></li>
+</ul>
+<section id="ascend-autotune">
+<h3>1. 先启用 Ascend 对 autotune 的扩展<a class="headerlink" href="#ascend-autotune" title="Link to this heading">#</a></h3>
+<p>只有导入下面这行后，才会进入 Triton-Ascend 的 autotune 扩展路径：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="kn">import</span><span class="w"> </span><span class="nn">triton.backends.ascend.runtime</span>
+</pre></div>
+</div>
+<p>如果没有这一步，使用的仍然是社区版 <code class="docutils literal notranslate"><span class="pre">triton.autotune</span></code>，<code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 也不会触发 Ascend 的自动 Tiling 生成。</p>
+</section>
+<section id="triton-autotune-triton-jit">
+<h3>2. <code class="docutils literal notranslate"><span class="pre">&#64;triton.autotune</span></code> 必须直接包在 <code class="docutils literal notranslate"><span class="pre">&#64;triton.jit</span></code> 外层<a class="headerlink" href="#triton-autotune-triton-jit" title="Link to this heading">#</a></h3>
+<p>必须写成下面这种顺序：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span><span class="n">configs</span><span class="o">=</span><span class="p">[],</span> <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">])</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">kernel</span><span class="p">(</span><span class="o">...</span><span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">&#64;triton.autotune</span></code> 必须直接包在 <code class="docutils literal notranslate"><span class="pre">&#64;triton.jit</span></code> 外层，不能在两者之间插入其他 decorator。否则会导致无法对 kernel DSL 进行解析，从而无法进入 Triton-Ascend 的自动 Tiling 生成与寻优链路。</p>
+</section>
+<section id="key">
+<h3>3. <code class="docutils literal notranslate"><span class="pre">key</span></code> 的含义与社区一致<a class="headerlink" href="#key" title="Link to this heading">#</a></h3>
+<p><code class="docutils literal notranslate"><span class="pre">key</span></code> 的本质是 autotune 的 cache key。凡是填入 <code class="docutils literal notranslate"><span class="pre">key</span></code> 的参数，只要取值发生变化，就会触发重新 autotune。</p>
+<p>大多数情况下，<code class="docutils literal notranslate"><span class="pre">key</span></code> 里放的是 <code class="docutils literal notranslate"><span class="pre">M/N/K</span></code>、<code class="docutils literal notranslate"><span class="pre">seq_len</span></code>、<code class="docutils literal notranslate"><span class="pre">hidden_size</span></code> 这类 shape 参数，因为它们往往会显著影响最优 Tiling；但 <code class="docutils literal notranslate"><span class="pre">key</span></code> 并不只限于 shape 参数，只要某个参数变化会影响配置选择，也可以放入 <code class="docutils literal notranslate"><span class="pre">key</span></code>。</p>
+</section>
+<section id="id3">
+<h3>4. 希望参与自动调优的参数不要被提前固定<a class="headerlink" href="#id3" title="Link to this heading">#</a></h3>
+<p>如果希望某个 <code class="docutils literal notranslate"><span class="pre">tl.constexpr</span></code> 参与自动 Tiling 生成，需要同时满足下面三点：</p>
+<ul class="simple">
+<li><p>它本身必须是 Tiling 参数，也就是会影响每个 block（逻辑核）处理的数据规模或 tile 大小的参数；</p></li>
+<li><p>不要在 launch 时把它显式传值写死；</p></li>
+<li><p>不要在 kernel 定义里给它设置默认值。</p></li>
+</ul>
+<p>例如下面这种写法，<code class="docutils literal notranslate"><span class="pre">BLOCK_M</span></code> 会参与自动调优：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">kernel</span><span class="p">[</span><span class="n">grid</span><span class="p">](</span>
+    <span class="n">x</span><span class="p">,</span>
+    <span class="n">y</span><span class="p">,</span>
+    <span class="n">out</span><span class="p">,</span>
+    <span class="n">M</span><span class="p">,</span>
+    <span class="n">N</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>如果你在 launch 时显式传入：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">kernel</span><span class="p">[</span><span class="n">grid</span><span class="p">](</span>
+    <span class="n">x</span><span class="p">,</span>
+    <span class="n">y</span><span class="p">,</span>
+    <span class="n">out</span><span class="p">,</span>
+    <span class="n">M</span><span class="p">,</span>
+    <span class="n">N</span><span class="p">,</span>
+    <span class="n">BLOCK_M</span><span class="o">=</span><span class="mi">128</span><span class="p">,</span>
+<span class="p">)</span>
+</pre></div>
+</div>
+<p>那这个参数就已经被固定，不再属于自动生成范围。</p>
+<p>同样，如果在 kernel 定义中给某个调优参数提供了默认值，例如：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">kernel</span><span class="p">(</span>
+    <span class="o">...</span><span class="p">,</span>
+    <span class="n">BLOCK_M</span><span class="p">:</span> <span class="n">tl</span><span class="o">.</span><span class="n">constexpr</span> <span class="o">=</span> <span class="mi">128</span><span class="p">,</span>
+<span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p>那么这个参数也不会参与自动调优。对于希望交给框架自动生成和寻优的参数，应该把它保留为“未在 launch 时显式传值、且在 kernel 定义中也没有默认值”的 <code class="docutils literal notranslate"><span class="pre">tl.constexpr</span></code>。</p>
+</section>
+<section id="tiling-grid-grid-lambda">
+<h3>5. 如果 Tiling 参数会影响 grid，grid 必须写成 lambda 形式<a class="headerlink" href="#tiling-grid-grid-lambda" title="Link to this heading">#</a></h3>
+<p>如果某个 Tiling 参数会影响 grid 大小，那么 grid 不能提前写成固定值或只依赖运行时参数的静态表达式，而必须写成依赖 meta 参数的 <code class="docutils literal notranslate"><span class="pre">lambda</span></code> 形式。这一点与社区 autotune 的要求一致。</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="n">grid</span> <span class="o">=</span> <span class="k">lambda</span> <span class="n">meta</span><span class="p">:</span> <span class="p">(</span><span class="n">triton</span><span class="o">.</span><span class="n">cdiv</span><span class="p">(</span><span class="n">M</span><span class="p">,</span> <span class="n">meta</span><span class="p">[</span><span class="s2">&quot;BLOCK_M&quot;</span><span class="p">]),)</span>
+</pre></div>
+</div>
+<p>原因是 autotune 在评估不同候选配置时，<code class="docutils literal notranslate"><span class="pre">BLOCK_M</span></code> 这类参数的取值会变化；如果 grid 不随候选配置一起变化，就无法保证每个候选配置都以正确的发射方式执行。</p>
+</section>
+</section>
+<section id="id4">
+<h2>使用注意事项<a class="headerlink" href="#id4" title="Link to this heading">#</a></h2>
+<p>autotune 的 benchmark 语义与社区一致，会多次执行 kernel。如果 kernel 存在副作用，例如包含原子操作、inplace 写入，或会修改输入/输出 buffer 的累积状态，仍然需要通过社区已有的 hook 机制处理。</p>
+</section>
+<section id="id5">
+<h2>Triton-Ascend 相比社区 autotune 的扩展<a class="headerlink" href="#id5" title="Link to this heading">#</a></h2>
+<p>社区版 <code class="docutils literal notranslate"><span class="pre">triton.autotune</span></code> 的典型模式是：用户手工提供一组 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code>，框架做 benchmark，然后缓存最优结果。</p>
+<p>Triton-Ascend 在保持这套接口习惯不变的前提下，主要扩展了下面几件事。</p>
+<section id="configs">
+<h3>1. 支持 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 自动生成候选配置<a class="headerlink" href="#configs" title="Link to this heading">#</a></h3>
+<p>这是最核心的扩展。用户不必先手写一组 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code>，而是可以把 <code class="docutils literal notranslate"><span class="pre">configs</span></code> 留空，让 Ascend backend 根据 kernel DSL 语义和运行时 shape 自动生成候选配置。</p>
+</section>
+<section id="config">
+<h3>2. 支持多个 config 的并行编译<a class="headerlink" href="#config" title="Link to this heading">#</a></h3>
+<p>当 autotune 需要评估多个候选配置时，Triton-Ascend 默认会并行编译这些候选配置，以缩短首次调优时延。</p>
+<p>这一能力默认开启，可通过环境变量 <code class="docutils literal notranslate"><span class="pre">TRITON_AUTOTUNE_PARALLEL_COMPILE=0</span></code> 关闭。</p>
+</section>
+<section id="profiler-kernel">
+<h3>3. 支持使用 profiler 采集 kernel 性能<a class="headerlink" href="#profiler-kernel" title="Link to this heading">#</a></h3>
+<p>Triton-Ascend 支持在 autotune 做 benchmark 时切换性能采集方式：除了默认 benchmark 模式外，还可以使用 profiler 来采集每个候选 config 的 kernel 性能数据，它只关注 kernel 的片上计算时间，对于执行时间较短的 kernel 比默认性能采集方式更加精确，但会增加一些耗时。这项能力可通过环境变量 <code class="docutils literal notranslate"><span class="pre">TRITON_BENCH_METHOD='npu'</span></code> 开启。</p>
+</section>
+</section>
+<section id="tiling">
+<h2>自动 Tiling 生成能力的范围与行为<a class="headerlink" href="#tiling" title="Link to this heading">#</a></h2>
+<p>前面的第 1 点说明了 Triton-Ascend 支持 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 自动生成候选配置。对这项能力，进行以下几点说明。</p>
+<section id="id6">
+<h3>1. 自动生成范围聚焦在 Tiling 参数<a class="headerlink" href="#id6" title="Link to this heading">#</a></h3>
+<p>Ascend 自动生成的重点是 kernel 中与 Tiling 相关的 <code class="docutils literal notranslate"><span class="pre">tl.constexpr</span></code> 参数，也就是影响每个 block（逻辑核）处理的数据规模或 tile 大小的参数。</p>
+<p>这套能力不等价于“自动帮你调所有参数”。像 <code class="docutils literal notranslate"><span class="pre">num_warps</span></code>、<code class="docutils literal notranslate"><span class="pre">num_stages</span></code> 这类编译参数，以及 kernel 的非 Tiling 参数，不属于当前自动生成范围。</p>
+</section>
+<section id="ascend">
+<h3>2. 候选配置会带上 Ascend 硬件约束<a class="headerlink" href="#ascend" title="Link to this heading">#</a></h3>
+<p>Ascend backend 在生成候选时，会结合 NPU 的片上存储容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目 benchmark。</p>
+</section>
+<section id="id7">
+<h3>3. 自动 Tiling 模式的目标是方便给出“性能不错”的配置<a class="headerlink" href="#id7" title="Link to this heading">#</a></h3>
+<p>为了权衡寻优时间和寻优效果，当前自动 Tiling 会对生成配置数量做大量剪枝，因此并不保证自动生成结果一定能达到手工极致调优的性能上限。</p>
+<p>这项能力的目标，是在尽量降低用户使用门槛和寻优成本的前提下，方便地给用户提供一个性能还不错的 Tiling 配置。</p>
+</section>
+<section id="tiling-triton-config">
+<h3>4. 自动 Tiling 生成失败时需要用户手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code><a class="headerlink" href="#tiling-triton-config" title="Link to this heading">#</a></h3>
+<p>如果自动 Tiling 模式无法生成任何可用候选配置，这时需要用户改为手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code>。同时也建议对这类场景提 issue，帮助 Triton-Ascend 后续补齐解析和自动生成能力。</p>
+</section>
+</section>
+<section id="triton-config">
+<h2>手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code> 模式<a class="headerlink" href="#triton-config" title="Link to this heading">#</a></h2>
+<p>如果自动 Tiling 模式生成失败，或生成的 Tiling 性能未达到预期，直接回到社区标准写法即可。Triton-Ascend 对这部分语义保持兼容：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span>
+    <span class="n">configs</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">triton</span><span class="o">.</span><span class="n">Config</span><span class="p">({</span><span class="s2">&quot;BLOCK_M&quot;</span><span class="p">:</span> <span class="mi">128</span><span class="p">,</span> <span class="s2">&quot;BLOCK_N&quot;</span><span class="p">:</span> <span class="mi">128</span><span class="p">}),</span>
+        <span class="n">triton</span><span class="o">.</span><span class="n">Config</span><span class="p">({</span><span class="s2">&quot;BLOCK_M&quot;</span><span class="p">:</span> <span class="mi">64</span><span class="p">,</span> <span class="s2">&quot;BLOCK_N&quot;</span><span class="p">:</span> <span class="mi">256</span><span class="p">}),</span>
+    <span class="p">],</span>
+    <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">kernel</span><span class="p">(</span><span class="o">...</span><span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+<p>这一模式下：</p>
+<ul class="simple">
+<li><p>配置由用户手工提供；</p></li>
+<li><p>框架负责 benchmark、选择最优配置和缓存复用；</p></li>
+<li><p>使用习惯与社区 autotune 保持一致。</p></li>
+</ul>
+</section>
+<section id="id8">
+<h2>进阶用法：自动 Tiling 与其他参数联合调优<a class="headerlink" href="#id8" title="Link to this heading">#</a></h2>
+<p>以下内容属于进阶用法，只有当用户希望在自动 Tiling 模式下，继续联合调优 kernel 的非 Tiling 参数或编译参数时，再考虑使用。</p>
+<section id="autotune">
+<h3>1. 社区 autotune：手工枚举全部调优参数<a class="headerlink" href="#autotune" title="Link to this heading">#</a></h3>
+<p>社区标准写法是由用户手工枚举所有候选配置：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span>
+    <span class="n">configs</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">triton</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;BLOCK_M&quot;</span><span class="p">:</span> <span class="n">BM</span><span class="p">,</span>
+                <span class="s2">&quot;BLOCK_N&quot;</span><span class="p">:</span> <span class="n">BN</span><span class="p">,</span>
+                <span class="s2">&quot;BLOCK_K&quot;</span><span class="p">:</span> <span class="n">BK</span><span class="p">,</span>
+                <span class="s2">&quot;GROUP_SIZE_M&quot;</span><span class="p">:</span> <span class="n">GS</span><span class="p">,</span>
+            <span class="p">},</span>
+            <span class="n">num_warps</span><span class="o">=</span><span class="n">num_warps</span><span class="p">,</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">BM</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">BN</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">BK</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">GS</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">num_warps</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">]</span>
+    <span class="p">],</span>
+    <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="s2">&quot;K&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_kernel</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">BLOCK_M</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">,</span> <span class="n">GROUP_SIZE_M</span><span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="triton-ascend-tiling-ascend">
+<h3>2. Triton-Ascend：手工枚举 Tiling 参数和 Ascend 编译参数<a class="headerlink" href="#triton-ascend-tiling-ascend" title="Link to this heading">#</a></h3>
+<p>在 Triton-Ascend 中，如果希望继续走手工枚举模式，也可以把 Ascend 侧参数一起放进手工配置空间：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span>
+    <span class="n">configs</span><span class="o">=</span><span class="p">[</span>
+        <span class="n">triton</span><span class="o">.</span><span class="n">Config</span><span class="p">(</span>
+            <span class="p">{</span>
+                <span class="s2">&quot;BLOCK_M&quot;</span><span class="p">:</span> <span class="n">BM</span><span class="p">,</span>
+                <span class="s2">&quot;BLOCK_N&quot;</span><span class="p">:</span> <span class="n">BN</span><span class="p">,</span>
+                <span class="s2">&quot;BLOCK_K&quot;</span><span class="p">:</span> <span class="n">BK</span><span class="p">,</span>
+                <span class="s2">&quot;GROUP_SIZE_M&quot;</span><span class="p">:</span> <span class="n">GS</span><span class="p">,</span>
+                <span class="s2">&quot;multibuffer&quot;</span><span class="p">:</span> <span class="n">MS</span><span class="p">,</span>
+            <span class="p">}</span>
+        <span class="p">)</span>
+        <span class="k">for</span> <span class="n">BM</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">BN</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">BK</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">16</span><span class="p">,</span> <span class="mi">32</span><span class="p">,</span> <span class="mi">64</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">GS</span> <span class="ow">in</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">]</span>
+        <span class="k">for</span> <span class="n">MS</span> <span class="ow">in</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="kc">True</span><span class="p">]</span>
+    <span class="p">],</span>
+    <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="s2">&quot;K&quot;</span><span class="p">],</span>
+<span class="p">)</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_kernel</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">BLOCK_M</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">,</span> <span class="n">GROUP_SIZE_M</span><span class="p">):</span>
+    <span class="o">...</span>
+</pre></div>
+</div>
+</section>
+<section id="triton-ascend-tiling">
+<h3>3. Triton-Ascend：自动生成 Tiling，同时联合调优其他参数<a class="headerlink" href="#triton-ascend-tiling" title="Link to this heading">#</a></h3>
+<p>如果希望 Tiling 参数继续由 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 自动生成，但又希望同时调优其他非 Tiling 参数或编译参数，可以把这些额外搜索维度通过 <code class="docutils literal notranslate"><span class="pre">hints</span></code> 传入：</p>
+<div class="highlight-python notranslate"><div class="highlight"><pre><span></span><span class="nd">@triton</span><span class="o">.</span><span class="n">autotune</span><span class="p">(</span>
+    <span class="n">configs</span><span class="o">=</span><span class="p">[],</span>
+    <span class="n">key</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;M&quot;</span><span class="p">,</span> <span class="s2">&quot;N&quot;</span><span class="p">,</span> <span class="s2">&quot;K&quot;</span><span class="p">],</span>
+    <span class="n">hints</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;GROUP_SIZE_M&quot;</span><span class="p">:</span> <span class="p">[</span><span class="mi">1</span><span class="p">,</span> <span class="mi">2</span><span class="p">,</span> <span class="mi">4</span><span class="p">,</span> <span class="mi">8</span><span class="p">],</span>
+        <span class="s2">&quot;multibuffer&quot;</span><span class="p">:</span> <span class="p">[</span><span class="kc">False</span><span class="p">,</span> <span class="kc">True</span><span class="p">],</span>
+    <span class="p">},</span>
+<span class="p">)</span>
+<span class="nd">@triton</span><span class="o">.</span><span class="n">jit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">matmul_kernel</span><span class="p">(</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">,</span> <span class="n">BLOCK_M</span><span class="p">,</span> <span class="n">BLOCK_N</span><span class="p">,</span> <span class="n">BLOCK_K</span><span class="p">,</span> <span class="n">GROUP_SIZE_M</span><span class="p">):</span>
+    <span class="o">...</span>
+
+
+<span class="n">matmul_kernel</span><span class="p">[</span><span class="n">grid</span><span class="p">](</span><span class="n">a</span><span class="p">,</span> <span class="n">b</span><span class="p">,</span> <span class="n">M</span><span class="p">,</span> <span class="n">N</span><span class="p">,</span> <span class="n">K</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>这种方式的含义是：</p>
+<ul class="simple">
+<li><p>Tiling 相关参数仍然由 Triton-Ascend 自动生成；</p></li>
+<li><p>非 Tiling 参数或编译参数（如 <code class="docutils literal notranslate"><span class="pre">GROUP_SIZE_M</span></code> 和 <code class="docutils literal notranslate"><span class="pre">multibuffer</span></code>）由用户通过 <code class="docutils literal notranslate"><span class="pre">hints</span></code> 显式给出候选集合；</p></li>
+<li><p>autotune 会对两部分组合后的配置空间做评估。</p></li>
+</ul>
+</section>
+</section>
+<section id="id9">
+<h2>autotune 示例<a class="headerlink" href="#id9" title="Link to this heading">#</a></h2>
+<div class="pst-scrollable-table-container"><table class="table">
+<thead>
+<tr class="row-odd"><th class="head"><p>autotune算子</p></th>
+<th class="head"><p>示例</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>向量加法 autotune</p></td>
+<td><p><a class="reference external" href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/autotune_ut/01-vector-add.py">01-vector-add.py</a></p></td>
+</tr>
+<tr class="row-odd"><td><p>融合 Softmax autotune</p></td>
+<td><p><a class="reference external" href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/autotune_ut/02-fused-softmax.py">02-fused-softmax.py</a></p></td>
+</tr>
+<tr class="row-even"><td><p>Layer Norm autotune</p></td>
+<td><p><a class="reference external" href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/autotune_ut/03-layer-norm.py">03-layer-norm.py</a></p></td>
+</tr>
+</tbody>
+</table>
+</div>
+</section>
+<section id="id10">
+<h2>小结<a class="headerlink" href="#id10" title="Link to this heading">#</a></h2>
+<p>Triton-Ascend 相比社区 autotune 的关键扩展，不是改变用户接口，而是在社区接口之上增加了“自动生成 Tiling 候选并完成寻优”的能力。对大多数用户来说，最推荐的使用方式就是：</p>
+<ul class="simple">
+<li><p>保持社区版 <code class="docutils literal notranslate"><span class="pre">&#64;triton.autotune</span></code> 的写法；</p></li>
+<li><p>将 <code class="docutils literal notranslate"><span class="pre">configs</span></code> 设为 <code class="docutils literal notranslate"><span class="pre">[]</span></code>；</p></li>
+<li><p>让 Ascend backend 基于 kernel DSL 和运行时 shape 自动完成候选生成、筛选、benchmark 与缓存复用。</p></li>
+</ul>
+<p>如果场景不适合自动 Tiling 模式，再回到手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code> 即可。</p>
+</section>
+</section>
+
+
+                </article>
+              
+
+              
+              
+              
+              
+                <footer class="prev-next-footer d-print-none">
+                  
+<div class="prev-next-area">
+    <a class="left-prev"
+       href="programming_guide/cv_fusion_operator.html"
+       title="previous page">
+      <i class="fa-solid fa-angle-left"></i>
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">previous</p>
+        <p class="prev-next-title">CV 融合算子开发</p>
+      </div>
+    </a>
+    <a class="right-next"
+       href="examples/index.html"
+       title="next page">
+      <div class="prev-next-info">
+        <p class="prev-next-subtitle">next</p>
+        <p class="prev-next-title">Tutorials</p>
+      </div>
+      <i class="fa-solid fa-angle-right"></i>
+    </a>
+</div>
+                </footer>
+              
+            </div>
+            
+            
+              
+                <dialog id="pst-secondary-sidebar-modal"></dialog>
+                <div id="pst-secondary-sidebar" class="bd-sidebar-secondary bd-toc"><div class="sidebar-secondary-items sidebar-secondary__inner">
+
+
+  <div class="sidebar-secondary-item"><div
+    id="pst-page-navigation-heading-2"
+    class="page-toc tocsection onthispage">
+    <i class="fa-solid fa-list"></i> Contents
+  </div>
+  <nav id="pst-page-toc-nav" class="page-toc" aria-labelledby="pst-page-navigation-heading-2">
+    <ul class="pst-show_toc_level nav section-nav flex-column">
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id1">文档定位</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id2">快速上手</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend-autotune">1. 先启用 Ascend 对 autotune 的扩展</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-autotune-triton-jit">2. <code class="docutils literal notranslate"><span class="pre">@triton.autotune</span></code> 必须直接包在 <code class="docutils literal notranslate"><span class="pre">@triton.jit</span></code> 外层</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#key">3. <code class="docutils literal notranslate"><span class="pre">key</span></code> 的含义与社区一致</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id3">4. 希望参与自动调优的参数不要被提前固定</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling-grid-grid-lambda">5. 如果 Tiling 参数会影响 grid，grid 必须写成 lambda 形式</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id4">使用注意事项</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id5">Triton-Ascend 相比社区 autotune 的扩展</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#configs">1. 支持 <code class="docutils literal notranslate"><span class="pre">configs=[]</span></code> 自动生成候选配置</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#config">2. 支持多个 config 的并行编译</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#profiler-kernel">3. 支持使用 profiler 采集 kernel 性能</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling">自动 Tiling 生成能力的范围与行为</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id6">1. 自动生成范围聚焦在 Tiling 参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#ascend">2. 候选配置会带上 Ascend 硬件约束</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#id7">3. 自动 Tiling 模式的目标是方便给出“性能不错”的配置</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#tiling-triton-config">4. 自动 Tiling 生成失败时需要用户手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code></a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-config">手写 <code class="docutils literal notranslate"><span class="pre">triton.Config</span></code> 模式</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id8">进阶用法：自动 Tiling 与其他参数联合调优</a><ul class="nav section-nav flex-column">
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#autotune">1. 社区 autotune：手工枚举全部调优参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-ascend-tiling-ascend">2. Triton-Ascend：手工枚举 Tiling 参数和 Ascend 编译参数</a></li>
+<li class="toc-h3 nav-item toc-entry"><a class="reference internal nav-link" href="#triton-ascend-tiling">3. Triton-Ascend：自动生成 Tiling，同时联合调优其他参数</a></li>
+</ul>
+</li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id9">autotune 示例</a></li>
+<li class="toc-h2 nav-item toc-entry"><a class="reference internal nav-link" href="#id10">小结</a></li>
+</ul>
+  </nav></div>
+
+</div></div>
+              
+            
+          </div>
+          <footer class="bd-footer-content">
+            
+<div class="bd-footer-content__inner container">
+  
+  <div class="footer-item">
+    
+<p class="component-author">
+By Huawei
+</p>
+
+  </div>
+  
+  <div class="footer-item">
+    
+
+  <p class="copyright">
+    
+      © Copyright 2026, Huawei.
+      <br/>
+    
+  </p>
+
+  </div>
+  
+  <div class="footer-item">
+    <p class="last-updated">
+  Last updated on Sep 11, 2026.
+  <br/>
+</p>
+  </div>
+  
+  <div class="footer-item">
+    
+  </div>
+  
+</div>
+          </footer>
+        
+
+      </main>
+    </div>
+  </div>
+  
+  <!-- Scripts loaded after <body> so the DOM is not blocked -->
+  <script defer src="_static/scripts/bootstrap.js?digest=90905a2f556bf617f1a9"></script>
+<script defer src="_static/scripts/pydata-sphinx-theme.js?digest=90905a2f556bf617f1a9"></script>
+
+  <footer class="bd-footer">
+  </footer>
+  </body>
+</html>

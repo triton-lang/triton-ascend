@@ -31,6 +31,9 @@ enum class SimtAnchorKind {
   PlainOneDimensionalCumsum,
   TensorAtomic,
   TriangularSolveLoop,
+  /// Synthesized descriptor: no primitive anchor exists, so one whole
+  /// LogicalStage's contiguous root range becomes the local SIMT scope.
+  StageOwnedScope,
 };
 
 llvm::StringRef stringifySimtAnchorKind(SimtAnchorKind kind);
@@ -106,9 +109,24 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
                                         int64_t superblockFactor = 1);
 
 /// True when a load/store pointer has an SSA backward slice that reaches a
-/// loaded/gathered index.  This is a real data-dependence test and must not be
-/// confused with the legacy rank-based laneDependentPointerOps proxy.
+/// loaded/gathered index.  This is a real data-dependence test and must not
+/// be confused with the legacy rank-based laneDependentPointerOps proxy.
 bool isLoadedIndexDependentMemoryOp(Operation *op);
+
+/// Structural check: can `roots` be wrapped by one scope.scope region?  All
+/// roots must live in one block and form a lexically contiguous range there
+/// (no foreign operation between the first and last root), because the
+/// materializer moves exactly this set into the scope.
+bool isStageScopeWrappable(llvm::ArrayRef<Operation *> roots);
+
+/// Synthesize a StageOwnedScope descriptor for an anchor-free Stage.  The
+/// Stage's own root range becomes the local SIMT scope, so mixed remains
+/// selectable for kernels with no primitive anchor.  Returns nullopt when
+/// the range is not wrappable, would return pointer-like tensor state, or
+/// when the target cannot materialize local scopes at all.
+std::optional<SimtAnchorDescriptor>
+buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
+                               bool compileOn91095);
 
 /// Build the non-overlapping shared plan in pre-order.
 SimtAnchorPlan buildMixedSimtAnchorPlan(ModuleOp module, bool compileOn91095);

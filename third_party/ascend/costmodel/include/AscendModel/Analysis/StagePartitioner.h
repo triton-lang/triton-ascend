@@ -18,6 +18,9 @@ struct StagePartitionerOptions {
   int64_t tinyDotFlopsMax = 16384;
   int64_t maximumSuperblockFactor = 1;
   bool scopeSuperblockMaterializable = false;
+  /// Anchor-free Stages may become StageOwnedScope local SIMT scopes only on
+  /// targets whose backend can materialize local scope.scope regions.
+  bool compileOn91095 = true;
 };
 
 /// Ordered post-transform TTIR semantic roots.  AutoBlockify V1's outer loop
@@ -36,12 +39,15 @@ public:
 
 /// Splits ordered semantic roots directly into single-kind Stages.  It does
 /// not evaluate cycles or choose SIMD/SIMT.  The anchor plan is used only as
-/// exact ownership evidence for materializable local SIMT Stages.
+/// exact ownership evidence for materializable local SIMT Stages; anchor-free
+/// Stages may additionally become StageOwnedScope units when the target can
+/// materialize local scopes.
 class StageBoundaryAnalysis {
 public:
   llvm::Expected<StagePartition>
   analyze(const ProgramStructure &structure,
-          const SimtAnchorPlan &anchorPlan) const;
+          const SimtAnchorPlan &anchorPlan,
+          bool compileOn91095 = true) const;
 };
 
 /// Derives structural facts for every already-owned Stage.  It never chooses

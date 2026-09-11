@@ -9,6 +9,7 @@
 #define ASCENDMODEL_ROUTEMODEL_SIMDSIMTCOSTMODEL_H
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
+#include "AscendModel/RouteModel/StageCostModels.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "llvm/Support/Error.h"
@@ -139,6 +140,15 @@ llvm::Expected<SimdSimtCostReport>
 analyzeSimdSimtCandidates(mlir::ModuleOp module,
                           const SimtAnchorPlan &anchorPlan,
                           const SimdSimtCostModelOptions &options = {});
+
+/// Partition `module` with exactly the options the candidate model uses for
+/// scoring.  The selector calls this so a Mixed decision synthesized from
+/// StageOwnedScope units (anchor-free Stages) wraps the same root ranges
+/// that produced the scored route.
+llvm::Expected<StagePartition>
+partitionForSimdSimtSelection(mlir::ModuleOp module,
+                              const SimtAnchorPlan &anchorPlan,
+                              const SimdSimtCostModelOptions &options = {});
 
 } // namespace ascend
 } // namespace mlir

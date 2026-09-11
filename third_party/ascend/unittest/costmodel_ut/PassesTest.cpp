@@ -644,6 +644,61 @@ module {
   EXPECT_TRUE(*v1Applied);
 }
 
+TEST(CostModelPassesTest, StageOwnedScopeRejectsEscapingScalar) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: f32, %arg1: f32) -> f32 {
+    %0 = arith.addf %arg0, %arg1 : f32
+    return %0 : f32
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *add = findFirstOp(*module, "arith.addf");
+  ASSERT_NE(add, nullptr);
+  auto descriptor =
+      mlir::ascend::buildStageOwnedScopeDescriptor({add}, true);
+  EXPECT_FALSE(descriptor.has_value());
+}
+
+TEST(CostModelPassesTest, StageOwnedScopeAcceptsEscapingTensor) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<1xf32>, %arg1: tensor<1xf32>)
+      -> tensor<1xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<1xf32>
+    return %0 : tensor<1xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *add = findFirstOp(*module, "arith.addf");
+  ASSERT_NE(add, nullptr);
+  auto descriptor =
+      mlir::ascend::buildStageOwnedScopeDescriptor({add}, true);
+  ASSERT_TRUE(descriptor.has_value());
+  EXPECT_EQ(descriptor->kind,
+            mlir::ascend::SimtAnchorKind::StageOwnedScope);
+  EXPECT_TRUE(descriptor->materializable);
+
+  mlir::ascend::SimtAnchorPlan plan;
+  plan.anchors.push_back(std::move(*descriptor));
+  ASSERT_TRUE(mlir::succeeded(materializeSimtAnchorPlan(*module, plan)));
+
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+  ASSERT_EQ(scopeOp->getNumResults(), 1u);
+  EXPECT_TRUE(mlir::isa<mlir::RankedTensorType>(
+      scopeOp->getResult(0).getType()));
+  auto mode = scopeOp->getAttrOfType<StringAttr>("vector_mode");
+  ASSERT_TRUE(mode);
+  EXPECT_EQ(mode.getValue(), "simt");
+}
+
 TEST(CostModelPassesTest, MaterializeSimtScopePreservesEscapingSSAResult) {
   mlir::MLIRContext context;
   auto module = parseModule(context, R"mlir(

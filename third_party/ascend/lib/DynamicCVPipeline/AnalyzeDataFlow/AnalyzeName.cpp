@@ -42,7 +42,6 @@ namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[]{
     "kernel_sdpa_bwd_kv",
-    "kernel_da_bwd_kv_ul",
     "pcb06_tc02_c2v2v2c_chain",
     "flash_varlen_fwd_kernel",
     "_sparse_decode_kernel",

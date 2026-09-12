@@ -398,8 +398,15 @@ static Operation *getTopLevelSemanticRoot(Operation *operation) {
     return nullptr;
   Operation *root = operation;
   while (Operation *parent = root->getParentOp()) {
+    const llvm::StringRef parentName = parent->getName().getStringRef();
+    // AutoBlockify V1 may wrap a multi-block original function body in a
+    // newly created scf.execute_region.  That region is only a scheduling
+    // shell, so semantic roots inside it should be exposed directly instead
+    // of being owned by the execute_region.
     if (isFunctionLikeTTIROp(parent) ||
-        parent->hasAttr("ta.auto_blockify_v1.loop"))
+        parent->hasAttr("ta.auto_blockify_v1.loop") ||
+        (parentName == "scf.execute_region" &&
+         parent->hasAttr("ta.auto_blockify_v1.schedule")))
       return root;
     root = parent;
   }
@@ -418,29 +425,44 @@ static bool isInsideAutoBlockifyV1Loop(Operation *operation) {
 
 static std::vector<Operation *> collectTopLevelSemanticRoots(ModuleOp module) {
   std::vector<Operation *> result;
-  auto appendBlock = [&](Block &block) {
+  auto appendOps = [&](auto &&self, Block &block, bool insideV1Loop) -> void {
     for (Operation &nested : block.getOperations()) {
       if (nested.hasTrait<OpTrait::IsTerminator>())
         continue;
+
+      const llvm::StringRef name = nested.getName().getStringRef();
+      const bool isV1Loop = nested.hasAttr("ta.auto_blockify_v1.loop");
+      // AutoBlockify V1 wraps a multi-block original function body in a new
+      // scf.execute_region.  That region is only a scheduling shell; expose
+      // its inner operations as semantic roots so the real algorithm is not
+      // hidden behind an auto_blockify_dispatch stage.
+      const bool isV1ExecuteRegion =
+          insideV1Loop && name == "scf.execute_region" &&
+          nested.hasAttr("ta.auto_blockify_v1.schedule");
+      if (isV1ExecuteRegion) {
+        for (Region &region : nested.getRegions())
+          for (Block &body : region)
+            self(self, body, insideV1Loop);
+        continue;
+      }
+
       result.push_back(&nested);
       // AutoBlockify V1's scf.for is a scheduling shell.  Own the shell as
       // loop control, then expose its direct body operations as semantic
       // roots.  Other structured operations remain atomic roots so their
       // nested recurrence/reduction work is not double-owned.
-      if (!nested.hasAttr("ta.auto_blockify_v1.loop") ||
-          nested.getNumRegions() == 0)
+      if (!isV1Loop || nested.getNumRegions() == 0)
         continue;
-      for (Block &body : nested.getRegion(0))
-        for (Operation &bodyOperation : body.getOperations())
-          if (!bodyOperation.hasTrait<OpTrait::IsTerminator>())
-            result.push_back(&bodyOperation);
+      for (Region &region : nested.getRegions())
+        for (Block &body : region)
+          self(self, body, /*insideV1Loop=*/true);
     }
   };
   for (Operation &operation : module.getBody()->getOperations()) {
     if (!isFunctionLikeTTIROp(&operation) || operation.getNumRegions() == 0)
       continue;
     for (Block &block : operation.getRegion(0))
-      appendBlock(block);
+      appendOps(appendOps, block, /*insideV1Loop=*/false);
   }
   return result;
 }

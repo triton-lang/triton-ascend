@@ -526,6 +526,22 @@ void OpClassifierPass::matchMaterializePattern(Operation *user) {
 int OpClassifierPass::patternMatchCUBE() {
   LOG_DEBUG("--- Step 1: pattern match --->\n");
 
+  // Mark operations with kMNEStore0 tag (MNE counter store 0) as CUBE
+  for (Operation *op : allOps) {
+    if (op->getAttrOfType<UnitAttr>(mlir::CVPipeline::kMNEStore0)) {
+      markCube(op);
+    }
+  }
+
+  // Mark operations with kCoupledMatmulAndStore tag (MNE counter store 1) as CUBE
+  for (Operation *op : allOps) {
+    if (op->getAttrOfType<IntegerAttr>(
+            mlir::CVPipeline::kCoupledMatmulAndStore)) {
+      markCube(op);
+      cubeSeeds.push_back(op);
+    }
+  }
+
   for (Operation *op : allOps) {
     if (!isa<linalg::MatmulOp>(op))
       continue;
@@ -563,6 +579,10 @@ int OpClassifierPass::patternMatchCUBE() {
     }
 
     // ---- Downstream pattern matching ----
+    if (op->getAttrOfType<IntegerAttr>(
+            mlir::CVPipeline::kCoupledMatmulAndStore)){
+      continue;
+    }
     for (Value result : op->getResults()) {
       if (!result.hasOneUse()) {
         continue;

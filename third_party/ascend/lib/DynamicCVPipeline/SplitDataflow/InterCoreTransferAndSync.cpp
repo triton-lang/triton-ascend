@@ -133,6 +133,19 @@ static void attachAnalyzeFlagIdTag(Operation *op) {
   op->setAttr(CVPipeline::kAnalyzeFlagId, UnitAttr::get(ctx));
 }
 
+/// Get the operation just before the terminating yield of the block that
+/// contains \p op. Returns nullptr if the block has no yield terminator.
+static Operation *getOpBeforeYield(Operation *op) {
+  if (!op || !op->getBlock() || !op->getBlock()->getTerminator()) {
+    return nullptr;
+  }
+  Operation *terminator = op->getBlock()->getTerminator();
+  if (!isa<scf::YieldOp>(terminator)) {
+    return nullptr;
+  }
+  return terminator->getPrevNode();
+}
+
 /// Get the sub-block id of \p op, or std::nullopt if \p op is null or does
 /// not carry the sub-block tag.
 static std::optional<int> getSubBlockId(Operation *op) {
@@ -565,12 +578,6 @@ Operation *
 InterCoreTransferAndSyncPass::findMainLoopforTransfer(Operation *endOp,
                                                       Operation *startOp) {
   Operation *lca = endOp->getParentOp();
-  if (lca != startOp->getParentOp()) {
-    LOG_DEBUG("startOp: " << *startOp << " and endOp: " << *endOp
-                          << " are not in the same parent block, which is "
-                             "unexpected.");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-  }
   Operation *current = lca;
   while (current) {
     if (isa<scf::ForOp, scf::WhileOp>(current)) {
@@ -851,9 +858,13 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
       builder.getContext(),
       dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
 
+  auto realValue = dep.value;
+  if (dep.realValue) {
+    realValue = dep.realValue;
+  }
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{},    // No return value
-      srcValue,                  // src
+      realValue,                 // src
       cubeAllocOp->getResult(0), // dst
       mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
       nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
@@ -1496,6 +1507,56 @@ static std::optional<hivm::PIPE> getCopyPipeForAnalyze(hivm::CopyOp copyOp) {
   return std::nullopt;
 }
 
+/// Returns the MatmulOp that is yielded by the split-if op.
+/// Returns nullptr if the block has no yield terminator.
+linalg::MatmulOp
+InterCoreTransferAndSyncPass::findYieldMatmulInSplitIf(Value splittedIfResult) {
+  auto ifOp = splittedIfResult.getDefiningOp<scf::IfOp>();
+  if (!ifOp) {
+    return nullptr;
+  }
+
+  auto result = dyn_cast<OpResult>(splittedIfResult);
+  if (!result) {
+    return nullptr;
+  }
+  unsigned resultIndex = result.getResultNumber();
+
+  auto yieldOp = ifOp.thenYield();
+  if (!yieldOp || resultIndex >= yieldOp.getNumOperands())
+    return nullptr;
+  auto definingOp = yieldOp.getOperand(resultIndex).getDefiningOp();
+
+  return dyn_cast<linalg::MatmulOp>(definingOp);
+}
+
+void InterCoreTransferAndSyncPass::AnalyzeSplittedIf(DependencyInfo &dep) {
+  auto srcOp = dep.value.getDefiningOp();
+  if (!srcOp || !srcOp->hasAttr(CVPipeline::kSplittedIf)) {
+    return;
+  }
+  Operation *consIfOp = nullptr;
+  for (Operation *nextOp = srcOp->getNextNode(); nextOp;
+       nextOp = nextOp->getNextNode()) {
+    auto op = dyn_cast<scf::IfOp>(nextOp);
+    if (op && CVPipeline::getOpBlockId(op) == dep.consumerBlockId) {
+      consIfOp = op;
+      break;
+    }
+  }
+  if (!consIfOp || !consIfOp->hasAttr(CVPipeline::kSplittedIf)) {
+    return;
+  }
+  if (srcOp->getAttrOfType<IntegerAttr>(CVPipeline::kSplittedIf) !=
+      consIfOp->getAttrOfType<IntegerAttr>(CVPipeline::kSplittedIf)) {
+    return;
+  }
+  if (auto matmulOp = findYieldMatmulInSplitIf(dep.value)) {
+    dep.isSplitedIf = true;
+    dep.realValue = matmulOp->getResult(0);
+  }
+}
+
 // V->C Transfer Logic
 LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
     OpBuilder &builder, DependencyInfo &dep, FlagIdManager &flagManager,
@@ -1577,6 +1638,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   LOG_DEBUG("[newConsStart]" << *consStart << "\n");
   LOG_DEBUG("[newConsEnd]" << *consEnd << "\n");
 
+  AnalyzeSplittedIf(dep);
+
   if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(srcValue.getDefiningOp())) {
     auto producerPoint =
         getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
@@ -1592,6 +1655,15 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
     consumerPoint =
         analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
     if (consumerPoint && getSubBlockId(consumerPoint)) {
+      consStart = consumerPoint;
+    }
+  }
+
+  if (dep.isSplitedIf) {
+    prodEnd = dep.realValue.getDefiningOp();
+    auto consumerPoint =
+        analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
+    if (consumerPoint) {
       consStart = consumerPoint;
     }
   }
@@ -1619,7 +1691,14 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
       newConsStart = newconsumerPoint;
     }
   }
-
+  if (dep.isSplitedIf) {
+    auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
+    auto yieldBeforeOp = getOpBeforeYield(newconsumerPoint);
+    if (newconsumerPoint && yieldBeforeOp) {
+      newConsStart = newconsumerPoint;
+      newConsEnd = yieldBeforeOp;
+    }
+  }
   insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId,
                       loc, transferIndex, flagIdReuseManager, consumedDataOp,
                       isStoreDirectly);

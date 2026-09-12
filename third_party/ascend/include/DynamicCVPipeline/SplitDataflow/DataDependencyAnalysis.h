@@ -58,6 +58,10 @@ struct DependencyInfo {
 
   bool isAllTranspoesd = false;
 
+  // Optional Items for splitted if
+  bool isSplitedIf = false;
+  mlir::Value realValue;
+
   // Optional Items for memDependencies
   mlir::Operation *predOp;
   mlir::Operation *nextOp;

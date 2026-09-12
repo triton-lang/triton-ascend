@@ -191,3 +191,96 @@ def test_c_api_request_version_and_bounded_error(native_api):
         assert ret != 0
         assert bytes(error)[3] == 0
         assert bytes(error)[4:] == b"XXXX"
+
+
+@pytest.fixture(scope="module")
+def python_launcher_factory():
+    runtime, _ = launcher.get_runtime(driver.NPUUtils().get_so_path())
+    config = launcher.LaunchSpec(flags=0, workspace_size=0, ordered_locks=0, unordered_locks=0, lock_init_value=0,
+                                 participant_factor=1, physical_blocks=20, coalesce_factor=1, coalesce_axis=-1,
+                                 task_type=1, mix_ratio=0, shared_mem_dynamic_size=0)
+    return lambda kinds: runtime.create_launcher(config.as_dict(), [(kind, -1) for kind in kinds])
+
+
+@pytest.mark.parametrize("kind,value", [
+    (launcher.I8, -1),
+    (launcher.I16, -1),
+    (launcher.I32, -1),
+    (launcher.I64, -1),
+    (launcher.U8, 255),
+    (launcher.U16, 65535),
+    (launcher.U32, 2**32 - 1),
+    (launcher.U64, 2**64 - 1),
+    (launcher.F32, -1.0),
+    (launcher.F64, -1.0),
+    (launcher.POINTER, 0),
+    (launcher.POINTER, 2**64 - 1),
+])
+def test_python_conversion_accepts_error_sentinel_values(python_launcher_factory, kind, value):
+    launch = python_launcher_factory([kind])
+    entered = []
+    # A zero grid exercises conversion and hooks without submitting fake pointers.
+    launch(0, 1, 1, 0, 0, {"kernel_name": "sentinel"}, None, entered.append, None, value)
+    assert entered == [None]
+
+
+@pytest.mark.parametrize("kind,value,error", [
+    (launcher.I8, 2**100, OverflowError),
+    (launcher.I16, 2**100, OverflowError),
+    (launcher.I32, 2**100, OverflowError),
+    (launcher.I64, 2**100, OverflowError),
+    (launcher.U8, -1, OverflowError),
+    (launcher.U16, -1, OverflowError),
+    (launcher.U32, -1, OverflowError),
+    (launcher.U64, 2**64, OverflowError),
+    (launcher.F32, object(), TypeError),
+    (launcher.F64, object(), TypeError),
+    (launcher.POINTER, -1, OverflowError),
+    (launcher.POINTER, 2**64, OverflowError),
+])
+def test_python_conversion_stops_before_later_arguments(python_launcher_factory, kind, value, error):
+    events = []
+
+    class LaterArgument:
+
+        def __index__(self):
+            events.append("later")
+            return 7
+
+    launch = python_launcher_factory([kind, launcher.I64])
+    with pytest.raises(error):
+        launch(0, 1, 1, 0, 0, {"kernel_name": "conversion_error"}, None, events.append, None, value, LaterArgument())
+    assert events == []
+
+
+@pytest.mark.parametrize("kind", [launcher.I64, launcher.F64, launcher.POINTER])
+def test_python_conversion_preserves_custom_exceptions(python_launcher_factory, kind):
+
+    class RaisingValue:
+
+        def __index__(self):
+            raise RuntimeError("custom conversion failure")
+
+        def __float__(self):
+            raise RuntimeError("custom conversion failure")
+
+        def data_ptr(self):
+            raise RuntimeError("custom conversion failure")
+
+    launch = python_launcher_factory([kind])
+    with pytest.raises(RuntimeError, match="custom conversion failure"):
+        launch(0, 1, 1, 0, 0, {"kernel_name": "custom_error"}, None, None, None, RaisingValue())
+
+
+@pytest.mark.parametrize("slot", range(5))
+def test_python_grid_and_handles_preserve_overflow(python_launcher_factory, slot):
+    launch = python_launcher_factory([])
+    args = [0, 1, 1, 0, 0, {"kernel_name": "request_error"}, None, None, None]
+    args[slot] = 2**100
+    with pytest.raises(OverflowError):
+        launch(*args)
+
+
+def test_python_request_accepts_valid_sentinels(python_launcher_factory):
+    launch = python_launcher_factory([])
+    launch(-1, 1, 1, 2**64 - 1, 2**64 - 1, {"kernel_name": "empty_grid"}, None, None, None)

@@ -496,7 +496,6 @@ static int collectTransferChains(const SmallVector<Operation *> &ops,
 
 /// Build TransferGroupInfo for a single transfer_id
 static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
-                                  FlagIdManager &flagIdMgr,
                                   TransferGroupInfo &info) {
   info.tid = tid;
 
@@ -568,22 +567,12 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
     return -1;
   }
 
-  // 6. Acquire output flag
-  for (int attempt = 0; attempt < kMaxFlagAttempts; ++attempt) {
-    int64_t pf = flagIdMgr.acquireId();
-    if (pf == FlagIdManager::INVALID_FLAG_ID) {
-      break;
-    }
-    if (pf != info.originalFlag) {
-      info.outputFlag = static_cast<int>(pf);
-      break;
-    }
-  }
+  // 6. Output flag is assigned in collectTransferGroupData, shared by groups
+  // with the same (originalFlag, direction).
 
   if (info.senderChain.transferOp || info.receiverChain.transferOp) {
     LDBG("Direction: " << (info.isCtoV ? "C→V" : "V→C")
-                       << ", flag=" << info.originalFlag
-                       << ", outputFlag=" << info.outputFlag << ".");
+                       << ", flag=" << info.originalFlag << ".");
   }
 
   return 0;
@@ -595,7 +584,7 @@ static int collectTransferGroupData(
     FlagIdManager &flagIdMgr, DenseMap<int, TransferGroupInfo> &groups) {
   for (auto &p : opsByTid) {
     TransferGroupInfo info;
-    if (buildTransferGroupData(p.first, p.second, flagIdMgr, info)) {
+    if (buildTransferGroupData(p.first, p.second, info)) {
       continue;
     }
     if (info.senderChain.transferOp || info.receiverChain.transferOp) {
@@ -604,22 +593,29 @@ static int collectTransferGroupData(
   }
 
   // Output flag reuse: groups with same (originalFlag, direction) share an
-  // output flag
+  // output flag. Assign one new flag per distinct key; std::map iterates in
+  // sorted key order for determinism.
   std::map<std::pair<int, bool>, int> outputFlagByKey;
   for (auto &p : groups) {
-    auto &g = p.second;
-    auto key = std::make_pair(g.originalFlag, g.isCtoV);
-    auto it = outputFlagByKey.find(key);
-    if (it != outputFlagByKey.end()) {
-      g.outputFlag = it->second;
-      LDBG("Group tid=" << g.tid << " reuses outputFlag=" << g.outputFlag
-                        << " (shared originalFlag=" << g.originalFlag << ").");
-    } else {
-      outputFlagByKey[key] = g.outputFlag;
-      LDBG("Group tid=" << g.tid
-                        << " gets new shared outputFlag=" << g.outputFlag
-                        << " for originalFlag=" << g.originalFlag << ".");
+    outputFlagByKey.try_emplace(
+        std::make_pair(p.second.originalFlag, p.second.isCtoV),
+        FlagIdManager::INVALID_FLAG_ID);
+  }
+  for (auto &entry : outputFlagByKey) {
+    for (int attempt = 0; attempt < kMaxFlagAttempts; ++attempt) {
+      int64_t pf = flagIdMgr.acquireId();
+      if (pf == FlagIdManager::INVALID_FLAG_ID || pf != entry.first.first) {
+        entry.second = static_cast<int>(pf);
+        break;
+      }
     }
+  }
+  for (auto &p : groups) {
+    auto &g = p.second;
+    g.outputFlag = outputFlagByKey[std::make_pair(g.originalFlag, g.isCtoV)];
+    LDBG("Group tid=" << g.tid << " gets outputFlag=" << g.outputFlag
+                      << " (shared originalFlag=" << g.originalFlag
+                      << ", dir=" << (g.isCtoV ? "C→V" : "V→C") << ").");
   }
 
   return 0;

@@ -1033,7 +1033,7 @@ static void release_npu_tensor_handle(void* handle) {{
 
     mapping_applied = getattr(metadata, "program_grid_mapping_applied", None)
     row_coalescing_applied = getattr(metadata, "row_coalescing_applied", None)
-    ptsm_cap_authorized = getattr(metadata, "ptsm_cap_authorized", None)
+    ptsm_cap_authorized = getattr(metadata, "ptsm_cap_authorized", False)
     if not isinstance(mapping_applied, bool):
         raise RuntimeError("compiler metadata missing program_grid_mapping_applied")
     if not isinstance(row_coalescing_applied, bool):

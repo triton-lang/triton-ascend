@@ -83,6 +83,52 @@ def test_make_launcher_exposes_triton_launch_kernel(
     _mock_ffts.assert_called_once_with("Ascend910B3")
 
 
+@pytest.mark.parametrize("persistent", [False, True])
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_missing_ptsm_authorization(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    mock_npu_utils,
+    persistent,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+    metadata = _make_metadata()
+    del metadata.ptsm_cap_authorized
+    if persistent:
+        metadata.program_grid_mapping_applied = True
+        metadata.program_grid_transforms = {
+            "version":
+            2,
+            "extent_source":
+            "runtime_original_grid",
+            "hidden_extent_axes": [0, 1],
+            "hidden_argument_order": ["originalGridX", "originalGridY"],
+            "hidden_argument_types": ["i32", "i32"],
+            "transforms": [{
+                "order": 0,
+                "kind": "ceil_div",
+                "axis": 0,
+                "factor": 64,
+                "persistent_coverage": True,
+                "grid_stride_abi_verified": True,
+            }],
+        }
+        with pytest.raises(RuntimeError, match="persistent program-grid transform lacks PTSM cap authorization"):
+            driver.make_launcher(constants={}, signature={0: "*fp32"}, metadata=metadata)
+    else:
+        src = driver.make_launcher(constants={}, signature={0: "*fp32"}, metadata=metadata)
+        c_abi_launch, cpp_launch = _split_launch_functions(src)
+        assert "void triton_launch_kernel(" in c_abi_launch
+        assert "static void _launch(" in cpp_launch
+        assert "axisCap" not in src
+        assert "originalGridX" not in src
+
+
 @patch.object(driver, "NPUUtils")
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)

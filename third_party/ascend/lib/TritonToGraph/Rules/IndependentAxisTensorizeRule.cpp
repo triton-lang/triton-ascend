@@ -220,6 +220,18 @@ bool hasDisjointWriteReadRoots(
   return true;
 }
 
+bool hasTensorPointerInProgramAxisClosure(
+    const ProgramAxisDependence &dependence) {
+  // A tensor pointer requires a scalar base pointer. IAT turns the dependent
+  // program id into a vector of lanes, and the current materializer cannot
+  // reconstruct a legal tensor pointer from that vector. Reject this case
+  // while discovering candidates instead of scheduling a plan that fails in
+  // apply().
+  return llvm::any_of(dependence.dependenceClosure, [](Operation *operation) {
+    return isa<triton::MakeTensorPtrOp>(operation);
+  });
+}
+
 int64_t getPreferredLaneAxis(Type originalType, const IATCandidate &candidate) {
   auto tensor = dyn_cast<RankedTensorType>(originalType);
   if (!tensor || candidate.form == TensorizeForm::NormRope)
@@ -915,6 +927,7 @@ analyzeDynamicSingleMomentCandidate(GraphOptimizationContext &context) {
   const ProgramAxisDependence &dependence =
       context.getProgramAxisDependenceAnalysis().get(1);
   if (!dependence.isProgramMappingTransformCandidate() ||
+      hasTensorPointerInProgramAxisClosure(dependence) ||
       !hasDisjointWriteReadRoots(dependence,
                                  context.getEntryArgPointerAliasAnalysis()))
     return std::nullopt;
@@ -1060,6 +1073,7 @@ analyzeDynamicMergeSplitCandidate(GraphOptimizationContext &context) {
   const ProgramAxisDependence &dependence =
       context.getProgramAxisDependenceAnalysis().get(1);
   if (!dependence.isProgramMappingTransformCandidate() ||
+      hasTensorPointerInProgramAxisClosure(dependence) ||
       !hasDisjointWriteReadRoots(dependence,
                                  context.getEntryArgPointerAliasAnalysis()))
     return std::nullopt;

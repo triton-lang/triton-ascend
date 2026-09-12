@@ -328,13 +328,22 @@ void translateException() {
   }
 }
 
+// These CPython numeric conversion APIs report errors with a -1 sentinel.
+// Query the error indicator only for that value, including valid -1 inputs.
+template <typename T> bool conversionFailed(T value) {
+  return value == static_cast<T>(-1) && PyErr_Occurred();
+}
+
 bool pointerValue(PyObject *obj, void **value) {
   *value = nullptr;
   if (obj == Py_None)
     return true;
   if (PyLong_Check(obj)) {
-    *value = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(obj));
-    return !PyErr_Occurred();
+    auto address = PyLong_AsUnsignedLongLong(obj);
+    if (conversionFailed(address))
+      return false;
+    *value = reinterpret_cast<void *>(address);
+    return true;
   }
   static PyObject *key = PyUnicode_InternFromString("data_ptr");
   if (!key)
@@ -347,13 +356,22 @@ bool pointerValue(PyObject *obj, void **value) {
     PyErr_SetString(PyExc_TypeError, "data_ptr method must return an integer");
     return false;
   }
-  *value = reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(result));
+  auto address = PyLong_AsUnsignedLongLong(result);
+  bool valid = !conversionFailed(address);
   Py_DECREF(result);
-  return !PyErr_Occurred();
+  *value = reinterpret_cast<void *>(address);
+  return valid;
 }
 
 template <typename T> void storeValue(char *out, T value) {
   std::memcpy(out, &value, sizeof(value));
+}
+
+template <typename T, typename U> bool storeConverted(char *out, U value) {
+  if (conversionFailed(value))
+    return false;
+  storeValue(out, static_cast<T>(value));
+  return true;
 }
 
 bool convertArgument(PyObject *obj, uint32_t kind, char *out) {
@@ -363,43 +381,32 @@ bool convertArgument(PyObject *obj, uint32_t kind, char *out) {
     if (!pointerValue(obj, &value))
       return false;
     storeValue(out, value);
-    break;
+    return true;
   }
   case TRITON_NPU_I8:
-    storeValue(out, static_cast<int8_t>(PyLong_AsLong(obj)));
-    break;
+    return storeConverted<int8_t>(out, PyLong_AsLong(obj));
   case TRITON_NPU_I16:
-    storeValue(out, static_cast<int16_t>(PyLong_AsLong(obj)));
-    break;
+    return storeConverted<int16_t>(out, PyLong_AsLong(obj));
   case TRITON_NPU_I32:
-    storeValue(out, static_cast<int32_t>(PyLong_AsLong(obj)));
-    break;
+    return storeConverted<int32_t>(out, PyLong_AsLong(obj));
   case TRITON_NPU_I64:
-    storeValue(out, static_cast<int64_t>(PyLong_AsLongLong(obj)));
-    break;
+    return storeConverted<int64_t>(out, PyLong_AsLongLong(obj));
   case TRITON_NPU_U8:
-    storeValue(out, static_cast<uint8_t>(PyLong_AsUnsignedLong(obj)));
-    break;
+    return storeConverted<uint8_t>(out, PyLong_AsUnsignedLong(obj));
   case TRITON_NPU_U16:
-    storeValue(out, static_cast<uint16_t>(PyLong_AsUnsignedLong(obj)));
-    break;
+    return storeConverted<uint16_t>(out, PyLong_AsUnsignedLong(obj));
   case TRITON_NPU_U32:
-    storeValue(out, static_cast<uint32_t>(PyLong_AsUnsignedLong(obj)));
-    break;
+    return storeConverted<uint32_t>(out, PyLong_AsUnsignedLong(obj));
   case TRITON_NPU_U64:
-    storeValue(out, static_cast<uint64_t>(PyLong_AsUnsignedLongLong(obj)));
-    break;
+    return storeConverted<uint64_t>(out, PyLong_AsUnsignedLongLong(obj));
   case TRITON_NPU_F32:
-    storeValue(out, static_cast<float>(PyFloat_AsDouble(obj)));
-    break;
+    return storeConverted<float>(out, PyFloat_AsDouble(obj));
   case TRITON_NPU_F64:
-    storeValue(out, PyFloat_AsDouble(obj));
-    break;
+    return storeConverted<double>(out, PyFloat_AsDouble(obj));
   default:
     PyErr_SetString(PyExc_TypeError, "unknown launcher argument kind");
     return false;
   }
-  return !PyErr_Occurred();
 }
 
 std::vector<int64_t> tensorShape(PyObject *obj) {
@@ -460,7 +467,7 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     request.struct_size = sizeof(request);
     for (int i = 0; i < 3; ++i) {
       long dim = PyLong_AsLong(args[i]);
-      if (PyErr_Occurred())
+      if (conversionFailed(dim))
         return nullptr;
       if (dim < INT32_MIN || dim > INT32_MAX) {
         PyErr_SetString(PyExc_OverflowError,
@@ -469,14 +476,14 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
       }
       request.grid[i] = dim;
     }
-    request.stream =
-        reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(args[3]));
-    if (PyErr_Occurred())
+    auto stream = PyLong_AsUnsignedLongLong(args[3]);
+    if (conversionFailed(stream))
       return nullptr;
-    request.function =
-        reinterpret_cast<void *>(PyLong_AsUnsignedLongLong(args[4]));
-    if (PyErr_Occurred())
+    request.stream = reinterpret_cast<void *>(stream);
+    auto function = PyLong_AsUnsignedLongLong(args[4]);
+    if (conversionFailed(function))
       return nullptr;
+    request.function = reinterpret_cast<void *>(function);
     if (!PyDict_Check(args[5])) {
       PyErr_SetString(PyExc_TypeError, "packedMetadata must be a dictionary");
       return nullptr;

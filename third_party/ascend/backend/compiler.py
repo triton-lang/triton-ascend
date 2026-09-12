@@ -57,6 +57,8 @@ from triton.backends.ascend.utils import (
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,
+    _get_modeled_superblock_factors,
+    _get_current_scope_superblock_factors,
     _get_auto_blockify_blacklist_reasons,
     _warn_auto_blockify_disabled,
     force_disable_ffts,
@@ -206,7 +208,7 @@ def _apply_cpp_simd_simt_decision(metadata, effective: str, superblock_factor: i
         metadata["auto_simt_scope_superblock_factor"] = scope_factor
     elif effective == "all_simt_only":
         # Auto route selection owns this decision.  When the user did not
-        # explicitly disable V1, make the selected pure-SIMT F1/F2/F4 plan
+        # explicitly disable V1, make the selected pure-SIMT plan
         # executable instead of depending on a separate environment switch.
         if metadata.get("auto_simt_whole_kernel_superblock_materializable", False):
             metadata["auto_blockify_v1_enabled"] = True
@@ -232,6 +234,16 @@ def _selected_npuir_superblock_factor(metadata, opt) -> int:
     else:
         selected = opt.superblock_factor
     return max(1, int(selected or 1))
+
+
+def _append_pure_simt_auto_blockify_options(options, metadata, opt) -> None:
+    """Pass the executable V1 schedule contract to bishengir-compile."""
+    if (not metadata.get("auto_blockify_v1_enabled", False) or not metadata.get("auto_blockify_v1_runtime_cap", False)):
+        return
+    if not opt.enable_ta_auto_blockify_v1:
+        options.append("--enable-auto-blockify-loop")
+    selected_factor = _selected_npuir_superblock_factor(metadata, opt)
+    options.append(f"--super-block-factor={selected_factor}")
 
 
 def _can_materialize_scope_superblock(metadata, opt, whole_kernel_materializable: bool) -> bool:
@@ -267,10 +279,14 @@ def _publish_route_transform_capability(metadata, opt) -> str:
     if not target_supported:
         disable_reasons.append("target_does_not_support_simt_auto_blockify_v1")
 
-    legal_factors = [factor for factor in (1, 2, 4) if num_warps * factor <= 64]
+    modeled_factors = _get_modeled_superblock_factors()
+    current_scope_factors = _get_current_scope_superblock_factors()
+    legal_factors = [factor for factor in modeled_factors if num_warps * factor <= 64]
     if not legal_factors:
         legal_factors = [1]
-    superblock_factors = legal_factors if v1_materializable else [1]
+    whole_kernel_factors = legal_factors if v1_materializable else [1]
+    scope_factors = ([factor for factor in legal_factors
+                      if factor in current_scope_factors] if v1_materializable else [1])
     coalesce_factor = max(1, int(metadata.get("ttir_layout_coalesce_factor", 1) or 1))
 
     coalesce_axis = metadata.get("ttir_layout_coalesce_axis", -1)
@@ -294,8 +310,9 @@ def _publish_route_transform_capability(metadata, opt) -> str:
         "auto_blockify_v1_requested": bool(metadata.get("auto_blockify_v1_requested", False)),
         "auto_blockify_v1_materializable": v1_materializable,
         "auto_blockify_v1_disable_reasons": sorted(set(disable_reasons)),
-        "whole_kernel_superblock_factors": superblock_factors,
-        "scope_superblock_factors": superblock_factors,
+        "modeled_superblock_factors": list(modeled_factors),
+        "whole_kernel_superblock_factors": whole_kernel_factors,
+        "scope_superblock_factors": scope_factors,
         "source_logical_program_count_hint": source_logical_program_count,
         "logical_program_count_hint": transformed_logical_program_count,
         "physical_vector_core_count_hint": physical_vector_cores,
@@ -307,13 +324,13 @@ def _publish_route_transform_capability(metadata, opt) -> str:
                 "full_group_count": logical_program_count // factor,
                 "tail_count": logical_program_count % factor,
             }
-            for factor in (1, 2, 4)
+            for factor in legal_factors
         }
     capability_json = json.dumps(capability, sort_keys=True, separators=(",", ":"))
     metadata["route_transform_capability"] = capability_json
     metadata["route_transform_v1_materializable"] = v1_materializable
-    metadata["route_transform_whole_kernel_factors"] = ",".join(map(str, superblock_factors))
-    metadata["route_transform_scope_factors"] = ",".join(map(str, superblock_factors))
+    metadata["route_transform_whole_kernel_factors"] = ",".join(map(str, whole_kernel_factors))
+    metadata["route_transform_scope_factors"] = ",".join(map(str, scope_factors))
     return capability_json
 
 
@@ -330,6 +347,9 @@ def _run_cpp_simd_simt_costmodel(mod, metadata, opt, analysis_ttir_code: str = "
     capability_json = metadata.get("route_transform_capability")
     if not capability_json:
         capability_json = _publish_route_transform_capability(metadata, opt)
+    capability = json.loads(capability_json)
+    whole_kernel_factors = capability.get("whole_kernel_superblock_factors", [1])
+    scope_factors = capability.get("scope_superblock_factors", [1])
     whole_kernel_superblock_materializable = bool(metadata.get("route_transform_v1_materializable", False))
     metadata["auto_simt_whole_kernel_superblock_materializable"] = (whole_kernel_superblock_materializable)
     # Mixed F2/F4 requires an outer factor-one V1 loop that NPUIR can refine
@@ -351,6 +371,8 @@ def _run_cpp_simd_simt_costmodel(mod, metadata, opt, analysis_ttir_code: str = "
             bool(opt.compile_on_910_95),
             whole_kernel_superblock_materializable,
             scope_superblock_materializable,
+            max(whole_kernel_factors, default=1),
+            max(scope_factors, default=1),
             int(json.loads(capability_json).get("logical_program_count_hint", 0)),
             analysis_path,
             capability_json,
@@ -1863,13 +1885,10 @@ def ttir_to_npubin(mod, metadata, opt):
             if bisheng_options is not None:
                 _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
-            # TA and NPUIR consume the same resolved policy.  Selecting TA
-            # suppresses the NPUIR pass even when TA silently skipped, so the
-            # port's behavior can be validated without a hidden fallback.
-            if (not opt.enable_ta_auto_blockify_v1 and metadata.get("auto_blockify_v1_enabled", False)):
-                _compile_option_list += ["--enable-auto-blockify-loop"]
-                selected_factor = _selected_npuir_superblock_factor(metadata, opt)
-                _compile_option_list += [f"--super-block-factor={selected_factor}"]
+            # NPUIR needs the enable flag only when it materializes V1 itself.
+            # Both implementations need the selected factor because
+            # bishengir-compile also uses it for the pure-SIMT launch contract.
+            _append_pure_simt_auto_blockify_options(_compile_option_list, metadata, opt)
 
         if not _is_debug_line_info_disabled():
             _compile_option_list += ["--enable-debug-info=true"]

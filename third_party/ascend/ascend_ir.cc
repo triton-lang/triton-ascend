@@ -31,6 +31,7 @@
 
 #include "AscendModel/Transforms/SimtSelection.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -627,9 +628,10 @@ void init_ascend_ir(py::module &&m) {
 
   m.def("set_simt_scope_superblock_factor",
         [](OpState &root, int64_t factor) -> int64_t {
-          if (factor != 1 && factor != 2 && factor != 4)
+          if (!ascend::isSupportedSuperBlockFactor(factor))
             throw std::invalid_argument(
-                "SIMT scope SuperBlock factor must be 1, 2 or 4");
+                "SIMT scope SuperBlock factor must be one of "
+                "1, 2, 4, 8, 16 or 32");
           int64_t updated = 0;
           root->walk([&](Operation *op) {
             if (op->getName().getStringRef() != "scope.scope")

@@ -17,6 +17,7 @@ namespace mlir::ascend {
 struct StagePartitionerOptions {
   int64_t tinyDotFlopsMax = 16384;
   int64_t maximumSuperblockFactor = 1;
+  int64_t maximumScopeSuperblockFactor = 4;
   bool scopeSuperblockMaterializable = false;
 };
 
@@ -72,8 +73,9 @@ public:
 class StageModeLegalityAnalysis {
 public:
   llvm::Error analyze(StagePartition &partition,
-                      int64_t maximumSuperblockFactor = 4,
-                      bool scopeSuperblockMaterializable = false) const;
+                      int64_t maximumSuperblockFactor = 32,
+                      bool scopeSuperblockMaterializable = false,
+                      int64_t maximumScopeSuperblockFactor = 4) const;
 };
 
 class StagePartitionVerifier {

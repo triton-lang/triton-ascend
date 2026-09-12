@@ -1,6 +1,7 @@
 //===- StageRouteCostModel.cpp - Logical-stage route solver ---------------===//
 
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -129,7 +130,7 @@ static llvm::StringRef stringifyStageSchedule(StageScheduleKind kind) {
 }
 
 bool StageImplementation::isValid() const {
-  if (superblockFactor <= 0 || (superblockFactor & (superblockFactor - 1)) != 0)
+  if (!isSupportedSuperBlockFactor(superblockFactor))
     return false;
   if (mode == StageMode::SIMD)
     return superblockFactor == 1 && !localScope;
@@ -578,7 +579,7 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   auto bestFactoredPlan = [&](StageKernelRouteKind kind) {
     StageRoutePlan best;
     best.candidate = kind;
-    for (int64_t factor : {1, 2, 4}) {
+    for (int64_t factor : kSupportedSuperBlockFactors) {
       StageRoutePlan candidate = buildPlan(kind, factor);
       if (candidate.legal &&
           (!best.legal || candidate.totalCycles < best.totalCycles))

@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -515,28 +516,28 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
 static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
     unsigned numWarps, bool wholeKernelSuperblockMaterializable,
-    bool scopeSuperblockMaterializable, int64_t logicalProgramCountHint,
+    bool scopeSuperblockMaterializable,
+    int64_t maximumWholeKernelSuperblockFactor,
+    int64_t maximumScopeSuperblockFactor, int64_t logicalProgramCountHint,
     int64_t physicalCoreCountHint, ModuleOp module,
     const SimtAnchorPlan *anchorPlan) {
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
+  const int64_t warpLimitedFactorUpperBound =
+      std::max<int64_t>(1, 64 / std::max<int64_t>(1, numWarps));
+  int64_t commonFactorUpperBound =
+      std::min<int64_t>(kMaximumSuperBlockFactor, warpLimitedFactorUpperBound);
+  if (logicalProgramCountHint > 0)
+    commonFactorUpperBound =
+        std::min(commonFactorUpperBound, logicalProgramCountHint);
   partitionerOptions.maximumSuperblockFactor =
-      (wholeKernelSuperblockMaterializable || scopeSuperblockMaterializable ||
-       features.autoBlockifyV1Applied)
-          ? 4
+      (wholeKernelSuperblockMaterializable || features.autoBlockifyV1Applied)
+          ? std::min(commonFactorUpperBound, maximumWholeKernelSuperblockFactor)
           : 1;
-  const int64_t warpLimitedMaximum = numWarps <= 16   ? 4
-                                     : numWarps <= 32 ? 2
-                                                      : 1;
-  partitionerOptions.maximumSuperblockFactor =
-      std::min(partitionerOptions.maximumSuperblockFactor, warpLimitedMaximum);
-  if (logicalProgramCountHint > 0) {
-    const int64_t runtimeMaximum = logicalProgramCountHint >= 4   ? 4
-                                   : logicalProgramCountHint >= 2 ? 2
-                                                                  : 1;
-    partitionerOptions.maximumSuperblockFactor =
-        std::min(partitionerOptions.maximumSuperblockFactor, runtimeMaximum);
-  }
+  partitionerOptions.maximumScopeSuperblockFactor =
+      scopeSuperblockMaterializable
+          ? std::min(commonFactorUpperBound, maximumScopeSuperblockFactor)
+          : 1;
   partitionerOptions.scopeSuperblockMaterializable =
       scopeSuperblockMaterializable;
   StagePartitioner partitioner;
@@ -780,7 +781,9 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   auto stageModel = evaluateStageModel(
       features, profile, static_cast<unsigned>(numWarps),
       options.wholeKernelSuperblockMaterializable,
-      options.scopeSuperblockMaterializable, options.logicalProgramCountHint,
+      options.scopeSuperblockMaterializable,
+      options.maximumWholeKernelSuperblockFactor,
+      options.maximumScopeSuperblockFactor, options.logicalProgramCountHint,
       options.physicalVectorCoreCountHint, module, anchorPlan);
   if (!stageModel)
     return stageModel.takeError();

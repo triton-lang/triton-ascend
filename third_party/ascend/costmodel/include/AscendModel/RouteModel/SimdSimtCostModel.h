@@ -76,11 +76,15 @@ struct SimdSimtCostModelOptions {
   /// eligible for selection.
   bool compileOn91095 = false;
   /// True when backend integration can wrap a mixed local scope with the
-  /// AutoBlockify V1 logical-program schedule for F2/F4.
+  /// AutoBlockify V1 logical-program schedule for factors greater than one.
   bool scopeSuperblockMaterializable = false;
   /// True when backend integration can apply AutoBlockify V1 to a pure-SIMT
   /// kernel.  This is deliberately independent of local-scope batching.
   bool wholeKernelSuperblockMaterializable = false;
+  /// Largest factor accepted by the whole-kernel backend contract.
+  int64_t maximumWholeKernelSuperblockFactor = 32;
+  /// Largest factor accepted by the outlined local-scope backend contract.
+  int64_t maximumScopeSuperblockFactor = 4;
   /// Optional runtime launch count. Zero means unknown; a positive value
   /// prevents the solver from pricing factors that cannot form one full
   /// logical-program group.

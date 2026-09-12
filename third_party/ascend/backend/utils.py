@@ -349,6 +349,14 @@ def _is_auto_map_parallel_blocks_enabled() -> bool:
     return os.getenv("TRITON_ALL_BLOCKS_PARALLEL", "true").lower() in ("true", "1")
 
 
+def _get_modeled_superblock_factors():
+    return (1, 2, 4, 8, 16, 32)
+
+
+def _get_current_scope_superblock_factors():
+    return (1, 2, 4)
+
+
 def _get_auto_blockify_blacklist_reasons(ir_text: str):
     return [description for pattern, description in AUTO_BLOCKIFY_BLACKLIST_RULES if pattern.search(ir_text)]
 

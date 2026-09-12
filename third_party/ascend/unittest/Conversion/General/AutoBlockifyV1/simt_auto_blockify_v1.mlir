@@ -1,6 +1,8 @@
 // RUN: triton-opt --ta-simt-auto-blockify-v1="physical-vector-core-count=64 superblock-factor=1" %s | FileCheck %s --check-prefix=V1
 // RUN: triton-opt --ta-simt-auto-blockify-v1="physical-vector-core-count=64 superblock-factor=2" %s | FileCheck %s --check-prefix=SUPERBLOCK
 // RUN: triton-opt --ta-simt-auto-blockify-v1="physical-vector-core-count=64 superblock-factor=1" --ta-refine-simt-auto-blockify-v1-superblock="superblock-factor=2" %s | FileCheck %s --check-prefix=REFINE
+// RUN: triton-opt --ta-simt-auto-blockify-v1="physical-vector-core-count=64 superblock-factor=32" %s | FileCheck %s --check-prefix=SUPERBLOCK32
+// RUN: triton-opt --ta-simt-auto-blockify-v1="physical-vector-core-count=64 superblock-factor=1" --ta-refine-simt-auto-blockify-v1-superblock="superblock-factor=32" %s | FileCheck %s --check-prefix=REFINE32
 
 // V1-LABEL: tt.func public @v1_keeps_tile_shape(
 // V1-SAME: attributes {ta.auto_blockify_v1, ta.auto_blockify_v1.superblock_factor = 1 : i32}
@@ -50,6 +52,24 @@
 // REFINE: scf.if
 // REFINE: %[[PX:.*]] = arith.remui %[[LINEAR]],
 // REFINE: tt.store
+
+// SUPERBLOCK32-LABEL: tt.func public @v1_keeps_tile_shape(
+// SUPERBLOCK32-SAME: attributes {ta.auto_blockify_v1, ta.auto_blockify_v1.superblock_factor = 32 : i32}
+// SUPERBLOCK32: %[[THIRTY_TWO:.*]] = arith.constant {{.*}}32 : i32
+// SUPERBLOCK32: scf.for %[[IV:.*]] = {{.*}} to %[[UPPER:.*]] step %[[THIRTY_TWO]] : i32 {
+// SUPERBLOCK32: %[[TASK:.*]] = arith.remui {{.*}}, %[[THIRTY_TWO]] {{.*}} : i32
+// SUPERBLOCK32: %[[LINEAR:.*]] = arith.addi %[[IV]], %[[TASK]] {{.*}} : i32
+// SUPERBLOCK32: scf.if
+// SUPERBLOCK32: tt.store
+
+// REFINE32-LABEL: tt.func public @v1_keeps_tile_shape(
+// REFINE32-SAME: attributes {ta.auto_blockify_v1, ta.auto_blockify_v1.superblock_factor = 32 : i32}
+// REFINE32: %[[THIRTY_TWO:.*]] = arith.constant {{.*}}32 : i32
+// REFINE32: scf.for %[[IV:.*]] = {{.*}} to %[[UPPER:.*]] step %[[THIRTY_TWO]] : i32 {
+// REFINE32: %[[TASK:.*]] = arith.remui {{.*}}, %[[THIRTY_TWO]] {{.*}} : i32
+// REFINE32: %[[LINEAR:.*]] = arith.addi %[[IV]], %[[TASK]] {{.*}} : i32
+// REFINE32: scf.if
+// REFINE32: tt.store
 
 module {
   tt.func public @v1_keeps_tile_shape(%arg0: !tt.ptr<f32>) {

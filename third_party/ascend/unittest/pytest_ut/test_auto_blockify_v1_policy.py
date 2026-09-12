@@ -24,12 +24,15 @@ from unittest.mock import patch
 import pytest
 
 from triton.backends.ascend.compiler import (
+    _append_pure_simt_auto_blockify_options,
     _build_costmodel_analysis_ttir,
     _can_materialize_scope_superblock,
     _publish_route_transform_capability,
     _resolve_auto_blockify_v1_policy,
     _selected_npuir_superblock_factor,
 )
+
+pytestmark = pytest.mark.backend("cpu")
 
 SAFE_TTIR = "module { tt.func public @safe() { tt.return } }"
 ATOMIC_TTIR = "module { tt.func public @atomic() { %0 = tt.atomic_rmw add } }"
@@ -94,7 +97,8 @@ def test_route_transform_capability_is_single_resolved_fact():
     assert capability["layout_coalescing_applied"]
     assert capability["layout_coalescing_factor"] == 8
     assert capability["auto_blockify_v1_materializable"]
-    assert capability["whole_kernel_superblock_factors"] == [1, 2, 4]
+    assert capability["modeled_superblock_factors"] == [1, 2, 4, 8, 16, 32]
+    assert capability["whole_kernel_superblock_factors"] == [1, 2, 4, 8, 16]
     assert capability["scope_superblock_factors"] == [1, 2, 4]
     assert capability["source_logical_program_count_hint"] == 9
     assert capability["logical_program_count_hint"] == 2
@@ -102,6 +106,37 @@ def test_route_transform_capability_is_single_resolved_fact():
         "full_group_count": 0,
         "tail_count": 2,
     }
+    assert capability["superblock_runtime_groups"]["16"] == {
+        "full_group_count": 0,
+        "tail_count": 2,
+    }
+
+
+@pytest.mark.parametrize(
+    "num_warps,expected",
+    [
+        (1, [1, 2, 4, 8, 16, 32]),
+        (2, [1, 2, 4, 8, 16, 32]),
+        (4, [1, 2, 4, 8, 16]),
+        (8, [1, 2, 4, 8]),
+        (16, [1, 2, 4]),
+        (32, [1, 2]),
+        (64, [1]),
+    ],
+)
+def test_route_transform_capability_respects_warp_limit(num_warps, expected):
+    metadata = {
+        "auto_blockify_v1_enabled": True,
+        "auto_blockify_v1_disable_reasons": [],
+    }
+    opt = SimpleNamespace(
+        compile_on_910_95=True,
+        num_warps=num_warps,
+        logical_program_count_hint=0,
+    )
+    capability = __import__("json").loads(_publish_route_transform_capability(metadata, opt))
+    assert capability["whole_kernel_superblock_factors"] == expected
+    assert capability["scope_superblock_factors"] == [factor for factor in expected if factor <= 4]
 
 
 @pytest.mark.parametrize(
@@ -141,6 +176,30 @@ def test_scope_superblock_uses_npuir_abi_v2(compile_on_910_95, num_warps, v1_mat
 def test_selected_npuir_superblock_factor_respects_route_owner(metadata, option_factor, expected):
     opt = SimpleNamespace(superblock_factor=option_factor)
     assert _selected_npuir_superblock_factor(metadata, opt) == expected
+
+
+@pytest.mark.parametrize(
+    "ta_materializes,runtime_cap,expected",
+    [
+        (False, True, ["--enable-auto-blockify-loop", "--super-block-factor=32"]),
+        (True, True, ["--super-block-factor=32"]),
+        (True, False, []),
+    ],
+)
+def test_pure_simt_passes_selected_factor_to_bishengir(ta_materializes, runtime_cap, expected):
+    options = []
+    metadata = {
+        "auto_blockify_v1_enabled": True,
+        "auto_blockify_v1_runtime_cap": runtime_cap,
+        "auto_simt_effective_kind": "all_simt_only",
+        "auto_simt_superblock_factor": 32,
+    }
+    opt = SimpleNamespace(
+        enable_ta_auto_blockify_v1=ta_materializes,
+        superblock_factor=1,
+    )
+    _append_pure_simt_auto_blockify_options(options, metadata, opt)
+    assert options == expected
 
 
 def test_costmodel_analysis_view_materializes_v1_only_on_clone():

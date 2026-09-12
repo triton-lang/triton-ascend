@@ -97,7 +97,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          const std::string &profilePath, const std::string &actualTarget,
          int64_t numWarps, bool compileOn91095,
          bool wholeKernelSuperblockMaterializable,
-         bool scopeSuperblockMaterializable, int64_t logicalProgramCountHint,
+         bool scopeSuperblockMaterializable,
+         int64_t maximumWholeKernelSuperblockFactor,
+         int64_t maximumScopeSuperblockFactor, int64_t logicalProgramCountHint,
          const std::string &analysisModulePath,
          const std::string &routeTransformCapabilityJSON,
          const std::string &reportFile) {
@@ -110,6 +112,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         opts.wholeKernelSuperblockMaterializable =
             wholeKernelSuperblockMaterializable;
         opts.scopeSuperblockMaterializable = scopeSuperblockMaterializable;
+        opts.maximumWholeKernelSuperblockFactor =
+            maximumWholeKernelSuperblockFactor;
+        opts.maximumScopeSuperblockFactor = maximumScopeSuperblockFactor;
         opts.logicalProgramCountHint = logicalProgramCountHint;
         opts.analysisModulePath = analysisModulePath;
         opts.routeTransformCapabilityJSON = routeTransformCapabilityJSON;
@@ -121,6 +126,8 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("compile_on_910_95"),
       py::arg("whole_kernel_superblock_materializable") = false,
       py::arg("scope_superblock_materializable") = false,
+      py::arg("maximum_whole_kernel_superblock_factor") = 32,
+      py::arg("maximum_scope_superblock_factor") = 4,
       py::arg("logical_program_count_hint") = 0,
       py::arg("analysis_module_path") = "",
       py::arg("route_transform_capability_json") = "{}",

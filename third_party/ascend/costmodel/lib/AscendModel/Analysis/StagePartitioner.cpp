@@ -1,6 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseSet.h"
@@ -1285,26 +1286,27 @@ StagePartitionVerifier::verify(const StagePartition &partition) const {
 llvm::Error
 StageModeLegalityAnalysis::analyze(StagePartition &partition,
                                    int64_t maximumSuperblockFactor,
-                                   bool scopeSuperblockMaterializable) const {
-  const int64_t maximum = std::clamp<int64_t>(maximumSuperblockFactor, 1, 4);
-  // Local and whole-kernel SuperBlock candidates consume the same SIMT warp
-  // resources.  Do not regenerate F4 here after evaluateStageModel has
-  // already reduced the target maximum to F2 for num_warps=32 (or to F1 for
-  // a smaller runtime grid).
-  const int64_t localMaximum = scopeSuperblockMaterializable ? maximum : 1;
+                                   bool scopeSuperblockMaterializable,
+                                   int64_t maximumScopeSuperblockFactor) const {
+  const int64_t maximum =
+      std::clamp<int64_t>(maximumSuperblockFactor, 1, kMaximumSuperBlockFactor);
+  const int64_t localMaximum =
+      scopeSuperblockMaterializable
+          ? std::clamp<int64_t>(maximumScopeSuperblockFactor, 1,
+                                kMaximumSuperBlockFactor)
+          : 1;
   for (LogicalStage &stage : partition.stages) {
     stage.simdLegal = true;
     stage.simtLegal = true;
-    stage.legalSimtFactors = {1};
+    stage.legalSimtFactors.clear();
     // A pure-SIMT SuperBlock factor is a whole-kernel schedule, not a
     // recurrence-only annotation.  Every SIMT Stage must therefore expose
     // the same factor candidates; KernelRouteSolver keeps the chosen factor
     // uniform.  Local mixed scopes stay restricted by localSimtFactors
     // (F1 unless Scope SuperBlock materialization is explicitly available).
-    if (maximum >= 2)
-      stage.legalSimtFactors.push_back(2);
-    if (maximum >= 4)
-      stage.legalSimtFactors.push_back(4);
+    for (int64_t factor : kSupportedSuperBlockFactors)
+      if (factor <= maximum)
+        stage.legalSimtFactors.push_back(factor);
     if (stage.localSimtMaterializable) {
       // The ABI-v2 scope materializer batches complete logical programs
       // around this Stage.  F2/F4 therefore does not require multiple
@@ -1312,15 +1314,14 @@ StageModeLegalityAnalysis::analyze(StagePartition &partition,
       // interpretation was only warp widening, not a SuperBlock.
       stage.localSimtFactors = {1};
       if (scopeSuperblockMaterializable && stage.localSuperblockMaterializable)
-        for (int64_t factor : {2, 4})
-          if (factor <= localMaximum)
+        for (int64_t factor : kSupportedSuperBlockFactors)
+          if (factor > 1 && factor <= localMaximum)
             stage.localSimtFactors.push_back(factor);
     }
     if (stage.localSimtMaterializable &&
         (stage.localSimtFactors.empty() ||
          llvm::any_of(stage.localSimtFactors, [&](int64_t factor) {
-           return factor < 1 || factor > localMaximum ||
-                  (factor != 1 && factor != 2 && factor != 4);
+           return factor > localMaximum || !isSupportedSuperBlockFactor(factor);
          })))
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -1350,7 +1351,8 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
   StageModeLegalityAnalysis legalityAnalysis;
   if (llvm::Error error =
           legalityAnalysis.analyze(*result, options.maximumSuperblockFactor,
-                                   options.scopeSuperblockMaterializable))
+                                   options.scopeSuperblockMaterializable,
+                                   options.maximumScopeSuperblockFactor))
     return std::move(error);
   if (llvm::Error error = StagePartitionVerifier().verify(*result))
     return std::move(error);

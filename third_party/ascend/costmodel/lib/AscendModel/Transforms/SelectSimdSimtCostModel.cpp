@@ -11,6 +11,7 @@
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
+#include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -173,6 +174,11 @@ struct SelectSimdSimtCostModelPass
         wholeKernelSuperblockMaterializable.getValue();
     options.scopeSuperblockMaterializable =
         scopeSuperblockMaterializable.getValue();
+    options.maximumWholeKernelSuperblockFactor =
+        std::clamp<int64_t>(maximumWholeKernelSuperblockFactor.getValue(), 1,
+                            kMaximumSuperBlockFactor);
+    options.maximumScopeSuperblockFactor = std::clamp<int64_t>(
+        maximumScopeSuperblockFactor.getValue(), 1, kMaximumSuperBlockFactor);
     options.logicalProgramCountHint =
         std::max<int64_t>(0, logicalProgramCountHint.getValue());
     if (auto capability =

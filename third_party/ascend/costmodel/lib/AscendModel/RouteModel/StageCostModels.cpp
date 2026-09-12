@@ -185,7 +185,8 @@ static double applySuperBlock(const LogicalStage &stage,
   // F independent logical programs to the same physical program, allowing the
   // scheduler to cover one program's dependency stalls with another program.
   // Normalize the critical-path portion per logical program, but retain the
-  // aggregate issue floor: F2/F4 cannot create additional issue bandwidth.
+  // aggregate issue floor: a larger factor cannot create additional issue
+  // bandwidth.
   // This applies equally to whole-kernel and scope-local SuperBlock because
   // both materializers batch complete logical programs around the Stage.
   if (stage.costModelKind == StageCostModelKind::LoopCarriedRecurrence) {

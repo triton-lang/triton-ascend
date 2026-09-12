@@ -45,15 +45,12 @@ def cache_configuration_scope():
 
 
 def metadata(**changes):
-    fields = dict(target=SimpleNamespace(arch="Ascend910B3"), workspace_size=0,
-                  lock_init_value=0, sync_block_lock_layout=0, bs_task_type=0,
-                  mix_mode="aiv", shared=0, compile_on_910_95=False,
-                  parallel_mode="", is_pure_simt=False, debug=False,
-                  coalesce_factor=1, coalesce_axis=-1, coalesce_grid_ceil_div=False,
-                  has_auto_blockify_blacklist_op=False,
-                  program_grid_mapping_applied=False, program_grid_transforms=None,
-                  row_coalescing_applied=False, auto_blockify_enabled=False,
-                  ptsm_cap_authorized=False)
+    fields = dict(target=SimpleNamespace(arch="Ascend910B3"), workspace_size=0, lock_init_value=0,
+                  sync_block_lock_layout=0, bs_task_type=0, mix_mode="aiv", shared=0, compile_on_910_95=False,
+                  parallel_mode="", is_pure_simt=False, debug=False, coalesce_factor=1, coalesce_axis=-1,
+                  coalesce_grid_ceil_div=False, has_auto_blockify_blacklist_op=False,
+                  program_grid_mapping_applied=False, program_grid_transforms=None, row_coalescing_applied=False,
+                  auto_blockify_enabled=False, ptsm_cap_authorized=False)
     fields.update(changes)
     return SimpleNamespace(**fields)
 
@@ -70,9 +67,9 @@ def policy(monkeypatch):
 
 @pytest.mark.parametrize("ceil_div", [False, True])
 def test_launch_plan_preserves_independent_grid_policies(policy, ceil_div):
-    spec = launcher.make_launch_spec(metadata(coalesce_factor=16, coalesce_axis=1, row_coalescing_applied=True,
-                                    coalesce_grid_ceil_div=ceil_div,
-                                    has_auto_blockify_blacklist_op=True), policy)
+    spec = launcher.make_launch_spec(
+        metadata(coalesce_factor=16, coalesce_axis=1, row_coalescing_applied=True, coalesce_grid_ceil_div=ceil_div,
+                 has_auto_blockify_blacklist_op=True), policy)
     assert (spec.coalesce_axis, spec.coalesce_factor) == (1, 16)
     assert bool(spec.flags & launcher.COALESCE_CEIL) == ceil_div
     assert not spec.flags & launcher.AUTO_MAP
@@ -536,11 +533,12 @@ def test_build_command_reuses_stable_options_but_tracks_environment(tmp_path, mo
 
 
 def _grid_contract(sequence):
-    return dict(version=2, extent_source="runtime_original_grid", hidden_extent_axes=[0, 1],
-                hidden_argument_order=["originalGridX", "originalGridY"], hidden_argument_types=["i32", "i32"],
-                transforms=[dict(order=i, kind="ceil_div", axis=axis, factor=factor,
-                                 persistent_coverage=persistent, grid_stride_abi_verified=persistent)
-                            for i, (axis, factor, persistent) in enumerate(sequence)])
+    return dict(
+        version=2, extent_source="runtime_original_grid", hidden_extent_axes=[0, 1],
+        hidden_argument_order=["originalGridX", "originalGridY"], hidden_argument_types=["i32", "i32"], transforms=[
+            dict(order=i, kind="ceil_div", axis=axis, factor=factor, persistent_coverage=persistent,
+                 grid_stride_abi_verified=persistent) for i, (axis, factor, persistent) in enumerate(sequence)
+        ])
 
 
 @pytest.mark.parametrize("sequence,expected", [
@@ -551,16 +549,16 @@ def _grid_contract(sequence):
 @pytest.mark.parametrize("as_json", [False, True])
 def test_program_grid_plan_modes(policy, sequence, expected, as_json):
     contract = _grid_contract(sequence)
-    spec = launcher.make_launch_spec(metadata(
-        program_grid_mapping_applied=True,
-        program_grid_transforms=json.dumps(contract) if as_json else contract,
-        ptsm_cap_authorized=any(t[2] for t in sequence)), policy)
+    spec = launcher.make_launch_spec(
+        metadata(program_grid_mapping_applied=True,
+                 program_grid_transforms=json.dumps(contract) if as_json else contract,
+                 ptsm_cap_authorized=any(t[2] for t in sequence)), policy)
     assert spec.flags & (launcher.IAT | launcher.PTSM) == expected
     assert (spec.coalesce_factor, spec.coalesce_axis) == (1, -1)
 
 
-@pytest.mark.parametrize("field", ["program_grid_mapping_applied", "row_coalescing_applied",
-                                    "auto_blockify_enabled", "ptsm_cap_authorized"])
+@pytest.mark.parametrize(
+    "field", ["program_grid_mapping_applied", "row_coalescing_applied", "auto_blockify_enabled", "ptsm_cap_authorized"])
 @pytest.mark.parametrize("value", [None, 0, "false"])
 def test_program_grid_requires_explicit_compiler_gates(policy, field, value):
     with pytest.raises(RuntimeError, match=f"compiler metadata missing {field}"):
@@ -601,8 +599,8 @@ def test_program_grid_rejects_unsafe_mapping_combinations(policy, changes, error
 @pytest.mark.parametrize("auto_blockify", [False, True])
 def test_block_cap_preserves_upstream_policy(policy, monkeypatch, auto_map, blacklisted, auto_blockify):
     monkeypatch.setattr(utils, "_is_auto_map_parallel_blocks_enabled", lambda: auto_map)
-    spec = launcher.make_launch_spec(metadata(has_auto_blockify_blacklist_op=blacklisted,
-                                             auto_blockify_enabled=auto_blockify), policy)
+    spec = launcher.make_launch_spec(
+        metadata(has_auto_blockify_blacklist_op=blacklisted, auto_blockify_enabled=auto_blockify), policy)
     assert bool(spec.flags & launcher.AUTO_MAP) == (auto_map and not blacklisted)
 
 
@@ -613,8 +611,11 @@ def native_grid_probe(tmp_path_factory):
     source = Path(__file__).with_name("launcher_grid_test.cpp")
     output = tmp_path_factory.mktemp("native-grid") / "probe"
     compiler = shutil.which("c++") or utils._get_bisheng_path()
-    subprocess.run([compiler, "-std=c++17", "-O2", "-I" + str(Path(launcher.__file__).with_name("launcher_src")),
-                    str(source), "-o", str(output)], check=True, capture_output=True, text=True)
+    subprocess.run([
+        compiler, "-std=c++17", "-O2", "-I" + str(Path(launcher.__file__).with_name("launcher_src")),
+        str(source), "-o",
+        str(output)
+    ], check=True, capture_output=True, text=True)
     return output
 
 
@@ -635,8 +636,11 @@ def test_native_grid_matches_compiler_reference(native_grid_probe, sequence, mod
     for physical in (1, 20, 40, 72):
         for grid in grids:
             flags = mode | (launcher.AUTO_MAP if auto_map else 0)
-            values = [int(v) for v in subprocess.check_output(
-                [str(native_grid_probe), str(flags), str(physical), *map(str, grid)], text=True).split()]
+            values = [
+                int(v)
+                for v in subprocess.check_output([str(
+                    native_grid_probe), str(flags), str(physical), *map(str, grid)], text=True).split()
+            ]
             expected = apply_program_grid_transforms(grid, contract, physical_core_count=physical)
             logical = expected[0] * expected[1] * expected[2]
             assert values[:5] == [*expected, logical, min(logical, physical) if auto_map else logical]

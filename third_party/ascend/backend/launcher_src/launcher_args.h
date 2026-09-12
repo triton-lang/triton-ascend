@@ -149,8 +149,10 @@ inline void validateSpec(const TritonNpuLaunchSpecV1 &spec) {
   if ((spec.flags & (TRITON_NPU_IAT | TRITON_NPU_PTSM)) &&
       (spec.coalesce_factor != 1 || spec.coalesce_axis != -1 ||
        (spec.flags & TRITON_NPU_COALESCE_CEIL)))
-    throw std::invalid_argument("program-grid transforms conflict with legacy coalescing");
-  if ((spec.flags & (TRITON_NPU_AUTO_MAP | TRITON_NPU_PTSM)) && !spec.physical_blocks)
+    throw std::invalid_argument(
+        "program-grid transforms conflict with legacy coalescing");
+  if ((spec.flags & (TRITON_NPU_AUTO_MAP | TRITON_NPU_PTSM)) &&
+      !spec.physical_blocks)
     throw std::invalid_argument("physical block limit must be positive");
   if (!spec.participant_factor)
     throw std::invalid_argument("lock participant factor must be positive");
@@ -173,9 +175,12 @@ inline LaunchGrid prepareGrid(const TritonNpuLaunchSpecV1 &spec,
     result.grid[1] = (int64_t(input[1]) + 15) / 16;
   if (spec.flags & TRITON_NPU_PTSM) {
     const uint32_t factor = (spec.flags & TRITON_NPU_IAT) ? 4 : 64;
-    const uint64_t otherPrograms = checkedMultiply(result.grid[1], result.grid[2]);
-    const uint64_t axisCap = std::max(uint64_t(1), spec.physical_blocks / otherPrograms);
-    result.grid[0] = std::min((uint64_t(input[0]) + factor - 1) / factor, axisCap);
+    const uint64_t otherPrograms =
+        checkedMultiply(result.grid[1], result.grid[2]);
+    const uint64_t axisCap =
+        std::max(uint64_t(1), spec.physical_blocks / otherPrograms);
+    result.grid[0] =
+        std::min((uint64_t(input[0]) + factor - 1) / factor, axisCap);
   }
   if (spec.coalesce_factor > 1 && spec.coalesce_axis >= 0) {
     int64_t dim = result.grid[spec.coalesce_axis];

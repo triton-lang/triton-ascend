@@ -32,8 +32,7 @@ import tempfile
 
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from . import utils
-from .program_grid import (ProgramGridContractError, get_persistent_transform,
-                           normalize_program_grid_transforms)
+from .program_grid import (ProgramGridContractError, get_persistent_transform, normalize_program_grid_transforms)
 
 # Keep these values in sync with launcher_abi.h. These are data tags, not C++
 # spellings: a signature is decoded once when a native plan is constructed.
@@ -104,8 +103,8 @@ class LaunchSpec:
 def _program_grid_flags(metadata):
     # The compiler must explicitly report which rewriting and block-cap gates
     # applied. Missing fields must not silently select the legacy device ABI.
-    for field in ("program_grid_mapping_applied", "row_coalescing_applied",
-                  "auto_blockify_enabled", "ptsm_cap_authorized"):
+    for field in ("program_grid_mapping_applied", "row_coalescing_applied", "auto_blockify_enabled",
+                  "ptsm_cap_authorized"):
         if not isinstance(getattr(metadata, field, None), bool):
             raise RuntimeError(f"compiler metadata missing {field}")
     raw = getattr(metadata, "program_grid_transforms", None)
@@ -149,12 +148,12 @@ def _program_grid_flags(metadata):
     # This extends the flag set without changing the version-1 C struct layout.
     # Reject a future schema/sequence until its native implementation is added.
     modes = {
-        ((1, 16, False, False),): IAT,
+        ((1, 16, False, False), ): IAT,
         ((1, 16, False, False), (0, 4, True, True)): IAT | PTSM,
-        ((0, 64, True, True),): PTSM,
+        ((0, 64, True, True), ): PTSM,
     }
-    sequence = tuple((t["axis"], t["factor"], t["persistent_coverage"],
-                      t["grid_stride_abi_verified"]) for t in transforms["transforms"])
+    sequence = tuple((t["axis"], t["factor"], t["persistent_coverage"], t["grid_stride_abi_verified"])
+                     for t in transforms["transforms"])
     if transforms["version"] != 2 or sequence not in modes:
         raise RuntimeError("unsupported native launcher program-grid transforms")
     return modes[sequence]

@@ -145,13 +145,6 @@ static std::optional<int> getSubBlockId(Operation *op) {
   return attr.getInt();
 }
 
-/// Set the sub-block tag of \p op to \p subBlockId.
-static void setSubBlockId(Operation *op, int subBlockId) {
-  MLIRContext *ctx = op->getContext();
-  op->setAttr(CVPipeline::kSubBlock,
-              IntegerAttr::get(IntegerType::get(ctx, 32), subBlockId));
-}
-
 static bool isChannelSplitNeeded(RankedTensorType tensorType) {
   static constexpr int32_t alignM = 16;
   return mlir::utils::getNumPerBlock(tensorType) == alignM / 2;
@@ -249,31 +242,39 @@ InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,
   return {start, end};
 }
 
-mlir::Operation *
-InterCoreTransferAndSyncPass::getSubBlockEnd(mlir::Operation *defOp) {
+std::pair<mlir::Operation *, mlir::Operation *>
+InterCoreTransferAndSyncPass::getSubBlockStartEnd(mlir::Operation *defOp) {
   if (!defOp) {
-    return nullptr;
+    return {nullptr, nullptr};
   }
-  auto subBlockId = getSubBlockId(defOp);
-  if (!subBlockId) {
-    return nullptr;
+  auto targetSubBlockId = getSubBlockId(defOp);
+  if (!targetSubBlockId) {
+    return {nullptr, nullptr};
   }
   if (!defOp->getBlock()) {
-    return nullptr;
+    return {nullptr, nullptr};
   }
+  mlir::Operation *subBlockStart = nullptr;
   mlir::Operation *subBlockEnd = nullptr;
   for (Operation &op : *defOp->getBlock()) {
     auto opSubBlockId = getSubBlockId(&op);
     if (!opSubBlockId) {
       continue;
     }
-    if (*opSubBlockId == *subBlockId) {
-      subBlockEnd = &op;
-    } else if (subBlockEnd) {
-      break;
+    if (!subBlockStart) {
+      if (*opSubBlockId == *targetSubBlockId) {
+        subBlockStart = &op;
+        subBlockEnd = &op;
+      }
+    } else {
+      if (*opSubBlockId == *targetSubBlockId) {
+        subBlockEnd = &op;
+      } else {
+        break;
+      }
     }
   }
-  return subBlockEnd;
+  return {subBlockStart, subBlockEnd};
 }
 
 bool InterCoreTransferAndSyncPass::isOuterLayerDependency(
@@ -759,7 +760,7 @@ Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
     // Propagate the sub-block tag from the src defining op to the copy op.
     if (Operation *srcDefOp = srcValue.getDefiningOp()) {
       if (auto subBlockId = getSubBlockId(srcDefOp)) {
-        setSubBlockId(copyOp, *subBlockId);
+        CVPipeline::setSubBlockId(copyOp, *subBlockId);
       }
     }
     LOG_DEBUG("[copyOp]: " << *copyOp << "\n");
@@ -879,6 +880,11 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
                       CVPipeline::crossCoreConsumerId, builder);
   attachTransferTags(toTensorOp, vecBlockId, CVPipeline::kCoreTypeVector,
                      transferIndex);
+  // Propagate the sub-block tag from vectorStartOp to the vector-side ops.
+  if (auto subBlockId = getSubBlockId(vectorStartOp)) {
+    CVPipeline::setSubBlockId(memspaceCastOp, *subBlockId);
+    CVPipeline::setSubBlockId(toTensorOp, *subBlockId);
+  }
   LOG_DEBUG("[toTensorOp]: " << *toTensorOp << "\n");
 
   if (dep.isAllTranspoesd) {
@@ -1028,7 +1034,7 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
                      transferIndex);
   // Propagate the sub-block tag from transferOp to the sync ops.
   if (auto subBlockId = getSubBlockId(transferOp)) {
-    setSubBlockId(setOpForRead, *subBlockId);
+    CVPipeline::setSubBlockId(setOpForRead, *subBlockId);
   }
 
   builder.setInsertionPoint(consumerStartOp);
@@ -1036,6 +1042,9 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
       loc, config.dstCoreAttr, config.forReadTPipe, config.forReadPipe, flagId);
   attachTransferTags(waitOpForRead, consumerBlockId, config.dstCoreType,
                      transferIndex);
+  if (auto subBlockId = getSubBlockId(consumerStartOp)) {
+    CVPipeline::setSubBlockId(waitOpForRead, *subBlockId);
+  }
 
   if (mainLoopOp) {
     builder.setInsertionPoint(transferOp);
@@ -1068,7 +1077,10 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
                        transferIndex);
 
     if (auto subBlockId = getSubBlockId(transferOp)) {
-      setSubBlockId(waitOpForWrite, *subBlockId);
+      CVPipeline::setSubBlockId(waitOpForWrite, *subBlockId);
+    }
+    if (auto subBlockId = getSubBlockId(consumerEndOp)) {
+      CVPipeline::setSubBlockId(setOpForWrite, *subBlockId);
     }
 
     attachAnalyzeFlagIdTag(setOpForRead);
@@ -1592,7 +1604,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
     consumerPoint =
         analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
     if (consumerPoint && getSubBlockId(consumerPoint)) {
-      consStart = consumerPoint;
+      consStart = getSubBlockStartEnd(consumerPoint).first;
     }
   }
 
@@ -1605,7 +1617,7 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
       getBlockStartEnd(dep.producerBlockId, module); // C Block
   auto [newConsStart, newConsEnd] =
       getBlockStartEnd(dep.consumerBlockId, module); // V Block
-  if (Operation *subBlockEnd = getSubBlockEnd(consumerPoint)) {
+  if (Operation *subBlockEnd = getSubBlockStartEnd(consumerPoint).second) {
     newConsEnd = subBlockEnd;
   }
   int flagId = flagManager.acquireId();
@@ -1616,7 +1628,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   if (dep.consumerBlockId == dep.iniConsumerBlockId) {
     auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
     if (newconsumerPoint && getSubBlockId(consumerPoint)) {
-      newConsStart = newconsumerPoint;
+      // insert the wait for read at the sub-block start
+      newConsStart = getSubBlockStartEnd(consumerPoint).first;
     }
   }
 

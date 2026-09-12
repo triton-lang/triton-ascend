@@ -138,6 +138,8 @@ bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
 bool isSyncOp(Operation *op);
 bool isExternalSyncOp(Operation *op);
 
+void setSubBlockId(Operation *op, int subBlockId);
+
 // Wrapper around a "main loop" — either scf.for or scf.while carrying the
 // ssbuffer.main_loop attribute. Lets downstream code treat both uniformly.
 class MainLoop {

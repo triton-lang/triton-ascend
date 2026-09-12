@@ -127,7 +127,8 @@ private:
 
   std::pair<mlir::Operation *, mlir::Operation *>
   getBlockStartEnd(int blockId, mlir::ModuleOp module);
-  mlir::Operation *getSubBlockEnd(mlir::Operation *defOp);
+  std::pair<mlir::Operation *, mlir::Operation *>
+  getSubBlockStartEnd(mlir::Operation *defOp);
   bool
   isOuterLayerDependency(size_t depIndex, mlir::Operation *currProdEnd,
                          mlir::Operation *currConsStart,

@@ -307,9 +307,7 @@ static void markSubBlock(const DenseMap<int, ComputeBlock> &computeBlocks,
       continue;
     for (Operation *op : it->second.ops) {
       int curId = CVPipeline::getOpBlockId(op).value_or(id);
-      op->setAttr(
-          CVPipeline::kSubBlock,
-          IntegerAttr::get(IntegerType::get(op->getContext(), 32), curId));
+      CVPipeline::setSubBlockId(op, curId);
     }
   }
 }

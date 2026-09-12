@@ -720,6 +720,50 @@ static void getBlockIdsInProgramOrder(Block *block,
   }
 }
 
+/// Match the pattern inside a small VECTOR block:
+///   %m = arith.sitofp %mask
+///   %b = arith.subf %_, %m
+///   %r = arith.mulf %b, %_
+/// When matched, tag every op in the source block and the target block with
+/// its original block id via kSubBlock, before updateBlockId rewrites the
+/// block_id attribute.
+static void
+markSubBlockIfMaskApplyPattern(llvm::ArrayRef<Operation *> ops, int nowBlockId,
+                               int targetBlockId,
+                               CVPipeline::ComputeBlockIdManager &bm) {
+  arith::SIToFPOp sitofpOp;
+  arith::SubFOp subfOp;
+  arith::MulFOp mulfOp;
+  for (Operation *op : ops) {
+    if (auto sitofp = dyn_cast<arith::SIToFPOp>(op)) {
+      sitofpOp = sitofp;
+    } else if (auto subf = dyn_cast<arith::SubFOp>(op)) {
+      subfOp = subf;
+    } else if (auto mulf = dyn_cast<arith::MulFOp>(op)) {
+      mulfOp = mulf;
+    }
+  }
+  if (!sitofpOp || !subfOp || !mulfOp) {
+    return;
+  }
+  Value sitofpResult = sitofpOp.getResult();
+  if (subfOp.getLhs() != sitofpResult && subfOp.getRhs() != sitofpResult) {
+    return;
+  }
+  Value subfResult = subfOp.getResult();
+  if (mulfOp.getLhs() != subfResult && mulfOp.getRhs() != subfResult) {
+    return;
+  }
+
+  auto markBlockOps = [&](int blockId) {
+    for (Operation *op : bm.getOpsByBlockId(blockId)) {
+      CVPipeline::setSubBlockId(op, blockId);
+    }
+  };
+  markBlockOps(nowBlockId);
+  markBlockOps(targetBlockId);
+}
+
 void MergeSmallBlockPass::runOnOperation() {
   ModuleOp module = getOperation();
 
@@ -777,6 +821,8 @@ void MergeSmallBlockPass::runOnOperation() {
                                              memGraph, id2order, nowBlockId);
 
       if (targetBlockId.has_value()) {
+        markSubBlockIfMaskApplyPattern(ops, nowBlockId, targetBlockId.value(),
+                                       bm);
         LOG_DEBUG("Merging block " << nowBlockId << " into block "
                                    << targetBlockId.value());
         for (Operation *op : ops) {

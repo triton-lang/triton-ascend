@@ -143,6 +143,11 @@ bool isExternalSyncOp(Operation *op) {
          op->getAttrOfType<IntegerAttr>(CVPipeline::kExternalSync);
 }
 
+void setSubBlockId(Operation *op, int subBlockId) {
+  OpBuilder builder(op->getContext());
+  op->setAttr(CVPipeline::kSubBlock, builder.getI32IntegerAttr(subBlockId));
+}
+
 bool isScfOp(Operation *op) {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
 }

@@ -139,13 +139,11 @@ static bool hasPointerFreeControlFlowBoundary(LoopLikeOpInterface loopOp) {
   return false;
 }
 
-// Visits every structural value represented by one dynamic descriptor slot.
+// Validates every structural value represented by one dynamic descriptor slot.
 // The result type is the slot contract; init values, region arguments and
 // terminator operands must all agree with it exactly.
-template <typename VisitorT>
-static LogicalResult
-visitPointerDescriptorBoundarySlotValues(Operation *loop, int32_t slot,
-                                         VisitorT &&visit) {
+static LogicalResult validatePointerDescriptorBoundarySlot(Operation *loop,
+                                                           int32_t slot) {
   if (!isa<scf::ForOp, scf::WhileOp>(loop) || slot < 0 ||
       static_cast<unsigned>(slot) >= loop->getNumResults())
     return failure();
@@ -154,27 +152,23 @@ visitPointerDescriptorBoundarySlotValues(Operation *loop, int32_t slot,
   if (containsTritonPointer(expectedType))
     return failure();
 
-  auto visitSlot = [&](auto values) {
-    if (static_cast<unsigned>(slot) >= values.size() ||
-        values[slot].getType() != expectedType)
-      return failure();
-    visit(values[slot]);
-    return success();
+  auto validateSlot = [&](auto values) {
+    return static_cast<unsigned>(slot) < values.size() &&
+           values[slot].getType() == expectedType;
   };
 
-  visit(loop->getResult(slot));
   if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
-    return success(succeeded(visitSlot(forOp.getInitArgs())) &&
-                   succeeded(visitSlot(forOp.getRegionIterArgs())) &&
-                   succeeded(visitSlot(forOp.getYieldedValues())));
+    return success(validateSlot(forOp.getInitArgs()) &&
+                   validateSlot(forOp.getRegionIterArgs()) &&
+                   validateSlot(forOp.getYieldedValues()));
   }
 
   auto whileOp = cast<scf::WhileOp>(loop);
-  return success(succeeded(visitSlot(whileOp.getInits())) &&
-                 succeeded(visitSlot(whileOp.getBeforeArguments())) &&
-                 succeeded(visitSlot(whileOp.getConditionOp().getArgs())) &&
-                 succeeded(visitSlot(whileOp.getAfterArguments())) &&
-                 succeeded(visitSlot(whileOp.getYieldOp().getOperands())));
+  return success(validateSlot(whileOp.getInits()) &&
+                 validateSlot(whileOp.getBeforeArguments()) &&
+                 validateSlot(whileOp.getConditionOp().getArgs()) &&
+                 validateSlot(whileOp.getAfterArguments()) &&
+                 validateSlot(whileOp.getYieldOp().getOperands()));
 }
 
 // Validates one CFO-owned loop boundary without changing the IR. An empty
@@ -195,8 +189,7 @@ static LogicalResult validatePointerDescriptorBoundary(Operation *loop) {
   llvm::SmallDenseSet<int32_t> seenSlots;
   for (int32_t slot : descriptorSlots.asArrayRef()) {
     if (!seenSlots.insert(slot).second ||
-        failed(
-            visitPointerDescriptorBoundarySlotValues(loop, slot, [](Value) {})))
+        failed(validatePointerDescriptorBoundarySlot(loop, slot)))
       return failure();
   }
   return success();
@@ -306,147 +299,6 @@ static bool containsPointerDescriptorHandoff(ModuleOp moduleOp) {
       found = true;
   });
   return found;
-}
-
-// A converted make_range may leave a tensor-valued SCF state behind even
-// though no loop result or loop-body operation observes it. Keep this cleanup
-// deliberately narrow: it recognizes only statically shaped integer tensors
-// whose entire loop-carried use chain consists of uniform integer updates.
-static bool isDeadRangeUpdate(Value value, scf::ForOp loop, unsigned slot,
-                              llvm::SmallPtrSetImpl<Value> &visited) {
-  if (!visited.insert(value).second)
-    return false;
-
-  auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
-  bool sawYield = false;
-  for (OpOperand &use : value.getUses()) {
-    Operation *user = use.getOwner();
-    if (user == yield) {
-      if (use.getOperandNumber() != slot)
-        return false;
-      sawYield = true;
-      continue;
-    }
-
-    Value updateResult;
-    Value lhs;
-    Value rhs;
-    if (auto add = dyn_cast<arith::AddIOp>(user)) {
-      updateResult = add.getResult();
-      lhs = add.getLhs();
-      rhs = add.getRhs();
-    } else if (auto sub = dyn_cast<arith::SubIOp>(user)) {
-      updateResult = sub.getResult();
-      lhs = sub.getLhs();
-      rhs = sub.getRhs();
-    } else {
-      return false;
-    }
-    if (updateResult.getType() != value.getType())
-      return false;
-
-    bool usesValueAsLhs = lhs == value;
-    bool usesValueAsRhs = rhs == value;
-    if (usesValueAsLhs == usesValueAsRhs)
-      return false;
-    Value delta = usesValueAsLhs ? rhs : lhs;
-    auto deltaType = dyn_cast<RankedTensorType>(delta.getType());
-    if (!deltaType || deltaType != value.getType())
-      return false;
-
-    Operation *deltaProducer = delta.getDefiningOp();
-    bool isUniformDelta = false;
-    if (auto constant = dyn_cast_or_null<arith::ConstantOp>(deltaProducer)) {
-      if (auto dense = dyn_cast<DenseIntElementsAttr>(constant.getValue()))
-        isUniformDelta = dense.isSplat();
-    }
-    if (auto fill = dyn_cast_or_null<linalg::FillOp>(deltaProducer))
-      isUniformDelta = fill.getInputs().size() == 1 &&
-                       fill.getOutputs().size() == 1 &&
-                       fill.getOutputs().front().getType() == value.getType();
-    if (!isUniformDelta)
-      return false;
-
-    if (!isDeadRangeUpdate(updateResult, loop, slot, visited))
-      return false;
-  }
-  return sawYield;
-}
-
-static bool isDeadRangeCarrier(scf::ForOp loop, unsigned slot) {
-  if (slot >= loop.getInitArgs().size() ||
-      slot >= loop.getRegionIterArgs().size() ||
-      slot >= loop.getResults().size() ||
-      slot >= loop.getYieldedValues().size() ||
-      !loop.getResult(slot).use_empty())
-    return false;
-
-  auto type = dyn_cast<RankedTensorType>(loop.getInitArgs()[slot].getType());
-  auto iterType =
-      dyn_cast<RankedTensorType>(loop.getRegionIterArgs()[slot].getType());
-  if (!type || !iterType || type != iterType || !type.hasStaticShape() ||
-      !isa<IntegerType>(type.getElementType()))
-    return false;
-
-  Operation *producer = loop.getInitArgs()[slot].getDefiningOp();
-  if (!producer ||
-      (!isa<linalg::GenericOp, linalg::FillOp, tensor::CastOp>(producer) &&
-       !producer->hasAttr("tt.from_make_range") &&
-       !producer->hasAttr("tt.make_range_offset") &&
-       !producer->hasAttr("tt.make_range_size")))
-    return false;
-
-  llvm::SmallPtrSet<Value, 8> visited;
-  return isDeadRangeUpdate(loop.getRegionIterArgs()[slot], loop, slot, visited);
-}
-
-// Remove only fully dead range-like SCF state. Body arguments and yield
-// operands are removed first, then the loop is rebuilt with surviving values.
-static void eraseDeadRangeCarriers(ModuleOp moduleOp) {
-  SmallVector<scf::ForOp> loops;
-  moduleOp.walk([&](scf::ForOp loop) { loops.push_back(loop); });
-
-  for (scf::ForOp loop : loops) {
-    if (!loop || loop->getParentOp() == nullptr)
-      continue;
-    llvm::BitVector dead(loop.getInitArgs().size());
-    for (unsigned i = 0; i < dead.size(); ++i) {
-      if (isDeadRangeCarrier(loop, i))
-        dead.set(i);
-    }
-    if (dead.none())
-      continue;
-
-    auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
-    yield->eraseOperands(dead);
-    loop.getBody()->eraseArguments([&](BlockArgument arg) {
-      unsigned argNumber = arg.getArgNumber();
-      return argNumber != 0 && dead.test(argNumber - 1);
-    });
-
-    llvm::BitVector operandIndices(loop->getNumOperands());
-    for (auto [i, init] : llvm::enumerate(loop.getInitArgsMutable())) {
-      if (dead.test(i))
-        operandIndices.set(init.getOperandNumber());
-    }
-    loop->eraseOperands(operandIndices);
-
-    OperationState state(loop.getLoc(), loop->getName(), loop->getOperands(),
-                         loop.getInitArgs().getTypes(), loop->getAttrs());
-    state.addRegion()->takeBody(loop.getBodyRegion());
-    OpBuilder builder(loop);
-    auto newLoop = cast<scf::ForOp>(builder.create(state));
-
-    unsigned newResultIndex = 0;
-    for (auto [i, result] : llvm::enumerate(loop.getResults())) {
-      if (dead.test(i)) {
-        assert(result.use_empty() && "dead range result still has uses");
-        continue;
-      }
-      result.replaceAllUsesWith(newLoop.getResult(newResultIndex++));
-    }
-    loop.erase();
-  }
 }
 
 static LogicalResult preCleanBeforeMemoryConversion(ModuleOp moduleOp) {
@@ -1075,15 +927,6 @@ void TritonToLinalgPass::addDynamicLegal(
     return tritonTypeConverter.isSignatureLegal(op.getFunctionType());
   });
 
-  // For CustomOp/CustomMacroOp, tt.ptr should be converted to memref.
-  target.addDynamicallyLegalOp<hivm::CustomOp>([&](hivm::CustomOp op) {
-    return isCustomOpOperandTypesLegal(op->getOperandTypes());
-  });
-  target.addDynamicallyLegalOp<hivm::CustomMacroOp>(
-      [&](hivm::CustomMacroOp op) {
-        return isCustomOpOperandTypesLegal(op->getOperandTypes());
-      });
-
   target.addDynamicallyLegalOp<arith::ConstantOp>([](arith::ConstantOp op) {
     auto res = op.getResult();
     if (!isa<RankedTensorType>(res.getType())) {
@@ -1103,24 +946,10 @@ void TritonToLinalgPass::addDynamicLegal(
     return true;
   });
 
-  target.addDynamicallyLegalOp<scf::IfOp>(
-      [](scf::IfOp op) { return !TTOpConverters::hasScalarPointerResult(op); });
-
+  // Memory conversion has already removed pointers and handoff metadata.
+  // Only the numerical operand constraints remain for SCF terminators.
   auto controlFlowTerminatorLegal = [](Operation *op) {
-    Operation *parent = op->getParentOp();
-    if (parent &&
-        parent->hasAttr(TTOpConverters::kScalarPointerCarrierBoundaryAttr)) {
-      if (auto parentIf = dyn_cast<scf::IfOp>(parent))
-        return llvm::equal(op->getOperandTypes(), parentIf.getResultTypes());
-    }
-
-    if (parent && parent->hasAttr(controlflow::kPointerDescriptorBoundaryAttr))
-      return hasPointerFreeControlFlowBoundary(
-          cast<LoopLikeOpInterface>(parent));
-
     return llvm::all_of(op->getOperandTypes(), [](Type t) {
-      if (isa<triton::PointerType>(t))
-        return false;
       if (auto shapedType = dyn_cast<ShapedType>(t))
         return shapedType.getElementType().isIntOrFloat();
       assert(t.isIntOrIndexOrFloat());
@@ -1141,15 +970,6 @@ void TritonToLinalgPass::addDynamicLegal(
 
     return this->namedOps || !operateOnTensors;
   };
-
-  // Numeric selects retain the existing Arith legality. Every scalar-pointer
-  // select uses the integer-address converter so no memref object crosses it.
-  target.addDynamicallyLegalOp<arith::SelectOp>(
-      [isArithOrMathOpLegal](arith::SelectOp op) {
-        if (TTOpConverters::isScalarPointerSelect(op))
-          return false;
-        return isArithOrMathOpLegal(op);
-      });
 
   target.addDynamicallyLegalDialect<arith::ArithDialect, math::MathDialect>(
       isArithOrMathOpLegal);
@@ -1897,11 +1717,6 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
     return;
   }
-
-  // Conversion can expose a make_range carrier whose loop result is already
-  // dead. Remove only the proven dead range/update chain before generic
-  // canonicalization; live tensor carriers and scalar address state remain.
-  eraseDeadRangeCarriers(moduleOp);
 
   // 8.1 Workaround: fold duplicated one-hot reconstruction emitted after
   // ArgMax lowering. The issue is not in triton::ReduceOp semantics themselves;

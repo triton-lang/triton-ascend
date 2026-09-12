@@ -3,11 +3,35 @@
 #define TRITON_ASCEND_GRAPH_FOLD_HISTOGRAM_PARKING_H
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace mlir::triton {
+
+// The pre-graph driver intentionally only visits explicitly selected roots.
+// When this rewrite replaces the subtraction, its old histogram and correction
+// tree are no longer roots, so clean that proven-dead, side-effect-free closure
+// here instead of widening the driver's scope to unrelated graph input.
+inline void eraseDeadHistogramParkingClosure(
+    PatternRewriter &rewriter, ArrayRef<Operation *> roots) {
+  SmallVector<Operation *> worklist(roots.begin(), roots.end());
+  while (!worklist.empty()) {
+    Operation *candidate = worklist.pop_back_val();
+    if (!candidate || !candidate->getBlock() || !isOpTriviallyDead(candidate))
+      continue;
+
+    SmallVector<Operation *> producers;
+    for (Value operand : candidate->getOperands()) {
+      if (Operation *producer = operand.getDefiningOp())
+        producers.push_back(producer);
+    }
+    rewriter.eraseOp(candidate);
+    worklist.append(producers.begin(), producers.end());
+  }
+}
 
 // Ascend histogram templates ignore out-of-range indices, including -1.
 // hist(select(mask, x, 0)) - select(bin_id == 0, sum(!mask), 0)
@@ -88,9 +112,12 @@ struct FoldHistogramParking : OpRewritePattern<arith::SubIOp> {
         op.getLoc(), input.getCondition(), input.getTrueValue(), invalid);
     // Preserve attributes (e.g. source provenance). Other uses of count remain
     // intact; the original histogram becomes dead after replacing subtraction.
+    Operation *oldHistogram = hist.getOperation();
+    Operation *oldCorrection = correction.getOperation();
     Operation *replacement = rewriter.clone(*hist.getOperation());
     replacement->setOperand(0, indices);
     rewriter.replaceOp(op, replacement->getResults());
+    eraseDeadHistogramParkingClosure(rewriter, {oldHistogram, oldCorrection});
     return success();
   }
 };

@@ -6,15 +6,21 @@
 // All four radix rounds use this structure. This is not an end-to-end kernel.
 //
 // CHECK-LABEL: tt.func @radix_topk_threshold_round(
-// CHECK: arith.constant dense<-1> : tensor<8192xi32>
+// CHECK-NOT: tt.reduce
+// CHECK-NOT: arith.subi
+// CHECK-NOT: tt.histogram
 // CHECK: arith.shrui {{.*}} : tensor<8192xi32>
 // CHECK-NOT: tt.reduce
+// CHECK-NOT: arith.subi
+// CHECK-NOT: tt.histogram
+// CHECK: arith.constant dense<-1> : tensor<8192xi32>
 // CHECK: tt.histogram
+// CHECK-NOT: tt.histogram
 // CHECK-NOT: tt.reduce
 // CHECK-NOT: arith.subi
 // CHECK: tt.return
 // OTHER-LABEL: tt.func @radix_topk_threshold_round(
-// OTHER: arith.shrui {{.*}} : tensor<8192xi64>
+// OTHER: arith.shrui {{.*}} : tensor<8192xi32>
 // OTHER: tt.histogram
 // OTHER: tt.reduce
 // OTHER: arith.subi

@@ -144,8 +144,7 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
     // 1. Move into first consumer blockId
     int consumerBlockId = bm.getBlockIdByOp(orderedConsumuers[0]);
     if (consumerBlockId == -1) {
-      // if i1 break by one control op, couldn't change. //FIXME: wait for
-      // multi-region...
+      // if i1 break by one control op, couldn't change.
       LOG_DEBUG("First consumer's blockid is -1.\n");
       seenBlockIds.insert(bm.getBlockIdByOp(p));
       blockId2Producer.insert({bm.getBlockIdByOp(p), p});
@@ -163,6 +162,10 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
     // 2. if there are other consumer, then clone producer.
     for (auto consumerInblock : orderedConsumuers) {
       int consumerBlockId = bm.getBlockIdByOp(consumerInblock);
+      if (consumerBlockId == -1) {
+        // if i1 break by one control op (scf.for/yield), couldn't change.
+        continue;
+      }
       if (!seenBlockIds.insert(consumerBlockId).second) {
         auto producer = blockId2Producer[consumerBlockId];
         for (auto info : llvm::enumerate(p->getResults())) {

@@ -25,5 +25,6 @@ int main(int argc, char **argv) {
     std::cout << dim << ' ';
   std::cout << grid.logicalBlocks << ' ' << grid.physicalBlocks << ' '
             << layout.args[1].offset << ' ' << layout.originalGrid << ' '
-            << layout.grid << ' ' << layout.debug << ' ' << layout.total << '\n';
+            << layout.grid << ' ' << layout.debug << ' ' << layout.total
+            << '\n';
 }

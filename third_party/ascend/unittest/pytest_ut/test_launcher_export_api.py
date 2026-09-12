@@ -284,3 +284,20 @@ def test_python_grid_and_handles_preserve_overflow(python_launcher_factory, slot
 def test_python_request_accepts_valid_sentinels(python_launcher_factory):
     launch = python_launcher_factory([])
     launch(-1, 1, 1, 2**64 - 1, 2**64 - 1, {"kernel_name": "empty_grid"}, None, None, None)
+
+
+@pytest.mark.parametrize("flags,changes", [
+    (launcher.IAT, {"coalesce_factor": 4}),
+    (launcher.PTSM, {"coalesce_axis": 0}),
+    (launcher.IAT | launcher.COALESCE_CEIL, {}),
+    (launcher.PTSM, {"physical_blocks": 0}),
+])
+def test_c_api_rejects_conflicting_program_grid_configuration(native_api, flags, changes):
+    config = spec()
+    config.flags = flags
+    for field, value in changes.items():
+        setattr(config, field, value)
+    error = ct.create_string_buffer(256)
+    handle = native_api.triton_npu_create_plan_v1(ct.byref(config), None, 0, error, len(error))
+    assert not handle
+    assert error.value

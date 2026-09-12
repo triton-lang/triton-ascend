@@ -70,7 +70,8 @@ struct Invocation {
     std::memset(data(), 0, plan->layout.total);
     if (plan->layout.originalGrid != ArgLayout::absent) {
       const std::array<uint32_t, 2> originalGrid{
-          static_cast<uint32_t>(request.grid[0]), static_cast<uint32_t>(request.grid[1])};
+          static_cast<uint32_t>(request.grid[0]),
+          static_cast<uint32_t>(request.grid[1])};
       put(plan->layout.originalGrid, originalGrid);
     }
   }

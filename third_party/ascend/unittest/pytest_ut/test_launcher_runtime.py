@@ -200,7 +200,7 @@ def test_coalesced_grid_reaches_both_entries(ceil_div):
     ny = 5 if ceil_div else 4
     # Keep the uncoalesced capacity so a missed transform fails by comparison,
     # without allowing an incorrect launcher to write past the allocation.
-    output = torch.full((2 * grid[1] * 3,), -1, dtype=torch.int32, device="npu")
+    output = torch.full((2 * grid[1] * 3, ), -1, dtype=torch.int32, device="npu")
     compiled = _grid_echo.warmup(output, grid=(2, ny, 3), rule_mask=0)
     compiled._init_handles()
     # The echo kernel consumes the transformed grid directly. Override only the
@@ -342,3 +342,57 @@ def test_compile_only_does_not_submit(monkeypatch):
     _run(instance, compiled, (x, out, 16, 2, 16))
     torch.npu.synchronize()
     assert torch.equal(out.cpu(), torch.full((16, ), -1.0))
+
+
+@triton.jit
+def _original_grid_echo(out, original_x, original_y):
+    if (tl.program_id(0) == 0) & (tl.program_id(1) == 0) & (tl.program_id(2) == 0):
+        tl.store(out + 0, original_x)
+        tl.store(out + 1, original_y)
+        tl.store(out + 2, tl.num_programs(0))
+        tl.store(out + 3, tl.num_programs(1))
+        tl.store(out + 4, tl.num_programs(2))
+
+
+@pytest.mark.parametrize("taskqueue", [False, True])
+@pytest.mark.parametrize("sequence", [
+    [(1, 16, False)],
+    [(0, 64, True)],
+    [(1, 16, False), (0, 4, True)],
+])
+def test_dynamic_original_grid_abi_reaches_both_entries(monkeypatch, taskqueue, sequence):
+    from types import SimpleNamespace
+    from triton.backends.ascend.program_grid import apply_program_grid_transforms
+    monkeypatch.setenv("TRITON_ENABLE_TASKQUEUE", str(taskqueue))
+    # Explicit scalar parameters occupy the same two ABI slots as compiler-
+    # inserted originalGridX/Y. This observes the launcher's bytes on device
+    # independently of whether a particular optimization happens to match.
+    compiled = triton.compile(
+        ASTSource(_original_grid_echo, signature={"out": "*i32", "original_x": "i32", "original_y": "i32"},
+                  constexprs={}), options={"rule_mask": 0})
+    compiled._init_handles()
+    contract = dict(
+        version=2, extent_source="runtime_original_grid", hidden_extent_axes=[0, 1],
+        hidden_argument_order=["originalGridX", "originalGridY"], hidden_argument_types=["i32", "i32"], transforms=[
+            dict(order=i, kind="ceil_div", axis=axis, factor=factor, persistent_coverage=persistent,
+                 grid_stride_abi_verified=persistent) for i, (axis, factor, persistent) in enumerate(sequence)
+        ])
+    metadata = compiled.metadata._replace(program_grid_mapping_applied=True, program_grid_transforms=contract,
+                                          row_coalescing_applied=False, auto_blockify_enabled=False,
+                                          ptsm_cap_authorized=any(t[2] for t in sequence))
+    source = SimpleNamespace(fn=compiled.src.fn, signature={0: "*i32"})
+    instance = driver.NPULauncher(source, metadata)
+    output = torch.full((5, ), -1, dtype=torch.int32, device="npu")
+    # Reuse one plan and one exported stub for changing, non-divisible grids.
+    for grid in [(1, 1, 1), (4097, 17, 3), (129, 65, 1)]:
+        transformed = apply_program_grid_transforms(grid, contract,
+                                                    physical_core_count=instance.launch_spec.physical_blocks)
+        expected = [*grid[:2], *transformed]
+        output.fill_(-1)
+        _run(instance, compiled, (output, ), grid=grid)
+        torch.npu.synchronize()
+        assert output.cpu().tolist() == expected
+        output.fill_(-2)
+        _c_launch(instance, compiled, [ctypes.c_void_p(output.data_ptr())], grid=grid)
+        torch.npu.synchronize()
+        assert output.cpu().tolist() == expected

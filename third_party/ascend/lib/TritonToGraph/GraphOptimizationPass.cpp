@@ -276,27 +276,29 @@ void GraphOptimizePass::runOnOperation() {
     return;
   }
 
-  // Narrowing is target-independent; only the parked-histogram template is
-  // specific to 910_95/950 lowering. Keep the rewrite scope constrained so
-  // unrelated dead operations remain visible to the later graph analyses.
-  SmallVector<Operation *> preGraphRewriteCandidates;
-  getOperation().walk([&](Operation *op) {
-    if (isNarrowUnsignedTensorCandidate(op) ||
-        (options.compileOn91095 && isFoldHistogramParkingCandidate(op)))
-      preGraphRewriteCandidates.push_back(op);
-  });
-  if (!preGraphRewriteCandidates.empty()) {
-    RewritePatternSet patterns(&getContext());
-    patterns.add<narrow_unsigned_tensor::Narrow>(&getContext());
-    if (options.compileOn91095)
-      patterns.add<FoldHistogramParking>(&getContext());
-    FrozenRewritePatternSet frozenPatterns(std::move(patterns));
-    GreedyRewriteConfig config;
-    config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps);
-    if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
-                                       frozenPatterns, config))) {
-      signalPassFailure();
-      return;
+  // The narrowing and parked-histogram templates are valid only for
+  // 910_95/950 lowering. Keep A3 on its established TTIR and constrain the
+  // rewrite scope so unrelated dead operations remain visible to later graph
+  // analyses.
+  if (options.compileOn91095) {
+    SmallVector<Operation *> preGraphRewriteCandidates;
+    getOperation().walk([&](Operation *op) {
+      if (isNarrowUnsignedTensorCandidate(op) ||
+          isFoldHistogramParkingCandidate(op))
+        preGraphRewriteCandidates.push_back(op);
+    });
+    if (!preGraphRewriteCandidates.empty()) {
+      RewritePatternSet patterns(&getContext());
+      patterns.add<narrow_unsigned_tensor::Narrow, FoldHistogramParking>(
+          &getContext());
+      FrozenRewritePatternSet frozenPatterns(std::move(patterns));
+      GreedyRewriteConfig config;
+      config.setStrictness(GreedyRewriteStrictness::ExistingAndNewOps);
+      if (failed(applyOpPatternsGreedily(preGraphRewriteCandidates,
+                                         frozenPatterns, config))) {
+        signalPassFailure();
+        return;
+      }
     }
   }
 

@@ -123,7 +123,8 @@ remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value) {
 
 bool isKnownNoMemoryEffectCall(Operation *op) {
   auto callOp = dyn_cast<func::CallOp>(op);
-  return callOp && callOp.getCallee().starts_with("triton_indirect_load");
+  return callOp && (callOp.getCallee().starts_with("triton_indirect_load") ||
+                    callOp.getCallee().starts_with("triton_stride_load"));
 }
 
 bool shouldAnalyzeAsLeaf(Operation *op) {

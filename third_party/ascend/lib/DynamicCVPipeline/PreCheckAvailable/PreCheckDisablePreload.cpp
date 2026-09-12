@@ -42,12 +42,8 @@ static const llvm::SmallVector<llvm::StringRef> kBlacklistFuncNames = {
     "kernel_sdpa_bwd_q",
     "_swa_paged_decode_kernel",
     "_mqa_logits_kernel",
-    "parallel_path_fwd_kernel",
-    "chunk_bwd_kernel_dv_local",
     "chunk_fwd_kernel_h",
     "_jagged_dense_flash_attention_bwd_dk_kernel",
-    "_gqa_sparse_decode_kernel",
-    "paged_decode_fd_reduce_kernel",
     "paged_decode_fd_kernel"};
 
 static constexpr const char *DEBUG_TYPE = "pre-check-disable-preload";

@@ -75,8 +75,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let options = [
     Option<"compileOn91095", "compile-on-910-95", "bool", "false",
            "Enable histogram rewrites relying on Ascend 910_95 templates">,
-    Option<"ruleMask", "rule-mask", "uint64_t", "511",
-           "Bitmask of known 32-bit graph rule identities; default 511 preserves the legacy native bundle. Only IAT/SPAF/PTSM may later be considered for default enablement; RLF/IPBE/SCP/CBAF remain explicit opt-in no-ops">,
+    Option<"ruleMask", "rule-mask", "uint64_t", "3071",
+           "Bitmask of known 32-bit graph rule identities; default 3071 preserves the legacy native bundle and enables IAT/PTSM. RLF/IPBE/SCP/CBAF remain explicit opt-in">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
            "64", "Maximum graph rewrites per function">,
     Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",

@@ -55,7 +55,7 @@ def _stub_ub_size_in_kbytes_for_arch(arch):
 
 
 def _stub_graph_ub_budget_bytes_for_arch(arch):
-    return _stub_ub_size_in_kbytes_for_arch(arch) * 1024 // 2
+    return _stub_ub_size_in_kbytes_for_arch(arch) * 1024 * 80 // 100
 
 
 class _FakeModule:
@@ -209,14 +209,14 @@ def _parse_options(compiler, arch, opts=None):
 @pytest.mark.parametrize(
     ("arch", "requested_capacity", "expected_capacity"),
     (
-        ("Ascend910B1", _UNSET, 96 * 1024),
-        ("Ascend910B1", None, 96 * 1024),
-        ("Ascend910_9581", None, 128 * 1024),
-        ("Ascend950A3", None, 128 * 1024),
+        ("Ascend910B1", _UNSET, 192 * 1024 * 80 // 100),
+        ("Ascend910B1", None, 192 * 1024 * 80 // 100),
+        ("Ascend910_9581", None, 256 * 1024 * 80 // 100),
+        ("Ascend950A3", None, 256 * 1024 * 80 // 100),
         ("Ascend910B1", 0, 0),
         ("Ascend910B1", 4096, 4096),
-        ("Ascend910B1", 96 * 1024 + 1, 96 * 1024),
-        ("Ascend910_9581", 128 * 1024 + 1, 128 * 1024),
+        ("Ascend910B1", 192 * 1024 * 80 // 100 + 1, 192 * 1024 * 80 // 100),
+        ("Ascend910_9581", 256 * 1024 * 80 // 100 + 1, 256 * 1024 * 80 // 100),
         ("unknown-arch", None, 0),
     ),
 )
@@ -235,13 +235,13 @@ def test_npu_options_normalizes_graph_ub_budget(compiler_module, arch, requested
 @pytest.mark.parametrize(
     ("arch", "requested_capacity", "expected_capacity"),
     (
-        ("Ascend910B1", _UNSET, 96 * 1024),
-        ("Ascend910B1", None, 96 * 1024),
-        ("Ascend910_9581", None, 128 * 1024),
-        ("Ascend950A3", None, 128 * 1024),
+        ("Ascend910B1", _UNSET, 192 * 1024 * 80 // 100),
+        ("Ascend910B1", None, 192 * 1024 * 80 // 100),
+        ("Ascend910_9581", None, 256 * 1024 * 80 // 100),
+        ("Ascend950A3", None, 256 * 1024 * 80 // 100),
         ("Ascend910B1", 0, 0),
         ("Ascend910B1", 4096, 4096),
-        ("Ascend910B1", 96 * 1024 + 1, 96 * 1024),
+        ("Ascend910B1", 192 * 1024 * 80 // 100 + 1, 192 * 1024 * 80 // 100),
     ),
 )
 def test_parse_options_normalizes_graph_ub_budget(compiler_module, arch, requested_capacity, expected_capacity):
@@ -262,11 +262,12 @@ def test_normalized_graph_ub_budget_contributes_to_npu_hash(compiler_module):
     explicit_none = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=None)
     disabled = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=0)
     small = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=4096)
-    clamped = compiler_module.NPUOptions(arch="Ascend910B1", graph_optimize_ub_capacity_bytes=96 * 1024 + 1)
+    clamped = compiler_module.NPUOptions(arch="Ascend910B1",
+                                         graph_optimize_ub_capacity_bytes=192 * 1024 * 80 // 100 + 1)
 
-    assert auto.__dict__["graph_optimize_ub_capacity_bytes"] == 96 * 1024
-    assert explicit_none.graph_optimize_ub_capacity_bytes == 96 * 1024
-    assert clamped.graph_optimize_ub_capacity_bytes == 96 * 1024
+    assert auto.__dict__["graph_optimize_ub_capacity_bytes"] == 192 * 1024 * 80 // 100
+    assert explicit_none.graph_optimize_ub_capacity_bytes == 192 * 1024 * 80 // 100
+    assert clamped.graph_optimize_ub_capacity_bytes == 192 * 1024 * 80 // 100
     assert auto.hash() == explicit_none.hash() == clamped.hash()
     assert auto.hash() != disabled.hash()
     assert auto.hash() != small.hash()
@@ -565,7 +566,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     events, graph_calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
 
     assert graph_calls == [{
-        "ub_capacity_bytes": 96 * 1024,
+        "ub_capacity_bytes": 192 * 1024 * 80 // 100,
         "compile_mode": "simt_only",
         "compile_on_910_95": False,
     }]
@@ -590,9 +591,9 @@ def test_npu_options_do_not_expose_graph_remark_switch(compiler_module):
 @pytest.mark.parametrize(
     ("arch", "expected_capacity"),
     (
-        ("Ascend910B1", 96 * 1024),
-        ("Ascend910_9581", 128 * 1024),
-        ("Ascend950A3", 128 * 1024),
+        ("Ascend910B1", 192 * 1024 * 80 // 100),
+        ("Ascend910_9581", 256 * 1024 * 80 // 100),
+        ("Ascend950A3", 256 * 1024 * 80 // 100),
         ("unknown-arch", 0),
     ),
 )

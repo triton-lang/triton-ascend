@@ -143,7 +143,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "graph_optimize_rule_mask":
     "it is ignored; the backend fixes the graph-optimization rule mask to 3071 (legacy + IAT + PTSM).",
     "graph_optimize_ub_capacity_bytes":
-    "it is ignored; the backend derives the UB budget from the target (A2: 96 KiB, A5: 128 KiB).",
+    "it is ignored; the backend derives an 80%-of-raw-UB graph budget from the target architecture.",
     "has_auto_blockify_blacklist_op": "it is ignored; the safety flag is derived by scanning TTIR.",
     "kernel_name": "it is ignored; the kernel name is derived from TTIR.",
     "llvm_version": "it is ignored; this option has no replacement because it had no effective consumer.",
@@ -792,9 +792,9 @@ def graph_ub_budget_bytes_for_arch(arch: str) -> int:
     """Return the conservative graph-optimization UB budget in bytes.
 
     StoreCoalescing does not model all live local buffers, so its budget is
-    capped at one half of the target's raw UB capacity.
+    capped at 80 percent of the target's raw UB capacity.
     """
-    return ub_size_in_kbytes_for_arch(arch) * 1024 // 2
+    return ub_size_in_kbytes_for_arch(arch) * 1024 * 80 // 100
 
 
 def is_ffts_supported(arch: str):

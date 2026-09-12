@@ -484,6 +484,15 @@ int getLoopCarriedArgIndex(Value operand, Block *block) {
   return argIdx;
 }
 
+int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
+  for (unsigned i = 0; i < iterArgs.size(); ++i) {
+    if (v == iterArgs[i] && isa<RankedTensorType>(iterArgs[i].getType())) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
   if (!isa<arith::TruncFOp, arith::TruncIOp>(op))
     return std::nullopt;

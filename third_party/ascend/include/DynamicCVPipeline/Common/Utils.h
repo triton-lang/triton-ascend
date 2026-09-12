@@ -266,6 +266,10 @@ int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
 
+// Returns the index of `v` in `iterArgs` when `v` is a tensor-type iter_arg,
+// or -1 otherwise.
+int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs);
+
 // Helper: convert OpCoreType to string for IR attribute
 inline llvm::StringRef coreTypeToString(CoreType ct) {
   switch (ct) {

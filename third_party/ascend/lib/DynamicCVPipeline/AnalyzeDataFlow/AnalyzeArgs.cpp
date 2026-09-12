@@ -50,19 +50,6 @@ using namespace triton;
 
 namespace {
 
-// Check if a value is a tensor-type iter_arg and return its index, -1
-// otherwise.
-static int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
-  for (unsigned i = 0; i < iterArgs.size(); ++i) {
-    if (v == iterArgs[i]) {
-      if (isa<RankedTensorType>(iterArgs[i].getType())) {
-        return i;
-      }
-    }
-  }
-  return -1;
-}
-
 // Data collected for each tensor iter_arg: first block_id that uses it, and set
 // of all block_ids
 struct TensorArgBlockInfo {
@@ -80,20 +67,18 @@ collectTensorArgBlockInfo(ArrayRef<Value> iterArgs, Block *body) {
   }
 
   for (Operation &op : body->without_terminator()) {
-    auto blockIdAttr = op.getAttrOfType<IntegerAttr>("ssbuffer.block_id");
-    if (!blockIdAttr) {
+    auto blockIdOpt = CVPipeline::getOpBlockId(&op);
+    if (!blockIdOpt)
       continue;
-    }
-    int blockId = blockIdAttr.getInt();
+    int blockId = *blockIdOpt;
 
     for (OpOperand &operand : op.getOpOperands()) {
-      int argIdx = getTensorIterArgIndex(operand.get(), iterArgs);
+      int argIdx = CVPipeline::getTensorIterArgIndex(operand.get(), iterArgs);
       if (argIdx >= 0) {
         auto &info = result[argIdx];
         info.blockIds.insert(blockId);
-        if (info.firstBlockId < 0) {
+        if (info.firstBlockId < 0)
           info.firstBlockId = blockId;
-        }
       }
     }
   }
@@ -105,9 +90,8 @@ collectTensorArgBlockInfo(ArrayRef<Value> iterArgs, Block *body) {
 static bool checkMultiBlockUse(
     const llvm::DenseMap<unsigned, TensorArgBlockInfo> &argBlockInfo) {
   for (auto &p : argBlockInfo) {
-    if (p.second.blockIds.size() > 1) {
+    if (p.second.blockIds.size() > 1)
       return true;
-    }
   }
   return false;
 }
@@ -116,35 +100,23 @@ static bool checkMultiBlockUse(
 static bool checkUseUpdateMismatch(
     ArrayRef<Value> iterArgs, Block *body,
     const llvm::DenseMap<unsigned, TensorArgBlockInfo> &argBlockInfo) {
-  if (!body) {
+  if (!body)
     return false;
-  }
-  auto yieldOp = cast<scf::YieldOp>(body->getTerminator());
 
   for (unsigned i = 0; i < iterArgs.size(); ++i) {
-    if (!isa<RankedTensorType>(iterArgs[i].getType())) {
+    if (!isa<RankedTensorType>(iterArgs[i].getType()))
       continue;
-    }
 
     auto it = argBlockInfo.find(i);
-    if (it == argBlockInfo.end()) {
+    if (it == argBlockInfo.end())
       continue;
-    }
 
-    Operation *defOp = yieldOp.getOperand(i).getDefiningOp();
-    if (!defOp) {
+    Operation *defOp = CVPipeline::getLoopCarriedDefOp(iterArgs[i], body);
+    if (!defOp)
       continue;
-    }
 
-    auto defBlockIdAttr =
-        defOp->getAttrOfType<IntegerAttr>("ssbuffer.block_id");
-    if (!defBlockIdAttr) {
-      continue;
-    }
-
-    if (it->second.firstBlockId != defBlockIdAttr.getInt()) {
+    if (CVPipeline::getOpBlockId(defOp) != it->second.firstBlockId)
       return true;
-    }
   }
   return false;
 }
@@ -157,41 +129,72 @@ static bool hasTensorArgInDifferentBlockIds(ArrayRef<Value> iterArgs,
          checkUseUpdateMismatch(iterArgs, body, argBlockInfo);
 }
 
+// Detect "update-before-use": a tensor iter_arg's update-defining op
+// appears in code order BEFORE another direct-child use of that iter_arg
+// whose ssbuffer.block_id differs from the update's block_id.
+static bool checkUpdateBeforeUse(ArrayRef<Value> iterArgs, Block *body) {
+  if (!body)
+    return false;
+  auto yieldOp = dyn_cast<scf::YieldOp>(body->getTerminator());
+  if (!yieldOp)
+    return false;
+
+  for (Value iterArg : iterArgs) {
+    if (!isa<RankedTensorType>(iterArg.getType()))
+      continue;
+
+    Operation *defOp = CVPipeline::getLoopCarriedDefOp(iterArg, body);
+    if (!defOp)
+      continue;
+
+    auto defBlockId = CVPipeline::getOpBlockId(defOp);
+    if (!defBlockId)
+      continue;
+
+    for (Operation *user : iterArg.getUsers()) {
+      Operation *directChild = body->findAncestorOpInBlock(*user);
+      if (!directChild)
+        continue;
+      // must come AFTER the update-defining op in code order
+      if (!defOp->isBeforeInBlock(directChild))
+        continue;
+
+      if (CVPipeline::getOpBlockId(directChild) != defBlockId)
+        return true;
+    }
+  }
+  return false;
+}
+
 } // namespace
 
 bool checkTensorArgsInMainLoop(ModuleOp module) {
-  bool shouldReturn = false;
+  return module
+      .walk([&](Operation *op) -> WalkResult {
+        if (!CVPipeline::isMainLoopOp(op))
+          return WalkResult::advance();
 
-  module.walk([&](Operation *op) -> WalkResult {
-    if (!op->hasAttr("ssbuffer.main_loop")) {
-      return WalkResult::advance();
-    }
+        CVPipeline::MainLoop mainLoop(op);
+        return hasTensorArgInDifferentBlockIds(mainLoop.getIterArgs(),
+                                               mainLoop.getBody())
+                   ? WalkResult::interrupt()
+                   : WalkResult::advance();
+      })
+      .wasInterrupted();
+}
 
-    SmallVector<Value> iterArgs;
-    Block *body = nullptr;
-    if (auto forOp = dyn_cast<scf::ForOp>(op)) {
-      for (auto arg : forOp.getRegionIterArgs())
-        iterArgs.push_back(arg);
-      body = forOp.getBody();
-    } else if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
-      // For whileOp, analyze the do-region (after body), where iter_args are
-      // used and updated by scf.yield.
-      for (auto arg : whileOp.getRegionIterArgs())
-        iterArgs.push_back(arg);
-      body = whileOp.getAfterBody();
-    } else {
-      return WalkResult::advance();
-    }
+bool checkUpdateBeforeUseInMainLoop(ModuleOp module) {
+  return module
+      .walk([&](Operation *op) -> WalkResult {
+        if (!CVPipeline::isMainLoopOp(op))
+          return WalkResult::advance();
 
-    if (hasTensorArgInDifferentBlockIds(iterArgs, body)) {
-      shouldReturn = true;
-      return WalkResult::interrupt();
-    }
-
-    return WalkResult::advance();
-  });
-
-  return shouldReturn;
+        CVPipeline::MainLoop mainLoop(op);
+        return checkUpdateBeforeUse(mainLoop.getIterArgs(), mainLoop.getBody())
+                   ? WalkResult::interrupt()
+                   : WalkResult::advance();
+      })
+      .wasInterrupted();
 }
 
 void AnalyzeArgsPass::runOnOperation() {
@@ -209,9 +212,15 @@ void AnalyzeArgsPass::runOnOperation() {
   int interBufNum = bufferCountMgr.getBufferCountByType(
       BufferCountManager::DepType::InterCore);
 
+  if (checkUpdateBeforeUseInMainLoop(module)) {
+    LDBG("Found tensor iter_args update-before-use in mainloop!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return;
+  }
+
   if (intraBufNum == 3 && interBufNum == 2 &&
       checkTensorArgsInMainLoop(module)) {
-    LDBG("[INFO]: Found tensor iter_args dependency in mainloop!");
+    LDBG("Found tensor iter_args dependency in mainloop!");
     CVPipeline::setFallbackAttr(module,
                                 CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
     return;

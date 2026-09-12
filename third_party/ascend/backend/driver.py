@@ -38,6 +38,9 @@ from triton.backends.ascend.launcher import (argument_types, export_launcher, ge
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
 
+# The helper contains the per-call Torch-NPU submission path as well as setup.
+_NPU_UTILS_CFLAGS = ("-O3", )
+
 
 @functools.lru_cache(maxsize=32)
 def _npu_utils_key(source, fingerprint):
@@ -71,7 +74,8 @@ class NPUUtils(object):
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
-        fingerprint = json.dumps(_ascend_utils.npu_extension_fingerprint("npu_utils"), sort_keys=True)
+        fingerprint = json.dumps(_ascend_utils.npu_extension_fingerprint("npu_utils", extra_cflags=_NPU_UTILS_CFLAGS),
+                                 sort_keys=True)
         key = _npu_utils_key(src, fingerprint)
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
@@ -80,7 +84,7 @@ class NPUUtils(object):
             with tempfile.TemporaryDirectory() as tmpdir:
                 tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
                 Path(tmp_src_path).write_text(src)
-                so = _build_npu_ext("npu_utils", tmp_src_path)
+                so = _build_npu_ext("npu_utils", tmp_src_path, extra_cflags=_NPU_UTILS_CFLAGS)
                 return Path(so).read_bytes()
 
         return _ascend_utils._get_or_build_npu_artifact(cache, fname, build)

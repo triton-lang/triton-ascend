@@ -212,6 +212,34 @@ def prepared_backend(tmp_path, monkeypatch):
     return SimpleNamespace(driver=driver, root=source_dir, builds=builds, fingerprint=fingerprint, src=src)
 
 
+def test_helper_optimization_flags_invalidate_cached_artifact(prepared_backend, monkeypatch):
+    """An optimized helper must not reuse the earlier unoptimized binary."""
+    state = prepared_backend
+    build_flags = []
+
+    def fingerprint(name, *, extra_cflags=()):
+        return {"compiler": "toolchain-a", "flags": list(extra_cflags)}
+
+    def build(name, source, *, extra_cflags=()):
+        build_flags.append(tuple(extra_cflags))
+        binary = Path(source).with_suffix(".so")
+        binary.write_bytes(repr(tuple(extra_cflags)).encode())
+        return str(binary)
+
+    monkeypatch.setattr(utils, "npu_extension_fingerprint", fingerprint)
+    monkeypatch.setattr(state.driver, "_build_npu_ext", build)
+    configured_flags = state.driver._NPU_UTILS_CFLAGS
+    assert configured_flags == ("-O3", )
+    monkeypatch.setattr(state.driver, "_NPU_UTILS_CFLAGS", ())
+    unoptimized = state.driver.NPUUtils().get_so_path()
+    monkeypatch.setattr(state.driver, "_NPU_UTILS_CFLAGS", configured_flags)
+    optimized = state.driver.NPUUtils().get_so_path()
+    assert optimized != unoptimized
+    assert Path(optimized).read_bytes() == repr(configured_flags).encode()
+    assert state.driver.NPUUtils().get_so_path() == optimized
+    assert build_flags == [(), configured_flags]
+
+
 def test_repeated_preparation_reuses_keys_and_artifacts(prepared_backend, monkeypatch):
     state = prepared_backend
     first = state.driver.NPULauncher(state.src, metadata())

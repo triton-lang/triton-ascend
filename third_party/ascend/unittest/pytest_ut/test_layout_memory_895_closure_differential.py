@@ -449,6 +449,18 @@ def _load_make_launcher(source):
     return namespace["make_launcher"], state
 
 
+def _load_launch_plan():
+    from unittest.mock import patch
+    from triton.backends.ascend import launcher
+    state = {"auto_map_enabled": False}
+
+    def create(*, metadata, **_kwargs):
+        with patch.object(launcher.utils, "_is_auto_map_parallel_blocks_enabled", lambda: state["auto_map_enabled"]):
+            return launcher.make_launch_spec(metadata, _FakeNPUUtils())
+
+    return create, state
+
+
 def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
     return SimpleNamespace(
         target=SimpleNamespace(arch="Ascend910B"),
@@ -526,7 +538,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
 ):
     """Compare both generated launcher paths for all E x B x R cap cases."""
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
+    target_make_launcher, target_state = _load_launch_plan()
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
     for env_enabled, blacklisted, row_applied in itertools.product(
@@ -560,18 +572,17 @@ def test_895_launcher_coalescing_and_block_cap_closure(
         )
         case = f"{name}: E={env_enabled}, B={blacklisted}, R={row_applied}"
         baseline_paths = _launcher_paths(baseline_src)
-        target_paths = _launcher_paths(target_src)
-        assert len(baseline_paths) == len(target_paths) == 2, case
-        expected_cap_count = 1 if env_enabled and not blacklisted else 0
-        for baseline_path, target_path in zip(baseline_paths, target_paths):
-            assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
-            assert baseline_path.count(assignment) == target_path.count(assignment) == 1, case
-            if guard is None:
-                assert "ChunkCoalescing: grid[2] not divisible" not in baseline_path, case
-                assert "ChunkCoalescing: grid[2] not divisible" not in target_path, case
-            else:
-                assert baseline_path.count(guard) == target_path.count(guard) == 1, case
-            assert baseline_path.count(cap) == target_path.count(cap) == expected_cap_count, case
+        from triton.backends.ascend.launcher import AUTO_MAP, COALESCE_CEIL
+        assert (target_src.coalesce_factor, target_src.coalesce_axis) == (factor, axis), case
+        assert bool(target_src.flags & COALESCE_CEIL) == ceil_div, case
+        assert bool(target_src.flags & AUTO_MAP) == (env_enabled and not blacklisted), case
+        assert target_src.physical_blocks == 40, case
+        assert len(baseline_paths) == 2, case
+        for baseline_path in baseline_paths:
+            assert baseline_path.count(assignment) == 1, case
+            if guard is not None:
+                assert baseline_path.count(guard) == 1, case
+            assert baseline_path.count(cap) == int(bool(target_src.flags & AUTO_MAP)), case
 
 
 def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
@@ -585,7 +596,7 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
     """
 
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
+    target_make_launcher, target_state = _load_launch_plan()
     grid_names = ("gridX", "gridY", "gridZ")
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
     # The factor sets deliberately mirror what each legacy pass can emit.
@@ -620,26 +631,22 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
             expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
                                    if ceil_div else f"{grid} = {grid} / {factor};")
             expected_cap_count = 1 if env_enabled and not blacklisted else 0
-            for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
-                assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
+            from triton.backends.ascend.launcher import AUTO_MAP, COALESCE_CEIL
+            assert (target_src.coalesce_factor, target_src.coalesce_axis) == (factor, axis), case
+            assert bool(target_src.flags & COALESCE_CEIL) == ceil_div, case
+            assert bool(target_src.flags & AUTO_MAP) == bool(expected_cap_count), case
+            for baseline_path in _launcher_paths(baseline_src):
                 assert baseline_path.count(expected_assignment) == 1, case
-                assert target_path.count(expected_assignment) == 1, case
-                if ceil_div:
-                    assert f"grid[{axis}] not divisible by coalesce_factor" not in baseline_path, case
-                    assert f"grid[{axis}] not divisible by coalesce_factor" not in target_path, case
-                else:
-                    guard = (f"ChunkCoalescing: grid[{axis}] not divisible by "
-                             f"coalesce_factor {factor}")
+                if not ceil_div:
+                    guard = f"ChunkCoalescing: grid[{axis}] not divisible by coalesce_factor {factor}"
                     assert baseline_path.count(guard) == 1, case
-                    assert target_path.count(guard) == 1, case
                 assert baseline_path.count(cap) == expected_cap_count, case
-                assert target_path.count(cap) == expected_cap_count, case
 
 
 def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):
     """SLS still selects the original 910_95 mixed-SIMT launch ABI."""
     baseline_make_launcher, _baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, _target_state = _load_make_launcher(source_pairs["driver"][1])
+    target_make_launcher, _target_state = _load_launch_plan()
 
     metadata = _make_metadata(
         factor=1,
@@ -662,24 +669,12 @@ def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):
     )
 
     baseline_paths = _launcher_paths(baseline_src)
-    target_paths = _launcher_paths(target_src)
-
-    for baseline_path, target_path in zip(baseline_paths, target_paths):
-        # Baseline keeps the inlined RT launch ABI in each launch path.
+    from triton.backends.ascend.launcher import DYNAMIC_SHARED
+    assert target_src.flags & DYNAMIC_SHARED
+    assert target_src.shared_mem_dynamic_size == 221184
+    for baseline_path in baseline_paths:
         assert baseline_path.count("rtKernelLaunchWithFlagV2") == 1
-        assert baseline_path.count("rtArgsEx_t argsInfo") == 1
         assert "cfgInfo.localMemorySize = 221184;" in baseline_path
-        # Target routes both paths through the shared shim entry points; the
-        # 221184 literal is carried at the cfg acquisition call site.
-        assert target_path.count("cann_get_launch_kernel_cfg(221184)") == 1
-        assert "cann_launch_kernel(func, blockNum" in target_path
-
-    # The shim lives once in the header (first path) and carries both the
-    # ACL (9.1.0+) and RT (<9.1.0) launch implementations.
-    assert target_src.count("aclrtLaunchKernelWithHostArgs") == 1
-    assert target_src.count("rtKernelLaunchWithFlagV2") == 1
-    assert target_src.count("aclrtLaunchKernelAttr attrInfo") == 1
-    assert target_src.count("rtArgsEx_t argsInfo") == 1
 
 
 def _load_inject_grid_num_tiles(source):

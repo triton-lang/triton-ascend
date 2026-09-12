@@ -8,6 +8,8 @@
 //   (operand-defined-after-use)
 // - CHECK locks double-buffer output: two mutually-exclusive transfer
 //   groups (even/odd flags) + double-buffer selection
+// - output flags are allocated above the module's maximum existing flag (6),
+//   in sorted (original flag, direction) order: flag 3 gets 7, flag 6 gets 8
 
 // CHECK-LABEL: func.func @tc_while_ctov_sender
 // CHECK: tightly_coupled_buffer
@@ -16,11 +18,11 @@
 // polling condition computed at body start
 // CHECK: arith.remsi
 // CHECK: arith.cmpi eq
-// two mutually-exclusive transfer groups: even flag=3 / odd flag=8
+// two mutually-exclusive transfer groups: even flag=3 / odd flag=7
 // CHECK: scf.if
 // CHECK: sync_block_wait {{.*}} flag = 3
 // CHECK: } else {
-// CHECK: sync_block_wait {{.*}} flag = 8
+// CHECK: sync_block_wait {{.*}} flag = 7
 // CHECK: ssbuffer.cross_buffer
 // double-buffer selection
 // CHECK: memref.memory_space_cast
@@ -28,14 +30,14 @@
 // CHECK: memref.memory_space_cast
 // CHECK: sync_block_set {{.*}} flag = 3
 // CHECK: } else {
-// CHECK: sync_block_set {{.*}} flag = 8
+// CHECK: sync_block_set {{.*}} flag = 7
 // CHECK: ssbuffer.iterCounter
 // CHECK: ssbuffer.main_loop
 // cross-core initial signals for both flags + CUBE-side waits
 // CHECK: sync_block_set {{.*}} flag = 3
-// CHECK: sync_block_set {{.*}} flag = 8
+// CHECK: sync_block_set {{.*}} flag = 7
 // CHECK: sync_block_wait {{.*}} flag = 3
-// CHECK: sync_block_wait {{.*}} flag = 8
+// CHECK: sync_block_wait {{.*}} flag = 7
 // CUBE side: fixpipe double-buffer selection
 // CHECK: hivm.hir.fixpipe
 // CHECK: } else {
@@ -88,26 +90,26 @@ func.func @tc_while_ctov_sender() {
 
 // CHECK-LABEL: func.func @tc_while_both_sides
 // CHECK: tightly_coupled_buffer
-// VECTOR while: counter injection + two mutually-exclusive groups (flag 6/7)
+// VECTOR while: counter injection + two mutually-exclusive groups (flag 6/8)
 // CHECK: scf.while {{.*}} : (i32, i32) -> (i32, i32)
 // CHECK: arith.remsi
 // CHECK: arith.cmpi eq
 // CHECK: scf.if
 // CHECK: sync_block_wait {{.*}} flag = 6
 // CHECK: } else {
-// CHECK: sync_block_wait {{.*}} flag = 7
+// CHECK: sync_block_wait {{.*}} flag = 8
 // CHECK: ssbuffer.cross_buffer
 // CHECK: memref.memory_space_cast
 // CHECK: } else {
 // CHECK: memref.memory_space_cast
 // CHECK: sync_block_set {{.*}} flag = 6
 // CHECK: } else {
-// CHECK: sync_block_set {{.*}} flag = 7
+// CHECK: sync_block_set {{.*}} flag = 8
 // CHECK: ssbuffer.iterCounter
 // CHECK: sync_block_set {{.*}} flag = 6
-// CHECK: sync_block_set {{.*}} flag = 7
+// CHECK: sync_block_set {{.*}} flag = 8
 // CHECK: sync_block_wait {{.*}} flag = 6
-// CHECK: sync_block_wait {{.*}} flag = 7
+// CHECK: sync_block_wait {{.*}} flag = 8
 // CUBE while: same counter injection + fixpipe double-buffer selection
 // CHECK: scf.while {{.*}} : (i32, i32) -> (i32, i32)
 // CHECK: hivm.hir.fixpipe

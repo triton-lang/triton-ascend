@@ -1,0 +1,104 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright 2018-2020 Philippe Tillet
+# Copyright 2020-2022 OpenAI
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Source: python/test/unit/language/test_block_pointer.py at main-dev@396df6cb5b001314e36f22220be07a560de44664
+
+import pytest
+import torch
+
+import triton
+import triton.language as tl
+from .test_core import check_type_supported
+
+
+@triton.jit
+def block_copy_kernel(a_ptr, b_ptr, N, BLOCK_SIZE: tl.constexpr, PADDING_OPTION: tl.constexpr,
+                      TEST_LOWER_BOUND: tl.constexpr, TEST_UPPER_BOUND: tl.constexpr):
+    pid = tl.program_id(0)
+    offset = pid * BLOCK_SIZE
+    if TEST_LOWER_BOUND:
+        offset = -N
+    elif TEST_UPPER_BOUND:
+        offset = N
+    # We only copy half of the data to see if the padding works
+    a_block_ptr = tl.make_block_ptr(base=a_ptr, shape=(N // 2, ), strides=(1, ), offsets=(offset, ),
+                                    block_shape=(BLOCK_SIZE, ), order=(0, ))
+    b_block_ptr = tl.make_block_ptr(base=b_ptr, shape=(N, ), strides=(1, ), offsets=(offset, ),
+                                    block_shape=(BLOCK_SIZE, ), order=(0, ))
+    if PADDING_OPTION is None:
+        a = tl.load(a_block_ptr, boundary_check=(0, ))
+    else:
+        a = tl.load(a_block_ptr, boundary_check=(0, ), padding_option=PADDING_OPTION)
+    tl.store(b_block_ptr, a, boundary_check=(0, ))
+
+
+@triton.jit
+def matmul_no_scf_with_advance_kernel(  #
+        a_ptr, b_ptr, c_ptr,  #
+        M, N, K,  #
+        stride_am, stride_ak,  #
+        stride_bk, stride_bn,  #
+        stride_cm, stride_cn,  #
+        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr  #
+):
+    offs_m = tl.arange(0, BLOCK_M)
+    offs_n = tl.arange(0, BLOCK_N)
+    a_block_ptr = tl.make_block_ptr(base=a_ptr, shape=(M, K), strides=(stride_am, stride_ak), offsets=(0, 0),
+                                    block_shape=(BLOCK_M, BLOCK_K), order=(1, 0))
+    b_block_ptr = tl.make_block_ptr(base=b_ptr, shape=(K, N), strides=(stride_bk, stride_bn), offsets=(0, 0),
+                                    block_shape=(BLOCK_K, BLOCK_N), order=(1, 0))
+    # Below two lines are just for testing negative offsets for the `advance` API, which could be removed
+    a_block_ptr = tl.advance(a_block_ptr, (BLOCK_M, -BLOCK_K))
+    a_block_ptr = tl.advance(a_block_ptr, (-BLOCK_M, BLOCK_K))
+    a = tl.load(a_block_ptr, boundary_check=(1, ), padding_option="zero")
+    b = tl.load(b_block_ptr, boundary_check=(0, ), padding_option="zero")
+
+    c = tl.dot(a, b)
+    c_ptrs = c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn
+    tl.store(c_ptrs, c)
+
+
+@pytest.mark.interpreter
+@pytest.mark.parametrize("shape, num_warps", [  #
+    (shape, num_warps) for shape in [
+        [64, 64, 16],
+        [64, 64, 32],
+        [64, 64, 64],
+    ] for num_warps in [4, 8]
+])
+def test_block_ptr_matmul_no_scf(shape, num_warps, device):
+    m, n, k = shape
+    a = torch.randn((m, k), device=device, dtype=torch.float16)
+    b = torch.randn((k, n), device=device, dtype=torch.float16)
+    c = torch.empty((m, n), device=device, dtype=torch.float32)
+
+    grid = lambda META: (1, )
+    matmul_no_scf_with_advance_kernel[grid](
+        a_ptr=a, b_ptr=b, c_ptr=c,  #
+        M=m, N=n, K=k,  #
+        stride_am=a.stride(0), stride_ak=a.stride(1),  #
+        stride_bk=b.stride(0), stride_bn=b.stride(1),  #
+        stride_cm=c.stride(0), stride_cn=c.stride(1),  #
+        BLOCK_M=m, BLOCK_N=n, BLOCK_K=k,  #
+        num_warps=num_warps)
+    golden = torch.matmul(a, b)
+    torch.testing.assert_close(c, golden, check_dtype=False)

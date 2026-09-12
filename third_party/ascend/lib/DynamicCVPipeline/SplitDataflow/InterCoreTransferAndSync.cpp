@@ -1703,6 +1703,7 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
   // Allocate a single shared L1 buffer for producer and consumer.
   auto *allocOp = createC2CSharedL1Buffer(builder, loc, shape, elemType,
                                           prodBlockId, prodEnd, consStart);
+  auto *mainLoopOp = findMainLoopforTransfer(prodEnd, consStart);
 
   // Producer side: insert fixpipe to write matmul L0C output to L1 buffer
   auto dmaModeAttr =
@@ -1722,10 +1723,13 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
       builder.getBoolAttr(channelSplit), nullptr, nullptr, mlir::ArrayAttr{},
       nullptr);
   attachCommonTags(fixpipeOp, prodBlockId, CVPipeline::kCoreTypeCube);
-  // Tag C2C fixpipe as kIntraDeps producer.
-  fixpipeOp->setAttr(CVPipeline::kIntraDeps,
-                     builder.getI32ArrayAttr(
-                         {intraDepsGroupId, CVPipeline::crossCoreProducerId}));
+  // Tag C2C fixpipe as kIntraDeps producer (only within a main loop).
+  if (mainLoopOp) {
+    fixpipeOp->setAttr(
+        CVPipeline::kIntraDeps,
+        builder.getI32ArrayAttr(
+            {intraDepsGroupId, CVPipeline::crossCoreProducerId}));
+  }
   LOG_DEBUG("[fixpipeOp C->C]: " << *fixpipeOp << "\n");
 
   // Consumer side: read L1 buffer via MemorySpaceCast + ToTensor
@@ -1737,11 +1741,13 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
   auto toTensorOp = builder.create<bufferization::ToTensorOp>(
       loc, targetTensorType, memspaceCastOp.getResult(), true, true);
   attachCommonTags(memspaceCastOp, consBlockId, CVPipeline::kCoreTypeCube);
-  // Tag C2C memspaceCastOp as kIntraDeps consumer.
-  memspaceCastOp->setAttr(
-      CVPipeline::kIntraDeps,
-      builder.getI32ArrayAttr(
-          {intraDepsGroupId, CVPipeline::crossCoreConsumerId}));
+  // Tag C2C memspaceCastOp as kIntraDeps consumer (only within a main loop).
+  if (mainLoopOp) {
+    memspaceCastOp->setAttr(
+        CVPipeline::kIntraDeps,
+        builder.getI32ArrayAttr(
+            {intraDepsGroupId, CVPipeline::crossCoreConsumerId}));
+  }
   attachCommonTags(toTensorOp, consBlockId, CVPipeline::kCoreTypeCube);
 
   // Replace uses of transferValue within the consumer block.

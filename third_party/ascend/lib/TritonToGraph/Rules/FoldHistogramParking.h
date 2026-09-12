@@ -3,9 +3,9 @@
 #define TRITON_ASCEND_GRAPH_FOLD_HISTOGRAM_PARKING_H
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -15,8 +15,8 @@ namespace mlir::triton {
 // When this rewrite replaces the subtraction, its old histogram and correction
 // tree are no longer roots, so clean that proven-dead, side-effect-free closure
 // here instead of widening the driver's scope to unrelated graph input.
-inline void eraseDeadHistogramParkingClosure(
-    PatternRewriter &rewriter, ArrayRef<Operation *> roots) {
+inline void eraseDeadHistogramParkingClosure(PatternRewriter &rewriter,
+                                             ArrayRef<Operation *> roots) {
   SmallVector<Operation *> worklist(roots.begin(), roots.end());
   while (!worklist.empty()) {
     Operation *candidate = worklist.pop_back_val();

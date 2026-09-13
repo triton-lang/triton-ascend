@@ -313,6 +313,17 @@ def _make_opt(
     )
 
 
+def _make_program_grid_contract(*transforms):
+    return {
+        "version": 2,
+        "extent_source": "runtime_original_grid",
+        "hidden_extent_axes": [0, 1],
+        "hidden_argument_order": ["originalGridX", "originalGridY"],
+        "hidden_argument_types": ["i32", "i32"],
+        "transforms": list(transforms),
+    }
+
+
 def _run_ttir_to_npubin(
     compiler,
     monkeypatch,
@@ -660,6 +671,53 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
         assert command[2:-2] == expected_options, case
         assert command[-2] == "-o", case
         assert Path(command[-1]).name == "kernel", case
+
+
+@pytest.mark.parametrize(
+    ("auto_map_enabled", "blacklisted", "row_applied", "transforms", "expected_auto", "expected_ptsm"),
+    (
+        (False, False, False, None, False, False),
+        (True, False, False, None, True, False),
+        (True, False, True, None, True, False),
+        (True, True, False, None, False, False),
+        (True, False, False, ((0, 1, 16, False, False), ), True, False),
+        (True, False, False, ((0, 0, 64, True, True), ), False, True),
+        (True, False, False, ((0, 1, 16, False, False), (1, 0, 4, True, True)), False, True),
+    ),
+)
+def test_finalize_program_launch_policy_uses_linalg_ptsm_gate(
+    compiler_module,
+    monkeypatch,
+    auto_map_enabled,
+    blacklisted,
+    row_applied,
+    transforms,
+    expected_auto,
+    expected_ptsm,
+):
+    contract = None
+    if transforms is not None:
+        contract = _make_program_grid_contract(*(dict(
+            order=order,
+            kind="ceil_div",
+            axis=axis,
+            factor=factor,
+            persistent_coverage=persistent,
+            grid_stride_abi_verified=grid_stride,
+        ) for order, axis, factor, persistent, grid_stride in transforms))
+    metadata = {
+        "program_grid_transforms": contract,
+        "program_grid_mapping_applied": contract is not None,
+        "row_coalescing_applied": row_applied,
+        "has_auto_blockify_blacklist_op": blacklisted,
+        "mix_mode": "aiv",
+    }
+    monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: auto_map_enabled)
+
+    compiler_module._finalize_program_launch_policy(metadata, SimpleNamespace(is_pure_simt=False))
+
+    assert metadata["auto_blockify_enabled"] is expected_auto
+    assert metadata["ptsm_cap_authorized"] is expected_ptsm
 
 
 def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compiler_module):

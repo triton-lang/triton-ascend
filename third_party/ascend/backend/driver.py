@@ -1060,8 +1060,6 @@ static void release_npu_tensor_handle(void* handle) {{
                             if program_grid_transforms is not None else None)
     if program_grid_transforms is not None and row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
-    if auto_blockify_enabled and (mapping_applied or row_coalescing_applied):
-        raise RuntimeError("auto_blockify_enabled conflicts with a rewritten program mapping")
     if auto_blockify_enabled and ptsm_cap_authorized:
         raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
     if persistent_transform is None:
@@ -1071,6 +1069,8 @@ static void release_npu_tensor_handle(void* handle) {{
         raise RuntimeError("persistent program-grid transform lacks PTSM cap authorization")
     elif mix_mode != "aiv":
         raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
+
+    launcher_cap_enabled = enable_auto_map_parallel_blocks and not ptsm_cap_authorized
 
     program_grid_finalization = ""
     if program_grid_transforms is not None:
@@ -1323,7 +1323,7 @@ static void release_npu_tensor_handle(void* handle) {{
         warned = true;
     }}
     #endif
-    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if enable_auto_map_parallel_blocks else ''}
+    {'blockNum = std::min(blockNum, (uint32_t)' + str(num_physical_blocks) + ');' if launcher_cap_enabled else ''}
     // set mixBlockNumRation for nodeBasicBlockDim for msprof report
     uint32_t mixBlockNumRation = {mix_block_dim_ratio};
     uint32_t nodeBasicBlockDim = (mixBlockNumRation << 16) + blockNum;

@@ -810,7 +810,7 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
 
       for (mlir::Operation *user : output.getUsers()) {
         int outputIndex = 0;
-        if (isControlFlowOp(user)) {
+        if (isa<scf::YieldOp>(user)) {
           for (unsigned i = 0; i < user->getNumOperands(); ++i) {
             if (user->getOperand(i) == output) {
               outputIndex = i;

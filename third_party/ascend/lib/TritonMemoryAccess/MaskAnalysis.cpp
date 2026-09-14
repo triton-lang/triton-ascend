@@ -126,26 +126,14 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
       OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
       if (initArgOperand) {
-        // Scalar iter_args (i32/index) are already handled above by
-        // parseIntScalar using the block argument value, which correctly
-        // reflects the current iteration's value inside the loop body.
-        //
-        // For a tensor iter_arg, the value advances by a constant amount
-        // each iteration (visible in the yield value, e.g. iter_arg + 64).
-        // Parse the init value to obtain the base range structure, then
-        // shift start/end by inductionVar * increment so the slice bounds
-        // are correct for every iteration, not just the first one.
         if (!isa<ShapedType>(operand.getType()))
           return failure();
 
-        // Parse the init value to get the base range structure.
+        // Parse the init value to get the base range structure
         if (failed(parse(initArgOperand->get(), loc, builder)))
           return failure();
 
-        // Only scf.for loops are handled: the per-iteration increment is
-        // extracted from the yield value and applied via the induction
-        // variable. Other loop-like ops fall back to failure (conservative:
-        // no slice optimization, but no incorrect bounds).
+        // Only scf.for loops are handled
         auto forOp = dyn_cast<scf::ForOp>(parentOp);
         if (!forOp)
           return failure();
@@ -173,42 +161,51 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
           return failure();
 
         // The increment must be a splat integer constant tensor or a scalar
-        // integer constant.
+        // integer constant (i.e. iteration-independent).
+        auto constOp = incrementValue.getDefiningOp<arith::ConstantOp>();
+        if (!constOp)
+          return failure();
         int64_t increment = 0;
-        if (auto constOp = incrementValue.getDefiningOp<arith::ConstantOp>()) {
-          if (auto denseAttr = dyn_cast<DenseElementsAttr>(constOp.getValue())) {
-            if (!denseAttr.isSplat() ||
-                !isa<IntegerType>(denseAttr.getElementType()))
-              return failure();
-            increment = denseAttr.getSplatValue<IntegerAttr>().getInt();
-          } else if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
-            increment = intAttr.getInt();
-          } else {
+        if (auto denseAttr = dyn_cast<DenseElementsAttr>(constOp.getValue())) {
+          if (!denseAttr.isSplat() ||
+              !isa<IntegerType>(denseAttr.getElementType()))
             return failure();
-          }
+          increment = denseAttr.getSplatValue<IntegerAttr>().getInt();
+        } else if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+          increment = intAttr.getInt();
         } else {
           return failure();
         }
 
-        // Only support lower bound 0 and step 1 (the typical Triton loop
-        // pattern), where the iteration count equals the induction variable.
+        // The iteration count n = (iv - lb) / step relates the induction
+        // variable to the per-iteration increment: current = init + n*delta.
+        // lb/step must be compile-time constants
         auto lb = getConstantIntValue(forOp.getLowerBound());
         auto step = getConstantIntValue(forOp.getStep());
-        if (!lb || *lb != 0 || !step || *step != 1)
+        if (!lb || !step || *step == 0)
           return failure();
 
-        // iteration offset = inductionVar * increment (in index type)
         FailureOr<Value> ivIndex = castIntegerLike(
             builder, loc, forOp.getInductionVar(), builder.getIndexType());
         if (failed(ivIndex))
           return failure();
+
+        Value iterCount = *ivIndex;
+        if (*lb != 0) {
+          auto lbCst = builder.create<arith::ConstantIndexOp>(loc, *lb);
+          iterCount = builder.create<arith::SubIOp>(loc, iterCount, lbCst);
+        }
+        if (*step != 1) {
+          auto stepCst = builder.create<arith::ConstantIndexOp>(loc, *step);
+          iterCount = builder.create<arith::DivSIOp>(loc, iterCount, stepCst);
+        }
+
         OpFoldResult offset = mulOpFoldResult(
-            *ivIndex, builder.getIndexAttr(increment), loc, builder,
+            iterCount, builder.getIndexAttr(increment), loc, builder,
             builder.getIndexType());
         if (!offset)
           return failure();
 
-        // Shift start/end (or the scalar) by the iteration offset.
         if (this->start && this->end) {
           this->start = addOpFoldResult(this->start, offset, loc, builder,
                                         builder.getIndexType());

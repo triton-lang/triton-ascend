@@ -879,9 +879,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
-        _compile_option_list += ["--mlir-print-ir-after-failure"]
-        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
+            _compile_option_list += ["--mlir-print-ir-after-failure"]
+            _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         vf_merge_level = metadata["vf_merge_level"]
@@ -922,9 +922,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             metadata["required_ub_bits"] = int(match.group(1))
 
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
 
         if Path(callback_path).is_file():
@@ -1097,9 +1098,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                     and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
                 _compile_option_list += ["--enable-lib-call-no-inline=false"]
 
-        _compile_option_list += ["--mlir-print-ir-after-failure"]
-        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
+            _compile_option_list += ["--mlir-print-ir-after-failure"]
+            _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
@@ -1125,9 +1126,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             metadata["required_ub_bits"] = int(match.group(1))
 
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
 
         if Path(callback_path).is_file():
@@ -1432,9 +1434,10 @@ def ttir_to_npubin(mod, metadata, opt):
         cmd_list = ([npu_compiler_path, src_path] + _compile_option_list + ["-o", bin_file])
         ret = subprocess.run(cmd_list, env=env, capture_output=True, check=True)
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8')
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8')
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
         return Path(bin_path).read_bytes()
 

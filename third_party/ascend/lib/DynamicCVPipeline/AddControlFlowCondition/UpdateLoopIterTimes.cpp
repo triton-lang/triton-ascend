@@ -512,12 +512,7 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
   for (auto &entry : crossDeps) {
     Operation *consumerOp = entry.first; // Consumer operation
     for (SmallVector<Operation *> &producerOps : entry.second) {
-      int x = producerOps.size(); // Producer op count (one buffer has
-                                  // two ops in different scope)
-      // some special buffer is not Symmetrical
-      if (producerOps.size() == 1) {
-        x = 1;
-      }
+      int x = info->crossCoreBufferCount;
 
       // Find the IfOp index that consumer belongs to (comsumerIdx)
       int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);

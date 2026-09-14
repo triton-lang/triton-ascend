@@ -349,6 +349,7 @@ def do_bench_npu(
     :type target_kernel_name: str, optional
     """
     import math
+    import os
     mspti_available = True
     if KernelMonitor is None:
         mspti_available = False
@@ -357,10 +358,15 @@ def do_bench_npu(
 
     if not isinstance(funcs, list):
         funcs = [funcs]
+        use_autotune = False
+    else:
+        use_autotune = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
+
     results = None
     need_fallback = True
-    force_fallback = (prof_dir is not None) or keep_res
-    if mspti_available and target_kernel_name is None and not force_fallback:
+    force_fallback = (prof_dir is not None) or keep_res or (target_kernel_name is not None and not use_autotune)
+
+    if mspti_available and not force_fallback:
         try:
             results = do_bench_npu_mspti(funcs, warmup, active, clear_l2_cache, target_kernel_name)
             first_val = results[0] if isinstance(results, list) else results

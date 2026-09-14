@@ -26,6 +26,7 @@
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -115,7 +116,8 @@ OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
 
 LogicalResult MaskState::parse(Value operand, const Location &loc,
                                OpBuilder &builder) {
-  if (isa<IntegerType>(operand.getType())) {
+  Type operandType = operand.getType();
+  if (isa<IntegerType>(operandType) || operandType.isIndex()) {
     return parseIntScalar(operand, loc, builder);
   }
 
@@ -124,8 +126,105 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
       OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
       if (initArgOperand) {
-        Value initArg = initArgOperand->get();
-        return parse(initArg, loc, builder);
+        // Scalar iter_args (i32/index) are already handled above by
+        // parseIntScalar using the block argument value, which correctly
+        // reflects the current iteration's value inside the loop body.
+        //
+        // For a tensor iter_arg, the value advances by a constant amount
+        // each iteration (visible in the yield value, e.g. iter_arg + 64).
+        // Parse the init value to obtain the base range structure, then
+        // shift start/end by inductionVar * increment so the slice bounds
+        // are correct for every iteration, not just the first one.
+        if (!isa<ShapedType>(operand.getType()))
+          return failure();
+
+        // Parse the init value to get the base range structure.
+        if (failed(parse(initArgOperand->get(), loc, builder)))
+          return failure();
+
+        // Only scf.for loops are handled: the per-iteration increment is
+        // extracted from the yield value and applied via the induction
+        // variable. Other loop-like ops fall back to failure (conservative:
+        // no slice optimization, but no incorrect bounds).
+        auto forOp = dyn_cast<scf::ForOp>(parentOp);
+        if (!forOp)
+          return failure();
+
+        unsigned slot = blockArgument.getArgNumber() - 1;
+        if (slot >= forOp.getYieldedValues().size())
+          return failure();
+        Value yielded = forOp.getYieldedValues()[slot];
+        if (yielded == operand) {
+          // iter_arg is unchanged across iterations: the init value is the
+          // current value, so the parsed state needs no adjustment.
+          return success();
+        }
+
+        // Detect yield == iter_arg + const_tensor (or const_tensor + iter_arg).
+        auto addOp = yielded.getDefiningOp<arith::AddIOp>();
+        if (!addOp)
+          return failure();
+        Value incrementValue;
+        if (addOp.getLhs() == operand)
+          incrementValue = addOp.getRhs();
+        else if (addOp.getRhs() == operand)
+          incrementValue = addOp.getLhs();
+        else
+          return failure();
+
+        // The increment must be a splat integer constant tensor or a scalar
+        // integer constant.
+        int64_t increment = 0;
+        if (auto constOp = incrementValue.getDefiningOp<arith::ConstantOp>()) {
+          if (auto denseAttr = dyn_cast<DenseElementsAttr>(constOp.getValue())) {
+            if (!denseAttr.isSplat() ||
+                !isa<IntegerType>(denseAttr.getElementType()))
+              return failure();
+            increment = denseAttr.getSplatValue<IntegerAttr>().getInt();
+          } else if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+            increment = intAttr.getInt();
+          } else {
+            return failure();
+          }
+        } else {
+          return failure();
+        }
+
+        // Only support lower bound 0 and step 1 (the typical Triton loop
+        // pattern), where the iteration count equals the induction variable.
+        auto lb = getConstantIntValue(forOp.getLowerBound());
+        auto step = getConstantIntValue(forOp.getStep());
+        if (!lb || *lb != 0 || !step || *step != 1)
+          return failure();
+
+        // iteration offset = inductionVar * increment (in index type)
+        FailureOr<Value> ivIndex = castIntegerLike(
+            builder, loc, forOp.getInductionVar(), builder.getIndexType());
+        if (failed(ivIndex))
+          return failure();
+        OpFoldResult offset = mulOpFoldResult(
+            *ivIndex, builder.getIndexAttr(increment), loc, builder,
+            builder.getIndexType());
+        if (!offset)
+          return failure();
+
+        // Shift start/end (or the scalar) by the iteration offset.
+        if (this->start && this->end) {
+          this->start = addOpFoldResult(this->start, offset, loc, builder,
+                                        builder.getIndexType());
+          this->end = addOpFoldResult(this->end, offset, loc, builder,
+                                      builder.getIndexType());
+          if (!this->start || !this->end)
+            return failure();
+        } else if (this->scalar) {
+          this->scalar = addOpFoldResult(this->scalar, offset, loc, builder,
+                                         builder.getIndexType());
+          if (!this->scalar)
+            return failure();
+        } else {
+          return failure();
+        }
+        return success();
       }
     }
   }

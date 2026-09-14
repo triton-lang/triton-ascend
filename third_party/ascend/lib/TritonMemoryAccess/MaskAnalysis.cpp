@@ -200,9 +200,9 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
           iterCount = builder.create<arith::DivSIOp>(loc, iterCount, stepCst);
         }
 
-        OpFoldResult offset = mulOpFoldResult(
-            iterCount, builder.getIndexAttr(increment), loc, builder,
-            builder.getIndexType());
+        OpFoldResult offset =
+            mulOpFoldResult(iterCount, builder.getIndexAttr(increment), loc,
+                            builder, builder.getIndexType());
         if (!offset)
           return failure();
 

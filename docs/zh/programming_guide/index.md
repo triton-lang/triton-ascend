@@ -337,7 +337,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 1. **触发阶段：** 该错误发生在核函数编译期——昇腾后端在将MLIR转换为二进制阶段失败，而非程序运行期；编译失败意味着核函数未生成可执行二进制。
 
-2. **直接原因：** 编译器估算单个tile所需UB为3,072,256bit，而硬件可用UB上限为1,572,864bit（A2系列，即192KB），需求量超出上限1,499,392bit（3,072,256 − 1,572,864 = 1,499,392），约为可用容量的1.95倍，因此判定ub overflow。
+2. **直接原因：** 编译器估算单个tile所需UB为3072256bit，而硬件可用UB上限为1572864bit（A2系列，即192KB），需求量超出上限1499392bit（3072256 − 1572864 = 1499392），约为可用容量的1.95倍，因此判定ub overflow。
 
 3. **根本原因：** ①块大小参数（如BLOCK_SIZE）过大，单个tile元素数过多；②编译器默认开启multi-buffer存算并行（编译器侧配置项为`multiBuffer=True`，用户在`triton.Config`或kernel launch中通过`multibuffer`参数控制，默认开启），为搬运与计算的流水重叠创建多份张量副本，部分算子需要额外local buffer，使UB占用成倍放大；③核函数内中间张量过多，累积占用超过上限。
 
@@ -348,8 +348,8 @@ large or block number is more than what user expect due to multi-buffer feature 
 | `triton.compiler.errors.MLIRCompilationError` | Triton编译器在MLIR编译阶段抛出的编译错误，核函数未生成可执行二进制 |
 | `[ConvertLinalgRToBinary] encounters error`、`Failed to run BishengHIR pipeline` | 昇腾后端在MLIR到二进制的转换阶段失败 |
 | `ub overflow` | UB（统一缓冲区）溢出：编译期估算的片上缓冲区需求量超过硬件容量上限 |
-| `requires 3072256 bits` | 本次编译中单个tile所需的UB位数：3,072,256bit（约375KB） |
-| `1572864 bits available` | 当前硬件可用UB上限：1,572,864bit，即192KB（A2系列） |
+| `requires 3072256 bits` | 本次编译中单个tile所需的UB位数：3072256bit（约375KB） |
+| `1572864 bits available` | 当前硬件可用UB上限：1572864bit，即192KB（A2系列） |
 | `multi-buffer feature is enabled and some ops need extra local buffer` | 编译器提示：multi-buffer（存算并行多缓冲）已开启，部分算子需要额外local buffer副本，会放大UB占用 |
 
 #### 解决步骤
@@ -433,7 +433,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 | 关注multi-buffer影响 | 编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节） |
 | 长序列分批处理 | 当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运 |
 
-UB占用估算示例：65,536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65,536×4×2×8 = 4,194,304bit，已超过A2系列可用的1,572,864bit；按A2系列1,572,864bit上限反推，单张量float16、双缓冲下的理论上限约49,152个元素（1,572,864÷8÷2÷2 = 49,152）。
+UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304bit，已超过A2系列可用的1572864bit；按A2系列1572864bit上限反推，单张量float16、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。
 
 【注意】A2系列产品UB大小为192KB（即1572864bit）。各产品系列片上内存规格如下：
 

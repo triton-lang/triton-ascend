@@ -31,6 +31,7 @@
 #include "mlir/Pass/Pass.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -55,6 +56,11 @@ struct DependencyInfo {
   int consumerBlockId;
   int iniProducerBlockId;
   int iniConsumerBlockId;
+
+  mlir::Operation *producerStart = nullptr;
+  mlir::Operation *producerEnd = nullptr;
+  mlir::Operation *consumerStart = nullptr;
+  mlir::Operation *consumerEnd = nullptr;
 
   bool isAllTranspoesd = false;
 
@@ -149,6 +155,15 @@ private:
   void analyzeExternalOutputs(DataDependencyInfo &info);
 
   void analyzeMemoryEffect(DataDependencyInfo &info);
+  void optimizeMemoryDependencies(DataDependencyInfo &info);
+  void sortMemoryDependencies(
+    llvm::SmallVector<DependencyInfo> &memoryDependencies);
+  void buildInitialDependencyGraph(
+    DataDependencyInfo &info,
+      llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap);
+  void updateDependencyGraph(
+    int producerBlockId, int consumerBlockId,
+      llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap);
   std::pair<int, int> findCommonLevelBlockIds(DataDependencyInfo &info,
                                               int producerBlockId,
                                               int consumerBlockId);

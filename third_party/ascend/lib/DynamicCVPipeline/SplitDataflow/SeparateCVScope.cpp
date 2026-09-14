@@ -1011,10 +1011,12 @@ static LogicalResult separateScopes(func::FuncOp funcOp) {
   auto vecScope = scopes->first;
   auto cubeScope = scopes->second;
 
-  auto vecActions = collectActionsInRegion(vecScope.getRegion(), "VECTOR");
-  auto cubeActions = collectActionsInRegion(cubeScope.getRegion(), "CUBE");
-  if (failed(executeActions(vecActions, "VECTOR")) ||
-      failed(executeActions(cubeActions, "CUBE"))) {
+  auto vecActions =
+      collectActionsInRegion(vecScope.getRegion(), CVPipeline::kCoreTypeVector);
+  auto cubeActions =
+      collectActionsInRegion(cubeScope.getRegion(), CVPipeline::kCoreTypeCube);
+  if (failed(executeActions(vecActions, CVPipeline::kCoreTypeVector)) ||
+      failed(executeActions(cubeActions, CVPipeline::kCoreTypeCube))) {
     logDebug("SeparateCVScope failed while executing actions for func '",
              funcOp.getName(), "'");
     return failure();

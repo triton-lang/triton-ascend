@@ -16,6 +16,7 @@
 
 ```python
 import torch
+import torch_npu
 import triton
 import triton.language as tl
 
@@ -37,8 +38,10 @@ def test_vector_add(n, dtype):
         tl.store(out_ptr + idx, a + b)
 
     def triton_func(x, y):
-        out = torch.empty_like(x)
-        add_kernel[(1,)](x.npu(), y.npu(), out, n=x.numel())
+        x_npu = x.npu()
+        y_npu = y.npu()
+        out = torch.empty_like(x_npu)
+        add_kernel[(1,)](x_npu, y_npu, out, n=x.numel())
         return out
 
     triton_cal = triton_func(x, y)
@@ -91,7 +94,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 ### 判定规则
 
-`torch.testing.assert_close`/`torch.equal` 不抛出异常 → **通过**，否则 **不通过**。
+`torch.testing.assert_close` 不抛出异常，或 `torch.equal` 返回 `True`，则为 **通过**；否则为 **不通过**。
 
 * `torch.testing.assert_close`：如果张量在指定的容差范围内近似相等，则通过（不抛出异常）；否则不通过（抛出 AssertionError）。
 

@@ -23,7 +23,7 @@
 
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
-| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
+| **精度问题** | NPU 运行结果与标杆参考结果（如 PyTorch 或 Triton CPU 解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
 | **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2 编译错误调试方法 |
 
 ## 2 Triton-Ascend 编译流程概览
@@ -137,7 +137,7 @@ python your_triton_program.py
 
 ### 3.4 IR文件解析
 
-以示范测试用例  [01-vector-add.py](../../../third_party/ascend/tutorials/01-vector-add.py#) 举例说明编译流程：
+以示范测试用例 [01-vector-add.py](../../../third_party/ascend/tutorials/01-vector-add.py) 举例说明编译流程：
 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。
 通过TRITON_DEBUG=1开启dump文件输出，TRITON_ALWAYS_COMPILE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 
@@ -198,7 +198,7 @@ TTIR 是 Triton 编译器前端生成的中间表示（Intermediate Representati
 
 TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.store` 等），尚未映射到底层硬件的具体内存模型或执行单元，是平台无关的高层次 IR。
 
-#### 3.4.1 TTAdapter IR（Target-Specific Adapter Representation）
+#### 3.4.2 TTAdapter IR（Target-Specific Adapter Representation）
 
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
@@ -414,7 +414,7 @@ TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`.
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成 `ttadapter.mlir`，并报错 `MLIRCompilationError`。
 需要进入 Triton-Ascend 代码层面定位问题。Triton-Ascend 包含 Python 和 C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
 ### 5.2.1 Python 代码调试方法
@@ -439,7 +439,7 @@ def compile_fn(ttir):
     import pdb; pdb.set_trace()  # 兼容所有Python版本
 ```
 
-**示例:**
+**示例：**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
 ```text
@@ -497,7 +497,7 @@ python your_triton_script.py
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
-```bash
+```markdown
 ## `isel`（Instruction Selection）
 - **作用**：将 LLVM IR 指令转换为目标架构的机器指令（MachineInstr）。
 - **调试内容**：显示 IR → 机器指令的映射过程、模式匹配结果。

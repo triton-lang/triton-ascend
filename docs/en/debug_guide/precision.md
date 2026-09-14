@@ -16,6 +16,7 @@ This document describes how to perform precision comparison and error analysis f
 
 ```python
 import torch
+import torch_npu
 import triton
 import triton.language as tl
 
@@ -37,8 +38,10 @@ def test_vector_add(n, dtype):
         tl.store(out_ptr + idx, a + b)
 
     def triton_func(x, y):
-        out = torch.empty_like(x)
-        add_kernel[(1,)](x.npu(), y.npu(), out, n=x.numel())
+        x_npu = x.npu()
+        y_npu = y.npu()
+        out = torch.empty_like(x_npu)
+        add_kernel[(1,)](x_npu, y_npu, out, n=x.numel())
         return out
 
     triton_cal = triton_func(x, y)
@@ -92,7 +95,7 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
 
 ### Evaluation Rules
 
-`torch.testing.assert_close` / `torch.equal` does not raise an exception → **Pass**, otherwise **Fail**.
+`torch.testing.assert_close` does not raise an exception, or `torch.equal` returns `True` → **Pass**; otherwise **Fail**.
 
 * `torch.testing.assert_close`: Passes (no exception raised) if tensors are approximately equal within the specified tolerance; otherwise fails (AssertionError raised).
 

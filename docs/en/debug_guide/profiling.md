@@ -109,7 +109,7 @@ The theoretical performance is the ideal objective of the actual performance of 
 > - If multiple transfer instructions exist at the same time, the bandwidth is shared. Data cannot be moved at a rate close to the theoretical bandwidth. For example, if the MTE2 and MTE3 read and write the GM at the same time, the time consumed by the transfer pipeline is (MTE2 transfer volume + MTE3 transfer volume)/GM bandwidth.
 > - The bandwidth usage (effective bandwidth/theoretical bandwidth) varies according to the size of data blocks to be transferred. If the amount of data transferred each time is small, the actual performance cannot reach the theoretical bandwidth.
 >
-- Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32K float elements is 32K/11.06 TOPS = 0.003 μs (calculated based on 1K = 1000).
+- Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32,000 float elements is 32,000/11.06 TOPS ≈ 2.9 ns.
 
 <a id="locating-bottlenecks"></a>
 
@@ -139,7 +139,7 @@ The AI processor used in the previous example has 48 vector cores. The _layer_no
 ### Example: i64/i32 Comparison Failing to Vectorize on NPU, Leading to Scalar Fallback
 
 [Description] The i64/i32 comparison (cmp) cannot enable Vector on the NPU, causing them to degenerate into scalar computation and reducing efficiency. The i64/i32 cmp is converted to fp32 to accelerate vector operations by using vec_cast and vec_cmp.
-[Note] When cmp is used within a mask in tl.load or tl.save, the compiler can typically auto-vectorize the operation. In this example, tl.where requires manual intervention to ensure vectorization.
+[Note] When cmp is used within a mask in tl.load or tl.store, the compiler can typically auto-vectorize the operation. In this example, tl.where requires manual intervention to ensure vectorization.
 
 ```diff
 import triton

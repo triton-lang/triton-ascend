@@ -1314,14 +1314,28 @@ static LogicalResult processTransferChain(TransferOpChain &chain, Value cond,
 /// Returns the condition Value; `builderOut` is set to the insertion point
 /// for subsequent wrapping ops (before the loop terminator).
 static Value prepareLoopPolling(Operation *loopOp, Operation *waitOp,
-                                OpBuilder &builderOut) {
+                                bool forceBodyStart, OpBuilder &builderOut) {
   int bid = getBlockId(waitOp);
   int tid = getTransferId(waitOp);
 
   if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
-    OpBuilder condBuilder(forOp.getBody(), Block::iterator(waitOp));
-    Value cond = createPollingCondition(forOp, condBuilder, bid, tid);
-    builderOut.setInsertionPoint(forOp.getBody()->getTerminator());
+    if (!forceBodyStart && waitOp->getBlock() == forOp.getBody()) {
+      // Anchor wait directly in the loop body: build at its position.
+      OpBuilder condBuilder(forOp.getBody(), Block::iterator(waitOp));
+      Value cond = createPollingCondition(forOp, condBuilder, bid, tid);
+      builderOut.setInsertionPoint(forOp.getBody()->getTerminator());
+      return cond;
+    }
+    // The loop has a wait nested inside the body (e.g. under a user scf.if):
+    // the anchor position cannot dominate sibling regions' wraps, and an
+    // iterator into a nested block would corrupt the op list. Build at body
+    // start (mirrors the while branch).
+    builderOut.setInsertionPointToStart(forOp.getBody());
+    std::optional<int> pollBlockId = getFirstBlockId(forOp.getBody());
+    if (!pollBlockId)
+      pollBlockId = bid;
+    OpBuilder condBuilder(builderOut);
+    Value cond = createPollingCondition(forOp, condBuilder, *pollBlockId, tid);
     return cond;
   }
 
@@ -1382,13 +1396,14 @@ static Value prepareLoopPolling(Operation *loopOp, Operation *waitOp,
 /// so one scalar condition chain per loop suffices; anchorWait (the earliest
 /// wait in the loop) guarantees the cond dominates every group's scf.if.
 static Value getOrCreateLoopCond(Operation *loopOp, Operation *anchorWait,
+                                 bool forceBodyStart,
                                  DenseMap<Operation *, Value> &condCache) {
   auto it = condCache.find(loopOp);
   if (it != condCache.end()) {
     return it->second;
   }
   OpBuilder builder(loopOp->getContext());
-  Value cond = prepareLoopPolling(loopOp, anchorWait, builder);
+  Value cond = prepareLoopPolling(loopOp, anchorWait, forceBodyStart, builder);
   if (cond) {
     condCache[loopOp] = cond;
     LDBG("Shared polling cond created for loop, tagged by anchor wait.");
@@ -1408,13 +1423,24 @@ static LogicalResult
 addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups, int &errCode) {
   // Anchor per loop: the earliest wait across all groups — the shared cond
   // must dominate every group's scf.if wrappers.
+  // loopHasNestedWait: any group wait of this loop sits inside a nested
+  // region (e.g. a user scf.if). Then the anchor position cannot dominate
+  // sibling regions either, and the cond must be built at body start.
   DenseMap<Operation *, Operation *> loopAnchor;
+  DenseMap<Operation *, bool> loopHasNestedWait;
   for (auto &[tid, group] : groups) {
     auto track = [&](Operation *waitOp) {
       if (!waitOp) {
         return;
       }
       Operation *loop = resolveLoopOp(waitOp);
+      Block *loopBody = nullptr;
+      if (auto forOp = dyn_cast<scf::ForOp>(loop))
+        loopBody = forOp.getBody();
+      else if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+        loopBody = &whileOp.getAfter().front();
+      if (loopBody && waitOp->getBlock() != loopBody)
+        loopHasNestedWait[loop] = true;
       Operation *anchor = loopAnchor.lookup(loop);
       if (!anchor || (waitOp->getBlock() == anchor->getBlock() &&
                       waitOp->isBeforeInBlock(anchor))) {
@@ -1433,7 +1459,8 @@ addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups, int &errCode) {
     // Shared polling condition for the sender loop
     OpBuilder senderBuilder(senderWaitParent->getContext());
     Value senderCond = getOrCreateLoopCond(
-        senderWaitParent, loopAnchor[senderWaitParent], condCache);
+        senderWaitParent, loopAnchor[senderWaitParent],
+        loopHasNestedWait.lookup(senderWaitParent), condCache);
     if (!senderCond) {
       LDBG("FALLBACK: unexpected sender loop op, tid="
            << tid << ", op=" << *senderWaitParent
@@ -1466,7 +1493,8 @@ addPollingControlFlow(DenseMap<int, TransferGroupInfo> &groups, int &errCode) {
         // Receiver uses a different loop op, share its cond too
         OpBuilder receiverBuilder(receiverWaitParent->getContext());
         Value receiverCond = getOrCreateLoopCond(
-            receiverWaitParent, loopAnchor[receiverWaitParent], condCache);
+            receiverWaitParent, loopAnchor[receiverWaitParent],
+            loopHasNestedWait.lookup(receiverWaitParent), condCache);
         if (!receiverCond) {
           LDBG("FALLBACK: unexpected receiver loop op, tid="
                << tid << ", op=" << *receiverWaitParent

@@ -227,8 +227,7 @@ TEST(SimdSimtCostModelTest, KernelMixedRouteComesFromAdjacentStageModes) {
   addStage("store", 30.0, 45.0);
 
   StageTransitionCost transition;
-  transition.simdToSimtCycles = 5.0;
-  transition.simtToSimdCycles = 7.0;
+  transition.fixedPairCycles = 12.0;
   auto result = solveStageRoutes(table, transition);
   if (!result)
     FAIL() << llvm::toString(result.takeError());
@@ -325,8 +324,7 @@ TEST(SimdSimtCostModelTest, MixedScopeSuperBlockAmortizesOnlyFixedTransitions) {
   table.stages = {head, payload, tail};
 
   StageTransitionCost transition;
-  transition.simdToSimtCycles = 40.0;
-  transition.simtToSimdCycles = 40.0;
+  transition.fixedPairCycles = 80.0;
   transition.simdUbLoadBytesPerCycle = 512.0;
   transition.simdUbStoreBytesPerCycle = 256.0;
   transition.simtUbLoadBytesPerThreadPerCycle = 4.0;
@@ -845,8 +843,7 @@ TEST(SimdSimtCostModelTest,
   table.stages = {gather, dot};
 
   StageTransitionCost transition;
-  transition.simdToSimtCycles = 10.0;
-  transition.simtToSimdCycles = 10.0;
+  transition.fixedPairCycles = 20.0;
   auto routes = solveStageRoutes(table, transition);
   if (!routes)
     FAIL() << llvm::toString(routes.takeError());
@@ -918,8 +915,7 @@ TEST(SimdSimtCostModelTest, MixedRouteChargesEveryMaterializedScope) {
   table.stages = {head, gather, tail};
 
   StageTransitionCost transition;
-  transition.simdToSimtCycles = 10.0;
-  transition.simtToSimdCycles = 10.0;
+  transition.fixedPairCycles = 20.0;
   auto routes = solveStageRoutes(table, transition);
   if (!routes)
     FAIL() << llvm::toString(routes.takeError());

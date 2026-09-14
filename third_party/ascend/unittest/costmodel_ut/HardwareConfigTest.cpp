@@ -91,7 +91,7 @@ TEST(CostModelHardwareConfigTest,
     FAIL() << llvm::toString(profile.takeError());
 
   EXPECT_EQ(profile->getProfileVersion(),
-            "david-v100-shared-microbench-20260730-v2");
+            "david-v100-shared-microbench-20260914-v3");
   EXPECT_EQ(profile->getTarget(), "Ascend950PR/dav-c310");
   EXPECT_FALSE(profile->getContentSha256().empty());
 
@@ -146,7 +146,7 @@ TEST(CostModelHardwareConfigTest,
   ASSERT_NE(cfg->getMicrobenchmarkProfile(), nullptr);
   EXPECT_EQ(cfg->getTarget(), "Ascend950PR/dav-c310");
   EXPECT_EQ(cfg->getMicrobenchmarkProfile()->getProfileVersion(),
-            "david-v100-shared-microbench-20260730-v2");
+            "david-v100-shared-microbench-20260914-v3");
   EXPECT_NEAR(
       cfg->getMicrobenchmarkRatePerDeviceCycle("simd.f32.add.throughput"),
       3.30 * 988.9 / 1650.0, 1.0e-12);

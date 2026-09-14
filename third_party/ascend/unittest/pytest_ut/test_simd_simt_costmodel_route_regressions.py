@@ -39,14 +39,17 @@ def _assert_effective_route(path, expected):
     assert report["effective_decision_kind"] == expected
 
 
-def _route_options(report_path):
-    return {
+def _route_options(report_path, logical_programs=0):
+    options = {
         "num_warps": 32,
         "compile_mode": "simd_simt",
         "auto_simt_scope_mode": "auto",
         "auto_simt_scope_dump": str(report_path),
         "enable_auto_blockify": True,
     }
+    if logical_programs:
+        options["logical_program_count_hint"] = logical_programs
+    return options
 
 
 @triton.jit
@@ -229,7 +232,7 @@ def test_dacs_segsum_selects_all_simt_only(tmp_path):
         segsum.stride(4),
         SEQLEN=seqlen,
         CHUNK_SIZE=chunk_size,
-        **_route_options(report_path),
+        **_route_options(report_path, batch * heads * chunks),
     )
     torch.npu.synchronize()
 

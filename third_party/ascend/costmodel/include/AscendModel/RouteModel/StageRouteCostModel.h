@@ -224,8 +224,9 @@ struct StageCostTable {
 };
 
 struct StageTransitionCost {
-  double simdToSimtCycles = 0.0;
-  double simtToSimdCycles = 0.0;
+  /// Fixed cost of one complete local SIMD -> SIMT -> SIMD scope pair.
+  /// This is an operational pair measurement, not a directional latency.
+  double fixedPairCycles = 0.0;
   /// Local scope values cross the SIMD/SIMT register-file boundary through
   /// UB.  SIMD rates are aggregate vector-pipeline rates; SIMT rates are
   /// explicitly per active thread and are aggregated over one logical warp.
@@ -236,7 +237,6 @@ struct StageTransitionCost {
   int64_t simtWarpSize = 1;
 
   bool isValid() const;
-  double get(StageMode from, StageMode to) const;
   llvm::json::Object toJSON() const;
 };
 

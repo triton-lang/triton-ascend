@@ -45,7 +45,7 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
-constexpr int64_t kSupportedProfileSchemaVersion = 11;
+constexpr int64_t kSupportedProfileSchemaVersion = 12;
 
 struct StructuralProfile {
   int64_t tinyDotFlopsMax = 0;
@@ -483,9 +483,9 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
             "superblock");
       }
       if (const auto *handoff = resources->getObject("scope_handoff")) {
-        hardware.transition.simdToSimtCycles =
-            hardware.transition.simtToSimdCycles = reader.number(
-                *handoff, "fixed_directional_system_cycles", "scope_handoff");
+        hardware.transition.fixedPairCycles = resolveNumberOrMeasurement(
+            *handoff, "fixed_pair_system_cycles", "fixed_pair_measurement",
+            "system_cycle", microbench, reader, "scope_handoff");
         hardware.transition.simdUbLoadBytesPerCycle = reader.number(
             *handoff, "simd_ub_load_bytes_per_system_cycle", "scope_handoff");
         hardware.transition.simdUbStoreBytesPerCycle = reader.number(

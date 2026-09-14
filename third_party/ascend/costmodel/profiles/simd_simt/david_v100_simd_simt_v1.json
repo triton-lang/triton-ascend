@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
-  "schema_version": 11,
-  "profile_version": "david-v100-simd-simt-20260906-v22",
+  "schema_version": 12,
+  "profile_version": "david-v100-simd-simt-20260915-v23",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -340,12 +340,12 @@
         "description": "Independent logical programs may continue hiding latency through F4. The 8 B/system-cycle persistent-state rate is shared by the generic SIMD loop-carried-state term and by the extra pressure of replicating that state in SIMT SuperBlock; state replication is pressure-free only through F2. The rule consumes SSA live-out bytes and contains no workload-name check."
       },
       "scope_handoff": {
-        "fixed_directional_system_cycles": 668.0,
+        "fixed_pair_measurement": "simd_simt.scope_handoff.fixed_pair",
         "simd_ub_load_bytes_per_system_cycle": 512.0,
         "simd_ub_store_bytes_per_system_cycle": 256.0,
         "simt_ub_load_bytes_per_thread_per_system_cycle": 4.0,
         "simt_ub_store_bytes_per_thread_per_system_cycle": 4.0,
-        "description": "Only exact tensor values captured by or returned from scope.scope are charged. A value crosses the distinct SIMD/SIMT register files through UB: producer store plus consumer load. SIMD rates reflect the 256-byte vector width with two load and one store issue slots; SIMT rates are explicitly per active thread and are aggregated over one logical warp. The provisional 668-cycle directional fixed term is half of the 1335-cycle scope-pair residual obtained from the A5 local-scope sweep. One scope-local SuperBlock group pays this fixed pair once, so the per-logical-program route score amortizes only the fixed term by factor; UB bytes and Stage work remain unscaled. This is a route-independent calibration seed, not a solve_tril name check, and must later be replaced by directional transition microbenchmarks."
+        "description": "Only exact tensor values captured by or returned from scope.scope are charged. A value crosses the distinct SIMD/SIMT register files through UB: producer store plus consumer load. The fixed pair is the measured operational intercept of one complete local SIMD-to-SIMT-to-SIMD scope and includes VF entry/prologue and exit/epilogue, but excludes tensor handoff bytes and SIMT body work. One scope-local SuperBlock group pays this fixed pair once, so the per-logical-program route score amortizes only the fixed term by factor; UB bytes and Stage work remain unscaled."
       },
       "source": "Ascend950 SIMT issue limits plus provisional conservative dependency/reconvergence, SuperBlock state-pressure, and scope hand-off rates; replace numeric seeds only through versioned CaModel/microbenchmark evidence."
     },

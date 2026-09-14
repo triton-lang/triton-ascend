@@ -35,9 +35,7 @@ static double mixedEquivalentStageCost(const LogicalStageCost &stage,
   const double factor = static_cast<double>(
       std::max<int64_t>(1, selected.implementation.superblockFactor));
   const double fixedScopeTransitions =
-      static_cast<double>(scopeCount) / factor *
-      (transition.get(StageMode::SIMD, StageMode::SIMT) +
-       transition.get(StageMode::SIMT, StageMode::SIMD));
+      static_cast<double>(scopeCount) / factor * transition.fixedPairCycles;
   const double activeThreads =
       std::max(1.0, static_cast<double>(transition.simtWarpSize) *
                         std::clamp(stage.features.activeLaneRatio, 0.0, 1.0));
@@ -368,8 +366,7 @@ llvm::json::Object LogicalStageCost::toJSON() const {
 }
 
 bool StageTransitionCost::isValid() const {
-  return std::isfinite(simdToSimtCycles) && std::isfinite(simtToSimdCycles) &&
-         simdToSimtCycles >= 0.0 && simtToSimdCycles >= 0.0 &&
+  return std::isfinite(fixedPairCycles) && fixedPairCycles >= 0.0 &&
          std::isfinite(simdUbLoadBytesPerCycle) &&
          simdUbLoadBytesPerCycle > 0.0 &&
          std::isfinite(simdUbStoreBytesPerCycle) &&
@@ -380,16 +377,9 @@ bool StageTransitionCost::isValid() const {
          simtUbStoreBytesPerThreadPerCycle > 0.0 && simtWarpSize > 0;
 }
 
-double StageTransitionCost::get(StageMode from, StageMode to) const {
-  if (from == to)
-    return 0.0;
-  return from == StageMode::SIMD ? simdToSimtCycles : simtToSimdCycles;
-}
-
 llvm::json::Object StageTransitionCost::toJSON() const {
   llvm::json::Object result;
-  result["simd_to_simt_system_cycles"] = simdToSimtCycles;
-  result["simt_to_simd_system_cycles"] = simtToSimdCycles;
+  result["fixed_pair_system_cycles"] = fixedPairCycles;
   result["simd_ub_load_bytes_per_system_cycle"] = simdUbLoadBytesPerCycle;
   result["simd_ub_store_bytes_per_system_cycle"] = simdUbStoreBytesPerCycle;
   result["simt_ub_load_bytes_per_thread_per_system_cycle"] =

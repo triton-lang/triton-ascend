@@ -1,7 +1,7 @@
 {
   "$schema": "./microbenchmark_profile_schema.json",
   "schema_version": 1,
-  "profile_version": "david-v100-shared-microbench-20260730-v2",
+  "profile_version": "david-v100-shared-microbench-20260914-v3",
   "target": "Ascend950PR/dav-c310",
   "description": "Model-neutral target facts and microbenchmark evidence. Model-specific scale, penalties, coverage, gates, and fallback priors are intentionally excluded.",
   "measurements": {
@@ -93,6 +93,16 @@
       "scope": "single_aiv_serialized_empty_vf_with_per_iteration_barrier",
       "source_kind": "isolated_microbenchmark",
       "source": "data_provider/meas.cce; data_provider/build_commands.md",
+      "confidence": "medium"
+    },
+    "simd_simt.scope_handoff.fixed_pair": {
+      "description": "Operational fixed cost of one complete local SIMD-to-SIMT-to-SIMD scope pair. Tensor handoff bytes and SIMT body work are excluded by the fitted intercept.",
+      "value": 184.663,
+      "unit": "system_cycle",
+      "cycle_domain": "SYS_CNT",
+      "scope": "single_aiv_local_simt_scope_pair_factor1_no_tensor_handoff",
+      "source_kind": "isolated_microbenchmark",
+      "source": "data_provider/transition_fixed_pair.md",
       "confidence": "medium"
     },
     "simt.shuffle.throughput": {

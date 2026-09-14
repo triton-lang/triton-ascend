@@ -27,9 +27,20 @@
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallVector.h"
+
+#include "DynamicCVPipeline/Common/Utils.h"
 
 namespace mlir {
 namespace CVPipeline {
+
+// Per-core-type wall data, grouped so CUBE and VECTOR share one structure.
+struct CoreWallInfo {
+  // Block-level sync points, sorted by position.
+  llvm::SmallVector<Operation *> syncPoints;
+  // prefixCount[i] = #syncPoints at positions < i -> O(1) segmentOf.
+  llvm::SmallVector<unsigned> prefixCount;
+};
 
 class SyncWall {
 public:
@@ -49,9 +60,24 @@ public:
 
   bool sameSegment(Operation *a, Operation *b) const;
 
+  // Sync points of the given core type (block-level), sorted by position.
+  ArrayRef<Operation *> syncPointsOf(CoreType core) const;
+
+  // True iff @p op is a sync point of @p core (itself a sync op or contains
+  // one). Covers all nesting levels, not only block-level.
+  bool isSyncPoint(Operation *op, CoreType core) const;
+
+  Operation *getNextSyncOpInSameBlock(Operation *op) const;
+
+  Operation *getPredSyncOpInSameBlock(Operation *op) const;
+
 private:
   llvm::DenseMap<Operation *, unsigned> ordinal;
-  llvm::DenseSet<unsigned> syncPositions;
+  CoreWallInfo cube;
+  CoreWallInfo vector;
+
+  llvm::SmallVector<unsigned> buildPrefixCount(ArrayRef<Operation *> syncs,
+                                               unsigned idx);
 };
 
 } // namespace CVPipeline

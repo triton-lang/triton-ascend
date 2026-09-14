@@ -1690,6 +1690,22 @@ int OpClassifierPass::handleCubeAndVector() {
     }
   } while (changed);
 
+  // Give every debug barrier / sync block its own unique block id
+  ModuleOp module = getOperation();
+  CVPipeline::ComputeBlockIdManager bm(module);
+  for (auto *op : allOps) {
+    if (!isSyncOp(op)) {
+      continue;
+    }
+    if (llvm::failed(bm.markOpBlockId(op))) {
+      return 1;
+    }
+    LOG_DEBUG("======== Assigned unique block_id for synchronization op "
+              << *op << "\n");
+    op->setAttr(CVPipeline::kExternalSync,
+                IntegerAttr::get(IntegerType::get(op->getContext(), 32), 1));
+  }
+
   return 0;
 }
 
@@ -1747,9 +1763,6 @@ int OpClassifierPass::stampToIR() {
 // Step 1: Mark Synchronization Op
 // ============================================================================
 llvm::LogicalResult OpClassifierPass::markSynchronizationOp() {
-  ModuleOp module = getOperation();
-  CVPipeline::ComputeBlockIdManager bm(module);
-
   for (Operation *op : allOps) {
     if (!isSyncOp(op)) {
       continue;
@@ -1810,18 +1823,6 @@ llvm::LogicalResult OpClassifierPass::markSynchronizationOp() {
     }
 
     LOG_DEBUG("sync_block_all classified by mode: " << *op << "\n");
-
-    // Give every debug barrier / sync block its own unique block id so the sync
-    // ops lowered from it inherit a block id that no other op shares. Sync ops
-    // that OpClassifier already stamped (e.g. hivm.sync_block_all) keep their
-    // id; markOpBlockId would fail on them because they are already recorded.
-    if (llvm::failed(bm.markOpBlockId(op))) {
-      return failure();
-    }
-    LOG_DEBUG("======== Assigned unique block_id for synchronization op "
-              << *op << "\n");
-    op->setAttr(CVPipeline::kExternalSync,
-                IntegerAttr::get(IntegerType::get(op->getContext(), 32), 1));
   }
 
   return success();

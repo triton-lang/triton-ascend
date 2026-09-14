@@ -56,6 +56,11 @@ struct DependencyInfo {
   int iniProducerBlockId;
   int iniConsumerBlockId;
 
+  mlir::Operation *producerStart = nullptr;
+  mlir::Operation *producerEnd = nullptr;
+  mlir::Operation *consumerStart = nullptr;
+  mlir::Operation *consumerEnd = nullptr;
+
   bool isAllTranspoesd = false;
 
   // Optional Items for memDependencies

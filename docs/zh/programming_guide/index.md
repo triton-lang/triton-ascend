@@ -335,7 +335,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 #### 错误原因分析
 
-1. **触发阶段：** 该错误发生在核函数编译期——昇腾后端在将MLIR转换为二进制（BishengHIR编译流水线）阶段失败，而非程序运行期；编译失败意味着核函数未生成可执行二进制。
+1. **触发阶段：** 该错误发生在核函数编译期——昇腾后端在将MLIR转换为二进制阶段失败，而非程序运行期；编译失败意味着核函数未生成可执行二进制。
 
 2. **直接原因：** 编译器估算单个tile所需UB为3,072,256bit，而硬件可用UB上限为1,572,864bit（A2系列，即192KB），需求量超出上限1,499,392bit（3,072,256 − 1,572,864 = 1,499,392），约为可用容量的1.95倍，因此判定ub overflow。
 
@@ -346,7 +346,7 @@ large or block number is more than what user expect due to multi-buffer feature 
 | 日志关键字段 | 含义 |
 | --- | --- |
 | `triton.compiler.errors.MLIRCompilationError` | Triton编译器在MLIR编译阶段抛出的编译错误，核函数未生成可执行二进制 |
-| `[ConvertLinalgRToBinary] encounters error`、`Failed to run BishengHIR pipeline` | 昇腾后端在MLIR到二进制的转换阶段（BishengHIR编译流水线）失败 |
+| `[ConvertLinalgRToBinary] encounters error`、`Failed to run BishengHIR pipeline` | 昇腾后端在MLIR到二进制的转换阶段失败 |
 | `ub overflow` | UB（统一缓冲区）溢出：编译期估算的片上缓冲区需求量超过硬件容量上限 |
 | `requires 3072256 bits` | 本次编译中单个tile所需的UB位数：3,072,256bit（约375KB） |
 | `1572864 bits available` | 当前硬件可用UB上限：1,572,864bit，即192KB（A2系列） |

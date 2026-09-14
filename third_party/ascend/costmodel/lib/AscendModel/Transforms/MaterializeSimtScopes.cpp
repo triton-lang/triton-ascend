@@ -8,6 +8,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
+#include "AscendModel/Support/CostModelLogger.h"
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
 
@@ -163,6 +164,9 @@ static LogicalResult wrapAnchorRange(ArrayRef<Operation *> ops,
 LogicalResult materializeSimtAnchorPlan(ModuleOp module,
                                         const SimtAnchorPlan &plan,
                                         int64_t superblockFactor) {
+  COSTMODEL_TRACE("materializeSimtAnchorPlan");
+  costModelLog() << "input: module anchors=" << plan.anchors.size()
+                 << " superblock_factor=" << superblockFactor << "\n";
   if (superblockFactor <= 0 || (superblockFactor & (superblockFactor - 1)) != 0)
     return module.emitError(
         "SIMT scope superblock factor must be a positive power of two");
@@ -213,6 +217,7 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
   if (materialized == 0)
     return module.emitError(
         "mixed_simd_simt has no materializable local SIMT scope");
+  costModelLog() << "output: materialized scopes=" << materialized << "\n";
   return success();
 }
 

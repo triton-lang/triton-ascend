@@ -18,6 +18,16 @@ struct StagePartitionerOptions {
   int64_t tinyDotFlopsMax = 16384;
   int64_t maximumSuperblockFactor = 1;
   bool scopeSuperblockMaterializable = false;
+  /// Anchor-free Stages may become StageOwnedScope local SIMT scopes only on
+  /// targets whose backend can materialize local scope.scope regions.
+  bool compileOn91095 = true;
+  /// Expose the direct body operations of independent structured loops
+  /// (no true loop-carried data dependency) as semantic roots, so the loop
+  /// shell is charged only its backedge overhead while the body is partitioned
+  /// with the normal Stage rules.  Loops carrying a real recurrence stay
+  /// atomic.  Always on: independent loop bodies are semantic roots by
+  /// default.
+  bool splitIndependentLoopBody = true;
 };
 
 /// Ordered post-transform TTIR semantic roots.  AutoBlockify V1's outer loop
@@ -26,22 +36,28 @@ struct StagePartitionerOptions {
 /// ownership is derived separately from the immutable SimtAnchorPlan.
 struct ProgramStructure {
   std::vector<Operation *> rootOperations;
+  /// Mirrors StagePartitionerOptions::splitIndependentLoopBody so every
+  /// later analysis resolves roots with the same loop-body exposure rule.
+  bool splitIndependentLoopBody = true;
 };
 
 class ProgramStructureAnalysis {
 public:
   llvm::Expected<ProgramStructure>
-  analyze(ModuleOp module, const SimtAnchorPlan &anchorPlan) const;
+  analyze(ModuleOp module, const SimtAnchorPlan &anchorPlan,
+          bool splitIndependentLoopBody = true) const;
 };
 
 /// Splits ordered semantic roots directly into single-kind Stages.  It does
 /// not evaluate cycles or choose SIMD/SIMT.  The anchor plan is used only as
-/// exact ownership evidence for materializable local SIMT Stages.
+/// exact ownership evidence for materializable local SIMT Stages; anchor-free
+/// Stages may additionally become StageOwnedScope units when the target can
+/// materialize local scopes.
 class StageBoundaryAnalysis {
 public:
-  llvm::Expected<StagePartition>
-  analyze(const ProgramStructure &structure,
-          const SimtAnchorPlan &anchorPlan) const;
+  llvm::Expected<StagePartition> analyze(const ProgramStructure &structure,
+                                         const SimtAnchorPlan &anchorPlan,
+                                         bool compileOn91095 = true) const;
 };
 
 /// Derives structural facts for every already-owned Stage.  It never chooses

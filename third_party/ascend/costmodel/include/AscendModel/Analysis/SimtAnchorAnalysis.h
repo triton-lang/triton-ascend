@@ -31,6 +31,9 @@ enum class SimtAnchorKind {
   PlainOneDimensionalCumsum,
   TensorAtomic,
   TriangularSolveLoop,
+  /// Synthesized descriptor: no primitive anchor exists, so one whole
+  /// LogicalStage's contiguous root range becomes the local SIMT scope.
+  StageOwnedScope,
 };
 
 llvm::StringRef stringifySimtAnchorKind(SimtAnchorKind kind);
@@ -40,6 +43,26 @@ struct CandidateLowerability {
   bool allSimtOnly = true;
   bool mixed = true;
 };
+
+/// Backend lowering capabilities consumed by anchor analysis.  Keeping these
+/// facts explicit avoids encoding target names in individual pattern matchers
+/// and makes capability changes independently testable.
+struct SimtLoweringCapabilities {
+  bool supportsLocalSimtScopes = false;
+  bool supportsPlainCumsumSIMD = true;
+  /// Plain cumsum is legal when the whole kernel is compiled in simt_only
+  /// mode.  This is deliberately distinct from support inside a local SIMT
+  /// scope: the two routes use different downstream lowering pipelines.
+  bool supportsPlainCumsumSIMTOnly = false;
+  /// Whether tt.scan can be materialized inside a mixed-mode local SIMT
+  /// scope.  Keep this false until the local-scope pipeline lowers vcumsum;
+  /// the surrounding mixed kernel can still execute cumsum on the SIMD side.
+  bool supportsPlainCumsumInLocalSIMTScope = false;
+};
+
+SimtLoweringCapabilities
+querySimtLoweringCapabilities(llvm::StringRef actualTarget,
+                              bool compileOn91095);
 
 /// Structural facts for a blockwise triangular recurrence such as solve_tril.
 /// These are extracted from TTIR and deliberately avoid workload/function
@@ -106,12 +129,32 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
                                         int64_t superblockFactor = 1);
 
 /// True when a load/store pointer has an SSA backward slice that reaches a
-/// loaded/gathered index.  This is a real data-dependence test and must not be
-/// confused with the legacy rank-based laneDependentPointerOps proxy.
+/// loaded/gathered index.  This is a real data-dependence test and must not
+/// be confused with the legacy rank-based laneDependentPointerOps proxy.
 bool isLoadedIndexDependentMemoryOp(Operation *op);
+
+/// Structural check: can `roots` be wrapped by one scope.scope region?  All
+/// roots must live in one block and form a lexically contiguous range there
+/// (no foreign operation between the first and last root), because the
+/// materializer moves exactly this set into the scope.
+bool isStageScopeWrappable(llvm::ArrayRef<Operation *> roots);
+
+/// Synthesize a StageOwnedScope descriptor for an anchor-free Stage.  The
+/// Stage's own root range becomes the local SIMT scope, so mixed remains
+/// selectable for kernels with no primitive anchor.  Returns nullopt when
+/// the range is not wrappable, would return pointer-like tensor state, or
+/// when the target cannot materialize local scopes at all.
+std::optional<SimtAnchorDescriptor>
+buildStageOwnedScopeDescriptor(llvm::ArrayRef<Operation *> roots,
+                               bool compileOn91095);
 
 /// Build the non-overlapping shared plan in pre-order.
 SimtAnchorPlan buildMixedSimtAnchorPlan(ModuleOp module, bool compileOn91095);
+
+/// Capability-driven entry point used by the production selector.
+SimtAnchorPlan
+buildMixedSimtAnchorPlan(ModuleOp module,
+                         const SimtLoweringCapabilities &capabilities);
 
 } // namespace ascend
 } // namespace mlir

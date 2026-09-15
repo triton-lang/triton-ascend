@@ -346,12 +346,33 @@ def fixpipe(
     :param dst: The destination buffer in UB. If None, an empty tensor will be created.
                 Must be buffer type in UB if provided.
     :type dst: bl.buffer | None
-    :param dma_mode: DMA transfer mode, "nz2nd" enables NZ to ND layout transformation
+    :param dma_mode: DMA transfer mode. FixpipeDMAMode enum values:
+
+        * NZ2ND — converts NZ layout to ND layout (default).
+        * NZ2DN — converts NZ layout to DN layout (transposed output).
+          Requires M to be a multiple of 8 for 32-bit data, and 16 for 16-bit data.
+        * NZ2NZ — keeps NZ layout without conversion.
+          Requires N to be a multiple of 16 for 32-bit data.
+
     :type dma_mode: FixpipeDMAMode
-    :param dual_dst_mode: Dual destination mode for split operations
+    :param dual_dst_mode: dual destination mode. FixpipeDualDstMode enum values:
+
+        * NO_DUAL — single destination, no split (default).
+        * COLUMN_SPLIT — splits the output along the N dimension into two
+          destination buffers. Requires N to be a multiple of 32 for 32-bit data.
+        * ROW_SPLIT — splits the output along the M dimension into two
+          destination buffers.
+
     :type dual_dst_mode: FixpipeDualDstMode
     :return: If dst is None, returns the created tensor; otherwise returns None.
     :rtype: tl.tensor | None
+
+    .. note::
+
+        The other two enums FixpipePreQuantMode (NO_QUANT, F322BF16,
+        F322F16, S322I8) and FixpipePreReluMode (NO_RELU, NORMAL_RELU,
+        LEAKY_RELU, P_RELU) are not exposed by the public interface;
+        they are internally fixed to NO_QUANT and NO_RELU respectively.
     """
     if not _semantic.builder.is_910_95():
         raise RuntimeError("this feature is only supported on Ascend910_95")

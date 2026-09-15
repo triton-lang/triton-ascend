@@ -266,6 +266,8 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
                     GraphOptimizationRuleId::PersistentTaskStripMining);
   options.persistentTaskStripMining.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
+  options.storeCoalescing.enabledForCompileMode =
+      *compileMode != triton::ascend::CompileMode::SimtOnly;
   return success();
 }
 
@@ -580,8 +582,8 @@ void populateBuiltinGraphOptimizationRules(
   }
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::StoreCoalescing)) {
-    rules.push_back(
-        createStoreCoalescingRule(options.storeCoalescingUBBudgetBytes));
+    rules.push_back(createStoreCoalescingRule(
+        options.storeCoalescingUBBudgetBytes, options.storeCoalescing));
   }
   if (isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::ResidentLoadForwarding)) {

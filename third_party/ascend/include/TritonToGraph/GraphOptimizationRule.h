@@ -94,7 +94,8 @@ std::unique_ptr<GraphOptimizationRule> createReservedGraphOptimizationRule(
 std::unique_ptr<GraphOptimizationRule> createTransposePointwiseReorderRule();
 std::unique_ptr<GraphOptimizationRule> createLoadStoreTransposeRule();
 std::unique_ptr<GraphOptimizationRule>
-createStoreCoalescingRule(unsigned ubCapacityBytes);
+createStoreCoalescingRule(unsigned ubCapacityBytes,
+                          const StoreCoalescingRuleOptions &options);
 std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
 std::unique_ptr<GraphOptimizationRule> createDiagonalMaskRemovalRule();
 std::unique_ptr<GraphOptimizationRule> createConvertModuloToMaskRule();

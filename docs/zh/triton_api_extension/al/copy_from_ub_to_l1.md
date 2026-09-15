@@ -1,136 +1,121 @@
 # al.copy_from_ub_to_l1 接口文档
 
+> **已弃用**：`al.copy_from_ub_to_l1` 自 triton-ascend 引入通用 `al.copy` 接口后被标记为 deprecated，调用时会触发 Python `DeprecationWarning`。新代码请使用 [`al.copy`](al.copy.md)，它同时支持 UB→UB 和 UB→L1 两种目标。本文仅为兼容既有代码保留说明。
+
 ## 1. 硬件背景
 
-昇腾硬件 A5 支持了直接从 UB 复制数据到 L1 ， 避免了先从 UB 到 GM 再从 GM 到 L1 复制两次，可以提高数据复制的效率。 因此，提供 copy_from_ub_to_l1 接口实现数据从 UB 到 L1 的复制。
+昇腾硬件 A5 及后续架构支持**直接从 UB（Unified Buffer）搬运数据到 L1（Cube 输入缓存）**，无需经过 GM（Global Memory）中转。传统路径需要"UB→GM→L1"两次 DMA 搬运，直接通路只需要一次 DMA（MTE3 + MTE2 流水协同），能显著降低数据搬运延迟、节省 GM 带宽、减少 L1 填充等待时间。
+
+`al.copy_from_ub_to_l1` 用于显式触发这一 UB→L1 直接通路，常见场景是 Cube 核做 GEMM/Conv 之前，由 Vector 核把预处理好的权重/数据直接从 UB 推到 L1，避免 Cube 等待 GM→L1 搬运。
 
 ## 2. 接口说明
 
-<table>
-  <tr>
-    <td>Python<br>def copy_from_ub_to_l1(<br>    src: tl.tensor | bl.buffer,<br>    dst: tl.tensor | bl.buffer,<br>    _builder=None<br>) -&gt; None :</td>
-  </tr>
-</table>
+```python
+def copy_from_ub_to_l1(
+    src: Union[tl.tensor, bl.buffer],
+    dst: Union[tl.tensor, bl.buffer],
+    _semantic=None,
+) -> None:
+```
 
-### 参数
+### 2.1 参数
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>src</td>
-    <td>tensor / buffer</td>
-    <td>是</td>
-    <td>源数据，位于ub 上</td>
-  </tr>
-  <tr>
-    <td>dst</td>
-    <td>tensor / buffer</td>
-    <td>是</td>
-    <td>目标数据，位于l1 上</td>
-  </tr>
-</table>
+| 参数名 | 类型 | 必需 | 说明 |
+|--------|------|------|------|
+| `src` | `tl.tensor` \| `bl.buffer` | 是 | 源数据，必须位于 UB 地址空间；既可以是 tensor（前端会自动 to_buffer 到 UB），也可以是通过 `bl.alloc(..., al.ascend_address_space.UB)` 分配的 buffer |
+| `dst` | `tl.tensor` \| `bl.buffer` | 是 | 目标缓冲区，必须位于 L1（cbuf）地址空间；通常是通过 `bl.alloc(..., al.ascend_address_space.L1)` 分配的 buffer |
+| `_semantic` | - | 内部 | JIT 编译器自动传参，用户不要手动传 |
 
-### 返回值
+### 2.2 返回值
 
-无
+无返回值。数据通过 DMA 异步写入 `dst` 所指 L1 buffer（实际完成时刻由硬件流水保证，必要时需用 `al.sync_block_set`/`al.sync_block_wait` 做同步）。
 
 ## 3. 约束说明
 
-- src 和 dst 必须同时为 tensor 或者 buffer
-
-- src 的address space 必须为UB， dst 的address space 必须为L1
-
-- src 和 dst 类型 ，形状必须相同
+- `src` 和 `dst` **必须同时是 tensor 或同时是 buffer**，不允许 tensor 与 buffer 混用。
+- `src` 的地址空间必须是 **UB**（可通过 `bl.to_buffer(tensor, al.ascend_address_space.UB)` 显式指定）。
+- `dst` 的地址空间必须是 **L1**（cbuf）（通过 `bl.alloc(..., al.ascend_address_space.L1)` 分配）。
+- `src` 和 `dst` 的 **element type 与 shape 必须完全一致**（同 bitwidth、同维度、同大小）。
+- L1 buffer 通常作为 Cube 核的输入，复制完成后应通过 `al.sync_block_set/wait` 通知 Cube 核可安全读取；否则 Cube 可能读到未更新的旧数据。
+- 本接口已弃用，新代码请使用 `al.copy(src, dst)`（当 `dst` 是 L1 buffer 时，`al.copy` 会自动选择 UB→L1 的直接通路）。
 
 ## 4. 用例示例
 
 ```python
-import os
 import triton
 import triton.language as tl
 import triton.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
-from triton.compiler.compiler import ASTSource
-from triton.compiler.code_generator import ast_to_ttir
-from triton._C.libtriton import ir, buffer_ir
-from triton._C.libtriton.ascend import ir as ascend_ir
-
-os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
-
-
-class Options:
-    num_warps = 4
-    num_stages = 3
-    num_ctas = 1
-    cluster_dims = (1, 1, 1)
-    enable_fp_fusion = True
-    debug = False
-    arch = "Ascend910_95"
-
-
-def compile_kernel(kernel, signature, constants):
-    """Helper to compile a kernel to MLIR."""
-    src = ASTSource(kernel, signature, constants)
-    context = ir.context()
-    ir.load_dialects(context)
-    buffer_ir.load_dialects(context)
-    ascend_ir.load_dialects(context)
-    module = ast_to_ttir(kernel, src, context, Options(), {}, {})
-    return str(module)
 
 
 @triton.jit
-def copy(
-    A_ptr,
-    A1_ptr,
-    M: tl.constexpr,
-    N: tl.constexpr,
-):
-    offs_a = tl.arange(0, M)[:, None]
-    offs_b = tl.arange(0, N)[None, :]
+def preload_to_l1_kernel(A_ptr, A1_ptr, M: tl.constexpr, N: tl.constexpr):
+    """把 GM 上的两个矩阵加载到 UB、相加后直接搬到 L1 供 Cube 使用。"""
+    offs_m = tl.arange(0, M)[:, None]
+    offs_n = tl.arange(0, N)[None, :]
+    offs = offs_m * N + offs_n
 
-    offs_c = (offs_a) * M + (offs_b)
-    a_ptr = A_ptr + offs_c
-    a_val = tl.load(a_ptr)
-    a1_ptr = A1_ptr + offs_c
-    a1_val = tl.load(a1_ptr)
+    # 1) 从 GM 读两块数据到 tensor
+    a_val  = tl.load(A_ptr + offs)
+    a1_val = tl.load(A1_ptr + offs)
 
-    add = tl.add(a_val, a1_val)
+    # 2) Vector 上做预处理（这里简单相加），结果放到 UB
+    add = a_val + a1_val
     add_ub = bl.to_buffer(add, al.ascend_address_space.UB)
 
+    # 3) 分配 L1 buffer 并把 UB 数据直接搬到 L1（推荐用新接口 al.copy）
     A_l1 = bl.alloc(tl.float32, [M, N], al.ascend_address_space.L1)
-    al.copy_from_ub_to_l1(add_ub, A_l1)
+    al.copy_from_ub_to_l1(add_ub, A_l1)   # deprecated：请改用 al.copy(add_ub, A_l1)
 
+    # 4) 可选：在 UB 上分配一份副本，供 Vector 后续使用
     A_ub = bl.alloc(tl.float32, [M, N], al.ascend_address_space.UB)
     al.copy(add_ub, A_ub)
-
-
-def test_copy():
-    print("=" * 60)
-    print("Test 1: copy ")
-    print("=" * 60)
-    mlir = compile_kernel(
-        copy,
-        {"A_ptr": "*fp32", "A1_ptr": "*fp32"},
-        {"M": 16, "N": 16},
-    )
-    print(f"Generated MLIR ({len(mlir)} chars):\n")
-    print(mlir)
-
-
-if __name__ == "__main__":
-    test_copy()
 ```
 
 ## 5. 编译输出结果
 
-<table>
-  <tr>
-    <td>Plain Text<br>module {<br>  tt.func public @copy(%arg0: !tt.ptr&lt;f32&gt; loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:36:0), %arg1: !tt.ptr&lt;f32&gt; loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:36:0)) attributes {noinline = false} {<br>    %0 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor&lt;16xi32&gt; loc(#loc1)<br>    %1 = tt.expand_dims %0 {axis = 1 : i32} : tensor&lt;16xi32&gt; -&gt; tensor&lt;16x1xi32&gt; loc(#loc2)<br>    %2 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor&lt;16xi32&gt; loc(#loc3)<br>    %3 = tt.expand_dims %2 {axis = 0 : i32} : tensor&lt;16xi32&gt; -&gt; tensor&lt;1x16xi32&gt; loc(#loc4)<br>    %c16_i32 = arith.constant 16 : i32 loc(#loc5)<br>    %c16_i32_0 = arith.constant 16 : i32 loc(#loc5)<br>    %cst = arith.constant dense&lt;16&gt; : tensor&lt;16x1xi32&gt; loc(#loc5)<br>    %4 = arith.muli %1, %cst : tensor&lt;16x1xi32&gt; loc(#loc5)<br>    %5 = tt.broadcast %4 : tensor&lt;16x1xi32&gt; -&gt; tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %6 = tt.broadcast %3 : tensor&lt;1x16xi32&gt; -&gt; tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %7 = arith.addi %5, %6 : tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %8 = tt.splat %arg0 : !tt.ptr&lt;f32&gt; -&gt; tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc7)<br>    %9 = tt.addptr %8, %7 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt;, tensor&lt;16x16xi32&gt; loc(#loc7)<br>    %10 = tt.load %9 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc8)<br>    %11 = tt.splat %arg1 : !tt.ptr&lt;f32&gt; -&gt; tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc9)<br>    %12 = tt.addptr %11, %7 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt;, tensor&lt;16x16xi32&gt; loc(#loc9)<br>    %13 = tt.load %12 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc10)<br>    %14 = arith.addf %10, %13 : tensor&lt;16x16xf32&gt; loc(#loc11)<br>    %15 = bufferization.to_memref %14 : memref&lt;16x16xf32&gt; loc(#loc12)<br>    %memspacecast = memref.memory_space_cast %15 : memref&lt;16x16xf32&gt; to memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc12)<br>    %alloc = memref.alloc() : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt; loc(#loc13)<br>    annotation.mark %alloc {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt; loc(#loc13)<br>    hivm.hir.copy ins(%memspacecast : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) outs(%alloc : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt;) loc(#loc14)<br>    %alloc_1 = memref.alloc() : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc15)<br>    annotation.mark %alloc_1 {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc15)<br>    hivm.hir.copy ins(%memspacecast : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) outs(%alloc_1 : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) loc(#loc16)<br>    tt.return loc(#loc17)<br>  } loc(#loc)<br>} loc(#loc)<br>#loc1 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:42:26)<br>#loc2 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:42:29)<br>#loc3 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:43:26)<br>#loc4 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:43:29)<br>#loc5 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:45:24)<br>#loc6 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:45:29)<br>#loc7 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:46:20)<br>#loc8 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:47:20)<br>#loc9 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:48:22)<br>#loc10 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:49:21)<br>#loc11 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:51:24)<br>#loc12 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:52:31)<br>#loc13 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:54:40)<br>#loc14 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:55:34)<br>#loc15 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:57:40)<br>#loc16 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:58:20)<br>#loc17 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:58:4)</td>
-  </tr>
-</table>
+以 `M=N=16, dtype=fp32` 为例，核心 IR 片段：
+
+```mlir
+// ... 前置 tl.load / arith.addf 等指令省略 ...
+
+// 把 add 结果放到 UB：tensor → memref<..., ub>
+%14 = arith.addf %10, %13 : tensor<16x16xf32>
+%15 = bufferization.to_memref %14 : memref<16x16xf32>
+%memspacecast = memref.memory_space_cast %15
+    : memref<16x16xf32> to memref<16x16xf32, #hivm.address_space<ub>>
+
+// 在 L1（cbuf）分配目标 buffer
+%alloc = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>>
+annotation.mark %alloc {effects = ["write", "read"]}
+    : memref<16x16xf32, #hivm.address_space<cbuf>>
+
+// UB → L1 直接搬运：对应 hivm.hir.copy
+hivm.hir.copy
+    ins(%memspacecast : memref<16x16xf32, #hivm.address_space<ub>>)
+    outs(%alloc       : memref<16x16xf32, #hivm.address_space<cbuf>>)
+
+// 对照：UB→UB 同地址空间内拷贝
+%alloc_1 = memref.alloc() : memref<16x16xf32, #hivm.address_space<ub>>
+annotation.mark %alloc_1 {effects = ["write", "read"]}
+    : memref<16x16xf32, #hivm.address_space<ub>>
+hivm.hir.copy
+    ins(%memspacecast : memref<16x16xf32, #hivm.address_space<ub>>)
+    outs(%alloc_1     : memref<16x16xf32, #hivm.address_space<ub>>)
+```
+
+### 输出要点说明
+
+- `al.copy_from_ub_to_l1(src, dst)` 底层统一降低为 `hivm.hir.copy ins(...) outs(...)` 指令，搬运方向由 `ins`（源 memref 的地址空间）与 `outs`（目标 memref 的地址空间）决定。
+- 如果 `src` 是 tensor，前端会先通过 `bufferization.to_memref` + `memref.memory_space_cast` 把 tensor 显式落到 UB memref（即等价于隐式 `bl.to_buffer(src, al.ascend_address_space.UB)`）。
+- L1 buffer 必须通过 `memref.alloc() : memref<..., #hivm.address_space<cbuf>>` 预先分配，且带有 `annotation.mark {effects = ["write", "read"]}` 标记。
+- UB→L1 搬运本身在硬件上是异步的（MTE 流水），如果后续 Cube/Vector 需要依赖 L1 中的新数据，必须通过 `al.sync_block_set`/`al.sync_block_wait` 保证数据已到达。
+- 对比 UB→UB 的 `hivm.hir.copy`，IR 结构完全一致，唯一区别是 outs 端 memref 的地址空间属性（`<cbuf>` vs `<ub>`）。这也是为什么新接口 `al.copy` 可以统一两种路径。
+
+## 6. 相关接口
+
+- [`al.copy`](al.copy.md)：**推荐替代**，统一支持 UB→UB 与 UB→L1 两种搬运
+- [`al.ascend_address_space`](ascend_address_space.md)：昇腾地址空间枚举（UB / L1 / L0A / L0B / L0C）
+- [`bl.alloc`](../bl/alloc.md)：分配 L1 / UB 目标 buffer
+- [`bl.to_buffer`](../bl/to_buffer.md)：将 tensor 搬运/绑定到指定地址空间 buffer
+- [`al.sync_block_set`](sync_block_set.md) / [`al.sync_block_wait`](sync_block_wait.md)：搬运完成后通知 Cube 核可读取 L1

@@ -5,13 +5,11 @@
 简介：为张量设置多缓冲，允许编译器对同一张量创建多个副本。
 原型：
 
+
 ```python
-triton.language.multibuffer(
-    src,
-    size,
-    _builder=None
-) -> None
+triton.language.multibuffer(input, num_buffers)
 ```
+
 
 ## 2. OP 规格
 
@@ -21,7 +19,6 @@ triton.language.multibuffer(
 | ------------- | ----------------- | -------------------------------------------------------------- |
 | `src`        | `tensor`          | 需要进行多缓冲设置的源张量                                                     |
 | `size`       | `int` 或 `constexpr`    | 要创建的缓冲区副本数量                                                        |
-| `_builder` |- | 保留参数，暂不支持外部调用                                            |
 
 返回值：
 `None`：此操作为一个编译提示，不会在运行时返回值，仅影响编译器的优化行为。
@@ -30,9 +27,10 @@ triton.language.multibuffer(
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 |  bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- |
-| Ascend A2/A3 | √    | √     | √     | √     | √     | √       | √         |  √       | √    | √    |  √    | √    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend A2/A3 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
 #### 2.2.2 Shape 支持
 

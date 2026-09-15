@@ -4,10 +4,12 @@
 |--|--|
 |[range](./range.md)  |永远向上计数的迭代器 |
 |[static_range](./static_range.md) | 永远向上计数的迭代器 |
+|[condition](./condition.md) | while 循环条件包装器，用于向编译器传递额外属性 |
 
 ```{toctree}
 :maxdepth: 3
 :hidden:
 range.md
 static_range.md
+condition.md
 ```

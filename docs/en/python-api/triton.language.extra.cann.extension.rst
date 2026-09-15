@@ -1,1 +1,0 @@
-../../zh/python-api/triton.language.extra.cann.extension.rst

@@ -5,7 +5,7 @@
 简介：`triton.language.full`返回一个填充了给定形状和数据类型的标量值的张量
 
 ```python
-triton.language.full(shape, value, dtype, _semantic=None)¶
+triton.language.full(shape, value, dtype)
 ```
 
 ## 2. OP 规格
@@ -17,7 +17,6 @@ triton.language.full(shape, value, dtype, _semantic=None)¶
 | `shape`           | `tuple of ints`               | 新数组的形状，例如 (8, 16) 或 (8, ) |
 | `value`            | `scalar`               | 用于填充数组的标量值 |
 | `dtype`            | `tl.dtype`               |  新数组的数据类型，例如 tl.float16  |
-| `_semantic`            | `Optional[str]`               | 保留参数，暂不支持外部调用|
 
 返回值：
 `tensor`：完成填充之后的tensor
@@ -26,11 +25,16 @@ triton.language.full(shape, value, dtype, _semantic=None)¶
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ |
-| GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
 
+
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 无缺失的数据类型。
 #### 2.2.2 Shape 支持
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。

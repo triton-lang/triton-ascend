@@ -5,7 +5,7 @@
 简介：限制张量x的范围为[min，max]之间。
 
 ```python
-triton.language.clamp(x, min, max, propagate_nan: constexpr = PropagateNan.NONE, _semantic=None)
+triton.language.clamp(x, min, max, propagate_nan=triton.language.PropagateNan.ALL)
 ```
 
 ## 2. 规格
@@ -27,25 +27,28 @@ triton.language.clamp(x, min, max, propagate_nan: constexpr = PropagateNan.NONE,
 
 #### 2.2.1 DataType 支持
 
-|        | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-| ------ | ---- | ----- | ----- | ----- | ------ | ------ | ------ | ----- | ---- | ---- | ---- | ---- | ---- |
-| GPU    | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | √    | √    | ×    |
-| Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | × | × | × | × | × | × | × | × | √ | √ | √ | √ | × | × | × |
+| Ascend A2/A3 | × | × | × | × | × | × | × | × | √ | √ | × | √ | × | × | × |
+| Ascend 950 | × | × | × | × | × | × | × | × | √ | √ | × | √ | √ | √ | × |
 
 #### 2.2.2 Shape 支持
 
 |        | 支持维度范围          |
 | ------ | --------------- |
-| GPU    | 仅支持 1~5维 tensor |
-| Ascend | 仅支持 1~5维 tensor |
+| GPU    | 仅支持 1~8维 tensor |
+| Ascend | 仅支持 1~8维 tensor |
 
-结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 5 维张量。
+结论：在 Shape 方面，GPU 与 Ascend 平台无差异，均支持 1 至 8 维张量。
 
 ### 2.3 特殊限制说明
 
 > 相对社区能力缺失且无法实现
 
-Ascend 相比 GPU 缺失 fp64 支持。
+结论：
+- Ascend A2/A3/950 对比 GPU 缺失 fp64 的支持能力。
+
 
 #### 2.3.1 propagate_nan 参数限制
 

@@ -11,7 +11,7 @@
 |[multibuffer](./Extension_Ops/multibuffer.md) | 为张量设置多缓冲，允许编译器对同一张量创建多个副本。 |
 |[parallel](./Extension_Ops/parallel.md) | `parallel` 是一个专门用于多核心并行执行的迭代器,提供显式的多核心并行语义。 |
 |[get_element](./Extension_Ops/get_element.md)| 根据给定的索引，从输入张量中读取单个元素。 |
-|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
+|[index_select 高性能接口](../triton_api_extension/al/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
 
 ```{toctree}
 :maxdepth: 3
@@ -44,12 +44,12 @@ Atomic_Ops/index.md
 
 |api|简要说明|
 |--|--|
-| [eq](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
+| [equal](./Comparing_Ops/eq.md) | 用于比较两个张量的元素，与`==`等价 |
 | [le](./Comparing_Ops/le.md) | 用于比较两个张量的元素，与`<=`等价。 |
 | [ge](./Comparing_Ops/ge.md) | 用于比较两个张量的元素，与`>=`等价。 |
 | [lt](./Comparing_Ops/lt.md) | 用于比较两个张量的元素，与`<`等价。 |
 | [gt](./Comparing_Ops/gt.md) | 用于比较两个张量的元素，与`>`等价。 |
-| [ne](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
+| [not_equal](./Comparing_Ops/ne.md) | 用于比较两个张量的元素，与`!=`等价。 |
 
 ```{toctree}
 :maxdepth: 3
@@ -122,7 +122,7 @@ Debug_Ops/index.md
 |[where](./Indexing_Ops/where.md) |根据 condition 返回来自 x 或 y 的元素组成的张量 |
 |[swizzle2d](./Indexing_Ops/swizzle2d.md) |将行主序排列为 size_i * size_j 的矩阵的索引，转换为每组 size_g 行的列主序矩阵的索引 |
 |[get_element](./Extension_Ops/get_element.md)| 根据给定的索引，从输入张量中读取单个元素。 |
-|[index_select 高性能接口](./Extension_Ops/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
+|[index_select 高性能接口](../triton_api_extension/al/index_select_simd.md) | 在非最后一个维度上并行 gather 多个索引，并以 tile 为单位将数据零拷贝地从全局内存（GM）直接搬运到统一缓冲区（UB）的正确位置。该操作等效于 `torch.index_select` 的高性能实现，适用于嵌入层查找、稀疏索引访问等场景。 |
 |[gather](./Indexing_Ops/gather.md) | 对`src`tensor沿`axis`维度按照`index`执行gather操作 |
 
 ```{toctree}
@@ -151,6 +151,7 @@ Inline_Assembly/index.md
 |--|--|
 |[range](./Iterators/range.md)  |永远向上计数的迭代器 |
 |[static_range](./Iterators/static_range.md) | 永远向上计数的迭代器 |
+|[condition](./Iterators/condition.md) | while 循环条件包装器，用于向编译器传递额外属性 |
 
 ```{toctree}
 :maxdepth: 3
@@ -308,6 +309,7 @@ Random_Number_Generation/index.md
 |[max](./Reduction_Ops/max.md) |返回沿指定 axis 轴上 input 张量中所有元素的最大值 |
 |[min](./Reduction_Ops/min.md) |返回沿指定 axis 轴上 input 张量中所有元素的最小值 |
 |[reduce](./Reduction_Ops/reduce.md) |将 combine_fn 应用于沿指定 axis 的 input 张量中的所有元素 |
+|[reduce_or](./Reduction_Ops/reduce_or.md) |返回 input 张量中，沿指定 axis 的所有元素的逻辑或 |
 |[sum](./Reduction_Ops/sum.md) |返回 input 张量中，沿指定 axis 的所有元素的总和 |
 |[xor_sum](./Reduction_Ops/xor_sum.md) |返回 input 张量中，沿指定 axis 的所有元素的异或和 |
 
@@ -323,10 +325,12 @@ Reduction_Ops/index.md
 |api|简要说明|
 |--|--|
 |[associative_scan](./Scan_Sort_Ops/associative_scan.md) |沿指定 axis 将 combine_fn 应用于 input 张量的每个元素和携带的值，并更新携带的值 |
+|[bitonic_merge](./Scan_Sort_Ops/bitonic_merge.md) |将沿指定维度的 bitonic 序列合并为单调有序序列 |
 |[cumprod](./Scan_Sort_Ops/cumprod.md) |返回沿指定 axis 的 input 张量中所有元素的累积乘积 |
 |[cumsum](./Scan_Sort_Ops/cumsum.md)  |返回沿指定 axis 的 input 张量中所有元素的累积和 |
 |[histogram](./Scan_Sort_Ops/histogram.md) |基于 input 张量计算 1 个具有 num_bins 个 bin 的直方图，每个 bin 宽度为 1，起始值为0 |
 |[sort](./Scan_Sort_Ops/sort.md) |沿着指定维度对张量进行排序 |
+|[topk](./Scan_Sort_Ops/topk.md) |返回沿指定维度的前 k 个最大元素 |
 
 ```{toctree}
 :maxdepth: 3

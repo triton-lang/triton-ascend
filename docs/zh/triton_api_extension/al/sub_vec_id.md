@@ -1,39 +1,93 @@
-# sub_vec_id
+# al.sub_vec_id 接口文档
 
 ## 1. 硬件背景
 
-昇腾硬件AIC与AIV核数配比不同（1:N），Triton编程抽象屏蔽了Cube核与Vector核的硬件细节，因此，Triton算子开发者无法控制如何切分数据在N个Vector核间并行处理，由编译器通过AutoSubTiling Pass自动实现。
+昇腾硬件上 **AIC（Cube 核）与 AIV（Vector 核）的核数配比为 1:N**（具体比例依芯片型号而定）。Triton 的编程抽象屏蔽了 Cube 与 Vector 核的硬件细节，普通算子开发者不需要感知多个 Vector 核的存在——编译器会通过 AutoSubTiling Pass 自动切分数据到 N 个 Vector 核并行处理。
 
-sub_vec_id编程接口返回N个Vector核的sub id，允许算子开发者根据vector核sub id决定每个核处理哪些数据。
+当开发者需要**手动控制数据在多个 Vector 核之间的切分方式**（例如自定义并行策略、按 sub-id 分发不同 workload）时，可以调用 `al.sub_vec_id()` 获取当前 Vector 核在同一 AIC 组内的 Sub Vector ID，据此决定每个 Vector 核应当处理哪一片数据。
 
 ## 2. 接口说明
 
-<table>
-  <tr>
-    <td>Python<br>def sub_vec_id() -&gt; i16</td>
-  </tr>
-</table>
+```python
+def sub_vec_id() -> tl.tensor:
+```
 
-- 返回值：返回范围为 [0, N) 的 Sub Vector ID，算子开发者可根据该ID决定N个并行Vector核中每个核处理的数据分片
+### 参数
 
-- 入参：无
+无入参。
+
+### 返回值
+
+- 返回一个标量 tensor，类型为 `tl.int16`（IR 中为 `i64`，由前端 cast 到 i16），取值范围为 `[0, N)`（N 为当前 AIC 绑定的 Vector 核数量）。该值在每个 Vector 核上是不同的常量，对应当前核在 Vector 核组中的编号。
 
 ## 3. 约束说明
 
-仅在AIC和AIV核混合使用场景中有效，不可在纯Cube类算子或者纯Vector类算子中使用，否则会触发编译报错。
+- **仅在 Cube + Vector 混合使用场景（AIC 对应多个 AIV）中有效**：在纯 Cube 算子或纯 Vector 算子中调用会触发编译报错。
+- 必须位于 `with al.scope(core_mode="vector")` 作用域内调用（否则无法为当前 Vector 子块确定 sub-id）。
+- 配合 `al.scope(core_mode="vector")` 使用时，编译器会自动在模块属性上添加 `hivm.disable_auto_tile_and_bind_subblock`（关闭自动子块绑定），由开发者手动根据 sub-id 进行数据分片。
+- 返回值是运行时每个 Vector 核独立的 SSA 值，**不能作为 constexpr** 使用（不能传入 `tl.constexpr` 形参）。
 
 ## 4. 用例示例
 
-<table>
-  <tr>
-    <td>Python<br><br>import os<br><br>import triton<br><br>import triton.language as tl<br><br>import triton.language.extra.cann.extension as al<br><br>from triton.compiler.compiler import ASTSource<br><br>from triton.compiler.code_generator import ast_to_ttir<br><br>from triton._C.libtriton import ir, buffer_ir<br><br>from triton._C.libtriton.ascend import ir as ascend_ir<br><br>os.environ[&quot;TORCH_DEVICE_BACKEND_AUTOLOAD&quot;] = &quot;0&quot;<br><br>class Options:<br><br>    num_warps = 4<br><br>    num_stages = 3<br><br>    num_ctas = 1<br><br>    cluster_dims = (1, 1, 1)<br><br>    enable_fp_fusion = True<br><br>    debug = False<br><br>    arch = &quot;Ascend910_95&quot;<br><br>def compile_kernel(kernel, signature, constants):<br><br>    &quot;&quot;&quot;Helper to compile a kernel to MLIR.&quot;&quot;&quot;<br><br>    src = ASTSource(kernel, signature, constants)<br><br>    context = ir.context()<br><br>    ir.load_dialects(context)<br><br>    buffer_ir.load_dialects(context)<br><br>    ascend_ir.load_dialects(context)<br><br>    module = ast_to_ttir(kernel, src, context, Options(), {}, {})<br><br>    return str(module)<br><br>@triton.jit<br><br>def verify_sub_vec_id_kernel(<br><br>    out_ptr,<br><br>    N: tl.constexpr,<br><br>):<br><br>    with al.scope(core_mode=&quot;vector&quot;):<br><br>        sub_id = al.sub_vec_id()<br><br>        <br><br>        offs = sub_id * N + tl.arange(0, N)<br><br>        out_ptrs = out_ptr + offs<br><br>        <br><br>        tl.store(out_ptrs, sub_id.to(tl.int32))<br><br>def test_sub_vec_id_1to2():<br><br>    print(&quot;=&quot; * 60)<br><br>    print(&quot;Test: Verify sub_vec_id (Simplified)&quot;)<br><br>    print(&quot;=&quot; * 60)<br><br>    <br><br>    mlir = compile_kernel(<br><br>        kernel=verify_sub_vec_id_kernel,<br><br>        signature={&quot;out_ptr&quot;: &quot;*i32&quot;},<br><br>        constants={&quot;N&quot;: 8},<br><br>    )<br><br>    <br><br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br><br>    print(mlir)<br><br># ============== Main ==============<br><br>if __name__ == &quot;__main__&quot;:<br><br>    test_sub_vec_id_1to2()</td>
-  </tr>
-</table>
+```python
+import triton
+import triton.language as tl
+import triton.language.extra.cann.extension as al
 
-输出：
 
-<table>
-  <tr>
-    <td>Plain Text<br>============================================================<br><br>Test: Verify sub_vec_id (Simplified)<br><br>============================================================<br><br>✅ Generated MLIR (1893 chars):<br><br>#loc = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:35:0)<br><br>module attributes {hivm.disable_auto_tile_and_bind_subblock} {<br><br>  tt.func public @verify_sub_vec_id_kernel(%arg0: !tt.ptr&lt;i32&gt; loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:35:0)) attributes {noinline = false} {<br><br>    %0:3 = scope.scope : () -&gt; (i64, tensor&lt;8xi64&gt;, tensor&lt;8x!tt.ptr&lt;i32&gt;&gt;) {<br><br>      %1 = hivm.hir.get_sub_block_idx -&gt; i64 loc(#loc2)<br><br>      %c8_i32 = arith.constant 8 : i32 loc(#loc3)<br><br>      %c8_i64 = arith.constant 8 : i64 loc(#loc3)<br><br>      %2 = arith.muli %1, %c8_i64 : i64 loc(#loc3)<br><br>      %3 = tt.make_range {end = 8 : i32, start = 0 : i32} : tensor&lt;8xi32&gt; loc(#loc4)<br><br>      %4 = arith.extsi %3 : tensor&lt;8xi32&gt; to tensor&lt;8xi64&gt; loc(#loc5)<br><br>      %5 = tt.splat %2 : i64 -&gt; tensor&lt;8xi64&gt; loc(#loc5)<br><br>      %6 = arith.addi %5, %4 : tensor&lt;8xi64&gt; loc(#loc5)<br><br>      %7 = tt.splat %arg0 : !tt.ptr&lt;i32&gt; -&gt; tensor&lt;8x!tt.ptr&lt;i32&gt;&gt; loc(#loc6)<br><br>      %8 = tt.addptr %7, %6 : tensor&lt;8x!tt.ptr&lt;i32&gt;&gt;, tensor&lt;8xi64&gt; loc(#loc6)<br><br>      %9 = arith.trunci %1 : i64 to i32 loc(#loc7)<br><br>      %10 = tt.splat %9 : i32 -&gt; tensor&lt;8xi32&gt; loc(#loc8)<br><br>      tt.store %8, %10 : tensor&lt;8x!tt.ptr&lt;i32&gt;&gt; loc(#loc8)<br><br>      scope.return %1, %6, %8 : i64, tensor&lt;8xi64&gt;, tensor&lt;8x!tt.ptr&lt;i32&gt;&gt; loc(#loc8)<br><br>    } {hivm.tcore_type = #hivm.tcore_type&lt;VECTOR&gt;, noinline} loc(#loc1)<br><br>    tt.return loc(#loc9)<br><br>  } loc(#loc)<br><br>} loc(#loc)<br><br>#loc1 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:39:9)<br><br>#loc2 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:40:17)<br><br>#loc3 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:42:24)<br><br>#loc4 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:42:41)<br><br>#loc5 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:42:28)<br><br>#loc6 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:43:29)<br><br>#loc7 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:45:37)<br><br>#loc8 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:45:27)<br><br>#loc9 = loc(&quot;/home/linxin/triton-test/sub_vec_id.py&quot;:39:4)</td>
-  </tr>
-</table>
+@triton.jit
+def verify_sub_vec_id_kernel(out_ptr, N: tl.constexpr):
+    """每个 Vector 核把自己的 sub_id 写到输出对应位置。
+
+    假设 N=8 且 Vector 核数量为 k：第 i 个 Vector 核负责
+    out_ptr[i*N : i*N+N] 这一段，把 sub_id (i) 写入。
+    """
+    with al.scope(core_mode="vector"):
+        sub_id = al.sub_vec_id()
+
+        offs = sub_id.to(tl.int64) * N + tl.arange(0, N).to(tl.int64)
+        out_ptrs = out_ptr + offs
+        tl.store(out_ptrs, sub_id.to(tl.int32))
+```
+
+## 5. 编译输出结果
+
+以 `N=8` 为例，核心 IR 片段：
+
+```mlir
+module attributes {hivm.disable_auto_tile_and_bind_subblock} {
+  tt.func public @verify_sub_vec_id_kernel(%arg0: !tt.ptr<i32>) attributes {noinline = false} {
+    %0:3 = scope.scope : () -> (i64, tensor<8xi64>, tensor<8x!tt.ptr<i32>>) {
+      // al.sub_vec_id() 对应 hivm.hir.get_sub_block_idx 指令
+      %1 = hivm.hir.get_sub_block_idx -> i64
+
+      %c8_i64 = arith.constant 8 : i64
+      %2 = arith.muli %1, %c8_i64 : i64            // sub_id * N
+      %3 = tt.make_range {end = 8 : i32, start = 0 : i32} : tensor<8xi32>
+      %4 = arith.extsi %3 : tensor<8xi32> to tensor<8xi64>
+      %5 = tt.splat %2 : i64 -> tensor<8xi64>
+      %6 = arith.addi %5, %4 : tensor<8xi64>       // 地址偏移
+      %7 = tt.splat %arg0 : !tt.ptr<i32> -> tensor<8x!tt.ptr<i32>>
+      %8 = tt.addptr %7, %6 : tensor<8x!tt.ptr<i32>>, tensor<8xi64>
+
+      %9 = arith.trunci %1 : i64 to i32            // 返回 i16/i32（前端 cast）
+      %10 = tt.splat %9 : i32 -> tensor<8xi32>
+      tt.store %8, %10 : tensor<8x!tt.ptr<i32>>
+
+      scope.return %1, %6, %8 : i64, tensor<8xi64>, tensor<8x!tt.ptr<i32>>
+    } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, noinline}
+    tt.return
+  }
+}
+```
+
+### 输出要点说明
+
+- `al.sub_vec_id()` 直接降低为 `hivm.hir.get_sub_block_idx -> i64` 指令，由后端在每个 Vector 子块上返回不同的子块编号。
+- 使用 `al.sub_vec_id` 时，模块属性会出现 `hivm.disable_auto_tile_and_bind_subblock`，提示 AutoSubTiling Pass 不要自动分发 sub-block。
+- 返回类型为 `i64`（index 类值），如果需要作为 `tl.int32` / `tl.int16` 存储，会在使用处通过 `arith.trunci` 做截断。
+- 整条指令位于 vector scope 的 region 内，与 `hivm.tcore_type<VECTOR>` 属性绑定。
+
+## 6. 相关接口
+
+- [`al.scope`](scope.md)：指定代码块运行在 Cube/Vector 核心，`al.sub_vec_id()` 必须在 vector scope 中使用

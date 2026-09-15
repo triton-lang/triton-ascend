@@ -292,6 +292,7 @@ add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
 
 <a id="limitations-and-notes"></a>
 
+(limitations-and-notes)=
 ## 8. 限制与注意事项
 
 ### 平台限制

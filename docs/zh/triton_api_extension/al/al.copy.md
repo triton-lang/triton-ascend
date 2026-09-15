@@ -1,4 +1,4 @@
-# al.copy
+# al.copy 接口文档
 
 ## 1. 背景
 
@@ -6,40 +6,26 @@
 
 ## 2. 接口说明
 
-<table>
-  <tr>
-    <td>Python<br>def copy(<br>    src: tl.tensor | bl.buffer,<br>    dst: tl.tensor | bl.buffer,<br>    _builder=None<br>) -&gt; None :</td>
-  </tr>
-</table>
+```python
+def copy(
+    src: tl.tensor | bl.buffer,
+    dst: tl.tensor | bl.buffer,
+    _builder=None
+) -> None :
+```
 
-### 参数
+## 3. 参数说明
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>src</td>
-    <td>tensor / buffer</td>
-    <td>是</td>
-    <td>源数据，位于ub 上</td>
-  </tr>
-  <tr>
-    <td>dst</td>
-    <td>tensor / buffer</td>
-    <td>是</td>
-    <td>目标数据，位于l1  或者 ub 上</td>
-  </tr>
-</table>
+| 参数名 | 类型 | 必需 | 说明 |
+| --- | --- | --- | --- |
+| src | tensor / buffer | 是 | 源数据，位于ub 上 |
+| dst | tensor / buffer | 是 | 目标数据，位于l1  或者 ub 上 |
 
-### 返回值
+## 4. 返回值
 
 无
 
-## 3. 约束说明
+## 5. 约束说明
 
 - src 和 dst 必须同时为 tensor 或者 buffer ，tensor 暂时不支持
 
@@ -47,7 +33,7 @@
 
 - src 和 dst 类型 ，形状必须相同
 
-## 4. 用例示例
+## 6. 用例示例
 
 ```python
 import os
@@ -127,10 +113,55 @@ if __name__ == "__main__":
     test_copy()
 ```
 
-## 5. 编译输出结果
+## 7. 编译输出结果
 
-<table>
-  <tr>
-    <td>Plain Text<br>module {<br>  tt.func public @copy(%arg0: !tt.ptr&lt;f32&gt; loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:36:0), %arg1: !tt.ptr&lt;f32&gt; loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:36:0)) attributes {noinline = false} {<br>    %0 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor&lt;16xi32&gt; loc(#loc1)<br>    %1 = tt.expand_dims %0 {axis = 1 : i32} : tensor&lt;16xi32&gt; -&gt; tensor&lt;16x1xi32&gt; loc(#loc2)<br>    %2 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor&lt;16xi32&gt; loc(#loc3)<br>    %3 = tt.expand_dims %2 {axis = 0 : i32} : tensor&lt;16xi32&gt; -&gt; tensor&lt;1x16xi32&gt; loc(#loc4)<br>    %c16_i32 = arith.constant 16 : i32 loc(#loc5)<br>    %c16_i32_0 = arith.constant 16 : i32 loc(#loc5)<br>    %cst = arith.constant dense&lt;16&gt; : tensor&lt;16x1xi32&gt; loc(#loc5)<br>    %4 = arith.muli %1, %cst : tensor&lt;16x1xi32&gt; loc(#loc5)<br>    %5 = tt.broadcast %4 : tensor&lt;16x1xi32&gt; -&gt; tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %6 = tt.broadcast %3 : tensor&lt;1x16xi32&gt; -&gt; tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %7 = arith.addi %5, %6 : tensor&lt;16x16xi32&gt; loc(#loc6)<br>    %8 = tt.splat %arg0 : !tt.ptr&lt;f32&gt; -&gt; tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc7)<br>    %9 = tt.addptr %8, %7 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt;, tensor&lt;16x16xi32&gt; loc(#loc7)<br>    %10 = tt.load %9 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc8)<br>    %11 = tt.splat %arg1 : !tt.ptr&lt;f32&gt; -&gt; tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc9)<br>    %12 = tt.addptr %11, %7 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt;, tensor&lt;16x16xi32&gt; loc(#loc9)<br>    %13 = tt.load %12 : tensor&lt;16x16x!tt.ptr&lt;f32&gt;&gt; loc(#loc10)<br>    %14 = arith.addf %10, %13 : tensor&lt;16x16xf32&gt; loc(#loc11)<br>    %15 = bufferization.to_memref %14 : memref&lt;16x16xf32&gt; loc(#loc12)<br>    %memspacecast = memref.memory_space_cast %15 : memref&lt;16x16xf32&gt; to memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc12)<br>    %alloc = memref.alloc() : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt; loc(#loc13)<br>    annotation.mark %alloc {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt; loc(#loc13)<br>    hivm.hir.copy ins(%memspacecast : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) outs(%alloc : memref&lt;16x16xf32, #hivm.address_space&lt;cbuf&gt;&gt;) loc(#loc14)<br>    %alloc_1 = memref.alloc() : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc15)<br>    annotation.mark %alloc_1 {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt; loc(#loc15)<br>    hivm.hir.copy ins(%memspacecast : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) outs(%alloc_1 : memref&lt;16x16xf32, #hivm.address_space&lt;ub&gt;&gt;) loc(#loc16)<br>    tt.return loc(#loc17)<br>  } loc(#loc)<br>} loc(#loc)<br>#loc1 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:42:26)<br>#loc2 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:42:29)<br>#loc3 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:43:26)<br>#loc4 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:43:29)<br>#loc5 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:45:24)<br>#loc6 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:45:29)<br>#loc7 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:46:20)<br>#loc8 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:47:20)<br>#loc9 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:48:22)<br>#loc10 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:49:21)<br>#loc11 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:51:24)<br>#loc12 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:52:31)<br>#loc13 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:54:40)<br>#loc14 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:55:34)<br>#loc15 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:57:40)<br>#loc16 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:58:20)<br>#loc17 = loc(&quot;/home/linxin/triton-test/al_copy.py&quot;:58:4)</td>
-  </tr>
-</table>
+```text
+module {
+  tt.func public @copy(%arg0: !tt.ptr<f32> loc("/home/linxin/triton-test/al_copy.py":36:0), %arg1: !tt.ptr<f32> loc("/home/linxin/triton-test/al_copy.py":36:0)) attributes {noinline = false} {
+    %0 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32> loc(#loc1)
+    %1 = tt.expand_dims %0 {axis = 1 : i32} : tensor<16xi32> -> tensor<16x1xi32> loc(#loc2)
+    %2 = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32> loc(#loc3)
+    %3 = tt.expand_dims %2 {axis = 0 : i32} : tensor<16xi32> -> tensor<1x16xi32> loc(#loc4)
+    %c16_i32 = arith.constant 16 : i32 loc(#loc5)
+    %c16_i32_0 = arith.constant 16 : i32 loc(#loc5)
+    %cst = arith.constant dense<16> : tensor<16x1xi32> loc(#loc5)
+    %4 = arith.muli %1, %cst : tensor<16x1xi32> loc(#loc5)
+    %5 = tt.broadcast %4 : tensor<16x1xi32> -> tensor<16x16xi32> loc(#loc6)
+    %6 = tt.broadcast %3 : tensor<1x16xi32> -> tensor<16x16xi32> loc(#loc6)
+    %7 = arith.addi %5, %6 : tensor<16x16xi32> loc(#loc6)
+    %8 = tt.splat %arg0 : !tt.ptr<f32> -> tensor<16x16x!tt.ptr<f32>> loc(#loc7)
+    %9 = tt.addptr %8, %7 : tensor<16x16x!tt.ptr<f32>>, tensor<16x16xi32> loc(#loc7)
+    %10 = tt.load %9 : tensor<16x16x!tt.ptr<f32>> loc(#loc8)
+    %11 = tt.splat %arg1 : !tt.ptr<f32> -> tensor<16x16x!tt.ptr<f32>> loc(#loc9)
+    %12 = tt.addptr %11, %7 : tensor<16x16x!tt.ptr<f32>>, tensor<16x16xi32> loc(#loc9)
+    %13 = tt.load %12 : tensor<16x16x!tt.ptr<f32>> loc(#loc10)
+    %14 = arith.addf %10, %13 : tensor<16x16xf32> loc(#loc11)
+    %15 = bufferization.to_memref %14 : memref<16x16xf32> loc(#loc12)
+    %memspacecast = memref.memory_space_cast %15 : memref<16x16xf32> to memref<16x16xf32, #hivm.address_space<ub>> loc(#loc12)
+    %alloc = memref.alloc() : memref<16x16xf32, #hivm.address_space<cbuf>> loc(#loc13)
+    annotation.mark %alloc {effects = ["write", "read"]} : memref<16x16xf32, #hivm.address_space<cbuf>> loc(#loc13)
+    hivm.hir.copy ins(%memspacecast : memref<16x16xf32, #hivm.address_space<ub>>) outs(%alloc : memref<16x16xf32, #hivm.address_space<cbuf>>) loc(#loc14)
+    %alloc_1 = memref.alloc() : memref<16x16xf32, #hivm.address_space<ub>> loc(#loc15)
+    annotation.mark %alloc_1 {effects = ["write", "read"]} : memref<16x16xf32, #hivm.address_space<ub>> loc(#loc15)
+    hivm.hir.copy ins(%memspacecast : memref<16x16xf32, #hivm.address_space<ub>>) outs(%alloc_1 : memref<16x16xf32, #hivm.address_space<ub>>) loc(#loc16)
+    tt.return loc(#loc17)
+  } loc(#loc)
+} loc(#loc)
+#loc1 = loc("/home/linxin/triton-test/al_copy.py":42:26)
+#loc2 = loc("/home/linxin/triton-test/al_copy.py":42:29)
+#loc3 = loc("/home/linxin/triton-test/al_copy.py":43:26)
+#loc4 = loc("/home/linxin/triton-test/al_copy.py":43:29)
+#loc5 = loc("/home/linxin/triton-test/al_copy.py":45:24)
+#loc6 = loc("/home/linxin/triton-test/al_copy.py":45:29)
+#loc7 = loc("/home/linxin/triton-test/al_copy.py":46:20)
+#loc8 = loc("/home/linxin/triton-test/al_copy.py":47:20)
+#loc9 = loc("/home/linxin/triton-test/al_copy.py":48:22)
+#loc10 = loc("/home/linxin/triton-test/al_copy.py":49:21)
+#loc11 = loc("/home/linxin/triton-test/al_copy.py":51:24)
+#loc12 = loc("/home/linxin/triton-test/al_copy.py":52:31)
+#loc13 = loc("/home/linxin/triton-test/al_copy.py":54:40)
+#loc14 = loc("/home/linxin/triton-test/al_copy.py":55:34)
+#loc15 = loc("/home/linxin/triton-test/al_copy.py":57:40)
+#loc16 = loc("/home/linxin/triton-test/al_copy.py":58:20)
+#loc17 = loc("/home/linxin/triton-test/al_copy.py":58:4)
+```

@@ -24,12 +24,14 @@ triton.language.inline_asm_elementwise(asm, constraints, args, dtype, is_pure, p
 
 ### 2.2 类型支持
 
-| | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
-|------|-------|-------|-------|-------|--------|--------|--------|-------|------|------|------|------|------|
-| GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ascend A2/A3 | ✓ | ✓ | ✓ | × | × | ×| × | ✓ |×|   ✓  | × | × | ×  |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | × | ✓ |
+| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | × | ✓ | × | × | × | × | × |
+| Ascend 950 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | × | ✓ | × | ✓ | × | × | × | × | × |
 
-Ascend 对比 GPU 的输入张量类型 缺失uint8、uint16、uint32、uint64、fp16、 fp64 、bf16 、bool的支持能力。
+结论：Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64、fp16、fp64、bf16、bool 的支持能力。
+Ascend 950 对比 GPU 缺失 uint64、fp16、fp64、bf16、bool 的支持能力。
 
 ### 2.3 使用方法
 

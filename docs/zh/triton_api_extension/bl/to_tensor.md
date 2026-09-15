@@ -2,61 +2,89 @@
 
 ## 1. 硬件背景
 
-将Ascend上分配的buffer转成tl.tensor并返回
+将 Ascend 上分配的 `bl.buffer` 对象转换为 `tl.tensor` 并返回，使其可参与 Triton 的张量计算（如 `tl.load`/`tl.store`/算术运算等）。与 `bl.to_buffer` 配对使用，构成 tensor ↔ buffer 的双向转换。
 
 ## 2. 接口说明
 
-<table>
-  <tr>
-    <td>Python<br>def to_tensor(memref: bl.buffer, writable: bool = True, _builder=None) -&gt; tl.tensor:</td>
-  </tr>
-</table>
+```python
+def to_tensor(
+    memref: bl.buffer,
+    writable: bool = True,
+    _builder=None,
+) -> tl.tensor:
+```
 
-### 入参说明
+## 3. 参数说明
 
-<table>
-  <tr>
-    <td>参数名</td>
-    <td>类型</td>
-    <td>必需</td>
-    <td>说明</td>
-  </tr>
-  <tr>
-    <td>memref</td>
-    <td>bl.buffer</td>
-    <td>是</td>
-    <td>输入bl.buffer对象</td>
-  </tr>
-  <tr>
-    <td>writable</td>
-    <td>bool</td>
-    <td>否</td>
-    <td>如果设置成True, 返回的tensor在bufferization过程中允许被原地修改，默认为True</td>
-  </tr>
-  <tr>
-    <td>_builder</td>
-    <td>-</td>
-    <td>内部参数</td>
-    <td>编译器自动传参，用户无需使用</td>
-  </tr>
-</table>
+| 参数名 | 类型 | 是否必需 | 说明 |
+|--------|------|----------|------|
+| `memref` | `bl.buffer` | 是 | 输入的 `bl.buffer` 对象 |
+| `writable` | `bool` | 否 | 若为 `True`，返回的 tensor 在 bufferization 阶段允许原地修改（write-through 到原 buffer）；默认为 `True` |
+| `_builder` | - | 内部参数 | 编译器自动传参，用户无需使用 |
 
-## 3. 约束说明
+## 4. 返回值
 
-该接口约束同bl.allocate_local_buffer
+返回一个 `tl.tensor`，与输入 buffer 共享底层内存，shape 和 element type 与 buffer 一致。
 
-## 4. 用例示例
+## 5. 昇腾平台数据类型支持
 
-<table>
-  <tr>
-    <td>Python<br>import os<br><br>import triton<br>import triton.language as tl<br>from triton.compiler.compiler import ASTSource<br>from triton.compiler.code_generator import ast_to_ttir<br>import triton.extension.buffer.language as bl<br>import triton.language.extra.cann.extension as al<br>from triton._C.libtriton import ir, buffer_ir<br>from triton._C.libtriton.ascend import ir as ascend_ir<br><br>os.environ[&quot;TORCH_DEVICE_BACKEND_AUTOLOAD&quot;] = &quot;0&quot;<br><br><br>class Options:<br>    num_warps = 4<br>    num_stages = 3<br>    num_ctas = 1<br>    cluster_dims = (1, 1, 1)<br>    enable_fp_fusion = True<br>    debug = False<br><br><br>def compile_kernel(kernel, signature, constants):<br>    &quot;&quot;&quot;Helper to compile a kernel to MLIR.&quot;&quot;&quot;<br>    src = ASTSource(kernel, signature, constants)<br>    context = ir.context()<br>    ir.load_dialects(context)<br>    buffer_ir.load_dialects(context)<br>    ascend_ir.load_dialects(context)<br>    module = ast_to_ttir(kernel, src, context, Options(), {&quot;create_address_space&quot;: al.semantic.create_address_space}, {})<br>    return str(module)<br><br><br># ============== Kernel definitions ==============<br><br>@triton.jit<br>def kernel_func(XBLOCK: tl.constexpr):<br>    buffer1 = bl.alloc(tl.float32, [XBLOCK])<br>    buffer1.to_tensor(writable=True)<br>    buffer2 = bl.alloc(tl.float32, [XBLOCK])<br>    bl.to_tensor(buffer2, writable=True)<br><br><br># ============== Main for manual testing ==============<br><br>if __name__ == &quot;__main__&quot;:<br>    print(&quot;=&quot; * 60)<br>    print(&quot;Test 1: Nested Scopes&quot;)<br>    print(&quot;=&quot; * 60)<br>    mlir = compile_kernel(<br>        kernel_func, {}, {&quot;XBLOCK&quot;: 256}<br>    )<br>    print(f&quot;✅ Generated MLIR ({len(mlir)} chars):\n&quot;)<br>    print(mlir)<br>    triton.compile(src=src, target=target)</td>
-  </tr>
-</table>
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e4nv | fp8e5 | bool |
+|------|-------|------|--------|-------|--------|-------|--------|-------|------|------|------|------|---------|-------|------|
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | √ | √ | × | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | × | √ | × | √ | √ | √ | × | √ | × | √ | × | × | √ |
 
-## 5. 编译输出结果
+## 6. 约束说明
 
-<table>
-  <tr>
-    <td>Plain Text<br>============================================================<br>Test 1: Nested Scopes<br>============================================================<br>✅ Generated MLIR (941 chars):<br><br>module {<br>  tt.func public @kernel_func() attributes {noinline = false} {<br>    %alloc = memref.alloc() : memref&lt;256xf32&gt; loc(#loc1)<br>    annotation.mark %alloc {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;256xf32&gt; loc(#loc1)<br>    %0 = bufferization.to_tensor %alloc restrict writable : memref&lt;256xf32&gt; loc(#loc2)<br>    %alloc_0 = memref.alloc() : memref&lt;256xf32&gt; loc(#loc3)<br>    annotation.mark %alloc_0 {effects = [&quot;write&quot;, &quot;read&quot;]} : memref&lt;256xf32&gt; loc(#loc3)<br>    %1 = bufferization.to_tensor %alloc_0 restrict writable : memref&lt;256xf32&gt; loc(#loc4)<br>    tt.return loc(#loc5)<br>  } loc(#loc)<br>} loc(#loc)<br>#loc = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:38:0)<br>#loc1 = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:39:35)<br>#loc2 = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:40:22)<br>#loc3 = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:41:35)<br>#loc4 = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:42:17)<br>#loc5 = loc(&quot;/home/linxin/triton-test/to_tensor.py&quot;:42:4)</td>
-  </tr>
-</table>
+- 接口约束规则与 `bl.alloc` 保持一致
+- `writable=False` 时，编译器可以对该 tensor 做只读优化（如常量传播、跨 buffer 复用），但不能保证一定不写——用户必须确保内核不通过其他别名修改这块内存
+- 仅可在 `@triton.jit` 修饰的内核函数中使用
+
+## 7. 用例示例
+
+```python
+import triton
+import triton.language as tl
+import triton.extension.buffer.language as bl
+import triton.language.extra.cann.extension as al
+
+
+@triton.jit
+def to_tensor_kernel(XBLOCK: tl.constexpr):
+    # 方式 1：通过 buffer 对象的成员方法调用
+    buf1 = bl.alloc(tl.float32, [XBLOCK])
+    t1 = buf1.to_tensor(writable=True)
+
+    # 方式 2：通过 bl.to_tensor 函数形式调用
+    buf2 = bl.alloc(tl.float32, [XBLOCK])
+    t2 = bl.to_tensor(buf2, writable=True)
+
+    # 3. writable=False 标记只读，便于编译器优化
+    buf3 = bl.alloc(tl.float32, [XBLOCK], al.ascend_address_space.UB)
+    t3 = bl.to_tensor(buf3, writable=False)
+```
+
+## 8. 编译输出结果
+
+以 `XBLOCK=256` 为例，核心 IR 片段：
+
+```mlir
+// memref.alloc + effects annotation 与 bl.alloc 一致
+%alloc = memref.alloc() : memref<256xf32>
+annotation.mark %alloc {effects = ["write", "read"]} : memref<256xf32>
+
+// to_tensor 在 bufferization dialect 中表示为 bufferization.to_tensor
+//   restrict   —— 表明这块内存没有其他别名（独占）
+//   writable   —— 对应 writable=True，允许写回
+%0 = bufferization.to_tensor %alloc restrict writable : memref<256xf32>
+```
+
+### 输出要点说明
+
+- `bl.to_tensor` 底层对应 `bufferization.to_tensor` op，本身不产生数据搬运，只是把 memref 类型"视图"成 tensor 类型
+- `restrict` 属性表示该 buffer 在转换为 tensor 时没有其他活跃别名（由 TritonAscend buffer SSA 语义保证）
+- `writable` 属性直接对应 `writable` 参数，影响 One-Shot Bufferize 阶段的就地化（in-place）决策
+
+## 9. 相关接口
+
+- [`bl.alloc`](alloc.md)：分配 buffer
+- [`bl.to_buffer`](to_buffer.md)：tensor → buffer 的反向转换

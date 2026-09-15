@@ -5,7 +5,7 @@
 简介：`triton.language.associative_scan` 对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值。
 
 ```python
-triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semantic=None, _generator=None)
+triton.language.associative_scan(inputs, axis, region_builder_fn, reverse=False)
 ```
 
 ## 2. OP 规格
@@ -18,8 +18,6 @@ triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semant
 | `axis` | `int` | 沿着哪个维度进行关联扫描操作 |
 | `combine_fn` | `Callable` | 用于组合两个标量tensor组的函数（必须用@triton.jit标记） |
 | `reverse` | `bool` | 是否沿轴的反方向应用关联扫描|
-| `_semantic` | `Optional[str]` | 保留参数，暂不支持外部调用 |
-| `_generator` | `Optional[Generator]` | 保留参数，暂不支持外部调用 |
 
 返回值：
 `tensor`：对输入tensor沿指定轴应用关联扫描操作，使用combine_fn函数组合元素并更新进位值之后的tensor。
@@ -28,10 +26,15 @@ triton.language.associative_scan(input, axis, combine_fn, reverse=False, _semant
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-| GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
-| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | × | × | × | √ |
+
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 无缺失的数据类型。
 
 #### 2.2.2 Shape 支持
 

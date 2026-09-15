@@ -5,7 +5,7 @@
 简介：`triton.language.cat`函数用于将指定的tensor进行拼接。
 
 ```python
-triton.language.cat(input, other, can_reorder=False, _semantic=None)
+triton.language.cat(input, other, can_reorder)
 ```
 
 ## 2. OP 规格
@@ -16,8 +16,7 @@ triton.language.cat(input, other, can_reorder=False, _semantic=None)
 | ------------- | ----------------- | ---------------------------- |
 | `input`           | `Tensor`               | 拼接的第一个tensor |
 | `other`            | `Tensor`               | 拼接的第二个tensor |
-| `can_reorder`            | `Bool`               | 编译器提示 - 当为True时，允许编译器在连接输入时重新排序元素以优化性能。  |
-| `_semantic`            | `Optional[str]`               | 保留参数，暂不支持外部调用 |
+| `can_reorder`            | `Bool`               | 编译器提示 - 当为True时，允许编译器在连接输入时重新排序元素以优化性能, 默认False。  |
 
 返回值：
 `tensor`：完成拼接之后的tensor
@@ -26,11 +25,16 @@ triton.language.cat(input, other, can_reorder=False, _semantic=None)
 
 #### 2.2.1 DataType 支持
 
-|| uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | bf16 | bool/int1 |
-|---| ------- | ------ | -------- | ------- | -------- | ------- | -------- | ------- | ------ | ------ | ------ | ----------- |
-| Ascend A2/A3 | ✓ | ✓ | × | ✓ | × | ✓ | × | ✓ | ✓ | ✓ | ✓ | ✓ |
-| GPU支持 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 平台 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| GPU | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | × | × | √ |
+| Ascend A2/A3 | √ | √ | × | √ | × | √ | × | √ | √ | √ | × | √ | × | × | √ |
+| Ascend 950 | √ | √ | √ | √ | √ | √ | √ | √ | √ | √ | × | √ | √ | √ | √ |
 
+
+结论：
+- Ascend A2/A3 对比 GPU 缺失 uint16、uint32、uint64 的支持能力。
+- Ascend 950 对比 GPU 无缺失的数据类型。
 #### 2.2.2 Shape 支持
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。cat 只支持1D shape 的拼接。

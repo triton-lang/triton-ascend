@@ -46,19 +46,8 @@ Triton Ascend
    Triton-Ascend Operator Debugging and Profiling <debug_guide/index>
    Environment Variables and Compiler Options <environment_variable_and_compiler_options_reference>
 
-.. toctree::
-   :maxdepth: 1
-   :titlesonly:
-   :caption: API Reference
-
-   triton <python-api/triton>
-   triton.language <python-api/triton.language>
-   triton.testing <python-api/triton.testing>
-   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
-
-.. Temporarily disabled -- restore into the toctree above when needed:
-   triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
-   triton.extension.buffer.language <python-api/triton.extension.buffer.language>
+.. API Reference disabled -- en python-api docs were removed by the revert of #1479;
+   restore once en triton_api docs are ready.
 
 .. toctree::
    :maxdepth: 1

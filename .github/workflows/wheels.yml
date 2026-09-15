@@ -8,11 +8,13 @@ on:
     paths:
       - .github/workflows/wheels.yml
       - .github/workflows/build/wheels.Dockerfile
+      - .github/workflows/build/patch-npuir-templates.py
       - setup.py
       - pyproject.toml
       - version.txt
       - cmake/llvm-hash.txt
       - cmake/json-version.txt
+      - third_party/ascend/AscendNPU-IR
   schedule:
     - cron: "0 8 * * *"
 
@@ -24,8 +26,202 @@ permissions: read-all
 
 jobs:
 
+  # Archives the nested npuir submodule sources (llvm-project, torch-mlir,
+  # shmem) at the exact commits the npuir pin records. Runs on GitHub-hosted
+  # runners because the self-hosted network cannot clone the gitcode
+  # repositories (branch clones come up empty / transfers fail);
+  # github.com -> gitcode depth-1 SHA fetches work fine.
+  prepare-npuir-sources:
+    name: Prepare npuir nested sources
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "*"
+
+      - name: Archive nested submodule sources
+        run: |
+          set -eu
+          NPUIR=third_party/ascend/AscendNPU-IR
+          mkdir -p sources
+          git -C "$NPUIR" ls-tree HEAD third-party/ | while read -r _ _ sha path; do
+            name=$(basename "$path")
+            url=$(git -C "$NPUIR" config -f .gitmodules --get "submodule.$path.url")
+            branch=$(git -C "$NPUIR" config -f .gitmodules --get "submodule.$path.branch" || true)
+            echo "Archiving ${path} at ${sha} (${url})"
+            rm -rf "/tmp/${name}"
+            git init -q "/tmp/${name}"
+            git -C "/tmp/${name}" remote add origin "$url"
+            # gitcode allows depth-1 fetches of an exact SHA. Fall back to
+            # fetching the branch tip first if the server rejects it.
+            if ! git -C "/tmp/${name}" fetch --depth 1 origin "$sha"; then
+              if [ -n "${branch}" ]; then
+                git -C "/tmp/${name}" fetch --depth 1 origin "$branch"
+              else
+                git -C "/tmp/${name}" fetch --depth 1 origin HEAD
+              fi
+              git -C "/tmp/${name}" fetch --depth 1 origin "$sha"
+            fi
+            git -C "/tmp/${name}" archive --prefix="${name}/" --format=tar.gz \
+              -o "$GITHUB_WORKSPACE/sources/${name}-${sha}.tar.gz" FETCH_HEAD
+            echo "${path} ${sha}" >> "$GITHUB_WORKSPACE/sources/pin.txt"
+          done
+          ls -lh sources/
+
+      - name: Upload source archives
+        uses: actions/upload-artifact@v4
+        with:
+          name: npuir-sources
+          path: sources/
+          if-no-files-found: error
+
+  # Builds the BishengIR payload (bishengir-compile/bishengir-opt + meta_op
+  # .bc libs) from the pinned AscendNPU-IR submodule, once per arch, and hands
+  # it to the wheel builds as an artifact. Runs on the 16-CPU / 32-GB
+  # self-hosted pods (cgroup limits, not the misleading host nproc); the
+  # nested sources come from the prepare-npuir-sources artifact because the
+  # self-hosted network cannot reach gitcode reliably.
+  build-npuir:
+    name: Build npuir payload (${{ matrix.config.arch }})
+    needs: prepare-npuir-sources
+    runs-on: ${{ matrix.config.runs_on }}
+    timeout-minutes: 360
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {runs_on: 'linux-amd64-cpu-16', arch: 'x86_64'}
+          - {runs_on: 'linux-aarch64-cpu-16', arch: 'aarch64'}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "*"
+
+      - name: Download nested submodule sources
+        uses: actions/download-artifact@v4
+        with:
+          name: npuir-sources
+          path: npuir-sources
+
+      - name: Unpack nested submodule sources
+        run: |
+          set -eu
+          NPUIR=third_party/ascend/AscendNPU-IR
+          test -f npuir-sources/pin.txt || {
+            echo "pin.txt missing; artifact contents:" >&2
+            ls -laR npuir-sources/ 2>/dev/null || true
+            exit 1
+          }
+          echo "--- pin.txt ---"
+          cat npuir-sources/pin.txt
+          while read -r path sha; do
+            echo "Unpacking ${path} @ ${sha}"
+            tarball="npuir-sources/$(basename "${path}")-${sha}.tar.gz"
+            test -f "${tarball}" || { echo "Missing archive: ${tarball}"; exit 1; }
+            # The archives were made from the same npuir commit, so the
+            # gitlinks must match.
+            gitlink=$(git -C "$NPUIR" ls-tree HEAD "$path" | awk '{print $3}')
+            test "${gitlink}" = "${sha}" || {
+              echo "Archive sha ${sha} != gitlink ${gitlink} for ${path}"; exit 1; }
+            tar xzf "${tarball}" -C "$NPUIR/third-party"
+            echo "Unpacked ${path}"
+          done < npuir-sources/pin.txt
+          ls "$NPUIR/third-party"
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          # The base image is minimal: python3 is not present (needed by pip
+          # and the LLVM build), nor is bash (GitHub Actions falls back to sh
+          # for run steps when it is missing); wget is used by the CANN step.
+          sudo apt-get install -y --no-install-recommends bash python3 python3-pip wget clang lld ccache
+          python3 -m pip install cmake ninja
+
+      - name: Install CANN toolkit via apt
+        id: bisheng
+        run: |
+          set -eu
+          # Official online install: the cann-keyring package configures the
+          # Ascend apt source + signing key.
+          # https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/softwareinst/instg/instg_0105.html
+          wget -q https://ascend.devcloud.huaweicloud.com/cann/debian/cann-keyring_1.0.0_all.deb
+          sudo dpkg -i cann-keyring_1.0.0_all.deb
+          sudo apt-get update
+          # Prefer the newest available 9.2.x line (has the CCE_PRINT_CC
+          # device-print support), e.g. 9.2.0 or 9.2.0-beta.x.
+          CANN_VERSION=$(apt-cache madison ascend-cann-toolkit | grep -oE '9\.2\.[0-9a-zA-Z.-]+' | head -1)
+          if [ -z "${CANN_VERSION}" ]; then
+            echo "Error: no ascend-cann-toolkit 9.2.x available" >&2
+            apt-cache madison ascend-cann-toolkit || true
+            exit 1
+          fi
+          echo "Installing ascend-cann-toolkit=${CANN_VERSION}"
+          sudo apt-get install -y "ascend-cann-toolkit=${CANN_VERSION}"
+          # The toolkit installs under /usr/local/Ascend; locate the bisheng
+          # compiler (ccec + llvm-link) shipped with it.
+          BISHENG_DIR=$(find /usr/local/Ascend -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
+          test -x "${BISHENG_DIR}/ccec"
+          test -x "${BISHENG_DIR}/llvm-link"
+          echo "Found bisheng compiler at ${BISHENG_DIR}"
+          echo "bisheng_dir=${BISHENG_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: npuir-ccache-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          restore-keys: |
+            npuir-ccache-${{ matrix.config.arch }}-
+
+      - name: Build AscendNPU-IR
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          BISHENG_DIR: ${{ steps.bisheng.outputs.bisheng_dir }}
+        run: |
+          cd third_party/ascend/AscendNPU-IR
+          # See patch-npuir-templates.py: public bisheng compilers lack the
+          # markers the device-print templates need, so patch them first.
+          python3 "$GITHUB_WORKSPACE/.github/workflows/build/patch-npuir-templates.py" .
+          # Self-hosted pods are 16 CPUs / 32 GB (cgroup); 12 parallel jobs
+          # leaves ~2.5 GB per compile (heavy MLIR TUs peak at 3-5 GB).
+          build-tools/build.sh -o build -j 12 \
+            --add-cmake-options="-DCMAKE_LINKER=LLD" \
+            --add-cmake-options="-DLLVM_ENABLE_LLD=ON" \
+            --add-cmake-options="-DLLVM_PARALLEL_LINK_JOBS=1" \
+            -t \
+            --bisheng-compiler="${BISHENG_DIR}" \
+            --build-torch-mlir \
+            --safety-options --safety-ld-options --skip-rpath \
+            --skip-hivmc \
+            --collect-binary "$GITHUB_WORKSPACE/npuir-payload"
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: npuir-ccache-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+
+      - name: Upload npuir payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: npuir-payload-${{ matrix.config.arch }}
+          path: npuir-payload/
+          if-no-files-found: error
+
   Build-Wheels:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
+    needs: build-npuir
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
@@ -75,6 +271,13 @@ jobs:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
+
+      - name: Download npuir payload
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        uses: actions/download-artifact@v4
+        with:
+          name: npuir-payload-${{ matrix.config.arch }}
+          path: .npuir-payload
 
       - name: Compute build variables
         id: vars

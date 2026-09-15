@@ -1331,7 +1331,13 @@ CONSTRAINTS = {
     },
     "triton.language.map_elementwise": {
         "constraints": [
-            "`while` loops are not supported inside the scalar function.",
+            "`while` loops are not supported inside the scalar function. Reason: The compilation "
+            "implementation of `map_elementwise` (TritonToLinalg Pass) needs to promote all operations "
+            "in the scalar function to the tensor level for vectorization. However, the `scf.condition` "
+            "in the `scf.while` operation requires a scalar `i1` type condition value, which cannot be "
+            "promoted to a tensor, so the compiler reports an error during the conversion phase. "
+            "`if/elif/else` branches and `for` loops are not subject to this limitation because their "
+            "control flow can be vectorized.",
             "`pack` has no semantic effect on NPU backends as the implementation is always vectorized.",
         ],
         "example":

@@ -32,9 +32,11 @@ triton.language.map_elementwise(scalar_fn, *args, pack=1, _semantic=None, _gener
 
 ### 2.3 特殊限制说明
 
-> 相对社区能力缺失且无法实现
+> 语法约束
 
-`while` 循环不支持：在Ascend平台上，标量函数内部不能使用 `while` 循环。
+`while` 循环不支持：在 Ascend 平台上，标量函数内部不能使用 `while` 循环。
+
+**原因**：`map_elementwise` 的编译实现（TritonToLinalg Pass）需要将标量函数中的所有操作提升（promote）到 tensor 级别进行向量化。而 `while` 循环对应的 `scf.while` 操作中的 `scf.condition` 要求标量 `i1` 类型条件值，该值无法被提升为 tensor，因此编译器在转换阶段会报错拒绝。`if/elif/else` 分支和 `for` 循环不受此限制，因为它们的控制流可以被向量化。
 
 ### 2.4 使用方法
 

@@ -874,6 +874,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             # Temporary until the NPU compiler enables batch matmul by default in Q4.
             if metadata.get("enable_hivm_batch_matmul"):
                 _compile_option_list += ["--enable-hivm-batch-matmul"]
+            if metadata.get("enable_vf_stack_limit"):
+                _compile_option_list += ["--enable-vf-stack-limit"]
             if (_needs_lib_call_no_inline(metadata)
                     and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
                 _compile_option_list += ["--enable-lib-call-no-inline=false"]
@@ -1227,6 +1229,8 @@ class NPUOptions:
     enable_hivm_auto_cv_balance: bool = None
     # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
     enable_hivm_batch_matmul: bool = False
+    # Only takes effect on the A5 non-pure-SIMT BiShengIR compilation path.
+    enable_vf_stack_limit: bool = False
     sync_solver: bool = None
     unit_flag: bool = None
     enable_flatten: bool = None

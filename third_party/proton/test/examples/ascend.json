@@ -1,0 +1,38 @@
+[
+  {
+    "children": [
+      {
+        "children": [],
+        "frame": {
+          "name": "vector_add_kernel",
+          "type": "function"
+        },
+        "metrics": {
+          "count": 5,
+          "device_id": "0",
+          "device_type": "NPU",
+          "time (ns)": 10000
+        }
+      }
+    ],
+    "frame": {
+      "name": "ROOT",
+      "type": "function"
+    },
+    "metrics": {
+      "count": 0,
+      "time (ns)": 0
+    }
+  },
+  {
+    "NPU": {
+      "0": {
+        "arch": "Ascend950PR_9579",
+        "bus_width": 0,
+        "clock_rate": 1650000,
+        "memory_clock_rate": 1500000,
+        "num_sms": 56
+      }
+    }
+  }
+]

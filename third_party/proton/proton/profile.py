@@ -17,6 +17,8 @@ def _select_backend() -> str:
         return "cupti"
     elif backend == "hip":
         return "roctracer"
+    elif backend == "npu":
+        return "mspti"
     else:
         raise ValueError("No backend is available for the current target.")
 
@@ -78,18 +80,19 @@ def start(
                               Available options are ["tree", "trace"].
                               Defaults to "tree".
         backend (str, optional): The backend to use for profiling.
-                                 Available options are [None, "cupti", "roctracer", "instrumentation"].
+                                 Available options are [None, "cupti", "roctracer", "mspti", "instrumentation"].
                                  Defaults to None, which automatically selects the backend matching the current active runtime.
         mode (Union[str, BaseMode], optional): The "mode" to use for profiling, which is specific to the backend.
                                                Can be a string or an instance of BaseMode (or any subclass thereof).
                                                Defaults to None.
                                                For "cupti", available options are [None, "pcsampling"].
                                                For "roctracer", available options are [None].
+                                               For "mspti", available options are [None].
                                                For "instrumentation", available options are [None].
                                                Each mode has a set of control knobs following with the mode name.
                                                For example, "pcsampling" has an "interval" control knob, expressed as "pcsampling:interval=1000".
         hook (str, optional): The hook to use for profiling.
-                              Available options are [None, "launch"].
+                              Available options are [None, "triton"].
                               Defaults to None.
     Returns:
         session (int): The session ID of the profiling session.
@@ -107,7 +110,13 @@ def start(
 
     _check_env(backend)
 
-    session = libproton.start(name, context, data, backend, mode_str)
+    try:
+        session = libproton.start(name, context, data, backend, mode_str)
+    except RuntimeError as error:
+        if backend == "mspti" and "msptiEnableCallback with error 6" in str(error):
+            raise RuntimeError("MSPTI profiling requires libmspti.so in LD_PRELOAD "
+                               "before the Python process starts") from error
+        raise
 
     if hook == "triton":
         HookManager.register(LaunchHook(), session)

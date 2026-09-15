@@ -92,6 +92,24 @@
         "factor": 12.0,
         "confidence": "low"
       },
+      "f32.sin": {
+        "description": "Triton end-to-end measured FP32 SIMD sine cost relative to f32.add; reflects AscendNPU-IR Taylor expansion.",
+        "relative_to": "f32.add",
+        "factor": 15.0,
+        "confidence": "low"
+      },
+      "f32.cos": {
+        "description": "Triton end-to-end measured FP32 SIMD cosine cost relative to f32.add; reflects AscendNPU-IR Taylor expansion.",
+        "relative_to": "f32.add",
+        "factor": 15.0,
+        "confidence": "low"
+      },
+      "f32.trans": {
+        "description": "Same-kernel Triton measured effective FP32 SIMD transpose cost relative to f32.add.",
+        "relative_to": "f32.add",
+        "factor": 6.0,
+        "confidence": "low"
+      },
       "predicate.cmp": {
         "description": "Estimated SIMD predicate-comparison cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
@@ -229,6 +247,24 @@
         "description": "Estimated FP32 SIMT logarithm cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 12.0,
+        "confidence": "low"
+      },
+      "f32.sin": {
+        "description": "Marginally measured FP32 SIMT sine cost relative to f32.add at the CCE SIMT baseline condition (per-thread ILP=8).",
+        "relative_to": "f32.add",
+        "factor": 14.0,
+        "confidence": "low"
+      },
+      "f32.cos": {
+        "description": "Marginally measured FP32 SIMT cosine cost relative to f32.add at the CCE SIMT baseline condition (per-thread ILP=8).",
+        "relative_to": "f32.add",
+        "factor": 18.0,
+        "confidence": "low"
+      },
+      "f32.trans": {
+        "description": "Same-kernel Triton measured effective FP32 SIMT transpose cost relative to f32.add.",
+        "relative_to": "f32.add",
+        "factor": 33.0,
         "confidence": "low"
       },
       "predicate.cmp": {

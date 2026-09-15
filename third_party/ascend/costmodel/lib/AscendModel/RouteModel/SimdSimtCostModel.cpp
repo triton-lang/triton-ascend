@@ -393,8 +393,8 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
     if (const auto *ops = reader.object(*simd, "ops", "simd")) {
       for (llvm::StringRef op :
            {"f32.add", "f32.sub", "f32.mul", "f32.div", "f32.max", "f32.abs",
-            "f32.exp", "f32.log", "predicate.cmp", "predicate.select",
-            "convert.cast", "f32.clamp"})
+            "f32.exp", "f32.log", "f32.sin", "f32.cos", "f32.trans",
+            "predicate.cmp", "predicate.select", "convert.cast", "f32.clamp"})
         hardware.simd.operationRates[op] = resolveOpProfile(
             *ops, op, "throughput_vector_instructions_per_system_cycle",
             "vector_instruction/system_cycle", microbench, reader);
@@ -438,8 +438,8 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
     if (const auto *ops = reader.object(*simt, "ops", "simt")) {
       for (llvm::StringRef op :
            {"f32.add", "f32.sub", "f32.mul", "f32.div", "f32.max", "f32.abs",
-            "f32.exp", "f32.log", "predicate.cmp", "predicate.select",
-            "convert.cast", "f32.clamp"})
+            "f32.exp", "f32.log", "f32.sin", "f32.cos", "f32.trans",
+            "predicate.cmp", "predicate.select", "convert.cast", "f32.clamp"})
         hardware.simt.operationRates[op] =
             resolveOpProfile(*ops, op, "throughput_scalar_ops_per_system_cycle",
                              "scalar_op/system_cycle", microbench, reader);

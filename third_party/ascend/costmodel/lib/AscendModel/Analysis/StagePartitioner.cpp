@@ -145,6 +145,9 @@ static llvm::StringRef getProfileOperationName(Operation *operation) {
       .Cases("math.absf", "tt.abs", "f32.abs")
       .Cases("math.exp", "tt.exp", "f32.exp")
       .Cases("math.log", "tt.log", "f32.log")
+      .Cases("math.sin", "tt.sin", "f32.sin")
+      .Cases("math.cos", "tt.cos", "f32.cos")
+      .Cases("tt.trans", "linalg.transpose", "f32.trans")
       .Cases("arith.extf", "arith.truncf", "arith.sitofp", "arith.uitofp",
              "convert.cast")
       .Cases("arith.fptosi", "arith.fptoui", "convert.cast")

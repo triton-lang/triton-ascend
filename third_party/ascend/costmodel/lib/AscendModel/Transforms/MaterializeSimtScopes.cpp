@@ -173,11 +173,18 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
   SmallVector<Operation *> anchorOps;
   SmallVector<PlannedRange> anchorRanges;
   DenseSet<Operation *> coveredByRange;
+  int64_t materialized = 0;
 
   for (const SimtAnchorDescriptor &anchor : plan.anchors) {
     Operation *op = anchor.operation;
     if (!anchor.materializable || !op || coveredByRange.contains(op))
       continue;
+    if (op->getName().getStringRef() == "scope.scope") {
+      // A user scope already is the local SIMT contract: count it as
+      // materialized without re-wrapping.
+      ++materialized;
+      continue;
+    }
     if (hasEnclosingVectorMode(op, "simt"))
       continue;
 
@@ -197,7 +204,6 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
     anchorOps.push_back(op);
   }
 
-  int64_t materialized = 0;
   for (const PlannedRange &range : anchorRanges) {
     if (failed(wrapAnchorRange(range.operations, range.insertionPoint,
                                superblockFactor)))

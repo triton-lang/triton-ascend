@@ -95,6 +95,8 @@ struct LogicalStage {
   /// AutoBlockify V1 loop body.  NPUIR's current scope-SuperBlock ABI requires
   /// this stronger condition for F2/F4; nested scopes remain legal at F1.
   bool localSuperblockMaterializable = false;
+  bool pinnedToSimt = false;
+  bool pinnedToSimd = false;
   std::vector<int64_t> legalSimtFactors;
   std::vector<int64_t> localSimtFactors;
 };

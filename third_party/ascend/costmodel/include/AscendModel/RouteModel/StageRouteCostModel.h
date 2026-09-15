@@ -205,6 +205,8 @@ struct LogicalStageCost {
   std::vector<unsigned> simtAnchorIndices;
   bool localSimtMaterializable = false;
   bool localSuperblockMaterializable = false;
+  bool pinnedToSimt = false;
+  bool pinnedToSimd = false;
   /// Factors legal for a whole-kernel pure-SIMT schedule.
   std::vector<int64_t> legalSimtFactors;
   /// Factors legal when this Stage alone is materialized as a local scope.

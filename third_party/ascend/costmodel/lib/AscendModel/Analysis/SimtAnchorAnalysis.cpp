@@ -1,6 +1,7 @@
 //===- SimtAnchorAnalysis.cpp - Materializable SIMT anchors --------------===//
 
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
+#include "AscendModel/Transforms/SimtSelection.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -501,6 +502,9 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     if (!facts)
       return std::nullopt;
     descriptor.kind = SimtAnchorKind::PlainOneDimensionalCumsum;
+    // A serial one-dimensional scan is a lane-order recurrence: the
+    // all-SIMD lowering cannot express it.
+    descriptor.lowerability.allSimd = false;
     if (facts->axisExtent <= 0 || !isSupportedCumsumType(facts->elementType))
       descriptor.lowerability.mixed = false;
   } else if (name == "tt.atomic_rmw" || name == "tt.atomic_cas") {
@@ -556,6 +560,8 @@ llvm::StringRef mlir::ascend::stringifySimtAnchorKind(SimtAnchorKind kind) {
     return "tensor_atomic";
   case SimtAnchorKind::TriangularSolveLoop:
     return "triangular_solve_loop";
+  case SimtAnchorKind::ExplicitUserSimtScope:
+    return "explicit_user_simt_scope";
   }
   llvm_unreachable("unknown SIMT anchor kind");
 }
@@ -653,6 +659,20 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
   module.walk<WalkOrder::PreOrder>([&](Operation *op) {
     if (operationsInPlannedScope.contains(op))
       return WalkResult::skip();
+    // Never rediscover auto anchors inside a user scope; a simt scope is
+    // itself an already-materialized anchor.
+    if (op->getName().getStringRef() == "scope.scope") {
+      auto mode = mlir::ascend::simt_selection::getVectorMode(op);
+      if (mode && mode.getValue() == "simt") {
+        SimtAnchorDescriptor descriptor;
+        descriptor.operation = op;
+        descriptor.scopeInsertionPoint = op;
+        descriptor.kind = SimtAnchorKind::ExplicitUserSimtScope;
+        descriptor.materializable = compileOn91095;
+        plan.anchors.push_back(std::move(descriptor));
+      }
+      return WalkResult::skip();
+    }
     std::optional<SimtAnchorDescriptor> descriptor =
         analyzeAnchor(op, compileOn91095);
     if (!descriptor)

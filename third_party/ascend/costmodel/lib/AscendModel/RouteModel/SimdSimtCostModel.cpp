@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/Transforms/SimtSelection.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -676,6 +677,8 @@ llvm::json::Object SimdSimtFeatureSummary::toJSON() const {
   postTransform["auto_blockify_v1_applied"] = autoBlockifyV1Applied;
   result["post_transform"] = std::move(postTransform);
   result["has_explicit_scope"] = hasExplicitScope;
+  result["has_explicit_simt_scope"] = hasExplicitSimtScope;
+  result["has_explicit_simd_scope"] = hasExplicitSimdScope;
   result["simt_anchors"] = simtAnchors.toJSON();
   return result;
 }
@@ -697,6 +700,7 @@ llvm::json::Object SimdSimtCostReport::toJSON() const {
   result["unit"] = scoreUnit;
   result["candidate_costs"] = candidateCosts.toJSON();
   result["decision_kind"] = stringifySimdSimtCandidate(decision);
+  result["explicit_scope_forces_mixed"] = explicitScopeForcedMixed;
   llvm::json::Array selectableCandidates;
   if (allSimdCandidateLegal)
     selectableCandidates.push_back(kAllSimd);
@@ -766,8 +770,13 @@ mlir::ascend::analyzeSimdSimtFeatures(ModuleOp module,
     if (operation->hasAttr("ta.auto_blockify_v1") ||
         operation->hasAttr("ta.auto_blockify_v1.loop"))
       features.autoBlockifyV1Applied = true;
-    features.hasExplicitScope |=
-        operation->getName().getStringRef() == "scope.scope";
+    const bool isScope = operation->getName().getStringRef() == "scope.scope";
+    features.hasExplicitScope |= isScope;
+    if (isScope) {
+      auto mode = mlir::ascend::simt_selection::getVectorMode(operation);
+      features.hasExplicitSimtScope |= mode && mode.getValue() == "simt";
+      features.hasExplicitSimdScope |= mode && mode.getValue() == "simd";
+    }
   });
   return features;
 }
@@ -799,8 +808,11 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   report.allSimtOnlyCandidateLegal =
       options.compileOn91095 && !features.hasExplicitScope &&
       features.simtAnchors.kernelLowerability.allSimtOnly;
-  report.mixedCandidateLegal = !features.hasExplicitScope &&
-                               options.compileOn91095 &&
+  // A user-authored vector_mode scope no longer vetoes the mixed candidate:
+  // the pin mechanism routes the scope's Stage on the user-specified side.
+  // Scopes the Route Model cannot reason about (cube / unknown modes) are
+  // rejected later by the selector's actionSupported gate.
+  report.mixedCandidateLegal = options.compileOn91095 &&
                                features.simtAnchors.count > 0 &&
                                features.simtAnchors.kernelLowerability.mixed;
   report.includeFeaturesInJSON = options.includeFeaturesInJSON;
@@ -821,6 +833,24 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   report.allSimdCandidateLegal &= report.stageModel.allSimd.legal;
   report.allSimtOnlyCandidateLegal &= report.stageModel.allSimt.legal;
   report.mixedCandidateLegal &= report.stageModel.mixed.legal;
+  // A user-authored simt scope pins its Stage to the SIMT side of the mixed
+  // candidate, so all-SIMD and whole-kernel all-SIMT are not selectable.  If
+  // the mixed plan is not materializable, the selector falls back to the
+  // backend default so the scope keeps its legacy lowering.
+  if (features.hasExplicitSimtScope && options.compileOn91095) {
+    report.allSimdCandidateLegal = false;
+    report.allSimtOnlyCandidateLegal = false;
+    report.mixedCandidateLegal = true;
+    report.explicitScopeForcedMixed = true;
+    if (!report.stageModel.mixed.legal)
+      report.unsupported.push_back(
+          "explicit_simt_scope_mixed_plan_not_materializable");
+  }
+  // A user-authored simd scope only excludes whole-kernel all-SIMT; all-SIMD
+  // already honors the scope's native semantics.
+  if (features.hasExplicitSimdScope && options.compileOn91095) {
+    report.allSimtOnlyCandidateLegal = false;
+  }
   const unsigned legalCandidateCount =
       static_cast<unsigned>(report.allSimdCandidateLegal) +
       static_cast<unsigned>(report.allSimtOnlyCandidateLegal) +

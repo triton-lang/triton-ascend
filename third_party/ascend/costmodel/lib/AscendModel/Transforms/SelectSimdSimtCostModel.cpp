@@ -67,6 +67,24 @@ static bool containsExplicitVectorScope(ModuleOp module) {
   return found;
 }
 
+/// True when the module carries a user scope with an unsupported vector
+/// mode (not ``"simt"`` or ``"simd"``), which the Route Model cannot reason
+/// about.
+static bool containsUnsupportedExplicitVectorScope(ModuleOp module) {
+  bool found = false;
+  module.walk([&](Operation *op) {
+    if (op->getName().getStringRef() != "scope.scope")
+      return WalkResult::advance();
+    auto mode = simt_selection::getVectorMode(op);
+    if (!mode || (mode.getValue() != "simt" && mode.getValue() != "simd")) {
+      found = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::skip();
+  });
+  return found;
+}
+
 static void clearPreviousSelection(ModuleOp module) {
   module->removeAttr(kEffectiveExecutionAttr);
   module->removeAttr(kRecommendedExecutionAttr);
@@ -214,7 +232,7 @@ struct SelectSimdSimtCostModelPass
     bool actionSupported = true;
     bool hasExplicitScope = containsExplicitVectorScope(module);
     if (recommended == kMixedSimdSimt) {
-      if (hasExplicitScope) {
+      if (containsUnsupportedExplicitVectorScope(module)) {
         actionSupported = false;
         applicationReason = "explicit_scope_present";
       } else if (!anchorPlansHaveCompatibleIndices(analysisAnchorPlan,

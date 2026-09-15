@@ -31,6 +31,7 @@ enum class SimtAnchorKind {
   PlainOneDimensionalCumsum,
   TensorAtomic,
   TriangularSolveLoop,
+  ExplicitUserSimtScope,
 };
 
 llvm::StringRef stringifySimtAnchorKind(SimtAnchorKind kind);

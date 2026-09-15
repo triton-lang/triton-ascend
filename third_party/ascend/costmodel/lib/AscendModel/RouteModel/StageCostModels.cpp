@@ -536,6 +536,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.localSimtMaterializable = stage.localSimtMaterializable;
     logicalCost.localSuperblockMaterializable =
         stage.localSuperblockMaterializable;
+    logicalCost.pinnedToSimt = stage.pinnedToSimt;
+    logicalCost.pinnedToSimd = stage.pinnedToSimd;
     logicalCost.legalSimtFactors = stage.legalSimtFactors;
     logicalCost.localSimtFactors = stage.localSimtFactors;
 

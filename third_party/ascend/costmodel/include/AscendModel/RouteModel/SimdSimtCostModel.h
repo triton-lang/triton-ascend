@@ -50,6 +50,10 @@ struct SimdSimtFeatureSummary {
   /// ran before feature extraction rather than being guessed from source TTIR.
   bool autoBlockifyV1Applied = false;
   bool hasExplicitScope = false;
+  /// A user simt scope excludes all-SIMD.
+  bool hasExplicitSimtScope = false;
+  /// A user simd scope excludes whole-kernel all-SIMT.
+  bool hasExplicitSimdScope = false;
 
   SimtAnchorFeatureSummary simtAnchors;
 
@@ -104,6 +108,9 @@ struct SimdSimtCostReport {
   bool allSimdCandidateLegal = true;
   bool allSimtOnlyCandidateLegal = true;
   bool mixedCandidateLegal = false;
+  /// True when a user-authored SIMT scope constrained the candidate legality
+  /// to mixed only (all-SIMD and all-SIMT rejected).
+  bool explicitScopeForcedMixed = false;
   SimdSimtCandidateKind decision = SimdSimtCandidateKind::AllSIMD;
 
   std::vector<std::string> unsupported;

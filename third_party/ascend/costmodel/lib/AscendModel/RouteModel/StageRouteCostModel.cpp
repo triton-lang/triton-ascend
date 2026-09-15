@@ -351,6 +351,8 @@ llvm::json::Object LogicalStageCost::toJSON() const {
   result["simt_anchor_indices"] = std::move(anchorIndices);
   result["local_simt_materializable"] = localSimtMaterializable;
   result["local_superblock_materializable"] = localSuperblockMaterializable;
+  result["pinned_to_simt"] = pinnedToSimt;
+  result["pinned_to_simd"] = pinnedToSimd;
   llvm::json::Array legalFactors;
   for (int64_t factor : legalSimtFactors)
     legalFactors.push_back(factor);
@@ -467,6 +469,13 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     StageRoutePlan plan;
     plan.candidate = kind;
     plan.routeSuperblockFactor = factor;
+    // A user-authored scope is factor-1 only: restrict such kernels to the
+    // factor-1 mixed plan.
+    if (kind == StageKernelRouteKind::Mixed && factor > 1 &&
+        llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+          return stage.pinnedToSimt || stage.pinnedToSimd;
+        }))
+      return plan;
     struct MixedChoice {
       const StageImplementationCost *simd = nullptr;
       const StageImplementationCost *simt = nullptr;
@@ -491,14 +500,25 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
             findImplementation(stage, StageMode::SIMD, 1, false);
         const StageImplementationCost *simt =
             findImplementation(stage, StageMode::SIMT, factor, true);
-        const double simdCycles = simd
+        const bool pinnedToSimt = stage.pinnedToSimt;
+        const bool pinnedToSimd = stage.pinnedToSimd;
+        const double simdCycles = simd && !pinnedToSimt
                                       ? mixedBaseStageCost(stage, *simd, factor)
                                       : std::numeric_limits<double>::infinity();
         const double simtCycles =
-            simt ? mixedEquivalentStageCost(stage, *simt, transition)
-                 : std::numeric_limits<double>::infinity();
-        selected = simtCycles < simdCycles ? simt : simd;
-        stageCycles = std::min(simdCycles, simtCycles);
+            simt && !pinnedToSimd
+                ? mixedEquivalentStageCost(stage, *simt, transition)
+                : std::numeric_limits<double>::infinity();
+        // A pinned Stage may only use the pinned-side implementation.
+        selected =
+            pinnedToSimt
+                ? simt
+                : (pinnedToSimd ? simd
+                                : (simtCycles < simdCycles ? simt : simd));
+        stageCycles = pinnedToSimt
+                          ? simtCycles
+                          : (pinnedToSimd ? simdCycles
+                                          : std::min(simdCycles, simtCycles));
         mixedChoices.push_back({simd, simt, simdCycles, simtCycles});
       }
       if (!selected)
@@ -581,6 +601,12 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
         size_t bestIndex = plan.implementations.size();
         double bestPenalty = std::numeric_limits<double>::infinity();
         for (size_t index = 0; index < mixedChoices.size(); ++index) {
+          // A pinned Stage may never be switched to the opposite side.
+          if ((required == StageMode::SIMD &&
+               costTable.stages[index].pinnedToSimt) ||
+              (required == StageMode::SIMT &&
+               costTable.stages[index].pinnedToSimd))
+            continue;
           const MixedChoice &choice = mixedChoices[index];
           const StageImplementationCost *replacement =
               required == StageMode::SIMD ? choice.simd : choice.simt;
@@ -616,10 +642,22 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
       // Mixed is a constrained candidate, not the unconstrained per-Stage
       // minimum.  If the latter collapses to all-SIMD or all-SIMT, switch the
       // Stage with the smallest incremental cost so the reported candidate
-      // is the cheapest route that genuinely contains both modes.
-      if ((countMode(StageMode::SIMT) == 0 && !forceOneMode(StageMode::SIMT)) ||
-          (countMode(StageMode::SIMD) == 0 && !forceOneMode(StageMode::SIMD)) ||
-          countMode(StageMode::SIMD) == 0 || countMode(StageMode::SIMT) == 0) {
+      // is the cheapest route that genuinely contains both modes.  A pin on
+      // that side accepts the degenerate route instead of forcing one.
+      const bool allowPureSimt =
+          llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+            return stage.pinnedToSimt;
+          });
+      const bool allowPureSimd =
+          llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+            return stage.pinnedToSimd;
+          });
+      if ((countMode(StageMode::SIMT) == 0 && !allowPureSimd &&
+           !forceOneMode(StageMode::SIMT)) ||
+          (countMode(StageMode::SIMD) == 0 && !allowPureSimt &&
+           !forceOneMode(StageMode::SIMD)) ||
+          (countMode(StageMode::SIMD) == 0 && !allowPureSimt) ||
+          (countMode(StageMode::SIMT) == 0 && !allowPureSimd)) {
         StageRoutePlan invalid;
         invalid.candidate = kind;
         return invalid;

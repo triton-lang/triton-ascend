@@ -1,6 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "AscendModel/Transforms/SimtSelection.h"
 
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/ADT/DenseSet.h"
@@ -326,6 +327,39 @@ static std::optional<int64_t> getConstantInteger(Value value) {
   return attribute.getInt();
 }
 
+/// True for a user-authored ``scope.scope`` with a recognized vector mode
+/// (``"simt"`` or ``"simd"``): the scope is a fixed Stage boundary.
+static bool isUserAuthoredVectorScope(Operation *operation) {
+  if (!operation || operation->getName().getStringRef() != "scope.scope")
+    return false;
+  auto mode = mlir::ascend::simt_selection::getVectorMode(operation);
+  return mode && (mode.getValue() == "simt" || mode.getValue() == "simd");
+}
+
+/// True for a user-authored ``scope.scope<vector_mode="simd">``.  The Stage
+/// owning such a root is pinned to SIMD locally by the partitioner: unlike a
+/// user simt scope it needs no anchor-plan presence, because the SIMD
+/// implementation of a Stage always exists.
+static bool isUserAuthoredSimdScope(Operation *operation) {
+  if (!operation || operation->getName().getStringRef() != "scope.scope")
+    return false;
+  auto mode = mlir::ascend::simt_selection::getVectorMode(operation);
+  return mode && mode.getValue() == "simd";
+}
+
+/// Walk the subtree of `root` without descending into user scopes when
+/// `root` itself is not one; a scope root sees its complete subtree.
+template <typename Callback>
+static void walkWithoutUserScopes(Operation *root, Callback &&callback) {
+  const bool scopeRoot = isUserAuthoredVectorScope(root);
+  root->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+    callback(nested);
+    if (!scopeRoot && nested != root && isUserAuthoredVectorScope(nested))
+      return WalkResult::skip();
+    return WalkResult::advance();
+  });
+}
+
 static int64_t getLoopTripCount(Operation *operation,
                                 int64_t stageIterationCount) {
   const llvm::StringRef name = operation->getName().getStringRef();
@@ -342,6 +376,20 @@ static int64_t getLoopTripCount(Operation *operation,
   if (name == "scf.for" || name == "scf.while")
     return std::max<int64_t>(1, stageIterationCount);
   return 1;
+}
+
+/// A user scope Stage is carved out of its enclosing loops: the scope op
+/// executes once per enclosing iteration.  V1 shells are excluded (their body
+/// Stages are also costed per iteration).
+static double enclosingScopeMultiplicity(Operation *scopeRoot) {
+  double multiplicity = 1.0;
+  for (Operation *parent = scopeRoot->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (parent->hasAttr("ta.auto_blockify_v1.loop"))
+      continue;
+    multiplicity *= static_cast<double>(getLoopTripCount(parent, 1));
+  }
+  return multiplicity;
 }
 
 /// Accumulate dynamic work, not merely the number of syntactic TTIR ops.
@@ -369,9 +417,14 @@ static void accumulateDynamicOperationTree(Operation *operation,
       static_cast<double>(getLoopTripCount(operation, fallbackLoopTripCount));
   for (Region &region : operation->getRegions())
     for (Block &block : region)
-      for (Operation &nested : block.getOperations())
+      for (Operation &nested : block.getOperations()) {
+        // A user scope nested here is accounted by its own Stage.
+        if (!isUserAuthoredVectorScope(operation) &&
+            isUserAuthoredVectorScope(&nested))
+          continue;
         accumulateDynamicOperationTree(&nested, work, childMultiplicity,
                                        fallbackLoopTripCount);
+      }
 }
 
 static int64_t countAlgorithmLoops(const LogicalStage &stage) {
@@ -379,7 +432,7 @@ static int64_t countAlgorithmLoops(const LogicalStage &stage) {
   for (Operation *root : stage.operations) {
     if (!root || root->hasAttr("ta.auto_blockify_v1.loop"))
       continue;
-    root->walk([&](Operation *operation) {
+    walkWithoutUserScopes(root, [&](Operation *operation) {
       const llvm::StringRef name = operation->getName().getStringRef();
       if ((name == "scf.for" || name == "scf.while") &&
           !operation->hasAttr("ta.auto_blockify_v1.loop"))
@@ -437,17 +490,34 @@ static bool stageOwnsAnchor(const LogicalStage &stage,
 /// second source of Stage boundaries.
 static void attachExactAnchorOwnership(StagePartition &partition,
                                        const SimtAnchorPlan &anchorPlan) {
+  // A user-authored SIMD scope pins its owning Stage without going through
+  // the anchor plan: the partitioner owns the semantic roots, and the SIMD
+  // implementation of a Stage always exists (unlike a local SIMT scope, which
+  // only the anchor plan can construct).
+  for (LogicalStage &stage : partition.stages) {
+    stage.pinnedToSimd = false;
+    for (Operation *root : stage.operations)
+      if (isUserAuthoredSimdScope(root))
+        stage.pinnedToSimd = true;
+  }
   for (LogicalStage &stage : partition.stages) {
     if (!stage.localSimtMaterializable)
       continue;
     stage.simtAnchorIndices.clear();
     stage.localSuperblockMaterializable = false;
+    stage.pinnedToSimt = false;
     bool allAnchorsDirectlyOwnedByV1Loop = true;
     for (auto indexedAnchor : llvm::enumerate(anchorPlan.anchors)) {
       const SimtAnchorDescriptor &anchor = indexedAnchor.value();
       if (anchor.materializable && stageOwnsAnchor(stage, anchor)) {
         stage.simtAnchorIndices.push_back(
             static_cast<unsigned>(indexedAnchor.index()));
+        if (anchor.kind == SimtAnchorKind::ExplicitUserSimtScope) {
+          // The user's scope already exists: pin to SIMT, factor-1 only.
+          stage.pinnedToSimt = true;
+          allAnchorsDirectlyOwnedByV1Loop = false;
+          continue;
+        }
         Operation *insertionPoint = anchor.scopeOperations.size() > 1
                                         ? anchor.scopeInsertionPoint
                                         : anchor.operation;
@@ -488,6 +558,9 @@ static Operation *getTopLevelSemanticRoot(Operation *operation) {
         (parentName == "scf.execute_region" &&
          parent->hasAttr("ta.auto_blockify_v1.schedule")))
       return root;
+    // A user scope is itself a semantic root.
+    if (isUserAuthoredVectorScope(root))
+      return root;
     root = parent;
   }
   return nullptr;
@@ -505,6 +578,20 @@ static bool isInsideAutoBlockifyV1Loop(Operation *operation) {
 
 static std::vector<Operation *> collectTopLevelSemanticRoots(ModuleOp module) {
   std::vector<Operation *> result;
+  // Expose every user scope nested inside `root` as its own root, so the
+  // user's boundary is a Stage boundary regardless of nesting depth.
+  auto appendRoot = [&](Operation *root) {
+    result.push_back(root);
+    if (isUserAuthoredVectorScope(root) ||
+        root->hasAttr("ta.auto_blockify_v1.loop"))
+      return;
+    root->walk<WalkOrder::PreOrder>([&](Operation *descendant) {
+      if (!isUserAuthoredVectorScope(descendant))
+        return WalkResult::advance();
+      result.push_back(descendant);
+      return WalkResult::skip();
+    });
+  };
   auto appendOps = [&](auto &&self, Block &block, bool insideV1Loop) -> void {
     for (Operation &nested : block.getOperations()) {
       if (nested.hasTrait<OpTrait::IsTerminator>())
@@ -526,16 +613,17 @@ static std::vector<Operation *> collectTopLevelSemanticRoots(ModuleOp module) {
         continue;
       }
 
-      result.push_back(&nested);
+      appendRoot(&nested);
       // AutoBlockify V1's scf.for is a scheduling shell.  Own the shell as
       // loop control, then expose its direct body operations as semantic
       // roots.  Other structured operations remain atomic roots so their
       // nested recurrence/reduction work is not double-owned.
       if (!isV1Loop || nested.getNumRegions() == 0)
         continue;
-      for (Region &region : nested.getRegions())
-        for (Block &body : region)
-          self(self, body, /*insideV1Loop=*/true);
+      for (Block &body : nested.getRegion(0))
+        for (Operation &bodyOperation : body.getOperations())
+          if (!bodyOperation.hasTrait<OpTrait::IsTerminator>())
+            appendRoot(&bodyOperation);
     }
   };
   for (Operation &operation : module.getBody()->getOperations()) {
@@ -551,7 +639,7 @@ static bool operationTreeContainsName(Operation *root, llvm::StringRef name) {
   bool found = root && root->getName().getStringRef() == name;
   if (!root || found)
     return found;
-  root->walk([&](Operation *nested) {
+  walkWithoutUserScopes(root, [&](Operation *nested) {
     found |= nested->getName().getStringRef() == name;
   });
   return found;
@@ -561,7 +649,7 @@ static bool operationTreeContainsLoadedIndexMemory(Operation *root) {
   bool found = root && isLoadedIndexDependentMemoryOp(root);
   if (!root || found)
     return found;
-  root->walk([&](Operation *nested) {
+  walkWithoutUserScopes(root, [&](Operation *nested) {
     if (!found)
       found = isLoadedIndexDependentMemoryOp(nested);
   });
@@ -572,7 +660,7 @@ static bool operationTreeHasTrueLoopCarriedDependency(Operation *root) {
   bool found = false;
   if (!root)
     return found;
-  root->walk([&](Operation *operation) {
+  walkWithoutUserScopes(root, [&](Operation *operation) {
     if (found || operation->hasAttr("ta.auto_blockify_v1.loop"))
       return;
     const llvm::StringRef name = operation->getName().getStringRef();
@@ -663,10 +751,18 @@ static int64_t semanticRootIterationCount(Operation *root) {
   int64_t iterations = 1;
   if (!root || root->hasAttr("ta.auto_blockify_v1.loop"))
     return iterations;
-  root->walk([&](Operation *operation) {
+  walkWithoutUserScopes(root, [&](Operation *operation) {
     if (!operation->hasAttr("ta.auto_blockify_v1.loop"))
       iterations = std::max(iterations, getLoopTripCount(operation, 1));
   });
+  // A scope Stage carved out of a loop inherits the enclosing iteration count.
+  if (isUserAuthoredVectorScope(root))
+    for (Operation *parent = root->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      if (parent->hasAttr("ta.auto_blockify_v1.loop"))
+        continue;
+      iterations = std::max(iterations, getLoopTripCount(parent, 1));
+    }
   return iterations;
 }
 
@@ -674,7 +770,7 @@ static bool hasOrderedStageBoundary(Operation *root) {
   bool ordered = false;
   if (!root)
     return ordered;
-  root->walk([&](Operation *operation) {
+  walkWithoutUserScopes(root, [&](Operation *operation) {
     const llvm::StringRef name = operation->getName().getStringRef();
     ordered |= operation->getNumRegions() > 0 ||
                name.starts_with("tt.atomic") || name.contains("barrier") ||
@@ -698,9 +794,15 @@ static void collectOwnedOperationTree(Operation *root,
   // would double-own every algorithm operation.
   if (root->hasAttr("ta.auto_blockify_v1.loop"))
     return;
-  root->walk([&](Operation *nested) {
+  // A user scope root owns its complete subtree; any other root stops at a
+  // user scope, which belongs to its own Stage.
+  const bool scopeRoot = isUserAuthoredVectorScope(root);
+  root->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+    if (!scopeRoot && nested != root && isUserAuthoredVectorScope(nested))
+      return WalkResult::skip();
     if (nested != root)
       owned.insert(nested);
+    return WalkResult::advance();
   });
 }
 
@@ -1085,8 +1187,11 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
           scheduleForSemanticRoot(candidate, candidateKind);
       const bool sameCompoundAnchor =
           anchorGroup >= 0 && candidateAnchorGroup == anchorGroup;
+      // A user scope is never merged with a neighbouring Stage.
+      const bool userScopeBoundary = isUserAuthoredVectorScope(root) ||
+                                     isUserAuthoredVectorScope(candidate);
       const bool mergePlainStage =
-          anchorGroup < 0 && candidateAnchorGroup < 0 &&
+          !userScopeBoundary && anchorGroup < 0 && candidateAnchorGroup < 0 &&
           ((candidateKind == kind && candidateSchedule == schedule) ||
            (haveSameSourceStatement(stage.operations.back(), candidate) &&
             (isSupportingSemanticKind(kind) ||
@@ -1334,7 +1439,11 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
         loopCount > 0 ? std::max<int64_t>(1, stage.iterationCount / loopCount)
                       : 1;
     for (Operation *root : stage.operations)
-      accumulateDynamicOperationTree(root, work, 1.0, fallbackLoopTripCount);
+      accumulateDynamicOperationTree(root, work,
+                                     isUserAuthoredVectorScope(root)
+                                         ? enclosingScopeMultiplicity(root)
+                                         : 1.0,
+                                     fallbackLoopTripCount);
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);

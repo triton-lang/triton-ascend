@@ -701,6 +701,399 @@ module attributes {
       "ascend.simt_costmodel.scope_materialized"));
 }
 
+TEST(CostModelPassesTest,
+     UserSimtScopeIsExplicitAnchorAndMaterializationKeepsItIntact) {
+  mlir::MLIRContext context;
+  context.allowUnregisteredDialects();
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%index_pointer: tensor<64xi64>,
+                  %base_pointer: tensor<64xi64>) -> tensor<64xf32> {
+    %index = "tt.load"(%index_pointer) : (tensor<64xi64>) -> tensor<64xi64>
+    %address = "tt.addptr"(%base_pointer, %index)
+      : (tensor<64xi64>, tensor<64xi64>) -> tensor<64xi64>
+    %data = "scope.scope"() ({
+      %loaded = "tt.load"(%address) : (tensor<64xi64>) -> tensor<64xf32>
+      "scope.return"(%loaded) : (tensor<64xf32>) -> ()
+    }) {vector_mode = "simt"} : () -> tensor<64xf32>
+    return %data : tensor<64xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+
+  auto plan = buildMixedSimtAnchorPlan(*module, /*compileOn91095=*/true);
+  // The user scope is the single anchor: the loaded-index-dependent load
+  // inside it is never rediscovered as an auto anchor.
+  ASSERT_EQ(plan.anchors.size(), 1u);
+  const auto &anchor = plan.anchors.front();
+  EXPECT_EQ(anchor.kind, mlir::ascend::SimtAnchorKind::ExplicitUserSimtScope);
+  EXPECT_EQ(mlir::ascend::stringifySimtAnchorKind(anchor.kind),
+            "explicit_user_simt_scope");
+  EXPECT_TRUE(anchor.materializable);
+  EXPECT_EQ(anchor.operation, scopeOp);
+  EXPECT_EQ(anchor.scopeInsertionPoint, scopeOp);
+  EXPECT_EQ(plan.materializableRoots().size(), 1u);
+
+  auto features = analyzeSimdSimtFeatures(*module, plan);
+  if (!features)
+    FAIL() << llvm::toString(features.takeError());
+  EXPECT_TRUE(features->hasExplicitScope);
+  EXPECT_TRUE(features->hasExplicitSimtScope);
+  EXPECT_EQ(features->simtAnchors.count, 1);
+
+  ASSERT_TRUE(mlir::succeeded(materializeSimtAnchorPlan(*module, plan)));
+  // The user scope is not re-wrapped: still exactly one scope.scope with no
+  // SuperBlock factor, and its interior load stays owned by the scope.
+  int64_t scopeCount = 0;
+  module->walk([&](Operation *operation) {
+    scopeCount += operation->getName().getStringRef() == "scope.scope";
+  });
+  EXPECT_EQ(scopeCount, 1);
+  EXPECT_FALSE(scopeOp->hasAttr("ascend.scope_superblock.factor"));
+  Operation *interiorLoad = nullptr;
+  scopeOp->walk([&](Operation *operation) {
+    if (!interiorLoad && operation->getName().getStringRef() == "tt.load")
+      interiorLoad = operation;
+  });
+  ASSERT_NE(interiorLoad, nullptr);
+  EXPECT_EQ(interiorLoad->getParentOp(), scopeOp);
+  EXPECT_TRUE(mlir::succeeded(mlir::verify(*module)));
+}
+
+TEST(CostModelPassesTest, UserSimtScopePinsMixedSelectionEndToEnd) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<4xf32>
+    %1 = "scope.scope"() ({
+      %2 = arith.addf %0, %0 : tensor<4xf32>
+      "scope.return"(%2) : (tensor<4xf32>) -> ()
+    }) {vector_mode = "simt"} : () -> tensor<4xf32>
+    %3 = arith.addf %1, %arg1 : tensor<4xf32>
+    return %3 : tensor<4xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+  Operation *scopedAdd = nullptr;
+  scopeOp->walk([&](Operation *operation) {
+    if (!scopedAdd && operation->getName().getStringRef() == "arith.addf")
+      scopedAdd = operation;
+  });
+  ASSERT_NE(scopedAdd, nullptr);
+
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "auto";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.numWarps = 4;
+  options.compileOn91095 = true;
+  ASSERT_TRUE(runPasses(*module, createSelectSimdSimtCostModelPass(options)));
+
+  auto effective =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.effective");
+  auto recommended =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.recommended");
+  auto factor = (*module)->getAttrOfType<mlir::IntegerAttr>(
+      "ascend.simt_costmodel.superblock_factor");
+  ASSERT_TRUE(effective);
+  ASSERT_TRUE(recommended);
+  ASSERT_TRUE(factor);
+  EXPECT_EQ(effective.getValue(), "mixed_simd_simt");
+  EXPECT_EQ(recommended.getValue(), "mixed_simd_simt");
+  // The hand-written scope ABI is factor-1: no SuperBlock aggregation.
+  EXPECT_EQ(factor.getInt(), 1);
+
+  // The user's own scope is the only scope.scope: never re-wrapped.
+  int64_t scopeCount = 0;
+  module->walk([&](Operation *operation) {
+    scopeCount += operation->getName().getStringRef() == "scope.scope";
+  });
+  EXPECT_EQ(scopeCount, 1);
+  EXPECT_FALSE(scopeOp->hasAttr("ascend.scope_superblock.factor"));
+  EXPECT_EQ(scopedAdd->getParentOp(), scopeOp);
+  EXPECT_TRUE(mlir::succeeded(mlir::verify(*module)));
+
+  auto reportAttr =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
+  ASSERT_TRUE(reportAttr);
+  auto report = llvm::json::parse(reportAttr.getValue());
+  ASSERT_TRUE(static_cast<bool>(report));
+  auto *object = report->getAsObject();
+  ASSERT_NE(object, nullptr);
+  auto reason = object->getString("application_reason");
+  ASSERT_TRUE(reason);
+  EXPECT_EQ(*reason, "minimum_cost_candidate");
+  auto forced = object->getBoolean("explicit_scope_forces_mixed");
+  ASSERT_TRUE(forced);
+  EXPECT_TRUE(*forced);
+  auto *features = object->getObject("features");
+  ASSERT_NE(features, nullptr);
+  auto hasSimtScope = features->getBoolean("has_explicit_simt_scope");
+  ASSERT_TRUE(hasSimtScope);
+  EXPECT_TRUE(*hasSimtScope);
+
+  auto *stageModel = object->getObject("stage_model");
+  ASSERT_NE(stageModel, nullptr);
+  auto *routes = stageModel->getObject("routes");
+  ASSERT_NE(routes, nullptr);
+  auto *mixed = routes->getObject("mixed_simd_simt");
+  ASSERT_NE(mixed, nullptr);
+  auto mixedLegal = mixed->getBoolean("legal");
+  ASSERT_TRUE(mixedLegal);
+  EXPECT_TRUE(*mixedLegal);
+  auto mixedFactor = mixed->getInteger("route_superblock_factor");
+  ASSERT_TRUE(mixedFactor);
+  EXPECT_EQ(*mixedFactor, 1);
+
+  // Exactly one Stage owns the user scope; it is pinned and routed SIMT.
+  auto *logicalStages = stageModel->getArray("logical_stages");
+  ASSERT_NE(logicalStages, nullptr);
+  auto *mixedStages = mixed->getArray("stages");
+  ASSERT_NE(mixedStages, nullptr);
+  ASSERT_EQ(logicalStages->size(), mixedStages->size());
+  size_t pinnedCount = 0;
+  for (size_t index = 0; index < logicalStages->size(); ++index) {
+    auto *logicalStage = (*logicalStages)[index].getAsObject();
+    auto *mixedStage = (*mixedStages)[index].getAsObject();
+    ASSERT_NE(logicalStage, nullptr);
+    ASSERT_NE(mixedStage, nullptr);
+    auto *implementation = mixedStage->getObject("implementation");
+    ASSERT_NE(implementation, nullptr);
+    auto mode = implementation->getString("mode");
+    ASSERT_TRUE(mode);
+    auto pinned = logicalStage->getBoolean("pinned_to_simt");
+    if (pinned && *pinned) {
+      ++pinnedCount;
+      EXPECT_EQ(*mode, "simt");
+    } else {
+      EXPECT_EQ(*mode, "simd");
+    }
+  }
+  EXPECT_EQ(pinnedCount, 1u);
+}
+
+TEST(CostModelPassesTest, UserSimdScopePinsMixedSelectionEndToEnd) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<4xf32>
+    %1 = "scope.scope"() ({
+      %2 = arith.addf %0, %0 : tensor<4xf32>
+      "scope.return"(%2) : (tensor<4xf32>) -> ()
+    }) {vector_mode = "simd"} : () -> tensor<4xf32>
+    %3 = arith.addf %1, %arg1 : tensor<4xf32>
+    return %3 : tensor<4xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+  Operation *scopedAdd = nullptr;
+  scopeOp->walk([&](Operation *operation) {
+    if (!scopedAdd && operation->getName().getStringRef() == "arith.addf")
+      scopedAdd = operation;
+  });
+  ASSERT_NE(scopedAdd, nullptr);
+
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "auto";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.numWarps = 4;
+  options.compileOn91095 = true;
+  ASSERT_TRUE(runPasses(*module, createSelectSimdSimtCostModelPass(options)));
+
+  auto effective =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.effective");
+  ASSERT_TRUE(effective);
+  // A user-authored SIMD scope is natively honored by the all-SIMD route, so
+  // the pure user-scope kernel keeps all-SIMD as its applied decision
+  // instead of being forced onto the mixed candidate.
+  EXPECT_EQ(effective.getValue(), "all_simd");
+
+  // The user's own SIMD scope stays untouched: never re-wrapped, never
+  // nested inside a materialized SIMT scope.
+  int64_t scopeCount = 0;
+  module->walk([&](Operation *operation) {
+    scopeCount += operation->getName().getStringRef() == "scope.scope";
+  });
+  EXPECT_EQ(scopeCount, 1);
+  EXPECT_EQ(scopedAdd->getParentOp(), scopeOp);
+  EXPECT_TRUE(mlir::succeeded(mlir::verify(*module)));
+
+  auto reportAttr =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
+  ASSERT_TRUE(reportAttr);
+  auto report = llvm::json::parse(reportAttr.getValue());
+  ASSERT_TRUE(static_cast<bool>(report));
+  auto *object = report->getAsObject();
+  ASSERT_NE(object, nullptr);
+  auto *features = object->getObject("features");
+  ASSERT_NE(features, nullptr);
+  auto hasSimdScope = features->getBoolean("has_explicit_simd_scope");
+  ASSERT_TRUE(hasSimdScope);
+  EXPECT_TRUE(*hasSimdScope);
+
+  auto *stageModel = object->getObject("stage_model");
+  ASSERT_NE(stageModel, nullptr);
+  auto *routes = stageModel->getObject("routes");
+  ASSERT_NE(routes, nullptr);
+  auto *mixed = routes->getObject("mixed_simd_simt");
+  ASSERT_NE(mixed, nullptr);
+  auto mixedLegal = mixed->getBoolean("legal");
+  ASSERT_TRUE(mixedLegal);
+  EXPECT_TRUE(*mixedLegal);
+
+  // Exactly one Stage owns the user scope; in the mixed route it is pinned
+  // to SIMD and the degenerate pure-SIMD mixed route stays legal (the
+  // dual of the pure-SIMT degeneration for SIMT scopes).
+  auto *logicalStages = stageModel->getArray("logical_stages");
+  ASSERT_NE(logicalStages, nullptr);
+  auto *mixedStages = mixed->getArray("stages");
+  ASSERT_NE(mixedStages, nullptr);
+  ASSERT_EQ(logicalStages->size(), mixedStages->size());
+  size_t pinnedCount = 0;
+  for (size_t index = 0; index < logicalStages->size(); ++index) {
+    auto *logicalStage = (*logicalStages)[index].getAsObject();
+    auto *mixedStage = (*mixedStages)[index].getAsObject();
+    ASSERT_NE(logicalStage, nullptr);
+    ASSERT_NE(mixedStage, nullptr);
+    auto *implementation = mixedStage->getObject("implementation");
+    ASSERT_NE(implementation, nullptr);
+    auto mode = implementation->getString("mode");
+    ASSERT_TRUE(mode);
+    auto pinned = logicalStage->getBoolean("pinned_to_simd");
+    if (pinned && *pinned) {
+      ++pinnedCount;
+      EXPECT_EQ(*mode, "simd");
+    }
+  }
+  EXPECT_EQ(pinnedCount, 1u);
+}
+
+TEST(CostModelPassesTest, UserSimtScopeNestedInLoopIsItsOwnPinnedStage) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<4xf32>, %arg1: tensor<4xf32>) -> tensor<4xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<4xf32>
+    %c0 = arith.constant 0 : index
+    %c4 = arith.constant 4 : index
+    %c1 = arith.constant 1 : index
+    %1 = scf.for %i = %c0 to %c4 step %c1 iter_args(%acc = %0) -> tensor<4xf32> {
+      %2 = arith.mulf %acc, %acc : tensor<4xf32>
+      %3 = "scope.scope"() ({
+        %4 = arith.addf %2, %2 : tensor<4xf32>
+        "scope.return"(%4) : (tensor<4xf32>) -> ()
+      }) {vector_mode = "simt"} : () -> tensor<4xf32>
+      scf.yield %3 : tensor<4xf32>
+    }
+    %5 = arith.addf %1, %arg1 : tensor<4xf32>
+    return %5 : tensor<4xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *forOp = findFirstOp(*module, "scf.for");
+  ASSERT_NE(forOp, nullptr);
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+  ASSERT_EQ(scopeOp->getParentOp(), forOp);
+
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "auto";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.numWarps = 4;
+  options.compileOn91095 = true;
+  ASSERT_TRUE(runPasses(*module, createSelectSimdSimtCostModelPass(options)));
+
+  auto effective =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.effective");
+  ASSERT_TRUE(effective);
+  EXPECT_EQ(effective.getValue(), "mixed_simd_simt");
+
+  // The user's scope stays nested exactly where the user wrote it: never
+  // re-wrapped, never hoisted out of the loop.
+  int64_t scopeCount = 0;
+  module->walk([&](Operation *operation) {
+    scopeCount += operation->getName().getStringRef() == "scope.scope";
+  });
+  EXPECT_EQ(scopeCount, 1);
+  EXPECT_EQ(scopeOp->getParentOp(), forOp);
+  EXPECT_FALSE(scopeOp->hasAttr("ascend.scope_superblock.factor"));
+  EXPECT_TRUE(mlir::succeeded(mlir::verify(*module)));
+
+  auto reportAttr =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
+  ASSERT_TRUE(reportAttr);
+  auto report = llvm::json::parse(reportAttr.getValue());
+  ASSERT_TRUE(static_cast<bool>(report));
+  auto *object = report->getAsObject();
+  ASSERT_NE(object, nullptr);
+  auto *stageModel = object->getObject("stage_model");
+  ASSERT_NE(stageModel, nullptr);
+  auto *routes = stageModel->getObject("routes");
+  ASSERT_NE(routes, nullptr);
+  auto *mixed = routes->getObject("mixed_simd_simt");
+  ASSERT_NE(mixed, nullptr);
+  auto mixedLegal = mixed->getBoolean("legal");
+  ASSERT_TRUE(mixedLegal);
+  EXPECT_TRUE(*mixedLegal);
+  auto mixedFactor = mixed->getInteger("route_superblock_factor");
+  ASSERT_TRUE(mixedFactor);
+  EXPECT_EQ(*mixedFactor, 1);
+
+  // The partitioner cut exactly at the user's scope: the scalar head, the
+  // recurrence loop, the scope, and the scalar tail are four Stages.  Only
+  // the scope Stage is pinned to SIMT; the loop that merely contains the
+  // scope is not pinned and keeps its SIMD routing.
+  auto *logicalStages = stageModel->getArray("logical_stages");
+  ASSERT_NE(logicalStages, nullptr);
+  ASSERT_GE(logicalStages->size(), 4u);
+  auto *mixedStages = mixed->getArray("stages");
+  ASSERT_NE(mixedStages, nullptr);
+  ASSERT_EQ(logicalStages->size(), mixedStages->size());
+  size_t pinnedCount = 0;
+  for (size_t index = 0; index < logicalStages->size(); ++index) {
+    auto *logicalStage = (*logicalStages)[index].getAsObject();
+    auto *mixedStage = (*mixedStages)[index].getAsObject();
+    ASSERT_NE(logicalStage, nullptr);
+    ASSERT_NE(mixedStage, nullptr);
+    auto pinned = logicalStage->getBoolean("pinned_to_simt");
+    ASSERT_TRUE(pinned);
+    auto *implementation = mixedStage->getObject("implementation");
+    ASSERT_NE(implementation, nullptr);
+    auto mode = implementation->getString("mode");
+    ASSERT_TRUE(mode);
+    if (*pinned) {
+      ++pinnedCount;
+      EXPECT_EQ(*mode, "simt");
+      // The scope Stage inherits the enclosing loop's trip count: it executes
+      // once per iteration, not once for the whole kernel.
+      auto scopeIterations = logicalStage->getInteger("iteration_count");
+      ASSERT_TRUE(scopeIterations);
+      EXPECT_EQ(*scopeIterations, 4);
+    } else {
+      EXPECT_EQ(*mode, "simd");
+    }
+  }
+  EXPECT_EQ(pinnedCount, 1u);
+}
+
 TEST(CostModelPassesTest, SameStageAnchorsMaterializeAsOneCompoundScope) {
   mlir::MLIRContext context;
   auto module = parseModule(context, R"mlir(

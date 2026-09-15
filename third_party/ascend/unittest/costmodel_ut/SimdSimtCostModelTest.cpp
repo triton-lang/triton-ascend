@@ -243,6 +243,125 @@ TEST(SimdSimtCostModelTest, KernelMixedRouteComesFromAdjacentStageModes) {
   EXPECT_DOUBLE_EQ(result->mixed.entryTransitionCycles[1], 12.0);
 }
 
+TEST(SimdSimtCostModelTest, MixedRouteKeepsUserSimtScopeStagePinned) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  auto makeCost = [&](StageMode mode, int64_t factor, double cycles,
+                      bool localScope = false) {
+    StageImplementationCost cost;
+    cost.implementation = {mode, factor, localScope};
+    cost.totalCycles = cycles;
+    return cost;
+  };
+  auto addStage = [&](llvm::StringRef id, double simd, double simt,
+                      bool pinned) {
+    mlir::ascend::LogicalStageCost stage;
+    stage.id = id.str();
+    stage.localSimtMaterializable = true;
+    stage.localSimtFactors = {1, 2};
+    stage.pinnedToSimt = pinned;
+    stage.implementations = {makeCost(StageMode::SIMD, 1, simd),
+                             makeCost(StageMode::SIMT, 1, simt),
+                             makeCost(StageMode::SIMT, 1, simt, true),
+                             makeCost(StageMode::SIMT, 2, simt / 2.0, true)};
+    table.stages.push_back(std::move(stage));
+  };
+  addStage("head", 10.0, 20.0, false);
+  // SIMD is dramatically cheaper on the pinned Stage and a factor-2 local
+  // scope exists: the user-authored SIMT scope must still force the local
+  // SIMT implementation at factor 1 regardless of relative cost.
+  addStage("payload", 1.0, 100.0, true);
+  addStage("tail", 30.0, 45.0, false);
+
+  StageTransitionCost transition;
+  transition.simdToSimtCycles = 5.0;
+  transition.simtToSimdCycles = 7.0;
+  auto result = solveStageRoutes(table, transition);
+  if (!result)
+    FAIL() << llvm::toString(result.takeError());
+  ASSERT_TRUE(result->mixed.legal);
+  EXPECT_EQ(result->mixed.routeSuperblockFactor, 1);
+  ASSERT_EQ(result->mixed.implementations.size(), 3u);
+  EXPECT_EQ(result->mixed.implementations[0].mode, StageMode::SIMD);
+  EXPECT_EQ(result->mixed.implementations[1].mode, StageMode::SIMT);
+  EXPECT_TRUE(result->mixed.implementations[1].localScope);
+  EXPECT_EQ(result->mixed.implementations[1].superblockFactor, 1);
+  EXPECT_EQ(result->mixed.implementations[2].mode, StageMode::SIMD);
+  // The pin holds even though the SIMD side would be far cheaper.
+  EXPECT_GT(result->mixed.totalCycles, result->allSimd.totalCycles);
+}
+
+TEST(SimdSimtCostModelTest, MixedAcceptsPureSimtWhenAllStagesPinned) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  auto makeCost = [&](StageMode mode, int64_t factor, double cycles,
+                      bool localScope = false) {
+    StageImplementationCost cost;
+    cost.implementation = {mode, factor, localScope};
+    cost.totalCycles = cycles;
+    return cost;
+  };
+  mlir::ascend::LogicalStageCost stage;
+  stage.id = "user_scope_only";
+  stage.localSimtMaterializable = true;
+  stage.localSimtFactors = {1};
+  stage.pinnedToSimt = true;
+  stage.implementations = {makeCost(StageMode::SIMD, 1, 10.0),
+                           makeCost(StageMode::SIMT, 1, 20.0),
+                           makeCost(StageMode::SIMT, 1, 20.0, true)};
+  table.stages.push_back(std::move(stage));
+
+  StageTransitionCost transition;
+  transition.simdToSimtCycles = 5.0;
+  transition.simtToSimdCycles = 7.0;
+  auto result = solveStageRoutes(table, transition);
+  if (!result)
+    FAIL() << llvm::toString(result.takeError());
+  // A lone pinned Stage collapses the per-Stage minimum to SIMT-only.  The
+  // user's SIMT contract legitimately degenerates the mixed route to pure
+  // SIMT: the both-modes rule neither flips the Stage to the SIMD side nor
+  // rejects the route.
+  ASSERT_TRUE(result->mixed.legal);
+  ASSERT_EQ(result->mixed.implementations.size(), 1u);
+  EXPECT_EQ(result->mixed.implementations[0].mode, StageMode::SIMT);
+  EXPECT_TRUE(result->mixed.implementations[0].localScope);
+}
+
+TEST(SimdSimtCostModelTest, MixedKeepsUserSimdScopeStagePinnedAndPure) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  auto makeCost = [&](StageMode mode, int64_t factor, double cycles,
+                      bool localScope = false) {
+    StageImplementationCost cost;
+    cost.implementation = {mode, factor, localScope};
+    cost.totalCycles = cycles;
+    return cost;
+  };
+  mlir::ascend::LogicalStageCost stage;
+  stage.id = "user_simd_scope_only";
+  stage.localSimtMaterializable = true;
+  stage.localSimtFactors = {1};
+  stage.pinnedToSimd = true;
+  // SIMT is dramatically cheaper on the pinned Stage: the user-authored SIMD
+  // scope must still force the SIMD implementation regardless of relative
+  // cost, and a pure-SIMD mixed route is legal.
+  stage.implementations = {makeCost(StageMode::SIMD, 1, 100.0),
+                           makeCost(StageMode::SIMT, 1, 10.0),
+                           makeCost(StageMode::SIMT, 1, 10.0, true)};
+  table.stages.push_back(std::move(stage));
+
+  StageTransitionCost transition;
+  transition.simdToSimtCycles = 5.0;
+  transition.simtToSimdCycles = 7.0;
+  auto result = solveStageRoutes(table, transition);
+  if (!result)
+    FAIL() << llvm::toString(result.takeError());
+  ASSERT_TRUE(result->mixed.legal);
+  ASSERT_EQ(result->mixed.implementations.size(), 1u);
+  EXPECT_EQ(result->mixed.implementations[0].mode, StageMode::SIMD);
+  EXPECT_FALSE(result->mixed.implementations[0].localScope);
+}
+
 TEST(SimdSimtCostModelTest, MixedScopePaysExactBidirectionalUbHandoffCost) {
   StageCostTable table;
   table.profileVersion = "unit-test-profile-v1";

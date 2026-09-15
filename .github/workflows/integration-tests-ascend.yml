@@ -48,44 +48,64 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
-      - name: Download and install Bisheng compiler
+      - name: Download npuir payload from PR build
+        id: payload-pr
+        # Pre-merge testing: take the payload built by this PR's npuir-build
+        # run (GitHub artifact), so a submodule bump can be tested before
+        # merge. Falls back to the OBS object for the exact pinned commit.
+        uses: dawidd6/action-download-artifact@v9
+        continue-on-error: true
+        with:
+          workflow: npuir-build.yml
+          workflow_conclusion: success
+          allow_forks: true
+          branch: ${{ github.head_ref || github.ref_name }}
+          name: npuir-payload-manylinux-${{ matrix.config.chip_type == 'a3' && 'aarch64' || 'x86_64' }}
+          path: npuir-artifacts
+
+      - name: Prepare npuir payload
         shell: bash
         run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
-            exit 0
-          fi
-
-          # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
-          # x86_64 (a5) each have their own; select by the container's arch.
-          ARCH=$(uname -m)
-          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
-
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
-            exit 1
-          fi
-
-          echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
-          # Retry with resume: this download has been killed mid-flight
-          # (exit 137, k8s memory limit / node OOM) and can drop on flaky
-          # networks; -C - resumes from where the previous attempt stopped.
-          curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
-            --retry-delay 10 -C - \
-            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
-
-          if [ -n "${BISHENG_SHA256}" ]; then
-            echo "Verifying SHA256 checksum..."
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+          set -eu
+          # The payload (bishengir-compile/opt + meta_op libs) is built by
+          # npuir-build.yml (manylinux variant) and bundled into the wheel
+          # below via TRITON_ASCEND_BISHENGIR_PATH.
+          BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
+          if [ -n "${BIN}" ]; then
+            PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+            echo "Using PR-build payload at ${PAYLOAD_DIR}"
           else
-            echo "Warning: No SHA256 checksum provided, skipping verification"
+            echo "No PR-build artifact; downloading the OBS object for the pinned commit"
+            ARCH=$(uname -m)
+            SHA8=$(git -C third_party/ascend/AscendNPU-IR rev-parse --short=8 HEAD)
+            OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/npuir"
+            if ! curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
+                 --retry-delay 10 \
+                 "${OBS_BASE}/npuir-payload-manylinux-${ARCH}-${SHA8}.tar.gz" \
+                 -o npuir-payload.tar.gz; then
+              echo "Payload for npuir pin ${SHA8} (${ARCH}) is not available." >&2
+              echo "If this PR bumps the AscendNPU-IR submodule, wait for its" >&2
+              echo "npuir-build run to finish, then re-run the tests." >&2
+              exit 1
+            fi
+            mkdir -p npuir-payload-dl
+            tar xzf npuir-payload.tar.gz -C npuir-payload-dl
+            PAYLOAD_DIR="$GITHUB_WORKSPACE/npuir-payload-dl"
           fi
-
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+          # Normalize into the path the build step's TRITON_ASCEND_BISHENGIR_PATH
+          # points at.
+          rm -rf npuir-payload
+          mkdir -p npuir-payload
+          cp -a "${PAYLOAD_DIR}/bin" npuir-payload/
+          cp -a "${PAYLOAD_DIR}/lib" npuir-payload/
+          # GitHub artifact zips carry no unix permission bits (upload-artifact
+          # zips without setUnixMode) and action-download-artifact extracts
+          # via adm-zip as 0644, so restore the exec bit explicitly.
+          chmod -R a+x npuir-payload/bin
+          test -x npuir-payload/bin/bishengir-compile
+          test -x npuir-payload/bin/bishengir-opt
+          test -d npuir-payload/lib
+          ls -la npuir-payload/bin
 
       - name: Build and install triton-ascend
         shell: bash
@@ -99,10 +119,22 @@ jobs:
           TRITON_BUILD_PROTON: OFF
           TRITON_WHEEL_NAME: triton-ascend
           TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
+          # Building the BishengIR payload here (TRITON_BUILD_NPUIR=ON) is not
+          # viable on the current pods: the a3 images (CANN 8.5.0) lack the
+          # --cce-enable-print compiler flag the npuir templates require, and
+          # the a5 pods have less than the 30 GiB free disk build_npuir.py
+          # demands. The payload is built by the wheels pipeline
+          # (wheels.yml build-npuir, CANN 9.2 image) and downloaded above;
+          # bundling it via TRITON_ASCEND_BISHENGIR_PATH puts it at
+          # triton/backends/ascend/backend/bishengir in the installed wheel.
+          # ${{ github.workspace }} (not $GITHUB_WORKSPACE): the cluster runner
+          # does not shell-expand $VAR in step env values, so the literal
+          # $GITHUB_WORKSPACE string would reach setup.py unresolved.
+          TRITON_ASCEND_BISHENGIR_PATH: "${{ github.workspace }}/npuir-payload"
         run: |
           nproc
+          echo "TRITON_ASCEND_BISHENGIR_PATH=${TRITON_ASCEND_BISHENGIR_PATH}"
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           npu-smi info
           if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
             cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
@@ -136,7 +168,8 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          # bishengir-compile/opt are bundled inside the installed wheel;
+          # backend/utils.py prefers the bundled copy.
           NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
@@ -149,7 +182,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          # bishengir binaries are bundled inside the installed wheel.
           TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
           echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then

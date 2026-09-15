@@ -99,33 +99,6 @@ jobs:
           fi
           echo "upstream triton ready at ~/triton-upstream ($(git -C ~/triton-upstream rev-parse --short HEAD))"
 
-      # ── Build toolchain (Bisheng compiler), same as integration tests ─────
-      - name: Download and install Bisheng compiler
-        shell: bash
-        run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
-            exit 0
-          fi
-          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          ARCH=$(uname -m)
-          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
-            exit 1
-          fi
-          echo "Downloading: ${BISHENG_FILENAME}"
-          curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
-          if [ -n "${BISHENG_SHA256}" ]; then
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
-          else
-            echo "Warning: No SHA256 checksum provided, skipping verification"
-          fi
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
-
       - name: Cache build dependencies
         uses: actions/cache@v4
         with:
@@ -253,7 +226,8 @@ jobs:
           TRITON_BUILD_WITH_O1: "true"
         run: |
           source /usr/local/Ascend/cann/set_env.sh || echo "warn: CANN set_env.sh not sourced"
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          # bishengir-compile/opt are bundled inside the triton-ascend wheel
+          # (built by wheels.yml); utils.py prefers the bundled copy.
           npu-smi info || true
           # Limit build parallelism (nproc/3) and NPU pytest workers (nproc/9)
           # to match integration-tests-ascend.yml and avoid build / NPU OOM.

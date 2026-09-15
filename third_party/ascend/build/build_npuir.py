@@ -71,11 +71,61 @@ def _is_submodule_initialized(dir_path):
     return dir_path.is_dir() and (dir_path / "CMakeLists.txt").exists()
 
 
-def _init_npuir_repo():
-    """Initialize the AscendNPU-IR submodule and its nested submodules.
+def _nested_submodule_gitlinks(npuir_dir):
+    """Map {relative_path: sha} for the nested submodules the npuir pin records."""
+    out = subprocess.check_output(
+        ["git", "ls-tree", "HEAD", "third-party/"],
+        cwd=str(npuir_dir),
+        text=True,
+    )
+    links = {}
+    for line in out.splitlines():
+        fields = line.split()
+        if len(fields) >= 4:
+            links[fields[3]] = fields[2]
+    return links
 
-    AscendNPU-IR depends on LLVM and Torch-MLIR, which are pulled in as
-    nested submodules, hence the recursive update.
+
+def _fetch_nested_via_sha(npuir_dir, path, sha):
+    """Fetch one nested repo at its exact SHA.
+
+    Direct depth-1 fetches of an exact commit SHA work where branch clones do
+    not (gitcode serves `want <sha>` requests but branch clones fail).
+    """
+    url = subprocess.check_output(
+        ["git", "-C", str(npuir_dir), "config", "-f", ".gitmodules", "--get", f"submodule.{path}.url"],
+        text=True,
+    ).strip()
+    dest = npuir_dir / path
+    shutil.rmtree(dest, ignore_errors=True)
+    subprocess.check_call(["git", "init", "-q", str(dest)])
+    subprocess.check_call(["git", "-C", str(dest), "remote", "add", "origin", url])
+    subprocess.check_call(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha])
+    subprocess.check_call(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
+
+
+def _init_nested_submodule_sources(npuir_dir):
+    """Fetch the nested submodule sources (llvm-project, torch-mlir, shmem)
+    via direct depth-1 SHA fetches from the gitcode remotes.
+    """
+    links = _nested_submodule_gitlinks(npuir_dir)
+    if not links:
+        raise RuntimeError("No nested submodules recorded in the AscendNPU-IR pin.")
+    for path, sha in links.items():
+        dest = npuir_dir / path
+        if _is_submodule_initialized(dest):
+            _log(f"{path} already initialized, skipping")
+            continue
+        _log(f"Fetching {path} @ {sha}")
+        _fetch_nested_via_sha(npuir_dir, path, sha)
+
+
+def _init_npuir_repo():
+    """Initialize the AscendNPU-IR submodule and its nested submodule sources.
+
+    AscendNPU-IR depends on LLVM and Torch-MLIR. The recursive gitcode clone
+    is not reliable from the CI network, so the nested sources are fetched
+    with direct depth-1 SHA pulls from the gitcode remotes.
     """
     _log("Initializing AscendNPU-IR repository ...")
     if not _is_git_repo(_REPO_ROOT):
@@ -94,21 +144,12 @@ def _init_npuir_repo():
         "third_party/ascend/AscendNPU-IR",
     ], cwd=_REPO_ROOT)
 
-    # Then recursively initialize its nested submodules (LLVM, Torch-MLIR).
-    if _is_submodule_initialized(_NPUIR_DIR):
-        _run_with_retry([
-            "git",
-            "submodule",
-            "update",
-            "--init",
-            "--recursive",
-        ], cwd=_NPUIR_DIR)
-    else:
-        raise RuntimeError(f"AscendNPU-IR submodule initialization failed: {_NPUIR_DIR} is not git repository.")
-
     if not _is_submodule_initialized(_NPUIR_DIR):
-        raise RuntimeError(f"AscendNPU-IR initialization failed: {_NPUIR_DIR} is still empty.")
+        raise RuntimeError(f"AscendNPU-IR submodule initialization failed: {_NPUIR_DIR} is not git repository.")
     _log("AscendNPU-IR repository initialized.")
+
+    _init_nested_submodule_sources(_NPUIR_DIR)
+    _log("Nested submodule sources ready.")
 
 
 def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Release", rebuild=True):

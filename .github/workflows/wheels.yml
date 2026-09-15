@@ -76,6 +76,73 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
+      - name: Download npuir payload from PR build
+        id: payload-pr
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        # Pre-merge testing: take the payload built by this PR's npuir-build
+        # run (GitHub artifact). Falls back to OBS objects below.
+        uses: dawidd6/action-download-artifact@v9
+        continue-on-error: true
+        with:
+          workflow: npuir-build.yml
+          workflow_conclusion: success
+          # PRs from forks run npuir-build on the fork, not on this repo;
+          # without allow_forks the action skips exactly the run we want.
+          allow_forks: true
+          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
+          name: npuir-payload-manylinux-${{ matrix.config.arch }}
+          path: npuir-artifacts
+
+      - name: Prepare npuir payload
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        shell: bash
+        run: |
+          set -eu
+          # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
+          # wheels.Dockerfile. Sources, in order: PR artifact, OBS object for
+          # the exact pinned commit, rolling -latest (retried briefly in case
+          # the publish is in flight; may not match the pin on old branches).
+          ARCH=${{ matrix.config.arch }}
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/npuir"
+          BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
+          if [ -n "${BIN}" ]; then
+            PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+            echo "Using PR-build payload at ${PAYLOAD_DIR}"
+          else
+            # Read the pin from the gitlink; the wheels checkout does not
+            # initialize submodules.
+            SHA8=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print substr($3, 1, 8)}')
+            if ! curl -fL --connect-timeout 30 --retry 3 --retry-all-errors \
+                 --retry-delay 5 \
+                 "${OBS_BASE}/npuir-payload-manylinux-${ARCH}-${SHA8}.tar.gz" \
+                 -o npuir-payload.tar.gz; then
+              echo "Pin object for ${SHA8} not found; falling back to -latest" >&2
+              for attempt in 1 2 3 4 5; do
+                if curl -fL --connect-timeout 30 --retry 3 --retry-all-errors \
+                     --retry-delay 5 \
+                     "${OBS_BASE}/npuir-payload-manylinux-${ARCH}-latest.tar.gz" \
+                     -o npuir-payload.tar.gz; then
+                  break
+                fi
+                echo "Payload not available yet (attempt ${attempt}), waiting 60s..." >&2
+                sleep 60
+              done
+            fi
+            test -s npuir-payload.tar.gz
+            mkdir -p npuir-payload-dl
+            tar xzf npuir-payload.tar.gz -C npuir-payload-dl
+            PAYLOAD_DIR="$GITHUB_WORKSPACE/npuir-payload-dl"
+          fi
+          rm -rf .npuir-payload
+          mkdir -p .npuir-payload
+          cp -a "${PAYLOAD_DIR}/bin" .npuir-payload/
+          cp -a "${PAYLOAD_DIR}/lib" .npuir-payload/
+          # GitHub artifact zips carry no unix permission bits (upload-artifact
+          # zips without setUnixMode) and action-download-artifact extracts
+          # via adm-zip as 0644, so restore the exec bit explicitly.
+          chmod -R a+x .npuir-payload/bin
+          ls -la .npuir-payload/bin
+
       - name: Compute build variables
         id: vars
         shell: bash

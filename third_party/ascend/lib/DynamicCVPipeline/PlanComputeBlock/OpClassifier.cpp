@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include <optional>
 #include <queue>
 
 #include "llvm/ADT/DenseSet.h"
@@ -27,6 +28,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Casting.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Utils/Util.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -62,6 +64,28 @@ bool isInsideNestedLinalgRegion(Operation *op)
         }
     }
     return false;
+}
+
+// Map a hivm.hir.sync_block to the core scope(s) it belongs to, based on its sync_block_mode.
+std::optional<OpCoreType> getSyncBlockCoreType(Operation *op)
+{
+    auto syncBlockOp = dyn_cast_or_null<hivm::SyncBlockOp>(op);
+    if (!syncBlockOp) {
+        return std::nullopt;
+    }
+    hivm::SyncBlockMode mode = syncBlockOp.getSyncBlockModeAttr().getSyncMode();
+    switch (mode) {
+        case hivm::SyncBlockMode::ALL:
+            return OP_CUBE_AND_VECTOR;
+        case hivm::SyncBlockMode::ALL_CUBE:
+        case hivm::SyncBlockMode::BARRIER_CUBE:
+            return OP_CUBE_ONLY;
+        case hivm::SyncBlockMode::ALL_VECTOR:
+        case hivm::SyncBlockMode::BARRIER_VECTOR:
+        case hivm::SyncBlockMode::ALL_SUB_VECTOR:
+            return OP_VECTOR_ONLY;
+    }
+    return std::nullopt;
 }
 
 } // namespace
@@ -702,6 +726,11 @@ int OpClassifierPass::markRemainingAsVector()
 
         if (opCoreTypes[op] == OP_UNDETERMINED && !isa<scf::YieldOp>(op)) {
             opCoreTypes[op] = OP_VECTOR_ONLY;
+        }
+
+        // hivm.hir.sync_block: classify by its sync_block_mode.
+        if (auto syncCoreType = getSyncBlockCoreType(op)) {
+            opCoreTypes[op] = *syncCoreType;
         }
     }
 

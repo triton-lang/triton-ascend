@@ -254,15 +254,15 @@ getScalarPointerCarrierType(Type originalType,
   return memrefType;
 }
 
-static FailureOr<Type>
-getIfResultCarrierType(Type originalType, const TypeConverter &typeConverter) {
+static Type getIfResultCarrierType(Type originalType) {
   if (isa<triton::PointerType>(originalType))
     return IntegerType::get(originalType.getContext(), 64);
 
-  Type convertedType = typeConverter.convertType(originalType);
-  if (!convertedType)
-    return failure();
-  return convertedType;
+  // This converter exists only to carry scalar pointers as integer addresses.
+  // Sibling results already have valid SSA types and must stay unchanged; using
+  // the global type converter here would turn a tensor mask into a memref even
+  // though its existing users still consume the tensor value.
+  return originalType;
 }
 
 // Materialize a no-op-compatible memref cast to the common carrier. Returning
@@ -387,12 +387,7 @@ IfConverter::matchAndRewrite(scf::IfOp op, OpAdaptor adaptor,
   SmallVector<Type> convertedResultTypes;
   convertedResultTypes.reserve(op.getNumResults());
   for (Type resultType : op.getResultTypes()) {
-    FailureOr<Type> convertedType =
-        getIfResultCarrierType(resultType, *typeConverter);
-    if (failed(convertedType))
-      return rewriter.notifyMatchFailure(op,
-                                         "could not convert an if result type");
-    convertedResultTypes.push_back(*convertedType);
+    convertedResultTypes.push_back(getIfResultCarrierType(resultType));
   }
 
   auto newIfOp = rewriter.create<scf::IfOp>(op.getLoc(), convertedResultTypes,

@@ -1,12 +1,12 @@
 import os
 import shutil
 import subprocess
-import sys
 import time
 from pathlib import Path
 
 _THIS_DIR = Path(__file__).resolve().parent
-_NPUIR_DIR = _THIS_DIR / "third_party" / "ascend" / "AscendNPU-IR"
+_REPO_ROOT = _THIS_DIR.parents[2]
+_NPUIR_DIR = _REPO_ROOT / "third_party" / "ascend" / "AscendNPU-IR"
 
 _MIN_FREE_DISK_GB = 30
 _GIT_RETRY_TIMES = 3
@@ -27,10 +27,10 @@ def _check_disk_space(min_free_gb=_MIN_FREE_DISK_GB):
     Building AscendNPU-IR recursively fetches LLVM / Torch-MLIR sources and
     produces a large build tree, which requires substantial disk space.
     """
-    usage = shutil.disk_usage(str(_THIS_DIR))
+    usage = shutil.disk_usage(str(_REPO_ROOT))
     free_gb = usage.free / (1024**3)
     total_gb = usage.total / (1024**3)
-    _log(f"Disk space on {_THIS_DIR.drive or _THIS_DIR.anchor}: "
+    _log(f"Disk space on {_REPO_ROOT.drive or _REPO_ROOT.anchor}: "
          f"free {free_gb:.1f} GiB / total {total_gb:.1f} GiB "
          f"(required >= {min_free_gb} GiB)")
     if free_gb < min_free_gb:
@@ -78,8 +78,8 @@ def _init_npuir_repo():
     nested submodules, hence the recursive update.
     """
     _log("Initializing AscendNPU-IR repository ...")
-    if not _is_git_repo(_THIS_DIR):
-        raise RuntimeError(f"{_THIS_DIR} is not a git repository; cannot initialize the "
+    if not _is_git_repo(_REPO_ROOT):
+        raise RuntimeError(f"{_REPO_ROOT} is not a git repository; cannot initialize the "
                            f"Triton-Ascend submodule.")
 
     # First initialize the AscendNPU-IR submodule itself from the root repo.
@@ -92,7 +92,7 @@ def _init_npuir_repo():
         "1",
         "--",
         "third_party/ascend/AscendNPU-IR",
-    ], cwd=_THIS_DIR)
+    ], cwd=_REPO_ROOT)
 
     # Then recursively initialize its nested submodules (LLVM, Torch-MLIR).
     if _is_submodule_initialized(_NPUIR_DIR):
@@ -143,7 +143,7 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
 
 def _copy_artifacts():
     """Collect built binaries/bitcode into third_party/ascend/bishengir."""
-    ascend_bishengir_path = _THIS_DIR / "third_party" / "ascend" / "backend" / "bishengir"
+    ascend_bishengir_path = _REPO_ROOT / "third_party" / "ascend" / "backend" / "bishengir"
     if ascend_bishengir_path.exists():
         shutil.rmtree(ascend_bishengir_path)
     bin_dir = ascend_bishengir_path / "bin"

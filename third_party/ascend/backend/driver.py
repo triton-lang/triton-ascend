@@ -18,9 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.metadata
 from pathlib import Path
-import contextlib
-import fcntl
 import tempfile
 import os
 import os.path
@@ -30,7 +29,7 @@ import sysconfig
 from typing import Optional
 import functools
 import hashlib
-from triton.runtime.cache import get_cache_manager, get_dump_manager, default_cache_dir
+from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (
@@ -47,32 +46,6 @@ from triton.backends.ascend.utils import (
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
-
-
-def _get_cache_lock_path(cache):
-    lock_path = getattr(cache, "lock_path", None)
-    if lock_path is not None:
-        return lock_path
-    file_cache_manager = getattr(cache, "_file_cache_manager", None)
-    return getattr(file_cache_manager, "lock_path", None)
-
-
-@contextlib.contextmanager
-def _cache_build_lock(cache):
-    lock_path = _get_cache_lock_path(cache)
-    if lock_path is None:
-        yield
-        return
-
-    os.makedirs(os.path.dirname(lock_path), exist_ok=True)
-    with open(lock_path, "a") as lock_file:
-        fcntl.flock(lock_file, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            fcntl.flock(lock_file, fcntl.LOCK_UN)
-
-
 class NPUUtils(object):
     def __new__(cls):
         if not hasattr(cls, 'instance'):
@@ -80,11 +53,13 @@ class NPUUtils(object):
         return cls.instance
 
     def __init__(self):
-        if getattr(self, "_initialized", False):
-            return
-        self._initialized = True
-        self._cache_path = None
-        self.npu_utils_mod = None
+        # Refresh the path on every construction. PyTorch Inductor can set
+        # TRITON_CACHE_DIR after the driver is first initialized; binding the
+        # singleton to its original cache root would make later launchers use
+        # an artifact outside their active cache.
+        self._cache_path = self._build_or_get_cached_so()
+        if not hasattr(self, "npu_utils_mod"):
+            self.npu_utils_mod = None
 
     def get_so_path(self):
         if self._cache_path is None:
@@ -97,13 +72,8 @@ class NPUUtils(object):
         src = Path(src_path).read_text()
         cann_version = get_cann_version()
         cann_version_str = ".".join(map(str, cann_version)) if cann_version else ""
-        key_parts = [
-            "npu_utils",
-            "torch_npu_wrapper_abi=triton_async_launch_v1",
-            "USE_TORCH_NPU",
-            src,
-            cann_version_str,
-        ]
+        torch_npu_version = importlib.metadata.version("torch_npu")
+        key_parts = [cann_version_str, torch_npu_version, src]
         key = hashlib.md5("\0".join(key_parts).encode("utf-8")).hexdigest()
         cache = get_cache_manager(key)
         fname = "npu_utils.so"
@@ -111,18 +81,13 @@ class NPUUtils(object):
         if cache_path is not None and os.path.exists(cache_path):
             return cache_path
 
-        with _cache_build_lock(cache):
-            cache_path = cache.get_file(fname)
-            if cache_path is not None and os.path.exists(cache_path):
-                return cache_path
-
-            with tempfile.TemporaryDirectory() as tmpdir:
-                tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
-                with open(tmp_src_path, "w") as f:
-                    f.write(src)
-                so = _build_npu_ext("npu_utils", tmp_src_path)
-                with open(so, "rb") as f:
-                    cache_path = cache.put(f.read(), fname, binary=True)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_src_path = os.path.join(tmpdir, "npu_utils.cpp")
+            with open(tmp_src_path, "w") as f:
+                f.write(src)
+            so = _build_npu_ext("npu_utils", tmp_src_path)
+            with open(so, "rb") as f:
+                cache_path = cache.put(f.read(), fname, binary=True)
         return cache_path
 
     def _load_mod(self):
@@ -136,9 +101,7 @@ class NPUUtils(object):
         self.npu_utils_mod = mod
         return self.npu_utils_mod
 
-    def load_binary(self, name, kernel, shared, device, mix_mode=None):
-        if mix_mode is None:
-            name, mix_mode = name.rsplit("_", 1)
+    def load_binary(self, name, kernel, shared, device, mix_mode):
         return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
     @functools.lru_cache()
@@ -616,6 +579,12 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     )
 
     npu_utils_so_path = NPUUtils().get_so_path()
+    # Keep only the deterministic cache-key directory in generated source so a
+    # launcher can be reused after TRITON_CACHE_DIR changes.
+    npu_utils_cache_relative = os.path.join(
+        os.path.basename(os.path.dirname(npu_utils_so_path)),
+        os.path.basename(npu_utils_so_path),
+    )
     cpp_npu_utils_dlopen = f"""
 typedef void* (*triton_allocate_workspace_legacy_t)(uint64_t);
 typedef void* (*triton_allocate_sync_block_lock_t)(uint64_t, void*, void**);
@@ -636,10 +605,23 @@ static bool npu_utils_ready() {{
 
 static void init_npu_utils() {{
     if (npu_utils_ready()) return;
-    const char* so_path = "{npu_utils_so_path}";
-    void* handle = dlopen(so_path, RTLD_LAZY);
+    const char* cache_root = std::getenv("TRITON_CACHE_DIR");
+    std::string npu_utils_path;
+    if (cache_root && cache_root[0] != '\\0') {{
+        npu_utils_path = std::string(cache_root) + "/{npu_utils_cache_relative}";
+    }} else {{
+        const char* triton_home = std::getenv("TRITON_HOME");
+        const char* home = std::getenv("HOME");
+        const char* base = triton_home && triton_home[0] != '\\0' ? triton_home : home;
+        if (!base || base[0] == '\\0') {{
+            fprintf(stderr, "Error: neither TRITON_CACHE_DIR nor TRITON_HOME/HOME is set\\n");
+            return;
+        }}
+        npu_utils_path = std::string(base) + "/.triton/cache/{npu_utils_cache_relative}";
+    }}
+    void* handle = dlopen(npu_utils_path.c_str(), RTLD_LAZY);
     if (!handle) {{
-        fprintf(stderr, "Error: dlopen %s failed: %s\\n", so_path, dlerror());
+        fprintf(stderr, "Error: dlopen %s failed: %s\\n", npu_utils_path.c_str(), dlerror());
         return;
     }}
     g_allocate_workspace_legacy = (triton_allocate_workspace_legacy_t)dlsym(handle, "triton_allocate_workspace_legacy");
@@ -1251,6 +1233,8 @@ PyMODINIT_FUNC PyInit___triton_launcher(void) {{
   }}
   PyModule_AddFunctions(m, ModuleMethods);
   {cpp_msprof_callback}
+  // Resolve NPU-utils symbols before the first kernel launch.
+  init_npu_utils();
   return m;
 }}
 """

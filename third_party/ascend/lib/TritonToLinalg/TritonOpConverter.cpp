@@ -3881,6 +3881,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
 
   // Get result type
   auto resultTensorType = cast<RankedTensorType>(op.getResult().getType());
+  static constexpr llvm::StringLiteral wasBoolToInt8AttrName =
+      "was_bool_to_int8";
+  bool wasBoolToInt8 = op->hasAttr(wasBoolToInt8AttrName);
 
   auto elemType = resultTensorType.getElementType();
   auto resultShape = resultTensorType.getShape();
@@ -4057,6 +4060,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
     // For index_select on the trailing axis, mark as discrete memory access
     // This degrades to scalar read/write handling to avoid alignment issues
     auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
     copyOp->setAttr(ConverterUtils::discreteAttrName, rewriter.getUnitAttr());
   } else {
     // For index_select on non-trailing axes, add stride alignment annotation
@@ -4069,7 +4074,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
                        rewriter.getDenseI32ArrayAttr({32}));
 
     // Copy from source to destination
-    rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
   }
 
   // Restore insertion point
@@ -4078,6 +4085,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
   // Convert memref to tensor
   auto resultTensor = rewriter.create<bufferization::ToTensorOp>(
       loc, resultTensorType, outputBuffer, true, true);
+  if (wasBoolToInt8)
+    resultTensor->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
 
   // Mark as index_select_simd
   resultTensor->setAttr("index_select_simd", rewriter.getUnitAttr());

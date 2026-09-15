@@ -956,10 +956,6 @@ def make_launcher(constants, signature, metadata):
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
     is_pure_simt = bool(getattr(metadata, "is_pure_simt", False))
     has_auto_blockify_blacklist_op = bool(getattr(metadata, "has_auto_blockify_blacklist_op", False))
-    # RowCoalescing already reduces the launch grid and expands one program to
-    # H logical rows.  Pure-SIMT codegen deliberately omits AutoBlockify for
-    # that contract, so the launcher must not cap the reduced grid to physical
-    # cores either; doing so would silently skip the remaining row groups.
     row_coalescing_applied = bool(getattr(metadata, "row_coalescing_applied", False))
     enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not row_coalescing_applied
                                        and (is_pure_simt or not has_auto_blockify_blacklist_op))

@@ -113,10 +113,6 @@ def _row_module(
 """
         store_value = "%out"
     elif body == "for_pid_lower_bound":
-        # Candidate discovery intentionally accepts this shape, but the
-        # legacy materializer cannot use a Row-lifted loop bound.  It must
-        # decline in its detached sandbox rather than fail the whole pass or
-        # publish a partial launch contract.
         post_load = f"""    %pid_index = arith.index_cast %pid : i32 to index
     %for_step = arith.constant 1 : index
     %for_ub = arith.constant 2 : index
@@ -210,9 +206,6 @@ def test_row_coalescing_scaffold_follows_pid_when_bound_is_hoisted(tmp_path):
     )
 
     _assert_row_hit(text)
-    # This source order used to make Row insert pidH between bound and pid,
-    # producing an SSA dominance error.  The transformed module is verified by
-    # the pass, and its scaffold must now follow the pid definition.
     assert text.index("arith.constant 32768") < text.index("tt.get_program_id")
     assert text.index("tt.get_program_id") < text.index("tt.make_range")
     assert "cf.cond_br" not in text

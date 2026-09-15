@@ -264,11 +264,6 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     return Value();
   };
 
-  // A legal seed proves both pid and validCount dominate entryGuard.  Insert
-  // immediately before that guard so the new Row scaffold is after all of its
-  // inputs and still dominates the lifted work block.  In particular, a
-  // constexpr validCount may be hoisted before pid; anchoring after its
-  // defining op would then create a use of pid before its definition.
   rw.setInsertionPoint(seed.entryGuard);
   Value cH = rw.create<arith::ConstantIntOp>(loc, H, 32);
   Value pidH = rw.create<arith::MulIOp>(loc, pidVal, cH);

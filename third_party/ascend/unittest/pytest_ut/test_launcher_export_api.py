@@ -196,8 +196,6 @@ def test_make_launcher_uses_ceil_div_for_row_coalescing(
 
     assert src.count("gridZ = (gridZ + 4 - 1) / 4;") == 2
     assert "ChunkCoalescing: grid[2] not divisible" not in src
-    # RowCoalescing owns the reduced grid; capping it to physical cores would
-    # skip the remaining row groups.
     assert src.count("blockNum = std::min(blockNum, (uint32_t)40);") == 0
 
 

@@ -410,20 +410,14 @@ def _run_ttir_to_npubin(
 
 
 def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op):
-    """Capture argv from a non-pure-SIMT linalg compiler entry point."""
     commands = []
     parsed_metadata = defaultdict(
         lambda: None, {
-            # Both Linalg compiler paths inspect the compile target while deciding
-            # whether the optional lib-call flag applies.
             "target": SimpleNamespace(arch="Ascend910B"),
             "program_grid_transforms": None,
             "program_grid_mapping_applied": False,
             "row_coalescing_applied": False,
             "has_auto_blockify_blacklist_op": has_blacklist_op,
-            # The linalg entry points consume the finalized policy rather
-            # than recomputing it.  This helper invokes them directly, so
-            # provide the corresponding non-pure-SIMT decision.
             "auto_blockify_enabled": not has_blacklist_op,
             "ptsm_cap_authorized": False,
             "mix_mode": "aiv",
@@ -671,7 +665,6 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
 
 
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
-    """Pure-SIMT ignores the blacklist but still honors the Row contract."""
     common_options = ["--common-before-pure-simt", "--common-after-pure-simt"]
     pure_simt_prefix = [
         "--enable-hivm-compile=false",
@@ -716,8 +709,6 @@ def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
             if superblock > 0:
                 expected_options.append(f"--super-block-factor={superblock}")
 
-        # Pure-SIMT option emission ignores the blacklist but retains the
-        # RowCoalescing gate.
         assert command[0] == "/fake/bisheng", case
         assert Path(command[1]).name == "kernel.ttir.mlir", case
         assert command[2:-2] == expected_options, case

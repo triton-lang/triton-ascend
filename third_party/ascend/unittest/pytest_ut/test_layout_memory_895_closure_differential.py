@@ -33,8 +33,6 @@ from types import SimpleNamespace
 import pytest
 
 _BASELINE_COMMIT = "895c5fbe2b0e69349b76388e65fd8c3e79703bb9"
-# Keep the rebase parent explicit so this differential can distinguish the
-# intended Row repair from changes that had already landed after the 895 cut.
 _REBASE_BASE_COMMIT = "e28d648cc79e270e6bd0baea5c24a285407faa7e"
 _REQUIRE_BASELINE_ENV = "TRITON_REQUIRE_895_DIFFERENTIAL"
 _SOURCE_PATHS = {
@@ -119,7 +117,6 @@ def _normalised_function_ast(source, name):
 
 
 def _rebase_base_source(relative_path):
-    """Read the exact main-dev parent used for this rebased PR."""
     result = subprocess.run(
         ["git", "show", f"{_REBASE_BASE_COMMIT}:{relative_path}"],
         cwd=_repo_root(),
@@ -159,8 +156,6 @@ def _load_compiler_closure(source):
 
 
 def test_895_compiler_closure_ast_is_identical_outside_row_migration(source_pairs):
-    """Keep unrelated compiler helpers stable across the main-dev rebase."""
-
     baseline_source, target_source = source_pairs["compiler"]
     rebase_source = _rebase_base_source(_SOURCE_PATHS["compiler"])
     for name in (
@@ -361,8 +356,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         )
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
-        # Keep bisheng_options neutral in this matrix so it verifies only the
-        # pure-SIMT envelope and automatic block policy.
         expected_options = list(common_prefix)
         auto_blockify = env_enabled and not row_applied
         if auto_blockify:
@@ -377,8 +370,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
             "kernel",
         ], case
 
-        # Row is applied by make_ttir's graph pass.  npubin must preserve all
-        # compile arguments while no longer creating a Row pass manager.
         assert target_pm.run_calls == [], case
         count += 1
 
@@ -433,7 +424,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
     ),
 )
 def test_895_coalesce_attrs_export_identically(name, attrs, expected, source_pairs):
-    """Axis, Chunk, and Row attrs retain the exact 895 metadata handoff."""
     baseline_closure = _load_compiler_closure(source_pairs["compiler"][0])
     target_closure = _load_compiler_closure(source_pairs["compiler"][1])
     baseline = _export_coalesce_metadata(baseline_closure, attrs)
@@ -460,7 +450,6 @@ class _FakeNPUUtils:
 
 
 def _module_string_constant(source, name):
-    """Extract a source-owned C++ template without importing the driver."""
     tree = ast.parse(source)
     for node in tree.body:
         if not isinstance(node, ast.Assign):
@@ -480,8 +469,6 @@ def _load_make_launcher(source):
         "NPUUtils": _FakeNPUUtils,
         "_BASE_ARGS_FORMAT": "iiiKKOOOO",
         "_BASE_ARGS_FORMAT_LEN": len("iiiKKOOOO"),
-        # Keep each source's emitted launcher text intact without importing
-        # the driver module or initializing its NPU extension.
         "_CPP_DEVICE_POINTER": _module_string_constant(source, "_CPP_DEVICE_POINTER"),
         "_CPP_MSPROF_EXTERN": _module_string_constant(source, "_CPP_MSPROF_EXTERN"),
         "_CPP_MSPROF_CALLBACK": _module_string_constant(source, "_CPP_MSPROF_CALLBACK"),
@@ -530,8 +517,6 @@ def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied, is_pure_
 
 
 def _launcher_paths(source):
-    # make_launcher produces both the stable ABI path and local C++ packing
-    # path.  The coalescing and auto-blockify fragments must be present in both.
     return source.split("static void _launch(", maxsplit=1)
 
 
@@ -579,7 +564,6 @@ def test_895_launcher_coalescing_and_block_cap_closure(
     guard,
     source_pairs,
 ):
-    """Preserve the legacy cap except for Row's explicit no-blockify contract."""
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
@@ -589,8 +573,6 @@ def test_895_launcher_coalescing_and_block_cap_closure(
         (False, True),
         (False, True),
     ):
-        # Current launcher metadata accepts non-default legacy coalescing only
-        # with its complete RowCoalescing contract.
         row_applied = True
         baseline_state["auto_map_enabled"] = env_enabled
         target_state["auto_map_enabled"] = env_enabled
@@ -637,20 +619,10 @@ def test_895_launcher_coalescing_and_block_cap_closure(
 
 
 def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
-    """Differentially cover every metadata form emitted by the four passes.
-
-    Axis can preserve a non-power-of-two split factor, Chunk is bounded to
-    2/4/8/16, and Row derives H=2/4/8.  Each family may target x/y/z.  This
-    checks the complete corresponding launcher fragment on both generated
-    launch paths for all AutoBlockify cap inputs, without pretending that a
-    910B4 smoke run entered the 91095 T2L gate.
-    """
-
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     grid_names = ("gridX", "gridY", "gridZ")
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
-    # The factor sets deliberately mirror what each legacy pass can emit.
     families = (
         ("axis", (2, 3, 4, 8, 16), False),
         ("chunk", (2, 4, 8, 16), False),
@@ -665,8 +637,6 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
             (False, True),
             (False, True),
         ):
-            # _export_coalesce_metadata publishes this flag for every valid
-            # non-default legacy coalescing triple.
             row_applied = True
             baseline_state["auto_map_enabled"] = env_enabled
             target_state["auto_map_enabled"] = env_enabled
@@ -794,32 +764,19 @@ def test_895_grid_num_tiles_ast_closure_differential(source_pairs):
 
 
 def _expected_row_rebase_core(baseline):
-    """Allow only the dominance-safe Row scaffold placement repair."""
     old_guard = "  Block *pidBlock = seed.pid->getBlock();\n  if (!pidBlock || !seed.workBlock)\n"
     new_guard = "  if (!seed.entryGuard || !seed.workBlock)\n"
     old_insertion = ("  if (Operation *validDef = seed.validCount.getDefiningOp())\n"
                      "    rw.setInsertionPointAfter(validDef);\n"
                      "  else\n"
                      "    rw.setInsertionPointAfter(seed.pid);\n")
-    new_insertion = ("  // A legal seed proves both pid and validCount dominate entryGuard.  Insert\n"
-                     "  // immediately before that guard so the new Row scaffold is after all of its\n"
-                     "  // inputs and still dominates the lifted work block.  In particular, a\n"
-                     "  // constexpr validCount may be hoisted before pid; anchoring after its\n"
-                     "  // defining op would then create a use of pid before its definition.\n"
-                     "  rw.setInsertionPoint(seed.entryGuard);\n")
+    new_insertion = "  rw.setInsertionPoint(seed.entryGuard);\n"
     assert old_guard in baseline
     assert old_insertion in baseline
     return baseline.replace(old_guard, new_guard).replace(old_insertion, new_insertion)
 
 
 def test_895_legacy_memory_access_core_sources_are_mechanical_relocations(source_pairs):
-    """The rebase retains main-dev core bodies except the explicit Row repair.
-
-    The original 895 relocation check remains useful for historical closures,
-    but main-dev has since evolved the moved cores.  Compare against this PR's
-    exact rebase parent so unrelated upstream evolution is not attributed to
-    the RowCoalescing fix.
-    """
     del source_pairs  # Fixture makes a missing 895 object fail in strict mode.
     root = _repo_root()
     sources = {

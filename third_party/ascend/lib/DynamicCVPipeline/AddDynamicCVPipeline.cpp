@@ -98,19 +98,6 @@ AddDynamicCVPipelinePass::AddDynamicCVPipelinePass(
     const AddDynamicCVPipelineOptions &options)
     : AddDynamicCVPipelineBase(options) {}
 
-static void checkAndDisableVfSub(ModuleOp module) {
-  static constexpr llvm::StringLiteral kDisableVfSubKernels[1]{
-      "chunk_gated_delta_rule_fwd_kernel_h_blockdim64"};
-  module->walk([=](func::FuncOp funcOp) {
-    if (llvm::is_contained(kDisableVfSubKernels, funcOp.getSymName())) {
-      CVPipeline::setFallbackAttr(module,
-                                  CVPipeline::ERRCODE_DISABLE_VF_SUBSTITUTION);
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-}
-
 void AddDynamicCVPipelinePass::runOnOperation() {
   auto moduleOp = getOperation();
   OpBuilder builder(moduleOp.getContext());
@@ -134,6 +121,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     return llvm::success();
   });
 
+  bool tuplePreloadFailed = false;
   for (unsigned attempt = 0; attempt < MAX_RETRY_TIMES; ++attempt) {
     // restore() consumes the saved region bodies. Each attempt needs its own
     // snapshot, taken before changing buffer counts for the retry.
@@ -154,6 +142,10 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     auto result = pm.run(moduleOp);
     auto errCode = getErrorCode(moduleOp);
     if (succeeded(result) && !errCode.has_value()) {
+      if (tuplePreloadFailed) {
+        CVPipeline::setFallbackAttr(moduleOp,
+                                    CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
+      }
       LDBG("Process successfully");
       return;
     }
@@ -161,6 +153,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     if (errCode == CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED) {
       if (attempt + 1 < MAX_RETRY_TIMES) {
         LDBG("Tuple-buffer failed; Retrying with tuple preload disabled.");
+        tuplePreloadFailed = true;
         fallback.restore();
         moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
         continue;
@@ -196,7 +189,6 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     return;
   }
 
-  checkAndDisableVfSub(moduleOp);
   LDBG("Process successfully");
 }
 

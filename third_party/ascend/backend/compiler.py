@@ -249,7 +249,7 @@ def _finalize_program_launch_policy(metadata, opt):
 
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
     rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
-    if rc == 4:
+    if rc == 3:
         metadata["disable_vf_operand_substitution"] = True
         return
     if rc != -1 and rc > 0:

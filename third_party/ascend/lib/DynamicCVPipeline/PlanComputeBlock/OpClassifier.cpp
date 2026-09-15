@@ -1180,6 +1180,117 @@ int OpClassifierPass::penetrateCubeIntoForLoops() {
 }
 
 // ============================================================================
+// Step 4.6: Scalar chains feeding CUBE-bearing control flow
+// ============================================================================
+// The CUBE upstream BFS is operand-driven: a scalar chain such as a loop bound
+// `muli(fptosi(extract(math.floor(...))))`, whose only consumer is the bound /
+// condition of control flow that contains CUBE ops, is never reached by that
+// BFS.  Its arith ops would then default to VECTOR, and SeparateCVScope would
+// clone the whole chain - including the VectorOnly root (math.floor, ...) -
+// into the CUBE scope, where AnalyzeCubeControlFlowInputChain rejects it and
+// the whole kernel falls back (rc=2).
+//
+// Walk up from each control-flow operand through scalar arith ops and give
+// them the CUBE core type so they are recomputed on the CUBE side, mirroring
+// what the operand-driven BFS already achieves when the chain happens to be
+// shared with the CUBE data path (e.g. the bound scalars reused in load
+// address math).  The walk stops at the first non-scalar-arith op:
+//   - tensor::ExtractOp of a scalar: stays VECTOR and becomes the direct
+//     external input of the CUBE block, which is exactly the form the SSBuffer
+//     scalar V->C channel (isValidScalarDependency) accepts, so the extract
+//     value crosses cores via the ssbuf slot with a PIPE_S sync;
+//   - VectorOnly ops (math.floor/ceil, tensor arith), memory ops, block args
+//     and ops already classified CUBE: stop and leave them untouched.
+// ============================================================================
+
+// Only scalar arith ops follow the control flow onto the CUBE core.
+static bool isScalarArithOp(Operation *op) {
+  if (!isa<arith::ArithDialect>(op->getDialect())) {
+    return false;
+  }
+  return llvm::none_of(op->getResults(), [](Value result) {
+    return isa<RankedTensorType>(result.getType());
+  });
+}
+
+bool OpClassifierPass::controlFlowContainsCube(Operation *cfOp) {
+  bool found = false;
+  cfOp->walk([&](Operation *op) {
+    if (op == cfOp) {
+      return WalkResult::advance();
+    }
+    auto it = opCoreTypes.find(op);
+    if (it != opCoreTypes.end() && it->second == OP_CUBE_ONLY) {
+      found = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return found;
+}
+
+void OpClassifierPass::colorScalarChainCube(
+    Value value, llvm::DenseSet<Operation *> &visited) {
+  Operation *defOp = value.getDefiningOp();
+  if (!defOp || !visited.insert(defOp).second) {
+    return;
+  }
+  auto it = opCoreTypes.find(defOp);
+  if (it != opCoreTypes.end() && it->second == OP_CUBE_ONLY) {
+    return;
+  }
+  if (!isScalarArithOp(defOp)) {
+    return;
+  }
+  LLVM_DEBUG(DBGS() << "scalar-bound-chain CUBE: " << *defOp << "\n");
+  opCoreTypes[defOp] = OP_CUBE_ONLY;
+  for (Value operand : defOp->getOperands()) {
+    colorScalarChainCube(operand, visited);
+  }
+}
+
+int OpClassifierPass::classifyScalarControlFlowChains() {
+  LLVM_DEBUG(DBGS() << "--- Step 4.6: scalar control-flow chains --->\n");
+  llvm::DenseSet<Operation *> visited;
+  getOperation().walk([&](Operation *op) {
+    if (!isa<scf::ForOp, scf::IfOp, scf::WhileOp>(op)) {
+      return WalkResult::advance();
+    }
+    if (!controlFlowContainsCube(op)) {
+      return WalkResult::advance();
+    }
+    llvm::SmallVector<Value> scalarOperands;
+    llvm::TypeSwitch<Operation *>(op)
+        .Case([&](scf::ForOp forOp) {
+          scalarOperands.append({forOp.getLowerBound(), forOp.getUpperBound(),
+                                 forOp.getStep()});
+        })
+        .Case([&](scf::IfOp ifOp) {
+          scalarOperands.push_back(ifOp.getCondition());
+        })
+        .Case([&](scf::WhileOp whileOp) {
+          // While conditions may depend on any arg; mirror the conservative
+          // operand walk of AnalyzeCubeControlFlowInputChain and take all.
+          auto operands = whileOp->getOperands();
+          scalarOperands.append(operands.begin(), operands.end());
+          // The while condition lives in the before region and captures the
+          // bound chain from outside, so it is not among the while operands.
+          whileOp.getBefore().front().walk([&](scf::ConditionOp condOp) {
+            for (Value operand : condOp->getOperands()) {
+              scalarOperands.push_back(operand);
+            }
+          });
+        })
+        .Default([](Operation *) {});
+    for (Value operand : scalarOperands) {
+      colorScalarChainCube(operand, visited);
+    }
+    return WalkResult::advance();
+  });
+  return 0;
+}
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 
@@ -1642,6 +1753,13 @@ void OpClassifierPass::splitOperationForCubeAndVector(
       if (llvm::isa<scf::ForOp, scf::WhileOp>(user)) {
         coreType = getForInitCoreType(&use);
       }
+      // scf.condition is cloned into both the CUBE and VECTOR scopes by
+      // SeparateCVScope. Keep it on the CUBE-side (original) value so the
+      // CUBE scope's condition chain stays free of VectorOnly roots; the
+      // VECTOR scope's clone materializes its own chain.
+      if (llvm::isa<scf::ConditionOp>(user)) {
+        continue;
+      }
       if (coreType == OP_VECTOR_ONLY) {
         usesToUpdate.push_back(&use);
       }
@@ -1869,6 +1987,15 @@ void OpClassifierPass::runOnOperation() {
   // Step 4: Penetrate CUBE coloring into pure loader for-loops.
   if (CVPipeline::isCubeBlockMergeEnabled() &&
       penetrateCubeIntoForLoops() != 0) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step 4.6: Scalar chains feeding CUBE-bearing control flow follow it CUBE,
+  // so the extract root stays VECTOR and crosses via the SSBuffer scalar
+  // channel instead of being cloned (with its VectorOnly root) into the CUBE
+  // scope.
+  if (classifyScalarControlFlowChains() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }

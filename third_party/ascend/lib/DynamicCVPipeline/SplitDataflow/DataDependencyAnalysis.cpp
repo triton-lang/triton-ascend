@@ -851,6 +851,64 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
   LOG_DEBUG("External output analysis complete.\n");
 }
 
+// Trace an operand's defining op back to find the source matmul.
+static linalg::MatmulOp resolveSameBlockMatmulProducer(mlir::Value operand,
+                                                       int consumerBlockId) {
+  Operation *defOp = CVPipeline::getSourceThroughCIntermediateOps(operand);
+
+  auto producer = dyn_cast_if_present<linalg::MatmulOp>(defOp);
+  if (!producer) {
+    return nullptr;
+  }
+  auto producerBlockIdOpt = CVPipeline::getOpBlockId(producer);
+  if (!producerBlockIdOpt || *producerBlockIdOpt != consumerBlockId) {
+    return nullptr;
+  }
+  return producer;
+}
+
+// Analyze C->C dependencies between the matmuls inside the same computeBlock.
+void DataDependencyAnalysisPass::analyzeInternalDeps(DataDependencyInfo &info) {
+  auto &blockInfoMap = info.getBlockInfoMap();
+  auto &intraBlockDeps = info.getIntraC2CDependencies();
+
+  LOG_DEBUG("Analyzing intra-block matmul dependencies...\n");
+  for (auto &[blockId, blockInfo] : blockInfoMap) {
+    if (!blockInfo.isCube) {
+      continue;
+    }
+
+    llvm::SmallVector<linalg::MatmulOp> matmuls;
+    for (mlir::Operation *op : blockInfo.Operations) {
+      if (auto matmulOp = dyn_cast<linalg::MatmulOp>(op)) {
+        matmuls.push_back(matmulOp);
+      }
+    }
+    if (matmuls.size() < 2) {
+      continue;
+    }
+
+    for (linalg::MatmulOp consumer : matmuls) {
+      for (OpOperand &opOperand : consumer->getOpOperands()) {
+        if (!resolveSameBlockMatmulProducer(opOperand.get(), blockId)) {
+          continue;
+        }
+        DependencyInfo depInfo;
+        depInfo.type = DependencyType::CubeToCube;
+        depInfo.value = opOperand.get();
+        depInfo.operand = &opOperand;
+        depInfo.producerBlockId = blockId;
+        depInfo.consumerBlockId = blockId;
+        depInfo.iniProducerBlockId = blockId;
+        depInfo.iniConsumerBlockId = blockId;
+        intraBlockDeps.push_back(depInfo);
+      }
+    }
+  }
+  LOG_DEBUG("Intra-block matmul dependency analysis complete. Found "
+            << intraBlockDeps.size() << " dependencies.\n");
+}
+
 void DataDependencyAnalysisPass::collectMemDepInfo(
     llvm::StringRef predCoreType, int producerBlockId, int consumerBlockId,
     int predBlockId, int currBlockId,
@@ -1092,10 +1150,13 @@ void DataDependencyAnalysisPass::runOnOperation() {
 
   analyzeExternalOutputs(info);
 
-  // Step 4: Analyze memory dependencies (memdep sync)
+  // Step 4: Analyze intra-block c2c dependencies
+  analyzeInternalDeps(info);
+
+  // Step 5: Analyze memory dependencies (memdep sync)
   analyzeMemoryEffect(info);
 
-  // Step 5: Deduplicate dependencies (remove duplicates with same value,
+  // Step 6: Deduplicate dependencies (remove duplicates with same value,
   // iniConsumerBlockId, iniProducerBlockId)
   deduplicateDependencies(info.getV2CDependencies());
   deduplicateDependencies(info.getC2VDependencies());
@@ -1113,6 +1174,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
                                     << "\n");
   LOG_DEBUG("  Memory dependencies: " << info.getMemoryDependencies().size()
                                       << "\n");
+  LOG_DEBUG("  Intra-block C->C dependencies: "
+            << info.getIntraC2CDependencies().size() << "\n");
 
   LOG_DEBUG("\n--- exit DataDependencyAnalysisPass --->\n");
 }

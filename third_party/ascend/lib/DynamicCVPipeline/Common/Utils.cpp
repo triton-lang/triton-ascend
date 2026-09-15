@@ -519,6 +519,18 @@ std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
     return hivm::FixpipePreQuantMode::S322I8;
   return std::nullopt;
 }
+
+Operation *getSourceThroughCIntermediateOps(Value operand) {
+  auto isIntermediateOp = [](Operation *op) {
+    return getFixpipePreQuantMode(op).has_value();
+  };
+  Operation *defOp = operand.getDefiningOp();
+  while (defOp && isIntermediateOp(defOp)) {
+    defOp = defOp->getOperand(0).getDefiningOp();
+  }
+  return defOp;
+}
+
 CoreType getValueCoreType(Value value) {
   auto result = llvm::dyn_cast_if_present<OpResult>(value);
   if (!result) {

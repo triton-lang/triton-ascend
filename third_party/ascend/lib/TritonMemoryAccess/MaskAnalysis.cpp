@@ -179,25 +179,35 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
 
         // The iteration count n = (iv - lb) / step relates the induction
         // variable to the per-iteration increment: current = init + n*delta.
-        // lb/step must be compile-time constants
-        auto lb = getConstantIntValue(forOp.getLowerBound());
-        auto step = getConstantIntValue(forOp.getStep());
-        if (!lb || !step || *step == 0)
-          return failure();
-
+        // lb/step may be dynamic; cast to index and compute at runtime.
         FailureOr<Value> ivIndex = castIntegerLike(
             builder, loc, forOp.getInductionVar(), builder.getIndexType());
         if (failed(ivIndex))
           return failure();
 
         Value iterCount = *ivIndex;
-        if (*lb != 0) {
-          auto lbCst = builder.create<arith::ConstantIndexOp>(loc, *lb);
-          iterCount = builder.create<arith::SubIOp>(loc, iterCount, lbCst);
+
+        // iterCount = iv - lb  (handle dynamic or constant lb)
+        auto lb = getConstantIntValue(forOp.getLowerBound());
+        if (!lb || *lb != 0) {
+          FailureOr<Value> lbIndex = castIntegerLike(
+              builder, loc, forOp.getLowerBound(), builder.getIndexType());
+          if (failed(lbIndex))
+            return failure();
+          iterCount = builder.create<arith::SubIOp>(loc, iterCount, *lbIndex);
         }
-        if (*step != 1) {
-          auto stepCst = builder.create<arith::ConstantIndexOp>(loc, *step);
-          iterCount = builder.create<arith::DivSIOp>(loc, iterCount, stepCst);
+
+        // iterCount = (iv - lb) / step  (handle dynamic or constant step)
+        auto stepCst = getConstantIntValue(forOp.getStep());
+        if (stepCst && *stepCst == 0)
+          return failure();
+        if (!stepCst || *stepCst != 1) {
+          FailureOr<Value> stepIndex = castIntegerLike(
+              builder, loc, forOp.getStep(), builder.getIndexType());
+          if (failed(stepIndex))
+            return failure();
+          iterCount =
+              builder.create<arith::DivSIOp>(loc, iterCount, *stepIndex);
         }
 
         OpFoldResult offset =

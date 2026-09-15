@@ -396,7 +396,11 @@ def _copy_bishengir_payload(build_lib):
     if source is None:
         return
 
-    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
+    # Must match the runtime lookup in backend/utils.py:
+    #   <dir of utils.py>/bishengir/bin/bishengir-compile
+    # where utils.py installs to triton/backends/ascend/backend/utils.py
+    # (same layout as build_npuir.py's _copy_artifacts).
+    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "backend" / "bishengir"
     if destination.exists():
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)

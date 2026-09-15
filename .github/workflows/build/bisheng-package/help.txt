@@ -1,8 +1,0 @@
-  --install                         Install run mode
-  --install-path=<path>             Install  to specific path
-  --uninstall                       Uninstall
-  --version                         Show version
-  --run                             Install run mode
-  --full                            Install run mode
-  --install-for-all                 Install for all user
-  --upgrade                         Upgrade run mode

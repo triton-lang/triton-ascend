@@ -41,6 +41,7 @@
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "ascend/include/DynamicCVPipeline/DynamicCVAutoBlockify.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
@@ -72,7 +73,10 @@ static std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
                      : std::nullopt;
 }
 
-static inline void addPasses(OpPassManager &pm) {
+static inline void addPasses(OpPassManager &pm, int aicoreNum) {
+  DynamicCVAutoBlockifyPassOptions autoBlockifyOptions;
+  autoBlockifyOptions.aicoreNum = aicoreNum;
+  pm.addPass(createDynamicCVAutoBlockifyPass(autoBlockifyOptions));
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
   pm.addPass(createPlanComputeBlockPass());
@@ -90,7 +94,7 @@ void AddDynamicCVPipelinePass::getDependentDialects(
     DialectRegistry &registry) const {
   Base::getDependentDialects(registry);
   OpPassManager tempPM(ModuleOp::getOperationName());
-  addPasses(tempPM);
+  addPasses(tempPM, this->aicoreNum);
   tempPM.getDependentDialects(registry);
 }
 
@@ -148,7 +152,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
-    addPasses(pm);
+    addPasses(pm, this->aicoreNum);
 
     // run passes in separate pm, instead of the pipeline to suppress reproducer
     auto result = pm.run(moduleOp);

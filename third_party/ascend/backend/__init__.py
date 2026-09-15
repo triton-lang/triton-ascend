@@ -24,6 +24,49 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 
 from .testing import do_bench_npu
 
+_ASCEND_UTILS_PACKAGE = "triton_ascend_op_utils"
+
+
+def _load_ascend_op_utils():
+    """Load the standalone ``third_party/ascend/utils`` config package by path.
+
+    That folder is shipped next to the backend but is not installed onto
+    ``sys.path`` (and must not collide with this backend's own ``utils.py``),
+    so it is imported explicitly via importlib using the backend file location
+    and the ``TRITON_PLUGIN_DIRS`` environment variable as fallbacks.
+    """
+    import importlib.util
+    import os
+    import sys
+    from pathlib import Path
+
+    if _ASCEND_UTILS_PACKAGE in sys.modules:
+        return sys.modules[_ASCEND_UTILS_PACKAGE]
+
+    candidates = [Path(__file__).resolve().parent.parent / "utils"]
+    for plugin_dir in os.environ.get("TRITON_PLUGIN_DIRS", "").split(os.pathsep):
+        if plugin_dir.strip():
+            plugin_root = Path(plugin_dir.strip())
+            candidates.append(plugin_root / "utils")
+            # The plugin root may be either the ascend root (containing
+            # ``backend/``) or ``third_party``; cover both layouts.
+            candidates.append(plugin_root / "ascend" / "utils")
+
+    for utils_dir in candidates:
+        init_file = utils_dir / "__init__.py"
+        if not init_file.is_file():
+            continue
+        spec = importlib.util.spec_from_file_location(
+            _ASCEND_UTILS_PACKAGE,
+            init_file,
+            submodule_search_locations=[str(utils_dir)],
+        )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[_ASCEND_UTILS_PACKAGE] = module
+        spec.loader.exec_module(module)
+        return module
+    return None
+
 
 def _apply_ascend_patch():
     from triton.compiler.code_generator import CodeGenerator
@@ -106,6 +149,18 @@ def _apply_ascend_patch():
 
         TritonSemantic.dot = _patched_dot
         TritonSemantic._ascend_dot_patch_applied = True
+
+    # Install the unified, non-intrusive dtype interception for operators
+    # whose dtypes are unsupported on Ascend. The rules live in the standalone
+    # package shipped at third_party/ascend/utils.
+    if not getattr(CodeGenerator, "_ascend_dtype_guard_applied", False):
+        op_utils = _load_ascend_op_utils()
+        if op_utils is not None and hasattr(op_utils, "install_dtype_guard"):
+            try:
+                op_utils.install_dtype_guard()
+                CodeGenerator._ascend_dtype_guard_applied = True
+            except Exception as e:
+                logging.warning(f"[Ascend Patch] Failed to install dtype guard: {e}")
 
 
 __all__ = ["do_bench_npu"]

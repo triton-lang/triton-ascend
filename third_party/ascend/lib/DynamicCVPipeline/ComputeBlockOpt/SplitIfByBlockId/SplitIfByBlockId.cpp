@@ -1348,8 +1348,6 @@ static scf::YieldOp safeGetTerminator(Block *block) {
   return llvm::dyn_cast_if_present<scf::YieldOp>(block->getTerminator());
 }
 
-constexpr llvm::StringRef kSplittedIf = "ssbuffer.splitted_if";
-
 static void postProcess(scf::IfOp ifOp, scf::IfOp sourceIfOp, int blockId) {
   OpBuilder builder{ifOp};
 
@@ -1384,7 +1382,7 @@ static void postProcess(scf::IfOp ifOp, scf::IfOp sourceIfOp, int blockId) {
     setBlockId(elseYield);
   }
 
-  ifOp->setAttr(kSplittedIf, builder.getUnitAttr());
+  ifOp->setAttr(CVPipeline::kSplittedIf, builder.getUnitAttr());
 }
 
 /// Materialization for Case A and Case B using per-group signatures.
@@ -1709,9 +1707,9 @@ void SplitIfByBlockIdPass::runOnOperation() {
   auto &aa = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memGraph{module, aa};
   module->walk([&](scf::IfOp ifOp) {
-    if (ifOp->hasAttr(kSplittedIf)) {
+    if (ifOp->hasAttr(CVPipeline::kSplittedIf)) {
       rearrangeIfOp(ifOp, memGraph);
-      ifOp->removeAttr(kSplittedIf);
+      ifOp->removeAttr(CVPipeline::kSplittedIf);
     }
   });
 

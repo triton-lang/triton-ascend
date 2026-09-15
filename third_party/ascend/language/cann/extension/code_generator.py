@@ -34,7 +34,7 @@ def mangle_ty(ty):
     """
     # Lazy imports to avoid circular dependencies at module import time.
     from triton import language
-    from triton.extension.buffer.language import core as bl
+    from triton.language.extra.extension.buffer.language import core as bl
 
     # Buffer types are Python-side dtypes; handle them first.
     if isinstance(ty, bl.buffer_type):

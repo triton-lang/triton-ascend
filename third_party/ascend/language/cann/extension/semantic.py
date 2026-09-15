@@ -32,7 +32,7 @@ from triton._C.libtriton import ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 import triton.language.core as tl
 import triton.language.extra.cann.extension as al
-import triton.extension.buffer.language as bl
+import triton.language.extra.extension.buffer.language as bl
 
 T = TypeVar('T')
 

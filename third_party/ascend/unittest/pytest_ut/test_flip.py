@@ -25,4 +25,4 @@ import torch
 import torch_npu
 import pytest
 import test_common
-from triton.runtime.libentry import libentry
+from triton.language.extra.runtime.libentry import libentry

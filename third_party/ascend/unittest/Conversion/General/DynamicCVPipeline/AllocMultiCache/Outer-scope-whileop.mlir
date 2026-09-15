@@ -8,6 +8,8 @@
 //   (operand-defined-after-use)
 // - CHECK locks double-buffer output: two mutually-exclusive transfer
 //   groups (even/odd flags) + double-buffer selection
+// - output flags are allocated above the module's maximum existing flag (6),
+//   in sorted (original flag, direction) order: flag 3 gets 7, flag 6 gets 8
 
 // CHECK-LABEL: func.func @tc_while_ctov_sender
 // CHECK: tightly_coupled_buffer

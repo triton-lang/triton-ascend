@@ -412,9 +412,22 @@ def _run_ttir_to_npubin(
 def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op):
     """Capture argv from a non-pure-SIMT linalg compiler entry point."""
     commands = []
-    parsed_metadata = defaultdict(lambda: None, {
-        "has_auto_blockify_blacklist_op": has_blacklist_op,
-    })
+    parsed_metadata = defaultdict(
+        lambda: None, {
+            # Both Linalg compiler paths inspect the compile target while deciding
+            # whether the optional lib-call flag applies.
+            "target": SimpleNamespace(arch="Ascend910B"),
+            "program_grid_transforms": None,
+            "program_grid_mapping_applied": False,
+            "row_coalescing_applied": False,
+            "has_auto_blockify_blacklist_op": has_blacklist_op,
+            # The linalg entry points consume the finalized policy rather
+            # than recomputing it.  This helper invokes them directly, so
+            # provide the corresponding non-pure-SIMT decision.
+            "auto_blockify_enabled": not has_blacklist_op,
+            "ptsm_cap_authorized": False,
+            "mix_mode": "aiv",
+        })
 
     class FakeNPUUtils:
 
@@ -443,7 +456,7 @@ def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op
     result = getattr(compiler, function_name)(
         "module {}",
         {},
-        SimpleNamespace(debug=False, target_arch="Ascend950PR"),
+        SimpleNamespace(debug=False, target_arch="Ascend950PR", is_pure_simt=False),
     )
     assert result == b"npubin"
     assert len(commands) == 1

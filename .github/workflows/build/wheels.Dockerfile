@@ -63,6 +63,12 @@ RUN export PATH="/opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin:${PATH}" \
          exit 1; \
        fi \
     && cd "$SETUP_DIR" \
+    && if [ -d /project/.npuir-payload/bin ] && [ -d /project/.npuir-payload/lib ]; then \
+         export TRITON_ASCEND_BISHENGIR_PATH=/project/.npuir-payload; \
+         echo "Bundling BishengIR payload from ${TRITON_ASCEND_BISHENGIR_PATH}"; \
+       else \
+         echo "No .npuir-payload in the build context; building without a bundled BishengIR"; \
+       fi \
     && python3 ${SETUP_PY} bdist_wheel \
     && mkdir -p /out \
     && cp dist/*.whl /out/

@@ -73,6 +73,33 @@ static bool isPureVectorIf(scf::IfOp ifOp) {
 }
 
 /**
+ * @brief Check whether a group of ops (an existing block_id's ops) is safe to
+ *        fold into a pure-VECTOR target block_id.
+ *
+ * block_id is consumed downstream both as a scheduling/reorder key
+ * (ReorderOpsByBlockIdPass) and as a CUBE/VECTOR compute-block boundary
+ * (DataDependencyAnalysis's collectBlockInfo). Merging a block that contains
+ * any CUBE-tagged op into a VECTOR-only block_id would silently produce a
+ * single block_id spanning both core types, which downstream passes do not
+ * expect. Sync ops are assigned unique block ids and must not be merged here.
+ * A group op may itself be a control-flow op (e.g. scf.if / scf.for) that
+ * carries no direct core_type tag, so getCoreTypeOfSimpleOpOrCf is used to
+ * recurse into its body instead of getOpCoreType.
+ */
+static bool isPureVectorOpGroup(ArrayRef<Operation *> ops) {
+  for (Operation *op : ops) {
+    if (CVPipeline::isSyncOp(op)) {
+      return false;
+    }
+    if (CVPipeline::getCoreTypeOfSimpleOpOrCf(op) !=
+        CVPipeline::CoreType::VECTOR_ONLY) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
  * @brief Determine the upstream block_id to merge the scf.if into
  *
  * The upstream is the data source of the if: its condition plus every value
@@ -207,6 +234,12 @@ static void tryMergeIf(scf::IfOp ifOp,
   // the dependency graph acyclic, forming one large block.
   for (int bid : downstream) {
     SmallVector<Operation *> downstreamOps = bm.getOpsByBlockId(bid);
+    if (!isPureVectorOpGroup(downstreamOps)) {
+      LOG_DEBUG("[tryMergeIf] downstream block_id "
+                << bid << " contains non-VECTOR ops, skip to avoid mixed "
+                << "core_type block_id");
+      continue;
+    }
     SmallVector<Operation *> opsToUnify;
     opsToUnify.push_back(ifOp.getOperation());
     opsToUnify.append(downstreamOps.begin(), downstreamOps.end());

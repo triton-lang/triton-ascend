@@ -333,3 +333,15 @@ def capture_output(expected_output):
         return wrapper
 
     return decorator
+
+
+def pytest_collection_modifyitems(config, items):
+    keep_items = []
+    for item in items:
+        if not hasattr(item, "callspec"):
+            continue
+        mark_obj = pytest.mark.case_info(level="P0", type="Functional")
+        item.add_marker(mark_obj)
+        #if not any(m.name == "skip" for m in item.own_markers):
+        #    keep_items.append(item)
+    #items[:] = keep_items

@@ -108,6 +108,18 @@ public:
   /// after cloning so later operations can reuse their exact component state.
   virtual bool shouldDecomposeOperation(Operation *op) const = 0;
 
+  /// Whether a rebuilt value may be used as a direct decomposition-cache key.
+  ///
+  /// The default preserves the existing behavior for policies whose rebuilt
+  /// values are already consumable by downstream conversion. A policy that
+  /// rebuilds an opaque tensor-of-pointers can reject the cache entry so the
+  /// next consumer re-analyzes the pointer producer and follows its normal
+  /// scalar-address lowering path instead of exposing tensor.extract of a
+  /// scalar Triton pointer to T2L.
+  virtual bool shouldCacheRebuiltDecomposition(const DecomposedValue &) const {
+    return true;
+  }
+
   /// Whether rewritten loops owned by this policy must expose their descriptor
   /// slots to downstream conversion. The shared rewrite records the exact
   /// expanded result indices because only it knows both old and new signatures.

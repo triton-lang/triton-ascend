@@ -1976,6 +1976,14 @@ public:
     return isa<triton::AddPtrOp>(op);
   }
 
+  bool
+  shouldCacheRebuiltDecomposition(const DecomposedValue &value) const override {
+    // A scalar base can be reconstructed as an integer address by T2U. An
+    // opaque tensor-of-pointers base must instead be re-analyzed so T2U can
+    // lower each lane to an integer address before T2L sees it.
+    return hasValidLayout(value) && hasScalarBase(value);
+  }
+
   bool requiresPointerDescriptorBoundaryMarker() const override { return true; }
 
   bool shouldMarkOperationRecomposition(Operation *op) const override {

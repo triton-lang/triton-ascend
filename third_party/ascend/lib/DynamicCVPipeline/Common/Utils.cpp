@@ -143,6 +143,11 @@ bool isExternalSyncOp(Operation *op) {
          op->getAttrOfType<IntegerAttr>(CVPipeline::kExternalSync);
 }
 
+void setSubBlockId(Operation *op, int subBlockId) {
+  OpBuilder builder(op->getContext());
+  op->setAttr(CVPipeline::kSubBlock, builder.getI32IntegerAttr(subBlockId));
+}
+
 bool isScfOp(Operation *op) {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
 }
@@ -482,6 +487,15 @@ int getLoopCarriedArgIndex(Value operand, Block *block) {
   }
 
   return argIdx;
+}
+
+int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
+  for (unsigned i = 0; i < iterArgs.size(); ++i) {
+    if (v == iterArgs[i] && isa<RankedTensorType>(iterArgs[i].getType())) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {

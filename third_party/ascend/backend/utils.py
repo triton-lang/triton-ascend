@@ -46,7 +46,6 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "auto_tile_and_bind_subblock",
     "code_motion",
     "compile_on_910_95",
-    "disable_size_align_for_cast",
     "enable_auto_blockify",
     "enable_buffer_insert_optimization",
     "enable_cce_vf_auto_sync",
@@ -76,6 +75,7 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "ops_reorder",
     "optimize_dynamic_offset",
     "parallel_mode",
+    "simt_reorder_instruction",
     "storage_align",
     "stream",
     "use_bytecode",
@@ -110,6 +110,7 @@ _DEPRECATED_NPU_OPTION_ALIASES = {
     "intra_cache_num": "buf_slot_num_of_veccore",
     "inter_cache_num": "buf_slot_num_of_crosscore",
     "load_cache_num": "buf_slot_num_of_gm",
+    "enable_bishengir_simt_optimization": "simt_optimization_mode",
 }
 
 # Removed no-op options keep using the compatibility path above.  This table
@@ -123,7 +124,6 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "auto_tile_and_bind_subblock":
     "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
-    "disable_size_align_for_cast": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
     "enable_buffer_insert_optimization":
     "it is ignored; DynamicCV keeps buffer insertion optimization enabled internally.",
@@ -151,6 +151,8 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "ops_reorder": "it is ignored; the removed vendor compiler control has no replacement.",
     "optimize_dynamic_offset": "it is ignored; the backend fixes dynamic-offset optimization to False.",
     "parallel_mode": "it is ignored; parallel mode is derived from compile_mode and Linalg IR.",
+    "simt_reorder_instruction":
+    "it is ignored; this option has been moved into the first digit of simt_optimization_mode.",
     "storage_align": "it is ignored; the removed vendor compiler control has no replacement.",
     "stream": "it is ignored; launch streams are managed by the runtime and driver.",
     "use_bytecode": "it is ignored; the bytecode pipeline is always enabled.",

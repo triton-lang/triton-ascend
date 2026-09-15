@@ -73,6 +73,22 @@ def scalar_pointer_while_from_function_args_kernel(x, out, steps_ptr):
 
 
 @triton.jit
+def scalar_pointer_while_if_backedge_kernel(x0, x1, out, steps_ptr, switch_at_ptr):
+    """Select a new scalar-pointer base on one while-loop backedge."""
+    steps = tl.load(steps_ptr)
+    switch_at = tl.load(switch_at_ptr)
+    pointer = x0 + 1
+    iteration = 0
+    while iteration < steps:
+        if iteration == switch_at:
+            pointer = x1 + 7
+        else:
+            pointer = pointer + 2
+        iteration += 1
+    tl.store(out, tl.load(pointer))
+
+
+@triton.jit
 def scalar_pointer_nested_if_for_kernel(x, out, predicate_ptr, steps_ptr):
     predicate = tl.load(predicate_ptr)
     steps = tl.load(steps_ptr)
@@ -195,6 +211,26 @@ def test_scalar_pointer_while_from_function_args(steps):
     expected = torch.zeros_like(out_cpu)
     expected[expected_output_index] = x0_cpu[expected_input_index]
     _assert_output(out, expected)
+
+
+@pytest.mark.parametrize("steps,switch_at", [(0, 0), (1, 0), (4, 1), (4, 7)])
+def test_scalar_pointer_while_if_backedge(steps, switch_at):
+    x0_cpu, x1_cpu, x0, x1 = _inputs()
+    out = torch.empty(1, dtype=torch.float32, device="npu")
+
+    scalar_pointer_while_if_backedge_kernel[(1, )](
+        x0,
+        x1,
+        out,
+        _device_i32(steps),
+        _device_i32(switch_at),
+    )
+
+    if switch_at < steps:
+        expected = x1_cpu[7 + 2 * (steps - switch_at - 1):]
+    else:
+        expected = x0_cpu[1 + 2 * steps:]
+    _assert_output(out, expected[:1])
 
 
 @pytest.mark.parametrize("predicate", [0, 1])

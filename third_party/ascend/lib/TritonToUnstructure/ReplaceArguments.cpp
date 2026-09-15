@@ -24,6 +24,8 @@
 #include "TritonToUnstructure/UnstructureConversionPass.h"
 #include "Utils/Utils.h"
 
+#include "mlir/IR/Block.h"
+
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "triton-replace-arguments"
@@ -181,6 +183,9 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
         return true;
     for (Value arg : whileOp.getAfterArguments())
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
+        return true;
+    for (Value value : whileOp.getYieldOp().getOperands())
+      if (isOpaqueScalarPointerIfResult(value))
         return true;
     return false;
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
@@ -557,6 +562,9 @@ SmallVector<Type> constructTypes(TypeRange types, Operation *loop) {
 
 void replacePtrArguments(triton::FuncOp funcOp,
                          llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  // Keep replaced values alive until the analysis cache is no longer used.
+  // This detached block owns the retired operations without revisiting them.
+  Block retiredOps;
   IRRewriter rewriter(funcOp.getContext());
   rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   Value tempVar = rewriter
@@ -567,7 +575,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
     IRMapping mapping;
     Operation *newOp = nullptr;
     // Address carriers used by the replacement op must dominate it. Build the
-    // replacement immediately before the old op and erase the old op last.
+    // replacement immediately before the old op and unlink the old op last.
     rewriter.setInsertionPoint(op);
     if (auto forOp = dyn_cast<scf::ForOp>(op)) {
       // An opaque scalar-pointer boundary cannot be represented by the
@@ -708,7 +716,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
         rewriter.replaceAllUsesWith(res, replacement);
         std::advance(resIter, std::max(getPtrTensorRank(res.getType()), 1));
       }
-      rewriter.eraseOp(op);
+      rewriter.moveOpBefore(op, &retiredOps, retiredOps.end());
       op = newOp;
       convertTensorPtrPre(op, rewriter, offsetMap);
       for (auto &region : op->getRegions())
@@ -720,4 +728,6 @@ void replacePtrArguments(triton::FuncOp funcOp,
   };
 
   funcOp->walk<WalkOrder::PreOrder>(convertTensorPtr);
+  // Drop all cached references before retiredOps destroys the old IR.
+  offsetMap.clear();
 }

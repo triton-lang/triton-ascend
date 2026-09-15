@@ -29,3 +29,8 @@ add_lit_testsuites(TRITON-LIT-TESTS ${CMAKE_CURRENT_SOURCE_DIR} DEPENDS ${TRITON
 if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   add_subdirectory(costmodel_ut)
 endif()
+
+# The deallocation observer uses ELF linker wrapping.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_subdirectory(offset_analysis_ut)
+endif()

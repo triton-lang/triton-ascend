@@ -89,6 +89,8 @@ inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
 inline constexpr llvm::StringLiteral kSubBlock = "ssbuffer.subBlock";
 inline constexpr llvm::StringLiteral kMergeComputeBlockApplied =
     "ssbuffer.merge_compute_block_applied";
+inline constexpr llvm::StringLiteral kMergeSmallBlockFirstRunDone =
+    "ssbuffer.merge_small_block_first_run_done";
 
 inline constexpr const char *ERRCODE_ATTR =
     "triton_ascend.dynamic_cv_pipeline.rc";
@@ -137,6 +139,8 @@ bool isOnlyDirectlyUse(Operation *preOp, Operation *nextOp,
                        const CVPipeline::MemoryDependenceGraph &memGraph);
 bool isSyncOp(Operation *op);
 bool isExternalSyncOp(Operation *op);
+
+void setSubBlockId(Operation *op, int subBlockId);
 
 // Wrapper around a "main loop" — either scf.for or scf.while carrying the
 // ssbuffer.main_loop attribute. Lets downstream code treat both uniformly.
@@ -265,6 +269,10 @@ bool allResultHasOneUser(Operation *op);
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
+
+// Returns the index of `v` in `iterArgs` when `v` is a tensor-type iter_arg,
+// or -1 otherwise.
+int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs);
 
 // Helper: convert OpCoreType to string for IR attribute
 inline llvm::StringRef coreTypeToString(CoreType ct) {

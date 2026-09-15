@@ -62,9 +62,10 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
+    GraphOptimizationRulePhase::AtomicMaskCanonicalization,
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
     GraphOptimizationRulePhase::LoadStoreTranspose,
@@ -595,6 +596,10 @@ void populateBuiltinGraphOptimizationRules(
       isRuleEnabled(options.enabledRuleMask,
                     GraphOptimizationRuleId::RowCoalescing)) {
     rules.push_back(createRowCoalescingRule());
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::AtomicMaskCanonicalization)) {
+    rules.push_back(createAtomicMaskCanonicalizationRule());
   }
 }
 

@@ -119,7 +119,15 @@ def add_kernel(x_ptr,
 
 ### Aligning the Size of the Tail Axis of the Tensor
 
-[Description] For VV operators, if the Vector core needs to be called for computation, the UB of the Ascend hardware requires that the size of the tail axis of the tensor be divisible by 32 bytes. For CV operators, if the Vector core and Cube core need to be called for computation, the size of the tail axis of the tensor must be divisible by 512 bytes. If the tail axis length is insufficient, the tail axis length will be automatically padded. Under this premise, the performance of operations with the shape of (2048,3) and (2048,1) tensors in the model deteriorates significantly due to automatic padding. In this case, you can perform the transpose operation to convert the alignment axis to a lower dimension until the store operation is performed, avoiding automatic padding and optimizing the computing speed. In addition, the transpose operation is also affected by the automatic padding rule. Therefore, special skills are required to avoid padding. The following is a tip for "borrowing axis for transpose", which is applicable to the scenario where **tensor.numel() % 256Byte == 0**:
+[Description] The UB (Unified Buffer) of the Ascend hardware imposes alignment requirements on the size of the tail axis (the last dimension) of a tensor: the data size of the tail axis must be an integer multiple of the alignment unit. If the tail axis length is insufficient, the hardware automatically pads it. The alignment requirements for different operator types are shown in the following table.
+
+| Operator Type | Compute Unit Used | Tail Axis Alignment Requirement |
+| --- | --- | --- |
+| VV operators (Vector-Vector, pure vector computation operators) | Vector core only | Tail axis size must be divisible by 32B |
+| CV operators (Cube-Vector, Cube core and Vector core fusion computation operators) | Cube core + Vector core | Tail axis size must be divisible by 512B |
+
+[Description] Various operations on tensors with shapes (2048,3) and (2048,1) in the model suffer noticeable performance degradation due to automatic padding. In this case, consider transposing the alignment axis to a lower dimension, and transpose it back to the original state only when storing, thereby avoiding automatic padding and improving computation speed.
+Since the transpose operation itself is also affected by the automatic padding rule, special techniques are needed to avoid padding. The following lists a "borrowing axis for transpose" tip, applicable to the scenario where **tensor.numel() % 256Byte == 0**:
 
 - Note: VV operators indicate that only Vector Core is used during operator computation. CV operators indicate that both AI Core and Vector Core are used during operator computation.
 - Example
@@ -168,12 +176,17 @@ def pick_kernel(
 
 You can use the msProf tool to execute the test case to obtain the **PROF_***\** folder, which contains the **op_summary_***\****.csv** file. This file can be used to analyze the pipeline. Note: *\** indicates the timestamp. For details, see the [performance data collection methods](../debug_guide/profiling.md).
 
-||Op Name|aiv_mte2_time(us)|aiv_mte2_ratio|
+|Optimization State|Op Name|aiv_mte2_time(μs)|aiv_mte2_ratio|
 |:---- |:--------|:--------|:--------|
 |Unoptimized|pick_kernel|0.686|0.008|
 |Optimized|pick_kernel|1.041|0.066|
 
-According to the data in the table, the values of **aiv_mte2_time(us)** and **aiv_mte2_ratio** before and after the optimization are greatly different. The optimization solution first transfers most of the data to the UB, reducing the number of times that small batches of data are transferred to the UB through the L2 and the total time for transferring data to the UB through the L2.
+Description of each metric:
+
+- **aiv_mte2_time(μs)**: Time consumed during the MTE2 (Move Engine 2) transfer stage on the AI Vector (AIV) core, in microseconds (μs), reflecting the overhead of moving data from global memory to on-chip memory (UB).
+- **aiv_mte2_ratio**: The ratio of MTE2 transfer time to the total operator execution time. A larger value indicates a higher proportion of transfer time, which can be used to evaluate the degree of overlap between transfer and computation.
+
+According to the data in the table, the values of aiv_mte2_time(μs) and aiv_mte2_ratio before and after optimization differ significantly. The optimization solution first transfers most of the data to the UB, reducing the number of times small batches of data are transferred from the L2 to the UB, thereby reducing the total time of transferring data from the L2 to the UB.
 
 ### Parallel Storage and Computation
 
@@ -238,7 +251,7 @@ Caching of tuning results: Cache the best configuration after tuning so that lat
 
 - Simple example
 
-    ```diff
+    ```python
     import triton.language as tl
 
     @triton.autotune(
@@ -264,7 +277,7 @@ Caching of tuning results: Cache the best configuration after tuning so that lat
 
 - Note: You can set the following environment variables to print the optimal parameter information.
 
-    ```diff
+    ```bash
     export TRITON_PRINT_AUTOTUNING=1
     ```
 
@@ -279,7 +292,7 @@ Developers only need to provide a few base configurations (such as BLOCK_SIZE), 
 
 - Simple Example
 
-    ```diff
+    ```python
     from triton.backends.ascend.runtime import max_autotune
 
     @max_autotune(
@@ -305,9 +318,13 @@ Developers only need to provide a few base configurations (such as BLOCK_SIZE), 
 
 ### How Do I Avoid UB Overflow on the NPU?
 
-[Description] On the NPU, the UB or L1 size has an upper limit. When this error occurs, reduce the amount of data transferred at a time and use the for loop to process long sequences.
+[Description] On the NPU, on-chip memories such as UB (Unified Buffer) and L1 (level-1 on-chip cache) have hardware capacity limits. When the on-chip buffer required by a single tile (block) for data transfer and computation in a kernel exceeds this limit, the compiler reports a `ub overflow` error during compilation, and the kernel cannot be compiled. This error is common in the following scenarios: the block size parameter (such as BLOCK_SIZE) is set too large, long sequences are transferred in a single pass, there are too many intermediate tensors in the kernel, and multi-buffer (parallel storage and computation with multiple buffers) is enabled by default, causing some tensors to require multiple copies. When this error occurs, you need to reduce the amount of data transferred at a time: reduce the block size parameter, or use a for loop within the kernel to process long sequences in blocks along the sequence dimension.
 
-```diff
+#### Error Message Example
+
+The following is the Triton compilation failure log echoed by pytest: the `E` at the beginning of each line is a pytest error output prefix (indicating that the line comes from pytest-captured error output) and is not part of the log content itself.
+
+```text
 E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
@@ -317,7 +334,115 @@ E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":3:3): error: ub overflow, require
 large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer. )
 ```
 
-[Note] The UB size of the A2 series products is 192 KB (1,572,864 bits).
+#### Error Cause Analysis
+
+1. **Trigger phase:** This error occurs during kernel compilation — the Ascend backend fails when converting MLIR to binary, not during program runtime; compilation failure means no executable binary was generated for the kernel.
+
+2. **Direct cause:** The compiler estimated that a single tile requires 3,072,256 bits of UB, while the hardware UB upper limit is 1,572,864 bits (A2 series, i.e., 192 KB), exceeding the limit by 1,499,392 bits (3,072,256 − 1,572,864 = 1,499,392), approximately 1.95 times the available capacity, resulting in a ub overflow.
+
+3. **Root cause:** ① The block size parameter (such as BLOCK_SIZE) is too large, resulting in too many elements in a single tile; ② Multi-buffer parallel storage and computation is enabled by default (the compiler-side configuration is `multiBuffer=True`, controlled by the user via the `multibuffer` parameter in `triton.Config` or kernel launch, enabled by default), creating multiple tensor copies for pipeline overlap between data transfer and computation, with some operators requiring additional local buffers, multiplying UB usage; ③ Too many intermediate tensors in the kernel, with cumulative usage exceeding the limit.
+
+The key log fields are interpreted as follows:
+
+| Log Key Field | Meaning |
+| --- | --- |
+| `triton.compiler.errors.MLIRCompilationError` | Compilation error thrown by the Triton compiler during the MLIR compilation phase; the kernel did not generate an executable binary |
+| `[ConvertLinalgRToBinary] encounters error`, `Failed to run BishengHIR pipeline` | The Ascend backend failed during the MLIR-to-binary conversion phase |
+| `ub overflow` | UB (Unified Buffer) overflow: the estimated on-chip buffer requirement during compilation exceeds the hardware capacity limit |
+| `requires 3072256 bits` | UB bits required for a single tile in this compilation: 3,072,256 bits (approximately 375 KB) |
+| `1572864 bits available` | Current hardware available UB upper limit: 1,572,864 bits, i.e., 192 KB (A2 series) |
+| `multi-buffer feature is enabled and some ops need extra local buffer` | Compiler hint: multi-buffer (parallel storage and computation with multiple buffers) is enabled, and some operators require additional local buffer copies, which amplifies UB usage |
+
+#### Resolution Steps
+
+Process in the following order; recompile and verify after each step; stop once the overflow disappears after any step:
+
+1. **Reduce the block size parameter.** Reduce BLOCK_SIZE and other block size parameters by powers of 2 (e.g., from 4096 to 2048, 1024). The grid will automatically expand with the block size (grid = ceil(n_elements / BLOCK_SIZE)), and the total number of elements processed remains unchanged.
+
+    Before modification (BLOCK_SIZE too large, triggering ub overflow):
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4096)
+    ```
+
+    After modification (reduced BLOCK_SIZE):
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)
+    ```
+
+2. **Use a for loop to process long sequences in blocks along the sequence dimension.** When the sequence length is far greater than the number of elements that a single tile can safely hold, use a for loop within the kernel to split along the sequence axis: load, computation, and store are all completed within the loop body, processing only BLOCK_SIZE_SUB elements at a time, and only one sub-block of data resides in the UB at any given time. Parameter constraints: BLOCK_SIZE_SUB should not be greater than BLOCK_SIZE, and should preferably be a power of 2 (e.g., 1024, 2048) and evenly divide BLOCK_SIZE; when it cannot evenly divide, the tail block is automatically handled by the mask, which does not affect correctness. The complete kernel example is as follows:
+
+    ```python
+    @triton.jit
+    def add_kernel_tiled(x_ptr, y_ptr, out_ptr, n_elements,
+                        BLOCK_SIZE: tl.constexpr, BLOCK_SIZE_SUB: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        base_offset = pid * BLOCK_SIZE
+
+        # Calculate the total number of sub-blocks to be processed by the current program
+        num_sub_blocks = tl.cdiv(BLOCK_SIZE, BLOCK_SIZE_SUB)
+
+        # Process in blocks along the sequence dimension: transfer/compute only BLOCK_SIZE_SUB elements at a time
+        for sub_block_idx in range(num_sub_blocks):
+            sub_offset = base_offset + sub_block_idx * BLOCK_SIZE_SUB
+            offsets = sub_offset + tl.arange(0, BLOCK_SIZE_SUB)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask, other=0)
+            y = tl.load(y_ptr + offsets, mask=mask, other=0)
+            tl.store(out_ptr + offsets, x + y, mask=mask)
+    ```
+
+    Compared with the large-block approach that triggers overflow (loading the entire BLOCK_SIZE at once in the kernel, e.g., `offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)`), the key difference is: the blocked approach splits the same amount of data into the for loop for sub-block transfer and computation, reducing the single transfer data volume from BLOCK_SIZE to BLOCK_SIZE_SUB.
+
+3. **Disable multi-buffer parallel storage and computation.** If reducing the block size still causes overflow, set `multibuffer=False` in the autotune configuration to disable multi-buffering (corresponding to the compiler-side `multiBuffer=True` configuration enabled by default), reducing the additional local buffer usage from tensor copies:
+
+    ```python
+    @triton.autotune(
+        configs=[
+            triton.Config({'BLOCK_SIZE': 1024}, multibuffer=False),
+            triton.Config({'BLOCK_SIZE': 2048}, multibuffer=False),
+        ],
+        key=['n_elements'],
+    )
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        tl.store(out_ptr + offsets, x + y, mask=mask)
+    ```
+
+    It can also be passed as a meta-parameter during kernel launch:
+
+    ```python
+    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=False)
+    ```
+
+    Disabling multi-buffer reduces the pipeline overlap between data transfer and computation and may affect performance. It is recommended only when UB is tight, and you should prioritize using autotune to compare and trade off between multiple configurations (see the "Parallel Storage and Computation" section of this document).
+
+4. **Recompile and verify.** Rerun the kernel compilation or test cases and confirm that `ub overflow` and `MLIRCompilationError` errors no longer appear in the log. The kernel compiles successfully and the output results are consistent with expectations, which means the issue is resolved. If overflow still occurs after all the above steps, continue reducing the block parameters by comparing the `requires` and `available` values in the log, and verify the UB specifications of the target product (see the specification table at the end of this section).
+
+#### Preventive Measures
+
+| Preventive Measure | Description |
+| --- | --- |
+| Estimate UB usage before coding | The UB usage (bit) of a single tile ≈ number of tile elements × bytes per element × number of buffer copies × 8; in practice, additional intermediate tensors and alignment overhead must be added, so leave sufficient margin. It is recommended to start with BLOCK_SIZE_SUB from 1024 to 4096 and verify with autotune |
+| Prioritize autotune | Use `triton.autotune` to enumerate multiple BLOCK_SIZE configurations (including the `multibuffer` switch), and let the runtime automatically select the combination that does not overflow and has the best performance, avoiding manual trial and error (see the "triton.autotune Automatic Tuning" section of this document) |
+| Pay attention to multi-buffer impact | The compiler enables parallel storage and computation by default (`multiBuffer=True`), and multi-buffering increases UB usage proportionally with the number of buffer copies; when UB is tight, set `multibuffer=False` in Config (see the "Parallel Storage and Computation" section of this document) |
+| Batch processing for long sequences | When the sequence length causes the estimated usage of a single tile to approach or exceed the UB limit, use a for loop within the kernel to load/compute/store in blocks along the sequence dimension, avoiding transferring the entire segment at once |
+
+UB usage estimation example: With 65,536 float32 elements (4 bytes) and double buffering (2 copies), a single tensor requires 65,536 × 4 × 2 × 8 = 4,194,304 bits, which already exceeds the A2 series available 1,572,864 bits; based on the A2 series 1,572,864 bits limit, the theoretical upper limit for a single float16 tensor with double buffering is approximately 49,152 elements (1,572,864 ÷ 8 ÷ 2 ÷ 2 = 49,152).
+
+[Note] The UB size of the A2 series products is 192KB (i.e., 1,572,864 bits). The on-chip memory specifications of each product series are as follows:
+
+| Product Series | UB Capacity | L1 Capacity |
+| --- | --- | --- |
+| A2 series | 192K B | 512 KB |
+| A3 series | 192K B | 512 KB |
+| A5 series | 248K B | 512 KB |
 
 ## Common Single-Core Data Computation
 
@@ -335,7 +460,7 @@ Implement basic data operation operators (such as addition, subtraction, multipl
 Single-kernel computation corresponds to block-level data processing.
 Single-kernel data computation example: vector addition
 
-```diff
+```python
 
 @triton.jit
 def add_kernel(x_ptr, # Pointer to first input vector.
@@ -357,7 +482,7 @@ def add_kernel(x_ptr, # Pointer to first input vector.
 
 Calling:
 
- ```diff
+ ```python
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
     n_elements = output.numel()
@@ -368,7 +493,7 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 Use the above function to compute **element-wise sum** of two torch.tensor objects and test its correctness.
 
- ```diff
+ ```python
 torch.manual_seed(0)
 size = 98432
 x = torch.rand(size, device='npu')
@@ -400,7 +525,7 @@ f'{torch.max(torch.abs(output_torch - output_triton))}')
 Ensure that the input and output buffers are aligned during allocation to avoid memory access performance deterioration.
 Example:
 
- ```diff
+ ```python
 BLOCK_SIZE = 256 # 256 x 4 bytes = 1024 bytes, which are well-aligned.
 
 @triton.jit
@@ -444,7 +569,7 @@ def vec_add(x, y):
 -Sub-block division should ensure both memory access continuity and computing unit utilization.
 Example:
 
- ```diff
+ ```python
 BLOCK_M = 64   # Each block processes 64 rows.
 BLOCK_N = 64   # Each block processes 64 columns.
 BLOCK_K = 32   # Internal dimension is accumulated.

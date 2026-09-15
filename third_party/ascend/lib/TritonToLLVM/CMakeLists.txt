@@ -10,5 +10,6 @@ add_triton_library(TritonToLLVM
   MLIRPass
   MLIRTransforms
   MLIRSupport
+  MLIRMathDialect
   TritonIR
 )

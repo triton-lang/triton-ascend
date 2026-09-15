@@ -23,8 +23,8 @@
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
     },
     "schema_version": {
-      "const": 11,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy."
+      "const": 12,
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values."
     },
     "profile_version": {
       "type": "string",
@@ -633,17 +633,44 @@
         "scope_handoff": {
           "type": "object",
           "required": [
-            "fixed_directional_system_cycles",
             "simd_ub_load_bytes_per_system_cycle",
             "simd_ub_store_bytes_per_system_cycle",
             "simt_ub_load_bytes_per_thread_per_system_cycle",
             "simt_ub_store_bytes_per_thread_per_system_cycle",
             "description"
           ],
+          "oneOf": [
+            {
+              "required": [
+                "fixed_pair_system_cycles"
+              ],
+              "not": {
+                "required": [
+                  "fixed_pair_measurement"
+                ]
+              }
+            },
+            {
+              "required": [
+                "fixed_pair_measurement"
+              ],
+              "not": {
+                "required": [
+                  "fixed_pair_system_cycles"
+                ]
+              }
+            }
+          ],
           "properties": {
-            "fixed_directional_system_cycles": {
+            "fixed_pair_system_cycles": {
               "type": "number",
-              "minimum": 0
+              "minimum": 0,
+              "description": "Fixed system-cycle cost of one complete local SIMD-to-SIMT-to-SIMD scope pair."
+            },
+            "fixed_pair_measurement": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Measurement key in the shared microbenchmark profile for one complete local scope pair."
             },
             "simd_ub_load_bytes_per_system_cycle": {
               "type": "number",

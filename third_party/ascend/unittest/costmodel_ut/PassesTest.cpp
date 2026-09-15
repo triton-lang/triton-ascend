@@ -210,7 +210,7 @@ module {
   auto plan = buildMixedSimtAnchorPlan(*module, /*compileOn91095=*/true);
   ASSERT_EQ(plan.anchors.size(), 1u);
   EXPECT_EQ(plan.materializableRoots().size(), 1u);
-  EXPECT_EQ(mlir::ascend::stringifySimtAnchorKind(plan.anchors[0].kind),
+  EXPECT_EQ(mlir::ascend::stringifySimtAnchorKind(*plan.anchors[0].kind),
             "loaded_index_dependent_memory");
 
   auto features = analyzeSimdSimtFeatures(*module, plan);
@@ -273,7 +273,8 @@ module {
   auto plan = buildMixedSimtAnchorPlan(*module, /*compileOn91095=*/true);
   ASSERT_EQ(plan.anchors.size(), 1u);
   const auto &anchor = plan.anchors.front();
-  EXPECT_EQ(anchor.kind, mlir::ascend::SimtAnchorKind::Histogram);
+  ASSERT_TRUE(anchor.kind.has_value());
+  EXPECT_EQ(*anchor.kind, mlir::ascend::SimtAnchorKind::Histogram);
   EXPECT_FALSE(anchor.lowerability.allSimd);
   EXPECT_FALSE(anchor.lowerability.allSimtOnly);
   EXPECT_TRUE(anchor.lowerability.mixed);
@@ -305,7 +306,8 @@ module {
   auto plan = buildMixedSimtAnchorPlan(*module, /*compileOn91095=*/true);
   ASSERT_EQ(plan.anchors.size(), 1u);
   const auto &anchor = plan.anchors.front();
-  EXPECT_EQ(anchor.kind,
+  ASSERT_TRUE(anchor.kind.has_value());
+  EXPECT_EQ(*anchor.kind,
             mlir::ascend::SimtAnchorKind::PlainOneDimensionalCumsum);
   EXPECT_FALSE(anchor.lowerability.allSimd);
   EXPECT_TRUE(anchor.lowerability.allSimtOnly);
@@ -344,7 +346,8 @@ module {
   auto plan = buildMixedSimtAnchorPlan(*module, /*compileOn91095=*/true);
   ASSERT_EQ(plan.anchors.size(), 1u);
   const auto &anchor = plan.anchors.front();
-  EXPECT_EQ(anchor.kind, mlir::ascend::SimtAnchorKind::TensorAtomic);
+  ASSERT_TRUE(anchor.kind.has_value());
+  EXPECT_EQ(*anchor.kind, mlir::ascend::SimtAnchorKind::TensorAtomic);
   EXPECT_TRUE(anchor.lowerability.allSimd);
   EXPECT_TRUE(anchor.lowerability.allSimtOnly);
   EXPECT_TRUE(anchor.lowerability.mixed);
@@ -411,7 +414,9 @@ module {
   ASSERT_EQ(plan.anchors.size(), 1u);
   EXPECT_EQ(plan.materializableRoots().size(), 1u);
   for (const auto &anchor : plan.anchors) {
-    EXPECT_EQ(anchor.kind, mlir::ascend::SimtAnchorKind::TriangularSolveLoop);
+    ASSERT_TRUE(anchor.kind.has_value());
+    EXPECT_EQ(*anchor.kind,
+              mlir::ascend::SimtAnchorKind::TriangularSolveLoop);
     EXPECT_TRUE(anchor.lowerability.mixed);
     EXPECT_TRUE(anchor.materializable);
     // Both recurrence loops are one physical SIMT scope and therefore one
@@ -642,6 +647,58 @@ module {
   auto v1Applied = postTransform->getBoolean("auto_blockify_v1_applied");
   ASSERT_TRUE(v1Applied);
   EXPECT_TRUE(*v1Applied);
+}
+
+TEST(CostModelPassesTest, AnchorFreeStageScopeRejectsEscapingScalar) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: f32, %arg1: f32) -> f32 {
+    %0 = arith.addf %arg0, %arg1 : f32
+    return %0 : f32
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *add = findFirstOp(*module, "arith.addf");
+  ASSERT_NE(add, nullptr);
+  auto descriptor = mlir::ascend::buildAnchorFreeStageScopeDescriptor({add});
+  EXPECT_FALSE(descriptor.has_value());
+}
+
+TEST(CostModelPassesTest, AnchorFreeStageScopeAcceptsEscapingTensor) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+module {
+  func.func @main(%arg0: tensor<1xf32>, %arg1: tensor<1xf32>)
+      -> tensor<1xf32> {
+    %0 = arith.addf %arg0, %arg1 : tensor<1xf32>
+    return %0 : tensor<1xf32>
+  }
+}
+)mlir");
+  ASSERT_TRUE(module);
+
+  Operation *add = findFirstOp(*module, "arith.addf");
+  ASSERT_NE(add, nullptr);
+  auto descriptor = mlir::ascend::buildAnchorFreeStageScopeDescriptor({add});
+  ASSERT_TRUE(descriptor.has_value());
+  EXPECT_FALSE(descriptor->kind.has_value());
+  EXPECT_TRUE(descriptor->materializable);
+
+  mlir::ascend::SimtAnchorPlan plan;
+  plan.anchors.push_back(std::move(*descriptor));
+  ASSERT_TRUE(mlir::succeeded(materializeSimtAnchorPlan(*module, plan)));
+
+  Operation *scopeOp = findFirstOp(*module, "scope.scope");
+  ASSERT_NE(scopeOp, nullptr);
+  ASSERT_EQ(scopeOp->getNumResults(), 1u);
+  EXPECT_TRUE(
+      mlir::isa<mlir::RankedTensorType>(scopeOp->getResult(0).getType()));
+  auto mode = scopeOp->getAttrOfType<StringAttr>("vector_mode");
+  ASSERT_TRUE(mode);
+  EXPECT_EQ(mode.getValue(), "simt");
 }
 
 TEST(CostModelPassesTest, MaterializeSimtScopePreservesEscapingSSAResult) {

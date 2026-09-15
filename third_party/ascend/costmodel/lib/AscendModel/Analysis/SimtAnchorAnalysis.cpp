@@ -645,6 +645,67 @@ bool mlir::ascend::isLoadedIndexDependentMemoryOp(Operation *op) {
          hasTensorPointerOperand(op) && pointerDependsOnLoadedIndex(op);
 }
 
+static bool isStageScopeWrappable(llvm::ArrayRef<Operation *> roots) {
+  if (roots.empty())
+    return false;
+
+  Block *block = roots.front() ? roots.front()->getBlock() : nullptr;
+  if (!block)
+    return false;
+  for (auto [index, root] : llvm::enumerate(roots)) {
+    if (!root || !root->getBlock())
+      return false;
+    if (root->getBlock() != block)
+      return false;
+    if (index > 0 && roots[index - 1]->getNextNode() != root)
+      return false;
+    const llvm::StringRef name = root->getName().getStringRef();
+    if (root->hasTrait<OpTrait::IsTerminator>() ||
+        root->hasTrait<OpTrait::IsIsolatedFromAbove>() ||
+        name == "scope.scope" || name == "scope.return")
+      return false;
+  }
+  return true;
+}
+
+static bool hasUnsupportedStageScopeLiveOut(llvm::ArrayRef<Operation *> roots) {
+  llvm::DenseSet<Operation *> inside;
+  for (Operation *root : roots) {
+    inside.insert(root);
+    root->walk([&](Operation *nested) { inside.insert(nested); });
+  }
+
+  auto isInside = [&](Operation *user) {
+    for (Operation *owner = user; owner; owner = owner->getParentOp())
+      if (inside.contains(owner))
+        return true;
+    return false;
+  };
+  for (Operation *root : roots)
+    for (Value result : root->getResults())
+      if (!isa<RankedTensorType>(result.getType()) &&
+          llvm::any_of(result.getUses(), [&](OpOperand &use) {
+            return !isInside(use.getOwner());
+          }))
+        return true;
+  return false;
+}
+
+std::optional<SimtAnchorDescriptor>
+mlir::ascend::buildAnchorFreeStageScopeDescriptor(
+    llvm::ArrayRef<Operation *> roots) {
+  if (!isStageScopeWrappable(roots) || hasUnsupportedStageScopeLiveOut(roots))
+    return std::nullopt;
+
+  SimtAnchorDescriptor descriptor;
+  descriptor.operation = roots.front();
+  llvm::append_range(descriptor.scopeOperations, roots);
+  descriptor.scopeInsertionPoint = roots.front();
+  descriptor.lowerability = CandidateLowerability{};
+  descriptor.materializable = true;
+  return descriptor;
+}
+
 SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
                                                       bool compileOn91095) {
   SimtAnchorPlan plan;
@@ -682,6 +743,11 @@ SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
     anyMixed |= anchor.lowerability.mixed;
     mixedBlocked |= !anchor.lowerability.mixed && !anchor.lowerability.allSimd;
   }
-  plan.kernelLowerability.mixed = anyMixed && !mixedBlocked;
+  // A kernel with no primitive anchor can still run mixed: every anchor-free
+  // Stage whose roots form a contiguous same-block range is materializable
+  // as a local scope, so absence of anchors alone must not disable the mixed
+  // candidate.
+  plan.kernelLowerability.mixed =
+      (anyMixed || (compileOn91095 && plan.anchors.empty())) && !mixedBlocked;
   return plan;
 }

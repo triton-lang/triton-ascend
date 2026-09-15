@@ -418,6 +418,36 @@ static Operation *getTopLevelSemanticRoot(Operation *operation) {
   return nullptr;
 }
 
+/// Anchor-free Stages can still become local SIMT scopes: the whole root
+/// range is the scope unit.  AutoBlockify V1 scheduling shells are excluded
+/// because wrapping them would serialize the SIMT
+/// execution of every logical program, which is a whole-kernel route.
+static void deriveAnchorFreeStageScopes(StagePartition &partition,
+                                        const SimtAnchorPlan &anchorPlan) {
+  if (!anchorPlan.kernelLowerability.mixed)
+    return;
+
+  for (LogicalStage &stage : partition.stages) {
+    if (stage.localSimtMaterializable || !stage.simtAnchorIndices.empty())
+      continue;
+    if (stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch ||
+        stage.costModelKind == StageCostModelKind::AutoBlockifyLoop)
+      continue;
+    if (!buildAnchorFreeStageScopeDescriptor(stage.operations))
+      continue;
+    stage.localSimtMaterializable = true;
+    stage.localSimtFactors = {1};
+    // An anchor-free Stage scope obeys the same SuperBlock ABI as primitive
+    // anchors: factor > 1 requires every root to be a direct child of the
+    // AutoBlockify V1 loop body.
+    stage.localSuperblockMaterializable =
+        llvm::all_of(stage.operations, [](Operation *root) {
+          Operation *parent = root ? root->getParentOp() : nullptr;
+          return parent && parent->hasAttr("ta.auto_blockify_v1.loop");
+        });
+  }
+}
+
 static bool isInsideAutoBlockifyV1Loop(Operation *operation) {
   if (!operation || operation->hasAttr("ta.auto_blockify_v1.loop"))
     return false;
@@ -690,27 +720,44 @@ static void deriveStageLiveValues(StagePartition &partition) {
   }
 }
 
+static llvm::SmallVector<Operation *>
+getLocalSimtScopeRoots(const LogicalStage &stage,
+                       const SimtAnchorPlan &anchorPlan) {
+  llvm::SmallVector<Operation *> roots;
+  if (stage.simtAnchorIndices.empty()) {
+    if (stage.localSimtMaterializable)
+      llvm::append_range(roots, stage.operations);
+    return roots;
+  }
+
+  auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
+  if (!merged)
+    return roots;
+  if (merged->scopeOperations.size() > 1)
+    llvm::append_range(roots, merged->scopeOperations);
+  else if (merged->operation)
+    roots.push_back(merged->operation);
+  return roots;
+}
+
 /// Derive the physical tensor traffic of the exact local SIMT scopes that the
 /// materializer will create.  Stage live values are intentionally not used:
 /// a Stage can own SIMD operations around a much smaller local scope, and
 /// charging its complete live-out footprint would invent UB traffic.
+/// Anchor-owned scopes use the merged anchor operation set; anchor-free
+/// Stage scope descriptors use the Stage's complete root range instead.
 static void deriveLocalSimtScopeTraffic(StagePartition &partition,
                                         const SimtAnchorPlan &anchorPlan) {
   for (LogicalStage &stage : partition.stages) {
     stage.localSimtScopeCount = 0;
     stage.scopeInputTensorBytes = 0;
     stage.scopeOutputTensorBytes = 0;
-    auto merged = mergeSimtStageAnchors(anchorPlan, stage.simtAnchorIndices);
-    if (!merged)
+    llvm::SmallVector<Operation *> roots =
+        getLocalSimtScopeRoots(stage, anchorPlan);
+    if (roots.empty())
       continue;
+    const bool isRange = roots.size() > 1;
     {
-      const SimtAnchorDescriptor &anchor = *merged;
-      llvm::SmallVector<Operation *> roots;
-      const bool isRange = anchor.scopeOperations.size() > 1;
-      if (isRange)
-        llvm::append_range(roots, anchor.scopeOperations);
-      else
-        roots.push_back(anchor.operation);
 
       llvm::DenseSet<Operation *> inside;
       for (Operation *root : roots) {
@@ -1040,6 +1087,7 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
     partition.stages.front().workload.paysKernelSetup = true;
 
   attachExactAnchorOwnership(partition, anchorPlan);
+  deriveAnchorFreeStageScopes(partition, anchorPlan);
   deriveStageLiveValues(partition);
   deriveLocalSimtScopeTraffic(partition, anchorPlan);
   return partition;
@@ -1277,12 +1325,10 @@ StagePartitionVerifier::verify(const StagePartition &partition) const {
           std::errc::invalid_argument,
           "materializable Stage '%s' has no operation ownership",
           stage.id.c_str());
-    if (stage.localSimtMaterializable && partition.operationOwnershipComplete &&
-        stage.simtAnchorIndices.empty())
-      return llvm::createStringError(
-          std::errc::invalid_argument,
-          "materializable Stage '%s' has no exact SIMT anchor ownership",
-          stage.id.c_str());
+    // A materializable Stage carries either exact primitive anchor indices
+    // or none at all: an anchor-free Stage's own contiguous root range is its
+    // local SIMT scope.  Both
+    // forms require the non-empty operation ownership checked above.
     if (partition.operationOwnershipComplete)
       for (unsigned index : stage.simtAnchorIndices)
         if (!ownedAnchors.insert(index).second)

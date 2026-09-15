@@ -55,6 +55,8 @@ struct TriangularSolveFacts {
   bool requiresCubeTailPartition = false;
 };
 
+/// A local SIMT scope derived from either a primitive anchor or an anchor-free
+/// Stage.
 struct SimtAnchorDescriptor {
   Operation *operation = nullptr;
   /// Exact top-level TTIR operations that will be moved into one local SIMT
@@ -68,7 +70,9 @@ struct SimtAnchorDescriptor {
   /// from scopeOperations.front() when pure mask setup is moved across the
   /// initial SIMD loads to reproduce the hand-written solve_tril scope.
   Operation *scopeInsertionPoint = nullptr;
-  SimtAnchorKind kind = SimtAnchorKind::LoadedIndexDependentMemory;
+  /// Primitive mechanism that requires local SIMT. A scope synthesized from
+  /// an anchor-free Stage has no primitive anchor kind.
+  std::optional<SimtAnchorKind> kind;
   std::optional<TriangularSolveFacts> triangularSolve;
   CandidateLowerability lowerability;
   /// True only when the current target/materializer contract can turn this
@@ -109,6 +113,14 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
 /// loaded/gathered index.  This is a real data-dependence test and must not be
 /// confused with the legacy rank-based laneDependentPointerOps proxy.
 bool isLoadedIndexDependentMemoryOp(Operation *op);
+
+/// Synthesize a local scope descriptor for an anchor-free Stage.  The
+/// Stage's own root range becomes the local SIMT scope, so mixed remains
+/// selectable for kernels with no primitive anchor.  Returns nullopt when
+/// the range is not wrappable or would return unsupported scalar/pointer
+/// state.
+std::optional<SimtAnchorDescriptor>
+buildAnchorFreeStageScopeDescriptor(llvm::ArrayRef<Operation *> roots);
 
 /// Build the non-overlapping shared plan in pre-order.
 SimtAnchorPlan buildMixedSimtAnchorPlan(ModuleOp module, bool compileOn91095);

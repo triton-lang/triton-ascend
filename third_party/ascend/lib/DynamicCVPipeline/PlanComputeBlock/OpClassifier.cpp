@@ -1273,6 +1273,13 @@ int OpClassifierPass::classifyScalarControlFlowChains() {
           // operand walk of AnalyzeCubeControlFlowInputChain and take all.
           auto operands = whileOp->getOperands();
           scalarOperands.append(operands.begin(), operands.end());
+          // The while condition lives in the before region and captures the
+          // bound chain from outside, so it is not among the while operands.
+          whileOp.getBefore().front().walk([&](scf::ConditionOp condOp) {
+            for (Value operand : condOp->getOperands()) {
+              scalarOperands.push_back(operand);
+            }
+          });
         })
         .Default([](Operation *) {});
     for (Value operand : scalarOperands) {

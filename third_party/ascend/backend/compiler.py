@@ -373,6 +373,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
+        # Proton instrumentation patch point (mirrors CUDABackend). Ascend
+        # has no ttgir stage, so proton passes run at TTIR level here.
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
@@ -1210,6 +1214,9 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
+    # Proton profile scratch bytes per block; 0 (default) keeps the
+    # driver-side profile scratch path inert.
+    profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
@@ -1459,6 +1466,8 @@ def get_simt_stack_limit(user_stack_limit=None):
 
 
 class AscendBackend(BaseBackend):
+    # Set by proton's InstrumentationHook; mirrors CUDABackend.instrumentation.
+    instrumentation = None
 
     @staticmethod
     def supports_target(target: GPUTarget):
@@ -1526,6 +1535,8 @@ class AscendBackend(BaseBackend):
             "hash": metadata.hash,
             "debug": metadata.debug,
             "tensor_kinds": metadata.tensor_kinds,
+            "profile_scratch_size": getattr(metadata, "profile_scratch_size", 0),
+            "num_warps": getattr(metadata, "num_warps", 0),
         }
 
     def get_codegen_implementation(self, options):
@@ -1542,6 +1553,8 @@ class AscendBackend(BaseBackend):
         buffer_ir.load_dialects(ctx)
         ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":

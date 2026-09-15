@@ -289,6 +289,22 @@ def allocate_memory(size, stream):
     }}'''
 
 
+@backend_strategy_registry.register("torch_npu", "allocate_profile_memory")
+def allocate_profile_memory(size, stream):
+    # Profile-buffer variant of the allocate_workspace path: proton requires
+    # the profile buffer zero-initialized, so memset after allocation.
+    return f'''init_npu_utils();
+    if (!g_allocate_workspace) {{
+      fprintf(stderr, "Error: triton_allocate_workspace is unavailable\\n");
+      profile_scratch_ptr = nullptr;
+    }} else {{
+      profile_scratch_ptr = g_allocate_workspace({size}, &profile_scratch_handle);
+      if (profile_scratch_ptr) {{
+        cann_memset_async(profile_scratch_ptr, {size}, 0, {size}, {stream});
+      }}
+    }}'''
+
+
 @backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
     return f'''auto sync_ptr = std::make_shared<mindspore::kernel::pyboost::MemBlock>(device_context, {size}, reinterpret_cast<uint64_t>({stream}));

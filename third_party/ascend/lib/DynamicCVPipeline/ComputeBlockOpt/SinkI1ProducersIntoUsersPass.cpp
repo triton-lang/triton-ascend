@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
@@ -88,8 +89,6 @@ static bool isValidI1Producer(Operation *op) {
 }
 
 static bool isPureAndRegionless(Operation *op) {
-  if (op->hasTrait<OpTrait::HasRecursiveMemoryEffects>())
-    return false;
   if (auto iface = dyn_cast<MemoryEffectOpInterface>(op)) {
     SmallVector<MemoryEffects::EffectInstance> effects;
     iface.getEffects(effects);
@@ -156,6 +155,7 @@ void SinkI1ProducersIntoUsersPass::runOnOperation() {
       p->moveBefore(orderedConsumuers[0]);
       LOG_DEBUG("move producer " << *p << " to " << consumerBlockId << "\n");
       bm.updateBlockId(p, consumerBlockId);
+      seenBlockIds.insert(consumerBlockId);
       blockId2Producer.insert({consumerBlockId, p});
     }
 

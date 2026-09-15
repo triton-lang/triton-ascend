@@ -169,6 +169,9 @@ if(TRITON_BUILD_UT)
   add_subdirectory(unittest)
 endif()
 
+if(TRITON_BUILD_TD)
+  add_subdirectory(Triton-distributed-ascend/csrc)
+endif()
 
 if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=1)

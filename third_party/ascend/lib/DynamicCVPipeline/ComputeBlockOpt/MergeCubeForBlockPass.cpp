@@ -22,6 +22,7 @@
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "DynamicCVPipeline/Common/Utils.h"
+#include "DynamicCVPipeline/ComputeBlockOpt/CubePageLoaders.h"
 #include "DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -167,25 +168,23 @@ public:
   }
 
   void runOnOperation() override {
-    // Gated by the enable_cube_block_merge compile option so other scenarios
-    // are unaffected unless the feature is explicitly turned on.
-    if (!CVPipeline::isCubeBlockMergeEnabled()) {
-      return;
-    }
-
     ModuleOp module = getOperation();
     LOG_DEBUG("Before: " << *module);
-    auto &aa = getAnalysis<AliasAnalysis>();
-    CVPipeline::MemoryDependenceGraph memGraph(module, aa);
-    auto bm = CVPipeline::ComputeBlockIdManager(module);
-
     llvm::SmallVector<scf::ForOp> cubeForOps;
     module.walk([&](scf::ForOp forOp) {
-      if (isCubeForOp(forOp)) {
+      // The precisely matched page loop shares the always-on unrolled path.
+      // All other loader loops retain the existing compile-option gate.
+      if (isCubeForOp(forOp) && (CVPipeline::isCubeBlockMergeEnabled() ||
+                                 CVPipeline::getCubePageLoaderLoop(forOp))) {
         cubeForOps.push_back(forOp);
       }
     });
+    if (cubeForOps.empty())
+      return;
 
+    auto &aa = getAnalysis<AliasAnalysis>();
+    CVPipeline::MemoryDependenceGraph memGraph(module, aa);
+    auto bm = CVPipeline::ComputeBlockIdManager(module);
     for (scf::ForOp forOp : cubeForOps) {
       tryMergeCubeFor(forOp, memGraph, bm);
     }

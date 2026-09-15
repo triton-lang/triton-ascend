@@ -1,11 +1,6 @@
 <!-- markdownlint-disable-file MD041 -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
-  </picture>
-</p>
 
-<h3 align="center"><font size="68">
+<h3 align="center"><font size="6">
 Triton-Ascend
 </font></h3>
 

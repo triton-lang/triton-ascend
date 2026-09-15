@@ -55,7 +55,6 @@ def _make_run_tuner(configs):
     tuner.arg_names = []
     tuner.cache = {}
     tuner.is_simt_mode = False
-    tuner.simt_stack_limit = 8192
     tuner.generate_key_and_configs = generate_key_and_configs
     tuner.prune_configs = lambda kwargs: configs
     tuner.enable_ubtuner = False
@@ -342,7 +341,6 @@ def test_run_caches_single_config_and_skips_gc(monkeypatch):
     assert tuner.run() == "kernel-result"
     assert len(prune_calls) == 1
     assert len(tuner.run_kwargs) == 2
-    assert tuner.run_kwargs[-1]["simt_stack_limit"] == 8192
     assert gc_calls == []
     assert profile_calls == []
 

@@ -23,6 +23,7 @@ def _set_default_env_vars():
     os.environ.setdefault("TRITON_BUILD_WITH_CLANG_LLD", "true")
     os.environ.setdefault("TRITON_BUILD_PROTON", "OFF")
     os.environ.setdefault("TRITON_BUILD_TD", "OFF")
+    os.environ.setdefault("TRITON_BUILD_NPUIR", "OFF")
     os.environ.setdefault("TRITON_WHEEL_NAME", "triton_ascend")
     os.environ.setdefault("TRITON_APPEND_CMAKE_ARGS", "-DTRITON_BUILD_UT=OFF")
 
@@ -302,6 +303,13 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
     raise last_error
 
 
+def _ensure_npuir_submodule():
+    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+        return
+    import build_npuir
+    build_npuir.build_npuir()
+
+
 def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
@@ -362,6 +370,39 @@ def _copy_ascend_tools(extdir, cmake_dir):
                 except (subprocess.CalledProcessError, FileNotFoundError):
                     pass
             print(f"Copied {name} to {dst}")
+
+
+_BISHENGIR_PAYLOAD_ENV = "TRITON_ASCEND_BISHENGIR_PATH"
+
+
+def _get_bishengir_payload_source():
+    raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
+    if not raw_path:
+        return None
+
+    source = Path(raw_path).expanduser().resolve()
+    required_paths = [
+        source / "bin" / "bishengir-compile",
+        source / "bin" / "bishengir-opt",
+        source / "lib",
+    ]
+    if not source.is_dir() or any(not path.exists() for path in required_paths):
+        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+                           "bin/bishengir-compile, bin/bishengir-opt, and lib")
+    return source
+
+
+def _copy_bishengir_payload(build_lib):
+    source = _get_bishengir_payload_source()
+    if source is None:
+        return
+
+    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, destination, symlinks=True)
+    print(f"Bundled BishengIR payload from {source} into {destination}")
 
 
 def _get_ascend_cmake_args():
@@ -479,7 +520,16 @@ def _patch_module(mod):
 
     mod.CMakeBuild = CMakeBuild
 
-    # 4. Replace BuildWheel (bdist_wheel) with Ascend auditwheel variant.
+    _OrigCMakeBuildPy = mod.CMakeBuildPy
+
+    class AscendBuildPy(_OrigCMakeBuildPy):
+
+        def run(self):
+            super().run()
+            _copy_bishengir_payload(self.build_lib)
+
+    mod.AscendBuildPy = AscendBuildPy
+
     is_manylinux = mod.check_env_flag("IS_MANYLINUX", "FALSE")
 
     class BuildWheel(bdist_wheel):
@@ -511,7 +561,6 @@ def _patch_module(mod):
 
     mod.BuildWheel = BuildWheel
 
-    # 5. Patch get_package_dirs to include distributed package.
     _orig_get_package_dirs = mod.get_package_dirs
 
     def get_package_dirs():
@@ -522,7 +571,6 @@ def _patch_module(mod):
 
     mod.get_package_dirs = get_package_dirs
 
-    # 6. Patch get_packages to include distributed subpackages.
     _orig_get_packages = mod.get_packages
 
     def get_packages():
@@ -541,7 +589,6 @@ def _patch_module(mod):
 
     mod.get_packages = get_packages
 
-    # 7. Patch add_links to include distributed symlink.
     _orig_add_links = mod.add_links
 
     def add_links(external_only):
@@ -582,10 +629,10 @@ def _build_setup_kwargs(mod, kwargs):
     if package_data:
         kwargs["package_data"] = package_data
 
-    # cmdclass: replace bdist_wheel with BuildWheel, build_ext with CMakeBuild
     cmdclass = dict(kwargs.get("cmdclass") or {})
     cmdclass["bdist_wheel"] = mod.BuildWheel
     cmdclass["build_ext"] = mod.CMakeBuild
+    cmdclass["build_py"] = mod.AscendBuildPy
     kwargs["cmdclass"] = cmdclass
 
     # packages / package_dir must be re-evaluated (they were computed with
@@ -602,6 +649,7 @@ def _build_setup_kwargs(mod, kwargs):
 
 def main():
     _set_default_env_vars()
+    _ensure_npuir_submodule()
     _ensure_distributed_submodule()
 
     # Import the community setup_triton module without executing its setup()

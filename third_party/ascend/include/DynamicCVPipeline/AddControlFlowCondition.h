@@ -44,6 +44,20 @@ struct TensorIterArgIfOpRelation {
   llvm::SmallVector<scf::IfOp> consumers;
 };
 
+// One consumer op may appear in multiple groups.
+// Each inner SmallVector is the producers of one group this consumer belongs
+// to.
+using ConsumerProducerMap =
+    llvm::DenseMap<Operation *,
+                   llvm::SmallVector<llvm::SmallVector<Operation *>>>;
+
+inline int countProducerGroups(const ConsumerProducerMap &map) {
+  int numProducerGroups = 0;
+  for (const auto &entry : map)
+    numProducerGroups += static_cast<int>(entry.second.size());
+  return numProducerGroups;
+}
+
 // Variables to control when an ifOp is both producer and consumer of a tensor
 // iter_args
 struct TensorIterArgIfOpVars {
@@ -64,7 +78,7 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<Operation *, int> blockCounterNums;
   llvm::DenseMap<Operation *, SmallVector<int>> innerDepConds;
 
-  llvm::DenseMap<Operation *, SmallVector<Operation *>> crossCoreDependentMap;
+  ConsumerProducerMap crossCoreDependentMap;
   llvm::DenseMap<Operation *,
                  llvm::DenseMap<Operation *, SmallVector<Operation *>>>
       intraCoreDependentMap;

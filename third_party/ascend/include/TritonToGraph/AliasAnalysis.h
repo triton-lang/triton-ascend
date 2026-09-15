@@ -158,6 +158,8 @@ private:
   // 分析splat操作
   void analyzeSplatOp(mlir::triton::SplatOp splatOp);
 
+  void analyzeExpandDimsOp(mlir::triton::ExpandDimsOp expandDimsOp);
+
   SmallVector<std::unique_ptr<TensorObject>> ownedTensorObjects;
   DenseMap<Value, Value> aliasMap;               // ptr -> base ptr
   DenseMap<Value, TensorObject *> baseTensorMap; // value -> tensor

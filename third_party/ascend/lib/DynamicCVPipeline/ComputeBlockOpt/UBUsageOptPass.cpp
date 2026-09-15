@@ -550,42 +550,6 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
   return recordChange;
 }
 
-static void processOpsInblock(Operation *parentOp, int targetId,
-                              CVPipeline::ComputeBlockIdManager &bm) {
-  // If the parentOp's blockId is the same as every op's id in each of its
-  // blocks, we need to change the ops inside its blocks to targetId as well.
-  int parentBlockId = bm.getBlockIdByOp(parentOp);
-  if (parentBlockId == -1) {
-    return;
-  }
-  // LinalgDialect should have targetId only in prarent, the inner op shouldn't
-  // have blockId.
-  if (isa<linalg::LinalgDialect>(parentOp->getDialect())) {
-    return;
-  }
-
-  bool allSame = true;
-  parentOp->walk([&](Operation *op) {
-    auto innerBlockId = bm.getBlockIdByOp(op);
-    if (innerBlockId != -1 && innerBlockId != parentBlockId) {
-      allSame = false;
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-
-  if (allSame) {
-    parentOp->walk([&](Operation *op) {
-      // Never fold a sync into a compute block: it must keep its own unique
-      // block id so the fence between before/after ops survives.
-      if (CVPipeline::isSyncOp(op)) {
-        return;
-      }
-      bm.updateBlockId(op, targetId);
-    });
-  }
-}
-
 bool applyRecordChange(DenseMap<int, int> &recordChange,
                        DenseMap<int, Operation *> &nodeId2op,
                        const CVPipeline::MemoryDependenceGraph &memGraph,
@@ -616,8 +580,7 @@ bool applyRecordChange(DenseMap<int, int> &recordChange,
     }
 
     for (auto op : willaddOps) {
-      processOpsInblock(op, targetBlockId, bm);
-      bm.updateBlockId(op, targetBlockId);
+      bm.updateBlockIdWithInner(op, targetBlockId);
     }
   }
 

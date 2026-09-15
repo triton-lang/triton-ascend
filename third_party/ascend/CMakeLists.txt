@@ -114,6 +114,18 @@ else()
   set(TRITON_ASCEND_HAS_INPROC_COSTMODEL 0)
 endif()
 
+if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
+  target_include_directories(TritonToGraph PRIVATE
+    "${_costmodel_gen_include}"
+    "${CMAKE_BINARY_DIR}/third_party/ascend/costmodel_build/include_AscendModel"
+    "${TRITON_ASCEND_COSTMODEL_SOURCE_DIR}/include"
+  )
+  target_compile_definitions(TritonToGraph PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=1)
+  target_link_libraries(TritonToGraph PUBLIC AscendModelAnalysis)
+else()
+  target_compile_definitions(TritonToGraph PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
+endif()
+
 add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc

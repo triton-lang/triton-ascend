@@ -19,13 +19,16 @@
 # SOFTWARE.
 """
 getBoundarySizes() reconstructs the per-axis in-bounds size by decomposing the
-flat block offset with the full-shape strides.  Two defects in that
+flat block offset with the full-shape strides.  Three defects in that
 decomposition are covered:
 
 an axis that is *not* boundary-checked used to leave its
 contribution in the flat offset, so a checked trailing axis computed its
 boundary from the un-reduced value and clipped it to 0, silently dropping
 the loaded/stored block;
+
+a permuted layout whose logical axis order differs from physical stride order
+must be decomposed in major-to-minor stride order.
 """
 
 import torch
@@ -62,6 +65,50 @@ def boundary_size_unchecked_axis_kernel(in_ptr, out_ptr, TOTAL_M, TOTAL_N, OFF_M
     tl.store(out, val, boundary_check=(1, ))
 
 
+@triton.jit
+def boundary_size_permuted_strides_kernel(in_ptr, out_ptr, size_0, size_1, size_2, BLOCK_0: tl.constexpr,
+                                          BLOCK_1: tl.constexpr, BLOCK_2: tl.constexpr):
+    """Copy a dynamically shaped, permuted tensor through block pointers.
+
+    The input's logical strides are [1, 800, 20], so its physical stride order
+    is [0, 2, 1].  Runtime shapes make the lowering exercise
+    getBoundarySizes()'s linear-offset reconstruction rather than replacing it
+    with the original per-axis offsets.
+    """
+    pid = tl.program_id(0)
+    num_tiles_1 = tl.cdiv(size_1, BLOCK_1)
+    num_tiles_2 = tl.cdiv(size_2, BLOCK_2)
+
+    tile_2 = pid % num_tiles_2
+    pid = pid // num_tiles_2
+    tile_1 = pid % num_tiles_1
+    tile_0 = pid // num_tiles_1
+
+    offset_0 = tile_0 * BLOCK_0
+    offset_1 = tile_1 * BLOCK_1
+    offset_2 = tile_2 * BLOCK_2
+
+    src = tl.make_block_ptr(
+        base=in_ptr,
+        shape=(size_0, size_1, size_2),
+        strides=(1, 800, 20),
+        offsets=(offset_0, offset_1, offset_2),
+        block_shape=(BLOCK_0, BLOCK_1, BLOCK_2),
+        order=(0, 2, 1),
+    )
+    value = tl.load(src, boundary_check=(0, 1, 2), padding_option="zero")
+
+    dst = tl.make_block_ptr(
+        base=out_ptr,
+        shape=(size_0, size_1, size_2),
+        strides=(1200, 40, 1),
+        offsets=(offset_0, offset_1, offset_2),
+        block_shape=(BLOCK_0, BLOCK_1, BLOCK_2),
+        order=(2, 1, 0),
+    )
+    tl.store(dst, value, boundary_check=(0, 1, 2))
+
+
 def _check_boundary(actual: torch.Tensor, expected: torch.Tensor, tag: str):
     torch.testing.assert_close(
         actual,
@@ -95,3 +142,32 @@ def test_boundary_size_unchecked_axis():
         x[OFF_M:OFF_M + BLOCK_M, OFF_N:TOTAL_N]
 
     _check_boundary(out_kernel, out_ref, "unchecked_axis")
+
+
+def test_boundary_size_permuted_strides():
+    shape = (20, 30, 40)
+    block_shape = (1, 16, 64)
+
+    # [30, 40, 20] contiguous has strides [800, 20, 1].  Moving its last
+    # axis to the front produces logical shape [20, 30, 40] and the target
+    # non-major-to-minor strides [1, 800, 20].
+    src = torch.arange(20 * 30 * 40, dtype=torch.float32, device="npu").reshape(30, 40, 20).permute(2, 0, 1)
+    assert src.shape == shape
+    assert src.stride() == (1, 800, 20)
+
+    actual = torch.zeros(shape, dtype=torch.float32, device="npu")
+    grid = (triton.cdiv(shape[0], block_shape[0]) * triton.cdiv(shape[1], block_shape[1]) *
+            triton.cdiv(shape[2], block_shape[2]), )
+    boundary_size_permuted_strides_kernel[grid](
+        src,
+        actual,
+        shape[0],
+        shape[1],
+        shape[2],
+        BLOCK_0=block_shape[0],
+        BLOCK_1=block_shape[1],
+        BLOCK_2=block_shape[2],
+    )
+    torch.npu.synchronize()
+
+    _check_boundary(actual, src, "permuted_strides")

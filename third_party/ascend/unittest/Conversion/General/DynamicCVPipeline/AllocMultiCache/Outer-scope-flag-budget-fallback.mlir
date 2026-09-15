@@ -1,19 +1,19 @@
 // RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
 
-// When the input IR already uses flags 1..8 across 8 transfer groups and
-// requests inter-core double-buffering (ssbuffer.inter_core_buf_count = 2),
-// AddMultiBufferOuterScope would need to acquire output flags 9..16, pushing
-// the maximum flag id past MAX_FLAG_ID (14). The pass must detect the budget
-// overflow and fall back to single-buffer mode, leaving the IR unchanged:
+// When the input IR already uses flags 1..9 and requests inter-core
+// double-buffering (ssbuffer.inter_core_buf_count = 2), the 6 main-loop
+// transfer keys need to acquire output flags 10..15, pushing the maximum
+// flag id past MAX_FLAG_ID (14). The pass must detect the budget overflow
+// and fall back to single-buffer mode, leaving the IR unchanged:
 // no new output flags, no polling control flow, no output buffers.
 
 // The double-buffer request attribute is preserved (downgrade, not removal).
 // CHECK: ssbuffer.inter_core_buf_count = 2
 // CHECK-LABEL: func.func @_attn_bwd
-// Original flags 1..8 are preserved.
-// CHECK: flag = 8
-// No new output flag (9..19) is allocated -> confirms single-buffer fallback.
-// CHECK-NOT: flag = {{9|1[0-9]}}
+// Original flags 1..9 are preserved.
+// CHECK: flag = 9
+// No new output flag (10..15) is allocated -> confirms single-buffer fallback.
+// CHECK-NOT: flag = {{1[0-5]}}
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.insertionOptimization, ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32, ssbuffer.load_store_buf_count = 1 : i32} {
   func.func @_attn_bwd(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.tensor_kind = 0 : i32}, %arg5: memref<?xf16> {tt.tensor_kind = 0 : i32}, %arg6: memref<?xf16> {tt.tensor_kind = 2 : i32}, %arg7: memref<?xf16> {tt.tensor_kind = 1 : i32}, %arg8: memref<?xf16> {tt.tensor_kind = 1 : i32}, %arg9: memref<?xf32> {tt.tensor_kind = 0 : i32}, %arg10: memref<?xf32> {tt.tensor_kind = 0 : i32}, %arg11: f32, %arg12: i32, %arg13: i32, %arg14: i32, %arg15: i32, %arg16: i32, %arg17: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd"} {
@@ -63,7 +63,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
         hivm.hir.sync_block_set {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 4 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 7
         %alloc_8 = memref.alloc() {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
         annotation.mark %alloc_8 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<5>, ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
-        hivm.hir.sync_block_set {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 8
+        hivm.hir.sync_block_set {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 9
         scf.for %arg19 = %c0_i32 to %c64_i32 step %c1_i32  : i32 {
           hivm.hir.sync_block_wait {ssbuffer.block_id = 19 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 6
           %memspacecast_11 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 19 : i32, ssbuffer.crossCoreDeps = [3 : i32, 0 : i32], ssbuffer.transfer_id = 3 : i32} : memref<128x64xf32, #hivm.address_space<ub>> to memref<128x64xf32>
@@ -113,7 +113,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
           hivm.hir.copy ins(%reshape_21 : tensor<4x8x16x16xf16>) outs(%alloc_5 : memref<4x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 21 : i32, ssbuffer.crossCoreDeps = [2 : i32, 1 : i32], ssbuffer.transfer_id = 2 : i32}
           hivm.hir.sync_block_set {ssbuffer.block_id = 21 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 5
           hivm.hir.sync_block_set {ssbuffer.block_id = 21 : i32, ssbuffer.transfer_id = 4 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 7
-          hivm.hir.sync_block_wait {ssbuffer.block_id = 22 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 8
+          hivm.hir.sync_block_wait {ssbuffer.block_id = 22 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 9
           %memspacecast_22 = memref.memory_space_cast %alloc_8 {ssbuffer.block_id = 22 : i32, ssbuffer.crossCoreDeps = [5 : i32, 0 : i32], ssbuffer.transfer_id = 5 : i32} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
           %46 = bufferization.to_tensor %memspacecast_22 restrict writable {ssbuffer.block_id = 22 : i32, ssbuffer.transfer_id = 5 : i32} : memref<128x128xf32> to tensor<128x128xf32>
           %47 = arith.muli %arg19, %c128_i32 {MixUse, ssbuffer.block_id = 22 : i32} : i32
@@ -123,7 +123,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
           %reinterpret_cast_23 = memref.reinterpret_cast %arg6 to offset: [%50], sizes: [128, 128], strides: [128, 1] {ssbuffer.block_id = 22 : i32} : memref<?xf16> to memref<128x128xf16, strided<[128, 1], offset: ?>>
           %51 = arith.truncf %46 {DataUse, ssbuffer.block_id = 22 : i32} : tensor<128x128xf32> to tensor<128x128xf16>
           hivm.hir.store ins(%51 : tensor<128x128xf16>) outs(%reinterpret_cast_23 : memref<128x128xf16, strided<[128, 1], offset: ?>>) {ssbuffer.block_id = 22 : i32} atomic = <add>
-          hivm.hir.sync_block_set {ssbuffer.block_id = 22 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 8
+          hivm.hir.sync_block_set {ssbuffer.block_id = 22 : i32, ssbuffer.transfer_id = 5 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 9
         } {DataUse, ssbuffer.block_id = 23 : i32, ssbuffer.main_loop = 0 : i32}
         hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 5
         hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 1 : i32}[<VECTOR>, <PIPE_M>, <PIPE_MTE3>] flag = 4
@@ -251,12 +251,12 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inse
           %39 = bufferization.to_tensor %memspacecast_20 restrict writable {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x64xf16> to tensor<128x64xf16>
           %40 = linalg.matmul {input_precision = "ieee", ssbuffer.block_id = 12 : i32, ssbuffer.loop_carried_l0c} ins(%39, %19 : tensor<128x64xf16>, tensor<64x128xf16>) outs(%3 : tensor<128x128xf32>) -> tensor<128x128xf32>
           hivm.hir.sync_block_set {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_M>, <PIPE_MTE3>] flag = 5
-          hivm.hir.sync_block_wait {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 8
+          hivm.hir.sync_block_wait {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 9
           hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 12 : i32, ssbuffer.crossCoreDeps = [5 : i32, 1 : i32], ssbuffer.transfer_id = 5 : i32} ins(%40 : tensor<128x128xf32>) outs(%alloc_12 : memref<128x128xf32, #hivm.address_space<ub>>)
-          hivm.hir.sync_block_set {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 8
+          hivm.hir.sync_block_set {ssbuffer.block_id = 12 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 9
           scf.yield {Undefined} %37, %33 : tensor<64x128xf32>, tensor<64x128xf32>
         } {DataUse, ssbuffer.block_id = 23 : i32, ssbuffer.main_loop = 0 : i32}
-        hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 8
+        hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 5 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 9
         hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 4 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 7
         hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 6
         hivm.hir.sync_block_wait {ssbuffer.block_id = 23 : i32, ssbuffer.transfer_id = 6 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 1

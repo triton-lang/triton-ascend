@@ -269,9 +269,9 @@ def test_npu_utils_cache_key_uses_cann_torch_npu_version_and_source(monkeypatch,
 @pytest.mark.parametrize(
     ("arch", "raw_ub_kib", "graph_budget_bytes"),
     (
-        ("Ascend910B1", 192, 96 * 1024),
-        ("Ascend910_9581", 256, 128 * 1024),
-        ("Ascend950A3", 256, 128 * 1024),
+        ("Ascend910B1", 192, 192 * 1024 * 80 // 100),
+        ("Ascend910_9581", 256, 256 * 1024 * 80 // 100),
+        ("Ascend950A3", 256, 256 * 1024 * 80 // 100),
         ("", 0, 0),
         ("unknown-arch", 0, 0),
         (None, 0, 0),

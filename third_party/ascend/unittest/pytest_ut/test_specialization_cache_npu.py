@@ -1,4 +1,4 @@
-"""NPU integration tests for Ascend specialization compilation and outputs.
+"""NPU integration tests for Ascend specialization and compile options.
 
 Run this file only with a configured CANN/TorchNPU environment, for example::
 
@@ -8,6 +8,8 @@ The device-independent unit suite covers SIMT-only and exact cache-key policy;
 this file intentionally repeats the three acceptance paths end to end with
 real compilation counts and NPU output checks. Current 910B hardware does not
 advertise the SIMT execution mode.
+
+Legacy option cases also check argument handling through JIT and Inductor.
 """
 
 import pytest
@@ -164,3 +166,41 @@ def test_simd_annotated_integer_one_is_constexpr_and_recompiles(mode, values):
         else:
             assert signature["value"] == "i32"
             assert (3, ) not in constants
+
+
+@pytest.mark.parametrize("compile_graph", [False, True], ids=["jit", "inductor"])
+@pytest.mark.parametrize(
+    "name, value",
+    [("use_bytecode", False), ("warp_size", 1), ("stream", 0), ("enable_vf_fusion", True), ("enable_vf_fusion", False)],
+)
+def test_legacy_option_is_not_a_kernel_argument(compile_graph, name, value):
+    if compile_graph:
+        from torch.utils._triton import has_triton_package
+
+        # Older PyTorch checks triton_key, which Triton 3.6 no longer exposes.
+        if not has_triton_package():
+            pytest.skip(f"PyTorch {torch.__version__} cannot recognize Triton {triton.__version__} for Inductor")
+        # Register NPU support before Dynamo checks whether Triton is available.
+        import torch_npu._inductor  # noqa: F401
+
+        from torch._inductor.codecache import CacheBase
+
+        # Some TorchNPU builds still import triton_key when constructing cache keys.
+        try:
+            CacheBase.get_system()
+        except ImportError as error:
+            if error.name != "triton.compiler.compiler" or "triton_key" not in str(error):
+                raise
+            pytest.skip(f"TorchNPU {torch_npu.__version__} requires the legacy Triton triton_key API")
+
+    legacy_options = {name: value}
+
+    def add_one(x):
+        result = torch.empty_like(x)
+        _add_value[(1, )](x, result, x.numel(), 1, BLOCK=32, **legacy_options)
+        return result
+
+    run = torch.compile(add_one, fullgraph=True) if compile_graph else add_one
+    x = torch.arange(17, device="npu", dtype=torch.float32)
+
+    torch.testing.assert_close(run(x), x + 1)

@@ -825,11 +825,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _compile_option_list += \
                 [f"--enable-mixed-cv={enable_mixed_cv}"]
 
-        enable_vf_fusion = metadata["enable_vf_fusion"]
-        if enable_vf_fusion is not None:
-            _compile_option_list += \
-                [f"--enable-vf-fusion={enable_vf_fusion}"]
-
         enable_dynamic_cv_pipeline = metadata["enable_dynamic_cv_pipeline"]
         if enable_dynamic_cv_pipeline == True and not metadata.get("disable_vf_operand_substitution", False):
             _compile_option_list += [f"--enable-vf-operand-substitution=True"]
@@ -1250,7 +1245,6 @@ class NPUOptions:
     tile_mix_cube_loop: int = None
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
-    enable_vf_fusion: bool = None
     enable_dynamic_cv_pipeline: bool = None
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None
@@ -1289,11 +1283,62 @@ class NPUOptions:
     # unmasked kernels whose grid dims are compile-time known.
     grid_num_tiles: int = None
 
+    # Deprecated names remain visible to callers that use parse_options({})
+    # to distinguish compile options from kernel arguments. Their public
+    # values are ignored (or routed to canonical options) before construction.
+    add_auto_scheduling: bool = field(default=False, init=False)
+    allow_fp8e4nv: bool = field(default=False, init=False)
+    auto_blockify_size: int = field(default=1, init=False)
+    auto_tile_and_bind_subblock: bool = field(default=True, init=False)
+    code_motion: Optional[bool] = field(default=None, init=False)
+    enable_auto_blockify: Optional[bool] = field(default=None, init=False)
+    enable_bishengir_simt_optimization: int = field(default=0, init=False)
+    enable_buffer_insert_optimization: bool = field(default=True, init=False)
+    enable_cce_vf_auto_sync: Optional[bool] = field(default=None, init=False)
+    enable_cce_vf_remove_membar: Optional[bool] = field(default=None, init=False)
+    enable_cross_if_fusion: bool = field(default=False, init=False)
+    enable_drop_unit_dims: Optional[bool] = field(default=None, init=False)
+    enable_linearize: Optional[bool] = field(default=None, init=False)
+    enable_mask_fallback_conversion: bool = field(default=False, init=False)
+    enable_nd2nz_on_vector: bool = field(default=False, init=False)
+    enable_select_analysis: bool = field(default=True, init=False)
+    enable_simt_reorder_instruction: bool = field(default=False, init=False)
+    enable_sync_block_lock: Optional[bool] = field(default=None, init=False)
+    enable_ub_refine_opt: bool = field(default=False, init=False)
+    enable_vf_fusion: Optional[bool] = field(default=None, init=False)
+    force_simt_only: bool = field(default=False, init=False)
+    force_simt_template: bool = field(default=False, init=False)
+    graph_optimize_emit_remarks: bool = field(default=False, init=False)
+    graph_optimize_max_rewrites_per_function: int = field(default=64, init=False)
+    graph_optimize_rule_mask: int = field(default=DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK, init=False)
+    graph_optimize_ub_capacity_bytes: Optional[int] = field(default=None, init=False)
+    has_auto_blockify_blacklist_op: Optional[bool] = field(default=None, init=False)
+    inter_cache_num: Optional[int] = field(default=None, init=False)
+    intra_cache_num: Optional[int] = field(default=None, init=False)
+    kernel_name: str = field(default="triton_", init=False)
+    llvm_version: int = field(default=15, init=False)
+    load_cache_num: Optional[int] = field(default=None, init=False)
+    mix_mode: str = field(default="", init=False)
+    ops_reorder: Optional[bool] = field(default=None, init=False)
+    optimize_dynamic_offset: bool = field(default=False, init=False)
+    simt_reorder_instruction: bool = field(default=False, init=False)
+    storage_align: Optional[bool] = field(default=None, init=False)
+    stream: Optional[int] = field(default=None, init=False)
+    use_bytecode: bool = field(default=True, init=False)
+
     def __post_init__(self, arch, rule_mask):
         from triton.backends.ascend import _apply_ascend_patch
 
         _apply_ascend_patch()
         object.__setattr__(self, "target_arch", arch)
+        # Plain init=False defaults live on the class. Materialize them in
+        # the instance because both Inductor and JIT inspect options.__dict__.
+        for name, option_field in self.__dataclass_fields__.items():
+            if not option_field.init and name not in self.__dict__:
+                object.__setattr__(self, name, option_field.default)
+        # Keep the legacy name discoverable while its property and all
+        # compiler decisions continue to use the injected target architecture.
+        self.__dict__["arch"] = arch
         if self.compile_on_910_95 is not None:
             _warn_deprecated_npu_option("compile_on_910_95")
         object.__setattr__(
@@ -1307,12 +1352,6 @@ class NPUOptions:
             raise ValueError(f"invalid GraphOptimize rule_mask: {error}") from error
         if normalized_rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
             object.__setattr__(self, "rule_mask", normalized_rule_mask)
-        # The core compiler serializes ``options.__dict__`` into launch
-        # metadata.  An init=False field with its class-level default alone is
-        # not present there, so materialize the false state before the
-        # compile-mode branch may set it to true.
-        object.__setattr__(self, "is_pure_simt", False)
-
         if self.simt_stack_limit is not None:
             _validate_simt_stack_limit(self.simt_stack_limit)
 
@@ -1340,10 +1379,9 @@ class NPUOptions:
 def _get_npu_options_arch(options: NPUOptions) -> str:
     """Expose the injected target to the established lowering builder API.
 
-    ``arch`` is an ``InitVar`` rather than a user compile option, so it is not
-    stored or serialized.  The builder still reads ``options.arch`` while
-    creating TTIR, and this view returns the target injected by
-    ``AscendBackend.parse_options``.
+    ``arch`` is an ``InitVar`` rather than a user compile option. Its legacy
+    name is also serialized for option discovery, while this view always
+    returns the target injected by ``AscendBackend.parse_options``.
     """
     return options.target_arch
 
@@ -1502,10 +1540,10 @@ class AscendBackend(BaseBackend):
             # those provenance markers instead of depending on every public
             # field being present, which changes whenever the dataclass evolves.
             internal_options = _is_internal_npu_options(opts, self.target.arch)
-            # JIT validates the same dictionary after this call.  Remove public
-            # compatibility keys in place so Ascend can accept them without
-            # requiring any change to the community JIT implementation.
-            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts, in_place=True)
+            # Normalize a copy, except for the legacy launch keyword below.
+            # NPUOptions retains compatibility defaults for legacy names so
+            # JIT and Inductor can still recognize them as compile options.
+            normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts)
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
             # Lazy init enable_dynamic_cv_pipeline if not provided.
@@ -1513,7 +1551,12 @@ class AscendBackend(BaseBackend):
             if options.enable_dynamic_cv_pipeline is None:
                 object.__setattr__(options, "enable_dynamic_cv_pipeline", options.compile_on_910_95)
             if not internal_options:
-                _normalize_bishengir_simt_optimization_for_context(options, opts)
+                _normalize_bishengir_simt_optimization_for_context(options, normalized_opts)
+                # Community JIT rejects the legacy launch keyword "stream"
+                # even when options.__dict__ recognizes it. Consume it at
+                # the Ascend boundary; the returned compatibility field stays
+                # None and the runtime still selects the current stream.
+                opts.pop("stream", None)
         else:
             raise NotImplementedError(f"Backend '{self.target.backend}' is not supported. "
                                       "Please ensure the target backend is set to 'npu'.")

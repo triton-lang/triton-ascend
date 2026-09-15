@@ -581,9 +581,10 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
-def test_npu_options_do_not_expose_graph_remark_switch(compiler_module):
-    """Graph rewrite logging is controlled by LLVM DEBUG, not an NPU option."""
-    assert "graph_optimize_emit_remarks" not in compiler_module.NPUOptions.__dataclass_fields__
+def test_npu_options_keep_graph_remark_compatibility_default(compiler_module):
+    """The legacy graph-remarks name remains discoverable with a fixed default."""
+    options = compiler_module.NPUOptions(arch="Ascend910B1")
+    assert options.__dict__["graph_optimize_emit_remarks"] is False
 
 
 @pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
@@ -758,5 +759,6 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     assert explicit_only.compile_mode == "simt_only"
     assert explicit_only.is_pure_simt is True
 
-    assert "force_simt_only" not in compiler_module.NPUOptions.__dataclass_fields__
-    assert "force_simt_template" not in compiler_module.NPUOptions.__dataclass_fields__
+    # Legacy spellings remain discoverable while compile_mode controls lowering.
+    assert explicit_only.__dict__["force_simt_only"] is False
+    assert explicit_template.__dict__["force_simt_template"] is False

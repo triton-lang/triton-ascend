@@ -34,6 +34,14 @@
 using namespace mlir;
 using namespace triton;
 
+void ComputeBlockOptPass::getDependentDialects(
+    DialectRegistry &registry) const {
+  linalg::registerTransformDialectExtension(registry);
+  linalg::registerTilingInterfaceExternalModels(registry);
+  scf::registerTransformDialectExtension(registry);
+  createMaterializeCubePageLoadersPass()->getDependentDialects(registry);
+}
+
 void ComputeBlockOptPass::runOnOperation() {
   ModuleOp module = getOperation();
 
@@ -84,6 +92,11 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createRelocateMemrefDeclPass());
 
+  pm.addPass(createMergeI1DependentBlockPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+  pm.addPass(createMaterializeCubePageLoadersPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
+
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
@@ -108,6 +121,7 @@ void registerComputeBlockOptPasses() {
   registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
   registerPass(createMergeCubeForBlockPass);
+  registerPass(createMaterializeCubePageLoadersPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
   registerPass(createExpSubfPatternPass);
@@ -120,6 +134,7 @@ void registerComputeBlockOptPasses() {
   registerPass(createMergeComputeBlockPass);
   registerPass(createMergeCubeBlockPass);
   registerPass(createRelocateMemrefDeclPass);
+  registerPass(createMergeI1DependentBlockPass);
 }
 
 } // namespace triton

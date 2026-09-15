@@ -37,6 +37,7 @@ void registerUnifyAllocBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeVectorIfBlockPass();
 void registerMergeVectorIfBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeCubeForBlockPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMaterializeCubePageLoadersPass();
 void registerMergeCubeForBlockPass();
 std::unique_ptr<OperationPass<ModuleOp>> createUnifyStoreBlockPass();
 void registerUnifyStoreBlockPass();
@@ -49,6 +50,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createMoveLoadIntoUserPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPosMaskPatternPass();
 std::unique_ptr<OperationPass<ModuleOp>> createRelocateMemrefDeclPass();
 std::unique_ptr<OperationPass<ModuleOp>> createMergeComputeBlockPass();
+std::unique_ptr<OperationPass<ModuleOp>> createMergeI1DependentBlockPass();
 
 std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpSubfPatternPass();

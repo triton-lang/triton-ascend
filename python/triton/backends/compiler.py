@@ -9,7 +9,7 @@ from types import ModuleType
 class GPUTarget(object):
     # Target backend, e.g., cuda, hip
     backend: str
-    # Target architecture, e.g., 90 (for cuda compute capability), gfx940 (for hip)
+    # Target architecture, e.g., 90 (for cuda compute capability), gfx940 (for h ip)
     arch: Union[int, str]
     warp_size: int
 

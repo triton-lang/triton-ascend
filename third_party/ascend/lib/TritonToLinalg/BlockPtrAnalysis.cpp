@@ -3266,7 +3266,7 @@ LogicalResult BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
       rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(1));
   auto addptrRes = op.getResult();
   assert(addptrRes.hasOneUse() && "Invalid: tt.addptr has multiple users");
-  auto loadOp = *(addptrRes.user_begin());
+  auto memoryOp = *(addptrRes.user_begin());
 
   // Prepare empty tensor for loop based scalar load
   // FIXME: We use cast here because addptr must return tensor<?x!tt.ptr<f32>>.
@@ -3292,7 +3292,11 @@ LogicalResult BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
   }
   SmallVector<Value> ivs;
   bool castFailed = false;
-  OpBuilder builder(op);
+  // Keep the access after its operand definitions and preceding memory effects.
+  OpBuilder builder(memoryOp->getContext());
+  // The body builder moves memoryOp before the outer loop is inserted, so use
+  // the following operation as the insertion point.
+  builder.setInsertionPointAfter(memoryOp);
   auto loop = createNestedLoops(
       builder, loc, 0, blockSizes.size(), forLBs, forUBs, forSteps, ivs,
       initArgs,
@@ -3327,9 +3331,9 @@ LogicalResult BlockDataParser::rewriteAddPtrToUnstrucMemAcc(
           return;
         }
         rewriter.replaceOp(op, (*castOp).getResult());
-        // Move tt.load using this tt.addptr into this block
-        loadOp->moveAfter((*castOp).getOperation());
-        loadOp->setAttr("IndirectLoad", UnitAttr::get(op.getContext()));
+        // Move the load or store using this tt.addptr into the scalar loop.
+        memoryOp->moveAfter((*castOp).getOperation());
+        memoryOp->setAttr("IndirectLoad", UnitAttr::get(op.getContext()));
         bB.create<scf::YieldOp>(bLoc, iterArgs);
       });
   if (castFailed)

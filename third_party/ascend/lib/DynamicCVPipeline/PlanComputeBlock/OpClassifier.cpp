@@ -1753,6 +1753,13 @@ void OpClassifierPass::splitOperationForCubeAndVector(
       if (llvm::isa<scf::ForOp, scf::WhileOp>(user)) {
         coreType = getForInitCoreType(&use);
       }
+      // scf.condition is cloned into both the CUBE and VECTOR scopes by
+      // SeparateCVScope. Keep it on the CUBE-side (original) value so the
+      // CUBE scope's condition chain stays free of VectorOnly roots; the
+      // VECTOR scope's clone materializes its own chain.
+      if (llvm::isa<scf::ConditionOp>(user)) {
+        continue;
+      }
       if (coreType == OP_VECTOR_ONLY) {
         usesToUpdate.push_back(&use);
       }

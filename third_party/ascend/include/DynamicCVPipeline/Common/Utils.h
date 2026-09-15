@@ -67,6 +67,9 @@ inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
 inline constexpr llvm::StringLiteral kDepMark = "ssbuffer.dep_mark";
 inline constexpr llvm::StringLiteral kMayNotExec = "ssbuffer.may_not_exec";
 inline constexpr llvm::StringLiteral kMayNotExecNPU = "may_not_exec";
+inline constexpr llvm::StringLiteral kCoupledMatmulAndStore =
+    "ssbuffer.coupled_matmul_and_store";
+inline constexpr llvm::StringLiteral kMNEStore0 = "ssbuffer.mne_store0";
 inline constexpr llvm::StringLiteral kIterCounter = "ssbuffer.iterCounter";
 inline constexpr llvm::StringLiteral kForMayNotExec =
     "ssbuffer.for_may_not_exec";
@@ -81,6 +84,7 @@ inline constexpr llvm::StringLiteral kGMLoadMultiBufferHintAttr = "gm_load";
 inline constexpr llvm::StringLiteral kGMLoadHintAttr = "gm_load_hint";
 inline constexpr llvm::StringLiteral kHIVMMatmulLimitedInCubeAttr =
     "hivm.matmul_limited_in_cube";
+// NOTE: This attribute is used by downstream passes, do not remove.
 inline constexpr llvm::StringLiteral kTightlyCoupledBufferAttr =
     "hivm.tightly_coupled_buffer";
 inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";

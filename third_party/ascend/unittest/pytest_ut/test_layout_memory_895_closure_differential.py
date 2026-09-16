@@ -605,7 +605,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
         target_paths = _launcher_paths(target_src)
         assert len(baseline_paths) == len(target_paths) == 2, case
         expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
-        expected_target_cap_count = 0
+        expected_target_cap_count = 1 if env_enabled and (is_pure_simt or not blacklisted) else 0
         for baseline_path, target_path in zip(baseline_paths, target_paths):
             assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
             assert baseline_path.count(assignment) == target_path.count(assignment) == 1, case
@@ -656,7 +656,7 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
             expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
                                    if ceil_div else f"{grid} = {grid} / {factor};")
             expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
-            expected_target_cap_count = 0
+            expected_target_cap_count = 1 if env_enabled and (is_pure_simt or not blacklisted) else 0
             for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
                 assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
                 assert baseline_path.count(expected_assignment) == 1, case

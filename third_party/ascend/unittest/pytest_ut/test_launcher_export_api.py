@@ -196,7 +196,7 @@ def test_make_launcher_uses_ceil_div_for_row_coalescing(
 
     assert src.count("gridZ = (gridZ + 4 - 1) / 4;") == 2
     assert "ChunkCoalescing: grid[2] not divisible" not in src
-    assert src.count("blockNum = std::min(blockNum, (uint32_t)40);") == 0
+    assert src.count("blockNum = std::min(blockNum, (uint32_t)40);") == 2
 
 
 @patch.object(driver, "NPUUtils")
@@ -316,8 +316,7 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
             signature={0: "*fp32", 1: "*fp32"},
             metadata=metadata,
         )
-        expected_per_launch_path = 1 if (auto_map_enabled and not row_coalescing_applied and
-                                         (is_pure_simt or not blacklisted)) else 0
+        expected_per_launch_path = 1 if (auto_map_enabled and (is_pure_simt or not blacklisted)) else 0
         c_abi_launch, cpp_launch = _split_launch_functions(src)
         case = (f"E={auto_map_enabled}, P={is_pure_simt}, B={blacklisted}, "
                 f"R={row_coalescing_applied}, A={auto_blockify_enabled}")

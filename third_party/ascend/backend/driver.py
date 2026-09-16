@@ -956,8 +956,7 @@ def make_launcher(constants, signature, metadata):
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
     is_pure_simt = bool(getattr(metadata, "is_pure_simt", False))
     has_auto_blockify_blacklist_op = bool(getattr(metadata, "has_auto_blockify_blacklist_op", False))
-    row_coalescing_applied = bool(getattr(metadata, "row_coalescing_applied", False))
-    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not row_coalescing_applied
+    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled()
                                        and (is_pure_simt or not has_auto_blockify_blacklist_op))
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()

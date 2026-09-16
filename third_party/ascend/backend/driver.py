@@ -396,6 +396,7 @@ def generate_npu_header_src():
 #include <stdbool.h>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <memory>
 #include <sys/syscall.h>
@@ -538,7 +539,7 @@ def generate_npu_wrapper_src(constants, signature, metadata):
             "float": "f",
             "double": "d",
             "long": "l",
-            "int8_t": "b",
+            "int8_t": "O&",
             "int16_t": "h",
             "int32_t": "i",
             "int64_t": "l",
@@ -578,6 +579,10 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     """
 
     format = "iiiKKOOOO" + ''.join([_format_of(_extracted_ty(ty)) for ty in signature.values()])
+    parse_args = ', '.join(
+        f"_parse_int8, &_arg{i}" if _extracted_ty(ty) == "int8_t" else f"&_arg{i}"
+        for i, ty in signature.items()
+    )
     grid_info = {'X': 'i32', 'Y': 'i32', 'Z': 'i32'}
     # TODO: automatically check if gather load ops are used.
 
@@ -1131,6 +1136,20 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
   return;
 }}
 
+static int _parse_int8(PyObject* obj, void* output) {{
+  long value = PyLong_AsLong(obj);
+  if (value == -1 && PyErr_Occurred()) {{
+    return 0;
+  }}
+  if (value < std::numeric_limits<int8_t>::min() ||
+      value > std::numeric_limits<int8_t>::max()) {{
+    PyErr_SetString(PyExc_OverflowError, "int8 argument out of range");
+    return 0;
+  }}
+  *static_cast<int8_t*>(output) = static_cast<int8_t>(value);
+  return 1;
+}}
+
 // Extract tensor shape from PyObject
 static std::vector<int64_t> _get_tensor_shape(PyObject *tensor) {{
   std::vector<int64_t> shape;
@@ -1176,7 +1195,7 @@ static PyObject* launch(PyObject* self, PyObject* args) {{
       args, \"{format}\",
       &gridX, &gridY, &gridZ, &stream, &function,
       &packedMetadata, &launch_metadata, &launch_enter_hook, &launch_exit_hook
-      {', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''}
+      {', ' + parse_args if len(signature) > 0 else ''}
       )
     ) {{
     return NULL;

@@ -748,6 +748,12 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 f"--enable-preload={enable_preload}",
             ]
 
+        enable_lazy_loading = metadata["enable_lazy_loading"]
+        if enable_lazy_loading is not None:
+            _compile_option_list += [
+                f"--enable-lazy-loading={enable_lazy_loading}",
+            ]
+
         disable_tightly_coupled_buffer_reuse = metadata["disable_tightly_coupled_buffer_reuse"]
         if disable_tightly_coupled_buffer_reuse:
             _compile_option_list += ["--disable-tightly-coupled-buffer-reuse"]
@@ -985,6 +991,12 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if enable_preload is not None:
             _compile_option_list += [
                 f"--enable-preload={enable_preload}",
+            ]
+
+        enable_lazy_loading = metadata["enable_lazy_loading"]
+        if enable_lazy_loading is not None:
+            _compile_option_list += [
+                f"--enable-lazy-loading={enable_lazy_loading}",
             ]
 
         _compile_option_list += [
@@ -1226,6 +1238,9 @@ class NPUOptions:
     enable_ubuf_saving: bool = None
     disable_size_align_for_cast: bool = None
     enable_preload: bool = None
+    # Controls the bishengir-compile --enable-lazy-loading flag.  None keeps
+    # the flag out of the command line so the NPU compiler default applies.
+    enable_lazy_loading: bool = None
     enable_auto_bind_sub_block: bool = None
     disable_tightly_coupled_buffer_reuse: bool = False
     enable_hivm_auto_cv_balance: bool = None

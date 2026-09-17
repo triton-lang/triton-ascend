@@ -19,6 +19,7 @@ triton.language.dot(input, other, acc=None, input_precision=None, allow_tf32=Non
 | `other`       | `int8 fp16 bf16 fp32`     |     第二个输入,  2D or 3D 张量，为了避免溢出 取值范围限制为-5-5    |                                                   |
 | `acc`           | `int32  float32`    | 存累加结果的张量, accumulator tensor. If not None, the result is added to this tensor, acc_dtype支持 {:code:`float16`, :code:`float32`, :code:`int32`} |
 | `input_precision`   | -                 |  Available options for nvidia 通过选择精度模式来决定是否启用 Tensor Cores 加速    |
+| `allow_tf32`   | `bool`                 |  若为 True，等价于将 `input_precision` 设为 `"tf32"`。`input_precision` 与 `allow_tf32` 只能指定其一（至少一个为 `None`）。Ascend 上按芯片型号映射：A2/A3 映射为 `"hf32"` 精度计算，A5 映射为原生 `"tf32"` 精度计算；`allow_tf32=False` 或 `None`（默认）使用 `"ieee"`。    |
 | `max_num_imprecise_acc`     | `int`    | 多少次低精度的累加数（当前昇腾不支持低精度累加） |
 | `out_dtype`     | `fp32  int32`    | 输出结果类型|
 

@@ -102,14 +102,14 @@ jobs:
             echo 'matrix-ASCEND<<MATRIX_EOF' >> $GITHUB_OUTPUT
             echo '[
               {
-                "runs_on": ["linux-aarch64-a3-4"],
+                "runs_on": ["linux-aarch64-a3-800i-4", "cn12-001"],
                 "chip_type": "a3",
                 "cann_version": "8.5.0",
                 "os": "ubuntu22.04",
                 "python_version": "3.10"
               },
               {
-                "runs_on": ["linux-aarch64-a3-4"],
+                "runs_on": ["linux-aarch64-a3-800i-4", "cn12-001"],
                 "chip_type": "a3",
                 "cann_version": "8.5.0",
                 "os": "ubuntu22.04",

@@ -412,7 +412,7 @@ tests/ops/test_wall_attn.py  # 上游验收测试（断言与容差未改）
 
 | 文件 | 改动 |
 |------|------|
-| `ops/wall_attn/parallel.py` | 移除 `dispatch`/einops；autotune 精简（fwd num_stages {2}、bwd {1}，num_warps {2,4}）；varlen 反向 BT=64、num_stages=1；所有 kernel 启动追加 `ascend_compile_kwargs()`；`parallel_wall_attn` 内 K/V 头维零填充 + 输出切片 |
+| `ops/wall_attn/parallel.py` | 移除 `dispatch`/einops；autotune 精简（fwd num_stages {2}、bwd {1}，num_warps {2,4}）；varlen 反向 BT=64、num_stages=1；所有 kernel 启动追加 `ascend_compile_kwargs()`；`parallel_wall_attn` 内 K/V 头维零填充 + 输出切片；bwd_dq kernel 末段按 off-diag 循环是否执行显式选择该项（A2/A3 零次循环累加器初值缺陷，见 8.2 问题 3） |
 | `ops/wall_attn/decode.py` | autotune 精简；启动追加 `ascend_compile_kwargs()`；`parallel_wall_attn_decode` 内 q/p_curr/k_tilde/r_cache 的 K 维与 v 的 V 维零填充 + 输出切片 |
 | `ops/utils/cumsum.py` | 裁剪为 `chunk_global_cumsum` 族；移除 `dispatch`；autotune 精简 |
 | `utils/*` | 按需裁剪；`check_shared_mem` NPU 恒 False；新增 `ascend_compile_kwargs` |
@@ -430,23 +430,32 @@ tests/ops/test_wall_attn.py  # 上游验收测试（断言与容差未改）
 - 根因：反向 dkv kernel 驻留 buffer 多（dv/dk 累加器、do/v/q 多块 tile、b_ds/b_p/b_dp 中间量），BT=128 + 双级流水超出 UB 预算。
 - 修复：varlen 反向固定配置降为 BT=64、num_stages=1；反向 autotune 空间统一改为单级流水。
 
-**问题 3：环境部署（非代码问题）。**
+**问题 3：A2 / A3 上反向 dq 数值错误（4 个用例，950 不复现）。**
+- 现象：`test_backward_matches_eager_reference`（2 项）、`test_backward_value_split_matches_single_tile`、`test_g_gradient_matches_finite_differences` 失败（如 `dq diff: 1.744135 ratio: 1.000000`）；同一输入重复执行 dq 结果不同，而前向 o、dk、dv 完全正确。
+- 定位：以 CPU float64 独立参考对拍，确认 NPU 上 eager 参考正确（误差 0），错误在 Triton 反向 dq kernel；逐项排除编译选项（multibuffer / AutoBlockify / subblock / fp 融合 / select 分析 / num_stages）与 4 种等价改写均无改善；去掉 off-diag 项后 dq 完全正确，定位到累加器 `b_dq_til`；对 dq 缓冲区预填 NaN 确认所有位置均被写入，排除漏写。
+- 根因：off-diag 循环 `range(i_start, i_t * BT, BS)` 在 `i_t == 0`（或滑窗使 `i_start == i_t*BT`）时零次执行，此时 A2/A3 后端未使 `b_dq_til = tl.zeros(...)` 的初值生效，循环后读到未初始化 UB 内容。上游验收测试的反向用例 T 均 ≤ BT，全部落在该路径；dkv 的同类循环带 `m_q` 掩码（贡献恒 0）、fwd 累加器为 `b_o = b_o * b_r + tl.dot(...)`，均不受影响。
+- 修复：`has_off = i_start < i_t * BT`，`b_dq = tl.where(has_off, (b_dq_til * scale) * exp2(b_pq - b_R), 0.0) + b_dq_diag * scale`。零次循环时该项本应为 0；循环执行时数值与上游完全一致。经 T=24 / T=64（零次循环）与 T=200 / T=200+V=128 切分（循环执行）验证。
+- CANN 相关性：在 CANN 9.1.0 官方镜像中以未修复代码复测，A2 上同样出错，与 CANN 版本无关。建议向 triton-ascend 反馈。
+
+**问题 4：环境部署（非代码问题）。**
 - pypi 官方源无 triton-ascend 3.2.2，需使用 ascend 源；
 - torch_npu 2.9.0 初版不识别 950PR（`Unsupported soc version: Ascend950PR 9579`），需 ≥ 2.9.0.post8；
 - kernel 首次编译需 python3-devel（Python.h）。
 
 ### 8.3 验证结果
 
-| 平台 | 结果 | 备注 |
-|------|------|------|
-| Ascend 950PR (9579) | **31 passed, 0 failed, 0 error**（527s） | CANN 9.1.0 + torch 2.9.0+cpu + torch_npu 2.9.0.post8 + triton-ascend 3.2.2，Python 3.11.6 |
-| Ascend A2 | ⏳ 待复测 | 代码无平台分支，复测步骤见 8.4 |
-| Ascend A3 | ⏳ 待复测 | 同上 |
+| 平台 | SoC | CANN | 代码 | 结果 |
+|------|-----|------|------|------|
+| Ascend 950 | Ascend950PR (9579) | 9.1.0 | 修复前 | **31 passed**（527s，torch_npu 2.9.0.post8） |
+| Ascend A2 | Ascend910B4 | 9.0.0 | 修复前 | 27 passed, **4 failed**（问题 3） |
+| Ascend A2 | Ascend910B4 | 9.0.0 | 修复后 | **31 passed**（1087s，复用编译缓存） |
+| Ascend A2 | Ascend910B4 | 9.1.0 | 修复后 | **31 passed**（4889s） |
+| Ascend A3 | Ascend910_9382 | 9.1.0 | 修复后 | **31 passed**（2854s） |
 
 - 覆盖：训练并行前向（定长 / varlen / 滑窗 / sink bias / GQA / T=512 强衰减）、训练反向（dq/dk/dv 对拍、V 维切分一致性、dg 与 dg_scalar 有限差分）、scalar gate、推理 decode（MHA / GQA / V 维切分 / T=4096 长上下文 / scalar gate / 流式 serving / cache 布局）；dtype 覆盖 fp32 与 bf16。
-- 超时与崩溃：三轮全量运行（20+ 种 shape）未出现 507014 / 507034 超时或挂死；两处编译问题均已根因修复。
+- 超时与崩溃：各平台全量运行均未出现 507014 / 507034 超时或挂死；两处编译问题与一处数值问题均已根因修复。
 - 精度：全部用例满足上游容差（RTOL_FWD 5e-3、RTOL_GRAD 5e-3、RTOL_FD 2e-2、RTOL_DECODE 2e-2）。
-- 逐用例明细见验收测试报告 `docs/test_report.md`（随算子代码 PR 提交）。
+- 逐用例明细、各平台环境与复测步骤见验收测试报告 `docs/test_report.md`（随算子代码 PR 提交）。
 
 ### 8.4 复测命令
 
@@ -464,9 +473,9 @@ python3 -m pytest tests/ops/test_wall_attn.py -v --tb=short
 
 ### 8.5 已知限制与遗留事项
 
-1. **平台覆盖**：仅 950PR 实测；A2 / A3 复测待完成（验收标准第 2 条）。
+1. **平台覆盖**：950 / A2 / A3 均已实测通过；其中 950 的 31/31 为修复前代码所测，使用修复后代码的复测待补（修复仅影响 off-diag 循环零次执行的分支）。
 2. **fp16**：上游验收测试矩阵为 fp32 / bf16，fp16 输入未单独验证。
 3. **性能**：当前以功能/精度为目标——关闭 auto-multi-buffer、三平台统一保守 tile 档位、autotune 空间精简，尚未补充 benchmark 数据；后续可在 A3/950 上放宽 BV 至 128、恢复 multi-buffer 并补 do_bench 对比。
 4. **host 侧零填充的代价**：非 2 幂头维会带来额外 pad/slice 拷贝与更大的 tile；后端掩码 load 缺陷修复后可回退为上游的 kernel 内掩码写法。
 5. **防御性检查**：未额外增加 grid 维度（≤ 65535）检查，超大 shape 下依赖上游既有断言。
-6. **代码格式**：950PR 验证在 yapf 格式化之前完成；格式化前后逐文件 AST 一致，不影响语义，A2/A3 复测将基于格式化后的代码。
+6. **代码格式**：950PR 的验证在 yapf 格式化之前完成（格式化前后逐文件 AST 一致，不影响语义）；A2 / A3 的验证均基于格式化后的代码。

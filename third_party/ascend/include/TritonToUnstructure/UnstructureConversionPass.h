@@ -28,6 +28,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/Utils/Utils.h"
 #include "mlir/IR/PatternMatch.h"
 
 #define GEN_PASS_DECL_TRITONTOUNSTRUCTURE
@@ -37,7 +38,6 @@
 #include "ascend/include/TritonToUnstructure/Passes.h.inc"
 
 extern bool compileOn91095Flag;
-extern bool forceSimtTemplateFlag;
 
 namespace mlir {
 namespace triton {
@@ -107,14 +107,14 @@ private:
                         ArrayRef<OpFoldResult> sizes,
                         ArrayRef<OpFoldResult> strides) const;
   template <typename U = MemAccOpTy>
-  typename std::enable_if<std::is_same_v<U, triton::LoadOp>, void>::type
-  splatAndLoadScenario(MemAccOpTy op, int rank,
+  typename std::enable_if<std::is_same_v<U, triton::LoadOp>,
+                          LogicalResult>::type
+  splatAndLoadScenario(MemAccOpTy op, const PtrOffsetInfo &ptrOffsetInfo,
                        PatternRewriter &rewriter) const;
 
   template <typename... Args>
   MemAccOpTy createMemAccOp(MemAccOpTy op, Value ptrToAccess, Location loc,
-                            PatternRewriter &rewriter,
-                            Args &&...args) const = delete;
+                            PatternRewriter &rewriter, Args &&...args) const;
 
   const llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap;
   const llvm::SmallDenseMap<Value, bool> &fromTensorArg;

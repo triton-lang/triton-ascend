@@ -23,14 +23,21 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 
+#include "DynamicCVPipeline/Common/SyncWall.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 
 namespace mlir {
 namespace CVPipeline {
 constexpr int INIT_SIZE = 4;
+
 class MemoryDependenceGraph {
 public:
   MemoryDependenceGraph(Operation *root, AliasAnalysis &aa);
@@ -40,6 +47,11 @@ public:
 
   ArrayRef<Operation *> getExecBefore(Operation *op) const;
   ArrayRef<Operation *> getExecAfter(Operation *op) const;
+
+  // Refine a frontOp -> backOp memory edge to the leaf front ops that cause it.
+  // Returns empty when no dependency is found.
+  SmallVector<Operation *> getRealDependency(Operation *frontOp,
+                                             Operation *backOp);
 
 private:
   struct MemSlot {
@@ -57,8 +69,8 @@ private:
   void analyzeOp(Operation *op);
   void analyzeRegionsOf(Operation *op);
 
-  SmallVector<MemoryEffects::EffectInstance> collectOuterEffects(Operation *op,
-                                                                 bool &unknown);
+  SmallVector<MemoryEffects::EffectInstance>
+  collectOuterEffects(Operation *op, bool &unknown, bool recursive = true);
 
   SmallVector<MemSlot *> findAliasSlots(Value v);
   ArrayRef<MemSlot *>
@@ -80,6 +92,12 @@ private:
                    ArrayRef<Operation *> preds);
   AliasResult queryAlias(Value lhs, Value rhs);
 
+  // True when a synchronization op sits strictly between @p a and @p b in the
+  // block they share. Memory edges that cross a sync are dropped so the graph
+  // never spans a barrier.
+  bool isSyncSeparated(Operation *a, Operation *b);
+  SyncWall &getWall(Block *block);
+
   Operation *root;
   AliasAnalysis &aa;
 
@@ -93,6 +111,9 @@ private:
 
   SmallVector<std::unique_ptr<MemSlot>> slots;
   DenseMap<Value, MemSlot *> valueToSlot;
+
+  // Per-block sync walls
+  DenseMap<Block *, SyncWall> walls;
 };
 
 } // namespace CVPipeline

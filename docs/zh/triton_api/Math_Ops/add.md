@@ -15,8 +15,8 @@ triton.language.add(x, y, sanitize_overflow: constexpr = True, _builder=None)
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `x`        | `tensor or Number`     |     第一个入参     |                                                       |
-| `y`       | `tensor or Number`     |     第二个入参     |                                                   |
+| `x`        | `tensor or Number`     |     第一个入参     |
+| `y`       | `tensor or Number`     |     第二个入参     |
 | `sanitize_overflow`     | `bool`    | 是否对整数加法做溢出检查，默认值为True,无需显示指定 |
 | `_builder`   | -                 | 保留参数，暂不支持外部调用                                                |
 

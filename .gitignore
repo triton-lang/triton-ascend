@@ -27,7 +27,9 @@ python/triton/backends/*
 !python/triton/backends/driver.py
 
 # Language extras
-python/triton/language/extra
+python/triton/language/extra/*
+!python/triton/language/extra/__init__.py
+!python/triton/language/extra/libdevice.py
 
 # Tools extras
 python/triton/tools/extra
@@ -63,6 +65,7 @@ cmake-build-*
 cuobjdump
 nvdisasm
 ptxas
+ptxas-blackwell
 
 # Third-party include
 third_party/nvidia/backend/include
@@ -70,7 +73,7 @@ third_party/nvidia/backend/lib/cupti
 
 # Docs
 docs/_build/
-docs/python-api/generated/
+docs/*/python-api/generated/
 docs/dialects/
 docs/getting-started/tutorials
 docs/sg_execution_times.rst
@@ -83,24 +86,10 @@ docs/sg_execution_times.rst
 /compile_commands.json
 .vscode
 .vs
-.idea/
+.cursor
 
 # Vim
 *.swp
 
 # macOS
 .DS_Store
-triton_ascend.egg-info/
-
-# cann
-fusion_result.json
-kernel_meta/
-
-# compilation
-/triton/
-build/
-
-# artifact
-dist/
-*.egg-info/
-.eggs/

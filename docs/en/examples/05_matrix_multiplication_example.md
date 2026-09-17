@@ -6,7 +6,9 @@ This section describes how to implement a matrix multiplication kernel using Tri
 
 The following Triton kernel implements batched matrix multiplication with bias:
 The formula is as follows:
-$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$
+
+$$ \mathrm{output}[b, i, j] = \sum_{k} x[b, i, k] \cdot y[k, j] + z[b, i, j] $$
+
 Specifically:
 
 - The shape of `x` is `(A, B)`.
@@ -94,7 +96,7 @@ def get_torch_typename(dtype):
     return tyname
 
 def generate_tensor(shape, dtype):
-     """Generates a random tensor based on the specified shape and data type, and adapts to the value ranges of different data types."""
+    """Generates a random tensor based on the specified shape and data type, and adapts to the value ranges of different data types."""
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
         return torch.randn(size=shape, dtype=eval('torch.' + dtype))
     elif dtype == 'int32' or dtype == 'int64' or dtype == 'int16':

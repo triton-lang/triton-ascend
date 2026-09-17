@@ -403,7 +403,8 @@ LogicalResult MaskState::addStateScalar(const MaskState &state,
                                         const OpFoldResult scalar, Location loc,
                                         OpBuilder &builder) {
   for (auto info : state.stateInfo) {
-    info.offset = addOpFoldResult(info.offset, scalar, loc, builder);
+    info.offset = addOpFoldResult(info.offset, scalar, loc, builder,
+                                  builder.getIndexType());
     this->stateInfo.emplace_back(info);
   }
   return success();

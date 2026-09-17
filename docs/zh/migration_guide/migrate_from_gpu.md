@@ -20,7 +20,7 @@ GPU 上常见的写法会把 grid 设计为大量逻辑 program，由硬件和�
 
 - grid 优先使用 1D；2D NPU 适配写法也会合并为 1D，例如 `(20,)` 与 `(4, 5)` 的效果相同。
 - Vector-only 算子的并发任务数通常按 Vector Core 数量组织；包含 `tl.dot` 的算子通常按 AI Core 数量组织。
-- 当逻辑 grid 远大于物理核数时，需要评估是否改成每个 program 内部循环处理多个 tile，或在逻辑核之间无顺序依赖时使用 `TRITON_ALL_BLOCKS_PARALLEL`。
+- 当逻辑 grid 远大于物理核数时，后端会自动把符合条件且逻辑核相互独立的任务折叠到可用物理核。对于存在顺序依赖或未通过 IR 安全分析的 kernel，应改成每个 program 内部循环处理多个 tile。
 - coreDim 不能超过 `UINT16_MAX`（65535），大 shape 算子需要结合 BLOCK_SIZE 或分块方式控制 grid 大小。
 
 | 维度 | 核心结构 | 算子类型 |
@@ -51,18 +51,19 @@ NPU 与 GPU 的计算单元和支持的数据类型存在差异。迁移后应�
 
 ```diff
 import torch
-+ import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
+import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持
 import triton
 import triton.language as tl
 
-- DEVICE = triton.runtime.driver.active.get_active_torch_device()  # 【删除】GPU设备自动获取，NPU无需此逻辑
+# DEVICE = triton.runtime.driver.active.get_active_torch_device()  # 【删除】GPU设备自动获取，NPU无需此逻辑
 
 @triton.jit
-def add_kernel(x_ptr, # Pointer to first input vector.
-y_ptr, # Pointer to second input vector.
-output_ptr, # Pointer to output vector.
-n_elements, # Size of the vector.
-BLOCK_SIZE: tl.constexpr, # Number of elements each program should process.
+def add_kernel(
+    x_ptr,  # Pointer to first input vector.
+    y_ptr,  # Pointer to second input vector.
+    output_ptr,  # Pointer to output vector.
+    n_elements,  # Size of the vector.
+    BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
 ):
     pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
     block_start = pid * BLOCK_SIZE
@@ -75,7 +76,7 @@ BLOCK_SIZE: tl.constexpr, # Number of elements each program should process.
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
--   assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # 【删除】GPU设备一致性校验，NPU无需显式断言
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # 【删除】GPU设备一致性校验，NPU无需显式断言
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -83,16 +84,18 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
-- x = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-+ x = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
-- y = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
-+ y = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
+# x = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
+x = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
+# y = torch.rand(size, device='cuda')  # 【删除】GPU设备指定
+y = torch.rand(size, device='npu')  # 【修改】指定为昇腾NPU设备
 output_torch = x + y
 output_triton = add(x, y)
 print(output_torch)
 print(output_triton)
-print(f'The maximum difference between torch and triton is '
-f'{torch.max(torch.abs(output_torch - output_triton))}')
+print(
+    f'The maximum difference between torch and triton is '
+    f'{torch.max(torch.abs(output_torch - output_triton))}'
+)
 ```
 
 ### 示例 2：设备替换与单核数据搬运
@@ -120,11 +123,11 @@ def test_npu_1d(shape, dtype):
     XS = shape[0]
     YS = 4
 
--    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
-+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
+    # x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
     std = torch.broadcast_to(x, (YS, XS))
--    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
-+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
+    # output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
@@ -132,12 +135,16 @@ def test_npu_1d(shape, dtype):
 ## 常见问题概览
 
 完成迁移基础步骤后，可能会遇到新的问题，新问题可归纳为以下两类：
-1.coreDim限制问题
-当网格维度超过NPU硬件限制时触发。
-典型错误信息：coreDim=xxxx can't be greater than UINT16_MAX
-2.UB空间溢出
-内存使用超出NPU缓存容量。
-典型错误信息：ub overflow, requires xxxx bits while 1572684 bits available!
+
+1. coreDim 限制问题
+
+   当网格维度超过NPU硬件限制时触发。
+   典型错误信息：`coreDim=xxxx can't be greater than UINT16_MAX`。
+
+2. UB 空间溢出
+
+   内存使用超出NPU缓存容量。
+   典型错误信息：`ub overflow, requires xxxx bits while 1572864 bits available!`。
 
 ### 解决 coreDim 超限问题
 
@@ -148,11 +155,26 @@ NPU的 coreDim 参数不能超过 UINT16_MAX（65535）。当处理大规模数�
 数据规模：N = 1073741824，原始 BLOCK_SIZE = 2048，计算得到的 coreDim = 524288 > 65535（超限）
 
 解决思路1：
-昇腾编译器针对coreDim超限问题，有对应的解决方案，只需将环境变量'TRITON_ALL_BLOCKS_PARALLEL'设为1。设置命令如下：
-export TRITON_ALL_BLOCKS_PARALLEL=1
+后端会对通过 IR 安全分析的 kernel 自动启用 block mapping，无需再设置环境变量。需要确认各逻辑 program 之间不存在顺序依赖；如果编译器提示自动 block mapping 已跳过，请采用解决思路2中的显式 tiling。
+
 解决思路2：
 通过增大 BLOCK_SIZE 来减少所需的核心数量，确保 coreDim 不超过限制。
-计算公式： coreDim = ceil(N / BLOCK_SIZE) → 需满足：ceil(N / BLOCK_SIZE) <= 65535 => BLOCK_SIZE >= ceil(N / 65535) 代入 N = 1073741824 得： BLOCK_SIZE >= triton.next_power_of_2(triton.cdiv(1073741824, 65535)) = 32768 -> 至少为 32768更稳妥
+计算公式如下：
+
+```text
+coreDim = ceil(N / BLOCK_SIZE)
+ceil(N / BLOCK_SIZE) <= 65535
+BLOCK_SIZE >= ceil(N / 65535)
+```
+
+代入 `N = 1073741824` 可得：
+
+```text
+ceil(1073741824 / 65535) = 16385
+triton.next_power_of_2(16385) = 32768
+```
+
+因此，如果 `BLOCK_SIZE` 按 2 的幂取值，至少应设置为 `32768`。
 
 优化前的代码：
 
@@ -336,7 +358,7 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。 对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4） 由于硬件要求vector算子场景ub内存32bytes对齐 ，假设type=float16，对应stride应该为(12832, 128,1)
+切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4）由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128,1)
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
@@ -346,8 +368,8 @@ def masked_fill(inp, expand_mask, value):
 bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
 
-会有输出IR ， 对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
-观察HIVM IR阶段是否存在纯scalar搬运或者计算， 没有映射为simd指令，这会成为性能瓶颈。
+会有输出IR，对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
+观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为simd指令，这会成为性能瓶颈。
 
 问题：离散访存 && scalar低效映射
 b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式 对[1024,32] 中的最低维度32绑定线程块, 再对1024切16，分为[64， 16， 32]，再对64绑定线程块
@@ -363,7 +385,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
         block_shape=(BT,), # 块大小
         order=(0,) # 连续访问
     )
-​)
+)
 ```
 
 优化思路

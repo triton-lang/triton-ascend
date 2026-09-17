@@ -10,7 +10,7 @@ from triton.language import semantic, core, standard
 from triton.language.core import (_unwrap_if_constexpr, _tensor_member_fn, _unwrap_iterable, builtin, constexpr, dtype,
                                   tensor, check_bit_width, _unwrap_if_constexpr, range)
 
-from . import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95
 from .aux_ops import compile_hint_impl
 
 from typing import Optional, Tuple, List, overload
@@ -21,17 +21,17 @@ from triton._C.libtriton import ir
 @builtin
 def insert_slice(ful, sub, offsets, sizes, strides, _semantic=None, _generator=None) -> tensor:
     """
-    Insert a tensor to another tensor as specified by the operation’s offsets, sizes and strides arguments.
+    Insert a tensor to another tensor as specified by the offsets, sizes and strides arguments.
 
     :param ful: The tensor to receive tensor.
     :type ful: Tensor
     :param sub: The tensor to be inserted.
     :type sub: Tensor
-    :param offsets:
-    :type offsets: tuple of ints
-    :param sizes:
+    :param offsets: The starting element indices in `ful` where the slice `sub` should be inserted.
+    :type offsets: tuple of ints or tuple of tensors
+    :param sizes: The dimensions of the slice to be inserted.
     :type sizes: tuple of ints
-    :param strides:
+    :param strides: The element strides for each dimension of the insertion.
     :type strides: tuple of ints
     """
 
@@ -67,15 +67,15 @@ def insert_slice(ful, sub, offsets, sizes, strides, _semantic=None, _generator=N
 @builtin
 def extract_slice(ful, offsets, sizes, strides, _semantic=None, _generator=None) -> tensor:
     """
-    Extract a tensor from another tensor as specified by the operation’s offsets, sizes and strides arguments.
+    Extract a tensor from another tensor as specified by the offsets, sizes and strides arguments.
 
     :param ful: The tensor to split.
     :type ful: Tensor
-    :param offsets:
-    :type offsets: tuple of ints
-    :param sizes:
+    :param offsets: The starting element indices in `ful` from where the slice should be extracted.
+    :type offsets: tuple of ints or tuple of tensors
+    :param sizes: The dimensions of the slice to be extracted.
     :type sizes: tuple of ints
-    :param strides:
+    :param strides: The element strides for each dimension of the extraction.
     :type strides: tuple of ints
     """
 
@@ -96,7 +96,9 @@ def extract_slice(ful, offsets, sizes, strides, _semantic=None, _generator=None)
                 new_offsets.append(o)
             else:
                 new_offsets.append(o.handle if hasattr(o, 'handle') else o)
-        ret_type = tl.block_type(ful.type.scalar, sizes)
+        # change sizes to list(sizes) for interpreter mode to bypass tl.block_type's assertion
+        # and has no effect on the compile mode
+        ret_type = tl.block_type(ful.type.scalar, list(sizes))
         out = builder.create_extract_slice(ful.handle, new_offsets, sizes, strides)
         return tensor(out, ret_type)
 
@@ -116,8 +118,8 @@ def get_element(src, indice, _semantic=None, _generator=None):
 
     :param src: The tensor to be accessed.
     :type src: Tensor
-    :param indice:
-    :type indice: tuple of ints
+    :param indice: The indices specifying the position of the element to extract.
+    :type indice: tuple of ints or tuple of tensors
     """
 
     def get_element_impl(src: tensor, indice: List[tensor], builder: ir.builder):
@@ -146,6 +148,16 @@ def get_element(src, indice, _semantic=None, _generator=None):
 
 @builtin
 def flip(ptr, dim=-1, _semantic=None, _generator=None):
+    """Flips a tensor along the specified dimension.
+
+    Reverses the order of elements along the given axis. This is an Ascend-specific
+    implementation that supports both SIMD and non-SIMD execution modes.
+
+    :param ptr: The input tensor to flip.
+    :type ptr: tensor
+    :param dim: The dimension along which to flip. Defaults to -1 (last dimension).
+    :type dim: int
+    """
 
     def flip_impl(ptr: tensor, dim: int, builder: ir.builder, generator=None):
         """
@@ -286,13 +298,13 @@ def sort(ptr, dim=-1, descending=False, _semantic=None):
     """
     sort the input tensor along 'dim'
 
-    param:
-        ptr: tensor, input tensor
-        dim: int or tl.constexpr[int], dimension to sort
-        descending: bool or tl.constexpr[bool], the result is descending or not
-        _builder: ir.builder
-    return:
-        values: tensor, the sorted tensor
+    :param ptr: the tensor to be sorted
+    :type ptr: tensor
+    :param dim: dimension to sort
+    :type dim: int or tl.constexpr[int]
+    :param descending: the result is descending or not
+    :type descending: bool or tl.constexpr[bool]
+
     """
 
     def sort_impl(ptr: tensor, dim: int, descending, builder: ir.builder):
@@ -391,7 +403,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         if fp_downcast_rounding is not None:
             raise ValueError("fp_downcast_rounding should be set only for truncating fp conversions. "
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
-    if not is_compile_on_910_95:
+    if not is_compile_on_910_95(_semantic.builder.options.arch):
         if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
             raise ValueError("[fp8, fp64] is unsupported on Ascend for now."
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
@@ -444,7 +456,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         elif overflow_mode == "saturate" and \
              (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
              src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
-            if is_compile_on_910_95:
+            if is_compile_on_910_95(_semantic.builder.options.arch):
                 result = tensor(
                     _semantic.builder.create_int_cast(input.handle, dst_ty.to_ir(_semantic.builder), sign_extend),
                     dst_ty)

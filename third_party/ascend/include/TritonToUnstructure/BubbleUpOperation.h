@@ -72,6 +72,11 @@ private:
                          PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, arith::CmpIOp parentOp, Location loc,
                          PatternRewriter &rewriter) const;
+  // Pushes extract(select(condition, lhs, rhs)) through the select. A shaped
+  // condition is extracted at the same position while a scalar condition is
+  // reused directly.
+  void bubbleUpOperation(ExtractOpTy op, arith::SelectOp parentOp, Location loc,
+                         PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, arith::TruncFOp parentOp, Location loc,
                          PatternRewriter &rewriter) const;
   void bubbleUpOperation(ExtractOpTy op, arith::ExtFOp parentOp, Location loc,

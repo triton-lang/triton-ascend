@@ -2,7 +2,7 @@ from __future__ import annotations
 import ast
 import textwrap
 import inspect
-from typing import Tuple, List, Dict, Callable
+from typing import Tuple, List, Dict, Callable, TypeVar
 
 import math
 import numpy as np
@@ -13,30 +13,14 @@ import dataclasses
 from dataclasses import dataclass
 
 from triton.language.semantic import TritonSemantic
+from triton.runtime.jit import KernelInterface
 from triton.tools.tensor_descriptor import TensorDescriptor
 from .errors import InterpreterError
 from functools import partial
 from .._C.libtriton import interpreter as _interpreter
 from .._C.libtriton import ir as _ir
 
-# Import Ascend-specific interpreter builder (with deferred import to avoid circular dependency)
-_has_ascend_support = False
-AscendInterpreterBuilder = None
-
-
-def _try_import_ascend():
-    global _has_ascend_support, AscendInterpreterBuilder
-    try:
-        from . import ascend_interpreter
-        AscendInterpreterBuilder = ascend_interpreter.AscendInterpreterBuilder
-        _has_ascend_support = True
-    except ImportError:
-        _has_ascend_support = False
-        AscendInterpreterBuilder = None
-    except Exception:
-        # Catch other exceptions (like circular import) and log them
-        _has_ascend_support = False
-        AscendInterpreterBuilder = None
+T = TypeVar("T")
 
 
 @dataclass
@@ -50,6 +34,11 @@ class TensorHandle:
     data: np.array
     dtype: tl.dtype
     attr: Dict = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if not _validate_np_data_size(self.data, self.dtype):
+            raise ValueError(f"numpy data itemsize ({self.data.itemsize * 8} bits) exceeds dtype primitive_bitwidth "
+                             f"({self.dtype.primitive_bitwidth} bits) for triton type {self.dtype}")
 
     def __bool__(self):
         return bool(self.data.all())
@@ -110,8 +99,11 @@ class TensorDescHandle:
         assert len(self.block_shape) == self.ndim
         assert self.ndim >= 1, "descriptor cannot be 0 dimensional"
 
+        scalar_ty = self.base.dtype.element_ty
+        itemsize = scalar_ty.primitive_bitwidth // 8
         for stride in self.strides[:-1]:
-            assert stride.data.item() % 16 == 0, "stride must be 16-byte aligned"
+            byte_stride = stride.data.item() * itemsize
+            assert byte_stride % 16 == 0, "stride must be 16-byte aligned"
         assert self.strides[-1].data.item() == 1, "last dim must be contiguous"
 
     def materialize_pointers(self, offsets: List[TensorHandle]):
@@ -142,9 +134,25 @@ class InterpreterOptions:
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e5b16", "fp8e4nv", "fp8e4b8", "fp8e4b15")
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     default_dot_input_precision: str = "tf32"
-    allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee", "hf32")
+    allowed_dot_input_precisions: Tuple[str] = ("tf32", "tf32x3", "ieee")
     max_num_imprecise_acc_default: int = 0
     backend_name: str = "interpreter"
+
+
+def _validate_np_data_size(np_array, tl_dtype):
+    if isinstance(tl_dtype, tl.pointer_type):
+        return True
+
+    np_dtype_bitwidth = np_array.itemsize * 8
+    tl_dtype_bitwidth = tl_dtype.primitive_bitwidth
+
+    # numpy lowest itemsize is at least 8 bits
+    if tl_dtype_bitwidth < 8:
+        tl_dtype_bitwidth = 8
+
+    if np_dtype_bitwidth > tl_dtype_bitwidth:
+        return False
+    return True
 
 
 def _get_signed_np_dtype(dtype):
@@ -202,8 +210,6 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
     bias_input = input_dtype.exponent_bias
     bias_output = output_dtype.exponent_bias
     exponent = ((input_bin >> input_dtype.fp_mantissa_width) & ((1 << input_exponent_width) - 1)).astype(np.int32)
-    # mark NAN value
-    input_nan_index = (exponent == (1 << input_exponent_width) - 1) & (significand != 0)
     subnormal_index = exponent == 0
     if np.any(subnormal_index):
         # Credit to Phil: phil@openai.com
@@ -223,13 +229,8 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
         significand[subnormal_index] = (significand[subnormal_index] << bit_pos[subnormal_index]) & (
             (1 << input_dtype.fp_mantissa_width) - 1)
     # Prevent overflow and underflow
-    exponent_unclamped = exponent - bias_input + bias_output
-    output_max_exponent = (1 << output_exponent_width) - 1
-    exponent_output = np.maximum(0, np.minimum(exponent_unclamped, output_max_exponent))
+    exponent_output = np.maximum(0, np.minimum((exponent - bias_input + bias_output), (1 << output_exponent_width) - 1))
     exponent_output = exponent_output.astype(output_unint_dtype)
-    # mark overflow index
-    overflow_index = exponent_unclamped > output_max_exponent - 1
-
     sign_output = sign.astype(output_unint_dtype)
     if input_dtype.primitive_bitwidth > output_dtype.primitive_bitwidth:  # Downcast
         significand_output = (significand >> (input_dtype.fp_mantissa_width - output_dtype.fp_mantissa_width)) & (
@@ -257,8 +258,6 @@ def _convert_float(input, input_dtype, output_dtype, rounding_mode):
         shift[subnormal_index] = (1 - bias_output) - (exponent[subnormal_index] - bias_input)
         significand_output[subnormal_index] = (significand_output[subnormal_index] >> shift[subnormal_index]) | (
             1 << (output_dtype.fp_mantissa_width - shift[subnormal_index]))
-    # covert overflow value to inf
-    significand_output[overflow_index & ~input_nan_index] = 0
     output = (sign_output << (output_dtype.primitive_bitwidth - 1)) | (
         exponent_output << output_dtype.fp_mantissa_width) | significand_output
     return output.reshape(input.shape)
@@ -313,8 +312,6 @@ class InterpreterBuilder:
         self.options = InterpreterOptions()
         self.codegen_fns = {}
         self.codegen_fns["convert_custom_types"] = ExtraFunctions._convert_custom_types
-        # For interpreter mode, don't enforce GPU hardware shape constraints
-        # NumPy matmul works with any size, including small matrices
         self.codegen_fns["min_dot_size"] = lambda lhsType, rhsType: (1, 1, 1)
 
     def set_grid_idx(self, x, y, z):
@@ -490,7 +487,13 @@ class InterpreterBuilder:
 
     # binary operators
     def binary_op(self, lhs, rhs, op):
-        return TensorHandle(op(lhs.data, rhs.data), lhs.dtype.scalar)
+        output = op(lhs.data, rhs.data)
+        tl_dtype = lhs.dtype.scalar
+
+        if not _validate_np_data_size(output, tl_dtype):
+            output = output.astype(_get_np_dtype(tl_dtype))
+
+        return TensorHandle(output, tl_dtype)
 
     create_fadd = lambda self, lhs, rhs: self.binary_op(lhs, rhs, np.add)
     create_fmul = lambda self, lhs, rhs: self.binary_op(lhs, rhs, np.multiply)
@@ -571,7 +574,13 @@ class InterpreterBuilder:
 
     # ternary functions
     def ternary_op(self, lhs, rhs, other, op):
-        return TensorHandle(op(lhs.data, rhs.data, other.data), other.dtype.scalar)
+        output = op(lhs.data, rhs.data, other.data)
+        tl_dtype = other.dtype.scalar
+
+        if not _validate_np_data_size(output, tl_dtype):
+            output = output.astype(_get_np_dtype(tl_dtype))
+
+        return TensorHandle(output, tl_dtype)
 
     create_clampf = lambda self, arg, lo, hi, propagate_nans: self.ternary_op(arg, lo, hi, np.clip)
     create_select = lambda self, cond, lhs, rhs: self.ternary_op(cond, lhs, rhs, np.where)
@@ -633,9 +642,17 @@ class InterpreterBuilder:
     def create_histogram(self, data, bins, mask):
         if mask is None:
             mask = TensorHandle(np.ones_like(data.data, dtype=bool), tl.int1)
+
+        # By default np.histogram returns int64 dtype values
+        # Docs specify that returned dtype is taken based on optional weights.dtype
+        # This is fix for interpreter cases where for example int32 tensor is being passed
+        # But unexpectedly int64 values are being returned causing
+        # tl.store to write 8 bytes instead of 4 bytes which lead to silent data corruption
+        dummy_weights = np.ones_like(data.data, dtype=data.data.dtype)
+
         # force all masked elements to zero
         data = np.where(mask.data, data.data, np.zeros_like(data.data))
-        histogram = np.histogram(data, bins=bins, range=(0, bins))[0]
+        histogram = np.histogram(data, bins=bins, range=(0, bins), weights=dummy_weights)[0]
         # remove overcounted elements
         histogram[0] -= np.logical_not(mask.data).sum()
         return TensorHandle(histogram, tl.int32)
@@ -814,22 +831,45 @@ class InterpreterBuilder:
             raise TypeError(f"unsupported type {type}")
 
 
-def _patch_attr(obj, name, member, builder):
+_MISSING = object()
+
+
+class _LangPatchScope:
+    """Tracks patched attributes so they can be restored."""
+
+    def __init__(self) -> None:
+        self._changes: list[tuple[object, str, object]] = []
+
+    def set_attr(self, obj: object, name: str, value: object) -> None:
+        original = getattr(obj, name, _MISSING)
+        self._changes.append((obj, name, original))
+        setattr(obj, name, value)
+
+    def restore(self) -> None:
+        while self._changes:
+            obj, name, original = self._changes.pop()
+            if original is _MISSING:
+                delattr(obj, name)
+            else:
+                setattr(obj, name, original)
+
+
+def _patch_attr(obj, name, member, builder, scope: _LangPatchScope):
     semantic = TritonSemantic(builder)
     new_member = lambda *args, member=member, **kwargs: (member(*args, **
                                                                 {k: v
                                                                  for k, v in kwargs.items()
                                                                  if k != "_semantic"}, _semantic=semantic))
-    setattr(obj, name, new_member)
+    scope.set_attr(obj, name, new_member)
 
 
-def _patch_builtin(pkg, builder):
+def _patch_builtin(pkg, builder, scope: _LangPatchScope):
     for name, member in inspect.getmembers(pkg):
         if tl.core.is_builtin(member):
-            _patch_attr(pkg, name, member, builder)
+            _patch_attr(pkg, name, member, builder, scope)
 
 
-def _patch_lang_tensor(tensor):
+def _patch_lang_tensor(tensor, scope: _LangPatchScope):
 
     def _get_bool(self):
         data = self.handle.data
@@ -845,11 +885,11 @@ def _patch_lang_tensor(tensor):
         res_ty = tl.core.block_type(self.dtype, block_shape)
         return tl.core.tensor(handle, res_ty)
 
-    tensor.__index__ = lambda self: int(self.handle.data)
-    tensor.__bool__ = lambda self: _get_bool(self)
-    tensor.__repr__ = lambda self: repr(self.handle.data)
-    tensor.__str__ = lambda self: str(self.handle.data)
-    tensor.T = property(_get_transpose)
+    scope.set_attr(tensor, "__index__", lambda self: int(self.handle.data))
+    scope.set_attr(tensor, "__bool__", lambda self: _get_bool(self))
+    scope.set_attr(tensor, "__repr__", lambda self: repr(self.handle.data))
+    scope.set_attr(tensor, "__str__", lambda self: str(self.handle.data))
+    scope.set_attr(tensor, "T", property(_get_transpose))
 
 
 class ReduceScanOpInterface:
@@ -1044,7 +1084,7 @@ class ScanOps(ReduceScanOpInterface):
         return ret
 
 
-def _patch_reduce_scan():
+def _patch_reduce_scan(scope: _LangPatchScope):
     # Because interpreter doesn't support region_builder_fn, we cannot patch the builder
     # to use the new reduce and scan functions.
     # Instead, we need to patch reduce and reduce functions in tl and tl.core
@@ -1054,13 +1094,13 @@ def _patch_reduce_scan():
     def _new_scan(input, axis, combine_fn, reverse=False, **kwargs):
         return ScanOps(axis, combine_fn, reverse).apply(input)
 
-    tl.reduce = _new_reduce
-    tl.associative_scan = _new_scan
-    tl.core.reduce = _new_reduce
-    tl.core.associative_scan = _new_scan
+    scope.set_attr(tl, "reduce", _new_reduce)
+    scope.set_attr(tl, "associative_scan", _new_scan)
+    scope.set_attr(tl.core, "reduce", _new_reduce)
+    scope.set_attr(tl.core, "associative_scan", _new_scan)
 
 
-def _patch_lang_core(lang):
+def _patch_lang_core(lang, scope: _LangPatchScope):
 
     def _new_to_ir(self, builder):
         # We need to specify signedness for integer types in the numpy mode
@@ -1126,33 +1166,31 @@ def _patch_lang_core(lang):
         input.handle.set_attr(name, values)
         return input
 
-    lang.range = _new_range
-    lang.static_range = _new_range
-    lang.static_assert = _new_static_assert
-    lang.static_print = print
-    lang.dtype.to_ir = _new_to_ir
-    lang.multiple_of = partial(_set_attr, name="tt.divisibility")
-    lang.max_contiguous = partial(_set_attr, name="tt.contiguity")
-    lang.max_constancy = partial(_set_attr, name="tt.constancy")
+    scope.set_attr(lang, "range", _new_range)
+    scope.set_attr(lang, "static_range", _new_range)
+    scope.set_attr(lang, "static_assert", _new_static_assert)
+    scope.set_attr(lang, "static_print", print)
+    scope.set_attr(lang.dtype, "to_ir", _new_to_ir)
+    scope.set_attr(lang, "multiple_of", partial(_set_attr, name="tt.divisibility"))
+    scope.set_attr(lang, "max_contiguous", partial(_set_attr, name="tt.contiguity"))
+    scope.set_attr(lang, "max_constancy", partial(_set_attr, name="tt.constancy"))
 
-    _patch_reduce_scan()
+    _patch_reduce_scan(scope)
 
 
 def _patch_lang(fn):
+    scope = _LangPatchScope()
     langs = [value for _, value in fn.__globals__.items() if inspect.ismodule(value) and value in [tl, tl.core]]
     assert len(langs) >= 1, "triton.language must be visible from within jit'd function"
     for lang in langs:
-        _patch_builtin(lang, interpreter_builder)
-        _patch_builtin(lang.tensor, interpreter_builder)
+        _patch_builtin(lang, interpreter_builder, scope)
+        _patch_builtin(lang.tensor, interpreter_builder, scope)
         if lang == tl:
-            _patch_builtin(lang.math, interpreter_builder)
-        _patch_lang_tensor(lang.tensor)
-        _patch_lang_core(lang)
-    _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder)
-
-    # Patch Ascend extensions if using AscendInterpreterBuilder
-    if hasattr(interpreter_builder, 'patch_extensions'):
-        interpreter_builder.patch_extensions(fn)
+            _patch_builtin(lang.math, interpreter_builder, scope)
+        _patch_lang_tensor(lang.tensor, scope)
+        _patch_lang_core(lang, scope)
+    _patch_builtin(tl.core.tensor_descriptor_base, interpreter_builder, scope)
+    return scope
 
 
 def _tuple_create(arg, contents):
@@ -1199,20 +1237,8 @@ def _implicit_cvt(arg):
     return arg
 
 
-# Use AscendInterpreterBuilder if available, otherwise fall back to base InterpreterBuilder
-_try_import_ascend()
-if _has_ascend_support and AscendInterpreterBuilder is not None:
-    interpreter_builder = AscendInterpreterBuilder()
-else:
-    interpreter_builder = InterpreterBuilder()
+interpreter_builder = InterpreterBuilder()
 interpreter_semantic = TritonSemantic(interpreter_builder)
-
-# These keywords are not supported by the interpreter
-RESERVED_KWS = ["num_warps", "num_stages", "num_ctas", "enable_fp_fusion", "grid", "maxnreg"]
-
-# Allow Ascend interpreter to extend reserved keywords
-if hasattr(interpreter_builder, 'get_additional_reserved_keywords'):
-    RESERVED_KWS.extend(interpreter_builder.get_additional_reserved_keywords())
 
 
 def _unwrap_tensor(t):
@@ -1229,12 +1255,13 @@ def _rewrap_tensor(t, original_tensor):
 
 class GridExecutor:
 
-    def __init__(self, fn, arg_names, grid):
+    def __init__(self, fn, arg_names, grid, pre_run_hooks=[]):
         from .jit import _normalize_ty  # TODO: modularize
 
         self.fn = fn
         self.arg_names = arg_names
         self.grid = grid
+        self.pre_run_hooks = pre_run_hooks
         __annotations__ = {name: _normalize_ty(ty) for name, ty in fn.__annotations__.items()}
         self.constexprs = [name for name in arg_names if __annotations__.get(name) == "constexpr"]
 
@@ -1300,8 +1327,6 @@ class GridExecutor:
             arg_dev.copy_(arg_hst)
 
     def __call__(self, *args_dev, **kwargs):
-        if kwargs.pop("warmup", False):
-            return
         # Removes not used reserved keywords from kwargs
         # Triton doesn't support keyword-only, variable positional or variable keyword arguments
         # It's safe to inspect only positional or keyword arguments (i.e., argspec.args)
@@ -1309,33 +1334,33 @@ class GridExecutor:
         kwargs = {k: v for k, v in kwargs.items() if k in argspec.args}
         # copy arguments to the host
         args_hst, kwargs_hst = self._init_args_hst(args_dev, kwargs)
+        # run pre-run hooks
+        for hook in self.pre_run_hooks:
+            hook(*args_hst, **kwargs_hst)
         # remaps core language functions to interpreted ones
-        _patch_lang(self.fn)
-        # we need to copy arguments to the host for the interpreter
-        # implicitly convert tensor arguments to their base pointers
-        args = inspect.getcallargs(self.fn, *args_hst, **kwargs_hst)
-        args = {name: arg if name in self.constexprs else _implicit_cvt(arg) for name, arg in args.items()}
-        # iterate through grid
-        grid = self.grid(args) if callable(self.grid) else self.grid
-        assert len(grid) <= 3, "grid must have at most 3 dimensions"
-        grid = grid + (1, ) * (3 - len(grid))
-        interpreter_builder.set_grid_dim(*grid)
+        patch_scope = _patch_lang(self.fn)
         try:
-            # Execute kernels - sub_vec_id simulation handled by AscendInterpreterBuilder
-            if hasattr(interpreter_builder, 'execute_with_sub_vec_simulation'):
-                # Ascend builder with sub-vector simulation
-                interpreter_builder.execute_with_sub_vec_simulation(self.fn, args, grid)
-            else:
-                # Standard execution for base interpreter
+            # we need to copy arguments to the host for the interpreter
+            # implicitly convert tensor arguments to their base pointers
+            args = inspect.getcallargs(self.fn, *args_hst, **kwargs_hst)
+            args = {name: arg if name in self.constexprs else _implicit_cvt(arg) for name, arg in args.items()}
+            # iterate through grid
+            grid = self.grid(args) if callable(self.grid) else self.grid
+            assert len(grid) <= 3, "grid must have at most 3 dimensions"
+            grid = grid + (1, ) * (3 - len(grid))
+            interpreter_builder.set_grid_dim(*grid)
+            try:
                 for x in range(grid[0]):
                     for y in range(grid[1]):
                         for z in range(grid[2]):
                             interpreter_builder.set_grid_idx(x, y, z)
                             self.fn(**args)
-        except Exception as e:
-            if triton.knobs.compilation.front_end_debugging:
-                raise
-            raise InterpreterError(repr(e)) from e
+            except Exception as e:
+                if triton.knobs.compilation.front_end_debugging:
+                    raise
+                raise InterpreterError(repr(e)) from e
+        finally:
+            patch_scope.restore()
         # copy arguments back to propagate side-effects
         self._restore_args_dev(args_dev, args_hst, kwargs, kwargs_hst)
 
@@ -1425,7 +1450,7 @@ class FunctionRewriter:
         return local_namespace[self.fn.__name__]
 
 
-class InterpretedFunction:
+class InterpretedFunction(KernelInterface[T]):
     # Cache all rewritten functions
     rewritten_fn: Dict[Callable, Callable] = {}
 
@@ -1433,15 +1458,20 @@ class InterpretedFunction:
         self.fn = fn
         self.rewriter = FunctionRewriter(fn, **kwargs)
         self.kwargs = kwargs
+        self.pre_run_hooks = []
 
-        def run(*args, **kwargs):
-            grid = kwargs["grid"]
-            fn = self.rewrite()
-            return GridExecutor(fn, self.arg_names, grid)(*args, **kwargs)
-
-        self.run = run
         signature = inspect.signature(fn)
         self.arg_names = [v.name for v in signature.parameters.values()]
+
+    def run(self, *args, grid, warmup, **kwargs):
+        if warmup:
+            return
+        fn = self.rewrite()
+        return GridExecutor(fn, self.arg_names, grid, self.pre_run_hooks)(*args, **kwargs)
+
+    def add_pre_run_hook(self, hook):
+        assert callable(hook)
+        self.pre_run_hooks.append(hook)
 
     def rewrite(self):
         if self.fn not in self.rewritten_fn:
@@ -1451,10 +1481,6 @@ class InterpretedFunction:
     @property
     def __name__(self):
         return self.fn.__name__
-
-    def __getitem__(self, grid):
-        fn = self.rewrite()
-        return GridExecutor(fn, self.arg_names, grid)
 
     def __call__(self, *args, **kwargs):
         # This is a device function call

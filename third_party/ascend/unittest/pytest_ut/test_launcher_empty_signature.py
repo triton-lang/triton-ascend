@@ -35,3 +35,22 @@ def test_launcher_empty_signature():
     grid = (1, )
     _empty_kernel[grid]()
     assert True
+
+
+# Regression test for commit 6365783a:
+# When all kernel parameters are constexpr, the launcher generated invalid
+# C++ code with a trailing comma in the _launch function signature because
+# it checked len(signature) > 0 instead of len(arg_decls) > 0.
+@triton.jit
+def _all_constexpr_kernel(VAL: tl.constexpr):
+    tl.static_assert(VAL == 42)
+    pass
+
+
+@pytest.mark.interpreter
+def test_launcher_all_params_constexpr():
+    grid = (1, )
+    # All params are constexpr -> arg_decls is empty but signature is not.
+    # Before the fix this produced: void _launch(..., )  /* trailing comma */
+    _all_constexpr_kernel[grid](VAL=42)
+    assert True

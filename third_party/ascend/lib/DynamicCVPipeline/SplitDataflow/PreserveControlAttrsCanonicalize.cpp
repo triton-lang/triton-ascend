@@ -20,31 +20,30 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/PreserveControlAttrsCanonicalize.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/Support/Debug.h"
 
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/PassRegistry.h"
 #include "mlir/Rewrite/FrozenRewritePatternSet.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/PreserveControlAttrsCanonicalize.h"
+
+#include "DynamicCVPipeline/Common/Utils.h"
 
 using namespace mlir;
 
-static constexpr const char *DEBUG_TYPE = "PreserveControlAttrsCanonicalize";
-#define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
-
-template <typename... Args> static void logDebug(const Args &...args) {
-  LLVM_DEBUG({
-    auto &debugStream = llvm::dbgs();
-    debugStream << '[' << DEBUG_TYPE << "] ";
-    (debugStream << ... << args);
-    debugStream << "\n";
-  });
-}
+#define DEBUG_TYPE "preserve-control-attrs-canonicalize"
+#define LOG_DEBUG(msg)                                                         \
+  LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << msg)
 
 namespace {
+
+static void debugDumpIr(StringRef stage, Operation *op) {
+  LOG_DEBUG(stage << "\n"; op->print(llvm::dbgs()); llvm::dbgs() << "\n");
+}
 
 static bool isTrackedControlFlowOp(Operation *op) {
   return isa<scf::ForOp, scf::IfOp, scf::WhileOp, scf::ParallelOp>(op);
@@ -67,51 +66,83 @@ public:
 
   void notifyOperationReplaced(Operation *op, Operation *newOp) override {
     transferAttrs(op, newOp);
+    transferBlockIdToInsertedReplacement(op, newOp);
   }
 
   void notifyOperationReplaced(Operation *op, ValueRange values) override {
     if (Operation *newOp = findReplacementOp(op, values)) {
       transferAttrs(op, newOp);
     }
+
+    for (Value value : values) {
+      if (!value)
+        continue;
+      if (Operation *defOp = value.getDefiningOp()) {
+        transferBlockIdToInsertedReplacement(op, defOp);
+      }
+    }
   }
 
 private:
   Operation *findReplacementOp(Operation *oldOp,
                                ValueRange replacements) const {
-    if (!isTrackedControlFlowOp(oldOp)) {
+    if (!isTrackedControlFlowOp(oldOp))
       return nullptr;
-    }
 
+    // Prefer direct replacement from definingOps
     for (Value value : replacements) {
+      if (!value)
+        continue;
       Operation *defOp = value.getDefiningOp();
       if (defOp && recentInserts.contains(defOp) &&
-          canTransferAttrs(oldOp, defOp)) {
+          canTransferAttrs(oldOp, defOp))
         return defOp;
-      }
     }
 
+    Block *oldBlock = oldOp->getBlock();
+    if (!oldBlock)
+      return nullptr;
+
+    // Fallback: search recentInserts in reverse, but only accept same-block
+    // candidates.
     for (Operation *candidate : llvm::reverse(recentInserts.getArrayRef())) {
-      if (canTransferAttrs(oldOp, candidate)) {
-        return candidate;
-      }
+      if (!canTransferAttrs(oldOp, candidate))
+        continue;
+
+      if (candidate->getBlock() != oldBlock)
+        continue;
+      return candidate;
     }
     return nullptr;
   }
 
   static void transferAttrs(Operation *from, Operation *to) {
-    if (!canTransferAttrs(from, to)) {
+    if (!canTransferAttrs(from, to))
+      return;
+
+    for (NamedAttribute attr : from->getAttrs()) {
+      if (to->hasAttr(attr.getName()))
+        continue;
+      to->setAttr(attr.getName(), attr.getValue());
+    }
+  }
+
+  void transferBlockIdToInsertedReplacement(Operation *from,
+                                            Operation *to) const {
+    if (!from || !to || from == to || !isTrackedControlFlowOp(from)) {
       return;
     }
 
-    for (NamedAttribute attr : from->getAttrs()) {
-      if (to->hasAttr(attr.getName())) {
-        continue;
-      }
-      to->setAttr(attr.getName(), attr.getValue());
-      logDebug("carry attr '", attr.getName(), "' from ",
-               from->getName().getStringRef(), " to ",
-               to->getName().getStringRef());
+    Attribute blockId = from->getAttr(CVPipeline::kBlockId);
+    if (!blockId || to->hasAttr(CVPipeline::kBlockId)) {
+      return;
     }
+
+    if (!recentInserts.contains(to) || from->getBlock() != to->getBlock()) {
+      return;
+    }
+
+    to->setAttr(CVPipeline::kBlockId, blockId);
   }
 
   llvm::SetVector<Operation *> recentInserts;
@@ -131,6 +162,12 @@ static void populateCanonicalizationPatterns(MLIRContext *ctx,
 } // namespace
 
 void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation() {
+  if (CVPipeline::hasFallbackAttr(getOperation())) {
+    return;
+  }
+
+  debugDumpIr("before PreserveControlAttrsCanonicalizePass", getOperation());
+
   RewritePatternSet patterns(&getContext());
   populateCanonicalizationPatterns(&getContext(), patterns);
 
@@ -142,8 +179,11 @@ void mlir::triton::PreserveControlAttrsCanonicalizePass::runOnOperation() {
                                    FrozenRewritePatternSet(std::move(patterns)),
                                    config))) {
     getOperation()->emitError("PreserveControlAttrsCanonicalizePass failed");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(getOperation(), CVPipeline::ERRCODE_FAILED);
+    return;
   }
+
+  debugDumpIr("after PreserveControlAttrsCanonicalizePass", getOperation());
 }
 
 namespace mlir {

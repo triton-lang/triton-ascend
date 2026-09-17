@@ -20,7 +20,7 @@
 
 import triton
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 import pytest
 import test_common
 
@@ -36,16 +36,15 @@ def triton_compile_hint(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_
         xmask = xindex < xnumel
         x0 = xindex
         tmp0 = tl.load(in_ptr0 + (x0), xmask)
-        extension.compile_hint(tmp0, "hint_a")
-        extension.multibuffer(tmp0, 2)
+        al.compile_hint(tmp0, "hint_a")
+        al.multibuffer(tmp0, 2)
         tmp2 = tmp0
-        extension.compile_hint(tmp2, "hint_b", 42)
-        extension.compile_hint(tmp2, "hint_c", True)
-        extension.compile_hint(tmp2, "hint_d", [XBLOCK, XBLOCK_SUB])
+        al.compile_hint(tmp2, "hint_b", 42)
+        al.compile_hint(tmp2, "hint_c", True)
+        al.compile_hint(tmp2, "hint_d", [XBLOCK, XBLOCK_SUB])
         tl.store(out_ptr0 + (xindex), tmp2, xmask)
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
@@ -54,5 +53,17 @@ def test_compile_hint(param_list):
     x0 = test_common.generate_tensor(shape, dtype).npu()
     y_ref = x0
     y_cal = test_common.generate_tensor(shape, dtype).npu()
-    triton_compile_hint[(ncore, )](x0, y_cal, x0.numel(), xblock, xblock_sub)
+    h = triton_compile_hint[(ncore, )](x0, y_cal, x0.numel(), xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
+
+    # Numeric correctness alone doesn't prove the hints reached the compiler:
+    # compile_hint/multibuffer don't change kernel semantics, so a wrong or
+    # dropped hint would still produce a numerically correct result. Check
+    # the lowered IR actually carries each annotation.mark with its value.
+    code_str = h.asm["ttadapter"]
+    assert code_str.count("annotation.mark") == 5
+    assert "{hint_a}" in code_str
+    assert "{hivm.multi_buffer = 2 : i32}" in code_str
+    assert "{hint_b = 42 : i32}" in code_str
+    assert "{hint_c = true}" in code_str
+    assert f"{{hint_d = [{xblock}, {xblock_sub}]}}" in code_str

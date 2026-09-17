@@ -33,6 +33,7 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -71,20 +72,31 @@ public:
   ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
 private:
+  llvm::DenseMap<Operation *, Operation *> CloneOpMap;
+
   // Map from operation to its core type
   llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
+
+  // Cache: value -> whether its defining chain reaches a VECTOR-only op.
+  // Memoizes hasVectorOnlyProducer during CUBE upstream propagation.
+  llvm::DenseMap<mlir::Value, bool> vectorOnlyProducerCache;
 
   // All operations in the module
   llvm::SmallVector<Operation *> allOps;
 
   // Seed operations for CUBE upstream propagation
   llvm::SmallVector<Operation *> cubeSeeds;
+  // if A*B+C's C from broadcast chain, they need to keep for Normalize.
+  llvm::DenseSet<Operation *> inBroadcastChain;
 
   std::shared_ptr<AliasAnalysis> aliasAnalysis;
   std::shared_ptr<CVPipeline::MemoryDependenceGraph> memDepGraph;
 
   // Mark an operation as CUBE
   void markCube(Operation *op);
+
+  // Mark synchronization Op
+  llvm::LogicalResult markSynchronizationOp();
 
   // Pattern matching for CUBE operations
   int patternMatchCUBE();
@@ -93,6 +105,9 @@ private:
   void matchToTensorPattern(Operation *def);
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
+  void matchEmptyPattern(Operation *def);
+  void matchBroadcastPattern(Operation *def);
+  Value extractMmadBiasFromPotentialUnitDimExpand(Value bias);
 
   // Downstream pattern matching helpers
   void matchStorePattern(Operation *user);
@@ -102,6 +117,16 @@ private:
   // Propagate CUBE core type upstream
   int propagateCubeUpstream();
 
+  // Propagate CUBE upstream for a specific operation
+  void propagateCubeUpstreamForOp(Operation *startOp);
+
+  // Shared skip predicates for both CUBE upstream BFS paths.
+  bool shouldSkipCubeUpstream(Operation *op);
+
+  // Helper: Handle fill op in scf.if - if all ops in scf.if are CUBE, mark
+  // scf.if and propagate upstream
+  void handleFillInScfIf(Operation *fillOp);
+
   // Get upstream operations based on both SSA and memory dependencies
   void
   getUpstreamOpsWithMemoryDeps(Operation *cur,
@@ -110,14 +135,25 @@ private:
   // Step 3: Mark remaining operations as VECTOR
   int markRemainingAsVector();
 
+  void markUpstreamsOfImplicitTranspose();
+
   // Step 4: Propagate VECTOR core type upstream
   int propagateVectorUpstream();
+
+  // Step 4.5: Penetrate CUBE coloring into pure loader scf.for loops whose
+  // results are consumed exclusively by CUBE ops.
+  int penetrateCubeIntoForLoops();
+
+  // Helper: decide whether an scf.for or scf.while is a pure cube-loader loop
+  bool isCubeLoaderForOp(scf::ForOp forOp);
+  bool isCubeLoaderForWhileOp(scf::WhileOp whileOp);
 
   // Initialize the pass
   void initializePass(ModuleOp module);
 
   // Get the core type of an operation
   OpCoreType getCoreType(Operation *op) const;
+  OpCoreType getForInitCoreType(OpOperand *operand) const;
 
   // Set the core type of an operation
   void setCoreType(Operation *op, OpCoreType coreType);
@@ -136,7 +172,8 @@ private:
   // then region yield
   bool handleYieldFromElseRegion(std::vector<OpCoreType> &coreTypes,
                                  unsigned operandIndex,
-                                 Operation *thenYieldForElse, Value &operand);
+                                 Operation *thenYieldForElse, Value &operand,
+                                 Operation *elseYieldOp);
 
   // Step 6: Handle CUBE_AND_VECTOR operations
   int handleCubeAndVector();
@@ -154,12 +191,6 @@ private:
 
   // Helper: Mark fill operations as CUBE when their output buffer is CUBE
   void markFillOpsAsCube();
-
-  // Step 7: Pre-legalize matmul (before initializePass)
-  int preLegalizeMatmul();
-
-  // Helper: bulk delete operations and clean up tracking structures
-  void bulkDeleteOps(llvm::SmallVectorImpl<Operation *> &opsToDelete);
 
   // Step 8: Stamp core type info to IR
   int stampToIR();

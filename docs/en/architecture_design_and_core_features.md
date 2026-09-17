@@ -39,25 +39,18 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 
 ### 2.2 Directory Structure and Function Description
 
-**`include/` and `lib/`**
-
-- **Content**: **MLIR Passes**, **dialects**, and related tools for Ascend NPUs.
-- **Description**: Represents and optimizes Ascend-specific computational graphs in the MLIR compilation process.
-
-**`libdevice.py`**
-
-- **Content**: `libdevice` API adaptable to Ascend NPUs.
-- **Description**: Provides underlying implementation support for the Ascend NPU hardware, which is called by Triton operators.
-
-**`backend/compiler.py`**
-
-- **Content**: Main entry of the `triton-ascend` compiler.
-- **Description**: Compiles the high-level DSL code of Triton into an **executable binary file** (such as the`.o` file) that can be executed on the Ascend NPU.
-
-**`backend/driver.py`**
-
-- **Content**: `triton-ascend` driver module.
-- **Description**: Loads and starts the compiled executable binary file.
+| Directory or File | Architecture Layer | Description |
+| --- | --- | --- |
+| `python/` | Triton core | Contains the common Python implementation from standard Triton, including `triton.language`, JIT, runtime, cache, and tool entry points. Target-independent capabilities should live here first. |
+| `include/` and `lib/` | Triton core | Contains the common C++/MLIR infrastructure, dialects, passes, and conversion logic from standard Triton. Ascend-specific backend code is not placed here. |
+| `third_party/ascend/` | Triton-Ascend | Root directory of the Ascend backend. It contains Ascend NPU, CANN, and BiSheng Compiler-specific language extensions, compiler backend, runtime driver, MLIR passes, examples, and tests. |
+| `third_party/ascend/language/` | Ascend language extension | Contains Ascend language extensions. During installation, this directory is linked under `triton.language.extra`, so Triton kernels can use `triton.language.extra.cann`. |
+| `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | Provides the Ascend NPU-adapted Python `libdevice` interface, including math functions and low-level operator wrappers used by Triton kernels. |
+| `third_party/ascend/backend/compiler.py` | compiler | Main entry of the Ascend compiler backend. It registers compiler options, organizes TTIR lowering to Ascend-adapted IR, Linalg, LLVM, and related stages, and invokes the downstream toolchain to generate executable binaries. |
+| `third_party/ascend/backend/driver.py` | driver | Ascend runtime driver module. It connects Triton runtime with CANN/TorchNPU runtime environments and launches compiled device-side executables. |
+| `third_party/ascend/include/` and `third_party/ascend/lib/` | compiler | Contains Ascend-specific MLIR dialects, passes, and conversions, such as `TritonToLinalg`, `TritonToStructured`, `DynamicCVPipeline`, and `AutoBlockify`. |
+| `third_party/ascend/AscendNPU-IR/` | compiler | Contains Ascend NPU IR and BiSheng compilation-chain integration used by the Triton-Ascend pipeline when lowering further toward hardware code generation. |
+| `third_party/ascend/tutorials/` and `third_party/ascend/unittest/` | Examples and tests | Provides Triton examples on Ascend, migration examples, Python unit tests, and MLIR conversion tests for validating Ascend backend capabilities. |
 
 ## 3. Modules
 
@@ -77,23 +70,30 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 
 |No.| NPU Option                                   | Hardware Platform    | Description|
 | --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Autotune option. It enables or disables the ping-pong pipeline. Enabled by default.|
-| 2   | enable_auto_bind_sub_block                    | NPU        | Autotune option (CV-fused kernels only). It enables or disables auto-binding of sub-blocks.|
-| 3   | enable_hivm_auto_cv_balance                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables automatic CV balancing.|
-| 4   | sync_solver                                   | NPU        | Autotune option (CV-fused kernels only). It enables or disables the synchronization solver. |
-| 5   | unit_flag                                     | NPU        | Autotune option. It enables or disables the sync unit flag.|
-| 6   | inject_barrier_all                            | NPU        | Autotune option. It enables or disables automatic injection of barriers for all operations.|
-| 7   | inject_block_all                              | NPU        | Autotune option. It enables or disables automatic injection of blocks for all operations.|
-| 8   | limit_auto_multi_buffer_only_for_local_buffer | NPU        | Autotune option. It restricts automatic multi-buffering only to local buffers.|
-| 9   | limit_auto_multi_buffer_of_local_buffer       | NPU        | Autotune option. It enables or disables automatic multi-buffering for local buffers.|
-| 10  | set_workspace_multibuffer                     | NPU        | Autotune option. It enables or disables multi-buffering for the workspace.|
-| 11  | tile_mix_vector_loop                          | NPU        | Autotune option (CV-fused kernels only). It enables or disables tiling for vector loops.|
-| 12  | tile_mix_cube_loop                            | NPU        | Autotune option (CV-fused kernels only). It enables or disables tiling for cube loops.|
-| 13  | disable_auto_inject_block_sync                | NPU        | Autotune option (CV-fused kernels only). It enables or disables automatic injection of block synchronizations.|
-| 14  | stream                                        | NPU        | (Optional) Informs the compiler about the NPU stream to use.|
-| 15  | enable_linearize                              | NPU        | Autotune option. It enables or disables the linearization pass.|
-| 16  | enable_nd2nz_on_vector                        | NPU        | Autotune option (CV-fused kernels only). It enables or disables the ND (n-dimensional) to NZ (non-zero) layout transformation.|
-| 17  | auto_blockify_size                            | NPU        | Autotune option. It enables or disables AutoBlockify pass. It is ignored when TRITON_ALL_BLOCKS_PARALLEL is not set |
+| 1   | multibuffer                                   | NPU        | Enables or disables the ping-pong pipeline. Enabled by default.|
+| 2   | enable_graph_optimize                         | NPU        | Enables or disables TTIR Graph Optimization.|
+| 3   | bisheng_options                               | NPU (950) | Forwards additional arguments to BiSheng compilation paths that support this option.|
+| 4   | enable_auto_bind_sub_block                    | NPU        | Enables or disables automatic sub-block binding.|
+| 5   | enable_hivm_auto_cv_balance                   | NPU        | Enables or disables automatic CV balancing.|
+| 6   | enable_cube_block_merge                       | NPU (950) | Controls Cube block merging in the DynamicCV pipeline.|
+| 7   | vf_fusion_mode                                | NPU (950) | Selects the VF fusion strategy.|
+| 8   | enable_vf_fusion                              | NPU (950) | Enables or disables VF fusion.|
+| 9   | hfusion_enable_multiple_consumer_fusion       | NPU (950) | Enables or disables multiple-consumer HFusion.|
+| 10  | sync_solver                                   | NPU        | Enables or disables the synchronization solver.|
+| 11  | unit_flag                                     | NPU        | Enables or disables the sync unit flag.|
+| 12  | inject_barrier_all                            | NPU        | Enables or disables automatic barrier injection.|
+| 13  | inject_block_all                              | NPU        | Enables or disables automatic block injection.|
+| 14  | limit_auto_multi_buffer_only_for_local_buffer | NPU        | Restricts automatic multi-buffering to local buffers.|
+| 15  | limit_auto_multi_buffer_of_local_buffer       | NPU        | Configures the local-buffer automatic multi-buffering scope.|
+| 16  | set_workspace_multibuffer                     | NPU        | Configures workspace multi-buffering.|
+| 17  | tile_mix_vector_loop                          | NPU        | Configures the Vector loop split count.|
+| 18  | tile_mix_cube_loop                            | NPU        | Configures the Cube loop split count.|
+| 19  | buf_slot_num_of_veccore                       | NPU        | Configures the number of vector-core-local buffer slots.|
+| 20  | buf_slot_num_of_crosscore                     | NPU        | Configures the number of cross-core buffer slots.|
+| 21  | buf_slot_num_of_gm                            | NPU        | Configures the number of GM load buffer slots.|
+| 22  | compile_mode                                  | NPU        | Compilation mode: `"simd_simt_template"` (default) / `"simd"` / `"simt_only"`; `"simt_only"` is supported only on Ascend 950.|
+
+See {ref}`Compiler Option Cleanup and Compatibility <compiler-option-cleanup-and-compatibility>` for deprecated-option compatibility and rename mappings.
 
 #### 3.2.2 SIMD Compiler
 
@@ -212,7 +212,101 @@ TritonToLinalg converts ttir to linalg ir.
 | triton-to-hivm | Processes the block synchronization operations (`tl.sync_block_all`, `tl.sync_block_set`, and `tl.sync_block_wait`) of Triton and converts them into the cross-core synchronization instruction in the `HIVM` dialect of Ascend NPU. These instructions are used to manage synchronization and data dependencies in the multi-core pipeline, which is the key to pipeline optimization.| TritonCustomOpToHIVMSyncOpConversion | Converts Triton synchronization instructions to HIVM synchronization instructions.<br>• `sync_block_all`: synchronizes blocks globally.<br>• `sync_block_set`: sets a synchronization point.<br>• `sync_block_wait`: waits for a synchronization point.|
 | triton-to-llvm | Converts the inline assembly operation (`tl.inline_assembly`) in Triton to the inline assembly in the LLVM dialect, and finally maps it to a CCE hardware intrinsic function of Ascend NPU.| ElementwiseInlineAsmOpConversion | Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`.|
 
-#### 3.2.3 Ascend affinitive Operators
+#### 3.2.3 SIMT Compiler (Ascend 950)
+
+Ascend 950 adds SIMT support alongside the SIMD path to accelerate **unstructured / discrete** memory access (for example, indirect-index load/store).
+Developers choose the compilation path via `compile_mode`.
+
+##### 3.2.3.1 `compile_mode` Overview
+
+| `compile_mode` | Description | Compilation Path |
+|---|---|---|
+| `"simd"` | Pure SIMD: structured access via DMA; unstructured access via scalar loops | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simd_simt_template"` (**default**) | Hybrid: structured access stays on SIMD; discrete access prefers SIMT templates | `Triton IR → Linalg IR → AscendNPU IR` |
+| `"simt_only"` | Pure SIMT: send Triton IR directly to AscendNPU IR | `Triton IR → AscendNPU IR` |
+
+Usage examples:
+
+```python
+# Pure SIMD
+kernel[grid](..., compile_mode="simd")
+
+# Hybrid (default; discrete access on 950 prefers SIMT)
+kernel[grid](..., compile_mode="simd_simt_template")
+
+# Pure SIMT
+kernel[grid](..., compile_mode="simt_only", num_warps=32)
+```
+
+##### 3.2.3.2 Compilation Flow by Mode
+
+```mermaid
+flowchart TD
+    A[compile_mode] --> B["simd"]
+    A --> C["simd_simt_template"]
+    A --> D["simt_only"]
+
+    %% simt_only branch
+    D --> D1[Send Triton IR directly for pure SIMT compilation, Triton IR → AscendNPU IR]
+
+    %% simd full path
+    B --> B1[discrete-mask-access-conversion]
+    B1 --> B2[Split into contiguous/discrete parts and handle via SIMD]
+    B2 --> B3[triton-to-unstructured]
+    B3 --> B4[Expand discrete access into scalar loops]
+    B4 --> B5[TritonToLinalg]
+    B5 --> B6[AscendNPU IR]
+
+    %% simd_simt_template full path
+    C --> C1[discrete-mask-access-conversion]
+    C1 --> C2[Mark when conditions are met and defer to downstream SIMT handling]
+    C2 --> C3[triton-to-unstructured]
+    C3 --> C4{Can discrete access be converted to indirect_load/store SIMT templates?}
+    C4 -- Yes --> B5
+    C4 -- No --> C5[Fall back to scalar loops]
+    C5 --> B5
+
+    %% styling
+    classDef root fill:#e6f7ff,stroke:#1890ff
+    classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
+    classDef logic fill:#f0fff4,stroke:#52c41a
+    classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
+
+    %% binding styles
+    class A root
+    class B1,C1,B3,C3,B5,B6 pass
+    class B2,B4,C2,C4,C5 logic
+    class D,D1 simtOnly
+```
+
+| Stage | `"simd"` | `"simd_simt_template"` | `"simt_only"` |
+|------|----------|--------------------------|---------------|
+| Discrete mask handling | Split into contiguous/discrete bounds and handle with load + select / store | On Ascend 950 with tensor rank ≤ 5: mark and defer to downstream; otherwise same as left | Not run |
+| Unstructured access | Expand to scalar loops | Prefer SIMT indirect access (rank ≤ 5); fall back to scalar loops on failure | Not run |
+| TritonToLinalg | Standard Linalg IR lowering | Standard Linalg IR lowering | Not run |
+
+##### 3.2.3.3 Hybrid Mode: SIMT Only for Discrete Access
+
+Hybrid mode does **not** move the entire kernel to SIMT. Only discrete / unstructured access points use SIMT; the rest stays on SIMD:
+
+1. **Discrete mask handling**
+   - If the mask is non-contiguous and Ascend 950, hybrid mode, and rank ≤ 5 are all satisfied: do not rewrite IR; only mark for downstream SIMT handling.
+   - Otherwise (pure SIMD or conditions not met): split the mask into contiguous / discrete parts, bound global memory access with contiguous bounds, and merge results via select.
+
+2. **Unstructured access handling**
+   - In Ascend 950 hybrid mode, unstructured access or marked discrete access uses the SIMT fast path:
+     - `load` / `store` → `indirect_load` / `indirect_store` (rank ≤ 5)
+     - `atomic` operations → `hivm.custom(symbol="__builtin_indirect_atomic")`
+   - If conditions are not met, fall back to scalar loops (same as `"simd"`).
+
+3. **TritonToLinalg**
+   - Standard Linalg IR lowering.
+
+##### 3.2.3.4 Pure SIMT (`simt_only`)
+
+`"simt_only"` sends Triton IR directly to AscendNPU IR for pure SIMT compilation.
+
+#### 3.2.4 Ascend affinitive Operators
 
 | No.| Operator | Description|
 |---|---|---|

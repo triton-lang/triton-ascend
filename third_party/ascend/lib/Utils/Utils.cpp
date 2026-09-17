@@ -22,7 +22,9 @@
 
 #include "ascend/include/Utils/Utils.h"
 
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -37,11 +39,16 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Value.h"
+#include "mlir/Interfaces/FunctionInterfaces.h"
+#include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -53,6 +60,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <map>
@@ -64,19 +72,6 @@
 #define DEBUG_TYPE "TritonNPU-Utils"
 
 namespace mlir {
-
-static Value createConstIndexValueOp(const Location &loc, OpBuilder &b,
-                                     int64_t value) {
-  return b.create<arith::ConstantOp>(loc, b.getIndexAttr(value)).getResult();
-}
-
-static std::optional<int64_t> getConstantOfAttr(const OpFoldResult &arg) {
-  if (isa<Attribute>(arg)) {
-    return getConstantIntValue(arg);
-  }
-
-  return std::nullopt;
-}
 
 namespace ConverterUtils {
 
@@ -90,7 +85,7 @@ getLastStrideOfReinterpretCastOp(memref::ReinterpretCastOp op) {
 
   OpFoldResult lastStride = mixedStrides.back();
 
-  if (op.getStaticStrides().back() > 0) {
+  if (op.getStaticStrides().back() != ShapedType::kDynamic) {
     return op.getStaticStrides().back();
   } else if (isa<BlockArgument>(op.getStrides().back())) {
     auto u = op.getStrides().back();
@@ -173,6 +168,8 @@ SmallVector<utils::IteratorType> getNParallelLoopsAttrs(unsigned n) {
 
 Value getScalarValue(Value operand, Location loc,
                      ConversionPatternRewriter &rewriter) {
+  // Peel splat / cast / select chains down to a scalar; nullptr if non-splat
+  // tensor.
   SmallVector<Operation *> ops;
   auto reconstructScalarValue = [&](Value src) {
     for (auto op = ops.rbegin(); op != ops.rend(); ++op) {
@@ -183,6 +180,13 @@ Value getScalarValue(Value operand, Location loc,
                     resType = shapedType.getElementType();
                   }
                   return rewriter.create<arith::SIToFPOp>(loc, resType, src);
+                })
+                .Case<arith::UIToFPOp>([&](Operation *op) {
+                  auto resType = op->getResults()[0].getType();
+                  if (auto shapedType = dyn_cast<ShapedType>(resType)) {
+                    resType = shapedType.getElementType();
+                  }
+                  return rewriter.create<arith::UIToFPOp>(loc, resType, src);
                 })
                 .Case<arith::TruncFOp>([&](Operation *op) {
                   auto resType = op->getResults()[0].getType();
@@ -204,33 +208,54 @@ Value getScalarValue(Value operand, Location loc,
       return reconstructScalarValue(operand);
     } else if (auto op = operand.getDefiningOp<arith::ConstantOp>()) {
       if (auto attr = dyn_cast<DenseElementsAttr>(op.getValue())) {
-        if (!attr.isSplat()) {
-          InFlightDiagnostic diag = emitError(loc)
-                                    << "other value used in masked load "
-                                       "produced by unsupported instruction";
+        if (!attr.isSplat())
           return nullptr;
-        }
         auto elemValue = attr.getSplatValue<Attribute>();
         auto constOp = arith::ConstantOp::materialize(
             rewriter, elemValue, attr.getElementType(), op.getLoc());
         return reconstructScalarValue(constOp.getResult());
       }
-      InFlightDiagnostic diag = emitError(loc)
-                                << "other value used in masked load produced "
-                                   "by unsupported instruction";
       return nullptr;
     } else if (auto op = operand.getDefiningOp<triton::SplatOp>()) {
       operand = op.getSrc();
+    } else if (auto op = operand.getDefiningOp<arith::SelectOp>()) {
+      // Descriptor padding: select(i1, splat_nan, splat_zero) -> scalar select.
+      Value trueVal = getScalarValue(op.getTrueValue(), loc, rewriter);
+      Value falseVal = getScalarValue(op.getFalseValue(), loc, rewriter);
+      if (!trueVal || !falseVal)
+        return nullptr;
+      Value cond = op.getCondition();
+      if (isa<ShapedType>(cond.getType())) {
+        if (auto splat = cond.getDefiningOp<triton::SplatOp>())
+          cond = splat.getSrc();
+        else if (auto c = cond.getDefiningOp<arith::ConstantOp>()) {
+          if (auto attr = dyn_cast<DenseElementsAttr>(c.getValue());
+              attr && attr.isSplat()) {
+            cond = arith::ConstantOp::materialize(
+                rewriter, attr.getSplatValue<Attribute>(),
+                attr.getElementType(), c.getLoc());
+          } else {
+            return nullptr;
+          }
+        } else {
+          return nullptr;
+        }
+      }
+      if (isa<ShapedType>(cond.getType()))
+        return nullptr;
+      Value scalarSelect = rewriter.create<arith::SelectOp>(
+          loc, trueVal.getType(), cond, trueVal, falseVal);
+      return reconstructScalarValue(scalarSelect);
     } else if (auto op = operand.getDefiningOp<arith::SIToFPOp>()) {
+      ops.push_back(op.getOperation());
+      operand = op.getIn();
+    } else if (auto op = operand.getDefiningOp<arith::UIToFPOp>()) {
       ops.push_back(op.getOperation());
       operand = op.getIn();
     } else if (auto op = operand.getDefiningOp<arith::TruncFOp>()) {
       ops.push_back(op.getOperation());
       operand = op.getIn();
     } else {
-      InFlightDiagnostic diag = emitError(loc)
-                                << "other value used in masked load produced "
-                                   "by unsupported instruction";
       return nullptr;
     }
   }
@@ -398,27 +423,306 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
   OpFoldResult offsetShift = subOpFoldResult(
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
-  for (int i = 0; i < shapedType.getRank(); ++i) {
-    if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
-      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
+  auto strides = fullShapeReCast.getConstifiedMixedStrides();
+  SmallVector<int> axisOrder;
+  axisOrder.reserve(shapedType.getRank());
+  for (int i = 0; i < shapedType.getRank(); ++i)
+    axisOrder.push_back(i);
 
-      OpFoldResult curOffset = divOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+  bool allStridesConstant = llvm::all_of(strides, [](OpFoldResult stride) {
+    return getConstantIntValue(stride).has_value();
+  });
+  if (allStridesConstant) {
+    llvm::stable_sort(axisOrder, [&strides](int lhs, int rhs) {
+      return std::abs(*getConstantIntValue(strides[lhs])) >
+             std::abs(*getConstantIntValue(strides[rhs]));
+    });
+  }
+
+  for (int i : axisOrder) {
+    OpFoldResult curStride = strides[i];
+    if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
+      if (isZero(curStride)) {
+        emitWarning(loc)
+            << "getBoundarySizes() cannot reconstruct boundary on checked "
+               "zero-stride axis "
+            << i << "; keep current block size for this axis";
+        continue;
+      }
+
+      OpFoldResult curOffset =
+          divOpFoldResult(offsetShift, curStride, loc, rewriter);
+      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
       OpFoldResult curLeftSize =
           maxOpFoldResult(subOpFoldResult(fullShape, curOffset, loc, rewriter),
                           rewriter.getIndexAttr(0), loc, rewriter);
 
       boundarySize[i] =
           minOpFoldResult(boundarySize[i], curLeftSize, loc, rewriter);
+    }
 
-      offsetShift = remOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+    if (!isZero(curStride)) {
+      offsetShift = remOpFoldResult(offsetShift, curStride, loc, rewriter);
     }
   }
 
   return boundarySize;
+}
+
+static std::optional<Value> getRootPointer(Value ptr) {
+  llvm::SmallPtrSet<Value, 8> visited;
+  while (true) {
+    if (!visited.insert(ptr).second) {
+      return std::nullopt;
+    }
+
+    if (auto blockArg = dyn_cast<BlockArgument>(ptr)) {
+      // A loop-carried pointer block argument is still rooted at its init
+      // value unless the loop updates it through an unsupported cycle.
+      Operation *parentOp = blockArg.getOwner()->getParentOp();
+      if (auto whileOp = dyn_cast_or_null<scf::WhileOp>(parentOp);
+          whileOp && whileOp.getAfterBody() == blockArg.getOwner()) {
+        auto argNum = blockArg.getArgNumber();
+        auto conditionArgs = whileOp.getConditionOp().getArgs();
+        if (argNum < conditionArgs.size()) {
+          ptr = conditionArgs[argNum];
+          continue;
+        }
+      }
+
+      if (auto loopOp = dyn_cast_or_null<LoopLikeOpInterface>(parentOp)) {
+        if (OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArg)) {
+          ptr = initArgOperand->get();
+          continue;
+        }
+      }
+
+      return ptr;
+    }
+
+    auto *defOp = ptr.getDefiningOp();
+    if (!defOp) {
+      return ptr;
+    }
+
+    auto nextPtr =
+        llvm::TypeSwitch<Operation *, std::optional<Value>>(defOp)
+            .Case<triton::AddPtrOp>(
+                [](auto op) -> std::optional<Value> { return op.getPtr(); })
+            .Case<triton::SplatOp>(
+                [](auto op) -> std::optional<Value> { return op.getSrc(); })
+            .Case<triton::BroadcastOp>(
+                [](auto op) -> std::optional<Value> { return op.getSrc(); })
+            .Case<triton::ExpandDimsOp>(
+                [](auto op) -> std::optional<Value> { return op.getSrc(); })
+            .Case<triton::MakeTensorPtrOp>(
+                [](auto op) -> std::optional<Value> { return op.getBase(); })
+            .Case<triton::AdvanceOp>(
+                [](auto op) -> std::optional<Value> { return op.getPtr(); })
+            .Case<memref::ReinterpretCastOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<memref::SubViewOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<memref::CastOp>(
+                [](auto op) -> std::optional<Value> { return op.getSource(); })
+            .Case<UnrealizedConversionCastOp>(
+                [](auto op) -> std::optional<Value> {
+                  if (op.getInputs().size() != 1) {
+                    return std::nullopt;
+                  }
+                  return op.getInputs().front();
+                })
+            .Default([](Operation *) -> std::optional<Value> {
+              return std::nullopt;
+            });
+    if (!nextPtr) {
+      return std::nullopt;
+    }
+    ptr = *nextPtr;
+  }
+}
+
+struct WritePointerInfo {
+  bool isWrite = false;
+  std::optional<Value> rootPtr;
+};
+
+static WritePointerInfo getKnownWritePointer(Operation *op) {
+  return llvm::TypeSwitch<Operation *, WritePointerInfo>(op)
+      .Case<triton::StoreOp>([](auto storeOp) {
+        return WritePointerInfo{true, getRootPointer(storeOp.getPtr())};
+      })
+      .Case<triton::AtomicRMWOp>([](auto atomicOp) {
+        return WritePointerInfo{true, getRootPointer(atomicOp.getPtr())};
+      })
+      .Case<triton::AtomicCASOp>([](auto atomicOp) {
+        return WritePointerInfo{true, getRootPointer(atomicOp.getPtr())};
+      })
+      .Case<triton::ascend::IndirectStoreOp>([](auto storeOp) {
+        return WritePointerInfo{true, getRootPointer(storeOp.getSrc())};
+      })
+      .Default([](Operation *) { return WritePointerInfo{}; });
+}
+
+static bool isLocalMemRef(Value value) {
+  while (auto *defOp = value.getDefiningOp()) {
+    if (isa<memref::AllocOp, memref::AllocaOp>(defOp)) {
+      return true;
+    }
+    auto source =
+        llvm::TypeSwitch<Operation *, Value>(defOp)
+            .Case<memref::ReinterpretCastOp>(
+                [](auto op) { return op.getSource(); })
+            .Case<memref::SubViewOp>([](auto op) { return op.getSource(); })
+            .Case<memref::CastOp>([](auto op) { return op.getSource(); })
+            .Default([](Operation *) { return Value(); });
+    if (!source) {
+      return false;
+    }
+    value = source;
+  }
+  return false;
+}
+
+static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
+  auto effectOp = dyn_cast<MemoryEffectOpInterface>(op);
+  if (!effectOp) {
+    return !mlir::isMemoryEffectFree(op);
+  }
+
+  SmallVector<SideEffects::EffectInstance<MemoryEffects::Effect>> effects;
+  effectOp.getEffects(effects);
+  for (auto &effect : effects) {
+    if (!isa<MemoryEffects::Write>(effect.getEffect())) {
+      continue;
+    }
+
+    Value value = effect.getValue();
+    if (!value) {
+      return true;
+    }
+    if (!isa<BaseMemRefType>(value.getType())) {
+      return true;
+    }
+
+    auto rootPtr = getRootPointer(value);
+    if (rootPtr) {
+      if (*rootPtr == loadRootPtr) {
+        return true;
+      }
+      continue;
+    }
+    if (!isLocalMemRef(value)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Keep an indirect load volatile unless its root pointer is proven to have no
+// possible prior write. The analysis scans ordered predecessors in the same
+// and enclosing blocks, nested writes in predecessor structured-control-flow
+// ops, and loop-carried writes where a later store in the loop body may feed a
+// following iteration.
+bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
+  auto loadRootPtr = getRootPointer(srcPtr);
+  if (!loadRootPtr) {
+    return true;
+  }
+
+  auto opMayWriteRoot = [&](Operation *op) {
+    // Device-side diagnostics are modeled as GlobalMemory writes in Triton,
+    // but they do not write through user GM pointers and must not affect the
+    // indirect-load source/root analysis.
+    if (isa<triton::AssertOp, triton::PrintOp>(op)) {
+      return false;
+    }
+
+    auto memRefWriteTarget = llvm::TypeSwitch<Operation *, Value>(op)
+                                 .Case<memref::CopyOp>([](auto copyOp) {
+                                   return copyOp.getTarget();
+                                 })
+                                 .Case<memref::StoreOp>([](auto storeOp) {
+                                   return storeOp.getMemRef();
+                                 })
+                                 .Default([](Operation *) { return Value(); });
+    if (memRefWriteTarget) {
+      auto rootPtr = getRootPointer(memRefWriteTarget);
+      if (rootPtr) {
+        return *rootPtr == *loadRootPtr;
+      }
+      return !isLocalMemRef(memRefWriteTarget);
+    }
+
+    auto writePtr = getKnownWritePointer(op);
+    if (writePtr.isWrite) {
+      return !writePtr.rootPtr || *writePtr.rootPtr == *loadRootPtr;
+    }
+
+    // For structured control flow, look through regions instead of using the
+    // op-level MemoryEffect summary, otherwise unrelated nested writes would
+    // make this load volatile.
+    if (isa<scf::IfOp>(op) || isa<LoopLikeOpInterface>(op)) {
+      return false;
+    }
+
+    // Unknown side-effecting ops are conservative: they may write through an
+    // alias that is no longer recoverable as a Triton root.
+    return mayWriteRoot(op, *loadRootPtr);
+  };
+
+  auto nestedMayWriteRoot = [&](Operation *container) {
+    bool found = false;
+    container->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+      if (nested == container) {
+        return WalkResult::advance();
+      }
+      if (opMayWriteRoot(nested)) {
+        found = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    return found;
+  };
+
+  Operation *current = loadOp;
+
+  while (current) {
+    Block *block = current->getBlock();
+    if (!block) {
+      return true;
+    }
+
+    // First scan operations that are ordered before the current op in this
+    // block. When such an operation owns regions, its nested writes are also
+    // considered ordered before this load.
+    for (auto it = Block::iterator(current); it != block->begin();) {
+      --it;
+      Operation *op = &*it;
+      if ((op->getNumRegions() > 0 && nestedMayWriteRoot(op)) ||
+          opMayWriteRoot(op)) {
+        return true;
+      }
+    }
+
+    Operation *parentOp = block->getParentOp();
+    if (!parentOp || isa<ModuleOp>(parentOp) ||
+        isa<FunctionOpInterface>(parentOp)) {
+      return false;
+    }
+
+    // If the load is inside a loop, a store that is textually after the load
+    // may still execute before the load in a later iteration. Scan the whole
+    // loop body before climbing further out.
+    if (isa<LoopLikeOpInterface>(parentOp) && nestedMayWriteRoot(parentOp)) {
+      return true;
+    }
+
+    current = parentOp;
+  }
+
+  return false;
 }
 
 SmallVector<int64_t> getBroadcastDims(RankedTensorType src,
@@ -704,232 +1008,8 @@ bool isTensorPtrType(Type type) {
 
 } // namespace triton
 
-// TODO: imply these function below
-OpFoldResult addOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(lhsInt.value() + rhsInt.value());
-
-  if (!lhsInt && rhsInt && rhsInt.value() == 0)
-    return lhs;
-  if (!rhsInt && lhsInt && lhsInt.value() == 0)
-    return rhs;
-
-  auto lhsValue = dyn_cast<Value>(lhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  auto rhsValue = dyn_cast<Value>(rhs);
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::AddIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult subOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(lhsInt.value() - rhsInt.value());
-
-  if (!lhsInt && rhsInt && rhsInt.value() == 0)
-    return lhs;
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::SubIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult mulOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(lhsInt.value() * rhsInt.value());
-
-  if (lhsInt) {
-    if (lhsInt.value() == 0)
-      return lhs;
-    if (lhsInt.value() == 1)
-      return rhs;
-  }
-  if (rhsInt) {
-    if (rhsInt.value() == 0)
-      return rhs;
-    if (rhsInt.value() == 1)
-      return lhs;
-  }
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::MulIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult divOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-
-  if (rhsInt && rhsInt.value() == 0) {
-    emitError(loc) << "cannot div 0!";
-    return OpFoldResult();
-  }
-
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(lhsInt.value() / rhsInt.value());
-
-  if (lhsInt) {
-    if (lhsInt.value() == 0)
-      return lhs;
-  }
-
-  if (rhsInt) {
-    if (rhsInt.value() == 1)
-      return lhs;
-  }
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::DivSIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult remOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-
-  if (rhsInt && rhsInt.value() == 0) {
-    emitError(loc) << "cannot remainder by 0!";
-    return OpFoldResult();
-  }
-
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(lhsInt.value() % rhsInt.value());
-
-  if (lhsInt) {
-    if (lhsInt.value() == 0)
-      return lhs;
-  }
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::RemSIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult minOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(std::min(lhsInt.value(), rhsInt.value()));
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  return b.create<arith::MinSIOp>(loc, lhsValue, rhsValue).getResult();
-}
-
-OpFoldResult maxOpFoldResult(const OpFoldResult &lhs, const OpFoldResult &rhs,
-                             const Location &loc, OpBuilder &b) {
-  auto lhsInt = getConstantOfAttr(lhs);
-  auto rhsInt = getConstantOfAttr(rhs);
-  if (lhsInt && rhsInt)
-    return b.getIndexAttr(std::max(lhsInt.value(), rhsInt.value()));
-
-  auto lhsValue = dyn_cast<Value>(lhs), rhsValue = dyn_cast<Value>(rhs);
-  if (lhsInt) {
-    lhsValue = createConstIndexValueOp(loc, b, lhsInt.value());
-  } else {
-    lhsValue = convertToIndexIfNeeded(lhsValue, loc, b);
-    assert(isa<IndexType>(lhsValue.getType()));
-  }
-
-  if (rhsInt) {
-    rhsValue = createConstIndexValueOp(loc, b, rhsInt.value());
-  } else {
-    rhsValue = convertToIndexIfNeeded(rhsValue, loc, b);
-    assert(isa<IndexType>(rhsValue.getType()));
-  }
-
-  return b.create<arith::MaxSIOp>(loc, lhsValue, rhsValue).getResult();
+bool haveSameTypes(TypeRange lhs, TypeRange rhs) {
+  return llvm::equal(lhs, rhs);
 }
 
 void addReduceWithIndexAttr(ReduceWithIndexParams params,
@@ -1079,29 +1159,6 @@ getReduceWithIndexParams(triton::ReduceOp op) {
                                .isUnsignedSrc = isUnsignedSrc};
 }
 
-// Fold layout constant info to attr, otherwise convert to index type value
-OpFoldResult getOpFoldResultOfLayoutInfo(Value value, OpBuilder &builder) {
-  OpFoldResult constantFold = getAsOpFoldResult(value);
-  if (llvm::isa<Attribute>(constantFold)) {
-    assert(isa<IntegerAttr>(cast<Attribute>(constantFold)));
-    return constantFold;
-  }
-
-  if (!isa<IntegerType>(value.getType()))
-    llvm_unreachable("Illegal data type when parse block data layout info");
-
-  if (!isa<IndexType>(value.getType())) {
-    if (value.getType().isInteger(/*width*/ 1))
-      value = builder.create<arith::IndexCastUIOp>(
-          value.getLoc(), builder.getIndexType(), value);
-    else
-      value = builder.create<arith::IndexCastOp>(value.getLoc(),
-                                                 builder.getIndexType(), value);
-  }
-
-  return value;
-}
-
 // Specialize the Typeless Value (Zero, Min, Max) into a mlir TypedAttr
 FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
                                                    Type type, OpBuilder &b) {
@@ -1150,81 +1207,70 @@ FailureOr<TypedAttr> specializeTypelessValueToAttr(TypelessValue value,
   auto toPtr = [](mlir::Type ty) { return ty.getAsOpaquePointer(); };
 
   std::map<std::pair<TypelessValue, const void *>,
-           std::variant<int8_t, int16_t, int32_t, int64_t, uint32_t, uint64_t,
-                        llvm::APFloat>>
+           std::variant<llvm::APInt, llvm::APFloat>>
       initMap = {
           {{TypelessValue::Zero, toPtr(f16Ty)}, halfZero},
           {{TypelessValue::Zero, toPtr(bf16Ty)}, bfloatZero},
           {{TypelessValue::Zero, toPtr(f32Ty)}, floatZero},
-          {{TypelessValue::Zero, toPtr(i16TySL)}, (int16_t)0},
-          {{TypelessValue::Zero, toPtr(i16TyS)}, (int16_t)0},
-          {{TypelessValue::Zero, toPtr(i16TyU)}, (int16_t)0},
-          {{TypelessValue::Zero, toPtr(i32TySL)}, 0},
-          {{TypelessValue::Zero, toPtr(i32TyS)}, 0},
-          {{TypelessValue::Zero, toPtr(i32TyU)}, 0},
-          {{TypelessValue::Zero, toPtr(i64TySL)}, (int64_t)0},
-          {{TypelessValue::Zero, toPtr(i64TyS)}, (int64_t)0},
-          {{TypelessValue::Zero, toPtr(i64TyU)}, (int64_t)0},
+          {{TypelessValue::Zero, toPtr(i8TySL)}, llvm::APInt(8, 0, true)},
+          {{TypelessValue::Zero, toPtr(i8TyS)}, llvm::APInt(8, 0, true)},
+          {{TypelessValue::Zero, toPtr(i8TyU)}, llvm::APInt(8, 0, false)},
+          {{TypelessValue::Zero, toPtr(i16TySL)}, llvm::APInt(16, 0, true)},
+          {{TypelessValue::Zero, toPtr(i16TyS)}, llvm::APInt(16, 0, true)},
+          {{TypelessValue::Zero, toPtr(i16TyU)}, llvm::APInt(16, 0, false)},
+          {{TypelessValue::Zero, toPtr(i32TySL)}, llvm::APInt(32, 0, true)},
+          {{TypelessValue::Zero, toPtr(i32TyS)}, llvm::APInt(32, 0, true)},
+          {{TypelessValue::Zero, toPtr(i32TyU)}, llvm::APInt(32, 0, false)},
+          {{TypelessValue::Zero, toPtr(i64TySL)}, llvm::APInt(64, 0, true)},
+          {{TypelessValue::Zero, toPtr(i64TyS)}, llvm::APInt(64, 0, true)},
+          {{TypelessValue::Zero, toPtr(i64TyU)}, llvm::APInt(64, 0, false)},
           {{TypelessValue::Min, toPtr(f16Ty)}, halfMin},
           {{TypelessValue::Min, toPtr(bf16Ty)}, bfloatMin},
           {{TypelessValue::Min, toPtr(f32Ty)}, floatMin},
-          {{TypelessValue::Min, toPtr(i16TySL)},
-           std::numeric_limits<int16_t>::min()},
-          {{TypelessValue::Min, toPtr(i16TyS)},
-           std::numeric_limits<int16_t>::min()},
-          {{TypelessValue::Min, toPtr(i16TyU)},
-           std::numeric_limits<uint16_t>::min()},
+          {{TypelessValue::Min, toPtr(i8TySL)}, llvm::APInt(8, -128, true)},
+          {{TypelessValue::Min, toPtr(i8TyS)}, llvm::APInt(8, -128, true)},
+          {{TypelessValue::Min, toPtr(i8TyU)}, llvm::APInt(8, 0, false)},
+          {{TypelessValue::Min, toPtr(i16TySL)}, llvm::APInt(16, -32768, true)},
+          {{TypelessValue::Min, toPtr(i16TyS)}, llvm::APInt(16, -32768, true)},
+          {{TypelessValue::Min, toPtr(i16TyU)}, llvm::APInt(16, 0, false)},
           {{TypelessValue::Min, toPtr(i32TySL)},
-           std::numeric_limits<int32_t>::min()},
+           llvm::APInt(32, std::numeric_limits<int32_t>::min(), true)},
           {{TypelessValue::Min, toPtr(i32TyS)},
-           std::numeric_limits<int32_t>::min()},
-          {{TypelessValue::Min, toPtr(i32TyU)},
-           std::numeric_limits<uint32_t>::min()},
+           llvm::APInt(32, std::numeric_limits<int32_t>::min(), true)},
+          {{TypelessValue::Min, toPtr(i32TyU)}, llvm::APInt(32, 0, false)},
           {{TypelessValue::Min, toPtr(i64TySL)},
-           std::numeric_limits<int64_t>::min()},
+           llvm::APInt(64, std::numeric_limits<int64_t>::min(), true)},
           {{TypelessValue::Min, toPtr(i64TyS)},
-           std::numeric_limits<int64_t>::min()},
-          {{TypelessValue::Min, toPtr(i64TyU)},
-           std::numeric_limits<int64_t>::min()},
+           llvm::APInt(64, std::numeric_limits<int64_t>::min(), true)},
+          {{TypelessValue::Min, toPtr(i64TyU)}, llvm::APInt(64, 0, false)},
           {{TypelessValue::Max, toPtr(f16Ty)}, halfMax},
           {{TypelessValue::Max, toPtr(bf16Ty)}, bfloatMax},
           {{TypelessValue::Max, toPtr(f32Ty)}, floatMax},
-          {{TypelessValue::Max, toPtr(i16TySL)},
-           std::numeric_limits<int16_t>::max()},
-          {{TypelessValue::Max, toPtr(i16TyS)},
-           std::numeric_limits<int16_t>::max()},
-          {{TypelessValue::Max, toPtr(i16TyU)},
-           std::numeric_limits<uint16_t>::max()},
+          {{TypelessValue::Max, toPtr(i8TySL)}, llvm::APInt(8, 127, true)},
+          {{TypelessValue::Max, toPtr(i8TyS)}, llvm::APInt(8, 127, true)},
+          {{TypelessValue::Max, toPtr(i8TyU)}, llvm::APInt::getAllOnes(8)},
+          {{TypelessValue::Max, toPtr(i16TySL)}, llvm::APInt(16, 32767, true)},
+          {{TypelessValue::Max, toPtr(i16TyS)}, llvm::APInt(16, 32767, true)},
+          {{TypelessValue::Max, toPtr(i16TyU)}, llvm::APInt::getAllOnes(16)},
           {{TypelessValue::Max, toPtr(i32TySL)},
-           std::numeric_limits<int32_t>::max()},
+           llvm::APInt(32, std::numeric_limits<int32_t>::max(), true)},
           {{TypelessValue::Max, toPtr(i32TyS)},
-           std::numeric_limits<int32_t>::max()},
-          {{TypelessValue::Max, toPtr(i32TyU)},
-           std::numeric_limits<uint32_t>::max()},
+           llvm::APInt(32, std::numeric_limits<int32_t>::max(), true)},
+          {{TypelessValue::Max, toPtr(i32TyU)}, llvm::APInt::getAllOnes(32)},
           {{TypelessValue::Max, toPtr(i64TySL)},
-           std::numeric_limits<int64_t>::max()},
+           llvm::APInt(64, std::numeric_limits<int64_t>::max(), true)},
           {{TypelessValue::Max, toPtr(i64TyS)},
-           std::numeric_limits<int64_t>::max()},
-          {{TypelessValue::Max, toPtr(i64TyU)},
-           std::numeric_limits<int64_t>::max()},
+           llvm::APInt(64, std::numeric_limits<int64_t>::max(), true)},
+          {{TypelessValue::Max, toPtr(i64TyU)}, llvm::APInt::getAllOnes(64)},
       };
 
   std::pair<TypelessValue, const void *> key =
       std::make_pair(value, toPtr(type));
   if (initMap.find(key) == initMap.end())
     return failure();
-  if (type.isInteger(8))
-    return success(IntegerAttr::get(IntegerType::get(b.getContext(), 8),
-                                    std::get<int8_t>(initMap.at(key))));
-  if (type.isInteger(16))
-    return success(IntegerAttr::get(IntegerType::get(b.getContext(), 16),
-                                    std::get<int16_t>(initMap.at(key))));
-  if (type.isInteger(32))
-    return success(IntegerAttr::get(IntegerType::get(b.getContext(), 32),
-                                    std::get<int32_t>(initMap.at(key))));
-  if (type.isInteger(64))
-    return success(IntegerAttr::get(IntegerType::get(b.getContext(), 64),
-                                    std::get<int64_t>(initMap.at(key))));
+  if (auto intType = dyn_cast<IntegerType>(type))
+    return success(
+        IntegerAttr::get(intType, std::get<llvm::APInt>(initMap.at(key))));
   if (isa<Float16Type>(type))
     return success(
         FloatAttr::get(f16Ty, std::get<llvm::APFloat>(initMap.at(key))));
@@ -1272,73 +1318,6 @@ FailureOr<Value> specializeTypelessValueToConstant(TypelessValue value,
   return failure();
 }
 
-std::optional<int64_t> getIntAttr(const OpFoldResult ofr) {
-  Attribute attr;
-  if (auto val = dyn_cast<Value>(ofr)) {
-    if (!val.getDefiningOp<arith::ConstantOp>())
-      return std::nullopt;
-    attr = cast<IntegerAttr>(val.getDefiningOp<arith::ConstantOp>().getValue());
-  } else {
-    attr = dyn_cast<Attribute>(ofr);
-  }
-  if (attr && isa<IntegerAttr>(attr))
-    return dyn_cast<IntegerAttr>(attr).getInt();
-  return std::nullopt;
-}
-
-Value materializeValue(OpBuilder &builder, Location loc, OpFoldResult ofr) {
-  if (auto val = ofr.dyn_cast<Value>()) {
-    return val;
-  }
-
-  auto intVal = getIntAttr(ofr);
-  if (intVal.has_value()) {
-    return builder.create<arith::ConstantOp>(
-        loc, builder.getI32IntegerAttr(intVal.value()));
-  }
-  assert(intVal.has_value());
-  return Value();
-
-  // return builder.create<arith::ConstantIndexOp>(
-  //     loc, dyn_cast<IntegerAttr>(attr).getInt());
-}
-
-bool isZero(const OpFoldResult ofr) {
-  auto staticOfr = getIntAttr(ofr);
-  return staticOfr.has_value() && staticOfr.value() == 0;
-}
-
-bool isOne(const OpFoldResult ofr) {
-  auto staticOfr = getIntAttr(ofr);
-  return staticOfr.has_value() && staticOfr.value() == 1;
-}
-
-Value convertToIndexIfNeeded(Value input, const Location &loc, OpBuilder &b) {
-  auto inputType = input.getType();
-  if (auto intType = dyn_cast<IntegerType>(inputType)) {
-    if (intType.isInteger(32) || intType.isInteger(64)) {
-      return b.create<arith::IndexCastOp>(loc, b.getIndexType(), input);
-    }
-  }
-  return input;
-}
-
-RankedTensorType getExtractSlicedType(ArrayRef<OpFoldResult> shape,
-                                      const llvm::SmallBitVector &droppedDims,
-                                      Type elemType) {
-  SmallVector<int64_t> targetShape;
-  for (auto [idx, dimOfr] : llvm::enumerate(shape)) {
-    if (!droppedDims[idx]) {
-      if (auto dim = getConstantIntValue(dimOfr)) {
-        targetShape.push_back(dim.value());
-      } else {
-        targetShape.push_back(ShapedType::kDynamic);
-      }
-    }
-  }
-  return RankedTensorType::get(targetShape, elemType);
-}
-
 bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter) {
   return llvm::any_of(op->getUsers(), [&rewriter](Operation *user) {
     auto annotationOp = dyn_cast<annotation::MarkOp>(user);
@@ -1349,5 +1328,10 @@ bool checkStructureAnnotated(Operation *op, RewriterBase &rewriter) {
     }
     return false;
   });
+}
+
+bool isDistributedTypeCustomOp(Operation *op) {
+  return op->hasAttr("hivm.is_distributed") &&
+         (llvm::isa<hivm::CustomOp>(op) || llvm::isa<hivm::CustomMacroOp>(op));
 }
 } // namespace mlir

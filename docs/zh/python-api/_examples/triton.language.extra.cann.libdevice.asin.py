@@ -1,0 +1,48 @@
+import os
+
+os.environ.setdefault("TRITON_ENABLE_LIBDEVICE_SIMT", "1")
+
+import pytest
+import triton
+import triton.language as tl
+import triton.language.extra.cann.libdevice as libdevice
+import torch
+from triton.backends.ascend.utils import triton_enable_libdevice_simt
+
+_SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
+                  "only runs on Ascend 950 with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+
+
+@triton.jit
+def triton_kernel(input, output, n_elements, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
+    offset = tl.program_id(0) * XBLOCK
+    base = tl.arange(0, XBLOCK_SUB)
+    loops: tl.constexpr = XBLOCK // XBLOCK_SUB
+    for loop in range(loops):
+        x0 = offset + (loop * XBLOCK_SUB) + base
+        mask = x0 < n_elements
+        tmp0 = tl.load(input + (x0), mask=mask)
+        tmp1 = libdevice.asin(tmp0)
+        tl.store(output + (x0), tmp1, mask=mask)
+
+
+@pytest.mark.skipif(not triton_enable_libdevice_simt(), reason=_SIMT_SKIP_MSG)
+def test_asin():
+    param_list = [(2, 256, 4), 2, 2048, 1024]
+    shape, ncore, xblock, xblock_sub = param_list
+    x0 = torch.rand(size=shape, dtype=torch.float32).npu() * 1.8 - 0.9
+
+    torch_res = torch.asin(x0)
+    triton_res = torch.empty_like(x0)
+    triton_kernel[ncore, 1, 1](x0, triton_res, x0.numel(), xblock, xblock_sub, compile_mode='simt_only')
+
+    torch_res = torch_res.cpu()
+    triton_res = triton_res.cpu()
+    torch.testing.assert_close(torch_res, triton_res, rtol=1e-04, atol=1e-04, equal_nan=True)
+
+
+if __name__ == "__main__":
+    if not triton_enable_libdevice_simt():
+        print(_SIMT_SKIP_MSG)
+    else:
+        test_asin()

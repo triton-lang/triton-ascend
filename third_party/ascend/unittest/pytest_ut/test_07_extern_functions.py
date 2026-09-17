@@ -73,13 +73,11 @@ def run_asin_case(size, use_extern_libs):
     torch.testing.assert_close(output_torch, output_triton, rtol=1e-4, atol=1e-4)
 
 
-@pytest.mark.skip(reason="Precision issue with libdevice.asin, it will be fixed later.")
 @pytest.mark.parametrize("size", [98432, 1024])
 def test_asin_kernel_matches_torch(size):
     run_asin_case(size=size, use_extern_libs=False)
 
 
-@pytest.mark.skip(reason="Precision issue with libdevice.asin, it will be fixed later.")
 @pytest.mark.parametrize("size", [98432, 1024])
 def test_asin_kernel_matches_torch_with_extern_libs(size):
     run_asin_case(size=size, use_extern_libs=True)

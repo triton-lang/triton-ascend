@@ -20,29 +20,33 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
-#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "llvm/Support/Debug.h"
+
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/IRMapping.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 static constexpr const char *DEBUG_TYPE = "CreateIfOps";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
     DBGS();                                                                    \
-    llvm::outs() << __VA_ARGS__;                                               \
-    llvm::outs() << "\n";                                                      \
+    llvm::dbgs() << __VA_ARGS__;                                               \
+    llvm::dbgs() << "\n";                                                      \
   })
 
-using namespace llvm;
 using namespace mlir;
 using namespace triton;
+using namespace CVPipeline;
 
 // Check if a value is used outside the given region ops
 static bool isUsedOutsideRegion(Value v,
@@ -56,7 +60,7 @@ static bool isUsedOutsideRegion(Value v,
   return false;
 }
 
-// Find the iteration argument in main loop that corresponds to the given value
+// Find iter_arg in main loop for `v` (yield operand idx = body arg position).
 static Value findIterArgInMainLoop(Value v, mlir::Type t) {
   for (Operation *user : v.getUsers()) {
     auto yieldOp = dyn_cast<scf::YieldOp>(user);
@@ -64,14 +68,21 @@ static Value findIterArgInMainLoop(Value v, mlir::Type t) {
       continue;
     }
 
-    auto forOp = dyn_cast<scf::ForOp>(yieldOp->getParentOp());
-    if (!forOp) {
+    SmallVector<Value> iterArgs =
+        MainLoop(yieldOp->getParentOp()).getIterArgs();
+    if (iterArgs.empty()) {
       continue;
     }
 
     for (auto [idx, operand] : llvm::enumerate(yieldOp.getOperands())) {
       if (operand.getAsOpaquePointer() == v.getAsOpaquePointer()) {
-        Value iterArg = forOp.getRegionIterArgs()[idx];
+        if (idx >= iterArgs.size()) {
+          LDBG("[Error]: yield operand index "
+               << idx << " out of range for iter_args size "
+               << iterArgs.size());
+          continue;
+        }
+        Value iterArg = iterArgs[idx];
         if (iterArg.getType() == t) {
           return iterArg;
         }
@@ -79,7 +90,7 @@ static Value findIterArgInMainLoop(Value v, mlir::Type t) {
     }
   }
 
-  LDBG("[Error]: else yield value not found in forOp iter_args: " << v << "\n");
+  LDBG("[Error]: else yield value not found in forOp/whileOp iter_args: " << v);
   return nullptr;
 }
 
@@ -91,21 +102,20 @@ static LogicalResult replaceExternalIfOpUses(scf::IfOp ifOp,
     Value oldVal = oldYieldValues[i];
 
     if (!oldVal) {
-      LDBG("[Error]: oldVal is null at index " << i << "\n");
+      LDBG("[Error]: oldVal is null at index " << i);
       return failure();
     }
 
     if (i >= ifOp.getNumResults()) {
       LDBG("[Error]: index " << i << " exceeds ifOp results count "
-                             << ifOp.getNumResults() << "\n");
+                             << ifOp.getNumResults());
       return failure();
     }
 
     Value newVal = ifOp.getResult(i);
     if (oldVal.getType() != newVal.getType()) {
       LDBG("[Error]: type mismatch at index " << i << ": " << oldVal.getType()
-                                              << " vs " << newVal.getType()
-                                              << "\n");
+                                              << " vs " << newVal.getType());
       return failure();
     }
 
@@ -136,13 +146,14 @@ static LogicalResult replaceExternalIfOpUses(scf::IfOp ifOp,
   return success();
 }
 
-// Compute yield values for each block: values that need to be yielded from the
-// if
+// Computes yield values per block (values yielded from the if); op-agnostic as
+// findIterArgInMainLoop dispatches on the yield's parent op (forOp/whileOp).
 LogicalResult CreateIfOpsPass::computeYieldValues(
-    scf::ForOp forOp,
+    Operation *loopOp,
     const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
     llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
     llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues) {
+  (void)loopOp; // unused; findIterArgInMainLoop walks the yield's parent.
   for (auto &p : blockOps) {
     int id = p.first;
     const SmallVector<Operation *> &ops = p.second;
@@ -204,7 +215,7 @@ static scf::IfOp createIfOpForBlock(OpBuilder &builder, Location loc,
   // Check size consistency
   if (needsYield && thenValues.size() != elseValues.size()) {
     LDBG("[Error]: then/else yield count mismatch: "
-         << thenValues.size() << " vs " << elseValues.size() << "\n");
+         << thenValues.size() << " vs " << elseValues.size());
     return scf::IfOp();
   }
 
@@ -214,7 +225,7 @@ static scf::IfOp createIfOpForBlock(OpBuilder &builder, Location loc,
       if (thenValues[i].getType() != elseValues[i].getType()) {
         LDBG("[Error]: then/else yield type mismatch at index "
              << i << ": " << thenValues[i].getType() << " vs "
-             << elseValues[i].getType() << "\n");
+             << elseValues[i].getType());
         return scf::IfOp();
       }
     }
@@ -232,7 +243,11 @@ static scf::IfOp createIfOpForBlock(OpBuilder &builder, Location loc,
     ifOp = builder.create<scf::IfOp>(loc, TypeRange{}, trueVal, false);
   }
 
-  ifOp->setAttr("ssbuffer.if", builder.getI32IntegerAttr(blockId));
+  ifOp->setAttr(CVPipeline::kIf, builder.getI32IntegerAttr(blockId));
+
+  // notify npuir that of the scenario
+  ifOp->setAttr(CVPipeline::kHIVMMatmulLimitedInCubeAttr,
+                builder.getUnitAttr());
 
   return ifOp;
 }
@@ -244,7 +259,7 @@ static LogicalResult moveOpsToThenBranch(scf::IfOp ifOp,
                                          const SmallVector<Value> &elseValues,
                                          Location loc) {
   if (ops.empty() && !thenValues.empty()) {
-    LDBG("[Error]: moving empty ops but thenValues not empty\n");
+    LDBG("[Error]: moving empty ops but thenValues not empty");
     return failure();
   }
 
@@ -266,13 +281,19 @@ static LogicalResult moveOpsToThenBranch(scf::IfOp ifOp,
   return success();
 }
 
-// Create if ops (scf.if %true) for each block_id in the main loop
+// Create if ops (scf.if %true) for each block_id in the main loop.
+// `op` is the main-loop op (scf.for or scf.while).
 LogicalResult CreateIfOpsPass::createIfInMainLoop(
-    scf::ForOp forOp,
+    Operation *op,
     const llvm::DenseMap<int, SmallVector<Operation *>> &blockOps,
     const llvm::DenseMap<int, SmallVector<Value>> &thenYieldValues,
     const llvm::DenseMap<int, SmallVector<Value>> &elseYieldValues) {
-  SmallVector<int> ids = getBlockIdsInOrder(forOp);
+  SmallVector<int> ids = getBlockIdsInOrder(op);
+  if (ids.empty() && !MainLoop(op).getBody()) {
+    LDBG("[Error]: op with ssbuffer.main_loop is neither scf::ForOp nor "
+         "scf::WhileOp");
+    return failure();
+  }
 
   for (int id : ids) {
     const SmallVector<Operation *> &ops = blockOps.lookup(id);
@@ -308,48 +329,50 @@ LogicalResult CreateIfOpsPass::createIfInMainLoop(
 void CreateIfOpsPass::runOnOperation() {
   ModuleOp module = getOperation();
 
-  LDBG("before createIfOps:\n" << module << "\n");
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
-  module.walk([&](Operation *op) -> WalkResult {
-    if (!op->hasAttr("ssbuffer.main_loop")) {
+  LDBG("before createIfOps:\n" << module);
+
+  auto walkResult = module.walk([&](Operation *op) -> WalkResult {
+    if (!isMainLoopOp(op)) {
       return WalkResult::advance();
     }
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("[Error]: op with ssbuffer.main_loop is not a scf::ForOp\n");
-      signalPassFailure();
-      return WalkResult::interrupt();
-    }
 
-    // Create if ops (scf.if %true) by block_id
     llvm::DenseMap<int, SmallVector<Operation *>> blockOps;
-    if (failed(collectOpsByBlockId(forOp, blockOps))) {
-      signalPassFailure();
+    if (failed(collectOpsByBlockId(op, blockOps))) {
+      LDBG("[Error]: op with ssbuffer.main_loop is neither scf::ForOp nor "
+           "scf::WhileOp, or a body op is missing ssbuffer.block_id\n");
       return WalkResult::interrupt();
     }
 
+    // blockCounterNums is keyed on the main-loop op (scf.for or scf.while).
+    // Record it for both forOp and whileOp.
     if (info) {
-      info->blockCounterNums[forOp] = blockOps.size();
+      info->blockCounterNums[op] = blockOps.size();
     }
 
     llvm::DenseMap<int, SmallVector<Value>> thenYieldValues;
     llvm::DenseMap<int, SmallVector<Value>> elseYieldValues;
 
-    if (failed(computeYieldValues(forOp, blockOps, thenYieldValues,
+    if (failed(computeYieldValues(op, blockOps, thenYieldValues,
                                   elseYieldValues))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
 
-    if (failed(createIfInMainLoop(forOp, blockOps, thenYieldValues,
+    if (failed(createIfInMainLoop(op, blockOps, thenYieldValues,
                                   elseYieldValues))) {
-      signalPassFailure();
       return WalkResult::interrupt();
     }
     return WalkResult::advance();
   });
+  if (walkResult.wasInterrupted()) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
 
-  LDBG("after createIfOps:\n" << module << "\n");
+  LDBG("after createIfOps:\n" << module);
 }
 
 namespace mlir {

@@ -387,7 +387,10 @@ def test_triton_unified_attn(
     soft_cap: Optional[float],
     num_blocks: int,
     q_dtype: Optional[torch.dtype],
+    request: pytest.FixtureRequest,
 ) -> None:
+    previous_default_device = torch.get_default_device()
+    request.addfinalizer(lambda: torch.set_default_device(previous_default_device))
     torch.set_default_device("npu")
 
     if q_dtype is not None and q_dtype.itemsize < 2 and block_size < 32:

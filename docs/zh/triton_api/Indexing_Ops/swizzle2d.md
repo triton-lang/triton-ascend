@@ -14,8 +14,8 @@ triton.language.swizzle2d(i, j, size_i, size_j, size_g)
 
 | 参数名           | 类型                | 说明                                                             |
 | ------------- | ----------------- | -------------------------------------------------------------- |
-| `i`        | `tensor`          | index索引值 ，最大值为size(i)-1                                                     |
-| `j`        | `tensor`          | index索引值 ，最大值为size(j)-1                                                     |
+| `i`        | `tensor`          | index索引值，最大值为size_i-1                                                     |
+| `j`        | `tensor`          | index索引值，最大值为size_j-1                                                     |
 | `size_i`        | `int`          | 整型，表示索引值i的长度                                                     |
 | `size_j`        | `int`          | 整型，表示索引值j的长度                                                          |
 | `size_g`        | `int`          | 整型                                                      |

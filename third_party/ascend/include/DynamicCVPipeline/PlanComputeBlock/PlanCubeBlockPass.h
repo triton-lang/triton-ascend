@@ -26,6 +26,7 @@
 #include <memory>
 
 #include "mlir/IR/BuiltinOps.h"
+
 #include "mlir/Pass/Pass.h"
 
 namespace mlir {
@@ -38,6 +39,8 @@ public:
 
   PlanCubeBlockPass() = default;
   void runOnOperation() override;
+
+  llvm::StringRef getArgument() const final { return "plan-cube-block"; }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createPlanCubeBlockPass();

@@ -24,6 +24,7 @@ import triton
 import triton.language as tl
 import test_common
 import pytest
+from triton.compiler.errors import CompilationError
 
 
 def naive_softmax(x):
@@ -57,11 +58,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
         # Load the row into SRAM, using a mask since BLOCK_SIZE may be > than n_cols
         mask = col_offsets < n_cols
         row = tl.load(input_ptrs, mask=mask, other=-float('inf'))
-        # Subtract maximum for numerical stability
-        row_minus_max = row - tl.max(row, axis=0)
-        numerator = tl.exp(row_minus_max)
-        denominator = tl.sum(numerator, axis=0)
-        softmax_output = numerator / denominator
+        softmax_output = tl.softmax(row)
         # Write back output to DRAM
         output_row_start_ptr = output_ptr + row_idx * output_row_stride
         output_ptrs = output_row_start_ptr + col_offsets
@@ -128,3 +125,48 @@ def test_softmax(dtype, sigtype, M, N):
     y_triton = softmax(x, stream)
     y_torch = torch.softmax(x, axis=1)
     test_common.validate_cmp(sigtype, y_triton, y_torch)
+
+
+@triton.jit
+def softmax_dim_kernel(input_ptr, output_ptr, M: tl.constexpr, N: tl.constexpr, dim: tl.constexpr,
+                       keep_dims: tl.constexpr):
+    row_offsets = tl.arange(0, M)
+    col_offsets = tl.arange(0, N)
+    idx = row_offsets[:, None] * N + col_offsets[None, :]
+    x = tl.load(input_ptr + idx)
+    ret = tl.softmax(x, dim=dim, keep_dims=keep_dims)
+    tl.store(output_ptr + idx, ret)
+
+
+dim_keep_dims_cases = [
+    (0, False),
+    (0, True),
+    (1, True),
+    (-1, True),
+    (-2, False),
+]
+
+
+@pytest.mark.parametrize('dtype, sigtype', types)
+@pytest.mark.parametrize('dim, keep_dims', dim_keep_dims_cases)
+def test_softmax_dim_keep_dims(dtype, sigtype, dim, keep_dims):
+    torch_npu.npu.utils.set_device(0)
+    torch.manual_seed(0)
+    M, N = 32, 128
+    x = torch.randn(M, N, dtype=dtype, device='npu')
+
+    y_triton = torch.empty_like(x)
+    softmax_dim_kernel[(1, )](x, y_triton, M, N, dim, keep_dims)
+
+    y_torch = torch.softmax(x, dim=dim)
+    test_common.validate_cmp(sigtype, y_triton, y_torch)
+
+
+def test_softmax_dim1_without_keep_dims_broadcast_fails():
+    torch_npu.npu.utils.set_device(0)
+    M, N = 32, 128
+    x = torch.randn(M, N, dtype=torch.float32, device='npu')
+    y = torch.empty_like(x)
+
+    with pytest.raises(CompilationError):
+        softmax_dim_kernel[(1, )](x, y, M, N, 1, False)

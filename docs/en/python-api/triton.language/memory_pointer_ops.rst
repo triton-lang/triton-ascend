@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/memory_pointer_ops.rst

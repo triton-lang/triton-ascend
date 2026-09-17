@@ -1,86 +1,87 @@
 Triton Ascend
-==============
+=============
 
-.. contents::
-    :local:
-    :depth: 2
+.. raw:: html
 
-.. toctree::
-    :maxdepth: 2
-    :caption: 快速开始
+   <p style="text-align:center">
+   <script async defer src="https://buttons.github.io/buttons.js"></script>
+   <a class="github-button" href="https://github.com/triton-lang/triton-ascend" data-show-count="true" data-size="large" aria-label="Star triton-lang/triton-ascend on GitHub">Star</a>
+   <a class="github-button" href="https://github.com/triton-lang/triton-ascend/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch triton-lang/triton-ascend on GitHub">Watch</a>
+   <a class="github-button" href="https://github.com/triton-lang/triton-ascend/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork triton-lang/triton-ascend on GitHub">Fork</a>
+   </p>
 
-    quick_start.md
+   <p style="text-align:center; margin-top: 4px;">
+   <a href="https://deepwiki.com/triton-lang/triton-ascend"><img src="https://deepwiki.com/badge.svg" alt="Ask DeepWiki"></a>
+   </p>
 
-.. toctree::
-    :maxdepth: 2
-    :caption: 安装指南
-
-    installation_guide.md
-
-.. toctree::
-    :maxdepth: 2
-    :caption: 架构设计与核心特性
-
-    architecture_design_and_core_features.md
+**Triton-Ascend** 是适配华为Ascend处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Ascend Atlas A2/A3/950系列产品，兼容Triton核心语法的同时，针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。
 
 .. toctree::
-    :maxdepth: 2
-    :caption: Triton 算子开发指南
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 从这里开始
 
-    programming_guide/index.md
-    programming_guide/vector_operator.md
-    programming_guide/cube_operator.md
-    programming_guide/cv_fusion_operator.md
-
-.. toctree::
-    :maxdepth: 2
-    :caption: Triton 算子迁移指南
-
-    migration_guide/architecture_difference.md
-    migration_guide/migrate_from_gpu.md
+   版本说明 <release_note>
+   快速入门 <quick_start>
+   安装指南 <installation_guide>
 
 .. toctree::
-    :maxdepth: 2
-    :caption: 典型算子样例
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 教程与样例
 
-    examples/index.md
-
-.. toctree::
-    :maxdepth: 2
-    :caption: 算子调试与调优
-
-    autotune_guide.md
-    max_autotune_guide.md
-    debug_guide/debugging.md
-    debug_guide/profiling.md
+   Vector算子开发 <programming_guide/vector_operator>
+   Cube算子开发 <programming_guide/cube_operator>
+   融合算子开发 <programming_guide/cv_fusion_operator>
+   Triton-Ascend autotune <autotune_guide>
+   典型算子样例 <examples/index>
 
 .. toctree::
-    :maxdepth: 3
-    :caption: Triton API 接口说明
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 开发指南
 
-    triton_api/index.md
-    triton_api/triton/index.md
-
-.. toctree::
-    :maxdepth: 1
-    :caption: Libdevice 开发者手册
-
-    libdevice/simt/libdevice_simt_developer_guide.md
+   Triton-Ascend算子开发 <programming_guide/index>
+   Triton-Ascend算子迁移 <migration_guide/index>
+   Triton-Ascend算子调试与调优 <debug_guide/index>
+   环境变量与编译选项 <environment_variable_and_compiler_options_reference>
 
 .. toctree::
-    :maxdepth: 2
-    :caption: 昇腾扩展 API 接口说明
+   :maxdepth: 1
+   :titlesonly:
+   :caption: API参考
 
-    triton_api_extention/index.md
+   triton <python-api/triton>
+   triton.language <python-api/triton.language>
+   triton.testing <python-api/triton.testing>
+   triton.language.extra.cann.extension <python-api/triton.language.extra.cann.extension>
+   triton.language.extra.cann.libdevice <python-api/triton.language.extra.cann.libdevice>
+   triton.extension.buffer.language <python-api/triton.extension.buffer.language>
+
 
 .. toctree::
-    :maxdepth: 1
-    :caption: 环境变量和编译选项
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 特性说明
 
-    environment_variable_and_compiler_options_reference.md
+   架构设计与核心特性 <architecture_design_and_core_features>
 
 .. toctree::
-    :maxdepth: 1
-    :caption: 常见问题
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 常见问题
 
-    FAQ.md
+   Triton-Ascend FAQ <FAQ>
+
+.. toctree::
+   :maxdepth: 1
+   :titlesonly:
+   :caption: 社区
+
+   贡献指南 <community/CONTRIBUTING_zh>
+   贡献者公约 <community/CODE_OF_CONDUCT_zh>
+   治理机制 <community/GOVERNANCE_zh>
+   技术例会 <community/community_technical_meeting>
+   Maintainers <community/MAINTAINERS>
+   Contributors <community/CONTRIBUTOR>
+   安全声明 <community/SECURITYNOTE_zh>

@@ -1,12 +1,14 @@
-# Agenda:
+# Agenda
 
-## Items:
+## Items
+
 1. Gluon update (Jeff Niu, OpenAI)
 2. Interest and requirements for a nightly performance regression suite (Simon Waters,  kernelize.ai)
 3. Triton developers’ summit update (Ofer Dekel, Microsoft)
 4. Open mic for other topics.
 
-## Minutes:
+## Minutes
+
 Recording link [here](https://youtu.be/zoSY_WXHmF0)
 
 1. Triton developers’ summit update (Ofer Dekel, Microsoft)
@@ -14,7 +16,7 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
     - Oct 21, 2025 (day before the PyTorch conference in SF)
     - Where: Microsoft Silicon Valley Campus, Mountain View, CA
     - There may be busses from SF to Mountain View (survey coming)
-    - Up to 500 people can be accomodated in their auditorium.
+    - Up to 500 people can be accommodated in their auditorium.
     - Everyone interested in Triton, developers, developers working on extensions, etc.
     - Registration website is imminent! (possibly in a week).
     - Talks (proposed):
@@ -70,7 +72,7 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
     - Q> In the future, will certain ops be implemented in Gluon vs in the compiler? E.g. tl.histogram written as a gluon kernel.
     - A> Probably not. Triton ops are tile-level. These aren't exposed in Gluon. Idea of interop between Gluon & Triton exist but may not be implemented.
     - Q> Pushing onus like scheduling to kernel writers, Any thoughts about tooling to help guide the kernel writers like timeline views?
-    - A> 1) intrakernel profiler with proton (very imporant, NCU stall counts example of something that might not be on the critical path) complicated dependency graphs 2) more function calls in gluon. but you won't see them in cuda gdb. Tooling needs to catch up and we expect it to do so.
+    - A> 1) intrakernel profiler with proton (very important, NCU stall counts example of something that might not be on the critical path) complicated dependency graphs 2) more function calls in gluon. but you won't see them in cuda gdb. Tooling needs to catch up and we expect it to do so.
     - Q> Microkernel for hotloops. Is this what you're envisioning for interop?
     - A> No, we haven't thought about it that much. If you had a large kernel, but our kernels are small so its not worth it.
     - Q> AMD other processors & gluon.
@@ -87,9 +89,9 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
         - Help on setting up and running CI & doing operations.
     - Proposal from kernelize.ai
         - Nosql based cloud storage
-        - pipelines on pulic cloud
+        - pipelines on public cloud
         - Use torchbench to store tests
-        - visualization: https://triton-bench.ai (currently contains fake data)
+        - visualization: <https://triton-bench.ai> (currently contains fake data)
         - discord for questions
         - Run on AWS (to start)
     - Demo of dashboard
@@ -118,5 +120,6 @@ Recording link [here](https://youtu.be/zoSY_WXHmF0)
 4. Open mic for other topics.
     - No additional topics.
 
-## Minutes:
+## Minutes
+
 Recording link [here](https://youtu.be/zoSY_WXHmF0)

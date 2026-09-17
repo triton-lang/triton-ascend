@@ -33,6 +33,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Attributes.h"
@@ -349,6 +350,72 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
   return success();
 }
 
+LogicalResult ZeroStrideMakeTensorPtrConverter::matchAndRewrite(
+    triton::MakeTensorPtrOp op, PatternRewriter &rewriter) const {
+  // Only rewrite when every stride is statically 0; any non-zero stride
+  // would mean the dimension actually varies in memory and the broadcast
+  // pattern doesn't apply.
+  if (!llvm::all_of(op.getStrides(), [](Value stride) {
+        Attribute attr;
+        if (!matchPattern(stride, m_Constant(&attr)))
+          return false;
+        if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+          return intAttr.getValue() == 0;
+        return false;
+      })) {
+    return failure();
+  }
+
+  auto isAllowedUser = [](Operation *user) {
+    // FIXME: temporary solution
+    // return isa<triton::LoadOp, triton::StoreOp, triton::AdvanceOp>(user);
+    return isa<triton::LoadOp>(user);
+  };
+  if (!llvm::all_of(op->getUsers(), isAllowedUser))
+    return failure();
+
+  Location loc = op.getLoc();
+  Value base = op.getBase();
+
+  auto ptrType = cast<triton::PointerType>(op.getResult().getType());
+  auto pointeeTensorTy = cast<RankedTensorType>(ptrType.getPointeeType());
+
+  SmallVector<triton::LoadOp> loadUsers;
+  SmallVector<triton::StoreOp> storeUsers;
+  SmallVector<triton::AdvanceOp> advanceUsers;
+  for (Operation *user : op->getUsers()) {
+    if (auto loadOp = dyn_cast<triton::LoadOp>(user))
+      loadUsers.push_back(loadOp);
+    else if (auto storeOp = dyn_cast<triton::StoreOp>(user))
+      storeUsers.push_back(storeOp);
+    else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(user))
+      advanceUsers.push_back(advanceOp);
+  }
+
+  // Rewrite loads: load a scalar from `base` directly (tt.load accepts a
+  // pointer-to-scalar type) and splat it to the block shape. The
+  // "splat" Triton op is the intended way to broadcast a scalar value into
+  // a tensor of arbitrary shape — equivalent in semantics to what
+  // `tt.broadcast(0-D-tensor -> shape)` does, but without the intermediate
+  // 0-D tensorization step.
+  auto rewriteLoad = [&](triton::LoadOp loadOp) {
+    rewriter.setInsertionPoint(loadOp);
+    auto scalarLoad = rewriter.create<triton::LoadOp>(
+        loc, base, /*mask=*/Value(), /*other=*/Value(), loadOp.getCache(),
+        loadOp.getEvict(), loadOp.getIsVolatile());
+
+    auto broadcasted = rewriter.create<triton::SplatOp>(loc, pointeeTensorTy,
+                                                        scalarLoad.getResult());
+    rewriter.replaceOp(loadOp, broadcasted.getResult());
+  };
+
+  for (triton::LoadOp loadOp : loadUsers)
+    rewriteLoad(loadOp);
+
+  rewriter.eraseOp(op);
+  return success();
+}
+
 LogicalResult PromotePointerIterArgsPattern::matchAndRewrite(
     scf::ForOp forOp, PatternRewriter &rewriter) const {
   // 1. Check if the loop meets transformation conditions
@@ -406,10 +473,16 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteForAddPtr(
   // 4. Rewrite the loop body
   if (failed(rewriteLoopBody(forOp, newForOp, pointerArgsInfo, indexMap,
                              rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   // 5. Replace original loop results
-  return replaceResults(forOp, newForOp, pointerArgsInfo, indexMap, rewriter);
+  if (failed(replaceResults(forOp, newForOp, pointerArgsInfo, indexMap,
+                            rewriter))) {
+    rewriter.eraseOp(newForOp);
+    return failure();
+  }
+  return success();
 }
 
 // Transform a for loop that uses pointer iteration arguments into one that uses
@@ -463,6 +536,7 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteAdvancePtr(
   // 5. Rewrite the loop body
   if (failed(rewriteLoopBodyForAdvancePtr(forOp, newForOp, pointerArgsInfo,
                                           indexMap, rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   rewriter.replaceOp(forOp, newForOp);
@@ -1732,7 +1806,7 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(
     scf::ForOp oldFor = forOp;
     if (failed(rewriteForWithRelayCandidates(newFor, oldFor, relayCandidates,
                                              rewriter))) {
-      newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+      rewriter.eraseOp(newFor);
       return failure();
     }
     return success();
@@ -1886,7 +1960,7 @@ SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidates(
   newFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> LogicalResult {
-    newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newFor);
     return failure();
   };
 
@@ -2173,9 +2247,6 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
     return failure();
   }
 
-  constexpr llvm::StringLiteral kFailedAttr =
-      "tts.simplify_tensor_iter_args.failed";
-
   Block &oldOuterBody = *outerFor.getBody();
   if (!oldOuterBody.mightHaveTerminator()) {
     return failure();
@@ -2206,7 +2277,7 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
   newOuterFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> FailureOr<scf::ForOp> {
-    newOuterFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newOuterFor);
     return failure();
   };
 

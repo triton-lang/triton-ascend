@@ -18,7 +18,7 @@ This document is intended for users already familiar with Triton-Ascend's autotu
 ```python
 import triton
 import triton.language as tl
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 
 
 @max_autotune(
@@ -68,7 +68,7 @@ Total configuration count: `2 × 2 × 2 × 2 × 2 = 32` configurations.
 Like using `configs=[]` for automatic Tiling, `max_autotune` requires Ascend backend extension support. `max_autotune` must be imported separately from the Ascend backend module:
 
 ```python
-from triton.backends.ascend.backend.runtime import max_autotune
+from triton.backends.ascend.runtime import max_autotune
 ```
 
 ## Kernel Types and Supported Parameters
@@ -80,7 +80,7 @@ from triton.backends.ascend.backend.runtime import max_autotune
 | Parameter | cube | mix | vector | Default Value | Valid Values | Description |
 |------|:----:|:---:|:------:|--------|--------|------|
 | `num_stages` | ✅ | ✅ | ✅ | `[2]` | `[1, 2]` | Number of pipeline stages |
-| `unit_flag` | ✅ | ✅ | ❌ | `[False]` | Boolean list | Cube搬出 related synchronization optimization |
+| `unit_flag` | ✅ | ✅ | ❌ | `[False]` | Boolean list | Cube related synchronization optimization |
 | `limit_auto_multi_buffer_of_local_buffer` | ✅ | ✅ | ❌ | `["no-l0c"]` | `["no-limit", "no-l0c"]` | Configure the scope of automatic multi-buffer for local buffer |
 | `limit_auto_multi_buffer_only_for_local_buffer` | ❌ | ✅ | ❌ | `[False]` | Boolean list | Limit automatic multi-buffer to only apply to local buffer |
 | `set_workspace_multibuffer` | ❌ | ✅ | ❌ | `[2, 4]` | `[2, 4]` | Configure workspace multi-buffer levels |

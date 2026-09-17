@@ -4,7 +4,6 @@ In this section, you will use Triton to write a simple accuracy comparison progr
 During this process, you will learn:
 
 - The method of comparing the accuracy of each data type in Triton.
-- Reference code: triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 
 Compute kernel:
 
@@ -111,10 +110,4 @@ def accuracy_comparison(y_cal, y_ref):
         raise ValueError(f'Invalid or unsupported tensor dtype: {tensor_dtype}')
 
 
-```
-
-You can run the following command to execute the sample code: tutorials/14-accuracy-comparison.py.
-
-```Python
-python triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 ```

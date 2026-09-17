@@ -1,0 +1,75 @@
+# Issue auto-labeling rules (simple schema for jimschubert/labeler-action)
+# Each label maps to a list of regex patterns matched case-insensitively
+# against the issue title + body.
+
+labels:
+  # ── Category ──
+  'bug':
+    - 'miscompiled|incorrect result|wrong result|result mismatch|wrong output'
+    - 'compilation error|compile error|build error|coredump|crash|segfault'
+    - 'NoTritonConfigsError|assertion failed|unexpected error|traceback'
+    - 'install.*(?:fail|error|broken)|pip.*(?:fail|error)|version.*mismatch'
+
+  'performance':
+    - 'precision|accuracy'
+    - 'performance|slow|slower|speed|throughput|latency|bottleneck'
+    - 'benchmark|profiling|msprof'
+
+  'documentation':
+    - '\bdoc\b|\bdocs\b|readme|quick.?start|docstring|typo'
+
+  'enhancement':
+    - 'feature request|new feature|enhancement|support for|add support'
+
+  # ── Component ──
+  'ssbuffer':
+    - 'ssbuffer|splitdataflow|allocmulticache|crossdeps|markop|planCube'
+
+  'autotune':
+    - 'autotune|auto.tun(?:e|ing)'
+
+  'compiler':
+    - 'compiler|backend|LLVM|MLIR|dialect|codegen|JIT|lowering'
+    - 'triton.*compiler|compiler.*triton|TritonGPU|TritonNvidiaGPU'
+
+  'python':
+    - 'python|pybind|numpy|pytorch|torch\.'
+
+  'tests':
+    - 'test.*(?:fail|error|broken)|unittest|lit\s+test|coverage'
+    - 'testing infrastructure|test suite|test harness'
+
+  'ascend-backend':
+    - 'ascend|NPU|CANN|AscendNPU|torch\.npu|Atlas|910B|950|Ascend\s+9'
+    - 'third.party.ascend|ascend.*backend'
+
+  'kernels':
+    - 'triton\s+kernel|kernel.*triton|gemm|matmul|SiLU|gelu|bmm|softmax'
+    - 'element.?wise|reduction|attention|flash\.?attention'
+
+  'build':
+    - 'cmake|makefile|setup\.py|pyproject\.toml|build system|compilation'
+    - 'CMakeLists|safe[._]compile'
+
+  'CICD':
+    - 'CI/CD|workflow|github\s+actions|pipeline|runner|actions'
+
+  'dependencies':
+    - 'dependency|dependencies|requirements\.txt|version bump|upgrade package'
+    - 'pip\s+install|package update|pypi'
+
+  'docker':
+    - 'docker|container|image|Dockerfile|debian|openeuler|ubuntu'
+
+  'scripts':
+    - '\bscripts?\b|\bcli\b|\bhelper\b|bin/'
+
+  'release':
+    - '\brelease\b|changelog|milestone|\btag\b'
+
+  'community-task':
+    - 'community\s+task|open.source.contribution'
+
+  # ── Priority ──
+  'good first issue':
+    - 'good first issue|beginners? friendly|easy fix|starter issue'

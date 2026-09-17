@@ -2,14 +2,12 @@
 
 ## Multi-Core Task Parallelism Strategy
 
-NPUs are strongly bound to physical cores in Triton multi-core parallelism. This represents a core difference from GPUs' logical dimension parallelism + automatic physical mapping in hardware.
+In Triton multi-core parallelism, NPUs use a strong physical-core binding model, which is a core difference from the GPU model of logical-dimension parallelism with automatic hardware mapping. The core comparison is shown in the following table:
 
-- Core comparison
-
-    |Dimension      |GPU (NVIDIA)|Ascend|
-    |-----------|--------------|-----------|
-    |Essence of grids| Logical task dimension (decoupled from physical cores)| Physical core group mapping (bound to the AI core topology)|
-    |Limit on the number of cores/dimensions| No hard limit on the grid dimensions/sizes| Grid size ≤ Total number of AI cores; topology matching required by 2D|
+|Dimension      |GPU (NVIDIA)|Ascend|
+|-----------|--------------|-----------|
+|Essence of grids| Logical task dimension (decoupled from physical cores)| Physical core group mapping (bound to the AI core topology)|
+|Limit on the number of cores/dimensions| No hard limit on the grid dimensions/sizes| Grid size ≤ Total number of AI cores; topology matching required by 2D|
 
 GPUs can be bound to multiple dimensions (a 3D grid of `[n, m, l]` is equivalent to`n × m × l` parallel threads). Each thread corresponds to only one kernel execution and executes only once.\
 In NPUs, vector cores and cube cores belong to multiple physical cores. The number of cores varies with the generation of hardware. Each core executes only one block and can schedule the block execution repeatedly.
@@ -23,7 +21,24 @@ When calling Triton kernel functions, you can set the **launch** parameter to co
 triton_gelu[n, 1, 1](...)  # The first parameter indicates the number of cores in use. n indicates that n cores are in use.
 ```
 
-By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Note that the number of cores in the current version must be less than or equal to 65,535.
+By optimizing the number of cores, you can fully schedule and utilize all computing resources, thereby maximizing the degree of parallelism (DOP) and throughput. Without `auto-blockify` (see below), the number of cores in the launched grid must be less than or equal to 65,535.
+
+### Auto-Blockify: lifting the 65,535 logical-block limit
+
+Upstream Triton on NVIDIA GPUs treats the grid as a pure logical dimension — `n` logical blocks map 1:1 to `n` hardware blocks, and the runtime expands the work across SMs without any per-block iteration. On Ascend, the strict physical-core binding above caps the launchable grid at 65,535, which is restrictive for kernels with millions of logical work items (autotuned reduce/scan, megablocks-style sparse kernels, etc.).
+
+`auto-blockify` (the `SIMTAutoBlockify` compiler pass plus a matching runtime cap) removes that limit by treating the grid as logical at compile time and folding it onto the physical cores at launch:
+
+- **Compile time**: a Triton pass wraps the kernel body in an `scf.for` over per-block work, indexed by `gpu.linear_block_id`. The chunk size is `ceildiv(logical_block_count, physical_core_count)`, so each physical block iterates through `chunk` logical block IDs.
+- **Runtime**: the block-count argument passed to the launcher is clamped from the logical grid down to `physical_core_count`, mirroring the compile-time fold.
+
+Compile time and runtime share one backend-managed policy. Automatic block mapping is enabled internally, while the compiler-generated IR safety marker excludes unsupported kernels. The compile-time loop wrap and runtime cap therefore stay in sync, so a kernel never compiles for one mode and launches for another.
+
+Practical implications when porting a GPU Triton kernel:
+
+- A grid larger than 65,535 just works; no need to manually fold the outer dimension into the kernel body.
+- Logical blocks must remain order-independent (the loop visits them in chunk order). Kernels that assume strict logical block-id ordering within a single launch (e.g., explicit cross-block synchronization on a particular order) need to be rewritten.
+- Per-block workspace allocations become `O(physical_core_count)` rather than `O(logical_block_count)`, because workspace is reused across iterations of the inner `scf.for`.
 
 ## Single-Core Data Transfer Strategy
 
@@ -70,6 +85,12 @@ def standard_unary(x0):
 The following is an example of a simple kernel written in Triton, demonstrating how to define and call a basic Triton kernel function. This example implements a simple mathematical operation (GELU activation function).
 
 ```Python
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
 # Define the triton_kernel function.
 @triton.jit
 def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
@@ -77,6 +98,13 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     x = tl.load(in_ptr0 + idx_block)
     ret = x * 0.5 * (1.0 + tl.erf(x / tl.sqrt(2.0)))
     tl.store(out_ptr0 + idx_block, ret)
+
+# Call the triton_kernel function.
+ncore = 32
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
+triton_easy_kernel[ncore, 1, 1](x0, out1, x0.numel())
+
 ```
 
 Precautions
@@ -93,6 +121,13 @@ The following is an example of an optimized Triton kernel implementation suitabl
 
 ```Python
 # Define the triton_kernel function.
+import torch
+import torch_npu
+
+import triton
+import triton.language as tl
+
+# Define the triton_kernel function.
 @triton.jit
 def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     xoffset = tl.program_id(0) * XBLOCK
@@ -107,6 +142,8 @@ def triton_better_kernel(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK
 ncore = 32
 xblock = 32768
 xblock_sub = 8192
+x0 = torch.rand(32768, device='npu')
+out1 = torch.empty_like(x0)
 triton_better_kernel[ncore, 1, 1](x0, out1, x0.numel(), xblock, xblock_sub)
 ```
 
@@ -148,13 +185,12 @@ For example, to enable the `multibuffer` option, pass `'multibuffer': True` to `
 | multibuffer                                   | Data transfer through parallel pipelines. | Default: **true**. Options: **true** and **false**. It is configurable during autotune.                    |
 | unit_flag                                     | Optimization item for cube-out.                                        | Default: None. Options: **true** and **false**.  It is configurable during autotune.                    |
 | limit_auto_multi_buffer_only_for_local_buffer | Optimization item for CV operators and cube-out.                        | Default: None. Options: **true** and **false**. It is configurable during autotune.|
-| limit_auto_multi_buffer_of_local_buffer       | Scope of enabling double buffer for cube operators.                        | Default: None. Value range: ["no-limit","no-l0c"]. It is configurable during autotune.          |
-| set_workspace_multibuffer                     | It takes effect only when **limit_auto_multi_buffer_only_for_local_buffer** is set to **false**.| Default: None. Example: [2,4]. It is configurable during autotune.                           |
-| enable_hivm_auto_cv_balance                   | **set_workspace_multibuffer** takes effect only when **limit_auto_multi_buffer_only_for_local_buffer** is set to **false**.| Default: None. Options: **true** and **false**. It is configurable during autotune.|
-| tile_mix_vector_loop                          | Optimization item for CV operators. It specifies the number of segments into which the current vector can be split.                       | Default: None. Example: [2,4,8]. It is configurable during autotune.                      |
-| tile_mix_cube_loop                            | Optimization item for CV operators. It specifies the number of segments into which the current cube can be split.     | Default: None. Example: [2,4,8]. It is configurable during autotune.                     |
-| auto_blockify_size                            | Optimization item for TRITON_ALL_BLOCKS_PARALLEL. It specifies the size of leftmost dimension to be expanded.     | Default: 1. Example: [2,4,8]. It is configurable during autotune.                     |
-| enable_auto_blockify                          | Per-kernel override for the TRITON_ALL_BLOCKS_PARALLEL env var. When set to **true** or **false**, the kernel uses that value regardless of the env var; when left unset (None), the env var decides. Resolution order: this option > env var > off. Both the compile-time blockify pass and the runtime cap on the launched block count follow this resolved value, so they always agree. | Default: None. Options: **true**, **false**, None. |
+| limit_auto_multi_buffer_of_local_buffer       | Scope of enabling double buffer for cube operators.                        | Default: None. Value: "no-limit" or "no-l0c". It is configurable during autotune.          |
+| set_workspace_multibuffer                     | Configures workspace multi-buffer levels to enable multi-buffering for workspace-related data movement.| Default: None. Use a single value, for example 2 or 4. Candidate values can be configured during autotune.                           |
+| enable_hivm_auto_cv_balance                   | Enables or disables automatic CV balance to balance Cube and Vector execution in CV fusion scenarios.| Default: None. Options: **true** and **false**. It is configurable during autotune.|
+| tile_mix_vector_loop                          | Optimization item for CV operators. It specifies the number of segments into which the current vector can be split.                       | Default: None. Use a single value, for example 2, 4, or 8. Candidate values can be configured during autotune.                      |
+| tile_mix_cube_loop                            | Optimization item for CV operators. It specifies the number of segments into which the current cube can be split.     | Default: None. Use a single value, for example 2, 4, or 8. Candidate values can be configured during autotune.                     |
 
-- Note: The compilation optimization options are located in **ascend/backend/compiler.py**.
+- Note: The compilation optimization options are located in `third_party/ascend/backend/compiler.py`.
 - Note: CV operators indicate that both AI cores and vector cores are used during operator computation.
+- Note: For active compiler options and migration from deprecated names, see {ref}`Compiler Option Cleanup and Compatibility <compiler-option-cleanup-and-compatibility>`.

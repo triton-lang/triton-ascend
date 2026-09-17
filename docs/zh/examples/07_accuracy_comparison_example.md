@@ -4,7 +4,6 @@
 在此过程中，用户会学习到：
 
 - Triton 每种数据类型的精度比对方法。
-- 参考示例代码：triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 
 计算内核:
 
@@ -111,10 +110,4 @@ def accuracy_comparison(y_cal, y_ref):
         raise ValueError(f'Invalid or unsupported tensor dtype: {tensor_dtype}')
 
 
-```
-
-可以使用下面指令，运行参考示例代码：tutorials/14-accuracy-comparison.py
-
-```Python
-python triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 ```

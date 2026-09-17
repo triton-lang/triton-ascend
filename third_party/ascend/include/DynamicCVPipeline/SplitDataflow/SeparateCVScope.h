@@ -39,9 +39,21 @@ public:
   void getDependentDialects(DialectRegistry &registry) const override;
 
   void runOnOperation() override;
+
+  // Return the pass argument name
+  static constexpr ::llvm::StringRef getArgumentName() {
+    return "separate-cv-scope";
+  }
+  ::llvm::StringRef getArgument() const override { return "separate-cv-scope"; }
+  ::llvm::StringRef getDescription() const override {
+    return "separate ops into cv scope";
+  }
+  ::llvm::StringRef getName() const override { return "SeparateCVScopePass"; }
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createSeparateCVScopePass();
+
+void registerSeparateCVScopePasses();
 
 } // namespace triton
 } // namespace mlir

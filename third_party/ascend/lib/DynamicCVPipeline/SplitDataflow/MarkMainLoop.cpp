@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/MarkMainLoop.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/Support/Debug.h"
@@ -38,23 +39,45 @@ void MarkMainLoopPass::runOnOperation() {
   LOG_DEBUG("\n--- enter MarkMainLoopPass --->\n");
   ModuleOp module = getOperation();
 
-  int mainLoopIdCounter = 0;
-  SmallVector<scf::ForOp> mainLoops;
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
 
-  // Find all candidate main loops
+  int mainLoopIdCounter = 0;
+  SmallVector<Operation *> mainLoops;
+
+  // Find all candidate main loops (ForOp + WhileOp)
+  auto isL1Fixpipe = [](Operation *op) -> bool {
+    auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
+    if (!fixpipeOp)
+      return false;
+    auto dstType = dyn_cast<MemRefType>(fixpipeOp.getDst().getType());
+    if (!dstType)
+      return false;
+    auto addrSpaceAttr =
+        dyn_cast_or_null<hivm::AddressSpaceAttr>(dstType.getMemorySpace());
+    return addrSpaceAttr &&
+           addrSpaceAttr.getAddressSpace() == hivm::AddressSpace::L1;
+  };
+
   module.walk([&](Operation *op) {
-    if (isa<hivm::FixpipeOp, hivm::CopyOp>(op)) {
-      if (auto forOp = op->getParentOfType<scf::ForOp>()) {
-        mainLoops.push_back(forOp);
-      }
-    }
+    if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op))
+      return;
+
+    if (isL1Fixpipe(op))
+      return;
+
+    if (auto forOp = op->getParentOfType<scf::ForOp>())
+      mainLoops.push_back(forOp);
+    if (auto whileOp = op->getParentOfType<scf::WhileOp>())
+      mainLoops.push_back(whileOp);
   });
 
-  for (scf::ForOp forOp : mainLoops) {
-    if (!forOp->hasAttr("ssbuffer.main_loop")) {
+  for (Operation *loopOp : mainLoops) {
+    if (!loopOp->hasAttr(CVPipeline::kMainLoop)) {
       // Add attribute with integer value (current counter ID)
-      forOp->setAttr(
-          "ssbuffer.main_loop",
+      loopOp->setAttr(
+          CVPipeline::kMainLoop,
           Builder(module.getContext()).getI32IntegerAttr(mainLoopIdCounter));
       mainLoopIdCounter++;
     }
@@ -62,24 +85,24 @@ void MarkMainLoopPass::runOnOperation() {
 
   // Remove main_loop attribute from outer loops if nested loops both have it
   // Keep only the innermost main_loop
-  SmallVector<scf::ForOp> allMainLoops;
-  module.walk([&](scf::ForOp forOp) {
-    if (forOp->hasAttr("ssbuffer.main_loop")) {
-      allMainLoops.push_back(forOp);
+  SmallVector<Operation *> allMainLoops;
+  module.walk([&](Operation *loopOp) {
+    if (CVPipeline::isMainLoopOp(loopOp)) {
+      allMainLoops.push_back(loopOp);
     }
   });
 
-  for (scf::ForOp forOp : allMainLoops) {
-    // Check if there's any nested for loop with main_loop attribute
+  for (Operation *loopOp : allMainLoops) {
+    // Check if there's any nested loop with main_loop attribute
     bool hasNestedMainLoop = false;
-    forOp.walk([&](scf::ForOp nestedForOp) {
-      if (nestedForOp != forOp && nestedForOp->hasAttr("ssbuffer.main_loop")) {
+    loopOp->walk([&](Operation *nestedLoopOp) {
+      if (nestedLoopOp != loopOp && CVPipeline::isMainLoopOp(nestedLoopOp)) {
         hasNestedMainLoop = true;
       }
     });
     // Remove attribute from outer loop if inner loop also has it
     if (hasNestedMainLoop) {
-      forOp->removeAttr("ssbuffer.main_loop");
+      loopOp->removeAttr(CVPipeline::kMainLoop);
     }
   }
 

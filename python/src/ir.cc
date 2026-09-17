@@ -12,7 +12,6 @@
 #include "mlir/Dialect/LLVMIR/LLVMAttrs.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/LLVMIR/Transforms/InlinerInterfaceImpl.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/UB/IR/UBOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -35,12 +34,12 @@
 #include "triton/Dialect/Triton/IR/Utility.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonInstrument/IR/Dialect.h"
+#include "triton/Dialect/TritonNvidiaGPU/IR/Dialect.h"
 #include "triton/Dialect/TritonNvidiaGPU/Transforms/TMAUtilities.h"
 #include "triton/Tools/Sys/GetEnv.hpp"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
-#include "ir.h"
 namespace {
 
 namespace py = pybind11;
@@ -213,19 +212,42 @@ py::list getTensorDescMetadata(ModuleOp &mod) {
 
     auto blockType = descTy.getBlockType();
     auto encoding = blockType.getEncoding();
-    auto mmaEncoding = dyn_cast<ttg::NVMMASharedEncodingAttr>(encoding);
-    auto swizzle = ttng::getTMASwizzleMode(nullptr, descTy);
-    auto elemType = ttng::getTMAElementType(nullptr, descTy);
-    assert(swizzle.has_value());
-    assert(elemType.has_value());
-    auto blockSize = ttng::getTMABlockShape(blockType, /*packedSize=*/false);
+
     py::dict metadata;
-    metadata["swizzle"] = *swizzle;
-    metadata["elem_size"] = descTy.getBlockType().getElementTypeBitWidth() / 8;
-    metadata["elem_type"] = *elemType;
-    metadata["block_size"] =
-        std::vector<int>(blockSize.begin(), blockSize.end());
-    metadata["fp4_padded"] = mmaEncoding && mmaEncoding.getFp4Padded();
+    if (isa<ttg::NVMMASharedEncodingAttr>(encoding)) {
+      auto mmaEncoding = dyn_cast<ttg::NVMMASharedEncodingAttr>(encoding);
+      auto swizzle = ttng::getTMASwizzleMode(nullptr, descTy);
+      auto elemType = ttng::getTMAElementType(nullptr, descTy);
+      assert(swizzle.has_value());
+      assert(elemType.has_value());
+      auto blockSize = ttng::getTMABlockShape(blockType, /*packedSize=*/false);
+      metadata["swizzle"] = *swizzle;
+      metadata["elem_size"] =
+          descTy.getBlockType().getElementTypeBitWidth() / 8;
+      metadata["elem_type"] = *elemType;
+      metadata["block_size"] =
+          std::vector<int>(blockSize.begin(), blockSize.end());
+      metadata["fp4_padded"] = mmaEncoding && mmaEncoding.getFp4Padded();
+    } else {
+      auto blockShape = blockType.getShape();
+      metadata["block_size"] =
+          std::vector<int>(blockShape.begin(), blockShape.end());
+      metadata["elem_bits"] = blockType.getElementTypeBitWidth();
+
+      if (auto paddedEnc = dyn_cast<ttg::PaddedSharedEncodingAttr>(encoding)) {
+        py::list intervalPaddingPairs;
+        for (auto [interval, padding] : llvm::zip_equal(
+                 paddedEnc.getIntervals(), paddedEnc.getPaddings())) {
+          py::list pair;
+          pair.append(interval);
+          pair.append(padding);
+          intervalPaddingPairs.append(pair);
+        }
+        metadata["interval_padding_pairs"] = intervalPaddingPairs;
+
+        auto blockShape = blockType.getShape();
+      }
+    }
     result.append(std::move(metadata));
   }
   return result;
@@ -236,15 +258,6 @@ py::list getTensorDescMetadata(ModuleOp &mod) {
 /*****************************************************************************/
 /* Python bindings for ir                                                    */
 /*****************************************************************************/
-
-namespace ir {
-
-// Pointer to the TritonOpBuilder class, used to register IR ops for third-party
-// dialects.
-static py::class_<TritonOpBuilder> *builderClassPtr = nullptr;
-py::class_<TritonOpBuilder> *getBuilderClass() { return builderClassPtr; }
-
-} // namespace ir
 
 void init_triton_ir(py::module &&m) {
   using ret = py::return_value_policy;
@@ -319,7 +332,8 @@ void init_triton_ir(py::module &&m) {
       .value("TF32", InputPrecision::TF32)
       .value("TF32x3", InputPrecision::TF32x3)
       .value("IEEE", InputPrecision::IEEE)
-      .value("HF32", InputPrecision::HF32)
+      .value("BF16x3", InputPrecision::BF16x3)
+      .value("BF16x6", InputPrecision::BF16x6)
       .export_values();
 
   py::enum_<ScaleDotElemType>(m, "ScaleDotElemTypeTY", py::module_local())
@@ -333,23 +347,14 @@ void init_triton_ir(py::module &&m) {
       .export_values();
 
   py::class_<MLIRContext>(m, "context", py::module_local())
-      .def(py::init<>())
-      .def(
-          "__enter__", [](MLIRContext &self) -> MLIRContext & { return self; },
-          py::return_value_policy::reference)
-      .def("__exit__",
-           [](MLIRContext &, py::object, py::object, py::object) -> bool {
-             // Keep context alive for the duration of the scope.
-             return false;
-           })
+      .def(py::init<>([]() {
+        return std::make_unique<MLIRContext>(MLIRContext::Threading::DISABLED);
+      }))
       .def("printOpOnDiagnostic",
            [](MLIRContext &self, bool v) { self.printOpOnDiagnostic(v); })
-      .def("printStackTraceOnDiagnostic",
-           [](MLIRContext &self, bool v) {
-             self.printStackTraceOnDiagnostic(v);
-           })
-      .def("disable_multithreading",
-           [](MLIRContext &self) { self.disableMultithreading(); });
+      .def("printStackTraceOnDiagnostic", [](MLIRContext &self, bool v) {
+        self.printStackTraceOnDiagnostic(v);
+      });
 
   py::class_<SourceMgrDiagnosticHandler>(m, "source_mgr_diag",
                                          py::module_local())
@@ -359,6 +364,7 @@ void init_triton_ir(py::module &&m) {
     DialectRegistry registry;
     registry.insert<TritonDialect, ::mlir::triton::gpu::TritonGPUDialect,
                     ::mlir::triton::instrument::TritonInstrumentDialect,
+                    ::mlir::triton::nvidia_gpu::TritonNvidiaGPUDialect,
                     math::MathDialect, arith::ArithDialect, scf::SCFDialect,
                     ::mlir::gpu::GPUDialect, cf::ControlFlowDialect,
                     LLVM::LLVMDialect, mlir::ub::UBDialect,
@@ -399,11 +405,18 @@ void init_triton_ir(py::module &&m) {
       });
 
   py::class_<Location>(m, "location", py::module_local())
-      .def("__str__", [](Location &self) {
-        std::string str;
-        llvm::raw_string_ostream os(str);
-        self.print(os);
-        return os.str();
+      .def("__str__",
+           [](Location &self) {
+             std::string str;
+             llvm::raw_string_ostream os(str);
+             self.print(os);
+             return os.str();
+           })
+      .def("set_name", [](Location &self, std::string &name) {
+        mlir::StringAttr nameAttr =
+            mlir::StringAttr::get(self.getContext(), name);
+        mlir::NameLoc nameLoc = mlir::NameLoc::get(nameAttr, self);
+        self = dyn_cast<Location>(nameLoc);
       });
 
   py::class_<Value>(m, "value", py::module_local())
@@ -424,6 +437,8 @@ void init_triton_ir(py::module &&m) {
              }
            })
       .def("get_context", &Value::getContext)
+      .def("get_loc", &Value::getLoc)
+      .def("set_loc", &Value::setLoc)
       .def("replace_all_uses_with",
            [](Value &self, Value &newValue) {
              self.replaceAllUsesWith(newValue);
@@ -441,7 +456,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpResult, Value>(m, "op_result", py::module_local());
 
-  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local());
+  py::class_<BlockArgument, Value>(m, "block_argument", py::module_local())
+      .def("get_loc", &BlockArgument::getLoc)
+      .def("set_loc", &BlockArgument::setLoc);
 
   py::class_<Region>(m, "region", py::module_local())
       .def("get_parent_region", &Region::getParentRegion, ret::reference)
@@ -465,6 +482,8 @@ void init_triton_ir(py::module &&m) {
              auto loc = UnknownLoc::get(ty.getContext());
              self.addArgument(ty, loc);
            })
+      .def("add_argument_at", [](Block &self, Type ty,
+                                 Location loc) { self.addArgument(ty, loc); })
       .def("get_num_arguments", &Block::getNumArguments)
       .def("get_argument", &Block::getArgument)
       .def("dump", &Block::dump)
@@ -521,8 +540,6 @@ void init_triton_ir(py::module &&m) {
   py::class_<IntegerAttr, Attribute>(m, "integer_attr", py::module_local());
   py::class_<BoolAttr, Attribute>(m, "bool_attr", py::module_local());
   py::class_<UnitAttr, Attribute>(m, "unit_attr", py::module_local());
-  py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
-  py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   // Ops
   py::class_<OpState>(m, "OpState", py::module_local())
@@ -576,6 +593,8 @@ void init_triton_ir(py::module &&m) {
            })
       .def("verify",
            [](OpState &self) -> bool {
+             TritonSourceMgrDiagnosticHandler handler =
+                 setupTritonDiagnosticHandler(self.getContext());
              return succeeded(verify(self.getOperation()));
            })
       .def("get_operation", [](OpState &self) { return self.getOperation(); });
@@ -722,12 +741,7 @@ void init_triton_ir(py::module &&m) {
       .def("walk",
            [](ModuleOp &self, const std::function<void(Operation *)> &fn) {
              self.walk(fn);
-           })
-      .def("verify_with_diagnostics", [](ModuleOp &self) {
-        TritonSourceMgrDiagnosticHandler handler =
-            setupTritonDiagnosticHandler(self.getContext());
-        return succeeded(verify(self.getOperation()));
-      });
+           });
 
   m.def("make_attr", [](const std::vector<int> &values, MLIRContext &context) {
     return mlir::cast<Attribute>(DenseIntElementsAttr::get(
@@ -785,16 +799,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpBuilder::InsertPoint>(m, "InsertPoint", py::module_local());
 
-  static py::class_<TritonOpBuilder> builderClass(
-      m, "builder", py::module_local(), py::dynamic_attr());
-  ir::builderClassPtr = &builderClass;
-  builderClass
-      .def(py::init<MLIRContext *, const std::string &>(), py::arg("context"),
-           py::arg("compile_mode") = "simd",
-           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
-           "default: simd)")
-      .def("is_simt_mode", &TritonOpBuilder::isSimtMode,
-           "Check if the compile mode is simt")
+  py::class_<TritonOpBuilder>(m, "builder", py::module_local(),
+                              py::dynamic_attr())
+      .def(py::init<MLIRContext *>())
       .def("get_op_builder", &TritonOpBuilder::getBuilder, ret::reference)
       // getters
       .def("create_module",
@@ -843,14 +850,6 @@ void init_triton_ir(py::module &&m) {
       .def("get_string_attr",
            [](TritonOpBuilder &self, std::string value) -> Attribute {
              return self.getBuilder().getStringAttr(value);
-           })
-      .def("get_i64_array_attr",
-           [](TritonOpBuilder &self, const std::vector<int64_t> &array) {
-             return self.getBuilder().getI64ArrayAttr(array);
-           })
-      .def("get_type_array_attr",
-           [](TritonOpBuilder &self, const std::vector<Type> &array) {
-             return self.getBuilder().getTypeArrayAttr(array);
            })
       .def("get_disable_loop_licm_attr",
            [](TritonOpBuilder &self) -> Attribute {
@@ -931,16 +930,6 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, double v) -> Value {
              return self.create<arith::ConstantOp>(
                  self.getBuilder().getF64FloatAttr(v));
-           })
-      .def("get_fp8e4nv",
-           [](TritonOpBuilder &self, double v) -> Value {
-             return self.create<arith::ConstantOp>(FloatAttr::get(
-                 Float8E4M3FNType::get((self.getBuilder().getContext())), v));
-           })
-      .def("get_fp8e5",
-           [](TritonOpBuilder &self, double v) -> Value {
-             return self.create<arith::ConstantOp>(FloatAttr::get(
-                 Float8E5M2Type::get(self.getBuilder().getContext()), v));
            })
       .def("get_null_value",
            [](TritonOpBuilder &self, Type type) -> Value {
@@ -1030,21 +1019,6 @@ void init_triton_ir(py::module &&m) {
            [](TritonOpBuilder &self, Type &elementType,
               std::vector<int64_t> &shape) -> Type {
              return RankedTensorType::get(shape, elementType);
-           })
-      .def("get_buffer_ty",
-           [](TritonOpBuilder &self, std::vector<int64_t> &shape,
-              Type &elementType, const Attribute &memorySpace) -> Type {
-             return MemRefType::get(shape, elementType,
-                                    MemRefLayoutAttrInterface{}, memorySpace);
-           })
-      .def("get_buffer_ty_with_strides",
-           [](TritonOpBuilder &self, std::vector<int64_t> &shape,
-              Type &elementType, const std::vector<int64_t> &strides,
-              const Attribute &memorySpace) -> Type {
-             // create a layout with strides, using dynamic offset
-             auto layout = StridedLayoutAttr::get(
-                 self.getBuilder().getContext(), ShapedType::kDynamic, strides);
-             return MemRefType::get(shape, elementType, layout, memorySpace);
            })
       .def("get_function_ty",
            [](TritonOpBuilder &self, std::vector<Type> inTypes,
@@ -1921,7 +1895,7 @@ void init_triton_ir(py::module &&m) {
            })
       .def(
           "run",
-          [](PassManager &self, ModuleOp &mod) {
+          [](PassManager &self, ModuleOp &mod, std::string repro_pipeline_tag) {
             // TODO: maybe dump module to file and print error for better
             // diagnostics
 
@@ -1932,6 +1906,11 @@ void init_triton_ir(py::module &&m) {
             auto reproducerPath =
                 triton::tools::getStrEnv("TRITON_REPRODUCER_PATH");
             if (!reproducerPath.empty()) {
+              if (reproducerPath != "-") {
+                std::string repro_suffix =
+                    "." + repro_pipeline_tag + ".repro.mlir";
+                reproducerPath += repro_suffix;
+              }
               auto anchorName = self.getOpAnchorName();
               auto passes = self.getPasses();
               Operation *op = mod.getOperation();

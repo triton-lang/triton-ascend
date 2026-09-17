@@ -24,7 +24,7 @@
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
 | **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
-| **编译错误 (MLIRCompileError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompileError`。 | 5.2 编译错误调试方法 |
+| **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2 编译错误调试方法 |
 
 ## 2 Triton-Ascend 编译流程概览
 
@@ -83,10 +83,12 @@ rm -rf ~/.triton/cache
 调试时禁用缓存: 在调试编译问题时，建议临时禁用缓存以确保每次都重新编译：
 
 ```bash
-export TRITON_DISABLE_CACHE=1
+export TRITON_ALWAYS_COMPILE=1
 ```
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
+
+<a id="debug-dump-files"></a>
 
 ### 3.2 调试转储文件（Dump Files）
 
@@ -110,7 +112,7 @@ export TRITON_DISABLE_CACHE=1
 ```bash
 # 在运行 Triton 程序前设置环境变量
 export TRITON_DEBUG=1
-export TRITON_DISABLE_CACHE=1
+export TRITON_ALWAYS_COMPILE=1
 
 # 运行 Triton kernel
 python your_triton_program.py
@@ -137,17 +139,17 @@ python your_triton_program.py
 
 以示范测试用例  [01-vector-add.py](../../../third_party/ascend/tutorials/01-vector-add.py#) 举例说明编译流程：
 这是一个简单的两个tensor的加法计算，计算逻辑请参考示范用例中的注解。
-通过TRITON_DEBUG=1开启dump文件输出，设置TRITON_DISABLE_CACHE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
+通过TRITON_DEBUG=1开启dump文件输出，TRITON_ALWAYS_COMPILE=1禁用缓存确保重新编译，可以获取到 kernel.ttir.mlir 和 kernel.ttadapter.mlir
 
 - 运行用例
 
-```python
-TRITON_DEBUG=1 TRITON_DISABLE_CACHE=1 python 01-vector-add.py
+```bash
+TRITON_DEBUG=1 TRITON_ALWAYS_COMPILE=1 python 01-vector-add.py
 ```
 
 运行用例后会打印dump文件路径，默认是 ~/.triton/dump，显示如下：
 
-```python
+```text
 Dumping intermediate results to ~/.triton/dump/xxx
 # xxx是一串hash的唯一标识符
 ```
@@ -159,7 +161,7 @@ Dumping intermediate results to ~/.triton/dump/xxx
 - TTIR 样例
 查看 kernel.ttir.mlir 如下：
 
-```python
+```mlir
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -201,7 +203,7 @@ TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.st
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
 
-```python
+```mlir
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -255,6 +257,8 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 
 TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 解释器模式
 
 解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` 强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 调试方法
+
+<a id="debug-printing"></a>
 
 ### 5.1 打印调试方法
 
@@ -345,7 +351,7 @@ python your_program.py
 
 ### 5.1.2 运行时调试方法
 
-此方法的使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
+此方法使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
 设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 
@@ -374,6 +380,17 @@ export TRITON_DEVICE_PRINT=1
 python your_program.py
 ```
 
+运行后，`tl.device_print` 打印的变量内容会显示在 `HiIPU Print` 区块内，示例如下：
+
+```text
+-----------------------------------------------------------------------------
+---------------------------------HiIPU Print---------------------------------
+-----------------------------------------------------------------------------
+=> Vec 0
+ tmp2 after addition =:
+[1.000000,2.000000,3.000000,4.000000,5.000000,6.000000,7.000000,8.000000,9.000000,10.000000,11.000000,12.000000,13.000000,14.000000,15.000000,16.000000]
+```
+
 - 注：打印长度限制：
 tl.device_print 在张量打印有长度限制，具体表现为：当张量长度超过一定阈值时，输出会被截断
 
@@ -393,9 +410,11 @@ TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打�
 
 TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
+<a id="debug-compilation-error"></a>
+
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompileError`.
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`.
 需要进入 Triton-Ascend 代码层面定位问题。Triton-Ascend 包含 Python 和 C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
 ### 5.2.1 Python 代码调试方法
@@ -423,7 +442,7 @@ def compile_fn(ttir):
 **示例:**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
-```python
+```text
 python
 (Pdb) l  # 查看当前代码上下文
 118     def compile_fn(ttir):
@@ -474,9 +493,9 @@ python your_triton_script.py
 
 **使用建议**
 仅在怀疑 LLVM 后端 bug 时启用（如生成非法指令、性能异常）
-配合 LLVM_DEBUG_ONLY 限制输出范围
+配合 TRITON_LLVM_DEBUG_ONLY 限制输出范围
 
-在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
+在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
 ```bash
 ## `isel`（Instruction Selection）
@@ -510,7 +529,7 @@ python your_triton_script.py
 
 ```bash
 export TRITON_ENABLE_LLVM_DEBUG=1
-export LLVM_DEBUG_ONLY="isel"
+export TRITON_LLVM_DEBUG_ONLY="isel"
 python your_triton_script.py
 ```
 
@@ -518,7 +537,7 @@ python your_triton_script.py
 先启用 `MLIR_ENABLE_DUMP=1`
 → 验证 MLIR 层转换是否正确（如 ReduceOp → scf.for）
 若 MLIR 正常但结果错误
-→ 怀疑 LLVM 问题，再启用 `TRITON_ENABLE_LLVM_DEBUG=1 + LLVM_DEBUG_ONLY`
+→ 怀疑 LLVM 问题，再启用 `TRITON_ENABLE_LLVM_DEBUG=1 + TRITON_LLVM_DEBUG_ONLY`
 避免直接开启 `TRITON_ENABLE_LLVM_DEBUG=1`
 → 日志过大易掩盖关键信息，且严重影响运行速度
 
@@ -527,7 +546,7 @@ python your_triton_script.py
 | 变量                      | 作用                             |
 |--------------------------|----------------------------------|
 | `TRITON_DEBUG=1`         | 启用中间 IR 转储                 |
-| `TRITON_DISABLE_CACHE=1` | 禁用编译缓存                     |
+| `TRITON_ALWAYS_COMPILE=1` | 启用重编译，不复用缓存               |
 | `TRITON_INTERPRET=1`     | 使用 CPU 解释器执行 kernel       |
 | `TRITON_DEVICE_PRINT=1`  | 启用运行时打印输出，同时也会启用编译时打印输出      |
 | `MLIR_ENABLE_DUMP=1`  | 启用 MLIR 高层 IR 的自动 dump。在每个 MLIR Pass 执行前后，将当前函数的 IR 以可读文本形式输出 |

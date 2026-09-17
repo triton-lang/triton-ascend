@@ -108,7 +108,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
           %54 = arith.addf %48, %53 {ssbuffer.block_id = 6 : i32} : tensor<128x128xf32>
           hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 3
           scf.yield %47, %54, %35 : tensor<128xf32>, tensor<128x128xf32>, tensor<128xf32>
-        } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}
+        } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64, ssbuffer.skip}
       } {ssbuffer.block_id = 10 : i32}
       scope.return
     } {hivm.tcore_type = #hivm.tcore_type<VECTOR>, ssbuffer.skip}

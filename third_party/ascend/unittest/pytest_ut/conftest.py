@@ -21,6 +21,10 @@
 import pytest
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "backend(name): select the runtime backend for a test module")
+
+
 @pytest.fixture(scope="module", autouse=True)
 def assign_npu(request, worker_id):
     marker = request.node.get_closest_marker("backend")

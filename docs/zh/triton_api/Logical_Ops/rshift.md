@@ -60,7 +60,7 @@ triton.language.core.__rshift__(
 
 ```python
 @triton.jit
-def triton_lshift_3d(in_ptr0, out_ptr0, L : tl.constexpr, M : tl.constexpr, N : tl.constexpr):
+def triton_rshift_3d(in_ptr0, out_ptr0, L : tl.constexpr, M : tl.constexpr, N : tl.constexpr):
     loffs = tl.program_id(0) * L
     lblk_idx = tl.arange(0,L) + loffs
     mblk_idx = tl.arange(0,M)

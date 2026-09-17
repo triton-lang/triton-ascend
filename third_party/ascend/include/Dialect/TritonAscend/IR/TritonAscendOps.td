@@ -314,13 +314,16 @@ def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
     - offsets: Tensor of per-element offsets (relative to `src`) for accessing source memory
     - mask (optional):  if mask[idx] is false, do not load the data at address pointer[idx]
     - other (optional): if mask[idx] is false, return other[idx]
+    - isVolatile: defaults to true. Set to false only when analysis proves
+      the source pointer has no prior possible writes.
   }];
 
   let arguments = (
     ins TT_Ptr:$src,
         TT_IntTensor:$offsets,
         Optional<TT_BoolLike>:$mask,
-        Optional<TT_Type>:$other
+        Optional<TT_Type>:$other,
+        DefaultValuedAttr<BoolAttr, "true">:$isVolatile
   );
 
   let results = (outs TT_Tensor:$result);
@@ -333,6 +336,75 @@ def IndirectLoadOp : TT_Ascend_Op<"indirect_load", [
     attr-dict `->` type($result)
   }];
 
+}
+
+//
+// Built-in: StrideLoad Op
+//
+def StrideLoadOp : TT_Ascend_Op<"stride_load", [
+  DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
+  SameVariadicOperandSize
+]> {
+  let summary = "Built-in: strided load from global memory";
+
+  let description = [{
+    Built-in operation emitted by the compiler for SIMT stride-load templates.
+    It loads a tensor from a scalar source pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+    Out-of-bound elements are filled with the scalar `other` value.
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        AnyType:$other,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
+  );
+
+  let results = (outs TT_Tensor:$result);
+
+  let assemblyFormat = [{
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    $other `:` type($other) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
+    attr-dict `->` type($result)
+  }];
+}
+
+//
+// Built-in: StrideStore Op
+//
+def StrideStoreOp : TT_Ascend_Op<"stride_store", [
+  MemoryEffects<[MemWrite<GlobalMemory>]>,
+  SameVariadicOperandSize
+]> {
+  let summary = "Built-in: strided store to global memory";
+
+  let description = [{
+    Built-in operation emitted by the compiler for SIMT stride-store templates.
+    It stores a tensor to a scalar destination pointer with one i32/i64 linear
+    base offset, per-dimension physical strides and valid element counts.
+  }];
+
+  let arguments = (
+    ins TT_Ptr:$dst,
+        TT_Type:$src,
+        AnyTypeOf<[I32, I64]>:$offset,
+        Variadic<AnyTypeOf<[I32, I64]>>:$stride,
+        Variadic<AnyTypeOf<[I32, I64]>>:$numel
+  );
+
+  let assemblyFormat = [{
+    $dst `:` type($dst) `,`
+    $src `:` type($src) `,`
+    $offset `:` type($offset) `,`
+    `[` $stride `:` type($stride) `]` `,`
+    `[` $numel `:` type($numel) `]`
+    attr-dict
+  }];
 }
 
 
@@ -457,6 +529,117 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
         I64Attr:$stride,
         I64Attr:$padding_size,
         I64Attr:$dilation,
+        I64Attr:$groups
+    );
+
+    let results = (outs TT_Tensor:$result);
+
+    let assemblyFormat = [{
+        `(` operands `)`
+        attr-dict `:` functional-type(operands, $result)
+    }];
+
+    let hasVerifier = 1;
+}
+
+//
+// Dot Op
+//
+def DotOp : TT_Ascend_Op<"dot", [
+    Pure,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+    let summary = "Matmul D = A * B with per-operand fractal (zN) control";
+    let description = [{
+        Computes `D = A * B`, declaring per operand whether it is stored in a
+        fractal (zN) layout: `fractal_a` / `fractal_b` mark input A / B as
+        fractal (converted to ND before the multiply); `fractal_c` produces D in
+        fractal layout. The result carries the cube accumulator dtype (f32 for
+        float inputs, i32 for int8), and its type is inferred from A, B and
+        these flags.
+
+        zN convention (non-transpose; inner block [16, b], b = 32 / elem_bytes,
+        i.e. f16/bf16 -> b=16, f32 -> b=8, int8 -> b=32):
+          A [M,K] <-> [K1, M1, 16, b]     (ND = [d1*d2, d0*d3])
+          B [K,N] <-> [N1, K1, 16, b]     (ND = [d1*d2, d0*d3])
+          C [M,N] <-> [N1, M1, 16, 16]    (L0C accumulator, block 16x16)
+
+        Example (fractal_a + fractal_c, f16 in -> f32 accumulator out):
+        ```mlir
+        %d = ascend.dot %a, %b {fractal_a = true, fractal_c = true}
+             : tensor<1x1x16x16xf16>, tensor<16x16xf16> -> tensor<1x1x16x16xf32>
+        ```
+    }];
+
+    let arguments = (ins
+        TT_Tensor:$a,
+        TT_Tensor:$b,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_a,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_b,
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_c
+    );
+
+    let results = (outs TT_Tensor:$d);
+
+    let assemblyFormat = [{
+        $a `,` $b attr-dict `:` type($a) `,` type($b) `->` type($d)
+    }];
+
+    let hasVerifier = 1;
+}
+
+//
+// Conv Op
+//
+def Conv2dOp : TT_Ascend_Op<"conv2d", [
+    Pure,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+    let summary = "2D convolution operation";
+    let description = [{
+        Performs a 2D convolution operation on the input tensor.
+
+        Dimension constraints:
+        - input: [C_in, H_in, W_in] (unbatched) or [N, C_in, H_in, W_in]
+          (batched), where N is the batch size, C_in the input channel
+          count, and H_in/W_in the spatial input dimensions.
+        - weight: [C_out, C_in/groups, kH, kW], where C_out is the output
+          channel count and kH/kW the convolution kernel size.
+        - bias (optional): [C_out], one bias per output channel. Must have
+          the same element type as input and weight.
+        - result: [C_out, H_out, W_out] (unbatched) or
+          [N, C_out, H_out, W_out] (batched).
+
+        Configurable attributes:
+        - stride: an integer (uniform along H and W) or 2-element integer
+          array [stride_h, stride_w], the step of the convolution kernel
+          along H and W. Elements must be > 0.
+        - padding: an integer (uniform on all sides), a 2-element integer
+          array [pad_h, pad_w] (symmetric per dimension), or a 4-element
+          integer array [pad_top, pad_bottom, pad_left, pad_right], the
+          number of zero-padding elements added to each side of the input.
+        - dilation: an integer (uniform along H and W) or 2-element integer
+          array [dil_h, dil_w], the spacing between kernel elements along H
+          and W.
+        - groups: number of blocked connections from input channels to
+          output channels. C_in and C_out must both be divisible by
+          groups.
+
+        Output shape derivation:
+        H_out = floor((H_in + pad_top + pad_bottom - dil_h * (kH - 1) - 1)
+                      / stride_h + 1)
+        W_out = floor((W_in + pad_left + pad_right - dil_w * (kW - 1) - 1)
+                      / stride_w + 1)
+    }];
+
+    let arguments = (ins
+        TT_Tensor:$input,
+        TT_Tensor:$weight,
+        Optional<TT_Tensor>:$bias,
+        // IntegerAttr (uniform scalar) or DenseI32ArrayAttr.
+        AnyAttr:$stride,
+        AnyAttr:$padding,
+        AnyAttr:$dilation,
         I64Attr:$groups
     );
 

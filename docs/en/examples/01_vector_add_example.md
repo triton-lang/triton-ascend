@@ -49,8 +49,8 @@ Create a helper function to:
 ```Python
 def add(x: torch.Tensor, y: torch.Tensor):
     # The output needs to be pre-allocated.
-    output = torch.empty_like(x)
-    n_elements = output.numel()
+    z = torch.empty_like(x)
+    n_elements = z.numel()
     # The launch grid indicates the number of kernel instances that run in parallel.
     # It can be Tuple[int] or Callable(metaparameters) -> Tuple[int].
     # In this case, a 1D grid is used, where the size is the number of blocks:
@@ -59,9 +59,9 @@ def add(x: torch.Tensor, y: torch.Tensor):
     #  - Each torch.tensor object is implicitly converted into a pointer to its first element.
     #  - The `triton.jit` function can be indexed with a launch grid to obtain a callable GPU kernel.
     #  - Pass meta-parameters as keywords.
-    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+    add_kernel[grid](x, y, z, n_elements, BLOCK_SIZE=1024)
     # Returns the handle to z.
-    return output
+    return z
 ```
 
 Use the above function to compute the element-wise sum of two `torch.tensor` objects and test its correctness:

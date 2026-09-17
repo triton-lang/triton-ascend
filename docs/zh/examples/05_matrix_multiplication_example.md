@@ -6,7 +6,9 @@
 
 以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：
 计算公式为：
-$$ \text{output}[b, i, j] = \sum_k \text{x}[b, i, k] \cdot \text{y}[k, j] + \text{z}[b, i, j] $$
+
+$$ \mathrm{output}[b, i, j] = \sum_{k} x[b, i, k] \cdot y[k, j] + z[b, i, j] $$
+
 其中：
 
 - `x` 的形状为 `(A, B)`
@@ -94,7 +96,7 @@ def get_torch_typename(dtype):
     return tyname
 
 def generate_tensor(shape, dtype):
-     """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
+    """根据指定形状和数据类型生成随机张量，适配不同数值类型的取值范围。"""
     if dtype == 'float32' or dtype == 'float16' or dtype == 'bfloat16':
         return torch.randn(size=shape, dtype=eval('torch.' + dtype))
     elif dtype == 'int32' or dtype == 'int64' or dtype == 'int16':

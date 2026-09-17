@@ -23,8 +23,8 @@
 __all__ = [
     "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
     "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
-    "PIPE", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set", "sync_block_wait",
-    "SYNC_IN_VF", "conv1d"
+    "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
+    "sync_block_wait", "SYNC_IN_VF", "conv1d", "dot", "conv2d"
 ]
 
 import enum
@@ -40,6 +40,10 @@ from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
 
 from . import semantic as semantic
+
+PIPE = semantic.PIPE
+SYNC_HINT = semantic.SYNC_HINT
+EVENT_ID = semantic.EVENT_ID
 
 PIPE = semantic.PIPE
 
@@ -134,6 +138,20 @@ class ascend_address_space_base(bl.address_space):
 
 
 class ascend_address_space_group:
+    """Ascend hardware address space constants for buffer allocation.
+
+    Provides named address space specifiers that map to Ascend NPU memory regions:
+
+    - ``UB`` — Unified Buffer (on-chip shared memory)
+    - ``L1`` — L1 cache buffer
+    - ``L0A`` — L0 buffer A (Cube unit input)
+    - ``L0B`` — L0 buffer B (Cube unit input)
+    - ``L0C`` — L0 buffer C (Cube unit output)
+
+    Usage with :func:`bl.alloc() <triton.extension.buffer.language.alloc>`::
+
+        buf = bl.alloc(dtype, shape, al.ascend_address_space.UB)
+    """
 
     def __init__(self):
         for k, v in {k: v
@@ -208,16 +226,72 @@ def create_sync_block(sender, receiver, event_id, is_set: bool, sender_pipe=None
 
 @builtin
 def sync_block_set(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None, _semantic=None):
+    """Sets a cross-core synchronization flag for producer-consumer sync between Cube and Vector cores.
+
+    Pairs with :func:`sync_block_wait` to coordinate execution between different core types.
+    Each call increments a per-event counter that the corresponding ``sync_block_wait`` will
+    decrement (semaphore-like behavior).
+
+    Must be used within an :func:`scope` context matching the sender's core type.
+
+    :param sender: Sending core type. Must be ``"cube"`` or ``"vector"`` (must differ from ``receiver``).
+    :type sender: str
+    :param receiver: Receiving core type. Must be ``"cube"`` or ``"vector"``.
+    :type receiver: str
+    :param event_id: Sync flag identifier in range [0, 15]. Each ID maps to an independent counter.
+    :type event_id: int
+    :param sender_pipe: Sender-side pipeline type (e.g., ``PIPE_MTE1``, ``PIPE_V``).
+        Defaults to ``PIPE_FIX`` if sender is cube, ``PIPE_MTE3`` if sender is vector.
+    :type sender_pipe: PIPE
+    :param receiver_pipe: Receiver-side pipeline type. Defaults to ``PIPE_MTE2``.
+    :type receiver_pipe: PIPE
+    """
     return create_sync_block(sender, receiver, event_id, True, sender_pipe, receiver_pipe, _semantic)
 
 
 @builtin
 def sync_block_wait(sender, receiver, event_id, sender_pipe=None, receiver_pipe=None, _semantic=None):
+    """Waits on a cross-core synchronization flag set by :func:`sync_block_set`.
+
+    Blocks execution until the corresponding event counter is positive (signaling the
+    producer has completed), then decrements it by 1. Pairs with ``sync_block_set``
+    for producer-consumer synchronization between Cube and Vector cores.
+
+    Must be used within an :func:`scope` context matching the receiver's core type.
+
+    :param sender: Sending core type. Must be ``"cube"`` or ``"vector"`` (must differ from ``receiver``).
+    :type sender: str
+    :param receiver: Receiving core type. Must be ``"cube"`` or ``"vector"``.
+    :type receiver: str
+    :param event_id: Sync flag identifier in range [0, 15]. Must match the ID used by the
+        corresponding ``sync_block_set``.
+    :type event_id: int
+    :param sender_pipe: Sender-side pipeline type. Defaults to ``PIPE_FIX`` if sender is cube,
+        ``PIPE_MTE3`` if sender is vector.
+    :type sender_pipe: PIPE
+    :param receiver_pipe: Receiver-side pipeline type. Defaults to ``PIPE_MTE2``.
+    :type receiver_pipe: PIPE
+    """
     return create_sync_block(sender, receiver, event_id, False, sender_pipe, receiver_pipe, _semantic)
 
 
 @builtin
 def sync_block_all(mode, event_id, _semantic=None):
+    """Performs global synchronization across all cores of a specified type.
+
+    Inserts a sync barrier to resolve RAW, WAR, and WAW data hazards on shared global
+    memory across Cube cores, Vector cores, or both. Also supports sub-vector-level
+    synchronization within Vector cores.
+
+    :param mode: Synchronization scope. One of:
+        ``"all_cube"`` — sync all Cube cores;
+        ``"all_vector"`` — sync all Vector cores;
+        ``"all"`` — sync all Cube and Vector cores;
+        ``"all_sub_vector"`` — sync between Vector sub-blocks.
+    :type mode: str
+    :param event_id: Event marker ID in range [0, 15].
+    :type event_id: int
+    """
     mode = _unwrap_if_constexpr(mode)
     event_id = _unwrap_if_constexpr(event_id)
     assert isinstance(mode, str), f"mode: {mode} is not string"
@@ -322,6 +396,15 @@ def fixpipe(
 
 
 class SYNC_IN_VF(enum.Enum):
+    """Synchronization barrier modes for fine-grained vector/scalar instruction ordering.
+
+    Each value specifies which instruction types are blocked until previous
+    instructions complete. The name follows the pattern ``{blocked}_{awaited}``:
+    e.g., ``VST_VLD`` blocks vector stores (VST) until vector loads (VLD) complete.
+
+    Intended for use within an :func:`scope` context.
+    """
+
     VV_ALL = enum.auto()
     VST_VLD = enum.auto()
     VLD_VST = enum.auto()
@@ -341,6 +424,14 @@ def debug_barrier(
     sync_mode: SYNC_IN_VF,
     _semantic=None,
 ) -> None:
+    """Inserts a synchronization barrier between vector/scalar load/store instructions.
+
+    Provides fine-grained control over which instruction types are blocked until
+    prior instructions complete. Intended for use within an :func:`scope` context.
+
+    :param sync_mode: Barrier type specifying which instruction classes to synchronize.
+    :type sync_mode: SYNC_IN_VF
+    """
     return semantic.debug_barrier(sync_mode.name, _semantic)
 
 
@@ -476,3 +567,269 @@ def conv1d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=N
         output_shape = [C_out, L_out_val]
 
     return semantic.conv1d(input, weight, bias, stride, padding_size_int, dilation, groups, output_shape, _semantic)
+
+
+def _dot_to_nd_shape(shape, fractal, is_lhs):
+    """A fractal operand's ND shape; lhs -> [M,K], rhs -> [K,N]. 2D is already ND.
+
+    Both operands use the zN fractal (non-transpose): A [M,K] <-> [K1,M1,16,b]
+    and B [K,N] <-> [N1,K1,16,b]. In each the two logical dims are
+    [d1*d2, d0*d3] (block rows on d2, block cols on d3)."""
+    if not (fractal and len(shape) == 4):
+        return [shape[0], shape[1]]
+    return [shape[1] * shape[2], shape[0] * shape[3]]
+
+
+def _check_dot_fractal_block(name, shape, is_lhs, dtype):
+    """Validate an nZ operand's trailing block [.., block_row, block_col].
+
+    block_col must equal 32 / elem_bytes. block_row must be 16, except for int8
+    where the cube fractal is per-operand: a non-transpose left operand is 16
+    and a non-transpose right operand is 32.
+    """
+    elem_bytes = dtype.primitive_bitwidth // 8
+    expected_col = 32 // elem_bytes
+    block_row = _unwrap_if_constexpr(shape[-2])
+    block_col = _unwrap_if_constexpr(shape[-1])
+
+    if block_col != expected_col:
+        raise ValueError(f"dot nZ operand `{name}`: block col dim is {block_col}, expected "
+                         f"{expected_col} (= 32 / {elem_bytes} bytes per {dtype} element)")
+
+    if elem_bytes != 1:
+        if block_row != 16:
+            raise ValueError(f"dot nZ operand `{name}`: block row dim is {block_row}, expected 16")
+        return
+
+    if block_row not in (16, 32):
+        raise ValueError(f"dot int8 nZ operand `{name}`: block row dim is {block_row}, expected 16 or 32")
+    if not is_lhs and block_row == 16:
+        raise ValueError(f"dot int8 right operand `{name}`: block row dim is 16, but a non-transpose "
+                         f"`{name}` needs 32 (block [32,32], i.e. zN[N/32, K/32, 32, 32]); a [16,32] "
+                         f"block forces an unsupported layout conversion in the backend")
+
+
+def _dot_operand_is_fractal(name, fmt):
+    """Resolve operand ``name``'s layout from its ``format_*`` string:
+
+      ``"fractal"``             -> fractal (zN)
+      ``"nd"`` / ``""`` / unset -> non-fractal (ND)
+      anything else             -> ValueError
+    """
+    fmt = _unwrap_if_constexpr(fmt)
+    if fmt is None or fmt == "" or fmt == "nd":
+        return False
+    if fmt == "fractal":
+        return True
+    raise ValueError(f"dot `{name}`: format must be 'fractal', 'nd', or '' "
+                     f"(empty/unset = non-fractal ND); got {fmt!r}")
+
+
+@builtin
+def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
+    """
+    Matrix multiply ``D = A * B`` with per-operand layout format.
+
+    ``format_a`` / ``format_b`` / ``format_c`` select each operand's layout:
+      - ``"fractal"``: zN fractal (4D)
+      - ``"nd"`` / ``""`` / unset: ND (non-fractal, 2D)
+      - any other value raises ``ValueError``.
+
+    zN convention (non-transpose, block [16, b], b = 32 / elem_bytes):
+        A [M,K] <-> [K1, M1, 16, b]      (ND = [d1*d2, d0*d3])
+        B [K,N] <-> [N1, K1, 16, b]      (ND = [d1*d2, d0*d3])
+        C [M,N] <-> [N1, M1, 16, 16]     (L0C accumulator, block 16x16)
+
+    :param a: left matrix A (2D ND, or 4D fractal when ``format_a="fractal"``).
+    :param b: right matrix B (2D ND, or 4D fractal when ``format_b="fractal"``).
+    :param format_a: layout of A: "fractal" | "nd" | "" (default ND).
+    :param format_b: layout of B: "fractal" | "nd" | "" (default ND).
+    :param format_c: layout of D: "fractal" | "nd" | "" (default ND).
+
+    :return: D = A * B (fractal 4D if ``format_c="fractal"`` else 2D ND).
+    :rtype: tensor
+    """
+    fractal_a = _dot_operand_is_fractal("a", format_a)
+    fractal_b = _dot_operand_is_fractal("b", format_b)
+    fractal_c = _dot_operand_is_fractal("c", format_c)
+
+    for name, operand, is_frac, is_lhs in (("a", a, fractal_a, True), ("b", b, fractal_b, False)):
+        if not isinstance(operand, tl.tensor):
+            raise TypeError(f"dot operand `{name}` must be a tensor, got {type(operand)}")
+        if len(operand.shape) not in (2, 4):
+            raise ValueError(f"dot operand `{name}` must be 2D (ND) or 4D (fractal zN), "
+                             f"got rank {len(operand.shape)}")
+        if is_frac and len(operand.shape) == 4:
+            _check_dot_fractal_block(name, operand.shape, is_lhs, operand.dtype)
+
+    # cube mmad requires both inputs share the element dtype (the output takes
+    # the accumulator dtype separately, see semantic.dot).
+    if a.dtype != b.dtype:
+        raise TypeError(f"dot operands must have the same dtype, got {a.dtype} and {b.dtype}")
+
+    a_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in a.shape], fractal_a, True)
+    b_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in b.shape], fractal_b, False)
+    m, n = a_nd[0], b_nd[1]
+    # The result carries the cube accumulator dtype (f32/i32, see semantic.dot);
+    # fractal_c is the L0C accumulator fractal, whose block is 16x16.
+    output_shape = [n // 16, m // 16, 16, 16] if fractal_c else [m, n]
+
+    return semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, _semantic=_semantic)
+
+
+@builtin
+def conv2d(input: tl.tensor, weight: tl.tensor, bias: tl.tensor = None, stride=None, padding=None, dilation=None,
+           groups=None, _semantic=None) -> tl.tensor:
+    """
+    Applies a 2D convolution over an input signal.
+
+    :param input: Input tensor of shape (N, C_in, H, W) or (C_in, H, W).
+    :type input: tensor
+    :param weight: Weight tensor of shape (C_out, C_in // groups, kH, kW).
+    :type weight: tensor
+    :param bias: Bias tensor of shape (C_out) or None. Default: None.
+    :type bias: tensor or None
+    :param stride: The stride of the convolution kernel. Can be an int or a 2-element tuple.
+    :type stride: int or Tuple[int, int]
+    :param padding: Padding added to the input. Can be an int (symmetric on all
+        sides), a 2-element tuple (pad_h, pad_w) (symmetric per dimension),
+        a 4-element tuple (pad_top, pad_bottom, pad_left, pad_right)
+        (asymmetric), or a string.
+        ``padding='valid'`` is the same as no padding.
+        ``padding='same'`` pads the input so the output has the same shape as the input. However, this mode doesn't support any stride values other than 1.
+    :type padding: int, Tuple[int, int], Tuple[int, int, int, int], or str
+    :param dilation: The spacing between kernel elements. Can be an int or a 2-element tuple.
+    :type dilation: int or Tuple[int, int]
+    :param groups: Number of blocked connections from input to output channels.
+    :type groups: int
+
+    **Example:**
+
+    .. code-block:: python
+
+        @triton.jit
+        def conv2d_kernel(input_ptr, weight_ptr, output_ptr, C, H, W, C_out, kH, kW):
+            input_tile = tl.load(input_ptr + ...)     # shape (C, H, W)
+            weight_tile = tl.load(weight_ptr + ...)   # shape (C_out, C, kH, kW)
+            output = al.conv2d(input_tile, weight_tile,
+                               stride=(1, 1), padding=(0, 0), dilation=(1, 1))
+            tl.store(output_ptr + ..., output)
+
+    :return: The output tensor of shape (N, C_out, H_out, W_out).
+    :rtype: tensor
+    """
+
+    stride = _unwrap_if_constexpr(stride)
+    padding = _unwrap_if_constexpr(padding)
+    dilation = _unwrap_if_constexpr(dilation)
+    groups = _unwrap_if_constexpr(groups)
+
+    # Set default values
+    stride = stride if stride is not None else 1
+    padding = padding if padding is not None else 0
+    dilation = dilation if dilation is not None else 1
+    groups = groups if groups is not None else 1
+
+    if type(bias).__name__ == 'constexpr':
+        bias = getattr(bias, 'value', bias)
+    if bias is not None:
+        assert len(bias.shape) == 1, f"bias must be a 1D tensor (C_out), got {len(bias.shape)}D"
+    assert isinstance(groups, int), f"groups must be an integer, got {groups}"
+
+    def _check_and_normalize_2d_param(param, name):
+        """Keep ints as ints and tuples as tuples; lists are accepted and
+        converted to tuples."""
+        if param is None:
+            return None
+        if isinstance(param, list):
+            assert len(param) == 2, f"{name} must be an integer or a 2-element sequence, got {param}"
+            return tuple(param)
+        if isinstance(param, (tuple, tl.tuple)):
+            assert len(param) == 2, f"{name} must be an integer or a 2-element sequence, got {param}"
+            return param
+        assert isinstance(param, int), f"{name} must be an integer or a 2-element sequence, got {type(param)}"
+        return param
+
+    stride = _check_and_normalize_2d_param(stride, 'stride')
+    dilation = _check_and_normalize_2d_param(dilation, 'dilation')
+
+    # Per-dimension accessors accepting either the int or tuple form.
+    stride_h, stride_w = (stride, stride) if isinstance(stride, int) else stride
+    dilation_h, dilation_w = (dilation, dilation) if isinstance(dilation, int) else dilation
+
+    is_batched = len(input.shape) == 4
+    H_in = input.shape[-2]
+    W_in = input.shape[-1]
+    kH = weight.shape[2]
+    kW = weight.shape[3]
+
+    def _check_and_normalize_padding(param):
+        """Keep ints as ints and tuples as tuples; lists are accepted and
+        converted to tuples.
+
+        Accepts an int (symmetric on all sides), a 2-element sequence
+        [pad_h, pad_w] (symmetric per dimension), or a 4-element sequence
+        [pad_top, pad_bottom, pad_left, pad_right] (fully asymmetric).
+        """
+        if param is None:
+            return 0
+        if isinstance(param, list):
+            assert len(param) in [2, 4], \
+                f"padding must be an int, a 2-element or 4-element sequence, got {param}"
+            return tuple(param)
+        if isinstance(param, (tuple, tl.tuple)):
+            assert len(param) in [2, 4], \
+                f"padding must be an int, a 2-element or 4-element sequence, got {param}"
+            return param
+        assert isinstance(param, int), \
+            f"padding must be an int, a 2-element or 4-element sequence, got {type(param)}"
+        return param
+
+    if isinstance(padding, str):
+        assert padding in ['same', 'valid'], f"padding string must be 'same' or 'valid', got '{padding}'"
+        if padding == 'valid':
+            padding_int = 0
+        elif padding == 'same':
+            if stride_h != 1 or stride_w != 1:
+                raise ValueError("padding='same' is only supported when stride=1")
+            # Total padding needed per dimension; extra element goes to bottom/right
+            pad_h_total = (H_in - 1) * stride_h + dilation_h * (kH - 1) + 1 - H_in
+            pad_w_total = (W_in - 1) * stride_w + dilation_w * (kW - 1) + 1 - W_in
+            padding_int = (pad_h_total // 2, pad_h_total - pad_h_total // 2, pad_w_total // 2,
+                           pad_w_total - pad_w_total // 2)
+    else:
+        padding_int = _check_and_normalize_padding(padding)
+
+    assert len(input.shape) in [3, 4], f"input must be 3D (C,H,W) or 4D (N,C,H,W), got {len(input.shape)}D"
+    assert len(weight.shape) == 4, f"weight must be 4D (C_out, C_in/groups, kH, kW), got {len(weight.shape)}D"
+
+    C_in = input.shape[-3] if is_batched else input.shape[0]
+    C_out = weight.shape[0]
+
+    H_in_val = _unwrap_if_constexpr(input.shape[-2])
+    W_in_val = _unwrap_if_constexpr(input.shape[-1])
+    kH_val = _unwrap_if_constexpr(weight.shape[2])
+    kW_val = _unwrap_if_constexpr(weight.shape[3])
+
+    def _compute_output(in_size, pad_before, pad_after, dil, k, strd):
+        return -int(-((in_size + pad_before + pad_after - dil * (k - 1) - 1) / strd + 1))
+
+    # Expand padding to [pad_top, pad_bottom, pad_left, pad_right].
+    if isinstance(padding_int, int):
+        pad_top = pad_bottom = pad_left = pad_right = padding_int
+    elif len(padding_int) == 2:
+        pad_h, pad_w = padding_int
+        pad_top = pad_bottom = pad_h
+        pad_left = pad_right = pad_w
+    else:
+        pad_top, pad_bottom, pad_left, pad_right = padding_int
+
+    H_out_val = _compute_output(H_in_val, pad_top, pad_bottom, dilation_h, kH_val, stride_h)
+    W_out_val = _compute_output(W_in_val, pad_left, pad_right, dilation_w, kW_val, stride_w)
+
+    if is_batched:
+        output_shape = [input.shape[0], C_out, H_out_val, W_out_val]
+    else:
+        output_shape = [C_out, H_out_val, W_out_val]
+
+    return semantic.conv2d(input, weight, bias, stride, padding_int, dilation, groups, output_shape, _semantic)

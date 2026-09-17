@@ -20,7 +20,7 @@ GPU kernels often use a large logical grid and rely on the runtime and hardware 
 
 - Prefer 1D grids. NPU 2D adaptations are merged into 1D; for example, `(20,)` and `(4, 5)` produce equivalent execution results.
 - For Vector-only operators, organize concurrent tasks around the Vector Core count. For operators containing `tl.dot`, organize concurrent tasks around the AI Core count.
-- If the logical grid is much larger than the physical core count, consider letting each program process multiple tiles in an inner loop, or use `TRITON_ALL_BLOCKS_PARALLEL` when logical programs have no ordering dependency.
+- If the logical grid is much larger than the physical core count, the backend automatically folds eligible independent logical programs onto the available physical cores. For kernels with ordering dependencies or kernels rejected by IR safety analysis, let each program process multiple tiles in an inner loop.
 - `coreDim` cannot exceed `UINT16_MAX` (65535). For large shapes, control grid size through BLOCK_SIZE or tiling.
 
 | Dimension | Core Structure | Operator Type |
@@ -51,18 +51,21 @@ NPU and GPU compute units differ in supported data types and execution behavior.
 
 ```diff
 import torch
-+ import torch_npu  # [Added] Import Ascend NPUs' PyTorch adaptation library to support NPU devices.
+# [Added] Import Ascend NPUs' PyTorch adaptation library to support NPU devices.
+import torch_npu
 import triton
 import triton.language as tl
 
-- DEVICE = triton.runtime.driver.active.get_active_torch_device()  #  [Deleted] GPU devices are automatically obtained. NPUs do not need this logic.
+# [Deleted] GPU devices are automatically obtained. NPUs do not need this logic.
+# DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 @triton.jit
-def add_kernel(x_ptr, # Pointer to first input vector.
-y_ptr, # Pointer to second input vector.
-output_ptr, # Pointer to output vector.
-n_elements, # Size of the vector.
-BLOCK_SIZE: tl.constexpr, # Number of elements each program should process.
+def add_kernel(
+    x_ptr,  # Pointer to first input vector.
+    y_ptr,  # Pointer to second input vector.
+    output_ptr,  # Pointer to output vector.
+    n_elements,  # Size of the vector.
+    BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
 ):
     pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
     block_start = pid * BLOCK_SIZE
@@ -75,7 +78,7 @@ BLOCK_SIZE: tl.constexpr, # Number of elements each program should process.
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
--   assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [Deleted] GPU devices have consistency checks. NPUs do not need explicit assertion.
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [Deleted] GPU device consistency check, which is not required on NPUs.
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -83,16 +86,18 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
-- x = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
-+ x = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
-- y = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
-+ y = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
+# x = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
+x = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
+# y = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
+y = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
 output_torch = x + y
 output_triton = add(x, y)
 print(output_torch)
 print(output_triton)
-print(f'The maximum difference between torch and triton is '
-f'{torch.max(torch.abs(output_torch - output_triton))}')
+print(
+    f'The maximum difference between torch and triton is '
+    f'{torch.max(torch.abs(output_torch - output_triton))}'
+)
 ```
 
 ### Example 2: Device Replacement and Single-Program Data Transfer
@@ -120,11 +125,11 @@ def test_npu_1d(shape, dtype):
     XS = shape[0]
     YS = 4
 
--    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
-+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
+#    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
     std = torch.broadcast_to(x, (YS, XS))
--    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
-+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
+#    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
@@ -134,11 +139,14 @@ def test_npu_1d(shape, dtype):
 After completing the basic migration procedure, you may encounter the following two types of new issues:
 
 1. **coreDim** limit
-This issue is triggered when grid dimensions exceed the hardware limit of NPUs.
-Typical error message: `coreDim=xxxx can't be greater than UINT16_MAX`.
+
+   This issue is triggered when grid dimensions exceed the hardware limit of NPUs.
+   Typical error message: `coreDim=xxxx can't be greater than UINT16_MAX`.
+
 2. UB space overflow
-Memory usage exceeds the NPU cache capacity.
-Typical error message: `ub overflow, requires xxxx bits while 1572684 bits available!`.
+
+   Memory usage exceeds the NPU cache capacity.
+   Typical error message: `ub overflow, requires xxxx bits while 1572864 bits available!`.
 
 ### Solving the coreDim Limit Issue
 
@@ -149,11 +157,26 @@ Case: Optimizing the `zeros_like` function
 (data scale `N = 1073741824`; original `BLOCK_SIZE = 2048`; calculated `coreDim = 524288`, exceeding the limit of **65535**)
 
 Solution 1:
-To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command:
-export TRITON_ALL_BLOCKS_PARALLEL=1
+The backend automatically enables block mapping for kernels that pass IR safety analysis, so no environment variable is required. Confirm that logical programs have no ordering dependency. If the compiler reports that automatic block mapping was skipped, use explicit tiling as described in Solution 2.
+
 Solution 2:
 Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit.
-The calculation follows: `coreDim = ceil(N / BLOCK_SIZE)`. → It needs to satisfy `ceil(N / BLOCK_SIZE) <= 65535 => BLOCK_SIZE >= ceil(N / 65535)`. Given `N = 1073741824`, we have `BLOCK_SIZE >= triton.next_power_of_2(triton.cdiv(1073741824, 65535)) = 32768`. Therefore, **32768** is the minimum safe value.
+The calculation is:
+
+```text
+coreDim = ceil(N / BLOCK_SIZE)
+ceil(N / BLOCK_SIZE) <= 65535
+BLOCK_SIZE >= ceil(N / 65535)
+```
+
+Given `N = 1073741824`:
+
+```text
+ceil(1073741824 / 65535) = 16385
+triton.next_power_of_2(16385) = 32768
+```
+
+Therefore, if `BLOCK_SIZE` is selected as a power of 2, it should be at least `32768`.
 
 Code before optimization:
 
@@ -364,7 +387,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
         block_shape=(BT,), # Block size
         order=(0,) # Sequential access
     )
-​)
+)
 ```
 
 Optimization Approach

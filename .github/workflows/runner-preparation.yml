@@ -24,14 +24,14 @@ jobs:
           echo "enable_integration=true" >> $GITHUB_ENV
       - name: Checkout post-submit commits
         if: github.event_name == 'push'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Only fetch two commits to check the latest changed files.
           fetch-depth: 2
       - name: Detect if build deps (e.g. LLVM hash) changed
         id: detect-change
         if: github.event_name == 'push'
-        uses: tj-actions/changed-files@v46
+        uses: tj-actions/changed-files@v47
         with:
           files: |
             cmake/*.txt
@@ -93,5 +93,36 @@ jobs:
         if: env.enable_integration == 'true'
         run: |
           if [ x"${{ github.repository }}" == x"triton-lang/triton-ascend" ]; then
-            echo 'matrix-ASCEND=[{"name":"linux-aarch64-a3-4","runner_type":"linux-aarch64-a3-4","runs_on":["linux-aarch64-a3-4"],"chip_type":"a3"}]' >> $GITHUB_OUTPUT
+            # One entry per (chip × python); each entry carries its full
+            # environment (container image tag = cann_version-chip_type-os-pyX).
+            # Chips are distinguished by runner: a3 pinned to cn12-001 via
+            # type + serial labels (self-hosted multi-label = AND), a5
+            # (Ascend 950) on linux-amd64-a5-4.
+            # Heredoc delimiter syntax: the only multiline $GITHUB_OUTPUT
+            # format supported on every runner version.
+            echo 'matrix-ASCEND<<MATRIX_EOF' >> $GITHUB_OUTPUT
+            echo '[
+              {
+                "runs_on": ["linux-aarch64-a3-800i-4", "cn12-001"],
+                "chip_type": "a3",
+                "cann_version": "8.5.0",
+                "os": "ubuntu22.04",
+                "python_version": "3.10"
+              },
+              {
+                "runs_on": ["linux-aarch64-a3-800i-4", "cn12-001"],
+                "chip_type": "a3",
+                "cann_version": "8.5.0",
+                "os": "ubuntu22.04",
+                "python_version": "3.11"
+              },
+              {
+                "runs_on": ["linux-amd64-a5-4"],
+                "chip_type": "950",
+                "cann_version": "9.1.0",
+                "os": "ubuntu22.04",
+                "python_version": "3.12"
+              }
+            ]' >> $GITHUB_OUTPUT
+            echo 'MATRIX_EOF' >> $GITHUB_OUTPUT
           fi

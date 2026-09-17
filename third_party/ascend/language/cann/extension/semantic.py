@@ -53,6 +53,23 @@ class PIPE(enum.Enum):
     PIPE_FIX = ascend_ir.PIPE.PIPE_FIX
 
 
+class SYNC_HINT(enum.Enum):
+    WAIT = ascend_ir.SYNC_HINT.wait
+    SET = ascend_ir.SYNC_HINT.set
+    INTERNAL = ascend_ir.SYNC_HINT.internal
+
+
+class EVENT_ID(enum.Enum):
+    EVENT_ID0 = ascend_ir.EVENT.EVENT_ID0
+    EVENT_ID1 = ascend_ir.EVENT.EVENT_ID1
+    EVENT_ID2 = ascend_ir.EVENT.EVENT_ID2
+    EVENT_ID3 = ascend_ir.EVENT.EVENT_ID3
+    EVENT_ID4 = ascend_ir.EVENT.EVENT_ID4
+    EVENT_ID5 = ascend_ir.EVENT.EVENT_ID5
+    EVENT_ID6 = ascend_ir.EVENT.EVENT_ID6
+    EVENT_ID7 = ascend_ir.EVENT.EVENT_ID7
+
+
 def create_sync_block_set(sender, receiver, event_id, sender_pipe: PIPE, receiver_pipe: PIPE, _semantic=None):
     if isinstance(event_id, int):
         _semantic.builder.sync_block_set(sender, receiver,
@@ -175,5 +192,32 @@ def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.ten
     element_ty = input_tensor.type.element_ty
     output_ty = tl.block_type(element_ty, output_shape)
     out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding_size,
+                                          dilation, groups, output_ty.to_ir(_semantic.builder))
+    return tl.tensor(out, output_ty)
+
+
+def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c: bool, output_shape,
+        _semantic=None) -> tl.tensor:
+    # Go through `_ascend_builder` explicitly rather than the unified-builder
+    # allow-list (builder.py:setup_unified_builder): `create_dot` collides with
+    # upstream `ir.builder.create_dot`, so attaching it to the main builder
+    # would shadow the one `tl.dot` uses.
+    out = _semantic.builder._ascend_builder.create_dot(a.handle, b.handle, bool(fractal_a), bool(fractal_b),
+                                                       bool(fractal_c))
+    # Result carries the cube accumulator dtype: f32 for float inputs, i32 for int8.
+    in_ty = a.type.element_ty
+    acc_ty = tl.float32 if in_ty.is_floating() else tl.int32
+    output_ty = tl.block_type(acc_ty, output_shape)
+    return tl.tensor(out, output_ty)
+
+
+def conv2d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None], stride: Union[int, tuple],
+           padding: Union[int, tuple], dilation: Union[int,
+                                                       tuple], groups: int, output_shape, _semantic=None) -> tl.tensor:
+    bias_handle = None if bias is None else bias.handle
+
+    element_ty = input_tensor.type.element_ty
+    output_ty = tl.block_type(element_ty, output_shape)
+    out = _semantic.builder.create_conv2d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding,
                                           dilation, groups, output_ty.to_ir(_semantic.builder))
     return tl.tensor(out, output_ty)

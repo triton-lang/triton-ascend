@@ -24,6 +24,7 @@
 #include "ascend/include/Utils/Utils.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "mlir/Analysis/DataFlow/ConstantPropagationAnalysis.h"
@@ -84,8 +85,10 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operands[2], UseType::MetaUse);
         }
       })
-      .Case<triton::PrintOp>(
-          [&](auto print) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<triton::PrintOp>([&](auto print) {
+        for (auto operand : operands)
+          propagateUse(operand, UseType::DataUse);
+      })
       .Case<triton::AssertOp>(
           [&](auto assert) { propagateUse(operands[0], UseType::DataUse); })
       .Case<triton::StoreOp>([&](auto store) {
@@ -100,13 +103,11 @@ void triton::UseAnalysis::visitOperation(Operation *op,
       })
       .Case<triton::ascend::IndirectStoreOp>([&](auto store) {
         propagateUse(operands[0], UseType::MetaUse);
-        propagateUse(operands[1], UseType::MetaUse);
+        propagateUse(operands[1], UseType::DataUse);
         propagateUse(operands[2], UseType::DataUse);
-        auto value = store.getValue();
         auto mask = store.getMask();
         if (mask) {
-          assert(mask != value && "mask and data cannot be the same");
-          propagateUse(operands[3], UseType::MetaUse);
+          propagateUse(operands[3], UseType::DataUse);
         }
       })
       // Consider triton::AtomicRMWOp as store operation
@@ -154,10 +155,20 @@ void triton::UseAnalysis::visitOperation(Operation *op,
           propagateUse(operand, UseType::DataUse);
         }
       })
+      .Case<tensor::ExtractOp>([&](auto extractOp) {
+        for (auto operand : operands) {
+          propagateUse(operand, UseType::DataUse);
+        }
+      })
       .Case<hivm::FixpipeOp>(
           [&](auto fixpipeOp) { propagateUse(operands[0], UseType::DataUse); })
       .Case<hivm::CopyOp>(
           [&](auto copyOp) { propagateUse(operands[0], UseType::DataUse); })
+      .Case<hivm::CustomOp, hivm::CustomMacroOp>([&](auto customOp) {
+        for (auto operand : operands) {
+          propagateUse(operand, UseType::MixUse);
+        }
+      })
       .Default([&](Operation *op) {
         // this condition account for tt.addptr
         for (auto operand : operands) {
@@ -330,7 +341,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
         }
       }
       if (!isa<mlir::scf::IfOp, mlir::scf::ForOp, mlir::scf::WhileOp,
-               triton::ReduceOp>(op)) {
+               scope::ScopeOp, triton::ReduceOp>(op)) {
         assert(op->getNumResults() == 1 &&
                "Ops used for meta computation are expected to have one result");
       }
@@ -383,9 +394,9 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             })
             .Case<triton::ascend::IndirectStoreOp>([&](auto indirectstore) {
               auto src = indirectstore.getSrc();
-              auto offset = indirectstore.getOffsets();
-              auto mask = indirectstore.getMask();
-              if (result == src || result == offset || result == mask) {
+              // Only src is MetaUse (see visitOperation). offsets/value/mask
+              // are DataUse
+              if (result == src) {
                 metaUsers.insert(user);
               }
             })
@@ -474,8 +485,7 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
     // We first trace from the 1st load to the 2nd load with the ops between
     // them marked as MixUse. Then we traceback from the 2nd load to mark defs
     // MixUse.
-    if (opIsIndirectLoad(op) || opIsIndirectCalc(op) ||
-        isa<triton::ascend::IndirectStoreOp>(op)) {
+    if (opIsIndirectLoad(op) || opIsIndirectCalc(op)) {
       LLVM_DEBUG({
         os << "[UseAnalysis] Found indirect load interface op: " << *op << "\n";
       });
@@ -496,8 +506,8 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
             // We need to ensure the intermediate ops are marked MixUse
             // so that they will be replaced instead of be erased without
             // conversion.
-            return (isa<triton::LoadOp>(curOp) || isa<triton::StoreOp>(curOp) ||
-                    isa<triton::ascend::IndirectStoreOp>(curOp)) &&
+            return (isa<triton::LoadOp, triton::StoreOp,
+                        triton::ascend::IndirectStoreOp>(curOp)) &&
                    !isMetaUse(curOp);
           },
           /*actionFn*/
@@ -544,8 +554,31 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
       op->removeAttr("MetaUse");
     }
   });
+  // Masked load with non-scalar tensor `other` lowers as
+  // arith.select(mask, loaded, other) so the mask SSA must stay live.
+  funcOp.walk([&](triton::LoadOp load) {
+    Value mask = load.getMask();
+    Value other = load.getOther();
+    if (!mask || !other)
+      return;
+    if (other.getDefiningOp<triton::SplatOp>())
+      return;
+    if (auto c = other.getDefiningOp<arith::ConstantOp>()) {
+      if (auto dense = dyn_cast<DenseElementsAttr>(c.getValue())) {
+        if (dense.isSplat())
+          return;
+      }
+    }
+    if (auto *def = mask.getDefiningOp())
+      setMixUseRecursively(def);
+  });
   // hivm.custom present library call, shouldn't be metause
   funcOp.walk([&](hivm::CustomOp op) {
+    if (isMetaUse(op)) {
+      op->removeAttr("MetaUse");
+    }
+  });
+  funcOp.walk([&](hivm::CustomMacroOp op) {
     if (isMetaUse(op)) {
       op->removeAttr("MetaUse");
     }
@@ -554,6 +587,20 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
     os << "[UseAnalysis] After post-process, funcOp is " << *funcOp << "\n";
   });
   return success();
+}
+
+static bool isScalarI1ToI8PointerBitcast(Operation *op) {
+  auto bitcast = dyn_cast<triton::BitcastOp>(op);
+  if (!bitcast)
+    return false;
+
+  auto sourceType = dyn_cast<triton::PointerType>(bitcast.getSrc().getType());
+  auto resultType = dyn_cast<triton::PointerType>(bitcast.getType());
+  if (!sourceType || !resultType)
+    return false;
+
+  return sourceType.getPointeeType().isInteger(1) &&
+         resultType.getPointeeType().isInteger(8);
 }
 
 MetaUseEraser::MetaUseEraser(MLIRContext *context)
@@ -572,6 +619,9 @@ LogicalResult MetaUseEraser::matchAndRewrite(Operation *op,
     return rewriter.notifyMatchFailure(op,
                                        "AddPtrOp will be handled separately");
   }
+  if (isScalarI1ToI8PointerBitcast(op))
+    return rewriter.notifyMatchFailure(
+        op, "scalar i1-to-i8 pointer bitcast requires conversion");
   if (isMetaUse(op)) {
     rewriter.eraseOp(op);
     return success();

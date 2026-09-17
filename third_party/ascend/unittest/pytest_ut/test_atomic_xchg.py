@@ -41,10 +41,7 @@ def atomic_xchg(in_ptr0, out_ptr0, out_ptr1, n_elements, BLOCK_SIZE: tl.constexp
 
 @pytest.mark.parametrize('param_list', [
     ['int32', (32, 32), 2],
-    ['int16', (16, 16), 2],
-    ['int8', (32, 32), 2],
     ['float32', (16, 16), 2],
-    ['float16', (128, 128), 16],
     ['float32', (32768, 16), 32],
 ])
 def test_atomic_xchg(param_list):

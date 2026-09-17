@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/compiler_hint_ops.rst

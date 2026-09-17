@@ -17,14 +17,14 @@
 
 ### 设置最大硬件核数
 
-在一个Triton算子中，通常使用grid进行分核操作。对于GPU而言，其计算核心SM通常是几十到几百量级。但是对于昇腾 NPU 平台而言，其计算核心AI Core的数量在几十个的量级。\
+在一个Triton算子中，通常使用grid进行分核操作。对于GPU而言，其计算核心SM通常是几十到几百量级。但是对于昇腾NPU平台而言，其计算核心AI Core的数量在几十个的量级。\
 虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。\
 因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是**将分核的数量直接固定为硬件的物理核数**，在核内做更为细致的数据分块：
 
-* 对于纯Vector算子，分核数等于**Vector核数量**
-* 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核
+* 对于纯Vector算子，分核数等于**Vector核数量**。
+* 对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核。
 
-一般而言，在NPU卡上，一个计算核心AI Core含有一个cube核，每个cube核配有两个vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**：
+一般而言，在NPU卡上，一个计算核心AI Core含有一个Cube核，每个Cube核配有两个Vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**：
 
 ```python
 import torch
@@ -88,7 +88,7 @@ def _attn_fwd(Q, K, V, M, Out, acc, scale,
 
 ### 设置合适的循环内数据分块大小（BLOCK SIZE）
 
-以add_kernel为例，变量和操作共同决定了片上内存空间的占用大，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
+以add_kernel为例，变量和操作共同决定了片上内存的空间占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上内存的空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。
 
 ```python
 import triton.language as tl
@@ -117,9 +117,9 @@ def add_kernel(x_ptr,
         tl.store(out_ptr + offsets, output, mask=mask)
 ```
 
-### 尽量保证Tensor的尾轴大小数据对齐
+### 尽量保证Tensor的尾轴（最后一个维度）大小数据对齐
 
-【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴大小能被32Bytes整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Bytes整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个"借轴转置"的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
+【描述】对于VV类算子需要调用Vector核计算时，昇腾硬件的UB要求Tensor的尾轴（最后一个维度）大小能被32Byte整除，而对于CV类算子需要调用vector核和Cube核计算时，要求Tensor的尾轴大小能被512Byte整除，若尾轴长度不足则会自动补齐。在此前提下，对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下：
 
 - 注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector Core。
 - 示例
@@ -127,7 +127,7 @@ def add_kernel(x_ptr,
 ```python
 # conv_state = tensor([2048, 3], bfloat16)
 conv_state = tl.load(conv_state_ptr + conv_batch_offs * conv_batch_stride + doffs * 3 + tl.arange(0, 2048 * 3)) # 当成1D tensor load，此时由于numel对齐，不会自动补齐。
-conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).trans().reshape(3 * 2048,) # 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐
+conv_state_T = conv_state.reshape(128, 16 * 3).transpose().reshape(16, 3 * 128).transpose().reshape(3 * 2048,) # 长轴(2048)裂出一根对齐轴(16)借给短轴(3)，从而让两个轴都对齐
 ```
 
 ### 先将数据搬运到UB上，再从UB中select目标值
@@ -136,7 +136,7 @@ conv_state_T = conv_state.reshape(128, 16 * 3).trans().reshape(16, 3 * 128).tran
 
 - 示例
 
-```diff
+```python
 @triton.jit
 def pick_kernel(
         x_ptr,
@@ -168,7 +168,7 @@ def pick_kernel(
 
 通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\*.csv文件，该文件可以帮助分析流水情况。注：“\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。
 
-||Op Name|aiv_mte2_time(us)|aiv_mte2_ratio|
+||Op Name|aiv_mte2_time(μs)|aiv_mte2_ratio|
 |:---- |:--------|:--------|:--------|
 |未优化|pick_kernel|0.686|0.008|
 |优化|pick_kernel|1.041|0.066|
@@ -183,8 +183,7 @@ Triton-Ascend支持两种数据处理模式：存算串行和存算并行。
 
 存算并行：在搬运第一批数据至片上内存的同时，已开始对其执行计算；随后继续搬运第二批数据，形成“搬运+计算”重叠的流水线式操作，显著提升整体吞吐率。
 
-实现存算并行的关键在于合理设计数据切分（Tiling）策略，使得在当前批次数据计算过程中，能够提前准备下一阶段所需的数据，从而实现数据搬运与计算过程的并
-行化。目前，编译器默认配置multiBuffer=True，默认支持存算并行。
+实现存算并行的关键在于合理设计数据切分（Tiling）策略，使得在当前批次数据计算过程中，能够提前准备下一阶段所需的数据，从而实现数据搬运与计算过程的并行化。目前，编译器默认配置multiBuffer=True，默认支持存算并行。
 
 ### Tiling优化
 
@@ -229,7 +228,7 @@ AI Core进行计算的时候要先将数据搬运至片上内存，而片上内�
 
 在 Tiling 分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。
 
-如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](./autotune_guide.md)。
+如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](../autotune_guide.md)。
 
 - 核心作用
 自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。
@@ -308,7 +307,7 @@ max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backe
 【描述】在NPU上，UB或者L1 Size存在上限，当出现该错误时，需要减少单次搬运的数据量，以for循环的方式处理长序列场景。
 
 ```diff
-E triton.compiler. errors.MLIRCompilationError:
+E triton.compiler.errors.MLIRCompilationError:
 E ///--------------------- [ERROR][Triton][BEG]-------------------------
 E [ConvertLinalgRToBinary] encounters error:
 E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":2:1): error: Failed to run BishengHIR pipeline
@@ -317,7 +316,7 @@ E loc("/tmp/tmpsb6qkdih/kernel.ttadapter.mlir":3:3): error: ub overflow, require
 large or block number is more than what user expect due to multi-buffer feature is enabled and some ops need extra local buffer. )
 ```
 
-【注意】A2系列产品UB大小为192KB(1572864 bits)。
+【注意】A2系列产品UB大小为192KB(1572864bit)。
 
 ## 通用单核数据运算
 
@@ -327,164 +326,245 @@ large or block number is more than what user expect due to multi-buffer feature 
 
 ### 开发步骤
 
-1.确定算子功能
--明确输入/输出张量的形状、数据类型（float16/float32/int32 等）。
--确认是否需要广播、边界处理。
+1. 确定算子功能
+    -明确输入/输出张量的形状、数据类型（float16/float32/int32等）。
+    -确认是否需要广播、边界处理。
 
-2.编写核函数（kernel）
-单核运算通常对应块级的数据处理。
-单核数据运算示例：向量加法
+2. 编写核函数（kernel）
+    单核运算通常对应块级的数据处理。
+    单核数据运算示例：向量加法
 
-```diff
+    ```diff
 
+    @triton.jit
+    def add_kernel(x_ptr, # Pointer to first input vector.
+        y_ptr, # Pointer to second input vector.
+        output_ptr, # output 向量的指针.
+        n_elements, # 向量的大小.
+        BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
+        # 注意：constexpr属性表示它可以被用作shape值.
+    ):
+        pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.store(output_ptr + offsets, output, mask=mask)
+    ```
+
+    调用：
+
+    ```diff
+    def add(x: torch.Tensor, y: torch.Tensor):
+        output = torch.empty_like(x)
+        n_elements = output.numel()
+        grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
+        add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
+        return output
+    ```
+
+    使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性
+
+    ```diff
+    torch.manual_seed(0)
+    size = 98432
+    x = torch.rand(size, device='npu')
+    y = torch.rand(size, device='npu')
+    output_torch = x + y
+    output_triton = add(x, y)
+    print(output_torch)
+    print(output_triton)
+    print(f'The maximum difference between torch and triton is '
+    f'{torch.max(torch.abs(output_torch - output_triton))}')
+    # Out:
+    # tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
+    # tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
+    # The maximum difference between torch and triton is 0.0
+    ```
+
+3. 单核运算的关键点
+
+    -块级数据处理：每个计算块负责一小段数据，保证并行性。
+
+    -边界检查：使用 mask 或 if (tid < N) 避免越界。
+
+    -块大小选择：合理设置 block 和 grid
+
+4. 性能要点：
+
+    (1)访存优化
+    -保证连续访问。
+    -使用对齐的 stride，避免跨行/跨列跳跃式访问。
+    -尽量让数据块大小对齐到 32 字节边界。
+    输入输出 buffer 在分配时保证对齐，避免访存性能下降。
+    例：
+
+    ```diff
+    BLOCK_SIZE = 256  # 256 * 4 Byte = 1024 Byte，对齐良好
+
+    @triton.jit
+    def vec_add_kernel(X, Y, Z, N,
+                    BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+
+        # 计算当前 block 负责的 index 范围
+        offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+
+        # mask 防止越界
+        mask = offsets < N
+
+        # 连续访存：offsets 是连续的
+        x = tl.load(X + offsets, mask=mask)
+        y = tl.load(Y + offsets, mask=mask)
+
+        z = x + y
+
+        # 连续写回
+        tl.store(Z + offsets, z, mask=mask)
+
+
+    def vec_add(x, y):
+        assert x.numel() == y.numel()
+        N = x.numel()
+
+        # 分配对齐内存（PyTorch 默认已经对齐到 64 字节）
+        z = torch.empty_like(x)
+
+        # grid：每个 block 处理 BLOCK_SIZE 个元素
+        grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']),)
+
+        vec_add_kernel[grid](x, y, z, N, BLOCK_SIZE=BLOCK_SIZE)
+
+        return z
+    ```
+
+    (2)子块划分
+    -将大矩阵分解为小block，每个block在 UB 内完成计算。
+    -子块划分要兼顾访存连续性和计算单元利用率。
+    例：
+
+    ```diff
+    BLOCK_M = 64   # 每个 block 处理 64 行
+    BLOCK_N = 64   # 每个 block 处理 64 列
+    BLOCK_K = 32   # 内部累加维度
+
+    @triton.jit
+    def matmul_kernel(
+        A, B, C,
+        M, N, K,
+        stride_am, stride_ak,
+        stride_bk, stride_bn,
+        stride_cm, stride_cn,
+        BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr
+    ):
+        pid_m = tl.program_id(0)  # block 在 M 方向的 id
+        pid_n = tl.program_id(1)  # block 在 N 方向的 id
+
+        # 当前 block 对应的起始坐标
+        offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+        offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+        offs_k = tl.arange(0, BLOCK_K)
+
+        # 初始化累加器
+        acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+        # 循环分块计算
+        for k in range(0, K, BLOCK_K):
+            a = tl.load(
+                A + (offs_m[:, None] * stride_am + (offs_k[None, :] + k) * stride_ak),
+                mask=(offs_m[:, None] < M) & (offs_k[None, :] + k < K),
+                other=0.0
+            )
+            b = tl.load(
+                B + ((offs_k[:, None] + k) * stride_bk + offs_n[None, :] * stride_bn),
+                mask=(offs_k[:, None] + k < K) & (offs_n[None, :] < N),
+                other=0.0
+            )
+            acc += tl.dot(a, b)
+
+        # 写回结果
+        c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
+        tl.store(c, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+    ```
+
+## 通用多维张量切分
+
+Triton 算子处理多维张量时，核心思想是将高维数据映射到硬件的 Block、Core、硬件单元中。本节提供二维与三维张量的典型处理示例。
+
+### 二维张量切分：以矩阵乘法（GEMM）为例
+
+对于二维矩阵乘法，通常需要在高度（M）和宽度（N）上进行二维切分，并在深度（K）上进行循环迭代。
+
+```python
 @triton.jit
-def add_kernel(x_ptr, # Pointer to first input vector.
-    y_ptr, # Pointer to second input vector.
-    output_ptr, # output 向量的指针.
-    n_elements, # 向量的大小.
-    BLOCK_SIZE: tl.constexpr, # 每个进程需要处理的元素个数.
-    # 注意：constexpr属性表示它可以被用作shape值.
-):
-    pid = tl.program_id(axis=0) # We use a 1D launch grid so axis is 0.
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    output = x + y
-    tl.store(output_ptr + offsets, output, mask=mask)
-```
+def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
+                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
+    # 1. 任务划分：计算当前 Block 在 M 和 N 维度上的坐标
+    pid_m = tl.program_id(0)
+    pid_n = tl.program_id(1)
 
-调用：
-
- ```diff
-def add(x: torch.Tensor, y: torch.Tensor):
-    output = torch.empty_like(x)
-    n_elements = output.numel()
-    grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
-    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
-    return output
-```
-
-使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性
-
- ```diff
-torch.manual_seed(0)
-size = 98432
-x = torch.rand(size, device='npu')
-y = torch.rand(size, device='npu')
-output_torch = x + y
-output_triton = add(x, y)
-print(output_torch)
-print(output_triton)
-print(f'The maximum difference between torch and triton is '
-f'{torch.max(torch.abs(output_torch - output_triton))}')
-# Out:
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
-# tensor([1.3713, 1.3076, 0.4940, ..., 0.6724, 1.2141, 0.9733], device='npu')
-# The maximum difference between torch and triton is 0.0
-```
-
-3.单核运算的关键点
-
--块级数据处理：每个计算块负责一小段数据，保证并行性。
-
--边界检查：使用 mask 或 if (tid < N) 避免越界。
-
--块大小选择：合理设置 block 和 grid
-
-4.性能要点：
-(1)访存优化
--保证连续访问。
--使用对齐的 stride，避免跨行/跨列跳跃式访问。
--尽量让数据块大小对齐到 32 字节边界。
-输入输出 buffer 在分配时保证对齐，避免访存性能下降。
-例:
-
- ```diff
-BLOCK_SIZE = 256  # 256 * 4 bytes = 1024 bytes，对齐良好
-
-@triton.jit
-def vec_add_kernel(X, Y, Z, N,
-                   BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(axis=0)
-
-    # 计算当前 block 负责的 index 范围
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-
-    # mask 防止越界
-    mask = offsets < N
-
-    # 连续访存：offsets 是连续的
-    x = tl.load(X + offsets, mask=mask)
-    y = tl.load(Y + offsets, mask=mask)
-
-    z = x + y
-
-    # 连续写回
-    tl.store(Z + offsets, z, mask=mask)
-
-
-def vec_add(x, y):
-    assert x.numel() == y.numel()
-    N = x.numel()
-
-    # 分配对齐内存（PyTorch 默认已经对齐到 64 字节）
-    z = torch.empty_like(x)
-
-    # grid：每个 block 处理 BLOCK_SIZE 个元素
-    grid = lambda meta: (triton.cdiv(N, meta['BLOCK_SIZE']),)
-
-    vec_add_kernel[grid](x, y, z, N, BLOCK_SIZE=BLOCK_SIZE)
-
-    return z
-```
-
-(2)子块划分
--将大矩阵分解为小block，每个block在 UB 内完成计算。
--子块划分要兼顾访存连续性和计算单元利用率。
-例：
-
- ```diff
-BLOCK_M = 64   # 每个 block 处理 64 行
-BLOCK_N = 64   # 每个 block 处理 64 列
-BLOCK_K = 32   # 内部累加维度
-
-@triton.jit
-def matmul_kernel(
-    A, B, C,
-    M, N, K,
-    stride_am, stride_ak,
-    stride_bk, stride_bn,
-    stride_cm, stride_cn,
-    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr
-):
-    pid_m = tl.program_id(0)  # block 在 M 方向的 id
-    pid_n = tl.program_id(1)  # block 在 N 方向的 id
-
-    # 当前 block 对应的起始坐标
-    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    # 2. 定义块指针（Block Pointers），处理多维步长（Strides）
+    offs_am = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
+    offs_bn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
     offs_k = tl.arange(0, BLOCK_K)
 
-    # 初始化累加器
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+    a_ptrs = a_ptr + offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak
+    b_ptrs = b_ptr + offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn
 
-    # 循环分块计算
+    # 3. 循环迭代 K 维度进行累加计算
+    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float16)
     for k in range(0, K, BLOCK_K):
-        a = tl.load(
-            A + (offs_m[:, None] * stride_am + (offs_k[None, :] + k) * stride_ak),
-            mask=(offs_m[:, None] < M) & (offs_k[None, :] + k < K),
-            other=0.0
-        )
-        b = tl.load(
-            B + ((offs_k[:, None] + k) * stride_bk + offs_n[None, :] * stride_bn),
-            mask=(offs_k[:, None] + k < K) & (offs_n[None, :] < N),
-            other=0.0
-        )
-        acc += tl.dot(a, b)
+        a = tl.load(a_ptrs, mask=(offs_am[:, None] < M) & (offs_k[None, :] < K))
+        b = tl.load(b_ptrs, mask=(offs_k[:, None] < K) & (offs_bn[None, :] < N))
+        accumulator += tl.dot(a, b)
 
-    # 写回结果
-    c = C + (offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn)
-    tl.store(c, acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))
+        a_ptrs += BLOCK_K * stride_ak
+        b_ptrs += BLOCK_K * stride_bk
+
+    tl.store(c_ptr + offs_am[:, None] * stride_cm + offs_bn[None, :] * stride_cn, accumulator)
 ```
+
+**要点**：
+
+- `pid_m` / `pid_n` 分别对应 M / N 维度上的 block 编号
+
+- `stride_*` 显式处理多维步长，避免假设连续内存
+
+- K 维度通过循环分块累加
+
+### 三维及以上张量切分：以 Batched GEMM 为例
+
+处理三维张量（如 `[Batch, M, N]`）时，可以将 `Batch` 维度（B）直接映射到 Triton 的 `Grid` 维度上，或者将其与 `M/N` 维度展平后重新映射。
+
+#### 启动 `Grid` 时增加 `Batch` 维度
+
+```python
+grid = lambda meta: (triton.cdiv(M, meta['BLOCK_M']), triton.cdiv(N, meta['BLOCK_N']), B)
+```
+
+#### 核函数实现
+
+```python
+@triton.jit
+def batched_matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K, B, ...):
+    # 获取当前 Batch 的索引
+    pid_b = tl.program_id(2)
+
+    # 根据 Batch 索引计算全局内存的基地址偏移
+    a_batch_ptr = a_ptr + pid_b * M * K
+    b_batch_ptr = b_ptr + pid_b * K * N
+    c_batch_ptr = c_ptr + pid_b * M * N
+
+    # 后续 M、N、K 维度的切分与二维 GEMM 完全一致，只需替换基地址指针即可
+    # ...
+```
+
+**要点**：
+
+- `tl.program_id(2)` 取得 Batch 维度的索引
+
+- 每个 Batch 独立计算自己的 `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`
+
+- 后续 M / N / K 维度的切分逻辑与二维 GEMM 一致

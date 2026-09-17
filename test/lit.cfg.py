@@ -14,7 +14,9 @@ from lit.llvm.subst import ToolSubst
 # name: The name of this test suite
 config.name = 'TRITON'
 
-config.test_format = lit.formats.ShTest(not llvm_config.use_lit_shell)
+# Always use the internal lit shell: lit >= 23 rejects execute_external=True
+# (removed entirely in LLVM 24), and none of the RUN lines need bash.
+config.test_format = lit.formats.ShTest(False)
 
 # suffixes: A list of file extensions to treat as test files.
 config.suffixes = ['.mlir', '.ll']

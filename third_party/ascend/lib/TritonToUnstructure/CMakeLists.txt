@@ -1,4 +1,5 @@
 add_triton_library(TritonToUnstructure
+        IndirectAtomicUtils.cpp
         UnstructureConversionPass.cpp
         OffsetAnalysis.cpp
         BubbleUpOperation.cpp
@@ -17,5 +18,6 @@ add_triton_library(TritonToUnstructure
   MLIRSupport
   TritonIR
   TritonAnalysis
+  TritonMemoryAccessAnalysis
   MLIRSCFTransforms
 )

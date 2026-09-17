@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import os
+
 from .autotuner import get_max_configs, max_autotune
 
 
@@ -32,4 +34,50 @@ def _patch_autotune():
     triton.autotune = autotune
 
 
+def _patch_config_init():
+    """Allow Config to round-trip the ubtune_cfg attribute through the disk cache.
+
+    UB-tuner dynamically injects ubtune_cfg onto Config objects via setattr to
+    fix UB-overflow compile failures. The disk cache serializes config.__dict__
+    to JSON, and on cache hit rebuilds configs with Config(**config_dict).
+    The upstream Config.__init__ does not accept ubtune_cfg, so the attribute
+    would be lost (or crash) on a disk-cache round-trip. This patch restores it.
+    """
+    from triton.runtime.autotuner import Config
+
+    _original_config_init = Config.__init__
+
+    def _patched_config_init(self, kwargs, num_warps=4, num_stages=3, num_ctas=1, maxnreg=None, pre_hook=None,
+                             ir_override=None, **extra):
+        _original_config_init(self, kwargs, num_warps, num_stages, num_ctas, maxnreg, pre_hook, ir_override)
+        if "ubtune_cfg" in extra:
+            setattr(self, "ubtune_cfg", extra["ubtune_cfg"])
+
+    Config.__init__ = _patched_config_init
+
+
+def _patch_cache_invalidating_env_vars():
+    """Include TRITON_ENABLE_UBTUNER in the autotune disk cache key.
+
+    UB-tuner may rescue configs that would otherwise fail to compile, changing
+    the benchmark outcome. Toggling it must therefore invalidate cached
+    autotune results; otherwise a cache hit from a run without UB-tuner would
+    silently skip configs that UB-tuner could have rescued.
+    """
+    import triton.runtime.autotuner as _autotuner_module
+
+    _original_get_env_vars = _autotuner_module.get_cache_invalidating_env_vars
+
+    def _patched_get_env_vars():
+        env_vars = _original_get_env_vars()
+        ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+        if ubtuner_mode:
+            env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
+        return env_vars
+
+    _autotuner_module.get_cache_invalidating_env_vars = _patched_get_env_vars
+
+
 _patch_autotune()
+_patch_config_init()
+_patch_cache_invalidating_env_vars()

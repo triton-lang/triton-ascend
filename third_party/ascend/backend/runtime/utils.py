@@ -31,6 +31,7 @@ def _init_npu_params():
         return _cached_params
 
     from triton.runtime.driver import driver
+    from triton.backends.ascend.utils import ub_size_in_kbytes_for_arch
 
     target = driver.active.get_current_target()
     device = driver.active.get_current_device()
@@ -38,7 +39,10 @@ def _init_npu_params():
 
     num_cube_core = prop["num_aicore"]
     num_vector_core = prop["num_aicore"]
-    ub_size_in_kbytes = 192
+    # Keep the runtime's historical fallback for a device descriptor that is
+    # not yet listed in the compiler-side architecture table.  Graph
+    # optimization intentionally treats that case as zero budget instead.
+    ub_size_in_kbytes = ub_size_in_kbytes_for_arch(target.arch) or 192
     rf_size_in_kbytes = None
 
     ASCEND_VARIANTS = ["Ascend910B", "Ascend910_93", "Ascend910_95", "Ascend950"]
@@ -46,7 +50,6 @@ def _init_npu_params():
         num_vector_core = num_cube_core * 2
 
     if target.arch.startswith("Ascend910_95") or target.arch.startswith("Ascend950"):
-        ub_size_in_kbytes = 256
         rf_size_in_kbytes = 128
 
     _cached_params = {
@@ -81,6 +84,9 @@ byte_per_numel = {
     torch.int16: 2,  # torch.int16 or torch.short
     torch.int8: 1,  # torch.int8
     torch.uint8: 1,  # torch.uint8
+    torch.uint16: 2,  # torch.uint16
+    torch.uint32: 4,  # torch.uint32
+    torch.uint64: 8,  # torch.uint64
     torch.bool: 1,  # torch.bool
     torch.complex32: 4,  # torch.complex32 (not yet available in PyTorch as of the latest stable release)
     torch.complex64: 8,  # torch.complex64
@@ -113,8 +119,6 @@ def get_byte_per_numel(dtype: torch.dtype) -> int:
 
 
 def is_valid_axis_name(name: str) -> bool:
-    if name.startswith("r"):
-        return name[1:] in valid_axis_names
     return name in valid_axis_names
 
 

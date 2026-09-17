@@ -50,9 +50,8 @@ def validate_block_shape(shape: List[int]):
     for i, d in enumerate(shape):
         if not isinstance(d, int):
             raise TypeError(f"Shape element {i} must have type `constexpr[int]`, got `constexpr[{type(d)}]")
-        # FIXME:patched triton community
-        # if not is_power_of_two(d):
-        #     raise ValueError(f"Shape element {i} must be a power of 2")
+        if not is_power_of_two(d):
+            raise ValueError(f"Shape element {i} must be a power of 2")
         numel *= d
 
     if numel > TRITON_MAX_TENSOR_NUMEL:
@@ -106,6 +105,10 @@ def canonicalize_dtype(dtype):
     return type_canonicalisation_dict[dtype_str]
 
 
+def canonicalize_ptr_dtype(dtype, is_const):
+    return f"{'*k' if is_const else '*'}{canonicalize_dtype(dtype)}"
+
+
 BITWIDTH_DICT: Dict[str, int] = {
     **{f"u{n}": n
        for n in (1, 8, 16, 32, 64)},
@@ -125,3 +128,7 @@ for k, v in type_canonicalisation_dict.items():
 
 def get_primitive_bitwidth(dtype: str) -> int:
     return BITWIDTH_DICT[dtype]
+
+
+def is_namedtuple(val):
+    return isinstance(val, type) and issubclass(val, tuple) and hasattr(val, "_fields")

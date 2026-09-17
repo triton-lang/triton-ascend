@@ -1,3 +1,4 @@
+# ── Build system ──
 build:
   - changed-files:
       - any-glob-to-any-file:
@@ -9,24 +10,83 @@ build:
           - 'MANIFEST.in'
           - 'safe_compile.cmake'
 
+# ── CI / CD ──
 CICD:
   - changed-files:
       - any-glob-to-any-file:
           - '.github/workflows/**'
           - '.github/actions/**'
 
+# ── Compiler backend (C/C++) ──
+compiler:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'lib/**'
+          - 'include/**'
+          - '**/*.cpp'
+          - '**/*.h'
+          - '**/*.td'
+          - '**/*.c'
+
+# ── Python runtime ──
+python:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'python/**'
+          - '**/*.py'
+          - '!python/test/**'
+
+# ── Tests ──
+tests:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'test/**'
+          - 'unittest/**'
+          - 'python/test/**'
+
+# ── Ascend NPU backend ──
+ascend-backend:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'third_party/ascend/**'
+
+# ── Triton kernels ──
+kernels:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'python/triton_kernels/**'
+
+# ── Dependencies ──
 dependencies:
   - changed-files:
       - any-glob-to-any-file:
           - 'requirements*.txt'
           - '.github/dependabot.yml'
 
-document:
+# ── Docker ──
+docker:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'docker/**'
+          - 'Dockerfile'
+          - 'Dockerfile.*'
+          - '.dockerignore'
+
+# ── Documentation ──
+documentation:
   - changed-files:
       - any-glob-to-any-file:
           - '**/*.md'
           - 'docs/**'
 
+# ── Scripts / tooling ──
+scripts:
+  - changed-files:
+      - any-glob-to-any-file:
+          - 'scripts/**'
+          - 'bin/**'
+
+# ── Release ──
 release:
   - changed-files:
       - any-glob-to-any-file:

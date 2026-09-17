@@ -27,6 +27,12 @@
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
 
+#include "triton/Dialect/Triton/IR/Dialect.h"
+
+#include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
+#include "ascend/include/TritonToGraph/ProgramAxisDependenceAnalysis.h"
+#include "ascend/include/TritonToGraph/ProgramGridTransform.h"
+#include "ascend/include/TritonToGraph/ProgramMappingScalarSpecialization.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -34,6 +40,7 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
@@ -42,17 +49,24 @@
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "llvm/IR/Instructions.h"
+#include <Python.h>
+#include <utility>
+#include <vector>
 
 using namespace mlir;
 namespace py = pybind11;
 
 struct AscendNPUIROpBuilder : public TritonOpBuilder {
   std::string target;
+  std::string compile_mode;
   static constexpr char kTarget910_95[] = "Ascend910_95";
   static constexpr char kTarget950[] = "Ascend950";
 
-  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "")
-      : TritonOpBuilder(context), target(target) {}
+  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "",
+                                std::string compile_mode = "simd")
+      : TritonOpBuilder(context), target(target), compile_mode(compile_mode) {}
+
+  bool isSimtMode() const { return compile_mode == "simt"; }
 
   bool is_910_95() const {
     // TODO: Use enum instead of strings after enabling HACC in satandalone
@@ -166,6 +180,40 @@ ModeAndPipes GetSyncBlockModeAndPipes(MLIRContext *ctx,
   }
   return {modeAttr, cubePipe, vectorPipe};
 }
+
+// Extend triton.ir.context with a context manager protocol for ascend tests
+// and examples, without modifying upstream python/src/ir.cc.
+void installTritonContextManager() {
+  static bool installed = false;
+  if (installed) {
+    return;
+  }
+  installed = true;
+
+  py::module_ tritonIr = py::module_::import("triton._C.libtriton.ir");
+  py::object ctxClass = tritonIr.attr("context");
+  if (py::hasattr(ctxClass, "__enter__")) {
+    return;
+  }
+
+  const char *patch = R"PY(
+import triton._C.libtriton.ir as _triton_ir
+if not hasattr(_triton_ir.context, '__enter__'):
+    def _mlir_context_enter(self):
+        return self
+    def _mlir_context_exit(self, exc_type, exc_val, exc_tb):
+        return False
+    _triton_ir.context.__enter__ = _mlir_context_enter
+    _triton_ir.context.__exit__ = _mlir_context_exit
+)PY";
+  PyGILState_STATE gil = PyGILState_Ensure();
+  if (PyRun_SimpleString(patch) != 0) {
+    PyGILState_Release(gil);
+    throw std::runtime_error("failed to install MLIRContext context manager");
+  }
+  PyGILState_Release(gil);
+}
+
 } // namespace
 
 void init_ascend_ir(py::module &&m) {
@@ -230,19 +278,42 @@ void init_ascend_ir(py::module &&m) {
           },
           py::arg("pos"), py::arg("context") = py::none());
 
+  affineExprClass.attr("__doc__") =
+      "An MLIR affine expression representing a linear combination of "
+      "dimensions and symbols with a constant offset.\n\n"
+      "Affine expressions model loop bounds, array indices, and memory "
+      "access patterns in the Ascend NPU compiler. They support addition, "
+      "subtraction, multiplication by constants, floor division, ceiling "
+      "division, and modulo operations.\n\n"
+      "Create via static methods: get_constant(value), get_dim(pos), "
+      "get_symbol(pos).";
+
   py::class_<AffineConstantExpr, AffineExpr>(m, "affine_constant_expr",
                                              py::module_local())
-      .def("get_value", &AffineConstantExpr::getValue);
+      .def("get_value", &AffineConstantExpr::getValue)
+      .attr("__doc__") =
+      "An affine expression that is a constant integer value. "
+      "This is the simplest form of an affine expression, "
+      "representing just a numeric constant.";
   py::class_<AffineDimExpr, AffineExpr>(m, "affine_dim_expr",
                                         py::module_local())
-      .def("get_position", &AffineDimExpr::getPosition);
+      .def("get_position", &AffineDimExpr::getPosition)
+      .attr("__doc__") =
+      "An affine expression representing a single dimension variable. "
+      "Dimensions typically correspond to loop induction variables.";
   py::class_<AffineSymbolExpr, AffineExpr>(m, "affine_symbol_expr",
                                            py::module_local())
-      .def("get_position", &AffineSymbolExpr::getPosition);
+      .def("get_position", &AffineSymbolExpr::getPosition)
+      .attr("__doc__") =
+      "An affine expression representing a single symbol variable. "
+      "Symbols represent unknown but constant values (e.g., tile sizes).";
   py::class_<AffineBinaryOpExpr, AffineExpr>(m, "affine_binary_op_expr",
                                              py::module_local())
       .def("get_lhs", &AffineBinaryOpExpr::getLHS)
-      .def("get_rhs", &AffineBinaryOpExpr::getRHS);
+      .def("get_rhs", &AffineBinaryOpExpr::getRHS)
+      .attr("__doc__") =
+      "An affine expression composed of two sub-expressions combined by "
+      "an operator (add, sub, mul, mod, floordiv, ceildiv).";
 
   auto affineMapClass =
       py::class_<AffineMap>(m, "affine_map", py::module_local());
@@ -427,6 +498,14 @@ void init_ascend_ir(py::module &&m) {
           },
           py::arg("value"), py::arg("context") = py::none());
 
+  affineMapClass.attr("__doc__") =
+      "An MLIR affine map representing a mapping from a set of "
+      "dimensions and symbols to a list of affine expressions.\n\n"
+      "Affine maps encode transformations like indexing, layout "
+      "permutations, and memory access patterns. They are the "
+      "fundamental abstraction for describing data movement and "
+      "computation placement in the Ascend NPU compiler.";
+
   py::enum_<hivm::AddressSpace>(m, "AddressSpace", py::module_local())
       .value("L1", hivm::AddressSpace::L1)
       .value("UB", hivm::AddressSpace::UB)
@@ -451,6 +530,23 @@ void init_ascend_ir(py::module &&m) {
       .value("PIPE_MTE3", hivm::PIPE::PIPE_MTE3)
       .value("PIPE_ALL", hivm::PIPE::PIPE_ALL)
       .value("PIPE_FIX", hivm::PIPE::PIPE_FIX)
+      .export_values();
+
+  py::enum_<hivm::SyncEventSlotMacroSync>(m, "SYNC_HINT", py::module_local())
+      .value("wait", hivm::SyncEventSlotMacroSync::wait)
+      .value("set", hivm::SyncEventSlotMacroSync::set)
+      .value("internal", hivm::SyncEventSlotMacroSync::internal)
+      .export_values();
+
+  py::enum_<hivm::EVENT>(m, "EVENT", py::module_local())
+      .value("EVENT_ID0", hivm::EVENT::EVENT_ID0)
+      .value("EVENT_ID1", hivm::EVENT::EVENT_ID1)
+      .value("EVENT_ID2", hivm::EVENT::EVENT_ID2)
+      .value("EVENT_ID3", hivm::EVENT::EVENT_ID3)
+      .value("EVENT_ID4", hivm::EVENT::EVENT_ID4)
+      .value("EVENT_ID5", hivm::EVENT::EVENT_ID5)
+      .value("EVENT_ID6", hivm::EVENT::EVENT_ID6)
+      .value("EVENT_ID7", hivm::EVENT::EVENT_ID7)
       .export_values();
 
   py::enum_<hivm::VFMode>(m, "MODE", py::module_local())
@@ -515,14 +611,594 @@ void init_ascend_ir(py::module &&m) {
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
+  m.def("get_int_attr", [](OpState &op, std::string &name) -> py::object {
+    auto ret = op->getAttrOfType<IntegerAttr>(name);
+    if (!ret) {
+      return py::none();
+    }
+    return py::cast(ret.getInt());
+  });
+  m.def("get_program_grid_transforms", [](OpState &op) -> py::object {
+    Attribute attribute =
+        op->getAttr(mlir::triton::cfg::kProgramGridTransformsAttr);
+    if (!attribute)
+      return py::none();
+    FailureOr<mlir::triton::cfg::ProgramGridTransformContract> contract =
+        mlir::triton::cfg::parseProgramGridTransformContract(attribute);
+    if (failed(contract))
+      throw std::runtime_error("invalid hacc.program_grid_transforms contract");
+
+    py::dict result;
+    result["version"] = contract->version;
+    result["extent_source"] = "runtime_original_grid";
+    py::list hiddenExtentAxes;
+    hiddenExtentAxes.append(0);
+    hiddenExtentAxes.append(1);
+    result["hidden_extent_axes"] = std::move(hiddenExtentAxes);
+    py::list hiddenArgumentOrder;
+    hiddenArgumentOrder.append("originalGridX");
+    hiddenArgumentOrder.append("originalGridY");
+    result["hidden_argument_order"] = std::move(hiddenArgumentOrder);
+    py::list hiddenArgumentTypes;
+    hiddenArgumentTypes.append("i32");
+    hiddenArgumentTypes.append("i32");
+    result["hidden_argument_types"] = std::move(hiddenArgumentTypes);
+    py::list transforms;
+    for (const mlir::triton::cfg::ProgramGridTransform &transform :
+         contract->transforms) {
+      py::dict item;
+      item["order"] = transform.order;
+      item["kind"] = "ceil_div";
+      item["axis"] = transform.axis;
+      item["factor"] = transform.factor;
+      item["persistent_coverage"] = transform.persistentCoverage;
+      item["grid_stride_abi_verified"] = transform.gridStrideAbiVerified;
+      transforms.append(std::move(item));
+    }
+    result["transforms"] = std::move(transforms);
+    return std::move(result);
+  });
+  m.def("get_program_mapping_scalar_specialization",
+        [](OpState &op) -> py::object {
+          Attribute attribute = op->getAttr(
+              mlir::triton::cfg::kProgramMappingScalarSpecializationAttr);
+          if (!attribute)
+            return py::none();
+          FailureOr<mlir::triton::cfg::ProgramMappingScalarSpecialization>
+              specialization =
+                  mlir::triton::cfg::parseProgramMappingScalarSpecialization(
+                      attribute);
+          if (failed(specialization))
+            throw std::runtime_error(
+                "invalid hacc.program_mapping_scalar_specialization contract");
+
+          py::dict result;
+          result["version"] = specialization->version;
+          py::list arguments;
+          for (const mlir::triton::cfg::ProgramMappingScalarArgument &argument :
+               specialization->arguments) {
+            py::dict item;
+            item["index"] = argument.index;
+            if (specialization->version ==
+                mlir::triton::cfg::kProgramMappingScalarSpecializationVersion)
+              item["name"] = argument.name;
+            item["value"] = argument.value;
+            arguments.append(std::move(item));
+          }
+          result["arguments"] = std::move(arguments);
+          return std::move(result);
+        });
+  m.def(
+      "set_program_mapping_scalar_specialization",
+      [](OpState &op, int64_t version, const py::iterable &arguments) {
+        auto module = dyn_cast<ModuleOp>(op.getOperation());
+        if (!module)
+          throw std::invalid_argument("set_program_mapping_scalar_"
+                                      "specialization expects an MLIR module");
+        mlir::triton::cfg::ProgramMappingScalarSpecialization specialization;
+        specialization.version = version;
+        const bool isLegacy =
+            version ==
+            mlir::triton::cfg::kProgramMappingScalarSpecializationLegacyVersion;
+        const bool isNamed =
+            version ==
+            mlir::triton::cfg::kProgramMappingScalarSpecializationVersion;
+        if (!isLegacy && !isNamed)
+          throw std::invalid_argument(
+              "unsupported program_mapping_scalar_specialization version");
+        for (const py::handle &rawArgument : arguments) {
+          if (!py::isinstance<py::sequence>(rawArgument) ||
+              py::isinstance<py::str>(rawArgument))
+            throw std::invalid_argument("program_mapping_scalar_specialization "
+                                        "argument must be a sequence");
+          py::sequence argument =
+              py::reinterpret_borrow<py::sequence>(rawArgument);
+          const size_t expectedSize = isLegacy ? 2 : 3;
+          if (argument.size() != expectedSize)
+            throw std::invalid_argument("program_mapping_scalar_specialization "
+                                        "argument has invalid arity");
+          uint32_t index = argument[0].cast<uint32_t>();
+          if (isLegacy) {
+            specialization.arguments.push_back(
+                {index, "", argument[1].cast<int64_t>()});
+          } else {
+            specialization.arguments.push_back({index,
+                                                argument[1].cast<std::string>(),
+                                                argument[2].cast<int64_t>()});
+          }
+        }
+        if (failed(mlir::triton::cfg::setProgramMappingScalarSpecialization(
+                module, specialization)))
+          throw std::runtime_error(
+              "invalid hacc.program_mapping_scalar_specialization contract");
+      },
+      py::arg("module"), py::arg("version"), py::arg("arguments"));
+  m.def("clear_program_mapping_scalar_specialization", [](OpState &op) {
+    auto module = dyn_cast<ModuleOp>(op.getOperation());
+    if (!module)
+      throw std::invalid_argument(
+          "clear_program_mapping_scalar_specialization expects an MLIR module");
+    mlir::triton::cfg::clearProgramMappingScalarSpecialization(module);
+  });
+  m.def(
+      "analyze_program_axis_dependence",
+      [](OpState &op) -> py::list {
+        auto function = llvm::dyn_cast<mlir::triton::FuncOp>(op.getOperation());
+        if (!function)
+          throw std::invalid_argument(
+              "analyze_program_axis_dependence expects a tt.func operation");
+
+        mlir::triton::cfg::ProgramAxisDependenceAnalysis analysis(function);
+        py::list axes;
+        for (int32_t axis = 0; axis < 3; ++axis) {
+          const mlir::triton::cfg::ProgramAxisDependence &facts =
+              analysis.get(axis);
+          py::dict result;
+          result["axis"] = facts.axis;
+          result["program_id_count"] = facts.programIds.size();
+          result["escapes"] = facts.escapes;
+          result["has_side_effects"] = facts.hasSideEffects;
+          result["has_unsupported_side_effects"] =
+              facts.hasUnsupportedSideEffects;
+          result["reads_num_programs"] = facts.readsNumPrograms;
+          result["is_independent_axis_transform_candidate"] =
+              facts.isIndependentAxisTransformCandidate();
+          result["is_program_mapping_transform_candidate"] =
+              facts.isProgramMappingTransformCandidate();
+
+          py::list closure;
+          for (Operation *operation : facts.dependenceClosure)
+            closure.append(operation->getName().getStringRef().str());
+          result["dependence_closure"] = std::move(closure);
+
+          py::list reductions;
+          for (int32_t reductionAxis : facts.reductionAxes)
+            reductions.append(reductionAxis);
+          result["reduction_axes"] = std::move(reductions);
+
+          py::list stores;
+          for (const mlir::triton::cfg::StoreAddressDependence &store :
+               facts.stores) {
+            py::dict summary;
+            summary["pointer_depends_on_axis"] = store.pointerDependsOnAxis;
+            switch (store.independence) {
+            case mlir::triton::cfg::StoreAddressIndependence::
+                NotProgramDependent:
+              summary["address_independence"] = "not_program_dependent";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::ProvenDisjoint:
+              summary["address_independence"] = "proven_disjoint";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::
+                CanonicalDynamicStride:
+              summary["address_independence"] = "canonical_dynamic_stride";
+              break;
+            case mlir::triton::cfg::StoreAddressIndependence::Unknown:
+              summary["address_independence"] = "unknown";
+              break;
+            }
+            stores.append(std::move(summary));
+          }
+          result["stores"] = std::move(stores);
+          axes.append(std::move(result));
+        }
+        return axes;
+      },
+      py::arg("function"),
+      "Return conservative per-axis ProgramAxisDependenceAnalysis facts for a "
+      "tt.func.");
+  m.def("remove_attr",
+        [](OpState &op, std::string &name) -> void { op->removeAttr(name); });
+  py::class_<StringAttr, Attribute>(m, "str_attr", py::module_local());
+  py::class_<ArrayAttr, Attribute>(m, "array_attr", py::module_local());
 
   py::class_<AscendNPUIROpBuilder, TritonOpBuilder>(
       m, "ascendnpu_ir_builder", py::module_local(), py::dynamic_attr())
-      .def(py::init<MLIRContext *, std::string>(), py::arg("context"),
-           py::arg("target") = "")
+      .def(py::init<MLIRContext *, std::string, std::string>(),
+           py::arg("context"), py::arg("target") = "",
+           py::arg("compile_mode") = "simd",
+           "Create a TritonOpBuilder with optional compile_mode (simt or simd, "
+           "default: simd)")
+      .def("is_simt_mode", &AscendNPUIROpBuilder::isSimtMode,
+           "Check if the compile mode is simt")
+      .def("get_i64_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<int64_t> &array) {
+             return self.getBuilder().getI64ArrayAttr(array);
+           })
+      .def("get_buffer_ty",
+           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape,
+              Type &elementType, const Attribute &memorySpace) -> Type {
+             return MemRefType::get(shape, elementType,
+                                    MemRefLayoutAttrInterface{}, memorySpace);
+           })
+      .def("get_buffer_ty_with_strides",
+           [](AscendNPUIROpBuilder &self, std::vector<int64_t> &shape,
+              Type &elementType, const std::vector<int64_t> &strides,
+              const Attribute &memorySpace) -> Type {
+             // create a layout with strides, using dynamic offset
+             auto layout = StridedLayoutAttr::get(
+                 self.getBuilder().getContext(), ShapedType::kDynamic, strides);
+             return MemRefType::get(shape, elementType, layout, memorySpace);
+           })
+      .def("create_extract_scalar",
+           [](AscendNPUIROpBuilder &self, Value &src,
+              std::vector<Value> &indices) -> Value {
+             llvm::SmallVector<Value> arg_indices;
+             for (const auto &i : indices) {
+               auto iTy = i.getType();
+               if (!iTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), i);
+                 arg_indices.push_back(v);
+               } else {
+                 arg_indices.push_back(i);
+               }
+             }
+             auto ret = self.create<tensor::ExtractOp>(src, arg_indices);
+             return ret;
+           })
+      .def("create_extract_slice",
+           [](AscendNPUIROpBuilder &self, Value &ful,
+              std::vector<Value> &offs_vec, std::vector<int> &sizs_vec,
+              std::vector<int> &strd_vec) -> Value {
+             llvm::SmallVector<Value> offsets;
+             llvm::SmallVector<int64_t> staticOffsets;
+             for (const auto &o : offs_vec) {
+               auto oTy = o.getType();
+               if (!oTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), o);
+                 offsets.push_back(v);
+               } else {
+                 offsets.push_back(o);
+               }
+               staticOffsets.push_back(ShapedType::kDynamic);
+             }
+             llvm::SmallVector<Value> sizes;
+             llvm::SmallVector<int64_t> staticSizes;
+             llvm::SmallVector<int64_t> retSizes;
+             for (const auto &s : sizs_vec) {
+               // auto v = self.create<arith::ConstantIndexOp>(s);
+               // sizes.push_back(v);
+               staticSizes.push_back(s);
+               retSizes.push_back(s);
+             }
+             llvm::SmallVector<Value> strides;
+             llvm::SmallVector<int64_t> staticStrides;
+             for (const auto &s : strd_vec) {
+               auto v = self.create<arith::ConstantIndexOp>(s);
+               strides.push_back(v);
+               staticStrides.push_back(ShapedType::kDynamic);
+             }
+             auto retTy = RankedTensorType::get(
+                 retSizes,
+                 cast<RankedTensorType>(ful.getType()).getElementType());
+
+             return self.create<tensor::ExtractSliceOp>(
+                 retTy, ful, offsets, sizes, strides, staticOffsets,
+                 staticSizes, staticStrides);
+           })
+      .def("create_insert_slice",
+           [](AscendNPUIROpBuilder &self, Value &ful, Value &sub,
+              std::vector<Value> &offs_vec, std::vector<int> &sizs_vec,
+              std::vector<int> &strd_vec) -> Value {
+             llvm::SmallVector<Value> offsets;
+             llvm::SmallVector<int64_t> staticOffsets;
+             for (const auto &o : offs_vec) {
+               auto oTy = o.getType();
+               if (!oTy.isIndex()) {
+                 auto v = self.create<arith::IndexCastOp>(
+                     self.getBuilder().getIndexType(), o);
+                 offsets.push_back(v);
+               } else {
+                 offsets.push_back(o);
+               }
+               staticOffsets.push_back(ShapedType::kDynamic);
+             }
+             llvm::SmallVector<Value> sizes;
+             llvm::SmallVector<int64_t> staticSizes;
+             llvm::SmallVector<int64_t> retSizes;
+             for (const auto &s : sizs_vec) {
+               // auto v = self.create<arith::ConstantIndexOp>(s);
+               // sizes.push_back(v);
+               staticSizes.push_back(s);
+               retSizes.push_back(s);
+             }
+             llvm::SmallVector<Value> strides;
+             llvm::SmallVector<int64_t> staticStrides;
+             for (const auto &s : strd_vec) {
+               auto v = self.create<arith::ConstantIndexOp>(s);
+               strides.push_back(v);
+               staticStrides.push_back(ShapedType::kDynamic);
+             }
+             auto retTy = RankedTensorType::get(
+                 retSizes,
+                 cast<RankedTensorType>(ful.getType()).getElementType());
+             auto ret = self.create<tensor::InsertSliceOp>(
+                 sub, ful, offsets, sizes, strides, staticOffsets, staticSizes,
+                 staticStrides);
+             return ret;
+           })
+      .def("create_custom_op_for_inter_core_sync",
+           [](AscendNPUIROpBuilder &self, std::string &op_name,
+              std::string &mode_or_sender, int id) -> void {
+             auto args = self.getBuilder().getArrayAttr(
+                 {self.getBuilder().getStringAttr(mode_or_sender),
+                  self.getBuilder().getI32IntegerAttr(id)});
+             self.create<triton::ascend::CustomOp>(op_name, args, ValueRange());
+           })
+      .def("create_index_select_simd",
+           [](AscendNPUIROpBuilder &self, Value &src, Value &index, int32_t dim,
+              std::vector<Value> &srcShape, std::vector<Value> &srcOffset,
+              std::vector<int32_t> &readShape,
+              std::vector<int32_t> &returnShape) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             // Get element type from source pointer
+             Type elemType;
+             if (auto ptrTy = dyn_cast<triton::PointerType>(src.getType())) {
+               elemType = ptrTy.getPointeeType();
+             } else {
+               llvm::report_fatal_error(
+                   "index_select_simd: src must be pointer type");
+             }
+
+             // Create return tensor type
+             llvm::SmallVector<int64_t> retShape;
+             for (const auto &s : returnShape) {
+               retShape.push_back(s);
+             }
+             auto retTensorType = RankedTensorType::get(retShape, elemType);
+
+             // Convert srcShape and srcOffset values to index type if needed
+             llvm::SmallVector<Value> srcShapeIndex;
+             for (auto val : srcShape) {
+               if (!val.getType().isIndex()) {
+                 val = self.create<arith::IndexCastOp>(builder.getIndexType(),
+                                                       val);
+               }
+               srcShapeIndex.push_back(val);
+             }
+
+             llvm::SmallVector<Value> srcOffsetIndex;
+             for (auto val : srcOffset) {
+               if (!val.getType().isIndex()) {
+                 val = self.create<arith::IndexCastOp>(builder.getIndexType(),
+                                                       val);
+               }
+               srcOffsetIndex.push_back(val);
+             }
+
+             // Create attributes
+             auto dimAttr = builder.getI32IntegerAttr(dim);
+             auto readShapeAttr = builder.getDenseI32ArrayAttr(readShape);
+
+             // Create the IndexSelectSimdOp
+             // Parameter order must match TritonOps.td definition:
+             // src, index, dim, src_shape, src_offset, read_shape
+             auto indexSelectSimdOp =
+                 builder.create<triton::ascend::IndexSelectSimdOp>(
+                     loc,
+                     retTensorType,  // result type
+                     src,            // src pointer
+                     index,          // index tensor
+                     dimAttr,        // dim attribute
+                     srcShapeIndex,  // src_shape (variadic, index type)
+                     srcOffsetIndex, // src_offset (variadic, index type)
+                     readShapeAttr   // read_shape attribute
+                 );
+
+             return indexSelectSimdOp.getResult();
+           })
+      .def("create_index_put",
+           [](AscendNPUIROpBuilder &self, Value &ptr, Value &index,
+              Value &value, const int32_t dim, const int64_t indexBoundary,
+              std::vector<Value> &endOffset, std::vector<Value> &startOffset,
+              std::vector<Value> &dstStride) -> void {
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+
+             self.create<triton::ascend::IndexPutOp>(ptr, index, value, dim_val,
+                                                     bound_val, endOffset,
+                                                     startOffset, dstStride);
+           })
+      .def("create_gather_out_to_ub",
+           [](AscendNPUIROpBuilder &self, Value &src, Value &index,
+              const int64_t indexBoundary, const int32_t dim,
+              std::vector<Value> &srcStride, std::vector<Value> &endOffset,
+              std::vector<Value> &startOffset,
+              std::optional<Value> &other) -> Value {
+             auto elemTy =
+                 cast<triton::PointerType>(src.getType()).getPointeeType();
+             auto idxTy = cast<RankedTensorType>(index.getType());
+             auto idxShape = idxTy.getShape();
+             std::vector<int64_t> retShape(idxShape.begin(), idxShape.end());
+             auto resType = RankedTensorType::get(retShape, elemTy);
+
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+             return self.create<triton::ascend::GatherOutToUbOp>(
+                 resType, src, index, bound_val, dim_val, srcStride, endOffset,
+                 startOffset, other.value_or(Value()));
+           })
+      .def("create_scatter_ub_to_out",
+           [](AscendNPUIROpBuilder &self, Value &ptr, Value &value,
+              Value &index, const int64_t indexBoundary, const int32_t dim,
+              std::vector<Value> &dstStride, std::vector<Value> &endOffset,
+              std::vector<Value> &startOffset) -> void {
+             auto idxTy = cast<RankedTensorType>(index.getType());
+
+             // indexBoundary need to be i64 type
+             auto BoundI64Ty = self.getBuilder().getI64Type();
+             auto bound_val =
+                 self.create<arith::ConstantIntOp>(BoundI64Ty, indexBoundary);
+             // dim need to be i32 type
+             auto dimI32Ty = self.getBuilder().getI32Type();
+             auto dim_val = self.create<arith::ConstantIntOp>(dimI32Ty, dim);
+
+             self.create<triton::ascend::ScatterUbToOutOp>(
+                 ptr, value, index, bound_val, dim_val, dstStride, endOffset,
+                 startOffset);
+           })
+      // conv1d operation
+      .def(
+          "create_conv1d",
+          [](AscendNPUIROpBuilder &self, Value input, Value weight,
+             py::object bias, int64_t stride, int64_t padding_size,
+             int64_t dilation, int64_t groups, Type output_type) -> Value {
+            Value biasValue;
+            if (!bias.is_none()) {
+              biasValue = bias.cast<Value>();
+            } else {
+              biasValue = Value();
+            }
+            auto &builder = self.getBuilder();
+            auto strideAttr = builder.getI64IntegerAttr(stride);
+            auto paddingSizeAttr = builder.getI64IntegerAttr(padding_size);
+            auto dilationAttr = builder.getI64IntegerAttr(dilation);
+            auto groupsAttr = builder.getI64IntegerAttr(groups);
+            auto op = self.create<triton::ascend::Conv1dOp>(
+                output_type, input, weight, biasValue, strideAttr,
+                paddingSizeAttr, dilationAttr, groupsAttr);
+            return op.getResult();
+          },
+          py::arg("input"), py::arg("weight"), py::arg("bias"),
+          py::arg("stride"), py::arg("padding_size"), py::arg("dilation"),
+          py::arg("groups"), py::arg("output_type"))
+      // dot: D = A * B with per-operand fractal (zN) flags; result type
+      // inferred from A, B and the flags.
+      .def(
+          "create_dot",
+          [](AscendNPUIROpBuilder &self, Value &a, Value &b, bool fractalA,
+             bool fractalB, bool fractalC) -> Value {
+            auto &builder = self.getBuilder();
+            auto op = self.create<triton::ascend::DotOp>(
+                a, b, builder.getBoolAttr(fractalA),
+                builder.getBoolAttr(fractalB), builder.getBoolAttr(fractalC));
+            return op.getResult();
+          },
+          py::arg("a"), py::arg("b"), py::arg("fractal_a"),
+          py::arg("fractal_b"), py::arg("fractal_c"))
+      // conv2d operation
+      .def(
+          "create_conv2d",
+          [](AscendNPUIROpBuilder &self, Value input, Value weight,
+             py::object bias, py::object stride, py::object padding,
+             py::object dilation, int64_t groups, Type output_type) -> Value {
+            Value biasValue;
+            if (!bias.is_none()) {
+              biasValue = bias.cast<Value>();
+            } else {
+              biasValue = Value();
+            }
+            auto &builder = self.getBuilder();
+            // Keep ints as IntegerAttr and sequences as DenseI32ArrayAttr.
+            // padding = [pad_top, pad_bottom, pad_left, pad_right] or a
+            // 2-element [pad_h, pad_w].
+            auto buildConvParamAttr = [&](py::object param,
+                                          const std::string &name,
+                                          bool allowFour) -> Attribute {
+              if (py::isinstance<py::int_>(param)) {
+                return builder.getI64IntegerAttr(param.cast<int64_t>());
+              }
+              py::sequence seq = param.cast<py::sequence>();
+              size_t len = py::len(seq);
+              SmallVector<int32_t> values;
+              for (auto item : seq)
+                values.push_back(item.cast<int32_t>());
+              return builder.getDenseI32ArrayAttr(values);
+            };
+            auto strideAttr = buildConvParamAttr(stride, "stride", false);
+            auto paddingAttr = buildConvParamAttr(padding, "padding", true);
+            auto dilationAttr = buildConvParamAttr(dilation, "dilation", false);
+            auto groupsAttr = builder.getI64IntegerAttr(groups);
+            auto op = self.create<triton::ascend::Conv2dOp>(
+                output_type, input, weight, biasValue, strideAttr, paddingAttr,
+                dilationAttr, groupsAttr);
+            return op.getResult();
+          },
+          py::arg("input"), py::arg("weight"), py::arg("bias"),
+          py::arg("stride"), py::arg("padding"), py::arg("dilation"),
+          py::arg("groups"), py::arg("output_type"))
+      // Add sort
+      .def("create_sort",
+           [](AscendNPUIROpBuilder &self, Value src, int64_t dim,
+              bool descending) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             auto dimAttr = builder.getI64IntegerAttr(dim);
+             auto descendingAttr = builder.getBoolAttr(descending);
+
+             auto op = builder.create<triton::ascend::SortOp>(loc, src, dimAttr,
+                                                              descendingAttr);
+
+             return op->getResult(0);
+           })
+      // Add flip
+      .def("create_flip",
+           [](AscendNPUIROpBuilder &self, Value src, int64_t dim) -> Value {
+             auto &builder = self.getBuilder();
+             auto loc = self.getLastLoc();
+
+             auto dimAttr = builder.getI64IntegerAttr(dim);
+
+             auto op =
+                 builder.create<triton::ascend::FlipOp>(loc, src, dimAttr);
+
+             return op->getResult(0);
+           })
+      .def("create_tanh",
+           [](AscendNPUIROpBuilder &self, Value &val) -> Value {
+             return self.create<math::TanhOp>(val);
+           })
+      // Add an annotation
+      .def("create_annotation",
+           [](AscendNPUIROpBuilder &self, Value &ptr,
+              const std::string &attrKey, Attribute &attrVal) {
+             auto annotationOp = self.create<triton::ascend::AnnotationOp>(ptr);
+             annotationOp->setAttr(self.getBuilder().getStringAttr(attrKey),
+                                   attrVal);
+           })
       .def("get_int_attr",
            [](AscendNPUIROpBuilder &self, int64_t value) -> Attribute {
              return IntegerAttr::get(self.getBuilder().getI64Type(), value);
+           })
+      .def("get_type_array_attr",
+           [](AscendNPUIROpBuilder &self,
+              const std::vector<Type> &array) -> Attribute {
+             return self.getBuilder().getTypeArrayAttr(array);
            })
       .def("get_core_type_attr",
            [](AscendNPUIROpBuilder &self,
@@ -533,6 +1209,34 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, hivm::PIPE pipe) -> Attribute {
              return self.getBuilder().getAttr<hivm::PipeAttr>(pipe);
            })
+      .def("get_event_attr",
+           [](AscendNPUIROpBuilder &self, hivm::EVENT event) -> Attribute {
+             return hivm::EventAttr::get(self.getBuilder().getContext(), event);
+           })
+      .def(
+          "get_sync_event_slot_attr",
+          [](AscendNPUIROpBuilder &self, py::object setPipe,
+             py::object waitPipe, hivm::SyncEventSlotMacroSync macroSync,
+             py::object event) -> Attribute {
+            auto *ctx = self.getBuilder().getContext();
+            hivm::PipeAttr setPipeAttr;
+            hivm::PipeAttr waitPipeAttr;
+            hivm::EventAttr eventAttr;
+            if (!setPipe.is_none())
+              setPipeAttr =
+                  hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(setPipe));
+            if (!waitPipe.is_none())
+              waitPipeAttr =
+                  hivm::PipeAttr::get(ctx, py::cast<hivm::PIPE>(waitPipe));
+            if (!event.is_none())
+              eventAttr =
+                  hivm::EventAttr::get(ctx, py::cast<hivm::EVENT>(event));
+            return hivm::SyncEventSlotAttr::get(ctx, setPipeAttr, waitPipeAttr,
+                                                macroSync, eventAttr);
+          },
+          py::arg("set_pipe") = py::none(), py::arg("wait_pipe") = py::none(),
+          py::arg("macro_sync") = hivm::SyncEventSlotMacroSync::wait,
+          py::arg("event") = py::none())
       .def("get_vf_mode_attr",
            [](AscendNPUIROpBuilder &self, hivm::VFMode mode) -> Attribute {
              return self.getBuilder().getAttr<hivm::VFModeAttr>(mode);
@@ -547,6 +1251,9 @@ void init_ascend_ir(py::module &&m) {
                  }));
              return self.getBuilder().getArrayAttr(attrs);
            })
+      .def("get_array_attr",
+           [](AscendNPUIROpBuilder &self, const std::vector<Attribute> &attrs)
+               -> Attribute { return self.getBuilder().getArrayAttr(attrs); })
       .def("get_t_core_type_attr_name",
            [](AscendNPUIROpBuilder &self) -> std::string {
              return hivm::TCoreTypeAttr::name.str();
@@ -650,7 +1357,7 @@ void init_ascend_ir(py::module &&m) {
                return py::cast<Value>(
                    self.create<hivm::FixpipeOp>(
                            mlir::TypeRange{dstValue.getType()}, src, dstValue,
-                           dma_mode_attr, dual_dst_mode_attr,
+                           dma_mode_attr, dual_dst_mode_attr, nullptr,
                            pre_quant_mode_attr, pre_relu_mode_attr,
                            channel_split)
                        .getResult(0));
@@ -658,7 +1365,7 @@ void init_ascend_ir(py::module &&m) {
              } else {
                self.create<hivm::FixpipeOp>(mlir::TypeRange{}, src, dstValue,
                                             dma_mode_attr, dual_dst_mode_attr,
-                                            pre_quant_mode_attr,
+                                            nullptr, pre_quant_mode_attr,
                                             pre_relu_mode_attr, channel_split);
                return py::none();
              }
@@ -695,6 +1402,53 @@ void init_ascend_ir(py::module &&m) {
              TypeRange res_types{outputs};
              auto op = self.create<hivm::CustomOp>(res_types, name, inputs,
                                                    outputs, temp_buffers);
+             for (auto &attr : attrs) {
+               std::string attr_name = py::cast<std::string>(attr.first);
+               Attribute attr_value = py::cast<Attribute>(attr.second);
+               op->setAttr(attr_name, attr_value);
+             }
+
+             SmallVector<Attribute> dictAttrs(arg_attrs.size());
+             Attribute emptyDict = self.getBuilder().getDictionaryAttr({});
+             for (const auto &[idx, attrs] : llvm::enumerate(arg_attrs)) {
+               if (idx >= op.getNumOperands())
+                 continue;
+
+               if (attrs.is_none()) {
+                 dictAttrs[idx] = emptyDict;
+                 continue;
+               }
+
+               llvm::SmallVector<NamedAttribute> namedAttrs;
+               for (const auto &attr : attrs) {
+                 std::string attr_name = py::cast<std::string>(attr.first);
+                 Attribute attr_value = py::cast<Attribute>(attr.second);
+                 namedAttrs.push_back(NamedAttribute(
+                     self.getBuilder().getStringAttr(attr_name), attr_value));
+               }
+
+               dictAttrs[idx] = self.getBuilder().getDictionaryAttr(namedAttrs);
+             }
+
+             ArrayAttr arg_attrs_array =
+                 self.getBuilder().getArrayAttr(dictAttrs);
+             op->setAttr("arg_attrs", arg_attrs_array);
+
+             auto results = op->getResults();
+             return std::vector<Value>(results.begin(), results.end());
+           })
+      .def("create_custom_macro_op",
+           [](AscendNPUIROpBuilder &self, const std::string &name,
+              const py::dict &attrs, const std::vector<Value> &ins,
+              const std::vector<Value> &outs,
+              const std::vector<py::dict> &arg_attrs) -> std::vector<Value> {
+             ValueRange inputs{ins};
+             ValueRange outputs{outs};
+             ValueRange temp_buffers{};
+             ValueRange syncArgs{};
+             TypeRange res_types{outputs};
+             auto op = self.create<hivm::CustomMacroOp>(
+                 res_types, name, inputs, outputs, temp_buffers, syncArgs);
              for (auto &attr : attrs) {
                std::string attr_name = py::cast<std::string>(attr.first);
                Attribute attr_value = py::cast<Attribute>(attr.second);
@@ -816,4 +1570,6 @@ void init_ascend_ir(py::module &&m) {
                      hivm::DataLayoutAttr::get(ctx, hivm::DataLayout::ND))
                  .getResult();
            });
+
+  installTritonContextManager();
 }

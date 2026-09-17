@@ -22,9 +22,7 @@
 
 #pragma once
 
-#include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
-#include "ascend/include/TritonToLinalg/MaskAnalysis.h"
-#include "ascend/include/TritonToLinalg/UseAnalysis.h"
+#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
 #include "ascend/include/Utils/Utils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
@@ -67,13 +65,6 @@ namespace mlir {
 namespace triton {
 
 enum class IndexMode : int { EVEN_MODE = 0, ODD_MODE = 1 };
-
-MemRefType expandInterleaveMemRefType(MemRefType originType);
-
-bool checkIsCaseOffsetValid(OpFoldResult originOffset);
-
-std::pair<OpFoldResult, IndexMode>
-recountReinterpretCastOffset(OpFoldResult originOffset, Builder &builder);
 
 LogicalResult
 DeinterleaveStatusOptimization(triton::LoadOp op,

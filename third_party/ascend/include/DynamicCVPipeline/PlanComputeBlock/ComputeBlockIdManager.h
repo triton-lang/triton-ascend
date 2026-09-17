@@ -23,12 +23,16 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMPUTE_BLOCK_ID_MANAGER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_PLAN_COMPUTE_BLOCK_COMPUTE_BLOCK_ID_MANAGER_H
 
-#include "mlir/IR/Operation.h"
+#include <optional>
+
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/LogicalResult.h"
-#include <mutex>
+
+#include "mlir/IR/Operation.h"
+
+#include "DynamicCVPipeline/Common/Utils.h"
 
 namespace mlir {
 namespace CVPipeline {
@@ -38,33 +42,44 @@ namespace CVPipeline {
  */
 class ComputeBlockIdManager {
 public:
-  static ComputeBlockIdManager &getInstance() {
-    static ComputeBlockIdManager instance;
-    return instance;
-  }
-
-  unsigned int getNextId();
-
+  ComputeBlockIdManager(Operation *root);
   bool isSameBlock(Operation *a, Operation *b);
   bool isWholeCubeReady(Operation *seedOp,
                         llvm::DenseMap<Operation *, int> &indegree);
 
-  llvm::LogicalResult markOpBlockId(Operation *op, int blockId);
+  llvm::LogicalResult markOpBlockId(Operation *op);
+  llvm::LogicalResult markOpsWithNewId(llvm::ArrayRef<Operation *> ops);
+  void updateBlockIdWithInner(Operation *parentOp, int targetId);
+  void updateBlockId(Operation *op, int blockId);
 
-  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId);
+  void forgetOp(Operation *op);
+
+  bool shouldInheritFromParent(Block *block, CoreType requiredCoreType) const;
+  llvm::LogicalResult inheritFromParent(Block *block);
+
+  llvm::SmallVector<Operation *> getOpsByBlockId(int blockId) const;
+  llvm::ArrayRef<Operation *> getOpsRefByBlockId(int blockId) const;
+
+  // Get operations that share the same block_id AND mlir block of op
+  llvm::SmallVector<Operation *> getOpsInSameBlock(Operation *op) const;
+
+  std::optional<int> getBlockIdByOpOpt(Operation *op) const;
+  int getNextId();
+
   int getBlockIdByOp(Operation *op);
-  llvm::LogicalResult markOpsWithNewId(llvm::SmallVectorImpl<Operation *> &ops);
-  void reset();
+
+  ~ComputeBlockIdManager() = default;
+  ComputeBlockIdManager(const ComputeBlockIdManager &) = delete;
+  ComputeBlockIdManager &operator=(const ComputeBlockIdManager &) = delete;
+  ComputeBlockIdManager(ComputeBlockIdManager &&) = default;
+  ComputeBlockIdManager &operator=(ComputeBlockIdManager &&) = default;
 
 private:
-  ComputeBlockIdManager() : cntComputeBlockId(0) {}
-  llvm::LogicalResult record(Operation *op, int blockId);
-
-  unsigned int cntComputeBlockId;
+  int cntComputeBlockId = 0;
   llvm::DenseMap<int, llvm::SmallVector<Operation *>> blockIdToOps;
   llvm::DenseMap<Operation *, int> opToBlockId;
-  mutable std::mutex managerMutex;
-  const int blockIdWidth = 32;
+  static constexpr int kBlockIdWidth = 32;
+  llvm::LogicalResult markAndRecord(Operation *op, int blockId);
 };
 
 } // namespace CVPipeline

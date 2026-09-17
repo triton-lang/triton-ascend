@@ -120,7 +120,7 @@ def matmul_kernel(
     # # Write back the block of the output matrix C with masks.
     # Comment out the following lines to enable split the workload to two vector cores
     SUB_BLK_M: tl.constexpr = BLOCK_SIZE_M // 2
-    for s in extension.parallel(0, 2, bind_sub_block=True):
+    for s in range(0, 2):
         vec_sub_blk = extension.extract_slice(accumulator, (s * SUB_BLK_M, 0), (SUB_BLK_M, BLOCK_SIZE_N), (1, 1))
         if ACTIVATION == "leaky_relu_custom":
             vec_sub_blk = leaky_relu_custom(vec_sub_blk)
@@ -182,18 +182,22 @@ def matmul(a, b, activation=""):
 # ---------
 #
 # We can test our custom matrix multiplication operation against a native torch implementation (i.e., cuBLAS).
-def test():
-    activation = "leaky_relu_custom"
+
+
+def test_matrix_multiplication():
+    activation = ""
+    shape = (512, 512, 512)
+    m, k, n = shape
     torch.manual_seed(0)
-    a = torch.randn((512, 512), device=DEV, dtype=torch.float16)
-    b = torch.randn((512, 512), device=DEV, dtype=torch.float16)
+    a = torch.randn((m, k), device=DEV, dtype=torch.float16)
+    b = torch.randn((k, n), device=DEV, dtype=torch.float16)
     triton_output = matmul(a, b, activation)
     torch_output = torch_matmul(a, b, activation)
-    print(f"triton_output_with_fp16_inputs={triton_output}")
-    print(f"torch_output_with_fp16_inputs={torch_output}")
+    print(f"triton_output(activation={activation}, shape={shape})={triton_output}")
+    print(f"torch_output(activation={activation}, shape={shape})={torch_output}")
     torch.testing.assert_close(triton_output, torch_output, atol=1e-3, rtol=1e-3)
-    print("Passed")
 
 
 if __name__ == "__main__":
-    test()
+    test_matrix_multiplication()
+    print("======Matrix Multiplication Test Passed!======")

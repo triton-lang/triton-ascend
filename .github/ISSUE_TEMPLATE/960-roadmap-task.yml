@@ -1,0 +1,38 @@
+name: 🧩 Roadmap Task
+description: Break down core module tasks, track design proposals and development progress
+title: "[Roadmap] <Work Item Name>"
+labels: ["roadmap"]
+
+body:
+- type: textarea
+  attributes:
+    value: |
+      ```
+      ## Background
+
+      <Describe the background, motivation, and current status of the problem, explaining why this work is needed.>
+
+      ## Design
+
+      <Describe the overall design proposal, target architecture, or implementation approach. May include code structure diagrams, flowcharts, etc.>
+
+      ## Tasks
+
+      <Break the work into multiple stages, each containing specific trackable task items.>
+
+      ### Stage 1: <Stage Name>
+
+      <Summary of this stage's objectives>
+
+      - [ ] <Task description 1> <PR link>
+      - [ ] <Task description 2> <PR link> (optional)
+
+      ### Stage 2: <Stage Name> (optional)
+
+      <Summary of this stage's objectives>
+
+      - [ ] <Task description 1> <PR link> (optional)
+      - [ ] <Task description 2> <PR link> (optional)
+      ```
+  validations:
+    required: true

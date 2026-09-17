@@ -104,34 +104,26 @@ def seeded_dropout(x, p, seed):
     return output
 
 
-def test():
-    # Input tensor
-    x = torch.randn(size=(10, ), device=DEV)
-    # Dropout mask
-    p = 0.5
-    x_keep = (torch.rand(size=(10, ), device=DEV) > p).to(torch.int32)
-    #
+def test_dropout_matches_reference():
+    shape, p = (256, ), 0.5
+    torch.manual_seed(0)
+    x = torch.randn(size=shape, device=DEV, dtype=torch.float32)
+    x_keep = (torch.rand(size=shape, device=DEV) > p).to(torch.int32)
     output = dropout(x, x_keep=x_keep, p=p)
-    print(tabulate.tabulate([
-        ["input"] + x.tolist(),
-        ["keep mask"] + x_keep.tolist(),
-        ["output"] + output.tolist(),
-    ]))
-
-    x = torch.randn(size=(10, ), device=DEV)
-    # Compare this to the baseline - dropout mask is never instantiated!
-    output = seeded_dropout(x, p=0.5, seed=123)
-    output2 = seeded_dropout(x, p=0.5, seed=123)
-    output3 = seeded_dropout(x, p=0.5, seed=512)
-
+    expected = torch.where(x_keep != 0, x / (1 - p), torch.zeros_like(x))
+    torch.testing.assert_close(output, expected, atol=1e-6, rtol=0)
+    # Demo-style print for dropout
+    x_demo = torch.randn(size=(10, ), device=DEV)
+    x_keep_demo = (torch.rand(size=(10, ), device=DEV) > 0.5).to(torch.int32)
+    output_demo = dropout(x_demo, x_keep=x_keep_demo, p=0.5)
     print(
         tabulate.tabulate([
-            ["input"] + x.tolist(),
-            ["output (seed = 123)"] + output.tolist(),
-            ["output (seed = 123)"] + output2.tolist(),
-            ["output (seed = 512)"] + output3.tolist(),
+            ["input"] + x_demo.tolist(),
+            ["keep mask"] + x_keep_demo.tolist(),
+            ["output"] + output_demo.tolist(),
         ]))
 
 
 if __name__ == "__main__":
-    test()
+    test_dropout_matches_reference()
+    print("======Low Memory Dropout Test Passed!======")

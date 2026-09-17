@@ -33,7 +33,7 @@ triton.language.load(
 | `padding_option`   | `""`或`"zero"`或`"nan"`               | 可选参数，当且仅当`boundary_check`不为空时可传入<br>表示访问越界时填充的值 |
 | `cache_modifier`   | `""` 或 `"ca"`或`"cg"`                | 可选参数，控制NVIDIA PTX上的cache选项，对Ascend硬件无效                                                |
 | `eviction_policy`   | `str`                | 控制NVIDIA PTX的eviction策略， 对Ascend硬件无效                                                |
-| `volatile`   | `str`                 | 控制NVIDIA PTX的volatile选项， 对Ascend硬件无效                                        |
+| `volatile`   | `bool`                 | 控制NVIDIA PTX的volatile选项， 对Ascend硬件无效                                        |
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用                                                |
 
 当前910代际均还不支持cache_modifier，eviction_policy， volatile等参数

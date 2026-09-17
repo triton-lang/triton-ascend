@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/linear_algebra_ops.rst

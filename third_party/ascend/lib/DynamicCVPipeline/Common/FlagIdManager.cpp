@@ -21,6 +21,7 @@
  */
 
 #include "ascend/include/DynamicCVPipeline/Common/FlagIdManager.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/Support/Debug.h"
@@ -44,6 +45,14 @@ FlagIdManager::FlagIdManager(ModuleOp module) {
 
 void FlagIdManager::scanExistingFlags(ModuleOp module) {
   module.walk([&](Operation *op) {
+    if (auto syncBlock = dyn_cast<hivm::SyncBlockOp>(op)) {
+      if (auto flagIdOpt = syncBlock.getFlagId()) {
+        int64_t id = flagIdOpt->getInt();
+        if (id >= 0 && id <= MAX_FLAG_ID) {
+          currentMaxId = std::max(currentMaxId, id);
+        }
+      }
+    }
     if (isa<hivm::SyncBlockSetOp>(op) || isa<hivm::SyncBlockWaitOp>(op)) {
       int flag = -1;
       if (auto intAttr = op->getAttrOfType<IntegerAttr>("static_flag_id")) {
@@ -58,10 +67,14 @@ void FlagIdManager::scanExistingFlags(ModuleOp module) {
   });
 }
 
-int FlagIdManager::acquireId(Operation *insertionPoint) {
-  if (currentMaxId < MAX_FLAG_ID) {
-    return ++currentMaxId;
-  }
+int FlagIdManager::acquireId() { return ++currentMaxId; }
 
-  return INVALID_FLAG_ID;
+bool FlagIdManager::checkCurrentId() {
+  BufferCountManager::DepType depType = BufferCountManager::DepType::InterCore;
+  BufferCountManager bufferCountMgr(module);
+  int outerBufferCount = bufferCountMgr.getBufferCountByType(depType);
+  if (outerBufferCount > 1) {
+    return currentMaxId <= MULTI_MAX_FLAG_ID;
+  }
+  return currentMaxId <= MAX_FLAG_ID;
 }

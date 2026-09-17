@@ -63,8 +63,7 @@ def test_erfinv_case(param_list):
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
-def test_all_blocks_parallel(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_all_blocks_parallel(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x = test_common.generate_tensor(shape, dtype).npu()
     x[0][0][0] = 1  # erfinv(1) -> ∞
@@ -81,14 +80,12 @@ def test_all_blocks_parallel(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_erfinv[ncore, 1, 1](x, y_cal, x.numel(), xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")
 
 
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
-def test_auto_blockify(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_auto_blockify(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x = test_common.generate_tensor(shape, dtype).npu()
     x[0][0][0] = 1  # erfinv(1) -> ∞
@@ -105,7 +102,6 @@ def test_auto_blockify(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_erfinv[ncore, 1, 1](x, y_cal, x.numel(), xblock, xblock_sub, auto_blockify_size=ncore)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")
 
 
 def prepare_erfinv_input(x: torch.Tensor, dtype: str) -> torch.Tensor:
@@ -133,8 +129,7 @@ def prepare_erfinv_input(x: torch.Tensor, dtype: str) -> torch.Tensor:
 @pytest.mark.parametrize("shape", [
     (2, 4096, 8),
 ])
-def test_erfinv_all_blocks_parallel(dtype, shape, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_erfinv_all_blocks_parallel(dtype, shape):
 
     XBLOCK = 1024
     XBLOCK_SUB = 128
@@ -152,5 +147,3 @@ def test_erfinv_all_blocks_parallel(dtype, shape, monkeypatch):
     triton_erfinv[grid](x, y_cal, numel, XBLOCK=XBLOCK, XBLOCK_SUB=XBLOCK_SUB)
 
     test_common.validate_cmp(dtype, y_cal, y_ref)
-
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")

@@ -54,6 +54,10 @@
 ```python
 @triton.jit
 def flatten_kernel(x_ptr, output_ptr, M, N, BLOCK_SIZE: tl.constexpr):
+    pid = tl.program_id(0)
+    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < M * N
+
     # 加载2D数据
     x = tl.load(x_ptr + offsets, mask=mask)
 

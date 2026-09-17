@@ -21,40 +21,44 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "third_party/ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
-// Role in dependency attribute: ssbuffer.crossDeps/intraDeps = [groupId,
-// roleId] role: 1=producer, 0=consumer
-static const int producerId = 1;
-static const int consumerId = 0;
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/BuiltinAttributes.h"
+
 static constexpr const char *DEBUG_TYPE = "InitDependentMap";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 using namespace mlir;
 using namespace triton;
+using namespace CVPipeline;
+using namespace hivm;
 
-// Function: Check if a consumer op is inside a given mainLoop
-//            but not inside any nested mainloop, and push to consumers if true
-// Input: Consumer operation, target mainLoop forOp, reference to consumers
-// vector Output: consumers - push consumer to this vector if it's inside
-// mainLoop (not in nested mainloop) Return: 0 for success (consumer pushed), -1
-// for failure (not in mainLoop or in nested mainLoop)
-static int isConsumerInMainLoop(Operation *consumer, scf::ForOp mainLoop,
+// Returns 0 if `consumer` is inside `mainLoop` (and pushes it to `consumers`)
+// or inside a nested mainloop (skip), or -1 on error.
+static int isConsumerInMainLoop(Operation *consumer, Operation *mainLoop,
                                 SmallVector<Operation *> &consumers) {
   Operation *current = consumer->getParentOp();
 
   // Traverse up the parent chain until we reach the top (nullptr)
   while (current != nullptr) {
-    if (auto forOp = dyn_cast<scf::ForOp>(current)) {
-      if (forOp->hasAttr("ssbuffer.main_loop") && forOp != mainLoop) {
-        // comsumer Op not in the current mainloop
-        return 0;
-      }
+    if (isMainLoopOp(current) && current != mainLoop) {
+      // consumer Op not in the current mainloop
+      return 0;
     }
     // If we reach the target mainLoop, consumer is inside it
     if (current == mainLoop) {
@@ -68,49 +72,90 @@ static int isConsumerInMainLoop(Operation *consumer, scf::ForOp mainLoop,
   return -1;
 }
 
-// Function: Collect ops with dependency attributes, grouped by group ID
-// Input: Root operation to traverse (module or forOp), attribute name
-// Output: depsByGroup - Ops grouped by group ID, format: group -> [(op, role),
-// ...]
-//         Attribute format: [group, role], role: 1=producer, 0=consumer
-// Return: 0 for success, -1 for failure
+// Collect ops with dependency attr `attrName` into depsByGroup (group ->
+// [(op, role)]). Attr is a flat list of pairs: [group, role, group, role, ...].
+// role: 1=producer, 0=consumer. One op may contribute multiple pairs (dual role
+// or several groups). 0 ok, -1 fail.
 static int
 collectDepsByGroup(Operation *rootOp, const char *attrName,
                    llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
                        &depsByGroup) {
-  // Attribute format: {ssbuffer.crossDeps/intraDeps = [group, role]}
   int ret = 0;
+  // One record is [group, role]; the attr concatenates N such records.
   int depSize = 2;
+  int groupOffset = 0;
+  int roleOffset = 1;
 
   rootOp->walk([&](Operation *op) {
     auto depsAttr = op->getAttrOfType<ArrayAttr>(attrName);
     if (!depsAttr)
       return;
 
-    if (depsAttr.size() < depSize) {
-      LDBG("format of dependency attribute error!");
+    if (depsAttr.empty() || depsAttr.size() % depSize != 0) {
+      LDBG("format of dependency attribute error, expect even-length pairs!");
       ret = -1;
       return;
     }
 
-    int group = cast<IntegerAttr>(depsAttr[0]).getInt();
-    int role = cast<IntegerAttr>(depsAttr[1]).getInt();
-    depsByGroup[group].push_back({op, role});
+    for (size_t i = 0; i < depsAttr.size(); i += depSize) {
+      Attribute groupAttr = depsAttr[i + groupOffset];
+      Attribute roleAttr = depsAttr[i + roleOffset];
+      if (!isa<IntegerAttr>(groupAttr) || !isa<IntegerAttr>(roleAttr)) {
+        LDBG("type of dependency attritbute is not Int! error op:" << *op);
+        ret = -1;
+        return;
+      }
+
+      int group = cast<IntegerAttr>(groupAttr).getInt();
+      int role = cast<IntegerAttr>(roleAttr).getInt();
+      depsByGroup[group].push_back({op, role});
+    }
   });
 
   return ret;
 }
 
-// Function: Build mapping from consumer to producer
-// Input: Ops grouped by group ID, format: group -> [(op, role), ...]
-//        role: 1=producer, 0=consumer
-//        mainLoop: if not nullptr, only include consumers inside this mainLoop
-// Output: result - Mapping from consumer Value to list of producer Values
-// Return: 0 for success, -1 for failure
-static int buildProducerConsumerMapping(
+// Cross-core: consumer -> one producer list per group it consumes. An op may
+// be both roles and/or in several groups; each group keeps its own list.
+static int buildCrossCoreProducerConsumerMapping(
     llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
-    llvm::DenseMap<Value, SmallVector<Value>> &result,
-    scf::ForOp mainLoop = nullptr) {
+    ConsumerProducerMap &result) {
+  for (auto &groupEntry : depsByGroup) {
+    auto &ops = groupEntry.second;
+
+    SmallVector<Operation *> producers;
+    SmallVector<Operation *> consumers;
+
+    for (auto &opRole : ops) {
+      Operation *op = opRole.first;
+      int role = opRole.second;
+      if (role == CVPipeline::crossCoreProducerId) {
+        if (!llvm::is_contained(producers, op))
+          producers.push_back(op);
+      } else if (role == CVPipeline::crossCoreConsumerId) {
+        if (!llvm::is_contained(consumers, op))
+          consumers.push_back(op);
+      } else {
+        LDBG("Get error role id in dependency attribute: OP: "
+             << *op << ", role: " << role);
+        return -1;
+      }
+    }
+
+    for (Operation *consumer : consumers) {
+      result[consumer].push_back(producers);
+    }
+  }
+
+  return 0;
+}
+
+// Build consumer -> producers mapping from depsByGroup (role 1=producer,
+// 0=consumer); if mainLoop != nullptr only consumers inside it. 0 ok, -1 fail.
+static int buildIntraCoreProducerConsumerMapping(
+    llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>> &depsByGroup,
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> &result,
+    Operation *mainLoop = nullptr) {
   for (auto &groupEntry : depsByGroup) {
     auto &ops = groupEntry.second;
 
@@ -121,9 +166,9 @@ static int buildProducerConsumerMapping(
     for (auto &opRole : ops) {
       Operation *op = opRole.first;
       int role = opRole.second;
-      if (role == producerId) {
+      if (role == CVPipeline::crossCoreProducerId) {
         producers.push_back(op);
-      } else if (role == consumerId) {
+      } else if (role == CVPipeline::crossCoreConsumerId) {
         // For intra-core mapping, only include consumers inside mainLoop
         if (mainLoop != nullptr) {
           if (isConsumerInMainLoop(op, mainLoop, consumers) != 0) {
@@ -146,80 +191,187 @@ static int buildProducerConsumerMapping(
 
     // For each consumer, build mapping to all producers
     for (Operation *consumer : consumers) {
-      for (Value consumerResult : consumer->getResults()) {
-        SmallVector<Value> producerValues;
-        for (Operation *producer : producers) {
-          for (Value producerResult : producer->getResults()) {
-            producerValues.push_back(producerResult);
-          }
-        }
-        result[consumerResult] = producerValues;
-      }
+      result[consumer] = producers;
     }
   }
 
   return 0;
 }
 
-// Initialize crossCoreDependentMap (cross-core data dependency)
-// Find ops with ssbuffer.crossDeps attribute
-// Attribute value is a list: [group, role], role: 1=producer, 0=consumer
-// Map key is consumer, value is list of all producers in the same group
-// Return: 0 for success, -1 for failure
+// Collects every scf.for/scf.while op tagged CVPipeline::kMainLoop, stored
+// uniformly as Operation* so downstream lookups ignore the op kind.
+static int collectMainLoopById(ModuleOp module,
+                               llvm::DenseMap<Operation *, int> &mainLoopById) {
+  int ret = 0;
+  module.walk([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kMainLoop))
+      return;
+    if (!isMainLoopOp(op)) {
+      LDBG("Do not support mainloop op other than scf.for or scf.while: "
+           << op->getName());
+      ret = -1;
+      return;
+    }
+    auto mainLoopIdAttr = op->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
+    if (mainLoopIdAttr) {
+      mainLoopById[op] = mainLoopIdAttr.getInt();
+    }
+  });
+  return ret;
+}
+
+static int
+findMainLoopIdContainingOp(Operation *op,
+                           llvm::DenseMap<Operation *, int> &mainLoopById) {
+  for (auto &entry : mainLoopById) {
+    if (entry.first->isAncestor(op)) {
+      return entry.second;
+    }
+  }
+  return -1;
+}
+
+static int
+filterMemCrossCoreDepsByMainLoop(ModuleOp module,
+                                 ConsumerProducerMap &initialDepsMap,
+                                 ConsumerProducerMap &filteredDepsMap) {
+  LDBG("memCrossCore dependencies before filter: "
+       << countProducerGroups(initialDepsMap));
+
+  // Step 1: Collect all main_loop ops (scf.for or scf.while) and their ids
+  llvm::DenseMap<Operation *, int> mainLoopById;
+  if (collectMainLoopById(module, mainLoopById) != 0) {
+    LDBG("collectMainLoopById Failed!");
+    return -1;
+  }
+
+  // Step 2: Filter mapping - only keep producer/consumer pairs in the same
+  // main_loop. Each inner producer list is one group and is filtered on its
+  // own so a multi-group consumer can keep some groups and drop others.
+  for (auto &entry : initialDepsMap) {
+    Operation *consumer = entry.first;
+
+    // Find the main_loop id containing the consumer
+    int consumerMainLoopId = findMainLoopIdContainingOp(consumer, mainLoopById);
+    if (consumerMainLoopId == -1) {
+      LDBG("Consumer op is not in any main_loop, skip: " << *consumer);
+      continue;
+    }
+
+    for (SmallVector<Operation *> &producers : entry.second) {
+      if (producers.empty()) {
+        LDBG("Producers list is empty!");
+        return -1;
+      }
+
+      // Find the main_loop id containing the producer
+      int producerMainLoopId =
+          findMainLoopIdContainingOp(producers[0], mainLoopById);
+      if (producerMainLoopId == -1) {
+        LDBG("producer op is not in any main_loop: " << *producers[0]);
+        continue;
+      }
+
+      // Check all producers in the same mainloop
+      for (size_t i = 1; i < producers.size(); i++) {
+        int otherProducerMainLoopId =
+            findMainLoopIdContainingOp(producers[i], mainLoopById);
+        if (otherProducerMainLoopId != producerMainLoopId) {
+          LDBG("Producers are not in the same main_loop. "
+               << "First producer main_loop id: " << producerMainLoopId
+               << ", Producer[" << i
+               << "] main_loop id: " << otherProducerMainLoopId);
+          return -1;
+        }
+      }
+
+      // Check if consumer and producers are in the same main_loop
+      if (consumerMainLoopId != producerMainLoopId) {
+        LDBG("Consumer and producers are in different main_loop, skip. "
+             << "Consumer main_loop id: " << consumerMainLoopId
+             << ", Producer main_loop id: " << producerMainLoopId);
+        continue;
+      }
+
+      filteredDepsMap[consumer].push_back(producers);
+    }
+  }
+
+  LDBG("memCrossCore dependencies after filter: "
+       << countProducerGroups(filteredDepsMap));
+
+  return 0;
+}
+
+// Init crossCoreDependentMap from ssbuffer.crossCoreDeps pairs
+// [group, role, ...]; 1=producer 0=consumer. Consumer -> one producer list per
+// group, same main_loop. 0 ok, -1 fail.
 int initCrossCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
+  // Step 1: Collect all crossDeps by group (including memCrossDeps)
   llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
       crossDepsByGroup;
-  if (collectDepsByGroup(module, "ssbuffer.crossDeps", crossDepsByGroup) != 0) {
+  if (collectDepsByGroup(module, CVPipeline::kCrossCoreDeps.data(),
+                         crossDepsByGroup) != 0) {
     LDBG("collectDepsByGroup on crossDeps Failed!");
     return -1;
   }
 
-  llvm::DenseMap<Value, SmallVector<Value>> crossDepsMap;
-  if (buildProducerConsumerMapping(crossDepsByGroup, crossDepsMap) != 0) {
-    LDBG("buildProducerConsumerMapping on crossDeps Failed!");
+  // Step 2: Build initial mapping (all producers for each consumer)
+  ConsumerProducerMap initialCrossDepsMap;
+  if (buildCrossCoreProducerConsumerMapping(crossDepsByGroup,
+                                            initialCrossDepsMap) != 0) {
+    LDBG("buildCrossCoreProducerConsumerMapping on crossDeps Failed!");
     return -1;
   }
-  info->crossCoreDependentMap = crossDepsMap;
+
+  // Step 3: Filter by main_loop constraint
+  ConsumerProducerMap filteredCrossDepsMap;
+  if (filterMemCrossCoreDepsByMainLoop(module, initialCrossDepsMap,
+                                       filteredCrossDepsMap) != 0) {
+    LDBG("filterCrossCoreDepsByMainLoop Failed!");
+    return -1;
+  }
+
+  info->crossCoreDependentMap = filteredCrossDepsMap;
   return 0;
 }
 
-// Initialize intraCoreDependentMap (intra-core data dependency)
-// Find forOp with ssbuffer.main_loop attribute
-// Collect all intra-core deps from module (producers may be outside the loop)
-// For each mainLoop, filter consumers that are inside it (not in nested
-// mainloops) Return: 0 for success, -1 for failure
+// Initializes intraCoreDependentMap: per main_loop op (scf.for/scf.while) keeps
+// consumers inside it but not in nested mainloops. 0 on success, -1 on error.
 int initIntraCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
   // Collect all intra-core deps from the entire module
   llvm::DenseMap<int, SmallVector<std::pair<Operation *, int>>>
       allIntraDepsByGroup;
-  if (collectDepsByGroup(module, "ssbuffer.intraDeps", allIntraDepsByGroup) !=
-      0) {
+  if (collectDepsByGroup(module, CVPipeline::kIntraDeps.data(),
+                         allIntraDepsByGroup) != 0) {
     LDBG("collectDepsByGroup on intraDeps Failed!");
     return -1;
   }
 
-  // For each mainLoop, build mapping with consumers inside it
+  // For each mainLoop, build the mapping with consumers inside it; both scf.for
+  // and scf.while can carry ssbuffer.main_loop (map keyed on Operation*).
   int ret = 0;
   module.walk([&](Operation *op) {
-    if (!op->hasAttr("ssbuffer.main_loop"))
+    if (!op->hasAttr(CVPipeline::kMainLoop))
       return;
-    auto forOp = dyn_cast<scf::ForOp>(op);
-    if (!forOp) {
-      LDBG("Do not support other mainloop except forOp!");
+    if (!isMainLoopOp(op)) {
+      LDBG("Do not support mainloop op other than scf.for or scf.while: "
+           << op->getName());
       ret = -1;
       return;
     }
 
-    llvm::DenseMap<Value, SmallVector<Value>> depMap;
-    if (buildProducerConsumerMapping(allIntraDepsByGroup, depMap, forOp) != 0) {
-      LDBG("buildProducerConsumerMapping on intraDeps Failed!");
+    llvm::DenseMap<Operation *, SmallVector<Operation *>> depMap;
+    if (buildIntraCoreProducerConsumerMapping(allIntraDepsByGroup, depMap,
+                                              op) != 0) {
+      LDBG("buildIntraCoreProducerConsumerMapping on intraDeps Failed!");
       ret = -1;
       return;
     }
 
     // Only insert if there are dependencies for this mainLoop
     if (!depMap.empty()) {
-      info->intraCoreDependentMap[forOp] = depMap;
+      info->intraCoreDependentMap[op] = depMap;
     }
   });
   return ret;
@@ -228,15 +380,18 @@ int initIntraCoreDependentMap(ModuleOp module, ControlFlowConditionInfo *info) {
 // Print all dependent maps for verification
 static void printDependentMaps(ControlFlowConditionInfo *info) {
   // Print crossCoreDependentMap
-  LDBG("crossCoreDependentMap size: " << info->crossCoreDependentMap.size());
+  LDBG("crossCoreDependentMap size: "
+       << countProducerGroups(info->crossCoreDependentMap));
   LDBG("crossCoreDependentMap contents:");
   for (auto &entry : info->crossCoreDependentMap) {
-    Value consumer = entry.first;
-    SmallVector<Value> &producers = entry.second;
-    LDBG("    Consumer: " << consumer
-                          << " (producers count: " << producers.size() << ")");
-    for (Value producer : producers) {
-      LDBG("      Producer: " << producer);
+    Operation *consumer = entry.first;
+    LDBG("    Consumer: " << *consumer << " (groups: " << entry.second.size()
+                          << ")");
+    for (SmallVector<Operation *> &producers : entry.second) {
+      LDBG("      group producers count: " << producers.size());
+      for (Operation *producer : producers) {
+        LDBG("        Producer: " << *producer);
+      }
     }
   }
 
@@ -244,44 +399,335 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
   LDBG("intraCoreDependentMap size: " << info->intraCoreDependentMap.size());
   LDBG("intraCoreDependentMap contents:");
   for (auto &forEntry : info->intraCoreDependentMap) {
-    scf::ForOp forOp = forEntry.first;
+    Operation *loopOp = forEntry.first;
     auto &depMap = forEntry.second;
-    LDBG("  ForOp (depMap size: " << depMap.size() << "):");
-    LDBG("    ");
-    forOp->print(llvm::dbgs(), OpPrintingFlags().skipRegions());
+    LDBG("  MainLoopOp (depMap size: " << depMap.size() << "):");
+    LDBG("    " << OpWithFlags(loopOp, OpPrintingFlags().skipRegions()));
 
     for (auto &entry : depMap) {
-      Value consumer = entry.first;
-      SmallVector<Value> &producers = entry.second;
-      LDBG("    Consumer: " << consumer << " (producers count: "
+      Operation *consumer = entry.first;
+      SmallVector<Operation *> &producers = entry.second;
+      LDBG("    Consumer: " << *consumer << " (producers count: "
                             << producers.size() << ")");
-      for (Value producer : producers) {
-        LDBG("      Producer: " << producer);
+      for (Operation *producer : producers) {
+        LDBG("      Producer: " << *producer);
       }
     }
   }
 }
 
+// Find the IfOp that contains a given operation
+static scf::IfOp findIfOpContainingOp(Operation *op) {
+  if (!op) {
+    return nullptr;
+  }
+
+  constexpr int maxDepth = 100;
+  int depth = 0;
+
+  Operation *current = op;
+  while (current && depth < maxDepth) {
+    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
+      if (ifOp->hasAttr(CVPipeline::kIf)) {
+        LDBG("Found ssbuffer.if at depth " << depth);
+        return ifOp;
+      }
+    }
+    current = current->getParentOp();
+    depth++;
+  }
+
+  if (depth >= maxDepth) {
+    LDBG("Warning: Max depth " << maxDepth
+                               << " exceeded in findIfOpContainingOp");
+  }
+
+  return nullptr;
+}
+
+// Compute producer buffer counts (max map size) from cross/intra-core maps;
+// falls back to BufferCountManager IntraCore when the intra-core map is empty.
+static void computeProducerBufferCount(ControlFlowConditionInfo *info,
+                                       ModuleOp module) {
+  // Get cross-core buffer count (max size in the map)
+  info->crossCoreBufferCount = 0;
+  for (auto &entry : info->crossCoreDependentMap) {
+    for (SmallVector<Operation *> &producers : entry.second) {
+      info->crossCoreBufferCount =
+          std::max(info->crossCoreBufferCount, (int)producers.size());
+    }
+  }
+  LDBG("Cross-core buffer count (max): " << info->crossCoreBufferCount);
+
+  // Get intra-core buffer count (max size across all main loops)
+  info->intraCoreBufferCount = 0;
+  for (auto &loopEntry : info->intraCoreDependentMap) {
+    auto &intraDepMap = loopEntry.second;
+    for (auto &entry : intraDepMap) {
+      info->intraCoreBufferCount =
+          std::max(info->intraCoreBufferCount, (int)entry.second.size());
+    }
+  }
+  LDBG("Intra-core buffer count (max across all main loops): "
+       << info->intraCoreBufferCount);
+
+  // If intra-core map is empty, use BufferCountManager's IntraCore value
+  if (info->intraCoreBufferCount == 0) {
+    BufferCountManager bufferCountMgr(module);
+    info->intraCoreBufferCount = bufferCountMgr.getBufferCountByType(
+        BufferCountManager::DepType::IntraCore);
+    LDBG("Intra-core map is empty, using BufferCountManager IntraCore value: "
+         << info->intraCoreBufferCount);
+  }
+}
+
+// Build if block DAG from crossCoreDependentMap
+// For consumer: its definingOp is inside an if block
+static int buildIfBlockCrossCoreDAG(ModuleOp module,
+                                    ControlFlowConditionInfo *info) {
+  // Traverse crossCoreDependentMap to build DAG
+  for (auto &entry : info->crossCoreDependentMap) {
+    Operation *consumerOp = entry.first;
+
+    // Step 1: Find consumer IfOp
+    // Consumer op is inside an if block
+    scf::IfOp consumerIf = findIfOpContainingOp(consumerOp);
+    if (!consumerIf) {
+      LDBG("Consumer op not in any ssbuffer.if block: " << *consumerOp);
+      return -1;
+    }
+
+    // Step 2: Find producer IfOps (each inner list is one dependency group)
+    for (SmallVector<Operation *> &producers : entry.second) {
+      for (Operation *producerOp : producers) {
+        scf::IfOp producerIf = findIfOpContainingOp(producerOp);
+        if (!producerIf) {
+          LDBG("Producer op not in any ssbuffer.if block: " << *producerOp);
+          return -1;
+        }
+
+        if (producerIf == consumerIf) {
+          LDBG("Producer and consumer are in the same if block, this is "
+               "invalid: "
+               << *producerIf);
+          return -1;
+        }
+
+        info->ifBlockCrossCoreDAG[producerIf].push_back(consumerIf);
+      }
+    }
+  }
+
+  // Deduplicate edges
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    llvm::SmallVector<scf::IfOp> uniqueConsumers;
+    for (scf::IfOp consumer : entry.second) {
+      if (!llvm::is_contained(uniqueConsumers, consumer)) {
+        uniqueConsumers.push_back(consumer);
+      }
+    }
+    entry.second = uniqueConsumers;
+  }
+  return 0;
+}
+
+// Detect cross-core cycle in the if-block DAG via DFS; all edges are cross-core
+// (CUBE<->VECTOR), so any cycle is a deadlock-prone bidirectional dependency.
+enum class DfsState : uint8_t { Unvisited, Visiting, Done };
+
+static bool dfsCycle(scf::IfOp node,
+                     llvm::DenseMap<scf::IfOp, SmallVector<scf::IfOp>> &dag,
+                     llvm::DenseMap<scf::IfOp, DfsState> &state) {
+  state[node] = DfsState::Visiting;
+  auto it = dag.find(node);
+  if (it != dag.end()) {
+    for (scf::IfOp neighbor : it->second) {
+      auto s = state.lookup(neighbor);
+      if (s == DfsState::Visiting)
+        return true;
+      if (s == DfsState::Unvisited && dfsCycle(neighbor, dag, state))
+        return true;
+    }
+  }
+  state[node] = DfsState::Done;
+  return false;
+}
+
+static int detectCrossCoreCycle(ControlFlowConditionInfo *info) {
+  // Collect all nodes in the DAG (both producers and consumers)
+  llvm::DenseMap<scf::IfOp, DfsState> state;
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    state.try_emplace(entry.first, DfsState::Unvisited);
+    for (scf::IfOp consumer : entry.second) {
+      state.try_emplace(consumer, DfsState::Unvisited);
+    }
+  }
+
+  for (auto &entry : state) {
+    if (entry.second == DfsState::Unvisited) {
+      if (dfsCycle(entry.first, info->ifBlockCrossCoreDAG, state)) {
+        LDBG("Cross-core cycle detected in DAG");
+        return -1;
+      }
+    }
+  }
+
+  return 0;
+}
+
+// DFS helper function to find nodes at target distance from start node
+static void dfsFindNodesAtDistance(
+    scf::IfOp currentNode, int currentDistance, int targetDistance,
+    llvm::DenseSet<scf::IfOp> &visited,
+    llvm::SmallVector<scf::IfOp> &resultNodes,
+    llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> &dag) {
+  // Mark current node as visited
+  visited.insert(currentNode);
+
+  // If we've reached target distance, add to result and stop recursion
+  if (currentDistance == targetDistance) {
+    resultNodes.push_back(currentNode);
+    return;
+  }
+
+  // Get consumers of current node
+  auto it = dag.find(currentNode);
+  if (it == dag.end() || it->second.empty()) {
+    return;
+  }
+  auto &consumers = it->second;
+
+  // Recursively visit all consumers
+  for (scf::IfOp consumer : consumers) {
+    if (!visited.contains(consumer)) {
+      dfsFindNodesAtDistance(consumer, currentDistance + 1, targetDistance,
+                             visited, resultNodes, dag);
+    }
+  }
+}
+
+// Collect flowOpt if-block pairs from the DAG: find start nodes (in-degree 0),
+// then DFS for nodes at distance 2.
+static int collectFlowOptIfOpPairs(ModuleOp module,
+                                   ControlFlowConditionInfo *info) {
+  // Step 1: Calculate in-degree for each node
+  llvm::DenseMap<scf::IfOp, int> inDegree;
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    for (scf::IfOp consumer : entry.second) {
+      inDegree[consumer]++;
+    }
+  }
+
+  // Step 2: Find all start nodes (in-degree = 0)
+  llvm::SmallVector<scf::IfOp> startNodes;
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    if (inDegree.lookup(entry.first) == 0) {
+      startNodes.push_back(entry.first);
+      LDBG("Found start node (in-degree = 0)");
+    }
+  }
+
+  LDBG("Number of start nodes: " << startNodes.size());
+
+  // Step 3: For each start node, use DFS to find nodes at distance 2
+  constexpr int targetDistance = 2;
+
+  for (scf::IfOp start : startNodes) {
+    // DFS data structures
+    llvm::DenseSet<scf::IfOp> visited;
+    llvm::SmallVector<scf::IfOp> thirdNodes;
+
+    // Start DFS from start node at distance 0
+    dfsFindNodesAtDistance(start, 0, targetDistance, visited, thirdNodes,
+                           info->ifBlockCrossCoreDAG);
+
+    // Record all third nodes found
+    for (scf::IfOp thirdNode : thirdNodes) {
+      info->flowOptIfOpPairs[thirdNode] = start;
+    }
+  }
+
+  LDBG("flowOptIfOpPairs size: " << info->flowOptIfOpPairs.size());
+
+  return 0;
+}
+
+// Print DAG and flowOpt pairs for verification
+static void printDAGInfo(ControlFlowConditionInfo *info) {
+  LDBG("ifBlockCrossCoreDAG contents:");
+  for (auto &entry : info->ifBlockCrossCoreDAG) {
+    scf::IfOp producer = entry.first;
+    LDBG("  Producer IfOp has " << entry.second.size() << " consumers");
+    for (scf::IfOp consumer : entry.second) {
+      LDBG("    -> Consumer IfOp");
+    }
+  }
+
+  LDBG("flowOptIfOpPairs contents:");
+  for (auto &entry : info->flowOptIfOpPairs) {
+    scf::IfOp target = entry.first;
+    scf::IfOp source = entry.second;
+    LDBG("  Target IfOp (third node) -> Source IfOp (start node)");
+  }
+}
+
 void InitDependentMapPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   LDBG("Enter InitDependentMap pass.");
 
   // Step 1: Initialize crossCoreDependentMap
   if (initCrossCoreDependentMap(module, info) != 0) {
     LDBG("initCrossCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Step 2: Initialize intraCoreDependentMap
   if (initIntraCoreDependentMap(module, info) != 0) {
     LDBG("initIntraCoreDependentMap failed!");
-    signalPassFailure();
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
   // Print all dependent maps for verification
-  printDependentMaps(info);
+  LLVM_DEBUG(printDependentMaps(info));
+
+  // Step 4: Compute producer buffer count for flowOpt condition
+  computeProducerBufferCount(info, module);
+
+  // Step 4: Build if block DAG from crossCoreDependentMap (always)
+  if (buildIfBlockCrossCoreDAG(module, info) != 0) {
+    LDBG("buildIfBlockCrossCoreDAG failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step 5: Detect cross-core cycle in DAG
+  if (detectCrossCoreCycle(info) != 0) {
+    LDBG("Cross-core cycle detected!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+    return;
+  }
+
+  // Step 6: Collect flowOpt if block pairs from DAG (only when buffer counts
+  // exceed threshold)
+  if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
+      info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
+    LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
+
+    if (collectFlowOptIfOpPairs(module, info) != 0) {
+      LDBG("collectFlowOptIfOpPairs failed!");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return;
+    }
+
+    LLVM_DEBUG(printDAGInfo(info));
+  }
 
   LDBG("Exit InitDependentMap pass.");
 }

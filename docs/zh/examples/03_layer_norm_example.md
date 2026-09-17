@@ -16,7 +16,7 @@ def _layer_norm_fwd_fused(
     X,  # 输入指针
     Y,  # 输出指针
     W,  # 权重指针
-    B,  # 偏差指针
+    B,  # 偏置指针
     Mean,  # 均值指针
     Rstd,  # 1/std 指针
     stride,  # 指针移动一行应该增加多少元素

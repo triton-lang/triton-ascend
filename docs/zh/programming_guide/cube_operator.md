@@ -4,7 +4,7 @@ Cube 算子以矩阵乘或批量矩阵乘为主要计算负载，Triton 代码�
 
 ## Cube 简单算子开发
 
-简单 Cube 算子可参考本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md) 或 `third_party/ascend/tutorials/03-matrix-multiplication.py`。一个最小开发路径包括：
+简单 Cube 算子可参考本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md)。一个最小开发路径包括：
 
 1. 明确输入输出 shape 和 stride，例如 `A[M, K]`、`B[K, N]`、`C[M, N]`。
 2. 用 `tl.program_id` 映射当前 program 到输出矩阵的 `(pid_m, pid_n)` tile。
@@ -56,9 +56,9 @@ def matmul_kernel(a_ptr, b_ptr, c_ptr,
 复杂 Cube 算子建议按以下顺序拆解：
 
 1. **先抽出纯矩阵乘核心**：确认每次 `tl.dot` 的输入 tile shape、dtype、累加 dtype 和输出 tile shape。
-2. **再处理不规则访存**：如果 K/V cache 低维离散、高维连续，直接二维 load 可能退化为标量访存。可先按连续维搬入 UB，再通过转置或 `tl.insert_slice` 重组为 `tl.dot` 需要的布局。
+2. **再处理不规则访存**：如果 K/V cache 低维离散、高维连续，直接二维 load 可能退化为标量访存。可先按连续维搬入 UB，再通过转置或 Ascend 扩展接口 `extension.insert_slice` 重组为 `tl.dot` 需要的布局。
 3. **把归约和归一化留到边界明确的位置**：例如 attention 中的 `max/sum/exp` 属于 Vector 逻辑，若和 `tl.dot` 放在同一 kernel，需要转到 [CV 融合算子开发](./cv_fusion_operator.md) 的思路。
 4. **为长 K 或长序列设计内层循环**：K 维循环要控制单次 A/B tile 的片上占用；序列维循环要避免一次 load 过大的 K/V block。
 5. **用 Autotune 管理候选 tile**：为常见 shape 准备多组 `BLOCK_M/N/K` 和 `multibuffer` 配置，让运行时选择最优组合。
 
-复杂 Cube 算子的常见风险是把 GPU 上的大量 program 直接迁移到 NPU。若输出 tile 数远大于物理 Cube Core 数，可考虑让每个 program 通过内层循环处理多个 tile，或者在确认逻辑核相互独立时设置 `TRITON_ALL_BLOCKS_PARALLEL=1` 降低调度开销。
+复杂 Cube 算子的常见风险是把 GPU 上的大量 program 直接迁移到 NPU。对于逻辑核相互独立且通过 IR 安全分析的 kernel，后端会自动把逻辑 grid 映射到可用物理核；不适用的 kernel 会被自动跳过。如果 kernel 存在顺序依赖或未通过安全分析，应让每个 program 通过内层循环处理多个 tile。

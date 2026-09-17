@@ -6,11 +6,41 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "triton/Dialect/Triton/IR/Utility.h"
+#include "triton/Dialect/TritonGPU/IR/Types.h"
 #include "llvm/Support/ErrorHandling.h"
 
 using namespace mlir;
+using namespace mlir::triton::gpu;
 
 LogicalResult OpTrait::impl::verifyEquivalentType(Type typeA, Type typeB) {
+  auto memdescA = dyn_cast<MemDescType>(typeA);
+  auto memdescB = dyn_cast<MemDescType>(typeB);
+  if (memdescA || memdescB) {
+    if (!memdescA || !memdescB)
+      return failure();
+    if (memdescA.getShape() != memdescB.getShape())
+      return failure();
+    if (memdescA.getAllocShape() != memdescB.getAllocShape())
+      return failure();
+    if (memdescA.getElementType() != memdescB.getElementType())
+      return failure();
+    if (memdescA.getMemorySpace() != memdescB.getMemorySpace())
+      return failure();
+    if (memdescA.getMutableMemory() != memdescB.getMutableMemory())
+      return failure();
+
+    Attribute encodingA = memdescA.getEncoding();
+    Attribute encodingB = memdescB.getEncoding();
+    if (encodingA == encodingB)
+      return success();
+    if (static_cast<bool>(encodingA) != static_cast<bool>(encodingB))
+      return failure();
+
+    auto layoutInterface =
+        cast<triton::DialectInferLayoutInterface>(&encodingA.getDialect());
+    return layoutInterface->verifyLayoutsAreEqual(memdescA.getShape(),
+                                                  encodingA, encodingB, {});
+  }
   auto tensorTypeA = dyn_cast<RankedTensorType>(typeA);
   auto tensorTypeB = dyn_cast<RankedTensorType>(typeB);
   if (!(bool(tensorTypeA) && bool(tensorTypeB)))
@@ -96,11 +126,10 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
         return op->emitError("Maximum allowed number of elements is ")
                << maxTensorNumElements << ", but " << *op
                << " has more than that";
-      // FIXME:patched triton community
-      // if ((numElements & (numElements - 1)) != 0)
-      //   return op->emitError("Number of elements must be power-of-two, but ")
-      //          << *op << " doesn't follow the rule (" << numElements << ")"
-      //          << " elements";
+      if ((numElements & (numElements - 1)) != 0)
+        return op->emitError("Number of elements must be power-of-two, but ")
+               << *op << " doesn't follow the rule (" << numElements << ")"
+               << " elements";
     }
   }
   for (auto opType : op->getResultTypes()) {
@@ -112,11 +141,10 @@ LogicalResult OpTrait::impl::verifyTensorSize(Operation *op) {
         return op->emitError("Maximum allowed number of elements is ")
                << maxTensorNumElements << ", but " << *op
                << " has more than that";
-      // FIXME:patched triton community
-      // if ((numElements & (numElements - 1)) != 0)
-      //   return op->emitError("Number of elements must be power-of-two, but ")
-      //          << *op << " doesn't follow the rule (" << numElements << ")"
-      //          << " elements";
+      if ((numElements & (numElements - 1)) != 0)
+        return op->emitError("Number of elements must be power-of-two, but ")
+               << *op << " doesn't follow the rule (" << numElements << ")"
+               << " elements";
     }
   }
   return success();

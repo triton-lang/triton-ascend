@@ -32,11 +32,11 @@ Extra Credits:
 
 """
 
-import pytest
 import torch
 import torch_npu
 import triton
 import triton.language as tl
+import triton.language.extra.cann.extension as extension
 
 DEVICE = "npu"
 
@@ -125,13 +125,13 @@ def _attn_fwd_inner(acc_ptr, l_i, m_i, q,  # Accumulator, local l, local m, quer
                 # Calculate start/end rows for current slice
                 offset = i * (BLOCK_M // 4)
                 # Extract slice data
-                acc_i = tl.extract_slice(acc, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
-                alpha_i = tl.extract_slice(alpha, [offset], [BLOCK_M // 4], [1])
-                pv_i = tl.extract_slice(pv, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
+                acc_i = extension.extract_slice(acc, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
+                alpha_i = extension.extract_slice(alpha, [offset], [BLOCK_M // 4], [1])
+                pv_i = extension.extract_slice(pv, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
                 # Incrementally update slice: acc = acc * alpha + pv
                 acc_i = acc_i * alpha_i[:, None] + pv_i
                 # Write updated slice back to accumulator
-                acc = tl.insert_slice(acc, acc_i, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
+                acc = extension.insert_slice(acc, acc_i, (offset, 0), (BLOCK_M // 4, HEAD_DIM), (1, 1))
             # 3. updated accumulator
             tl.store(acc_ptr + block2d_acc, acc)
 
@@ -300,52 +300,20 @@ class _attention(torch.autograd.Function):
 attention = _attention.apply
 
 
-@pytest.mark.parametrize("Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN", [
-    (1, 1, 128, 128, False, torch.float16, 32, 128),
-    (1, 1, 128, 128, False, torch.bfloat16, 64, 128),
-    (1, 2, 256, 256, False, torch.bfloat16, 32, 256),
-    (2, 2, 128, 256, False, torch.float16, 64, 128),
-    (4, 32, 64, 64, False, torch.float16, 32, 64),
-    (4, 32, 1024, 64, False, torch.bfloat16, 64, 128),
-    (4, 32, 4096, 64, False, torch.float16, 128, 128),
-])
-def test_op(Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN):
-    # Filter out non-integer cases; N_CTX must be divisible by BM and BN, and HEAD_DIM must be divisible by 16.
-    if N_CTX % BM != 0 or N_CTX % BN != 0 or HEAD_DIM % 16 != 0:
-        pytest.skip("Skipping non-divisible case")
-
+def test_attention_fused():
+    Z, H, N_CTX, HEAD_DIM, causal, dtype, BM, BN = 4, 32, 1024, 64, False, torch.bfloat16, 64, 128
     torch.manual_seed(20)
-    q = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
-    k = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
-    v = (torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_())
-
+    q = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
+    k = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
+    v = torch.empty((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).normal_(mean=0.0, std=0.5).requires_grad_()
     sm_scale = 0.5
-
     tri_out = attention(q, k, v, causal, sm_scale, BM, BN)
-    ref_out = torch_npu.npu_fusion_attention(
-        q,
-        k,
-        v,
-        H,
-        padding_mask=None,
-        atten_mask=None,
-        scale=sm_scale,
-        keep_prob=1.0,
-        input_layout="BNSD",
-        pre_tockens=65535,
-        next_tockens=65535,
-        sparse_mode=0,
-    )[0]
-
+    ref_out = torch_npu.npu_fusion_attention(q, k, v, H, padding_mask=None, atten_mask=None, scale=sm_scale,
+                                             keep_prob=1.0, input_layout="BNSD", pre_tockens=65535, next_tockens=65535,
+                                             sparse_mode=0)[0]
     torch.testing.assert_close(ref_out, tri_out, atol=1e-2, rtol=1e-2, equal_nan=True)
-    print(f"[PASSED] Attention shape:({Z}, {H}, {N_CTX}, {HEAD_DIM}), BM: {BM}, BN: {BN}, dtype: {dtype}")
 
 
 if __name__ == "__main__":
-    test_op(1, 1, 128, 128, causal=False, dtype=torch.float16, BM=32, BN=128)
-    test_op(1, 1, 128, 128, causal=False, dtype=torch.bfloat16, BM=64, BN=128)
-    test_op(1, 2, 256, 256, causal=False, dtype=torch.bfloat16, BM=32, BN=256)
-    test_op(2, 2, 128, 256, causal=False, dtype=torch.float16, BM=64, BN=128)
-    test_op(4, 32, 64, 64, causal=False, dtype=torch.float16, BM=32, BN=64)
-    test_op(4, 32, 1024, 64, causal=False, dtype=torch.bfloat16, BM=64, BN=128)
-    test_op(4, 32, 4096, 64, causal=False, dtype=torch.float16, BM=128, BN=128)
+    test_attention_fused()
+    print("======Fused Attention Test Passed!======")

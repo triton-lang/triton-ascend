@@ -263,6 +263,103 @@ def test_complex_base():
     assert torch.allclose(out_tensor.cpu(), torch.tensor(expected, device='cpu'), atol=1e-4)
 
 
+# ========== Test 8: padding_option="" (no padding, in-bounds) + boundary_check ==========
+@triton.jit
+def no_padding_in_bounds_kernel(
+    out_ptr,
+    in_ptr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    ptr = tl.make_block_ptr(base=in_ptr, shape=(BLOCK_SIZE * 2, ), strides=(1, ), offsets=(0, ),
+                            block_shape=(BLOCK_SIZE, ), order=(0, ))
+    data = tl.load(ptr, boundary_check=(0, ), padding_option="")
+    result = tl.sum(data)
+    tl.store(out_ptr, result)
+
+
+def test_no_padding_in_bounds():
+    """
+    boundary_check enabled but all accesses are in-bounds (BLOCK_SIZE out of BLOCK_SIZE*2).
+    With padding_option="", the result should still be correct since no out-of-bounds access occurs.
+    """
+    BLOCK_SIZE = 64
+    in_tensor = torch.randn(BLOCK_SIZE * 2, dtype=torch.float32).npu()
+    out_tensor = torch.zeros(1, dtype=torch.float32).npu()
+    no_padding_in_bounds_kernel[(1, )](
+        out_ptr=out_tensor,
+        in_ptr=in_tensor,
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+    expected = in_tensor.cpu()[:BLOCK_SIZE].sum().item()
+    assert torch.allclose(out_tensor.cpu(), torch.tensor(expected, device='cpu'), atol=1e-4)
+
+
+# ========== Test 9: padding_option="" (no padding, out-of-bounds) + boundary_check ==========
+@triton.jit
+def no_padding_out_of_bounds_kernel(
+    out_ptr,
+    in_ptr,
+    BLOCK_SIZE: tl.constexpr,
+):
+    ptr = tl.make_block_ptr(base=in_ptr, shape=(BLOCK_SIZE, ), strides=(1, ), offsets=(0, ),
+                            block_shape=(BLOCK_SIZE * 2, ), order=(0, ))
+    data = tl.load(ptr, boundary_check=(0, ), padding_option="")
+    result = tl.sum(data)
+    tl.store(out_ptr, result)
+
+
+def test_no_padding_out_of_bounds():
+    """
+    boundary_check enabled with actual out-of-bounds access (BLOCK_SIZE*2 load from BLOCK_SIZE data).
+    With padding_option="", out-of-bounds values are undefined — the kernel should still compile and
+    not crash.
+    """
+    BLOCK_SIZE = 64
+    in_tensor = torch.randn(BLOCK_SIZE, dtype=torch.float32).npu()
+    out_tensor = torch.zeros(1, dtype=torch.float32).npu()
+    # Should compile and run without error
+    no_padding_out_of_bounds_kernel[(1, )](
+        out_ptr=out_tensor,
+        in_ptr=in_tensor,
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+
+
+# ========== Test 10: padding_option="" with dynamic base + boundary_check ==========
+@triton.jit
+def no_padding_dynamic_base_kernel(
+    out_ptr,
+    in_ptr,
+    offset: tl.int32,
+    BLOCK_SIZE: tl.constexpr,
+):
+    base = in_ptr + offset
+    ptr = tl.make_block_ptr(base=base, shape=(BLOCK_SIZE * 2, ), strides=(1, ), offsets=(0, ),
+                            block_shape=(BLOCK_SIZE, ), order=(0, ))
+    data = tl.load(ptr, boundary_check=(0, ), padding_option="")
+    result = tl.sum(data)
+    tl.store(out_ptr, result)
+
+
+def test_no_padding_dynamic_base():
+    """
+    Same as test_no_padding_in_bounds but with a dynamic base address (offset).
+    All accesses are in-bounds, so results should match the reference.
+    """
+    BLOCK_SIZE = 64
+    offset = 32
+    in_tensor = torch.randn(BLOCK_SIZE * 4, dtype=torch.float32).npu()
+    out_tensor = torch.zeros(1, dtype=torch.float32).npu()
+    no_padding_dynamic_base_kernel[(1, )](
+        out_ptr=out_tensor,
+        in_ptr=in_tensor,
+        offset=offset,
+        BLOCK_SIZE=BLOCK_SIZE,
+    )
+    expected = in_tensor.cpu()[offset:offset + BLOCK_SIZE].sum().item()
+    assert torch.allclose(out_tensor.cpu(), torch.tensor(expected, device='cpu'), atol=1e-4)
+
+
 if __name__ == "__main__":
     print("Running all boundary_check tests...")
     test_static_base()
@@ -272,4 +369,7 @@ if __name__ == "__main__":
     test_nan_padding()
     test_multi_advance()
     test_complex_base()
+    test_no_padding_in_bounds()
+    test_no_padding_out_of_bounds()
+    test_no_padding_dynamic_base()
     print("All tests completed successfully!")

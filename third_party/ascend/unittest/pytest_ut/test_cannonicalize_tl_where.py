@@ -85,7 +85,7 @@ def test_tl_where(M, N, BLOCK_SIZE_N, dtype, sigtype):
 
     grid = (ceil_div(2 * M * N, BLOCK_SIZE_N), )
 
-    tl_where_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE_N, optimize_dynamic_offset=False)
+    tl_where_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE_N)
 
     torch_output = torch_tl_where(in_tensor.clone())
     assert torch.allclose(triton_output, torch_output, rtol=1e-5, atol=1e-8)
@@ -98,7 +98,7 @@ def triton_tl_where(in_tensor, BLOCK_SIZE):
     triton_output = torch.zeros_like(in_tensor)
     grid = (ceil_div(2 * M * N, BLOCK_SIZE), )
 
-    tl_where_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE, optimize_dynamic_offset=True)
+    tl_where_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE)
 
 
 def profile_performance_test(M, N, dtype, BLOCK_SIZE):

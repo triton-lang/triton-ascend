@@ -1,4 +1,4 @@
-torch-npu==2.7.1
+torch-npu==2.7.1.post8
 pybind11
 
 #from CANN
@@ -15,3 +15,4 @@ protobuf==3.20
 scipy
 requests
 absl-py
+pyelftools>=0.29

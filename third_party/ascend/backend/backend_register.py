@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.util
 import os
 from typing import Callable, Dict
 
@@ -73,19 +74,6 @@ class _LazyBackendStrategyRegister:
 
 
 backend_strategy_registry = _LazyBackendStrategyRegister()
-
-
-@backend_strategy_registry.register("mindspore", "version_hash")
-def version_hash():
-    import mindspore
-    return [str(mindspore.version)]
-
-
-@backend_strategy_registry.register("torch_npu", "version_hash")
-def version_hash():
-    import torch
-    import torch_npu
-    return [torch.version.git_version, torch_npu.version.git_version]
 
 
 @backend_strategy_registry.register("mindspore", "cxx_abi")
@@ -163,28 +151,8 @@ def get_empty_tensor(size):
     return torch.empty(size, dtype=torch.int32, device='npu')
 
 
-@backend_strategy_registry.register("mindspore", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import mindspore
-    tensor_params = [arg for arg in args if isinstance(arg, mindspore.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
-@backend_strategy_registry.register("torch_npu", "get_tensor_params_shape")
-def get_tensor_params_shape(*args):
-    import torch
-    tensor_params = [arg for arg in args if isinstance(arg, torch.Tensor)]
-    tensor_params_shape = []
-    for t in tensor_params:
-        tensor_params_shape.append([s for s in t.shape])
-    return tensor_params_shape
-
-
 @backend_strategy_registry.register("mindspore", "get_cc_cmd")
-def get_cc_cmd(build_pch):
+def get_cc_cmd():
     import mindspore
     mindspore_path = os.path.dirname(os.path.realpath(mindspore.__file__))
     cc_cmd = [
@@ -201,31 +169,43 @@ def get_cc_cmd(build_pch):
         f"-I{os.path.join(mindspore_path, 'include/mindspore/ops/include')}",
         f"-D_GLIBCXX_USE_CXX11_ABI={get_mindspore_cxx_abi()}",
         "-DENABLE_FAST_HASH_TABLE=1",
+        f"-L{os.path.join(mindspore_path, 'lib')}",
+        f"-lmindspore_pynative_utils",
     ]
-    if not build_pch:
-        cc_cmd += [
-            f"-L{os.path.join(mindspore_path, 'lib')}",
-            f"-lmindspore_pynative_utils",
-        ]
     return cc_cmd
 
 
 @backend_strategy_registry.register("torch_npu", "get_cc_cmd")
-def get_cc_cmd(build_pch):
-    import torch
-    import torch_npu
-    torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
+def get_cc_cmd():
+    return [
+        f"-D_GLIBCXX_USE_CXX11_ABI={get_torch_cxx_abi()}",
+        "-ldl",
+    ]
+
+
+def _get_package_dir(package_name):
+    spec = importlib.util.find_spec(package_name)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{package_name}'")
+    if spec.submodule_search_locations:
+        return os.path.realpath(next(iter(spec.submodule_search_locations)))
+    if spec.origin is None:
+        raise ModuleNotFoundError(f"Cannot locate module '{package_name}'")
+    return os.path.dirname(os.path.realpath(spec.origin))
+
+
+@backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
+def get_cc_cmd_npu_utils():
+    torch_path = _get_package_dir("torch")
+    torch_npu_path = _get_package_dir("torch_npu")
     cc_cmd = [
         f"-I{os.path.join(torch_path, 'include')}",
         f"-I{os.path.join(torch_npu_path, 'include')}",
         f"-D_GLIBCXX_USE_CXX11_ABI={get_torch_cxx_abi()}",
+        f"-L{os.path.join(torch_npu_path, 'lib')}",
+        f"-ltorch_npu",
+        "-DUSE_TORCH_NPU",
     ]
-    if not build_pch:
-        cc_cmd += [
-            f"-L{os.path.join(torch_npu_path, 'lib')}",
-            f"-ltorch_npu",
-        ]
     return cc_cmd
 
 
@@ -289,9 +269,7 @@ def header_file(enable_taskqueue):
 
 @backend_strategy_registry.register("torch_npu", "header_file")
 def header_file(enable_taskqueue):
-    return f'''#include <ATen/ATen.h>
-#include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
-{'#include <torch_npu/csrc/framework/OpCommand.h>' if {enable_taskqueue} else ''}'''
+    return '#include <dlfcn.h>\n#include <functional>'
 
 
 @backend_strategy_registry.register("mindspore", "allocate_memory")
@@ -302,18 +280,30 @@ def allocate_memory(size, stream):
 
 @backend_strategy_registry.register("torch_npu", "allocate_memory")
 def allocate_memory(size, stream):
-    return f"workspace_addr_ptr = const_cast<void *>(at::empty({size}, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte)).storage().data());"
+    return f'''init_npu_utils();
+    if (!g_allocate_workspace) {{
+      fprintf(stderr, "Error: triton_allocate_workspace is unavailable\\n");
+      workspace_addr_ptr = nullptr;
+    }} else {{
+      workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);
+    }}'''
 
 
 @backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
     return f'''auto sync_ptr = std::make_shared<mindspore::kernel::pyboost::MemBlock>(device_context, {size}, reinterpret_cast<uint64_t>({stream}));
-    syncBlockLock_ptr = work_ptr->ptr_;'''
+    syncBlockLock_ptr = sync_ptr->ptr_;'''
 
 
 @backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")
 def allocate_sync_block_lock(size, stream):
-    return f"syncBlockLock_ptr = const_cast<void *>(at_npu::native::allocate_workspace({size}, {stream}).storage().data());"
+    return f'''init_npu_utils();
+    if (!g_allocate_sync_block_lock) {{
+      fprintf(stderr, "Error: triton_allocate_sync_block_lock is unavailable\\n");
+      syncBlockLock_ptr = nullptr;
+    }} else {{
+      syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream}, &syncBlockLock_handle);
+    }}'''
 
 
 @backend_strategy_registry.register("mindspore", "pre_launch")
@@ -337,5 +327,9 @@ def async_launch(func):
 
 @backend_strategy_registry.register("torch_npu", "async_launch")
 def async_launch(func):
-    return f'''at_npu::native::OpCommand cmd;
-    cmd.Name(name.c_str()).SetCustomHandler({func}).Run();'''
+    return f'''init_npu_utils();
+   if (!g_async_launch) {{
+     fprintf(stderr, "Error: triton_async_launch is unavailable\\n");
+     return;
+   }}
+   g_async_launch(static_cast<void*>(&{func}), kernelName);'''

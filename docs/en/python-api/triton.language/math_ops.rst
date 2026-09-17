@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/math_ops.rst

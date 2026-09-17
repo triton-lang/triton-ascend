@@ -20,17 +20,18 @@
  * THE SOFTWARE.
  */
 
-#include "llvm/Support/Debug.h"
-
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
 #include "mlir/Pass/PassManager.h"
 
+#include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
+#include "DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
+#include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
-
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
+#include "llvm/Support/Debug.h"
 
 using namespace mlir;
 using namespace triton;
@@ -42,8 +43,12 @@ static constexpr const char *DEBUG_TYPE = "plan-compute-block";
 // Run the pass
 void PlanComputeBlockPass::runOnOperation() {
   ModuleOp module = getOperation();
+
+  if (CVPipeline::hasFallbackAttr(module)) {
+    return;
+  }
+
   OpPassManager pm(module.getOperationName());
-  CVPipeline::ComputeBlockIdManager::getInstance().reset();
   LOG_DEBUG("Enter pass.\n");
 
   // Step 1: Run OpClassifierPass to classify operations
@@ -59,8 +64,11 @@ void PlanComputeBlockPass::runOnOperation() {
   pm.addPass(createReorderOpsByBlockIdPass());
 
   if (failed(runPipeline(pm, module))) {
-    module->emitError() << "[" << DEBUG_TYPE << "] Pass failed!";
-    signalPassFailure();
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      LOG_DEBUG("Pass failed!\n");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
+    return;
   }
 
   LOG_DEBUG("Process successfully\n");
@@ -71,5 +79,15 @@ namespace triton {
 std::unique_ptr<OperationPass<ModuleOp>> createPlanComputeBlockPass() {
   return std::make_unique<PlanComputeBlockPass>();
 }
+
+void registerPlanComputeBlockPasses() {
+  registerPass([]() -> std::unique_ptr<mlir::Pass> {
+    return createPlanComputeBlockPass();
+  });
+  registerPass(createPlanCubeBlockPass);
+  registerPass(createPlanVectorBlockPass);
+  registerPass(createReorderOpsByBlockIdPass);
+}
+
 } // namespace triton
 } // namespace mlir

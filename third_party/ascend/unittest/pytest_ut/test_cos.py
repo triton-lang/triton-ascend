@@ -55,6 +55,13 @@ def triton_elementwise_binary(in_ptr0, in_ptr1, out_ptr0, N: tl.constexpr, NUMEL
     tl.store(out_ptr0 + idx_block, ret, mask=idx_block < N)
 
 
+@triton.jit
+def triton_cos_floor(in_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
+    offsets = tl.arange(0, BLOCK_SIZE)
+    x = tl.load(in_ptr + offsets)
+    tl.store(out_ptr + offsets, tl.floor(tl.cos(x)))
+
+
 types = [
     (torch.float32, 'float32'),
     # (torch.float16, 'float16'),
@@ -97,3 +104,15 @@ def test_elementwsie_common(dtype, sigtype, N, NUMEL):
     print(out)
 
     test_common.validate_cmp(sigtype, out, ans)
+
+
+def test_cos_floor_even_range_reduction():
+    value = 0.00034680962562561035
+    x_cpu = torch.tensor([-value, value], dtype=torch.float32)
+    expected = torch.floor(torch.cos(x_cpu))
+
+    x = x_cpu.npu()
+    actual = torch.ones_like(x)
+    triton_cos_floor[(1, )](x, actual, BLOCK_SIZE=x.numel())
+
+    assert torch.equal(actual.cpu(), expected)

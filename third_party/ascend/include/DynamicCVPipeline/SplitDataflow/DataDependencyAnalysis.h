@@ -171,7 +171,8 @@ private:
   bool isValidValueForDependency(mlir::Value value);
   bool isValidScalarDependency(mlir::Value value);
   bool isValid1DValueForDependency(mlir::Value value);
-  bool isAllTransposedInVector(mlir::Value value);
+  std::pair<bool, std::optional<mlir::Operation *>>
+  isAllTransposedInVector(mlir::Value value);
   bool isOuterOpArg(mlir::Value value);
   mlir::Value resolveNestedIterArgInitValue(mlir::Value initValue);
   void processIterArgDependencies();

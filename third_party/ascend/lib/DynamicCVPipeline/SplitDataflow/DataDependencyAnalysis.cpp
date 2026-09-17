@@ -169,22 +169,31 @@ bool DataDependencyAnalysisPass::isValid1DValueForDependency(
   return false;
 }
 
-// Check if a value is only used by transpose ops whose users are all vector ops
-bool DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
+// Check if a value is only used by transpose ops whose users are all vector
+// ops. Returns whether the condition holds and, if so, the yield op that uses
+// the transposed value (nullptr if there is none).
+std::pair<bool, std::optional<mlir::Operation *>>
+DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
   if (!isa<linalg::MatmulOp>(value.getDefiningOp())) {
-    return false;
+    return {false, std::nullopt};
   }
   if (!llvm::hasSingleElement(value.getUsers())) {
-    return false;
+    return {false, std::nullopt};
   }
   auto *userOp = *value.getUsers().begin();
   if (!isa<linalg::TransposeOp>(userOp))
-    return false;
+    return {false, std::nullopt};
   for (mlir::Operation *transposeOpUser : userOp->getUsers()) {
     if (getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr)
-      return false;
+      return {false, std::nullopt};
   }
-  return true;
+
+  for (mlir::Operation *transposeOpUser : userOp->getUsers()) {
+    if (isa<scf::YieldOp>(transposeOpUser)) {
+      return {true, transposeOpUser};
+    }
+  }
+  return {true, std::nullopt};
 }
 
 // Helper: Check if value is a valid tensor for dependency analysis
@@ -806,7 +815,8 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
 
       // if c->v value will be transposed and then used by vector op, the value
       // can be transposed within fixpipe
-      bool isAllTranspoesd = isAllTransposedInVector(output);
+      auto [isAllTranspoesd, transposedYieldOp] =
+          isAllTransposedInVector(output);
 
       for (mlir::Operation *user : output.getUsers()) {
         int outputIndex = 0;
@@ -840,6 +850,9 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
                                 c2vDependencies, blockInfo.blockId, consumerId,
                                 info, isAllTranspoesd)) {
               continue;
+            }
+            if (transposedYieldOp.has_value()) {
+              c2vDependencies.back().consumerYieldOp = *transposedYieldOp;
             }
           }
         }

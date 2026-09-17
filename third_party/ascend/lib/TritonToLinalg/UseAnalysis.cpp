@@ -424,6 +424,12 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
               }
             })
             .Case<triton::PrintOp>([&](auto print) {})
+            .Case<hivm::CustomOp, hivm::CustomMacroOp>([](auto) {
+              // Custom operands are MixUse in visitOperation, even when all
+              // results are used only as memory addresses. Keep the call on
+              // the materialized value, not a MetaUse clone that is erased
+              // before the custom operation's operands are converted.
+            })
             .Default([&](Operation *op) {
               bool allMeta = true;
               for (auto res : op->getResults()) {

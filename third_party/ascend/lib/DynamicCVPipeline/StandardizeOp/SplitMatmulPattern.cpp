@@ -858,8 +858,14 @@ static LogicalResult splitMatmul(linalg::MatmulOp matmulOp,
   auto fillOp = rewriter.create<linalg::FillOp>(emptyOp.getLoc(), zeroValue,
                                                 emptyOp.getResult());
   auto zeroVal = fillOp.getResult(0);
-  splitInfo.outerInValue.replaceUsesWithIf(
-      zeroVal, [&](OpOperand &opop) { return opop.getOwner() == outerDefOp; });
+  if (outerDefOp == matmulOp.getOperation()) {
+    // The matmul input and accumulator may alias. Replace only the accumulator.
+    matmulOp.getDpsInitsMutable()[0].assign(zeroVal);
+  } else {
+    splitInfo.outerInValue.replaceUsesWithIf(zeroVal, [&](OpOperand &opop) {
+      return opop.getOwner() == outerDefOp;
+    });
+  }
 
   auto forOp = llvm::dyn_cast_if_present<scf::ForOp>(
       splitInfo.outerOutValue.getDefiningOp());

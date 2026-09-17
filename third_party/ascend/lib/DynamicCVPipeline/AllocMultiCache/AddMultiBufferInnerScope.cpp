@@ -186,6 +186,7 @@ scf::ForOp findMainloopInScope(scope::ScopeOp scope) {
 // rather than process the dep through the multi-buffer pipeline. The operand
 // is intentionally NOT added to depValueMap in that case.
 // i1 return is done temporarily.
+
 static void collectDepValue(Value operand, Block *body, Operation *currentOp,
                             DenseMap<Value, int> &outputToBlockId,
                             DenseMap<Value, SmallVector<Value>> &depValueMap,
@@ -1810,9 +1811,20 @@ static BufferMap insertBuffersBeforeLoop(const MainLoop &loop,
 static bool
 hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap) {
   for (auto &p : depValueMap) {
+    Value groupKey = p.first;
+    Operation *producer = groupKey.getDefiningOp();
     for (Value depVal : p.second) {
-      if (isa<MemRefType>(depVal.getType()))
+      if (isa<MemRefType>(depVal.getType())) {
+        Operation *depOp = depVal.getDefiningOp();
+        LDBG("MEMREF DEP: producer=<" +
+             std::string(producer ? producer->getName().getStringRef().str()
+                                  : "(block-arg)") +
+             ">, depVal=<" +
+             std::string(depOp ? depOp->getName().getStringRef().str()
+                               : "(block-arg)") +
+             ">");
         return true;
+      }
     }
   }
   return false;
@@ -2004,7 +2016,7 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
 
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
                                scope::ScopeOp vectorScope, int &groupId,
-                               bool &i1Found) {
+                               bool &i1Found, bool &memrefFound) {
   OpBuilder globalBuilder(mainLoop.getContext());
 
   // Two-phase dep collection for empty+fill cloning:
@@ -2056,6 +2068,7 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   // Memref-type dep values are not supported here.
   if (hasMemrefDepValue(depValueMap)) {
     LDBG("ERROR: Memref type dependent values found in user IR, fallback");
+    memrefFound = true;
     return -1;
   }
 
@@ -2210,12 +2223,19 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
         LDBG("Nested main_loop found, this is not allowed");
         return WalkResult::interrupt();
       }
-      // i1Found is reset per main_loop so it only triggers fallback for
-      // the current scope's deps.
+      // i1Found / memrefFound are reset per main_loop so they only trigger
+      // fallback for the current scope's deps.
       bool i1Found = false;
-      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found);
+      bool memrefFound = false;
+      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found,
+                                    memrefFound);
       if (i1Found) {
         LDBG("i1 tensor dep found, setting fallback attribute");
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
+        return WalkResult::interrupt();
+      }
+      if (memrefFound) {
+        LDBG("memref dep found, setting fallback attribute to IGNORED");
         CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
         return WalkResult::interrupt();
       }
@@ -2230,7 +2250,9 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
     return WalkResult::advance();
   });
   if (walkResult.wasInterrupted()) {
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    if (!CVPipeline::hasFallbackAttr(module)) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
     return;
   }
 

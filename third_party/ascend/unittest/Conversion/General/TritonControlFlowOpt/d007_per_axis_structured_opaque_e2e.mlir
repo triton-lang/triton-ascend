@@ -81,6 +81,36 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
     tt.store %output_ptr, %loaded : tensor<2x4x!tt.ptr<f32>>
     tt.return
   }
+
+  // A uniform backedge update must remain the scalar uniform-offset field.
+  // The invariant opaque-axis contribution stays outside the loop instead of
+  // becoming a full tensor loop carrier on every iteration.
+  tt.func public @d007_rank2_mixed_uniform_loop(
+      %base: !tt.ptr<f32>, %output: !tt.ptr<f32>,
+      %axis1: tensor<4xi32>, %upper: index) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %delta = arith.constant dense<32> : tensor<2x4xi32>
+    %axis0 = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
+    %axis0_expanded = tt.expand_dims %axis0 {axis = 1 : i32} : tensor<2xi32> -> tensor<2x1xi32>
+    %axis0_broadcast = tt.broadcast %axis0_expanded : tensor<2x1xi32> -> tensor<2x4xi32>
+    %axis1_expanded = tt.expand_dims %axis1 {axis = 0 : i32} : tensor<4xi32> -> tensor<1x4xi32>
+    %axis1_broadcast = tt.broadcast %axis1_expanded : tensor<1x4xi32> -> tensor<2x4xi32>
+    %offset = arith.addi %axis0_broadcast, %axis1_broadcast : tensor<2x4xi32>
+    %base_tensor = tt.splat %base : !tt.ptr<f32> -> tensor<2x4x!tt.ptr<f32>>
+    %initial = tt.addptr %base_tensor, %offset : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xi32>
+    %final = scf.for %iv = %c0 to %upper step %c1
+        iter_args(%pointer = %initial) -> (tensor<2x4x!tt.ptr<f32>>) {
+      %next = tt.addptr %pointer, %delta : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xi32>
+      scf.yield %next : tensor<2x4x!tt.ptr<f32>>
+    }
+    %loaded = tt.load %final : tensor<2x4x!tt.ptr<f32>>
+    %output_offsets = arith.constant dense<[[0, 1, 2, 3], [4, 5, 6, 7]]> : tensor<2x4xi32>
+    %output_tensor = tt.splat %output : !tt.ptr<f32> -> tensor<2x4x!tt.ptr<f32>>
+    %output_ptr = tt.addptr %output_tensor, %output_offsets : tensor<2x4x!tt.ptr<f32>>, tensor<2x4xi32>
+    tt.store %output_ptr, %loaded : tensor<2x4x!tt.ptr<f32>>
+    tt.return
+  }
 }
 
 // CFO-LABEL: tt.func public @d007_rank1_structured
@@ -89,6 +119,11 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CFO-LABEL: tt.func public @d007_rank1_opaque
 // CFO: PointerDescriptorStructuredAxes = array<i32: 0>
 // CFO-LABEL: tt.func public @d007_rank2_mixed
+// CFO: PointerDescriptorStructuredAxes = array<i32: 1, 0>
+// CFO-LABEL: tt.func public @d007_rank2_mixed_uniform_loop
+// CFO: scf.for
+// CFO-SAME: i32
+// CFO-NOT: scf.yield {{.*}}tensor<2x4xi32>
 // CFO: PointerDescriptorStructuredAxes = array<i32: 1, 0>
 
 // E2E-LABEL: func.func @d007_rank1_structured
@@ -113,6 +148,12 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // E2E: bufferization.materialize_in_destination
 // E2E: return
 // E2E-LABEL: func.func @d007_rank2_mixed
+// E2E: memref.load
+// E2E: bufferization.materialize_in_destination
+// E2E: return
+// E2E-LABEL: func.func @d007_rank2_mixed_uniform_loop
+// E2E: scf.for
+// E2E-SAME: iter_args(%{{.*}} = %{{.*}}) -> (i32)
 // E2E: memref.load
 // E2E: bufferization.materialize_in_destination
 // E2E: return

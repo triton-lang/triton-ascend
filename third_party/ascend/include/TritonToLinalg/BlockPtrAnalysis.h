@@ -58,13 +58,6 @@ inline constexpr llvm::StringLiteral kScalarPointerCarrierAttr =
 /// legacy BlockData loop expansion solely because of their producer.
 bool needsLegacyBlockDataLoopRewrite(LoopLikeOpInterface loopOp);
 
-/// Returns the non-descriptor loop slots that carry a make-range integer
-/// tensor through a CFO-owned SCF boundary. These slots are safe to lower with
-/// the legacy BlockData mask path; pointer descriptor slots and opaque tensor
-/// carriers are deliberately excluded.
-SmallVector<unsigned>
-getMarkedMakeRangeCarrierSlots(LoopLikeOpInterface loopOp);
-
 enum class MemAccVal { Undefined = 0, StrucMemAcc = 1, UnstrucMemAcc = 2 };
 
 /// Creates a verifier-valid HIVM pointer cast for a scalar Triton pointer

@@ -1100,15 +1100,17 @@ void init_ascend_ir(py::module &&m) {
       .def(
           "create_dot",
           [](AscendNPUIROpBuilder &self, Value &a, Value &b, bool fractalA,
-             bool fractalB, bool fractalC) -> Value {
+             bool fractalB, bool fractalC, bool transposeB) -> Value {
             auto &builder = self.getBuilder();
             auto op = self.create<triton::ascend::DotOp>(
                 a, b, builder.getBoolAttr(fractalA),
-                builder.getBoolAttr(fractalB), builder.getBoolAttr(fractalC));
+                builder.getBoolAttr(fractalB), builder.getBoolAttr(fractalC),
+                builder.getBoolAttr(transposeB));
             return op.getResult();
           },
           py::arg("a"), py::arg("b"), py::arg("fractal_a"),
-          py::arg("fractal_b"), py::arg("fractal_c"))
+          py::arg("fractal_b"), py::arg("fractal_c"),
+          py::arg("transpose_b") = false)
       // conv2d operation
       .def(
           "create_conv2d",

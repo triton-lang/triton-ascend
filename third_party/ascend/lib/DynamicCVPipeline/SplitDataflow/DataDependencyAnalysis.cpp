@@ -181,7 +181,8 @@ bool DataDependencyAnalysisPass::isAllTransposedInVector(mlir::Value value) {
   if (!isa<linalg::TransposeOp>(userOp))
     return false;
   for (mlir::Operation *transposeOpUser : userOp->getUsers()) {
-    if (getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr)
+    if ((getSsbufferCoreType(transposeOpUser) != ssbufferCoreTypeVectorAttr) ||
+        isa<scf::YieldOp>(transposeOpUser))
       return false;
   }
   return true;

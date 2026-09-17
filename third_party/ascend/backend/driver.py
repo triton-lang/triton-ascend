@@ -30,6 +30,7 @@ from typing import Optional
 import functools
 import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager
+from triton.runtime import _allocation
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
 from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
@@ -219,7 +220,15 @@ class NPULauncher(object):
         spec.loader.exec_module(mod)
         cst_key = lambda i: self.src.fn.arg_names.index(i) if isinstance(i, str) else i
         signature = {cst_key(key): value for key, value in self.src.signature.items()}
-        self.launch = wrap_handle_tensordesc(getattr(mod, "launch"), signature)
+        # The pure-SIMT launch ABI inserts a profile_scratch base argument
+        # (see NPULauncher.__call__) between `function` and `packed_metadata`.
+        base_args_len = _BASE_ARGS_FORMAT_LEN + (1 if metadata.is_pure_simt else 0)
+        self.launch = wrap_handle_tensordesc(getattr(mod, "launch"), signature, base_args_len)
+        # 0 keeps the profile scratch path inert until the proton lowering
+        # pass backfills the real size.
+        self.profile_scratch_size = int(getattr(metadata, "profile_scratch_size", 0) or 0)
+        # 128 matches proton's default profile_buffer_alignment.
+        self.profile_scratch_align = int(getattr(metadata, "profile_scratch_align", 128) or 128)
 
     def _make_launcher_stub_path(self):
         header_src = generate_npu_header_src()
@@ -233,14 +242,25 @@ class NPULauncher(object):
     def get_launcher_so_path(self):
         return self.so_launcher_path
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, gridX, gridY, gridZ, stream, function, *args, **kwargs):
         _ascend_utils._warn_deprecated_ascend_env_var("TRITON_REGISTER_TENSOR_MSPROF")
         if self.compile_only:
-            cache_manager = get_cache_manager(args[5]['hash'])
+            cache_manager = get_cache_manager(args[0]['hash'])
             print("[INFO]: skip running kernel")
             print(f"[INFO]: The compiled kernel cache is in {cache_manager.cache_dir}")
             return
-        profiler_registered = self.launch(*args, **kwargs)
+        # Proton profile scratch, allocated through the runtime profile
+        # allocator and passed as an explicit launch argument, mirroring
+        # CudaLauncher. Only the pure-SIMT ABI has a profile_scratch slot.
+        if self.metadata.is_pure_simt:
+            profile_scratch = None
+            if self.profile_scratch_size > 0:
+                grid_size = gridX * gridY * gridZ
+                alloc_fn = _allocation._profile_allocator.get()
+                profile_scratch = alloc_fn(grid_size * self.profile_scratch_size, self.profile_scratch_align, stream)
+            profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, profile_scratch, *args, **kwargs)
+        else:
+            profiler_registered = self.launch(gridX, gridY, gridZ, stream, function, *args, **kwargs)
         _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
 
@@ -550,7 +570,7 @@ def make_tensordesc_arg(arg):
     return [arg.base, *arg.shape, *arg.strides, arg.padding == "nan", *arg.shape, *arg.strides]
 
 
-def wrap_handle_tensordesc(launcher, signature):
+def wrap_handle_tensordesc(launcher, signature, base_args_len=_BASE_ARGS_FORMAT_LEN):
     has_tensor_desc_arg = any(isinstance(sig, str) and sig.startswith("tensordesc") for sig in signature.values())
     if not has_tensor_desc_arg:
         return launcher
@@ -559,8 +579,8 @@ def wrap_handle_tensordesc(launcher, signature):
         [i for i, sig in enumerate(signature.values()) if isinstance(sig, str) and sig.startswith("tensordesc")])
 
     def inner(*args):
-        final_args = list(args[:_BASE_ARGS_FORMAT_LEN])
-        for i, arg in enumerate(args[_BASE_ARGS_FORMAT_LEN:]):
+        final_args = list(args[:base_args_len])
+        for i, arg in enumerate(args[base_args_len:]):
             if i in tensordesc_indices:
                 final_args.extend(make_tensordesc_arg(arg))
             else:
@@ -923,12 +943,22 @@ def make_launcher(constants, signature, metadata):
         _flatten_signature(sig, flat_signature)
     signature = {i: s for i, s in enumerate(flat_signature)}
     args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
+    # The pure-SIMT launch ABI carries an extra profile_scratch base argument
+    # (a PyObject accepted by getPointer) right after `function`.
+    simt_profile_scratch_arg = metadata.is_pure_simt
+    base_args_len = _BASE_ARGS_FORMAT_LEN + (1 if simt_profile_scratch_arg else 0)
+    # Per-block proton profile scratch size, backfilled by AscendNPU-IR.
+    profile_scratch_size = int(getattr(metadata, "profile_scratch_size", 0) or 0)
+    # Positional indices of the base arguments in launch()'s METH_FASTCALL
+    # args array.
+    idx_packed_metadata = 5 + (1 if simt_profile_scratch_arg else 0)
     # Total expected argument count for METH_FASTCALL arity check.
-    total_nargs = _BASE_ARGS_FORMAT_LEN + len(signature)
-    # Generate manual parsing statements for signature args (indices 9..) used by
-    # the METH_FASTCALL fast path in launch().
+    total_nargs = base_args_len + len(signature)
+    # Generate manual parsing statements for signature args (indices 9.., or
+    # 10.. for the pure-SIMT ABI) used by the METH_FASTCALL fast path in
+    # launch().
     fastcall_sig_parse_stmts = '\n  '.join(
-        _format_to_fastcall_stmt(ty, f"_arg{i}", _BASE_ARGS_FORMAT_LEN + i) for i, ty in signature.items())
+        _format_to_fastcall_stmt(ty, f"_arg{i}", base_args_len + i) for i, ty in signature.items())
     # Record the end of regular arguments;
     # subsequent arguments are architecture-specific descriptors.
     arg_decls = ', '.join(f"{ty_to_cpp(ty)} arg{i}" for i, ty in signature.items() if ty != "constexpr")
@@ -938,6 +968,27 @@ def make_launcher(constants, signature, metadata):
             internal_args_list.append(f"ptr_info{i}.dev_ptr")
         elif ty != "constexpr":
             internal_args_list.append(f"_arg{i}")
+
+    # Pure-SIMT ABI only: convert the profile_scratch PyObject passed by
+    # NPULauncher.__call__ into a device pointer and zero-initialize it.
+    if simt_profile_scratch_arg:
+        cpp_profile_scratch_setup = f"""
+  void* profile_scratch_ptr = nullptr;
+  if (profile_scratch_obj != Py_None) {{
+    DevicePtrInfo profile_scratch_info = getPointer(profile_scratch_obj, -1);
+    if (!profile_scratch_info.valid) {{
+      return nullptr;
+    }}
+    profile_scratch_ptr = profile_scratch_info.dev_ptr;
+  }}
+  // Proton requires the profile scratch zero-initialized before the kernel
+  // writes profiling records; the profile allocator returns stale memory.
+  if (profile_scratch_ptr != nullptr && {profile_scratch_size} > 0) {{
+    uint64_t profile_scratch_bytes = (uint64_t)gridX * gridY * gridZ * {profile_scratch_size};
+    cann_memset_async(profile_scratch_ptr, profile_scratch_bytes, 0, profile_scratch_bytes, stream);
+  }}"""
+    else:
+        cpp_profile_scratch_setup = ""
 
     # generate glue code
     newline = '\n  '
@@ -1445,6 +1496,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
 {original_grid_offset_decls}    size_t grid_offset = reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
     reserve_slot(sizeof(int32_t), 4);
+    {'// SIMT-only global_scratch/profile_scratch slots stay zero-initialized on this path.' if metadata.is_pure_simt else ''}
     {'reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
     {'reserve_slot(sizeof(void*), 8);' if metadata.is_pure_simt else ''}
     {'size_t dtdata_offset = reserve_slot(sizeof(void*), 8);' if enable_device_print else 'reserve_slot(sizeof(void*), 8);'}
@@ -1471,7 +1523,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
 
 static void _launch(const char* kernelName, cann_func_handle func, cann_stream stream,
     int gridX, int gridY, int gridZ,
-    std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
+    std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{', void* profile_scratch_ptr' if simt_profile_scratch_arg else ''}{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
   // Keep Python launcher on the stable local packing path.
   if (gridX <=0 || gridY <=0 || gridZ <=0) {{
     printf("WARNING: Skipping launch for kernel '%s' due to empty grid (gridX=%d, gridY=%d, gridZ=%d).\\n", kernelName, gridX, gridY, gridZ);
@@ -1496,8 +1548,9 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
         [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
       )}
 {original_grid_struct_values}      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
+      {'// global_scratch stays nullptr; only profile_scratch is wired here.' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
-      {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}
+      {', static_cast<void*>(profile_scratch_ptr)' if metadata.is_pure_simt else ''}
       {', static_cast<void*>(DTData)' if enable_device_print else ', static_cast<void*>(nullptr)'}
     }};
 {_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch_local)}
@@ -1512,6 +1565,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   PyObject *launch_metadata = nullptr;
   PyObject *launch_enter_hook = nullptr;
   PyObject *launch_exit_hook = nullptr;
+  {'PyObject *profile_scratch_obj = nullptr;' if simt_profile_scratch_arg else ''}
   std::vector<std::vector<int64_t>> tensorShapes;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
@@ -1527,14 +1581,16 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   gridZ = (int)PyLong_AsLong(args[2]);
   stream = reinterpret_cast<cann_stream>(PyLong_AsUnsignedLongLong(args[3]));
   function = reinterpret_cast<cann_func_handle>(PyLong_AsUnsignedLongLong(args[4]));
-  packedMetadata = args[5];
-  launch_metadata = args[6];
-  launch_enter_hook = args[7];
-  launch_exit_hook = args[8];
+  {'profile_scratch_obj = args[5];' if simt_profile_scratch_arg else ''}
+  packedMetadata = args[{idx_packed_metadata}];
+  launch_metadata = args[{idx_packed_metadata + 1}];
+  launch_enter_hook = args[{idx_packed_metadata + 2}];
+  launch_exit_hook = args[{idx_packed_metadata + 3}];
   {fastcall_sig_parse_stmts}
   if (PyErr_Occurred()) {{
     return nullptr;
   }}
+  {cpp_profile_scratch_setup}
   if (__MsprofFlagL1) {{
     {
       LINE_CHANGE_CHAR.join(
@@ -1579,6 +1635,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   _launch(kernelName, function, stream,
           gridX, gridY, gridZ,
           tensorShapes, tensorKinds
+          {', profile_scratch_ptr' if simt_profile_scratch_arg else ''}
           {', ' + ', '.join(internal_args_list) if len(internal_args_list) > 0 else ''});
   if (PyErr_Occurred()) {{
     return nullptr;

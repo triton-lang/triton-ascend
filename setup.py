@@ -440,6 +440,23 @@ class CMakeBuild(build_ext):
         if roctracer_include_dir == "":
             roctracer_include_dir = os.path.join(get_base_dir(), "third_party", "amd", "backend", "include")
         cmake_args += ["-DROCTRACER_INCLUDE_DIR=" + roctracer_include_dir]
+        # Ascend NPU support is opt-in, auto-detected from the CANN toolkit.
+        ascend_include_dir = get_env_with_keys(["ASCEND_INCLUDE_DIR"])
+        if ascend_include_dir != "" and not os.path.exists(os.path.join(ascend_include_dir, "acl", "acl.h")):
+            ascend_include_dir = ""
+        if ascend_include_dir == "":
+            ascend_home = get_env_with_keys(["ASCEND_HOME_PATH", "ASCEND_TOOLKIT_HOME"])
+            if ascend_home != "":
+                candidates = [
+                    os.path.join(ascend_home, "include"),
+                    os.path.join(ascend_home, "runtime", "include"),
+                ]
+                for candidate in candidates:
+                    if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
+                        ascend_include_dir = candidate
+                        break
+        if ascend_include_dir != "":
+            cmake_args += ["-DPROTON_ENABLE_NPU=ON", "-DASCEND_INCLUDE_DIR=" + ascend_include_dir]
         return cmake_args
 
     def build_extension(self, ext):

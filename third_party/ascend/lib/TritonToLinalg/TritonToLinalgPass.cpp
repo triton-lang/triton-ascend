@@ -61,6 +61,7 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -621,6 +622,207 @@ static void eraseDeadRangeCarriers(ModuleOp moduleOp) {
       result.replaceAllUsesWith(newLoop.getResult(newResultIndex++));
     }
     loop.erase();
+  }
+}
+
+// Promote a narrowly recognized insert-slice tiling loop from i32 to index.
+//
+// The NPU auto-subtiling pipeline deliberately accepts only normalized index
+// loops whose slice offset is derived directly from the induction variable.
+// Triton currently materializes the equivalent source pattern as
+//
+//   scf.for %iv : i32
+//     %scaled = arith.muli %iv, %tile : i32
+//     %offset = arith.index_cast %scaled : i32 to index
+//     tensor.insert_slice ... [%offset]
+//
+// Do not make this a generic index_cast(muli) fold: moving integer arithmetic
+// across an index cast changes overflow semantics. This matcher proves a
+// static, non-negative, non-overflowing tiling domain and otherwise leaves the
+// loop untouched.
+struct InsertSliceTilingIndexCandidate {
+  arith::MulIOp scaledIv;
+  SmallVector<arith::IndexCastOp> offsetCasts;
+  int64_t lowerBound;
+  int64_t upperBound;
+  int64_t step;
+  int64_t tileSize;
+};
+
+static std::optional<int64_t> getConstantIntegerValue(Value value) {
+  auto constant = value.getDefiningOp<arith::ConstantOp>();
+  if (!constant)
+    return std::nullopt;
+  auto integer = dyn_cast<IntegerAttr>(constant.getValue());
+  if (!integer)
+    return std::nullopt;
+  return integer.getInt();
+}
+
+static std::optional<InsertSliceTilingIndexCandidate>
+matchInsertSliceTilingLoop(scf::ForOp loop) {
+  auto ivType = dyn_cast<IntegerType>(loop.getInductionVar().getType());
+  if (!ivType || ivType.getWidth() != 32)
+    return std::nullopt;
+
+  auto lowerBound = getConstantIntegerValue(loop.getLowerBound());
+  auto upperBound = getConstantIntegerValue(loop.getUpperBound());
+  auto step = getConstantIntegerValue(loop.getStep());
+  if (!lowerBound || !upperBound || !step || *lowerBound != 0 ||
+      *upperBound <= 0 || *step != 1)
+    return std::nullopt;
+
+  // Changing the IV type in place is safe only when the scaled offset is its
+  // sole use. Other, genuinely i32 loop computations are intentionally not
+  // pulled into this first implementation.
+  if (!loop.getInductionVar().hasOneUse())
+    return std::nullopt;
+  auto scaledIv = dyn_cast<arith::MulIOp>(*loop.getInductionVar().user_begin());
+  if (!scaledIv || !scaledIv.getType().isInteger(32))
+    return std::nullopt;
+
+  Value tileSizeValue;
+  if (scaledIv.getLhs() == loop.getInductionVar())
+    tileSizeValue = scaledIv.getRhs();
+  else if (scaledIv.getRhs() == loop.getInductionVar())
+    tileSizeValue = scaledIv.getLhs();
+  else
+    return std::nullopt;
+
+  auto tileSize = getConstantIntegerValue(tileSizeValue);
+  if (!tileSize || *tileSize <= 0 ||
+      *tileSize > std::numeric_limits<int32_t>::max())
+    return std::nullopt;
+
+  SmallVector<arith::IndexCastOp> offsetCasts;
+  for (Operation *user : scaledIv->getUsers()) {
+    auto offsetCast = dyn_cast<arith::IndexCastOp>(user);
+    if (!offsetCast || !offsetCast.getOut().getType().isIndex() ||
+        offsetCast.getIn() != scaledIv.getResult())
+      return std::nullopt;
+    offsetCasts.push_back(offsetCast);
+  }
+  if (offsetCasts.empty())
+    return std::nullopt;
+
+  // Preserve the original i32 arithmetic semantics. The promotion is valid
+  // only when every scaled IV value is representable as a signed i32.
+  int64_t maxIv = *upperBound - 1;
+  if (maxIv > std::numeric_limits<int32_t>::max() / *tileSize)
+    return std::nullopt;
+
+  SmallVector<tensor::InsertSliceOp> matchingInserts;
+  unsigned nearestInsertCount = 0;
+  loop.walk([&](tensor::InsertSliceOp insertSlice) {
+    if (insertSlice->getParentOfType<scf::ForOp>() != loop)
+      return;
+    ++nearestInsertCount;
+
+    auto sourceType =
+        dyn_cast<RankedTensorType>(insertSlice.getSource().getType());
+    auto destType = dyn_cast<RankedTensorType>(insertSlice.getDest().getType());
+    if (!sourceType || !destType || sourceType.getRank() != destType.getRank() ||
+        !sourceType.hasStaticShape() || !destType.hasStaticShape())
+      return;
+
+    auto staticOffsets = insertSlice.getStaticOffsets();
+    auto staticSizes = insertSlice.getStaticSizes();
+    auto staticStrides = insertSlice.getStaticStrides();
+    auto mixedOffsets = insertSlice.getMixedOffsets();
+    if (staticOffsets.size() != static_cast<size_t>(sourceType.getRank()) ||
+        staticSizes.size() != staticOffsets.size() ||
+        staticStrides.size() != staticOffsets.size() ||
+        mixedOffsets.size() != staticOffsets.size())
+      return;
+
+    std::optional<size_t> tilingDim;
+    for (size_t dim = 0; dim < staticOffsets.size(); ++dim) {
+      if (staticStrides[dim] != 1 ||
+          staticSizes[dim] != sourceType.getDimSize(dim))
+        return;
+
+      Value dynamicOffset =
+          llvm::dyn_cast_if_present<Value>(mixedOffsets[dim]);
+      if (!dynamicOffset) {
+        if (staticOffsets[dim] != 0)
+          return;
+        continue;
+      }
+      auto offsetCast =
+          dyn_cast_or_null<arith::IndexCastOp>(dynamicOffset.getDefiningOp());
+      if (tilingDim || !offsetCast ||
+          offsetCast.getIn() != scaledIv.getResult())
+        return;
+      tilingDim = dim;
+    }
+    if (!tilingDim)
+      return;
+
+    int64_t dim = static_cast<int64_t>(*tilingDim);
+    if (sourceType.getDimSize(dim) != *tileSize ||
+        destType.getDimSize(dim) != *upperBound * *tileSize)
+      return;
+
+    auto destArg = dyn_cast<BlockArgument>(insertSlice.getDest());
+    if (!destArg || destArg.getOwner() != loop.getBody() ||
+        destArg.getArgNumber() == 0)
+      return;
+    unsigned iterArgNumber = destArg.getArgNumber() - 1;
+    if (iterArgNumber >= loop.getYieldedValues().size() ||
+        loop.getYieldedValues()[iterArgNumber] != insertSlice.getResult())
+      return;
+
+    matchingInserts.push_back(insertSlice);
+  });
+
+  // Requiring exactly one matching insert keeps the rewrite deterministic and
+  // avoids changing loops that combine several independently tiled results.
+  if (nearestInsertCount != 1 || matchingInserts.size() != 1)
+    return std::nullopt;
+
+  return InsertSliceTilingIndexCandidate{scaledIv, std::move(offsetCasts),
+                                         *lowerBound, *upperBound, *step,
+                                         *tileSize};
+}
+
+static void promoteInsertSliceTilingLoopsToIndex(ModuleOp moduleOp) {
+  SmallVector<scf::ForOp> loops;
+  moduleOp.walk([&](scf::ForOp loop) { loops.push_back(loop); });
+
+  for (scf::ForOp loop : loops) {
+    if (!loop || loop->getParentOp() == nullptr)
+      continue;
+    auto candidate = matchInsertSliceTilingLoop(loop);
+    if (!candidate)
+      continue;
+
+    IRRewriter rewriter(loop.getContext());
+    Location loopLoc = loop.getLoc();
+    rewriter.setInsertionPoint(loop);
+    Value newLowerBound = rewriter.create<arith::ConstantIndexOp>(
+        loopLoc, candidate->lowerBound);
+    Value newUpperBound = rewriter.create<arith::ConstantIndexOp>(
+        loopLoc, candidate->upperBound);
+    Value newStep =
+        rewriter.create<arith::ConstantIndexOp>(loopLoc, candidate->step);
+
+    rewriter.modifyOpInPlace(loop, [&]() {
+      loop.getLowerBoundMutable().assign(newLowerBound);
+      loop.getUpperBoundMutable().assign(newUpperBound);
+      loop.getStepMutable().assign(newStep);
+      loop.getInductionVar().setType(rewriter.getIndexType());
+    });
+
+    rewriter.setInsertionPoint(candidate->scaledIv);
+    Value tileSize = rewriter.create<arith::ConstantIndexOp>(
+        candidate->scaledIv.getLoc(), candidate->tileSize);
+    Value scaledIv = rewriter.create<arith::MulIOp>(
+        candidate->scaledIv.getLoc(), loop.getInductionVar(), tileSize);
+    for (arith::IndexCastOp offsetCast : candidate->offsetCasts) {
+      rewriter.replaceAllUsesWith(offsetCast.getOut(), scaledIv);
+      rewriter.eraseOp(offsetCast);
+    }
+    rewriter.eraseOp(candidate->scaledIv);
   }
 }
 
@@ -1948,6 +2150,11 @@ void TritonToLinalgPass::runOnOperation() {
   });
 
   rewriteDevicePrintOffsets(moduleOp);
+
+  // Keep the transformation local to the 910_95/950 handoff where automatic
+  // sub-block tiling consumes this canonical loop/offset form.
+  if (compileOn91095Flag)
+    promoteInsertSliceTilingLoopsToIndex(moduleOp);
 
   // 9. Clean up dead code and simplify IR.
   PassManager pm(&getContext(), moduleOp.getOperationName());

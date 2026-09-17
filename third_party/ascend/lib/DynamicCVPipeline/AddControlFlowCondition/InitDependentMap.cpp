@@ -481,15 +481,25 @@ static void computeProducerBufferCount(ControlFlowConditionInfo *info,
   }
 }
 
-// Build if block DAG from crossCoreDependentMap
-// For consumer: its definingOp is inside an if block
-static int buildIfBlockCrossCoreDAG(ModuleOp module,
-                                    ControlFlowConditionInfo *info) {
-  // Traverse crossCoreDependentMap to build DAG
+// Add an edge to ifBlockDAG if it is not already present
+static void addIfBlockEdge(ControlFlowConditionInfo *info, scf::IfOp producerIf,
+                           scf::IfOp consumerIf, IfBlockDepKind kind) {
+  auto &edges = info->ifBlockDAG[producerIf];
+  bool seen =
+      llvm::any_of(edges, [&](const std::pair<scf::IfOp, IfBlockDepKind> &e) {
+        return e.first == consumerIf;
+      });
+  if (!seen) {
+    edges.push_back({consumerIf, kind});
+  }
+}
+
+// Build if block DAG from crossCoreDependentMap and intraCoreDependentMap
+static int buildIfBlockDAG(ModuleOp module, ControlFlowConditionInfo *info) {
+  // Step 1: Traverse crossCoreDependentMap to add cross-core edges.
   for (auto &entry : info->crossCoreDependentMap) {
     Operation *consumerOp = entry.first;
 
-    // Step 1: Find consumer IfOp
     // Consumer op is inside an if block
     scf::IfOp consumerIf = findIfOpContainingOp(consumerOp);
     if (!consumerIf) {
@@ -497,7 +507,7 @@ static int buildIfBlockCrossCoreDAG(ModuleOp module,
       return -1;
     }
 
-    // Step 2: Find producer IfOps (each inner list is one dependency group)
+    // Each inner list is one dependency group
     for (SmallVector<Operation *> &producers : entry.second) {
       for (Operation *producerOp : producers) {
         scf::IfOp producerIf = findIfOpContainingOp(producerOp);
@@ -513,35 +523,58 @@ static int buildIfBlockCrossCoreDAG(ModuleOp module,
           return -1;
         }
 
-        info->ifBlockCrossCoreDAG[producerIf].push_back(consumerIf);
+        addIfBlockEdge(info, producerIf, consumerIf, IfBlockDepKind::CrossCore);
       }
     }
   }
 
-  // Deduplicate edges
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
-    llvm::SmallVector<scf::IfOp> uniqueConsumers;
-    for (scf::IfOp consumer : entry.second) {
-      if (!llvm::is_contained(uniqueConsumers, consumer)) {
-        uniqueConsumers.push_back(consumer);
+  // Step 2: Traverse intraCoreDependentMap to add intra-core edges.
+  for (auto &loopEntry : info->intraCoreDependentMap) {
+    for (auto &consumerProducers : loopEntry.second) {
+      Operation *consumerOp = consumerProducers.first;
+      scf::IfOp consumerIf = findIfOpContainingOp(consumerOp);
+      if (!consumerIf) {
+        LDBG("Intra consumer op not in any ssbuffer.if block: " << *consumerOp);
+        return -1;
+      }
+
+      for (Operation *producerOp : consumerProducers.second) {
+        scf::IfOp producerIf = findIfOpContainingOp(producerOp);
+        if (!producerIf) {
+          LDBG("Intra producer op not in any ssbuffer.if block: "
+               << *producerOp);
+          return -1;
+        }
+
+        if (producerIf == consumerIf) {
+          LDBG("Intra producer and consumer are in the same if block, this "
+               "is invalid: "
+               << *producerIf);
+          return -1;
+        }
+
+        addIfBlockEdge(info, producerIf, consumerIf, IfBlockDepKind::IntraCore);
       }
     }
-    entry.second = uniqueConsumers;
   }
+
   return 0;
 }
 
-// Detect cross-core cycle in the if-block DAG via DFS; all edges are cross-core
-// (CUBE<->VECTOR), so any cycle is a deadlock-prone bidirectional dependency.
+// Detect cycle in the if-block DAG via DFS over all edges.
 enum class DfsState : uint8_t { Unvisited, Visiting, Done };
 
-static bool dfsCycle(scf::IfOp node,
-                     llvm::DenseMap<scf::IfOp, SmallVector<scf::IfOp>> &dag,
-                     llvm::DenseMap<scf::IfOp, DfsState> &state) {
+static bool
+dfsCycle(scf::IfOp node,
+         llvm::DenseMap<scf::IfOp,
+                        llvm::SmallVector<std::pair<scf::IfOp, IfBlockDepKind>>>
+             &dag,
+         llvm::DenseMap<scf::IfOp, DfsState> &state) {
   state[node] = DfsState::Visiting;
   auto it = dag.find(node);
   if (it != dag.end()) {
-    for (scf::IfOp neighbor : it->second) {
+    for (auto &edge : it->second) {
+      scf::IfOp neighbor = edge.first;
       auto s = state.lookup(neighbor);
       if (s == DfsState::Visiting)
         return true;
@@ -553,20 +586,20 @@ static bool dfsCycle(scf::IfOp node,
   return false;
 }
 
-static int detectCrossCoreCycle(ControlFlowConditionInfo *info) {
+static int detectCycle(ControlFlowConditionInfo *info) {
   // Collect all nodes in the DAG (both producers and consumers)
   llvm::DenseMap<scf::IfOp, DfsState> state;
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
+  for (auto &entry : info->ifBlockDAG) {
     state.try_emplace(entry.first, DfsState::Unvisited);
-    for (scf::IfOp consumer : entry.second) {
-      state.try_emplace(consumer, DfsState::Unvisited);
+    for (auto &edge : entry.second) {
+      state.try_emplace(edge.first, DfsState::Unvisited);
     }
   }
 
   for (auto &entry : state) {
     if (entry.second == DfsState::Unvisited) {
-      if (dfsCycle(entry.first, info->ifBlockCrossCoreDAG, state)) {
-        LDBG("Cross-core cycle detected in DAG");
+      if (dfsCycle(entry.first, info->ifBlockDAG, state)) {
+        LDBG("Cycle detected in DAG");
         return -1;
       }
     }
@@ -576,74 +609,68 @@ static int detectCrossCoreCycle(ControlFlowConditionInfo *info) {
 }
 
 // DFS helper function to find nodes at target distance from start node
-static void dfsFindNodesAtDistance(
-    scf::IfOp currentNode, int currentDistance, int targetDistance,
-    llvm::DenseSet<scf::IfOp> &visited,
-    llvm::SmallVector<scf::IfOp> &resultNodes,
-    llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> &dag) {
-  // Mark current node as visited
-  visited.insert(currentNode);
-
-  // If we've reached target distance, add to result and stop recursion
-  if (currentDistance == targetDistance) {
-    resultNodes.push_back(currentNode);
-    return;
-  }
-
-  // Get consumers of current node
-  auto it = dag.find(currentNode);
-  if (it == dag.end() || it->second.empty()) {
-    return;
-  }
-  auto &consumers = it->second;
-
-  // Recursively visit all consumers
-  for (scf::IfOp consumer : consumers) {
-    if (!visited.contains(consumer)) {
-      dfsFindNodesAtDistance(consumer, currentDistance + 1, targetDistance,
-                             visited, resultNodes, dag);
-    }
-  }
-}
-
-// Collect flowOpt if-block pairs from the DAG: find start nodes (in-degree 0),
-// then DFS for nodes at distance 2.
 static int collectFlowOptIfOpPairs(ModuleOp module,
                                    ControlFlowConditionInfo *info) {
-  // Step 1: Calculate in-degree for each node
+  // Step 1: Collect every node appearing in the DAG (key or value).
+  llvm::DenseSet<scf::IfOp> allNodes;
+  for (auto &entry : info->ifBlockDAG) {
+    allNodes.insert(entry.first);
+    for (auto &edge : entry.second) {
+      allNodes.insert(edge.first);
+    }
+  }
+
+  // Step 2: Compute in-degree (every edge, cross or intra, contributes 1).
   llvm::DenseMap<scf::IfOp, int> inDegree;
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
-    for (scf::IfOp consumer : entry.second) {
-      inDegree[consumer]++;
+  for (auto &entry : info->ifBlockDAG) {
+    for (auto &edge : entry.second) {
+      inDegree[edge.first]++;
     }
   }
 
-  // Step 2: Find all start nodes (in-degree = 0)
+  // Step 3: Identify start nodes (in-degree 0).
   llvm::SmallVector<scf::IfOp> startNodes;
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
-    if (inDegree.lookup(entry.first) == 0) {
-      startNodes.push_back(entry.first);
-      LDBG("Found start node (in-degree = 0)");
+  for (auto node : allNodes) {
+    if (inDegree.lookup(node) == 0) {
+      startNodes.push_back(node);
     }
   }
 
-  LDBG("Number of start nodes: " << startNodes.size());
+  LDBG("Number of start nodes (depth=1): " << startNodes.size());
 
-  // Step 3: For each start node, use DFS to find nodes at distance 2
-  constexpr int targetDistance = 2;
-
+  // Step 4: For each start node, run a per-source DFS to compute each
+  // reachable node's depth (max over all paths from this start). Every node
+  // with depth = 3 becomes a flowOpt pair keyed on this start.
+  constexpr int targetDepth = 3;
   for (scf::IfOp start : startNodes) {
-    // DFS data structures
-    llvm::DenseSet<scf::IfOp> visited;
-    llvm::SmallVector<scf::IfOp> thirdNodes;
+    llvm::DenseMap<scf::IfOp, int> depth;
+    llvm::SmallVector<std::pair<scf::IfOp, int>> worklist;
+    worklist.push_back({start, 1});
+    depth[start] = 1;
 
-    // Start DFS from start node at distance 0
-    dfsFindNodesAtDistance(start, 0, targetDistance, visited, thirdNodes,
-                           info->ifBlockCrossCoreDAG);
+    while (!worklist.empty()) {
+      auto [node, nodeDepth] = worklist.pop_back_val();
+      auto it = info->ifBlockDAG.find(node);
+      if (it == info->ifBlockDAG.end())
+        continue;
+      for (auto &edge : it->second) {
+        scf::IfOp neighbor = edge.first;
+        int step = (edge.second == IfBlockDepKind::CrossCore) ? 1 : 0;
+        int candidate = nodeDepth + step;
+        auto inserted = depth.try_emplace(neighbor, candidate);
+        if (inserted.second) {
+          worklist.push_back({neighbor, candidate});
+        } else if (candidate > inserted.first->second) {
+          inserted.first->second = candidate;
+          worklist.push_back({neighbor, candidate});
+        }
+      }
+    }
 
-    // Record all third nodes found
-    for (scf::IfOp thirdNode : thirdNodes) {
-      info->flowOptIfOpPairs[thirdNode] = start;
+    for (auto &entry : depth) {
+      if (entry.second == targetDepth) {
+        info->flowOptIfOpPairs[entry.first] = start;
+      }
     }
   }
 
@@ -654,12 +681,15 @@ static int collectFlowOptIfOpPairs(ModuleOp module,
 
 // Print DAG and flowOpt pairs for verification
 static void printDAGInfo(ControlFlowConditionInfo *info) {
-  LDBG("ifBlockCrossCoreDAG contents:");
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
+  LDBG("ifBlockDAG contents:");
+  for (auto &entry : info->ifBlockDAG) {
     scf::IfOp producer = entry.first;
     LDBG("  Producer IfOp has " << entry.second.size() << " consumers");
-    for (scf::IfOp consumer : entry.second) {
-      LDBG("    -> Consumer IfOp");
+    for (auto &edge : entry.second) {
+      LDBG("    -> Consumer IfOp (kind: "
+           << (edge.second == IfBlockDepKind::CrossCore ? "CrossCore"
+                                                        : "IntraCore")
+           << ")");
     }
   }
 
@@ -701,15 +731,15 @@ void InitDependentMapPass::runOnOperation() {
   computeProducerBufferCount(info, module);
 
   // Step 4: Build if block DAG from crossCoreDependentMap (always)
-  if (buildIfBlockCrossCoreDAG(module, info) != 0) {
-    LDBG("buildIfBlockCrossCoreDAG failed!");
+  if (buildIfBlockDAG(module, info) != 0) {
+    LDBG("buildIfBlockDAG failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 5: Detect cross-core cycle in DAG
-  if (detectCrossCoreCycle(info) != 0) {
-    LDBG("Cross-core cycle detected!");
+  // Step 5: Detect cycle in DAG
+  if (detectCycle(info) != 0) {
+    LDBG("Cycle detected!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return;
   }

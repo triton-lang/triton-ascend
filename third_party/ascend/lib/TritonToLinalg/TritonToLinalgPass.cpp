@@ -59,6 +59,7 @@
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 #include "mlir/Dialect/Affine/IR/AffineOps.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -740,6 +741,38 @@ public:
   }
 };
 
+// Collect the ops in a scan body that actually contribute to the yielded
+// result: compute the backward slice from the terminator operands, then drop
+// pure type-cast ops. Mirrors ReductionOpBaseConverter::getRealReductionOps so
+// that auxiliary ops (e.g. the overflow asserts injected by TRITON_DEBUG)
+// never feed the yielded result and are ignored here as well.
+static llvm::SmallVector<Operation *> getRealScanBodyOps(triton::ScanOp op) {
+  Block *body = op.getBody();
+  Operation *terminator = body->getTerminator();
+
+  llvm::DenseSet<Operation *> liveOps;
+  llvm::SmallVector<Value> worklist(terminator->getOperands());
+  while (!worklist.empty()) {
+    Value val = worklist.pop_back_val();
+    if (auto *defOp = val.getDefiningOp()) {
+      if (defOp->getBlock() == body && liveOps.insert(defOp).second) {
+        for (auto operand : defOp->getOperands())
+          worklist.push_back(operand);
+      }
+    }
+  }
+
+  llvm::SmallVector<Operation *> realOps;
+  for (Operation &bodyOp : body->without_terminator()) {
+    if (!liveOps.contains(&bodyOp))
+      continue;
+    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
+      continue;
+    realOps.push_back(&bodyOp);
+  }
+  return realOps;
+}
+
 // A tt.scan that is (1) a plain cumsum (combine body is a single add, matching
 // ScanConverter's triton_cumsum selection) and (2) collapses to a 1-D scan
 // after backend lowering, i.e. every dim except the scan axis has extent 1
@@ -747,17 +780,11 @@ public:
 // (Sklansky) cumsum template; cumprod / generic scans and multi-dim cumsum stay
 // on SIMD.
 static bool isSimt1DCumsum(triton::ScanOp op) {
-  // (1) Must be a single-add combine body (skip pure type-cast ops, mirroring
-  // ReductionOpBaseConverter::getRealReductionOps).
-  Operation *reduceOp = nullptr;
-  for (Operation &bodyOp : op.getBody()->without_terminator()) {
-    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
-      continue;
-    if (reduceOp)
-      return false; // more than one real op -> not a simple cumsum
-    reduceOp = &bodyOp;
-  }
-  if (!reduceOp || !isa<arith::AddFOp, arith::AddIOp>(reduceOp))
+  // (1) Must be a single-add combine body (only ops that feed the yielded
+  // result count, mirroring getRealReductionOps).
+  llvm::SmallVector<Operation *> realOps = getRealScanBodyOps(op);
+  if (realOps.size() != 1 ||
+      !isa<arith::AddFOp, arith::AddIOp>(realOps.front()))
     return false;
 
   // (2) Must be the 1-D scenario: all non-scan dims are unit-sized.
@@ -1181,13 +1208,13 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
 
 void TritonToLinalgPass::addDynamicLegal(
     ConversionTarget &target, TritonTypeConverter &tritonTypeConverter) {
-  target.addLegalDialect<func::FuncDialect, arith::ArithDialect,
-                         math::MathDialect, linalg::LinalgDialect,
-                         affine::AffineDialect, scf::SCFDialect,
-                         cf::ControlFlowDialect, tensor::TensorDialect,
-                         LLVM::LLVMDialect, bufferization::BufferizationDialect,
-                         memref::MemRefDialect, annotation::AnnotationDialect,
-                         hivm::HIVMDialect, hfusion::HFusionDialect>();
+  target.addLegalDialect<
+      func::FuncDialect, arith::ArithDialect, math::MathDialect,
+      linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+      cf::ControlFlowDialect, tensor::TensorDialect, LLVM::LLVMDialect,
+      bufferization::BufferizationDialect, memref::MemRefDialect,
+      annotation::AnnotationDialect, hivm::HIVMDialect, hfusion::HFusionDialect,
+      scope::ScopeDialect>();
 
   // add legal dialect on condition
   target.addLegalOp<ModuleOp>();
@@ -1502,12 +1529,13 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
 }
 
 void TritonToLinalgPass::getDependentDialects(DialectRegistry &registry) const {
-  registry.insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
-                  linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
-                  tensor::TensorDialect, bufferization::BufferizationDialect,
-                  memref::MemRefDialect, hfusion::HFusionDialect,
-                  hivm::HIVMDialect, annotation::AnnotationDialect,
-                  LLVM::LLVMDialect, triton::ascend::TritonAscendDialect>();
+  registry
+      .insert<func::FuncDialect, arith::ArithDialect, math::MathDialect,
+              linalg::LinalgDialect, affine::AffineDialect, scf::SCFDialect,
+              tensor::TensorDialect, bufferization::BufferizationDialect,
+              memref::MemRefDialect, hfusion::HFusionDialect, hivm::HIVMDialect,
+              annotation::AnnotationDialect, LLVM::LLVMDialect,
+              triton::ascend::TritonAscendDialect, scope::ScopeDialect>();
 }
 
 LogicalResult

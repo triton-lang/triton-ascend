@@ -384,10 +384,9 @@ def _run_ttir_to_npubin(
     )
 
     # Keep this argv matrix independent of the host torch_npu configuration
-    # while checking that Pure-SIMT passes the explicit option to the resolver.
-    def get_simt_stack_limit(user_stack_limit):
-        assert user_stack_limit == simt_stack_limit
-        return resolved_simt_stack_limit if user_stack_limit is None else user_stack_limit
+    # while checking that Pure-SIMT uses the backend-resolved stack limit.
+    def get_simt_stack_limit():
+        return resolved_simt_stack_limit
 
     monkeypatch.setattr(compiler, "get_simt_stack_limit", get_simt_stack_limit)
     monkeypatch.setattr(compiler.subprocess, "run", run_bisheng)
@@ -407,6 +406,18 @@ def _run_ttir_to_npubin(
     assert result == b"npubin"
     assert len(commands) == 1
     return events, commands[0]
+
+
+def test_ttir_to_npubin_ignores_user_simt_stack_limit(compiler_module, monkeypatch):
+    _events, command = _run_ttir_to_npubin(
+        compiler_module,
+        monkeypatch,
+        simt_stack_limit=8192,
+        resolved_simt_stack_limit=2048,
+    )
+
+    assert "--simt-stack-limit=2048" in command
+    assert "--simt-stack-limit=8192" not in command
 
 
 def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op):

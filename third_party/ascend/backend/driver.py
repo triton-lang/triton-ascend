@@ -51,6 +51,7 @@ import triton.backends.ascend.utils as _ascend_utils
 
 def _get_cache_lock_path(cache):
     lock_path = getattr(cache, "lock_path", None)
+    lock_len = 10
     if lock_path is not None:
         return lock_path
     file_cache_manager = getattr(cache, "_file_cache_manager", None)

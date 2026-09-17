@@ -1818,6 +1818,27 @@ hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap) {
   return false;
 }
 
+// Whether a main loop in `region` has a memref-typed value crossing a block
+// boundary, by the same criterion addInnerMultiBuffer applies to VECTOR
+// scopes. Check-only: nothing is transformed.
+static bool hasInterBlockMemrefDep(Region &region) {
+  SmallVector<Operation *> mainLoops;
+  if (collectMainLoopsRecursively(region, mainLoops) <= 0)
+    return false;
+  for (Operation *loopOp : mainLoops) {
+    DenseMap<Value, InnerBlockInfo> blocks;
+    DenseMap<Value, SmallVector<Value>> depValueMap;
+    SmallVector<Operation *> allOps;
+    bool i1Found = false;
+    if (collectInnerBlockInfo(MainLoop(loopOp), blocks, depValueMap, allOps,
+                              i1Found) != 0)
+      continue;
+    if (hasMemrefDepValue(depValueMap))
+      return true;
+  }
+  return false;
+}
+
 // Build the before-region of the new whileOp
 static void buildBeforeRegion(scf::WhileOp oldWhile, OpBuilder &bb, Location bl,
                               ValueRange iterArgs) {
@@ -2188,6 +2209,16 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
     // Step 2: Check if core type is VECTOR
     hivm::TCoreType coreType = coreTypeAttr.getTcoretype();
     if (coreType != hivm::TCoreType::VECTOR) {
+      // A CUBE scope is not multi-buffered here, but its main loop still goes
+      // through CloneOps and the stage split, where an inter-block memref
+      // dependency is just as unsupported, so check it before skipping.
+      if (coreType == hivm::TCoreType::CUBE &&
+          hasInterBlockMemrefDep(scope.getBodyRegion())) {
+        LDBG("ERROR: Memref type dependent values found in CUBE scope, "
+             "fallback");
+        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+        return WalkResult::interrupt();
+      }
       LDBG("Not vector scope");
       return WalkResult::advance();
     }

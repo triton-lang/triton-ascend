@@ -286,6 +286,18 @@ static LogicalResult validateClonedSyncOpsErased(Block *bodyBlock) {
            << op.getName());
       return failure();
     }
+    // Look inside as well
+    WalkResult nested = op.walk([](Operation *inner) {
+      return isa<SyncBlockWaitOp>(inner) || isa<SyncBlockSetOp>(inner)
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    if (nested.wasInterrupted()) {
+      LDBG("[ERROR]: Cloned op still holds a sync op that should have been "
+           "erased: "
+           << op.getName());
+      return failure();
+    }
   }
 
   return success();

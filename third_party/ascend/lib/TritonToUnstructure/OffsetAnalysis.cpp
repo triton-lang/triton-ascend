@@ -580,6 +580,8 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
         recordOpaqueTensorPointer(operand, offsetMap);
       } else {
         offsetMap[operand] = PtrOffsetInfo();
+        if (auto tensorType = dyn_cast<RankedTensorType>(operand.getType()))
+          offsetMap[operand].setUnstructured(tensorType.getRank());
       }
     } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
       parseLoopRegionIterArg(loopOp, loc, rewriter, offsetMap, blockArgument);
@@ -738,6 +740,8 @@ void parseTritonOp(Operation *tritonOp, const Location &loc,
     parseBroadcast(broadcastOp, loc, rewriter, offsetMap);
   } else if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(tritonOp)) {
     parseExpandDims(expandDimsOp, loc, rewriter, offsetMap);
+  } else if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(tritonOp)) {
+    parseReshape(reshapeOp, loc, rewriter, offsetMap);
   } else if (auto clampFOp = dyn_cast<triton::ClampFOp>(tritonOp)) {
     parseClampF(clampFOp, loc, rewriter, offsetMap);
   }
@@ -1327,6 +1331,47 @@ void parseExpandDims(triton::ExpandDimsOp op, const Location &loc,
       dstStructured[i] = srcStructured[j];
       j++;
     }
+}
+
+void parseReshape(triton::ReshapeOp op, const Location &loc,
+                  RewriterBase &rewriter,
+                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  auto dst = op.getResult();
+  auto dstType = cast<RankedTensorType>(dst.getType());
+  // Numeric reshapes retain the existing conservative classification.
+  if (!isa<triton::PointerType>(dstType.getElementType()))
+    return;
+
+  parse(op.getSrc(), op.getLoc(), rewriter, offsetMap);
+  PtrOffsetInfo info = offsetMap.at(op.getSrc());
+  if (!info.getPtr() || !isScalarPointer(info.getPtr()) ||
+      (op.getAllowReorder() && dstType.getEncoding())) {
+    // Without a common scalar base (or a fixed lane mapping), keep the
+    // actual result pointers. Never choose one lane's base for every lane.
+    recordOpaqueTensorPointer(dst, offsetMap);
+    return;
+  }
+
+  RewriterBase::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(op);
+  if (op.getAllowReorder()) {
+    // Choose the order-preserving realization permitted by allow_reorder.
+    // Remaining pointer users and the derived offset must share this mapping.
+    rewriter.modifyOpInPlace(op, [&] { op->removeAttr("allow_reorder"); });
+  }
+  auto offsetType = cast<RankedTensorType>(info.getOffset().getType());
+  auto reshapedOffsetType = RankedTensorType::get(
+      dstType.getShape(), offsetType.getElementType(), dstType.getEncoding());
+  Value offset = rewriter.create<triton::ReshapeOp>(
+      op.getLoc(), reshapedOffsetType, info.getOffset(),
+      /*allowReorder=*/false, op.getEfficientLayout());
+  info.setOffset(offset);
+  // Reshaping complete offsets preserves addresses, but the old per-axis
+  // structure does not describe the new shape. Scalar-like state must also
+  // be cleared: setUnstructured alone does not force the lane-wise path.
+  info.setUnstructured(dstType.getRank());
+  info.setScalarLike(false);
+  offsetMap[dst] = info;
 }
 
 void parseClampF(triton::ClampFOp op, const Location &loc,

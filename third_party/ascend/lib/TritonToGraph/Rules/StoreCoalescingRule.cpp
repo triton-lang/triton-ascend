@@ -722,22 +722,24 @@ private:
 
 class StoreCoalescingRule final : public GraphOptimizationRule {
 public:
-  explicit StoreCoalescingRule(unsigned ubCapacityBytes)
-      : ubCapacityBytes(ubCapacityBytes) {}
+  StoreCoalescingRule(unsigned ubCapacityBytes, bool enabledForCompileMode)
+      : ubCapacityBytes(ubCapacityBytes),
+        enabledForCompileMode(enabledForCompileMode) {}
 
   GraphOptimizationRuleId getId() const override {
     return GraphOptimizationRuleId::StoreCoalescing;
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return ubCapacityBytes == 0 ? AnalysisRequirement::None
-                                : AnalysisRequirement::EntryArgPointerAlias;
+    return !enabledForCompileMode || ubCapacityBytes == 0
+               ? AnalysisRequirement::None
+               : AnalysisRequirement::EntryArgPointerAlias;
   }
 
   LogicalResult findCandidates(
       GraphOptimizationContext &context,
       SmallVectorImpl<std::unique_ptr<RewritePlan>> &plans) override {
-    if (ubCapacityBytes == 0)
+    if (!enabledForCompileMode || ubCapacityBytes == 0)
       return success();
 
     const EntryArgPointerAliasAnalysis *entryAliases =
@@ -760,11 +762,14 @@ public:
 
 private:
   unsigned ubCapacityBytes;
+  bool enabledForCompileMode;
 };
 
 } // namespace
 
 std::unique_ptr<GraphOptimizationRule>
-cfg::createStoreCoalescingRule(unsigned ubCapacityBytes) {
-  return std::make_unique<StoreCoalescingRule>(ubCapacityBytes);
+cfg::createStoreCoalescingRule(unsigned ubCapacityBytes,
+                               const StoreCoalescingRuleOptions &options) {
+  return std::make_unique<StoreCoalescingRule>(ubCapacityBytes,
+                                               options.enabledForCompileMode);
 }

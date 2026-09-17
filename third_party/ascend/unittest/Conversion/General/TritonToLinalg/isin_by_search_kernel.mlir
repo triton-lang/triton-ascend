@@ -1,8 +1,15 @@
 // RUN: triton-opt --discrete-mask-access-conversion --triton-to-unstructure --triton-to-linalg --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func @isin_by_search_kernel
-// CHECK: %[[FOR_VAR:.*]]:5 = scf.for
-// CHECK-SAME: iter_args({{.*}}) -> (tensor<1xi1>, tensor<1xi1>, index, index, index) : i32
+// The one-element loop mask controls the load itself, including in SIMD mode.
+// CHECK: %[[FOR_VAR:.*]]:4 = scf.for
+// CHECK-SAME: iter_args({{.*}}, %[[MASK:.*]] = %{{.*}}) -> (tensor<1xi1>, tensor<1xi32>, tensor<1xi32>, tensor<1xi1>) : i32
+// CHECK: %[[PREDICATE:.*]] = tensor.extract %[[MASK]][{{.*}}] {{.*}} : tensor<1xi1>
+// CHECK: %[[VALUE:.*]] = scf.if %[[PREDICATE]] -> (i16) {
+// CHECK-NEXT: %[[LOAD:.*]] = memref.load
+// CHECK-NEXT: scf.yield %[[LOAD]] : i16
+// CHECK-NEXT: } else {
+// CHECK-NEXT: scf.yield %{{.*}} : i16
 module {
   tt.func public @isin_by_search_kernel(
     %arg0: !tt.ptr<i64> {tt.divisibility = 16 : i32},

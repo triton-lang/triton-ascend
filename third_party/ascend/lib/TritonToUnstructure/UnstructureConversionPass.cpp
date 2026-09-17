@@ -745,6 +745,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto ptrType = resolvePtrTensorType(ptr);
   auto mixCompileDiscreteMask =
       op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
+  bool runtimeLoopMask = op->hasAttr(ConverterUtils::runtimeLoopMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
     return failure();
@@ -752,6 +753,67 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     return op.emitError() << "PtrOffsetInfo should be computed\n" << ptr;
 
   auto ptrOffsetInfo = offsetMap.at(ptr);
+
+  // Handle these accesses before any speculative fallback IR is created.
+  // A failed match must leave the original operation intact for the final
+  // unsupported-mask diagnostic, without repeatedly inserting dead helpers.
+  if (runtimeLoopMask) {
+    if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
+                  std::is_same_v<MemAccOpTy, triton::StoreOp>) {
+      // A one-element tensor needs only a scalar predicate, including in SIMD
+      // mode. Use explicit control flow: the legacy scalar masked-load
+      // converter otherwise loads unconditionally and selects afterwards.
+      if (ptrType.getNumElements() == 1 &&
+          getResultElementType(ptrType).isIntOrFloat() &&
+          canUseIndirectFastPath(ptrOffsetInfo.getPtr(),
+                                 ptrOffsetInfo.getOffset())) {
+        SmallVector<OpFoldResult> indices(ptrType.getRank(),
+                                          rewriter.getIndexAttr(0));
+        Value offset =
+            createExtractOp(loc, ptrOffsetInfo.getOffset(), rewriter, indices);
+        Value base = ptrOffsetInfo.getPtr();
+        Value scalarPtr = rewriter.create<triton::AddPtrOp>(loc, base.getType(),
+                                                            base, offset);
+        Value mask = createExtractOp(loc, op.getMask(), rewriter, indices);
+        if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+          Value other = createExtractOp(loc, op.getOther(), rewriter, indices);
+          if (!other)
+            other = rewriter.create<arith::ConstantOp>(
+                loc, rewriter.getZeroAttr(getResultElementType(ptrType)));
+          auto guardedLoad = rewriter.create<scf::IfOp>(
+              loc, mask,
+              [&](OpBuilder &b, Location loc) {
+                auto load =
+                    b.create<triton::LoadOp>(loc, scalarPtr, op.getCache(),
+                                             op.getEvict(), op.getIsVolatile());
+                b.create<scf::YieldOp>(loc, load.getResult());
+              },
+              [&](OpBuilder &b, Location loc) {
+                b.create<scf::YieldOp>(loc, other);
+              });
+          rewriter.replaceOpWithNewOp<triton::SplatOp>(
+              op, op.getType(), guardedLoad.getResult(0));
+        } else {
+          Value value = createExtractOp(loc, op.getValue(), rewriter, indices);
+          rewriter.create<scf::IfOp>(
+              loc, mask, [&](OpBuilder &b, Location loc) {
+                b.create<triton::StoreOp>(loc, scalarPtr, value, op.getCache(),
+                                          op.getEvict());
+                b.create<scf::YieldOp>(loc);
+              });
+          rewriter.eraseOp(op);
+        }
+        return success();
+      }
+    }
+    if (compileOn91095Flag &&
+        triton::ascend::isSimtTemplateMode(unstructureCompileMode))
+      return tryRewriteIndirectFastPath(op, loc, ptrOffsetInfo.getPtr(),
+                                        ptrOffsetInfo.getOffset(),
+                                        ptrType.getShape(), rewriter);
+    return rewriter.notifyMatchFailure(
+        op, "loop mask requires a supported masked indirect access");
+  }
 
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
@@ -1213,6 +1275,20 @@ void TritonToUnstructurePass::runOnOperation() {
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply Patterns");
     signalPassFailure();
+    return;
+  }
+
+  bool unsupportedLoopMask = false;
+  moduleOp.walk([&](Operation *op) {
+    if (op->hasAttr(ConverterUtils::runtimeLoopMaskAttrName)) {
+      op->emitError("cannot lower this loop-carried mask with a masked "
+                    "indirect access for the selected target and compile mode");
+      unsupportedLoopMask = true;
+    }
+  });
+  if (unsupportedLoopMask) {
+    signalPassFailure();
+    return;
   }
 
   // The offset-boundary marker is only an intra-pass analysis handoff.  Do

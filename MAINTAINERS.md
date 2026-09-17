@@ -3,6 +3,7 @@
 | Name | ID | Join Date |
 |---|---|---|
 | Kaixin Yang | kaixin1976 | 2025-09-27 |
+| Yichen Liu | Skyminers | 2026-09-17 |
 | Ziqi Hong | hongziqi | 2026-03-26 |
 | Tianyao Wu | WuTYSFG | 2026-05-11 |
 | Yihan Zhou | KanuaK | 2026-05-11 |
@@ -19,3 +20,4 @@
 | Kaipeng Xing | kpxing | 2025-09-27 |
 | Peiji Chen | zackc6 | 2026-05-07 |
 | Ingu Kung | kig9981 | 2026-05-08 |
+| Zhao Jingkai | elstainniles | 2026-09-17 |

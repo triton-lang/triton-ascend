@@ -234,8 +234,7 @@ def _finalize_program_launch_policy(metadata, opt):
         ptsm_cap_authorized = True
 
     if opt.is_pure_simt:
-        auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
-                                 and not row_coalescing_applied)
+        auto_blockify_enabled = _is_auto_map_parallel_blocks_enabled() and not row_coalescing_applied
     else:
         auto_blockify_enabled = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
                                  and not ptsm_cap_authorized)
@@ -1465,8 +1464,7 @@ def ttir_to_npubin(mod, metadata, opt):
             if bisheng_options is not None:
                 _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
 
-            if (_is_auto_map_parallel_blocks_enabled() and not metadata.get("has_auto_blockify_blacklist_op", False)
-                    and not metadata.get("row_coalescing_applied", False)):
+            if _is_auto_map_parallel_blocks_enabled() and not metadata.get("row_coalescing_applied", False):
                 _compile_option_list += ["--enable-auto-blockify-loop"]
                 if opt.superblock_factor > 1:
                     _compile_option_list += [f"--super-block-factor={opt.superblock_factor}"]

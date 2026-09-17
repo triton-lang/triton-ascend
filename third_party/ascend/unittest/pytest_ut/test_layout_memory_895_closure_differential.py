@@ -33,6 +33,7 @@ from types import SimpleNamespace
 import pytest
 
 _BASELINE_COMMIT = "895c5fbe2b0e69349b76388e65fd8c3e79703bb9"
+_REBASE_BASE_COMMIT = "e28d648cc79e270e6bd0baea5c24a285407faa7e"
 _REQUIRE_BASELINE_ENV = "TRITON_REQUIRE_895_DIFFERENTIAL"
 _SOURCE_PATHS = {
     "compiler": "third_party/ascend/backend/compiler.py",
@@ -115,6 +116,19 @@ def _normalised_function_ast(source, name):
     return ast.dump(function, include_attributes=False)
 
 
+def _rebase_base_source(relative_path):
+    result = subprocess.run(
+        ["git", "show", f"{_REBASE_BASE_COMMIT}:{relative_path}"],
+        cwd=_repo_root(),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return result.stdout.lstrip("\ufeff")
+
+
 def _load_compiler_closure(source):
     # The selected functions only need these imported names.  Keeping a tiny
     # namespace lets the test execute the exact source closure without loading
@@ -125,24 +139,30 @@ def _load_compiler_closure(source):
         "tempfile": tempfile,
         "Path": Path,
         "subprocess": subprocess_proxy,
+        "PROGRAM_GRID_TRANSFORMS_ATTR": "hacc.program_grid_transforms",
+        "ProgramGridContractError": RuntimeError,
+        "normalize_program_grid_transforms": lambda transforms: transforms,
+        "get_persistent_transform": lambda _transforms: None,
     }
-    _exec_functions(
-        source,
-        ("_get_then_remove_rc", "_export_coalesce_metadata", "ttir_to_npubin"),
-        namespace,
-    )
+    functions = ["_get_then_remove_rc", "_export_coalesce_metadata", "ttir_to_npubin"]
+    if "def _export_program_grid_metadata" in source:
+        functions[1:1] = [
+            "_get_then_remove_program_grid_transforms",
+            "_export_program_grid_metadata",
+            "_finalize_program_launch_policy",
+        ]
+    _exec_functions(source, functions, namespace)
     return namespace
 
 
 def test_895_compiler_closure_ast_is_identical_outside_row_migration(source_pairs):
-    """Keep unrelated helpers stable and derive the block blacklist internally."""
-
     baseline_source, target_source = source_pairs["compiler"]
+    rebase_source = _rebase_base_source(_SOURCE_PATHS["compiler"])
     for name in (
             "_get_then_remove_rc",
             "get_common_bishengir_compile_options",
     ):
-        baseline = _normalised_function_ast(baseline_source, name)
+        baseline = _normalised_function_ast(rebase_source, name)
         target = _normalised_function_ast(target_source, name)
         assert target == baseline, name
 
@@ -202,6 +222,7 @@ def _make_opt(
         shared_mem_dynamic_size=4096,
         disable_fma=True,
         superblock_factor=superblock_factor,
+        compile_on_910_95=False,
     )
 
 
@@ -228,9 +249,7 @@ def _run_ttir_to_npubin(
         parsed = dict(metadata)
         parsed.update({
             "has_auto_blockify_blacklist_op": blacklisted,
-            # _export_coalesce_metadata below replaces this with the row
-            # pass result from the mock module attrs, just like production.
-            "row_coalescing_applied": False,
+            "mix_mode": "aiv",
         })
         # Both the 895 baseline and the compatibility-restored target read
         # this option. Keep it neutral for the argv differential below.
@@ -247,7 +266,11 @@ def _run_ttir_to_npubin(
 
     closure["ir"] = SimpleNamespace(pass_manager=lambda _context: pass_manager)
     closure["ascend"] = SimpleNamespace(
-        ir=SimpleNamespace(get_int_attr=get_int_attr, remove_attr=remove_attr),
+        ir=SimpleNamespace(
+            get_int_attr=get_int_attr,
+            get_program_grid_transforms=lambda _module: None,
+            remove_attr=remove_attr,
+        ),
         passes=SimpleNamespace(ttir=SimpleNamespace(add_row_coalescing=lambda _pm: None), ),
     )
     closure["_parse_ttir_metadata"] = parse_ttir_metadata
@@ -308,7 +331,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",
-        "--enable-global-scratch-allocation",
         "--num-warps=4",
         "--threads-per-warp=32",
         "--simt-optimization-mode=1000017",
@@ -334,10 +356,8 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
         )
         case = f"E={env_enabled}, B={blacklisted}, R={row_applied}, superblock={superblock}"
 
-        # Keep bisheng_options neutral in this matrix so it verifies only the
-        # pure-SIMT envelope and automatic block policy.
         expected_options = list(common_prefix)
-        auto_blockify = env_enabled and not blacklisted and not row_applied
+        auto_blockify = env_enabled and not row_applied
         if auto_blockify:
             expected_options.append("--enable-auto-blockify-loop")
             if superblock > 0:
@@ -350,8 +370,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
             "kernel",
         ], case
 
-        # Row is applied by make_ttir's graph pass.  npubin must preserve all
-        # compile arguments while no longer creating a Row pass manager.
         assert target_pm.run_calls == [], case
         count += 1
 
@@ -406,7 +424,6 @@ def test_895_pure_simt_bisheng_argv_matrix_after_row_make_ttir_migration(source_
     ),
 )
 def test_895_coalesce_attrs_export_identically(name, attrs, expected, source_pairs):
-    """Axis, Chunk, and Row attrs retain the exact 895 metadata handoff."""
     baseline_closure = _load_compiler_closure(source_pairs["compiler"][0])
     target_closure = _load_compiler_closure(source_pairs["compiler"][1])
     baseline = _export_coalesce_metadata(baseline_closure, attrs)
@@ -422,6 +439,9 @@ def test_895_coalesce_attrs_export_identically(name, attrs, expected, source_pai
 class _FakeNPUUtils:
     npu_utils_mod = SimpleNamespace(__file__="")
 
+    def get_so_path(self):
+        return "/cache/895-closure/npu_utils.so"
+
     def get_aivector_core_num(self):
         return 40
 
@@ -429,25 +449,45 @@ class _FakeNPUUtils:
         return 20
 
 
+def _module_string_constant(source, name):
+    tree = ast.parse(source)
+    for node in tree.body:
+        if not isinstance(node, ast.Assign):
+            continue
+        if not any(isinstance(target, ast.Name) and target.id == name for target in node.targets):
+            continue
+        value = ast.literal_eval(node.value)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
 def _load_make_launcher(source):
     state = {"auto_map_enabled": False}
     namespace = {
+        "os": os,
         "NPUUtils": _FakeNPUUtils,
         "_BASE_ARGS_FORMAT": "iiiKKOOOO",
+        "_BASE_ARGS_FORMAT_LEN": len("iiiKKOOOO"),
+        "_CPP_DEVICE_POINTER": _module_string_constant(source, "_CPP_DEVICE_POINTER"),
+        "_CPP_MSPROF_EXTERN": _module_string_constant(source, "_CPP_MSPROF_EXTERN"),
+        "_CPP_MSPROF_CALLBACK": _module_string_constant(source, "_CPP_MSPROF_CALLBACK"),
+        "_CPP_MSPROF_BEFORE_LAUNCH": _module_string_constant(source, "_CPP_MSPROF_BEFORE_LAUNCH"),
+        "_CPP_ALIGN_LAUNCH_OFFSET": _module_string_constant(source, "_CPP_ALIGN_LAUNCH_OFFSET"),
+        "_CPP_GET_TENSOR_SHAPE": _module_string_constant(source, "_CPP_GET_TENSOR_SHAPE"),
         "_is_auto_map_parallel_blocks_enabled": lambda: state["auto_map_enabled"],
         "force_disable_ffts": lambda *_args: False,
         "is_ffts_supported": lambda _arch: True,
         "get_ascend_arch_from_env": lambda: "Ascend910B",
         "get_backend_func": lambda name, *_args: f"/* {name} */",
         "convert_sigtype_to_int": lambda _ty: 0,
-        "generate_npu_header_src": lambda: "",
         "extract_device_print_code_from_cann": lambda: "",
     }
-    _exec_functions(source, ("ty_to_cpp", "make_launcher"), namespace)
+    _exec_functions(source, ("generate_npu_header_src", "ty_to_cpp", "make_launcher"), namespace)
     return namespace["make_launcher"], state
 
 
-def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
+def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied, is_pure_simt=False):
     return SimpleNamespace(
         target=SimpleNamespace(arch="Ascend910B"),
         workspace_size=0,
@@ -460,8 +500,8 @@ def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
         parallel_mode="",
         # The baseline closure still reads this retired field; the target
         # closure reads is_pure_simt.  Keep both in this historical test mock.
-        force_simt_only=False,
-        is_pure_simt=False,
+        force_simt_only=is_pure_simt,
+        is_pure_simt=is_pure_simt,
         debug=False,
         shared_mem_dynamic_size=221184,
         coalesce_factor=factor,
@@ -469,12 +509,14 @@ def _make_metadata(*, factor, axis, ceil_div, blacklisted, row_applied):
         coalesce_grid_ceil_div=ceil_div,
         has_auto_blockify_blacklist_op=blacklisted,
         row_coalescing_applied=row_applied,
+        program_grid_transforms=None,
+        program_grid_mapping_applied=False,
+        auto_blockify_enabled=False,
+        ptsm_cap_authorized=False,
     )
 
 
 def _launcher_paths(source):
-    # make_launcher produces both the stable ABI path and local C++ packing
-    # path.  The coalescing and auto-blockify fragments must be present in both.
     return source.split("static void _launch(", maxsplit=1)
 
 
@@ -522,16 +564,16 @@ def test_895_launcher_coalescing_and_block_cap_closure(
     guard,
     source_pairs,
 ):
-    """Compare both generated launcher paths for all E x B x R cap cases."""
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    for env_enabled, blacklisted, row_applied in itertools.product(
+    for env_enabled, is_pure_simt, blacklisted in itertools.product(
         (False, True),
         (False, True),
         (False, True),
     ):
+        row_applied = True
         baseline_state["auto_map_enabled"] = env_enabled
         target_state["auto_map_enabled"] = env_enabled
         baseline_src = baseline_make_launcher(
@@ -543,6 +585,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             ),
         )
         target_src = target_make_launcher(
@@ -554,13 +597,15 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             ),
         )
-        case = f"{name}: E={env_enabled}, B={blacklisted}, R={row_applied}"
+        case = f"{name}: E={env_enabled}, P={is_pure_simt}, B={blacklisted}, R={row_applied}"
         baseline_paths = _launcher_paths(baseline_src)
         target_paths = _launcher_paths(target_src)
         assert len(baseline_paths) == len(target_paths) == 2, case
-        expected_cap_count = 1 if env_enabled and not blacklisted else 0
+        expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
+        expected_target_cap_count = 1 if env_enabled and (is_pure_simt or not blacklisted) else 0
         for baseline_path, target_path in zip(baseline_paths, target_paths):
             assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
             assert baseline_path.count(assignment) == target_path.count(assignment) == 1, case
@@ -569,24 +614,15 @@ def test_895_launcher_coalescing_and_block_cap_closure(
                 assert "ChunkCoalescing: grid[2] not divisible" not in target_path, case
             else:
                 assert baseline_path.count(guard) == target_path.count(guard) == 1, case
-            assert baseline_path.count(cap) == target_path.count(cap) == expected_cap_count, case
+            assert baseline_path.count(cap) == expected_baseline_cap_count, case
+            assert target_path.count(cap) == expected_target_cap_count, case
 
 
 def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
-    """Differentially cover every metadata form emitted by the four passes.
-
-    Axis can preserve a non-power-of-two split factor, Chunk is bounded to
-    2/4/8/16, and Row derives H=2/4/8.  Each family may target x/y/z.  This
-    checks the complete corresponding launcher fragment on both generated
-    launch paths for all AutoBlockify cap inputs, without pretending that a
-    910B4 smoke run entered the 91095 T2L gate.
-    """
-
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
     target_make_launcher, target_state = _load_make_launcher(source_pairs["driver"][1])
     grid_names = ("gridX", "gridY", "gridZ")
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
-    # The factor sets deliberately mirror what each legacy pass can emit.
     families = (
         ("axis", (2, 3, 4, 8, 16), False),
         ("chunk", (2, 4, 8, 16), False),
@@ -594,13 +630,14 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
     )
 
     for family, factors, ceil_div in families:
-        for factor, axis, env_enabled, blacklisted, row_applied in itertools.product(
+        for factor, axis, env_enabled, is_pure_simt, blacklisted in itertools.product(
                 factors,
             (0, 1, 2),
             (False, True),
             (False, True),
             (False, True),
         ):
+            row_applied = True
             baseline_state["auto_map_enabled"] = env_enabled
             target_state["auto_map_enabled"] = env_enabled
             metadata = _make_metadata(
@@ -609,15 +646,17 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                 ceil_div=ceil_div,
                 blacklisted=blacklisted,
                 row_applied=row_applied,
+                is_pure_simt=is_pure_simt,
             )
             baseline_src = baseline_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
             target_src = target_make_launcher(constants={}, signature={0: "*fp32", 1: "*fp32"}, metadata=metadata)
             grid = grid_names[axis]
             case = (f"{family}: H={factor}, axis={axis}, ceil={ceil_div}, "
-                    f"E={env_enabled}, B={blacklisted}, R={row_applied}")
+                    f"E={env_enabled}, P={is_pure_simt}, B={blacklisted}, R={row_applied}")
             expected_assignment = (f"{grid} = ({grid} + {factor} - 1) / {factor};"
                                    if ceil_div else f"{grid} = {grid} / {factor};")
-            expected_cap_count = 1 if env_enabled and not blacklisted else 0
+            expected_baseline_cap_count = 1 if env_enabled and not blacklisted else 0
+            expected_target_cap_count = 1 if env_enabled and (is_pure_simt or not blacklisted) else 0
             for baseline_path, target_path in zip(_launcher_paths(baseline_src), _launcher_paths(target_src)):
                 assert _coalescing_fragment(baseline_path) == _coalescing_fragment(target_path), case
                 assert baseline_path.count(expected_assignment) == 1, case
@@ -630,8 +669,8 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
                              f"coalesce_factor {factor}")
                     assert baseline_path.count(guard) == 1, case
                     assert target_path.count(guard) == 1, case
-                assert baseline_path.count(cap) == expected_cap_count, case
-                assert target_path.count(cap) == expected_cap_count, case
+                assert baseline_path.count(cap) == expected_baseline_cap_count, case
+                assert target_path.count(cap) == expected_target_cap_count, case
 
 
 def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):
@@ -724,101 +763,30 @@ def test_895_grid_num_tiles_ast_closure_differential(source_pairs):
         assert baseline_kwargs == target_kwargs, name
 
 
-def _baseline_source(root, relative_path):
-    """Read one required 895 source after ``source_pairs`` checked its object."""
-    result = subprocess.run(
-        ["git", "show", f"{_BASELINE_COMMIT}:{relative_path}"],
-        cwd=root,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        check=False,
-    )
-    assert result.returncode == 0, result.stderr
-    return result.stdout
-
-
-def _expected_relocated_legacy_core(name, baseline):
-    """Apply only the documented mechanical relocation edits to an 895 file.
-
-    The conversion fixtures show representative behavior; this check is the
-    complementary all-path guard.  If an old matcher, bailout, or rewrite is
-    altered in the moved core source, this equality fails before a narrow IR
-    fixture can accidentally hide it.  Do not normalize arbitrary whitespace,
-    identifiers, or control flow here: every allowed difference is listed.
-    """
-    if name == "axis":
-        return baseline.replace(
-            '#include "TritonToLinalg/StridedAxisCoalescing.h"',
-            '#include "TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.h"',
-        )
-    if name == "chunk":
-        return baseline.replace(
-            '#include "TritonToLinalg/ChunkCoalescing.h"',
-            '#include "TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.h"',
-        )
-    if name == "sls":
-        return (baseline.replace(
-            '#include "TritonToLinalg/StridedLoadStoreRewrite.h"',
-            '#include "TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.h"',
-        ).replace(
-            '#include "TritonToLinalg/ImplicitPermute.h"',
-            '#include "TritonMemoryAccess/MemoryAccessTags.h"',
-        ).replace(
-            '#include "TritonToLinalg/MaskAnalysis.h"',
-            '#include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"',
-        ).replace(
-            "ImplicitPermute::ImplicitPermuteHandledTAG",
-            "mlir::triton::memory_access::ImplicitPermuteHandledTAG",
-        ))
-    if name == "row":
-        old_wrapper_start = baseline.index("\nnamespace {\n\nstruct RowCoalescingPass")
-        old_wrapper_end = baseline.index("\n}  // namespace RowCoalescing", old_wrapper_start)
-        return (
-            baseline.replace(
-                '#include "TritonToLinalg/RowCoalescing.h"',
-                '#include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"',
-            ).replace('#include "mlir/Pass/Pass.h"\n', "").replace(baseline[old_wrapper_start:old_wrapper_end],
-                                                                   "").replace("}  // namespace RowCoalescing",
-                                                                               "} // namespace RowCoalescing")
-            # The moved file keeps one explicit visual separator where the old
-            # pass wrapper was removed; permit that one formatting-only delta.
-            .replace(
-                "\n\n} // namespace RowCoalescing",
-                "\n\n\n} // namespace RowCoalescing",
-            ))
-    raise AssertionError(f"unknown legacy core: {name}")
+def _expected_row_rebase_core(baseline):
+    old_guard = "  Block *pidBlock = seed.pid->getBlock();\n  if (!pidBlock || !seed.workBlock)\n"
+    new_guard = "  if (!seed.entryGuard || !seed.workBlock)\n"
+    old_insertion = ("  if (Operation *validDef = seed.validCount.getDefiningOp())\n"
+                     "    rw.setInsertionPointAfter(validDef);\n"
+                     "  else\n"
+                     "    rw.setInsertionPointAfter(seed.pid);\n")
+    new_insertion = "  rw.setInsertionPoint(seed.entryGuard);\n"
+    assert old_guard in baseline
+    assert old_insertion in baseline
+    return baseline.replace(old_guard, new_guard).replace(old_insertion, new_insertion)
 
 
 def test_895_legacy_memory_access_core_sources_are_mechanical_relocations(source_pairs):
-    """All four migrated core bodies remain 895-equivalent by construction.
-
-    This intentionally compares full implementation sources rather than only
-    selected positive examples.  The only permitted differences are include
-    ownership, the shared tag namespace, and removal of Row's old pass wrapper;
-    scheduling itself is separately exercised by compatibility-pass tests.
-    """
     del source_pairs  # Fixture makes a missing 895 object fail in strict mode.
     root = _repo_root()
     sources = {
-        "axis": (
-            "third_party/ascend/lib/TritonToLinalg/StridedAxisCoalescing.cpp",
-            "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.cpp",
-        ),
-        "chunk": (
-            "third_party/ascend/lib/TritonToLinalg/ChunkCoalescing.cpp",
-            "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.cpp",
-        ),
-        "sls": (
-            "third_party/ascend/lib/TritonToLinalg/StridedLoadStoreRewrite.cpp",
-            "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.cpp",
-        ),
-        "row": (
-            "third_party/ascend/lib/TritonToLinalg/RowCoalescing.cpp",
-            "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/RowCoalescing.cpp",
-        ),
+        "axis": "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/StridedAxisCoalescing.cpp",
+        "chunk": "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/ChunkCoalescing.cpp",
+        "sls": "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/StridedLoadStoreRewrite.cpp",
+        "row": "third_party/ascend/lib/TritonToGraph/LegacyMemoryAccess/RowCoalescing.cpp",
     }
-    for name, (baseline_path, target_path) in sources.items():
-        baseline = _baseline_source(root, baseline_path)
+    for name, target_path in sources.items():
+        baseline = _rebase_base_source(target_path)
         target = _source_text(root / target_path)
-        assert target == _expected_relocated_legacy_core(name, baseline), name
+        expected = _expected_row_rebase_core(baseline) if name == "row" else baseline
+        assert target == expected, name

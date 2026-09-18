@@ -77,6 +77,7 @@ _RESERVED_HINT_KEYS = {
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
 _DEFAULT_COMPILE_MODE = "simd_simt_template"
+_COMPILE_FAILURE_DETAIL_MAX_LENGTH = 512
 
 
 def _format_autotune_timing(timing) -> str:
@@ -85,6 +86,18 @@ def _format_autotune_timing(timing) -> str:
         labels = ("p50", "p20", "p80")
         return ", ".join(f"{label}={value:.4f} ms" for label, value in zip(labels, timing))
     return f"mean={timing:.4f} ms"
+
+
+def _format_compile_failure(exc) -> str:
+    """Return a compact, single-line compile failure summary."""
+    detail = getattr(exc, "error_message", None) or str(exc)
+    detail = " ".join(str(detail).split())
+    summary = type(exc).__name__
+    if detail:
+        summary = f"{summary}: {detail}"
+    if len(summary) > _COMPILE_FAILURE_DETAIL_MAX_LENGTH:
+        summary = summary[:_COMPILE_FAILURE_DETAIL_MAX_LENGTH - 3] + "..."
+    return summary
 
 
 def _get_constexpr_candidates_from_fn(fn) -> List[str]:
@@ -2186,6 +2199,17 @@ class AutoTilingTuner(Autotuner):
             if self.print_autotuning:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
 
+    def _handle_compile_failure(self, *args, config, excp, run_fns, compile_key, **kwargs):
+        self._try_ubtuner(*args, config=config, excp=excp, run_fns=run_fns, **kwargs)
+        self._compile_failed_configs.append(config)
+        if config in run_fns:
+            return
+
+        self._remember_compile_failure(compile_key, excp)
+        if self.print_autotuning:
+            print("Triton autotuning: skip compile-failed config "
+                  f"{config}; failure: {_format_compile_failure(excp)}")
+
     def _print_benchmark_results(self, timings) -> None:
         if not self.print_autotuning:
             return
@@ -2354,10 +2378,14 @@ class AutoTilingTuner(Autotuner):
                             import traceback
                             exc_stack = traceback.format_exc()
                             exc = e
-                            self._try_ubtuner(*args, config=config, excp=e, run_fns=run_fns, **kwargs)
-                            self._compile_failed_configs.append(config)
-                            if config not in run_fns:
-                                self._remember_compile_failure(compile_keys.get(config), e)
+                            self._handle_compile_failure(
+                                *args,
+                                config=config,
+                                excp=e,
+                                run_fns=run_fns,
+                                compile_key=compile_keys.get(config),
+                                **kwargs,
+                            )
             except Exception as e:
                 # ignore exception from __exit__() of AsyncCompileMode
                 triton.runtime._async_compile.active_mode.set(None)
@@ -2372,10 +2400,14 @@ class AutoTilingTuner(Autotuner):
                     import traceback
                     exc_stack = traceback.format_exc()
                     exc = e
-                    self._try_ubtuner(*args, config=config, excp=e, run_fns=run_fns, **kwargs)
-                    self._compile_failed_configs.append(config)
-                    if config not in run_fns:
-                        self._remember_compile_failure(compile_keys.get(config), e)
+                    self._handle_compile_failure(
+                        *args,
+                        config=config,
+                        excp=e,
+                        run_fns=run_fns,
+                        compile_key=compile_keys.get(config),
+                        **kwargs,
+                    )
 
         if len(run_fns) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc} \nStack trace: {exc_stack}")
@@ -2757,6 +2789,7 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     If the environment variable :code:`TRITON_PRINT_AUTOTUNING` is set to
     :code:`"1"`, Triton will print a message to stdout after autotuning each
     kernel, including the benchmark timing for each valid configuration, the
+    skipped compile-failed configurations with a bounded failure summary, the
     time spent autotuning, and the best configuration.
 
     :param configs: a list of :code:`triton.Config` objects

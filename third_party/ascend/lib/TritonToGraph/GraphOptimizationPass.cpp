@@ -556,10 +556,10 @@ void populateBuiltinGraphOptimizationRules(
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);
-  if (compileMode && *compileMode == triton::ascend::CompileMode::SimtOnly &&
-      isRuleEnabled(options.enabledRuleMask,
-                    GraphOptimizationRuleId::RowCoalescing)) {
-    rules.push_back(createRowCoalescingRule());
+  if (compileMode && isRuleEnabled(options.enabledRuleMask,
+                                   GraphOptimizationRuleId::RowCoalescing)) {
+    rules.push_back(createRowCoalescingRule(
+        *compileMode == triton::ascend::CompileMode::SimtOnly));
   }
 }
 

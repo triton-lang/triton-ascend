@@ -54,6 +54,11 @@ _SUPPORTED_SEQUENCES = frozenset((
     ((1, 16, False, False), ),
     ((1, 16, False, False), (0, 4, True, True)),
     ((0, 64, True, True), ),
+    ((0, 2, False, False), ),
+    ((0, 4, False, False), ),
+    ((0, 8, False, False), ),
+    ((0, 16, False, False), ),
+    ((0, 32, False, False), ),
 ))
 
 

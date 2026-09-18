@@ -131,9 +131,18 @@ bool isPTSM64(const ProgramGridTransform &transform) {
          transform.persistentCoverage && transform.gridStrideAbiVerified;
 }
 
+bool isDotRowTransform(const ProgramGridTransform &transform) {
+  return transform.axis == 0 && !transform.persistentCoverage &&
+         !transform.gridStrideAbiVerified &&
+         (transform.factor == 2 || transform.factor == 4 ||
+          transform.factor == 8 || transform.factor == 16 ||
+          transform.factor == 32);
+}
+
 bool isSupportedSequence(ArrayRef<ProgramGridTransform> transforms) {
   if (transforms.size() == 1)
-    return isIAT16(transforms.front()) || isPTSM64(transforms.front());
+    return isIAT16(transforms.front()) || isPTSM64(transforms.front()) ||
+           isDotRowTransform(transforms.front());
   return transforms.size() == 2 && isIAT16(transforms[0]) &&
          isPTSM4(transforms[1]);
 }

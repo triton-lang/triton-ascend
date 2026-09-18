@@ -31,6 +31,7 @@ add_triton_library(TritonToGraph
   Rules/ContiguousBlockAccessFormationRule.cpp
   Rules/LoadStoreTransposeRule.cpp
   Rules/RowCoalescingRule.cpp
+  Rules/DotRowCoalescing.cpp
   Rules/TransposePointwiseReorderRule.cpp
   Rules/StoreCoalescingRule.cpp
 
@@ -38,6 +39,7 @@ add_triton_library(TritonToGraph
   TritonToGraphPassIncGen
 
   LINK_LIBS PUBLIC
+  BiShengIRHACCUtils
   MLIRArithDialect
   MLIRBufferizationDialect
   MLIRControlFlowDialect

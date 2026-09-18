@@ -88,7 +88,7 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
     Option<"reservedUBBytes", "reserved-ub-bytes", "uint64_t", "0",
            "UB bytes reserved for lowering/backend workspace before candidate budgeting">,
     Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
-           "Compilation mode; RowCoalescing is enabled only for simt_only">,
+           "Compilation mode; legacy elementwise RowCoalescing is enabled only for simt_only">,
   ];
 }
 

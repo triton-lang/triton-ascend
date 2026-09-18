@@ -225,7 +225,7 @@ def _make_batch_bench_tuner():
     return tuner, kernel_calls
 
 
-def test_batch_bench_skips_config_cached_as_compile_failure():
+def test_batch_bench_skips_config_cached_as_compile_failure(capsys):
     tuner, kernel_calls = _make_batch_bench_tuner()
     bad = Config({"ID": "bad"})
     good = Config({"ID": "good"})
@@ -245,6 +245,55 @@ def test_batch_bench_skips_config_cached_as_compile_failure():
     assert kernel_calls[bad] == 1
     assert tuner._compile_failed_configs == []
     assert tuner._cached_compile_failed_configs == [bad]
+    assert capsys.readouterr().out == ""
+
+
+def test_batch_bench_reports_fresh_and_cached_compile_failures(capsys):
+    tuner, kernel_calls = _make_batch_bench_tuner()
+    tuner.print_autotuning = True
+    bad = Config({"ID": "bad"})
+    good = Config({"ID": "good"})
+
+    assert tuner._batch_bench(configs=[bad, good]) == {good: 1.0}
+    fresh_output = capsys.readouterr().out
+    assert "skip compile-failed config" in fresh_output
+    assert "ID: bad" in fresh_output
+    assert "OutOfResources" in fresh_output
+    assert "UB" in fresh_output
+
+    assert tuner._batch_bench(configs=[bad, good]) == {good: 1.0}
+    cached_output = capsys.readouterr().out
+    assert "skip cached compile-failed config" in cached_output
+    assert "previous failure: OutOfResources" in cached_output
+    assert kernel_calls[bad] == 1
+
+
+def test_format_compile_failure_is_single_line_and_bounded():
+    exc = RuntimeError("first line\n" + "x" * 600)
+
+    result = ascend_autotuner._format_compile_failure(exc)
+
+    assert result.startswith("RuntimeError: first line ")
+    assert "\n" not in result
+    assert len(result) == ascend_autotuner._COMPILE_FAILURE_DETAIL_MAX_LENGTH
+    assert result.endswith("...")
+
+
+def test_batch_bench_does_not_report_ubtuner_recovery_as_skipped(capsys):
+    tuner, _ = _make_batch_bench_tuner()
+    tuner.enable_ubtuner = True
+    tuner.print_autotuning = True
+    bad = Config({"ID": "bad"})
+    good = Config({"ID": "good"})
+
+    def recover_with_ubtuner(self, *args, config, excp, run_fns, **kwargs):
+        run_fns[config] = lambda: None
+
+    tuner._try_ubtuner = MethodType(recover_with_ubtuner, tuner)
+
+    assert tuner._batch_bench(configs=[bad, good]) == {bad: 1.0, good: 1.0}
+    assert capsys.readouterr().out == ""
+    assert ("compile-key", "bad") not in tuner._compile_failure_cache
 
 
 def test_batch_bench_raises_when_all_configs_are_cached_failures():

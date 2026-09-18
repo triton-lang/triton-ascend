@@ -23,9 +23,8 @@
 #ifndef TRITON_ADAPTER_OP_CLASSIFIER_H
 #define TRITON_ADAPTER_OP_CLASSIFIER_H
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "llvm/Support/LogicalResult.h"
+
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -36,6 +35,11 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace mlir {
@@ -191,6 +195,9 @@ private:
 
   // Helper: Mark fill operations as CUBE when their output buffer is CUBE
   void markFillOpsAsCube();
+
+  // Step 7.5: Group load ops into scope
+  LogicalResult groupLoadOps();
 
   // Step 8: Stamp core type info to IR
   int stampToIR();

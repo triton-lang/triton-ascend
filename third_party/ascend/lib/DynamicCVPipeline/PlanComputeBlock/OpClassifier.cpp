@@ -22,12 +22,14 @@
 
 #include <queue>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -36,12 +38,19 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Location.h"
+#include "mlir/IR/TypeRange.h"
+#include "mlir/IR/ValueRange.h"
+#include "mlir/IR/Visitors.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
@@ -52,7 +61,9 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "bishengir/Dialect/Utils/Util.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 using namespace mlir;
 using namespace mlir::CVPipeline;
@@ -62,9 +73,7 @@ static constexpr const char *DEBUG_TYPE = "op-classifier";
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 using namespace mlir::triton;
 
-namespace {
-
-bool isInsideNestedLinalgRegion(Operation *op) {
+static bool isInsideNestedLinalgRegion(Operation *op) {
   for (Operation *parent = op ? op->getParentOp() : nullptr; parent;
        parent = parent->getParentOp()) {
     if (isa<linalg::LinalgDialect>(parent->getDialect())) {
@@ -73,8 +82,6 @@ bool isInsideNestedLinalgRegion(Operation *op) {
   }
   return false;
 }
-
-} // namespace
 
 // Helper: describe operation for logging
 std::string OpClassifierPass::describeOp(Operation *op) const {
@@ -87,7 +94,7 @@ std::string OpClassifierPass::describeOp(Operation *op) const {
 }
 
 // Helper: convert OpCoreType to string for IR attribute
-std::string coreTypeToString(OpCoreType ct) {
+static std::string coreTypeToString(OpCoreType ct) {
   switch (ct) {
   case OP_CUBE_ONLY:
     return "CUBE";
@@ -100,22 +107,18 @@ std::string coreTypeToString(OpCoreType ct) {
   }
 }
 
-namespace {
-
 // Maximum number of core types in a comma-separated core type string (e.g.,
 // "CUBE,VECTOR")
-constexpr size_t kMaxCoreTypeParts = 4;
+static constexpr size_t kMaxCoreTypeParts = 4;
 
 // Minimum number of inputs for linalg.matmul (A and B matrices)
-constexpr size_t kMinMatmulInputs = 2;
-
-} // namespace
+static constexpr size_t kMinMatmulInputs = 2;
 
 // Helper: parse OpCoreType from string (handles both "CUBE" and "CUBE,VECTOR"
 // formats) For comma-separated multi-value strings, returns the i-th component
 // if index is provided, otherwise returns the first component.
-OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
-                                   size_t index = 0) {
+static OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
+                                          size_t index = 0) {
   llvm::StringRef ref(coreTypeStr);
   llvm::SmallVector<llvm::StringRef, kMaxCoreTypeParts> parts;
   ref.split(parts, ',');
@@ -283,7 +286,8 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
       return false;
     return (isa<bufferization::BufferizationDialect>(opDef->getDialect()) &&
             !isa<bufferization::AllocTensorOp>(opDef)) ||
-           isa<tensor::EmptyOp>(opDef);
+           isa<tensor::EmptyOp, hivm::ConvertLayoutOp, tensor::ReshapeOp>(
+               opDef);
   };
 
   // Check input tensor
@@ -1693,6 +1697,112 @@ int OpClassifierPass::handleCubeAndVector() {
   return 0;
 }
 
+static std::pair<scope::ScopeOp, scope::ReturnOp>
+packScopeOp(SetVector<Operation *> &ops, ValueRange redirects,
+            Operation *insertBefore) {
+  OpBuilder builder(insertBefore);
+  builder.setInsertionPoint(insertBefore);
+  Location loc = insertBefore->getLoc();
+  TypeRange types = redirects.getTypes();
+  auto scopeOp = builder.create<scope::ScopeOp>(loc, types);
+  auto *block = &scopeOp.getBodyRegion().emplaceBlock();
+
+  builder.setInsertionPointToEnd(block);
+  auto returnOp = builder.create<scope::ReturnOp>(loc, redirects);
+  for (auto *op : ops) {
+    op->moveBefore(returnOp);
+  }
+  return {scopeOp, returnOp};
+}
+
+// Currently only handles customop
+llvm::LogicalResult OpClassifierPass::groupLoadOps() {
+  struct Load {
+    SetVector<Operation *> dependantOps;
+    Value output;
+    OpCoreType coreType;
+  };
+
+  llvm::SmallVector<Load> matchedLoads;
+  auto walkResult = getOperation().walk<WalkOrder::PreOrder>(
+      [this, &matchedLoads](bufferization::ToTensorOp toTensorOp) {
+        auto memref = toTensorOp.getBuffer();
+        auto allocOp =
+            llvm::dyn_cast_if_present<memref::AllocOp>(memref.getDefiningOp());
+        if (!allocOp || memref.getNumUses() != 2) {
+          return WalkResult::advance();
+        }
+        SetVector<Operation *> dependantOps;
+        dependantOps.insert(allocOp);
+        Operation *writeOp = nullptr;
+        for (auto *user : memref.getUsers()) {
+          if (user->getBlock() != toTensorOp->getBlock()) {
+            continue;
+          }
+          auto customOp = llvm::dyn_cast<hivm::CustomOp>(user);
+          if (!customOp) {
+            continue;
+          }
+          llvm::SmallVector<MemoryEffects::EffectInstance> effects;
+          customOp.getEffects(effects);
+          for (auto effect : effects) {
+            // getValue returns null value
+            if (isa<MemoryEffects::Write>(effect.getEffect())) {
+              writeOp = user;
+            }
+          }
+        }
+        if (!writeOp) {
+          return WalkResult::advance();
+        }
+        dependantOps.insert(writeOp);
+        OpCoreType coreType;
+        auto hivmCtRes = hivm::getCoreType(writeOp);
+        if (llvm::failed(hivmCtRes)) {
+          return WalkResult::interrupt();
+        }
+        auto hivmCt = hivmCtRes.value();
+        switch (hivmCt) {
+        case hivm::TCoreType::CUBE:
+          coreType = OP_CUBE_ONLY;
+          break;
+        case hivm::TCoreType::VECTOR:
+          coreType = OP_VECTOR_ONLY;
+          break;
+        default:
+          return WalkResult::interrupt();
+        }
+        dependantOps.insert(toTensorOp);
+        Value output = toTensorOp;
+        if (output.hasOneUse()) {
+          if (auto convertLayoutOp = llvm::dyn_cast<hivm::ConvertLayoutOp>(
+                  *output.getUsers().begin())) {
+            output = convertLayoutOp;
+            dependantOps.insert(convertLayoutOp);
+          }
+        }
+        matchedLoads.push_back({dependantOps, output, coreType});
+        return WalkResult::advance();
+      });
+
+  if (walkResult.wasInterrupted()) {
+    return llvm::failure();
+  }
+
+  for (auto &load : matchedLoads) {
+    auto &ops = load.dependantOps;
+    auto coreType = load.coreType;
+    auto [scopeOp, returnOp] = packScopeOp(ops, {load.output}, *ops.rbegin());
+    for (auto *op : ops) {
+      opCoreTypes[op] = coreType;
+    }
+    allOps.push_back(scopeOp);
+    opCoreTypes[scopeOp] = coreType;
+    load.output.replaceAllUsesExcept(scopeOp.getResult(0), returnOp);
+  }
+  return llvm::success();
+}
+
 // ============================================================================
 // Step 9: Stamp Core Type to IR
 // ============================================================================
@@ -1881,6 +1991,11 @@ void OpClassifierPass::runOnOperation() {
 
   // Step 6: VECTOR upstream BFS
   if (propagateVectorUpstream() != 0) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  if (groupLoadOps().failed()) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }

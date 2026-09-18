@@ -64,7 +64,10 @@ DotOp::inferReturnTypes(MLIRContext *context, std::optional<Location> location,
     return {shape[1] * shape[2], shape[0] * shape[3]};
   };
   int64_t m = toND(aTy.getShape(), adaptor.getFractalA(), /*isLhs=*/true)[0];
-  int64_t n = toND(bTy.getShape(), adaptor.getFractalB(), /*isLhs=*/false)[1];
+  SmallVector<int64_t> bND =
+      toND(bTy.getShape(), adaptor.getFractalB(), /*isLhs=*/false);
+  // transpose_b takes B as [N,K], so N is its leading dim.
+  int64_t n = bND[adaptor.getTransposeB() ? 0 : 1];
 
   // The result carries the cube accumulator dtype (f32 for float inputs, i32
   // for int8), not the input dtype. fractal_c produces the L0C accumulator

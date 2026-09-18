@@ -17,6 +17,78 @@ from triton._C.libtriton import ir
 
 from ..utils import _deprecated
 from ._utils import _convert_elem_to_ir_value
+from .custom_op import custom_semantic
+
+
+@builtin
+def sparse_gather_load_to_l1cache(base, index, dst, block_r, valid_region_count, region_size, dim_size, stride_token,
+                                  region_valid_shift, region_id_mask, l2_cache_mode=0, _semantic=None):
+    """
+    Gather index-selected regions of a paged cache from GM straight into L1.
+
+    Sparse attention picks a handful of small regions of the KV cache per query.
+    Loading them one region at a time gives the hardware many short,
+    discontinuous GM accesses, and staging them in UB costs a vector pass plus a
+    vec->cube handoff. This writes them into L1 in NZ layout, ready to be loaded
+    into L0, and coalesces neighbouring region ids into a single transfer: the
+    selector emits each row's regions sorted by region offset, and a region's
+    tokens are contiguous in the physical token space, so a run of consecutive
+    ids is one contiguous GM range.
+
+    Slot ``s`` of ``index`` holds ``region_offset | (region_valid << region_valid_shift)``,
+    or a negative sentinel for a padding slot. Padding slots and the unused tail
+    of a partial region are zero filled, so every row of ``dst`` is written.
+
+    :param base: Base of the gathered tensor (in GM). Fold any head/group offset
+        into the pointer; token rows are ``stride_token`` elements apart and
+        ``dim_size`` elements long.
+    :type base: tensor (pointer type)
+    :param index: Base of this row's packed region metadata (in GM).
+    :type index: tensor (pointer type)
+    :param dst: Destination buffer, which must be allocated in L1 with shape
+        ``[block_r * region_size, dim_size]``.
+    :type dst: bl.buffer
+    :param block_r: Slots in the destination tile.
+    :type block_r: int
+    :param valid_region_count: Only the first ``min(block_r, valid_region_count)``
+        entries of ``index`` are read.
+    :type valid_region_count: int or tensor
+    :param region_size: Tokens per region.
+    :type region_size: int
+    :param dim_size: Elements per token. ``dim_size * sizeof(dtype)`` must be a
+        multiple of 32.
+    :type dim_size: int
+    :param stride_token: Element stride between consecutive tokens of ``base``.
+    :type stride_token: int
+    :param region_valid_shift: Bit position of the valid-token count.
+    :type region_valid_shift: int
+    :param region_id_mask: Mask selecting the region offset.
+    :type region_id_mask: int
+    :param l2_cache_mode: MTE2 cache-control field, passed through untouched.
+    :type l2_cache_mode: int
+
+    :return: ``dst``, so the call can be chained.
+    :rtype: bl.buffer
+
+    .. note::
+        A5 (dav-c310) only. GM->L1 is a cube-core MTE2 path there, and no other
+        supported target has a GM->L1 instruction.
+    """
+    return custom_semantic(
+        '__builtin_sparse_gather_load_to_l1cache',
+        base,
+        index,
+        _unwrap_if_constexpr(block_r),
+        valid_region_count,
+        _unwrap_if_constexpr(region_size),
+        _unwrap_if_constexpr(dim_size),
+        _unwrap_if_constexpr(stride_token),
+        _unwrap_if_constexpr(region_valid_shift),
+        _unwrap_if_constexpr(region_id_mask),
+        _unwrap_if_constexpr(l2_cache_mode),
+        out=dst,
+        _semantic=_semantic,
+    )
 
 
 @_deprecated()

@@ -475,6 +475,19 @@ static bool isAllocTensorPattern(Value depVal) {
   return isa_and_nonnull<bufferization::AllocTensorOp>(depVal.getDefiningOp());
 }
 
+// Check if depVal is the result of a bufferization.to_tensor whose input is a
+// memref.alloc — the freshly-allocated buffer has no data, so multi-buffering
+// the to_tensor would produce a read-before-write copy; clone both ops to the
+// consumer block instead.
+static bool isAllocToTensorPattern(Value depVal) {
+  auto toTensorOp =
+      dyn_cast_or_null<bufferization::ToTensorOp>(depVal.getDefiningOp());
+  if (!toTensorOp)
+    return false;
+  Value memref = toTensorOp.getOperand();
+  return isa_and_nonnull<memref::AllocOp>(memref.getDefiningOp());
+}
+
 SmallVector<Value>
 collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
                     const DenseSet<Value> &clonedDepVals) {
@@ -504,6 +517,11 @@ collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap,
 
       // Skip bufferization.alloc_tensor
       if (isa<bufferization::AllocTensorOp>(op))
+        continue;
+
+      // Skip to_tensor whose operand is a memref.alloc — handled by
+      // cloneAllocToTensorsInBlocks in Phase 2.
+      if (isAllocToTensorPattern(depVal))
         continue;
 
       valueList.push_back(depVal);
@@ -1687,6 +1705,32 @@ cloneAllocTensorsInBlocks(const MainLoop &loop,
       });
 }
 
+// Clone a memref.alloc + bufferization.to_tensor chain to each consumer block.
+// The buffer has no data on entry, so the multi-buffer transfer path would be a
+// read-before-write; cloning gives every consumer a fresh alloc.
+static int cloneAllocToTensorsInBlocks(
+    const MainLoop &loop, DenseMap<Value, InnerBlockInfo> &blocks,
+    DenseMap<Value, SmallVector<Value>> &depValueMap,
+    DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+    OpBuilder &globalBuilder) {
+  return cloneDepsToConsumers(
+      loop, blocks, depValueMap, depUserMap, globalBuilder,
+      isAllocToTensorPattern,
+      [](IRMapping &mapper, OpBuilder &builder, Value depVal, int userBlockId,
+         ArrayRef<Operation *> users) -> Value {
+        auto toTensor = cast<bufferization::ToTensorOp>(depVal.getDefiningOp());
+        Operation *origAlloc = toTensor.getOperand().getDefiningOp();
+
+        Operation *newAlloc = builder.clone(*origAlloc, mapper);
+        newAlloc->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+        mapper.map(origAlloc->getResult(0), newAlloc->getResult(0));
+
+        Operation *newToTensor = builder.clone(*toTensor, mapper);
+        newToTensor->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+        return newToTensor->getResult(0);
+      });
+}
+
 // Process cross-block tensor dependencies for double buffering
 static int
 processTensorDependencies(const MainLoop &loop,
@@ -1724,6 +1768,11 @@ processTensorDependencies(const MainLoop &loop,
 
       // Skip bufferization.alloc_tensor
       if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
+        continue;
+
+      // Skip to_tensor whose operand is a memref.alloc — cloned to consumer
+      // blocks by cloneAllocToTensorsInBlocks in Phase 2.
+      if (isAllocToTensorPattern(depVal))
         continue;
 
       auto *parentOp = depVal.getDefiningOp()->getParentOp();
@@ -2125,6 +2174,13 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   // Clone bufferization.alloc_tensor deps to each consumer's block.
   if (cloneAllocTensorsInBlocks(mainLoop, blocks, depValueMap, depUserMap,
                                 globalBuilder) != 0)
+    return -1;
+
+  // Clone memref.alloc + bufferization.to_tensor deps to each consumer's
+  // block. The buffer has no data on entry, so multi-buffering it would be a
+  // read-before-write; cloning gives every consumer a fresh alloc.
+  if (cloneAllocToTensorsInBlocks(mainLoop, blocks, depValueMap, depUserMap,
+                                  globalBuilder) != 0)
     return -1;
   auto valueList = collectBufferValues(depValueMap, phase1ClonedDepVals);
   LLVM_DEBUG(

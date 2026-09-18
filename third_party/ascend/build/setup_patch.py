@@ -306,8 +306,12 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
     raise last_error
 
 
+def _npuir_build_enabled():
+    return os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() in ["ON", "1", "YES", "TRUE", "Y"]
+
+
 def _ensure_npuir_submodule():
-    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+    if not _npuir_build_enabled():
         return
     build_npuir()
 
@@ -375,18 +379,26 @@ def _copy_ascend_tools(extdir, cmake_dir):
 
 
 def _get_bishengir_payload_source():
+    # Priority: an explicit external payload dir (TRITON_ASCEND_BISHENGIR_PATH,
+    # the prebuilt npuir-build artifact flow), else the in-repo output of
+    # build_npuir.py when TRITON_BUILD_NPUIR=ON.
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
-    if not raw_path:
+    if raw_path:
+        source = Path(raw_path).expanduser().resolve()
+        origin = _BISHENGIR_PAYLOAD_ENV
+    elif _npuir_build_enabled():
+        source = _REPO_ROOT / "third_party" / "ascend" / "backend" / "bishengir"
+        origin = "TRITON_BUILD_NPUIR (build_npuir output)"
+    else:
         return None
 
-    source = Path(raw_path).expanduser().resolve()
     required_paths = [
         source / "bin" / "bishengir-compile",
         source / "bin" / "bishengir-opt",
         source / "lib",
     ]
     if not source.is_dir() or any(not path.exists() for path in required_paths):
-        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+        raise RuntimeError(f"{origin} must name a BishengIR directory containing "
                            "bin/bishengir-compile, bin/bishengir-opt, and lib")
     return source
 
@@ -536,14 +548,16 @@ def patch_module(mod):
 
             if is_manylinux:
                 file = glob.glob(os.path.join(self.dist_dir, "*-linux_*.whl"))[0]
+                # Target policy is fixed to the build image (manylinux_2_34);
+                # auditwheel's own repair error names the policy if the image
+                # ever drifts to a toolchain that does not know it.
+                target_policy = f"manylinux_2_34_{platform.machine()}"
                 auditwheel_cmd = [
                     "auditwheel",
                     "-v",
                     "repair",
                     "--plat",
-                    f"manylinux_2_27_{platform.machine()}",
-                    "--plat",
-                    f"manylinux_2_28_{platform.machine()}",
+                    target_policy,
                     "-w",
                     self.dist_dir,
                     file,

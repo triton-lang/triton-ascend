@@ -872,6 +872,52 @@ static bool hasAnyOpaqueAxis(ArrayRef<AxisKind> kinds) {
   return llvm::is_contained(kinds, AxisKind::Opaque);
 }
 
+static bool hasMixedAxisKinds(ArrayRef<AxisKind> kinds) {
+  return hasAnyOpaqueAxis(kinds) &&
+         llvm::is_contained(kinds, AxisKind::Structured);
+}
+
+// A pure uniform update changes every pointer lane by the same scalar amount.
+// Keeping that amount in the scalar uniform-offset component avoids turning a
+// loop update into a full residual tensor when only some axes are opaque.
+static bool isPureUniformUpdate(const AnalyzedTensorOffset &offset) {
+  return llvm::all_of(
+             offset.axisKinds,
+             [](AxisKind kind) { return kind == AxisKind::Structured; }) &&
+         llvm::all_of(offset.strides,
+                      [](const AnalyzedComponent &stride) {
+                        return isZeroIdentity(stride.identity);
+                      }) &&
+         isZeroIdentity(offset.opaqueContribution.identity);
+}
+
+static bool isPureUniformUpdate(const TensorOffsetValues &offset) {
+  return llvm::all_of(
+             offset.axisKinds,
+             [](AxisKind kind) { return kind == AxisKind::Structured; }) &&
+         llvm::all_of(offset.strides,
+                      [](Value stride) { return isConstantZero(stride); }) &&
+         isConstantZero(offset.opaqueContribution);
+}
+
+// These offsets can be decomposed and widened without moving an extension
+// across arithmetic. In particular, sext(i32(a + b)) is not sext(a) + sext(b).
+static bool isShapeOnlyRangeOffset(Value value) {
+  if (value.getDefiningOp<triton::MakeRangeOp>())
+    return true;
+  if (auto expand = value.getDefiningOp<triton::ExpandDimsOp>())
+    return isShapeOnlyRangeOffset(expand.getSrc());
+  if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>())
+    return isShapeOnlyRangeOffset(broadcast.getSrc());
+  if (auto extension = value.getDefiningOp<arith::ExtSIOp>()) {
+    auto resultType = dyn_cast<RankedTensorType>(value.getType());
+    return resultType &&
+           isCompatibleIntegerExtension(extension.getIn(), resultType) &&
+           isShapeOnlyRangeOffset(extension.getIn());
+  }
+  return false;
+}
+
 static AnalyzedTensorOffset getOpaqueAnalyzedOffset(Value value) {
   auto tensorType = cast<RankedTensorType>(value.getType());
   Type scalarType = tensorType.getElementType();
@@ -1110,6 +1156,36 @@ static FailureOr<AnalyzedTensorOffset> analyzeTensorOffset(Value value) {
   }
 
   return getOpaqueAnalyzedOffset(value);
+}
+
+// Updating only existing structured axes does not change the opaque residual.
+// Restrict this to an already-wide descriptor: widening a narrow descriptor's
+// fields separately could lose overflow in its complete offset. Check the
+// original offset in both phases so analysis and materialization agree on
+// the residual's identity even when operands are remapped.
+static bool canPreserveMixedResidual(Value offset, Type currentResidualType,
+                                     bool scalarBase,
+                                     ArrayRef<AxisKind> currentKinds,
+                                     ArrayRef<AxisKind> resultKinds) {
+  auto currentType = dyn_cast<RankedTensorType>(currentResidualType);
+  auto offsetType = dyn_cast<RankedTensorType>(offset.getType());
+  if (!scalarBase || !hasMixedAxisKinds(currentKinds) ||
+      currentKinds != resultKinds || !currentType || !offsetType ||
+      !currentType.getElementType().isInteger(64) ||
+      !isa<IntegerType>(offsetType.getElementType()) ||
+      offsetType.getElementType().getIntOrFloatBitWidth() > 64 ||
+      !isShapeOnlyRangeOffset(offset))
+    return false;
+  FailureOr<AnalyzedTensorOffset> delta = analyzeTensorOffset(offset);
+  if (failed(delta) || delta->strides.size() != currentKinds.size() ||
+      !isZeroIdentity(delta->opaqueContribution.identity))
+    return false;
+  for (unsigned axis = 0; axis < currentKinds.size(); ++axis) {
+    if (currentKinds[axis] == AxisKind::Opaque &&
+        !isZeroIdentity(delta->strides[axis].identity))
+      return false;
+  }
+  return true;
 }
 
 static FailureOr<Value> materializeAxisRange(OpBuilder &builder, Location loc,
@@ -1665,10 +1741,10 @@ getTensorPointerAttributes(MLIRContext *context, bool baseIsScalar,
           getAxisKindsAttr(context, axisKinds)};
 }
 
-static LogicalResult normalizeOffsetComponents(DecomposedValue &value,
-                                               ArrayRef<AxisKind> targetKinds,
-                                               OpBuilder &builder,
-                                               Location loc) {
+static LogicalResult
+normalizeOffsetComponents(DecomposedValue &value,
+                          ArrayRef<AxisKind> targetKinds, OpBuilder &builder,
+                          Location loc, bool preserveMixedUniform = false) {
   if (!hasValidLayout(value))
     return failure();
   unsigned rank = cast<RankedTensorType>(value.originalType).getRank();
@@ -1680,6 +1756,15 @@ static LogicalResult normalizeOffsetComponents(DecomposedValue &value,
         targetKinds[axis] == AxisKind::Structured)
       return failure();
   }
+
+  // A selected loop-carried uniform offset is already a canonical scalar
+  // component. When a mixed per-axis schema is unchanged, folding that scalar
+  // back into the opaque tensor would recreate a large residual on every
+  // backedge. This fast path is enabled only by the loop-specific policy hook;
+  // if and scope normalization retain the established complete-offset schema.
+  bool sameKinds = llvm::equal(*currentKinds, targetKinds);
+  if (preserveMixedUniform && sameKinds && hasMixedAxisKinds(targetKinds))
+    return success();
 
   Value complete = materializeTensorCompleteOffsets(value, builder, loc);
   if (!complete)
@@ -1737,12 +1822,10 @@ public:
       return *known;
     }
 
-    // Broadcasting an already-structured pointer tensor only changes the
-    // descriptor shape. An expanded unit dimension repeats the same pointer,
-    // so that dimension has stride zero in the result descriptor. Restrict the
-    // propagation to scalar-base descriptors with no opaque contribution;
-    // unknown or partially opaque pointer tensors retain the established
-    // complete-pointer fallback below.
+    // Broadcasting a scalar-base descriptor preserves its axis kinds. An
+    // expanded unit dimension has stride zero, and the opaque contribution
+    // must be broadcast along with the pointers. Unknown tensor bases retain
+    // the complete-pointer fallback below.
     if (auto broadcast = value.getDefiningOp<triton::BroadcastOp>()) {
       FailureOr<AnalyzedValue> result =
           context.analyzeValue(broadcast.getSrc());
@@ -1754,10 +1837,7 @@ public:
         auto sourceType = cast<RankedTensorType>(broadcast.getSrc().getType());
         auto resultType = cast<RankedTensorType>(value.getType());
         unsigned rank = resultType.getRank();
-        if (succeeded(kinds) && !llvm::is_contained(*kinds, AxisKind::Opaque) &&
-            isZeroIdentity(
-                result->components[getOpaqueContributionComponent(rank)]
-                    .identity)) {
+        if (succeeded(kinds)) {
           for (unsigned axis = 0; axis < rank; ++axis) {
             if (sourceType.getShape()[axis] == 1 &&
                 resultType.getShape()[axis] != 1) {
@@ -1769,9 +1849,13 @@ public:
               result->components[getUniformOffsetComponent(rank)].type;
           auto resultOffsetsType = RankedTensorType::get(
               resultType.getShape(), scalarType, resultType.getEncoding());
-          result->components[getOpaqueContributionComponent(rank)] = {
-              resultOffsetsType,
-              ComponentIdentity::zero(getOpaqueContributionComponent(rank))};
+          auto &opaque =
+              result->components[getOpaqueContributionComponent(rank)];
+          if (opaque.type != resultOffsetsType &&
+              !isZeroIdentity(opaque.identity))
+            opaque.identity = ComponentIdentity::fromValue(
+                value, getOpaqueContributionComponent(rank));
+          opaque.type = resultOffsetsType;
           result->originalType = value.getType();
           result->attributes[kAxisKindsAttribute] =
               getAxisKindsAttr(value.getContext(), *kinds);
@@ -1814,7 +1898,25 @@ public:
                       getStrideComponent(axis))
                 : ComponentIdentity::zero(getStrideComponent(axis))};
       }
-      if (hasAnyOpaqueAxis(resultKinds)) {
+      bool preserveMixedResidual =
+          hasMixedAxisKinds(resultKinds) &&
+          (isPureUniformUpdate(*delta) ||
+           canPreserveMixedResidual(
+               addPtr.getOffset(),
+               result->components[getOpaqueContributionComponent(rank)].type,
+               hasScalarBase(*result), *currentKinds, resultKinds)) &&
+          isa<RankedTensorType>(
+              result->components[getOpaqueContributionComponent(rank)].type);
+      if (preserveMixedResidual) {
+        result->components[getUniformOffsetComponent(rank)] = {
+            scalarType,
+            getAddIdentity(
+                result->components[getUniformOffsetComponent(rank)].identity,
+                delta->uniformOffset.identity, value,
+                getUniformOffsetComponent(rank))};
+        result->components[getOpaqueContributionComponent(rank)].type =
+            joinedTensorType;
+      } else if (hasAnyOpaqueAxis(resultKinds)) {
         result->components[getUniformOffsetComponent(rank)] = {
             scalarType,
             ComponentIdentity::zero(getUniformOffsetComponent(rank))};
@@ -1912,17 +2014,33 @@ public:
       if (!forwardsCurrent && !restoresInitial)
         identityChangingComponents.push_back(component);
     }
-    FailureOr<SmallVector<unsigned>> transferred =
-        filterTransferredComponentsForJoinedAxes(initial, *joinedKinds,
-                                                 identityChangingComponents);
-    if (failed(transferred))
-      return failure();
-    for (unsigned component : *transferred) {
+    unsigned rank = cast<RankedTensorType>(initial.originalType).getRank();
+    unsigned uniformComponent = getUniformOffsetComponent(rank);
+    unsigned opaqueComponent = getOpaqueContributionComponent(rank);
+    bool carriesOnlyUniform =
+        hasMixedAxisKinds(*joinedKinds) &&
+        identityChangingComponents.size() == 1 &&
+        identityChangingComponents.front() == uniformComponent &&
+        next.components[opaqueComponent].identity ==
+            regionArgument.components[opaqueComponent].identity;
+
+    SmallVector<unsigned> transferred;
+    if (carriesOnlyUniform) {
+      transferred.push_back(uniformComponent);
+    } else {
+      FailureOr<SmallVector<unsigned>> filtered =
+          filterTransferredComponentsForJoinedAxes(initial, *joinedKinds,
+                                                   identityChangingComponents);
+      if (failed(filtered))
+        return failure();
+      transferred = std::move(*filtered);
+    }
+    for (unsigned component : transferred) {
       if (failed(joinComponentTypes(initial.components[component].type,
                                     next.components[component].type)))
         return failure();
     }
-    return *transferred;
+    return transferred;
   }
 
   FailureOr<SmallVector<unsigned>>
@@ -2016,6 +2134,45 @@ public:
     return success();
   }
 
+  LogicalResult normalizeLoopCarriedValue(DecomposedValue &value,
+                                          ArrayRef<unsigned> carriedComponents,
+                                          ArrayRef<Attribute> targetAttributes,
+                                          OpBuilder &builder,
+                                          Location loc) const override {
+    if (!hasValidLayout(value) || targetAttributes.size() != 2)
+      return failure();
+    auto targetBase =
+        dyn_cast<BoolAttr>(targetAttributes[kBaseIsScalarAttribute]);
+    auto targetKinds =
+        dyn_cast<DenseI32ArrayAttr>(targetAttributes[kAxisKindsAttribute]);
+    unsigned rank = cast<RankedTensorType>(value.originalType).getRank();
+    // Keep the base representation selected by analysis.  Loop normalization
+    // may use the compact mixed-uniform path only for scalar bases, but tensor
+    // bases must remain valid loop values and follow the regular normalization
+    // below instead of being rejected solely because the target attribute is
+    // false.
+    if (!targetBase || !targetKinds || targetKinds.size() != rank ||
+        targetBase.getValue() != hasScalarBase(value))
+      return failure();
+
+    SmallVector<AxisKind> kinds;
+    for (int32_t rawKind : targetKinds.asArrayRef()) {
+      if (rawKind != static_cast<int32_t>(AxisKind::Opaque) &&
+          rawKind != static_cast<int32_t>(AxisKind::Structured))
+        return failure();
+      kinds.push_back(static_cast<AxisKind>(rawKind));
+    }
+
+    bool preserveMixedUniform =
+        hasScalarBase(value) && carriedComponents.size() == 1 &&
+        carriedComponents.front() == getUniformOffsetComponent(rank);
+    if (failed(normalizeOffsetComponents(value, kinds, builder, loc,
+                                         preserveMixedUniform)))
+      return failure();
+    value.attributes.assign(targetAttributes.begin(), targetAttributes.end());
+    return success();
+  }
+
   LogicalResult annotatePointerDescriptorRebuild(
       Operation *rebuildOp, const DecomposedValue &value) const override {
     if (!hasValidLayout(value) || !isa<triton::AddPtrOp>(rebuildOp))
@@ -2059,9 +2216,7 @@ public:
         auto sourceType = cast<RankedTensorType>(broadcast.getSrc().getType());
         auto resultType = cast<RankedTensorType>(value.getType());
         unsigned rank = resultType.getRank();
-        if (succeeded(kinds) && !llvm::is_contained(*kinds, AxisKind::Opaque) &&
-            isConstantZero(
-                result->components[getOpaqueContributionComponent(rank)])) {
+        if (succeeded(kinds)) {
           OpBuilder::InsertionGuard guard(builder);
           builder.setInsertionPoint(broadcast);
           for (unsigned axis = 0; axis < rank; ++axis) {
@@ -2080,12 +2235,17 @@ public:
               result->components[getUniformOffsetComponent(rank)].getType();
           auto resultOffsetsType = RankedTensorType::get(
               resultType.getShape(), scalarType, resultType.getEncoding());
-          Value zeroOffsets =
-              createZeroOffsets(builder, broadcast.getLoc(), resultOffsetsType);
-          if (!zeroOffsets)
-            return failure();
-          result->components[getOpaqueContributionComponent(rank)] =
-              zeroOffsets;
+          Value &opaque =
+              result->components[getOpaqueContributionComponent(rank)];
+          if (isConstantZero(opaque)) {
+            opaque = createZeroOffsets(builder, broadcast.getLoc(),
+                                       resultOffsetsType);
+            if (!opaque)
+              return failure();
+          } else if (opaque.getType() != resultOffsetsType) {
+            opaque = triton::BroadcastOp::create(builder, broadcast.getLoc(),
+                                                 resultOffsetsType, opaque);
+          }
           result->originalType = value.getType();
           result->attributes[kAxisKindsAttribute] =
               getAxisKindsAttr(value.getContext(), *kinds);
@@ -2128,6 +2288,70 @@ public:
         if (!stride)
           return failure();
         resultStrides.push_back(stride);
+      }
+
+      if (hasMixedAxisKinds(resultKinds) &&
+          (isPureUniformUpdate(*delta) ||
+           canPreserveMixedResidual(
+               addPtr.getOffset(),
+               result->components[getOpaqueContributionComponent(rank)]
+                   .getType(),
+               hasScalarBase(*result), *currentKinds, resultKinds))) {
+        auto opaqueType = dyn_cast<RankedTensorType>(
+            result->components[getOpaqueContributionComponent(rank)].getType());
+        FailureOr<Type> joinedType = getWiderIntegerLikeType(
+            result->components[getOpaqueContributionComponent(rank)].getType(),
+            delta->opaqueContribution.getType());
+        auto joinedOpaqueType = succeeded(joinedType)
+                                    ? dyn_cast<RankedTensorType>(*joinedType)
+                                    : RankedTensorType();
+        Type scalarType =
+            joinedOpaqueType ? joinedOpaqueType.getElementType() : Type();
+        FailureOr<Value> currentUniform = castIntegerLike(
+            builder, addPtr.getLoc(),
+            result->components[getUniformOffsetComponent(rank)], scalarType);
+        FailureOr<Value> deltaUniform = castIntegerLike(
+            builder, addPtr.getLoc(), delta->uniformOffset, scalarType);
+        if (opaqueType && joinedOpaqueType && succeeded(currentUniform) &&
+            succeeded(deltaUniform)) {
+          Value uniform = createIntegerAdd(builder, addPtr.getLoc(),
+                                           *currentUniform, *deltaUniform);
+          SmallVector<Value> normalizedStrides;
+          normalizedStrides.reserve(rank);
+          bool compatible = static_cast<bool>(uniform);
+          for (unsigned axis = 0; axis < rank && compatible; ++axis) {
+            FailureOr<Value> stride = castIntegerLike(
+                builder, addPtr.getLoc(), resultStrides[axis], scalarType);
+            if (failed(stride)) {
+              compatible = false;
+              break;
+            }
+            normalizedStrides.push_back(*stride);
+          }
+          Value normalizedOpaque;
+          if (compatible) {
+            FailureOr<Value> opaque = castIntegerLike(
+                builder, addPtr.getLoc(),
+                result->components[getOpaqueContributionComponent(rank)],
+                joinedOpaqueType);
+            if (failed(opaque))
+              compatible = false;
+            else
+              normalizedOpaque = *opaque;
+          }
+          if (compatible) {
+            for (unsigned axis = 0; axis < rank; ++axis)
+              result->components[getStrideComponent(axis)] =
+                  normalizedStrides[axis];
+            result->components[getOpaqueContributionComponent(rank)] =
+                normalizedOpaque;
+            result->components[getUniformOffsetComponent(rank)] = uniform;
+            result->originalType = value.getType();
+            result->attributes[kAxisKindsAttribute] =
+                getAxisKindsAttr(value.getContext(), resultKinds);
+            return *result;
+          }
+        }
       }
 
       Value currentComplete =

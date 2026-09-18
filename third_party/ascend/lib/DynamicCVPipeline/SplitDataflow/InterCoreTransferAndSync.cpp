@@ -1826,9 +1826,8 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
 
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{}, fixpipeSrcValue, allocOp->getResult(0),
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
-      builder.getBoolAttr(channelSplit), nullptr, nullptr, mlir::ArrayAttr{},
-      nullptr);
+      dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      builder.getBoolAttr(channelSplit), nullptr, nullptr);
   attachCommonTags(fixpipeOp, prodBlockId, CVPipeline::kCoreTypeCube);
   // Tag C2C fixpipe as kIntraDeps producer when it is a cross-block C2C.
   if (!isIntraC2C) {

@@ -29,15 +29,16 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
-#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Pass/Pass.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 
@@ -312,109 +313,6 @@ cloneEarlierCubesInto(ArrayRef<CubeBlock> earlierCubes, int laterBlockId,
   return success();
 }
 
-/// Returns true if `root`'s effect can reach a non-cloned op (transitively
-/// through SSA use chains restricted to ops inside `scope`). For ops with
-/// no side effects on the SSA chain this returns false. For side-effecting
-/// ops it walks the effects of `root`, finds the values that are written/
-/// allocated (i.e. the side-effect targets), then BFS-walks every user of
-/// every such value to detect a non-cloned consumer.
-static bool effectReachesNonClonedOp(Operation *root) {
-  // Pure: no side effect to leak.
-  if (mlir::isMemoryEffectFree(root)) {
-    return false;
-  }
-
-  // Collect the values that root produces side effects on. For MemWrite
-  // / MemAlloc / MemFree effects, the .getValue() is the affected resource.
-  SmallVector<Value> affected;
-  for (auto &effect :
-       mlir::getEffectsRecursively(root).value_or(
-           llvm::SmallVector<mlir::MemoryEffects::EffectInstance>{})) {
-    Value v = effect.getValue();
-    if (!v) {
-      continue;
-    }
-    // Track any value the op side-effects on: writes (memref.copy,
-    // memref.store, linalg.fill), allocations (memref.alloc), reads
-    // (bufferization.to_tensor), and frees (memref.dealloc). If the
-    // value flows only to other cloned ops, the side effect is dead.
-    if (isa<MemoryEffects::Write, MemoryEffects::Allocate, MemoryEffects::Free,
-            MemoryEffects::Read>(effect.getEffect())) {
-      affected.push_back(v);
-    }
-  }
-
-  // If the op has no side effect on a known value (only Resource
-  // effects), be conservative and assume it may be observed externally.
-  if (affected.empty()) {
-    return true;
-  }
-
-  // BFS over users of every affected value, stopping at the first
-  // non-cloned user.
-  llvm::SmallPtrSet<Operation *, 32> visited;
-  SmallVector<Operation *> worklist;
-  for (Value v : affected) {
-    for (Operation *user : v.getUsers()) {
-      worklist.push_back(user);
-    }
-  }
-  while (!worklist.empty()) {
-    Operation *cur = worklist.pop_back_val();
-    if (!visited.insert(cur).second) {
-      continue;
-    }
-    if (!cur->hasAttr(CVPipeline::kClone)) {
-      return true;
-    }
-    // Continue along the user chain in case the effect value flows
-    // through more cloned ops to a final non-cloned consumer.
-    for (Operation *next : cur->getUsers()) {
-      worklist.push_back(next);
-    }
-  }
-  return false;
-}
-
-/// Cleanup helper: a cloned op is *potentially* erasable when:
-///   * it carries the kClone attr,
-///   * it is not a terminator,
-///   * for side-effecting ops: its effect does not reach any non-cloned
-///     op in the same region (i.e. the memory it produces/writes is only
-///     consumed by other cloned ops),
-///   * for ops with SSA results: every user of every result is itself a
-///     cloned op or the result is unused (the cascade into side-effect
-///     chains is handled by the fixpoint loop).
-static bool isInitiallyErasable(Operation *op) {
-  if (!op->hasAttr(CVPipeline::kClone)) {
-    return false;
-  }
-  if (op->hasTrait<OpTrait::IsTerminator>()) {
-    return false;
-  }
-  // Side-effect check (covers memref.alloc / memref.copy / linalg.fill /
-  // memref.store / bufferization.to_tensor's declared MemRead, etc.).
-  // We treat anything that declares side effects as live UNLESS its
-  // effect is provably confined to the cloned chain.
-  if (effectReachesNonClonedOp(op)) {
-    return false;
-  }
-  // SSA-result check: a result whose only consumer is a non-cloned op
-  // must be kept. This is redundant with the effect check for memref
-  // effects but covers pure ops whose result is read by non-cloned ops.
-  for (auto result : op->getResults()) {
-    if (result.use_empty()) {
-      continue;
-    }
-    for (Operation *user : result.getUsers()) {
-      if (!user->hasAttr(CVPipeline::kClone)) {
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
 /// Process one side (then or else) of a candidate if. Mirrors
 /// CloneOps::cloneOpsInMainLoop's reverse-order strategy: walk CUBE blocks
 /// from last to first; for each CUBE block whose ops depend on any earlier
@@ -473,190 +371,133 @@ static LogicalResult processSide(Block *block,
   return success();
 }
 
-/// Cleanup pass: erase cloned ops whose entire SSA-use chain is closed
-/// inside the cloned set (i.e. no non-cloned op references any result of
-/// any op in the chain). The closure is computed bottom-up via a
-/// fixpoint. This mirrors the conservative side of CloneOps cleanup,
-/// avoiding "operation destroyed but still has uses" verifier errors.
-static void cleanupSide(Block *block) {
+/// Cleanup: drop cloned ops whose entire SSA chain (results and memory
+/// effects) is dead w.r.t. the rest of the program. Mirrors
+/// CloneOps::shouldEraseOpForCube's Rule 2/3:
+///
+/// * Rule 2 — op has SSA results: erase only when no same-block_id user
+///   of any result remains live. (User is "live" iff it is non-cloned
+///   OR it has not been picked for erasure by the cascading cleanup.)
+///
+/// * Rule 3 — op has no results: erase only when no same-block_id
+///   exec-after consumer remains live, where exec-after is determined
+///   by MemoryDependenceGraph (real memory dependencies, not just MLIR
+///   order).
+///
+/// `erasedOps` shields already-erased consumers so the cascade can
+/// converge bottom-up.
+static void cleanupSide(Block *block,
+                       const MemoryDependenceGraph &memGraph) {
   if (block == nullptr) {
     return;
   }
 
-  // 1. Initially-erasable set.
-  llvm::DenseSet<Operation *> erasable;
-  for (auto &op : *block) {
-    if (isa<scf::YieldOp>(op)) {
-      continue;
-    }
-    if (isInitiallyErasable(&op)) {
-      erasable.insert(&op);
-    }
-  }
-  // Also consider cloned ops nested inside region-bearing ops (e.g. the
-  // body of a cloned scf.if). We treat each region recursively, but
-  // iterating just the outer block is sufficient because we never clone
-  // region-bearing ops in processSide — every op in earlierCubes is a
-  // simple op. We still walk one level deep defensively for nested
-  // cloned ops that may appear in user-written `scf.if` inside a CUBE
-  // block (rare but possible).
-  for (auto &op : *block) {
-    if (!op.hasAttr(CVPipeline::kClone)) {
-      continue;
-    }
-    for (Region &region : op.getRegions()) {
-      for (Block &subBlock : region) {
-        for (auto &nestedOp : subBlock) {
-          if (isInitiallyErasable(&nestedOp)) {
-            erasable.insert(&nestedOp);
-          }
-        }
-      }
-    }
+  // Walk the block from back to front; identify each contiguous cloned
+  // suffix and try to erase it. Mirrors CloneOps::cleanupClonedOps'
+  // "find last cloned index, then contiguous cloned suffix above it"
+  // strategy.
+  SmallVector<Operation *> opsInBlock;
+  opsInBlock.reserve(block->getOperations().size());
+  for (Operation &op : *block) {
+    opsInBlock.push_back(&op);
   }
 
-  LDBG("cleanupSide: initiallyErasable size=" << erasable.size());
+  llvm::DenseSet<Operation *> erasedOps;
 
-  // 2. Fixpoint: an op is erasable only if (a) every user of every SSA
-  //    result is itself erasable, AND (b) for side-effecting ops, the
-  //    effect chain does not reach a non-cloned (or non-erasable) op.
-  //    A non-cloned consumer acts as a "live" anchor; a previously-
-  //    erasable-but-now-removed consumer also exposes upstream effects
-  //    that may no longer have any cloned consumer.
-  bool changed = true;
-  while (changed) {
-    changed = false;
-    SmallVector<Operation *> snapshot(erasable.begin(), erasable.end());
-    for (Operation *op : snapshot) {
-      if (!op->getBlock()) {
-        continue;
+  for (int idx = static_cast<int>(opsInBlock.size()) - 1; idx >= 0; --idx) {
+    Operation *op = opsInBlock[idx];
+    if (isa<scf::YieldOp>(*op)) {
+      continue;
+    }
+    if (!op->hasAttr(CVPipeline::kClone)) {
+      continue;
+    }
+    if (erasedOps.contains(op) || !op->getBlock()) {
+      continue;
+    }
+
+    // Decide whether to erase this op.
+    auto hasLiveSameBlockIdUser = [&](Operation *op) {
+      auto opBlockId = CVPipeline::getOpBlockId(op);
+      if (!opBlockId) {
+        return true;
       }
-      // SSA-result check.
-      bool pin = false;
       for (auto result : op->getResults()) {
         for (Operation *user : result.getUsers()) {
-          if (!erasable.contains(user)) {
-            pin = true;
-            break;
-          }
-        }
-        if (pin) {
-          break;
-        }
-      }
-      if (pin) {
-        if (erasable.erase(op)) {
-          changed = true;
-        }
-        continue;
-      }
-      // Side-effect check: re-evaluate effect reachability, but treat
-      // any non-erasable op in the user chain as an external anchor
-      // (equivalent to non-cloned). The pure helper above already
-      // handles effect-reaches-non-cloned; we additionally exclude ops
-      // that have been removed from erasable.
-      if (!mlir::isMemoryEffectFree(op)) {
-        SmallVector<Value> affected;
-        for (auto &effect :
-             mlir::getEffectsRecursively(op).value_or(
-                 llvm::SmallVector<mlir::MemoryEffects::EffectInstance>{})) {
-          Value v = effect.getValue();
-          if (!v) {
+          if (erasedOps.contains(user)) {
             continue;
           }
-          if (isa<MemoryEffects::Write, MemoryEffects::Allocate,
-                  MemoryEffects::Free, MemoryEffects::Read>(
-                  effect.getEffect())) {
-            affected.push_back(v);
-          }
-        }
-        bool leak = affected.empty(); // conservative: no value ⇒ unknown
-        if (!leak) {
-          llvm::SmallPtrSet<Operation *, 32> visited;
-          SmallVector<Operation *> worklist;
-          for (Value v : affected) {
-            for (Operation *user : v.getUsers()) {
-              worklist.push_back(user);
-            }
-          }
-          while (!worklist.empty() && !leak) {
-            Operation *cur = worklist.pop_back_val();
-            if (!visited.insert(cur).second) {
-              continue;
-            }
-            if (!cur->hasAttr(CVPipeline::kClone) ||
-                !erasable.contains(cur)) {
-              leak = true;
-              break;
-            }
-            for (Operation *next : cur->getUsers()) {
-              worklist.push_back(next);
-            }
-          }
-        }
-        if (leak) {
-          if (erasable.erase(op)) {
-            changed = true;
+          auto userBlockId = CVPipeline::getOpBlockId(user);
+          if (userBlockId && *userBlockId == *opBlockId) {
+            return true;
           }
         }
       }
-    }
-  }
-  LDBG("cleanupSide: post-fixpoint erasable size=" << erasable.size());
+      return false;
+    };
 
-  // 3. Erase bottom-up (consumers before producers).
-  SmallVector<Operation *> toErase(erasable.begin(), erasable.end());
-  llvm::sort(toErase, [](Operation *a, Operation *b) {
-    return a->isBeforeInBlock(b);
-  });
-  std::reverse(toErase.begin(), toErase.end());
-
-  for (Operation *op : toErase) {
-    if (!op->getBlock()) {
-      continue;
-    }
-    // Sanity: still no live non-erasable user.
-    bool safe = true;
-    for (auto result : op->getResults()) {
-      for (Operation *user : result.getUsers()) {
-        if (!erasable.contains(user)) {
-          safe = false;
-          LDBG("cleanupSide: REFUSE to erase " << op->getName()
-                                                << " (live user: " << user->getName()
-                                                << ")");
-          break;
+    auto hasLiveSameBlockIdExecAfter = [&](Operation *op) {
+      auto opBlockId = CVPipeline::getOpBlockId(op);
+      if (!opBlockId) {
+        return true;
+      }
+      for (Operation *execOp : memGraph.getExecAfter(op)) {
+        if (erasedOps.contains(execOp)) {
+          continue;
+        }
+        auto execBlockId = CVPipeline::getOpBlockId(execOp);
+        if (execBlockId && *execBlockId == *opBlockId) {
+          return true;
         }
       }
-      if (!safe) {
-        break;
-      }
+      return false;
+    };
+
+    bool shouldErase = false;
+    if (op->getNumResults() > 0) {
+      // Rule 2
+      shouldErase = !hasLiveSameBlockIdUser(op);
+    } else {
+      // Rule 3
+      shouldErase = !hasLiveSameBlockIdExecAfter(op);
     }
-    if (!safe) {
-      continue;
+
+    if (shouldErase) {
+      LDBG("cleanupSide: erasing " << op->getName());
+      op->erase();
+      erasedOps.insert(op);
+    } else {
+      LDBG("cleanupSide: KEEP " << op->getName()
+                                << " (live "
+                                << (op->getNumResults() > 0 ? "user" : "exec-after")
+                                << " in same block_id)");
     }
-    // Sanity: side-effect no longer leaks (defensive).
-    if (effectReachesNonClonedOp(op)) {
-      LDBG("cleanupSide: REFUSE to erase " << op->getName()
-                                            << " (effect leaks to non-cloned)");
-      continue;
-    }
-    LDBG("cleanupSide: erasing " << op->getName());
-    op->erase();
   }
 }
 
-static LogicalResult processCandidate(CandidateIf &cand) {
+static LogicalResult processCandidate(CandidateIf &cand,
+                                      AliasAnalysis &aa) {
   if (cand.thenNeedsSplit) {
     if (failed(processSide(cand.ifOp.thenBlock(), cand.thenCubes))) {
       return failure();
     }
-    cleanupSide(cand.ifOp.thenBlock());
   }
   if (cand.elseNeedsSplit) {
     if (failed(processSide(cand.ifOp.elseBlock(), cand.elseCubes))) {
       return failure();
     }
-    cleanupSide(cand.ifOp.elseBlock());
+  }
+
+  // Rebuild the mem graph AFTER cloning so the cloned ops participate
+  // in the exec-after edges. CloneOps takes the same approach (rebuild
+  // the graph on demand for the loop op after each cloning round).
+  MemoryDependenceGraph memGraph(cand.ifOp, aa);
+
+  if (cand.thenNeedsSplit) {
+    cleanupSide(cand.ifOp.thenBlock(), memGraph);
+  }
+  if (cand.elseNeedsSplit) {
+    cleanupSide(cand.ifOp.elseBlock(), memGraph);
   }
   return success();
 }
@@ -693,6 +534,11 @@ void CloneCubeDepInIfPass::runOnOperation() {
 
   LDBG("Before:\n" << module << "\n----------");
 
+  // The memory-dependence graph is rebuilt PER CANDIDATE inside
+  // processCandidate so that freshly cloned ops participate in the
+  // exec-after edges (mirrors CloneOps' per-loop rebuild).
+  auto &aa = getAnalysis<AliasAnalysis>();
+
   WalkResult walkRes = module->walk([&](scf::IfOp ifOp) -> WalkResult {
     CandidateIf cand = getCandidate(ifOp);
     if (!cand.thenNeedsSplit && !cand.elseNeedsSplit) {
@@ -703,7 +549,7 @@ void CloneCubeDepInIfPass::runOnOperation() {
                               << " elseNeedsSplit=" << cand.elseNeedsSplit
                               << " thenCubes=" << cand.thenCubes.size()
                               << " elseCubes=" << cand.elseCubes.size());
-    if (failed(processCandidate(cand))) {
+    if (failed(processCandidate(cand, aa))) {
       return WalkResult::interrupt();
     }
     return WalkResult::advance();

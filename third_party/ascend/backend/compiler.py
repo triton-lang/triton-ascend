@@ -294,6 +294,12 @@ def _graph_optimize_kwargs(opt):
     return kwargs
 
 
+def _serialize_module(mod, opt):
+    if getattr(opt, "debug", False) or not _is_debug_line_info_disabled() or _enable_msdebug():
+        return str(mod)
+    return mod.str_nodebug()
+
+
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -324,7 +330,7 @@ def make_ttir(mod, metadata, opt):
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
-    ttir_code = str(mod)
+    ttir_code = _serialize_module(mod, opt)
     auto_map_parallel_blocks_enabled = _is_auto_map_parallel_blocks_enabled()
     # This is compiler-derived safety metadata, never a user compile option.
     # Derive it even when the feature is currently disabled so a later runtime
@@ -338,7 +344,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     with tempfile.TemporaryDirectory() as tmpdir:
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")
         dst_path = os.path.join(tmpdir, "kernel.ttadapter.mlir")
-        Path(src_path).write_text(ttir_code)
+        if opt.debug:
+            Path(src_path).write_text(ttir_code)
         triton_adapter_opt_path = _get_triton_adapter_opt_path()
 
         # Select analysis is a fixed lowering policy, not a user compile option.
@@ -437,7 +444,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(str(mod), "kernel.ttadapter.mlir", binary=False)
 
-        return str(mod)
+        return _serialize_module(mod, opt)
 
 
 def linalg_to_bc_by_triton_mlir_opt(linalg: str, metadata, opt):
@@ -498,13 +505,14 @@ def bc_to_linalg_by_bishengir_opt(bc_data: bytes, metadata, opt):
 
         bishengir_opt_path, env = _get_bishengir_opt_path()
 
-        subprocess.run([
+        cmd = [
             bishengir_opt_path,
             bc_path,
-            "--mlir-print-debuginfo",
-            "-o",
-            mlir_path,
-        ], env=env, capture_output=True, check=True, text=True)
+        ]
+        if opt.debug:
+            cmd += ["--mlir-print-debuginfo"]
+        cmd += ["-o", mlir_path]
+        subprocess.run(cmd, env=env, capture_output=True, check=True, text=True)
 
         # Read the generated MLIR text
         linalg_text = Path(mlir_path).read_text()
@@ -874,9 +882,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         bisheng_options = metadata["bisheng_options"]
         if bisheng_options is not None:
             _compile_option_list += [f"--append-bisheng-options={bisheng_options}"]
-        _compile_option_list += ["--mlir-print-ir-after-failure"]
-        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
+            _compile_option_list += ["--mlir-print-ir-after-failure"]
+            _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         vf_merge_level = metadata["vf_merge_level"]
@@ -1092,9 +1100,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
                     and _npu_compiler_supports_option(npu_compiler_path, "--enable-lib-call-no-inline")):
                 _compile_option_list += ["--enable-lib-call-no-inline=false"]
 
-        _compile_option_list += ["--mlir-print-ir-after-failure"]
-        _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
         if opt.debug:
+            _compile_option_list += ["--mlir-print-ir-after-failure"]
+            _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
@@ -1425,9 +1433,10 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
 
 def ttir_to_npubin(mod, metadata, opt):
     _export_program_grid_metadata(mod, metadata, require_row_contract=True)
-    ttir_code = str(mod)
+    ttir_code = _serialize_module(mod, opt)
     metadata = _parse_ttir_metadata(ttir_code, metadata)
     _finalize_program_launch_policy(metadata, opt)
+
     with tempfile.TemporaryDirectory() as tmpdir:
         # prepare input
         src_path = os.path.join(tmpdir, "kernel.ttir.mlir")

@@ -32,8 +32,8 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          is_ffts_supported, force_disable_ffts, get_backend_func, get_cann_version)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int, is_ffts_supported,
+                                          force_disable_ffts, get_backend_func, get_cann_version)
 from triton.backends.ascend.program_grid import (
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,

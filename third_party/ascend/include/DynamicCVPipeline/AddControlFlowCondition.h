@@ -67,6 +67,9 @@ struct TensorIterArgIfOpVars {
   llvm::SmallVector<Value> consumerVars;
 };
 
+// Kind of dependency edge between two ifOps in ifBlockDAG.
+enum class IfBlockDepKind : uint8_t { CrossCore = 0, IntraCore = 1 };
+
 // Per scf.while block-arg map: whileOp -> block_id -> (new_arg_idx ->
 // old_arg_idx).
 using WhileBlockArgMap =
@@ -95,8 +98,10 @@ struct ControlFlowConditionInfo {
   // unique counter value for each ifblock scf.for only.
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
 
-  // DAG for if block cross-core dependencies
-  llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> ifBlockCrossCoreDAG;
+  // DAG for if block dependencies.
+  llvm::DenseMap<scf::IfOp,
+                 llvm::SmallVector<std::pair<scf::IfOp, IfBlockDepKind>>>
+      ifBlockDAG;
   llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
 
   // Buffer counts for flowOpt condition

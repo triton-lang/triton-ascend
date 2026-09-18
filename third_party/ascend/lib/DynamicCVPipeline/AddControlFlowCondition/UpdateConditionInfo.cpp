@@ -1208,17 +1208,17 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
 // Update DAG nodes after ifOp replacement
 void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
                                                             scf::IfOp newIfOp) {
-  // 1. Update ifBlockCrossCoreDAG
-  if (info->ifBlockCrossCoreDAG.count(oldIfOp)) {
-    auto consumers = info->ifBlockCrossCoreDAG[oldIfOp];
-    info->ifBlockCrossCoreDAG.erase(oldIfOp);
-    info->ifBlockCrossCoreDAG[newIfOp] = consumers;
+  // 1. Update ifBlockDAG
+  if (info->ifBlockDAG.count(oldIfOp)) {
+    auto consumers = info->ifBlockDAG[oldIfOp];
+    info->ifBlockDAG.erase(oldIfOp);
+    info->ifBlockDAG[newIfOp] = consumers;
   }
 
-  for (auto &entry : info->ifBlockCrossCoreDAG) {
-    for (size_t i = 0; i < entry.second.size(); i++) {
-      if (entry.second[i] == oldIfOp) {
-        entry.second[i] = newIfOp;
+  for (auto &entry : info->ifBlockDAG) {
+    for (auto &edge : entry.second) {
+      if (edge.first == oldIfOp) {
+        edge.first = newIfOp;
       }
     }
   }

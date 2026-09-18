@@ -28,7 +28,7 @@ jobs:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
     timeout-minutes: 360
 
     strategy:
@@ -95,7 +95,7 @@ jobs:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
           build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
+            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
             MAX_JOBS=${{ steps.vars.outputs.max_jobs }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
@@ -105,7 +105,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
 
       - name: Setup obsutil and upload to OBS

@@ -316,7 +316,13 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
             signature={0: "*fp32", 1: "*fp32"},
             metadata=metadata,
         )
-        expected_per_launch_path = 1 if (auto_map_enabled and (is_pure_simt or not blacklisted)) else 0
+        if is_pure_simt:
+            # The launcher must use the compiler's final AutoBlockify decision.
+            # In particular, RowCoalescing can leave a pure-SIMT kernel without
+            # the grid-stride loop required for a physical-block cap.
+            expected_per_launch_path = 1 if auto_blockify_enabled else 0
+        else:
+            expected_per_launch_path = 1 if (auto_map_enabled and not blacklisted) else 0
         c_abi_launch, cpp_launch = _split_launch_functions(src)
         case = (f"E={auto_map_enabled}, P={is_pure_simt}, B={blacklisted}, "
                 f"R={row_coalescing_applied}, A={auto_blockify_enabled}")

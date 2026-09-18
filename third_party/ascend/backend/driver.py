@@ -1068,7 +1068,13 @@ static void release_npu_tensor_handle(void* handle) {{
     elif mix_mode != "aiv":
         raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
 
-    launcher_cap_enabled = enable_auto_map_parallel_blocks and not ptsm_cap_authorized
+    # Pure-SIMT may deliberately omit AutoBlockify after RowCoalescing.  In
+    # that case the generated kernel has no grid-stride loop, so capping the
+    # coalesced launch grid would drop the remaining logical programs.  Keep
+    # the existing policy for other compilation modes.
+    cap_policy_enabled = (auto_blockify_enabled
+                          if is_pure_simt else enable_auto_map_parallel_blocks)
+    launcher_cap_enabled = cap_policy_enabled and not ptsm_cap_authorized
 
     program_grid_finalization = ""
     if program_grid_transforms is not None:

@@ -4,7 +4,7 @@ import triton.language as tl
 
 
 @triton.jit
-def atomic_rmw_useanalysis_kernel(
+def atomic_rmw_memory_dependency_kernel(
     input_ptr,
     output_ptr,
     m_ptr,
@@ -41,7 +41,7 @@ def atomic_rmw_useanalysis_kernel(
     tl.atomic_add(output_ptr + output_offsets, result, mask=mask)
 
 
-def test_atomic_rmw_useanalysis():
+def test_atomic_rmw_memory_dependency():
     DEVICE = "npu"
     N = 1024
     BLOCK_SIZE = 128
@@ -54,7 +54,7 @@ def test_atomic_rmw_useanalysis():
 
     grid = (8, )
 
-    atomic_rmw_useanalysis_kernel[grid](
+    atomic_rmw_memory_dependency_kernel[grid](
         input_data,
         output_data,
         m_data,
@@ -65,6 +65,6 @@ def test_atomic_rmw_useanalysis():
     output_sum = output_data.abs().sum().item()
 
     if output_sum == 0:
-        raise AssertionError("UseAnalysis bug detected: atomic_rmw dependencies were erased")
+        raise AssertionError("atomic_rmw memory dependencies were erased")
     else:
-        print("  AtomicRMW UseAnalysis is working correctly.")
+        print("  AtomicRMW memory dependencies are preserved.")

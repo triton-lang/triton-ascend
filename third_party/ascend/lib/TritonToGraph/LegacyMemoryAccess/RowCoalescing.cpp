@@ -230,8 +230,7 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
   triton::GetProgramIdOp pid = seed.pid;
   Value pidVal = pid.getResult();
   Location loc = pid.getLoc();
-  Block *pidBlock = seed.pid->getBlock();
-  if (!pidBlock || !seed.workBlock)
+  if (!seed.entryGuard || !seed.workBlock)
     return false;
 
   auto liftTy = [&](Type t) -> RankedTensorType {
@@ -265,10 +264,7 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     return Value();
   };
 
-  if (Operation *validDef = seed.validCount.getDefiningOp())
-    rw.setInsertionPointAfter(validDef);
-  else
-    rw.setInsertionPointAfter(seed.pid);
+  rw.setInsertionPoint(seed.entryGuard);
   Value cH = rw.create<arith::ConstantIntOp>(loc, H, 32);
   Value pidH = rw.create<arith::MulIOp>(loc, pidVal, cH);
   auto hI32Ty = RankedTensorType::get({H}, rw.getI32Type());

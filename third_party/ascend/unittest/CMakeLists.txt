@@ -32,5 +32,5 @@ endif()
 
 # The deallocation observer uses ELF linker wrapping.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-  add_subdirectory(offset_analysis_ut)
+  add_subdirectory(Analysis)
 endif()

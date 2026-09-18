@@ -291,6 +291,9 @@ struct IndependentAxisTensorizeRuleOptions {
 struct PersistentTaskStripMiningRuleOptions {
   bool enabledForCompileMode = true;
 };
+struct StoreCoalescingRuleOptions {
+  bool enabledForCompileMode = true;
+};
 struct ResidentLoadForwardingRuleOptions {};
 struct IntermediatePrecisionBoundaryElisionRuleOptions {};
 struct StoreCoveragePlanningRuleOptions {};
@@ -313,6 +316,7 @@ struct GraphOptimizationOptions {
   std::string compileMode = "simd_simt_template";
   IndependentAxisTensorizeRuleOptions independentAxisTensorize;
   PersistentTaskStripMiningRuleOptions persistentTaskStripMining;
+  StoreCoalescingRuleOptions storeCoalescing;
   ResidentLoadForwardingRuleOptions residentLoadForwarding;
   IntermediatePrecisionBoundaryElisionRuleOptions
       intermediatePrecisionBoundaryElision;

@@ -16,6 +16,7 @@ add_triton_library(TritonMemoryAccessAnalysis
   MLIRDialectUtils
   MLIRIR
   MLIRMemRefDialect
+  MLIRSCFDialect
   MLIRSupport
   MLIRTensorDialect
   MLIRTransforms

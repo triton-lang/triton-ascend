@@ -226,8 +226,18 @@ bool isValuePreparationOp(Operation *op) {
          isTensorOnlyLinalgFillOp(op);
 }
 
+bool isFloatingPointExtensionOrTruncationOp(Operation *op) {
+  return llvm::StringSwitch<bool>(op->getName().getStringRef())
+      .Case("arith.extf", true)
+      .Case("arith.truncf", true)
+      .Default(false);
+}
+
 bool isAddressComputationOp(Operation *op) {
   StringRef name = op->getName().getStringRef();
+
+  if (isFloatingPointExtensionOrTruncationOp(op))
+    return false;
 
   return llvm::StringSwitch<bool>(name)
              .Case("memref.reinterpret_cast", true)
@@ -390,12 +400,16 @@ classifyOperation(Operation *op,
   if (isValuePreparationOp(op))
     return DebugLineLocClass::Synthetic;
 
-  if (isAddressComputationOp(op))
-    return DebugLineLocClass::Synthetic;
-
   SourceLine line = getSourceLine(canonicalizeSourceLoc(op->getLoc()));
   bool hasSemanticAnchorOnSameLine =
       line && semanticAnchors.lookup(line.getKey()) > 0;
+
+  if (isFloatingPointExtensionOrTruncationOp(op))
+    return hasSemanticAnchorOnSameLine ? DebugLineLocClass::Synthetic
+                                       : DebugLineLocClass::Semantic;
+
+  if (isAddressComputationOp(op))
+    return DebugLineLocClass::Synthetic;
 
   if (isArithmeticOrCastOp(op)) {
     if (hasSemanticAnchorOnSameLine)

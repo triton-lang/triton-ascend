@@ -1319,9 +1319,15 @@ static Value prepareLoopPolling(Operation *loopOp, Operation *waitOp,
   int tid = getTransferId(waitOp);
 
   if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
-    OpBuilder condBuilder(forOp.getBody(), Block::iterator(waitOp));
-    Value cond = createPollingCondition(forOp, condBuilder, bid, tid);
-    builderOut.setInsertionPoint(forOp.getBody()->getTerminator());
+    // Build the polling cond at body start so it dominates every group's
+    // scf.if wrapper (mirrors the while branch). tid comes from the anchor
+    // wait; the block id from the first body op (CloneOps contiguity).
+    builderOut.setInsertionPointToStart(forOp.getBody());
+    std::optional<int> pollBlockId = getFirstBlockId(forOp.getBody());
+    if (!pollBlockId)
+      pollBlockId = bid;
+    OpBuilder condBuilder(builderOut);
+    Value cond = createPollingCondition(forOp, condBuilder, *pollBlockId, tid);
     return cond;
   }
 

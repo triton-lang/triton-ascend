@@ -41,12 +41,7 @@ static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
 namespace mlir {
 namespace CVPipeline {
 
-static bool g_enableCubeBlockMerge = false;
 static bool g_enableUBRefineOpt = false;
-
-void setEnableCubeBlockMerge(bool enable) { g_enableCubeBlockMerge = enable; }
-
-bool isCubeBlockMergeEnabled() { return g_enableCubeBlockMerge; }
 
 CoreType getOpCoreType(Operation *op) {
   if (!op) {

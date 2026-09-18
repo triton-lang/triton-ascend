@@ -122,9 +122,6 @@ inline constexpr CoreType fromStrCoreType(std::string_view s) {
   return CoreType::UNDETERMINED;
 }
 
-void setEnableCubeBlockMerge(bool enable);
-bool isCubeBlockMergeEnabled();
-
 void setEnableUBRefineOpt(bool enable);
 bool isUBRefineOptEnabled();
 

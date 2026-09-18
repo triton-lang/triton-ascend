@@ -142,7 +142,7 @@ private:
 
   // Step 4.5: Penetrate CUBE coloring into pure loader scf.for loops whose
   // results are consumed exclusively by CUBE ops.
-  int penetrateCubeIntoForLoops();
+  llvm::LogicalResult penetrateCubeIntoForLoops();
 
   // Helper: decide whether an scf.for or scf.while is a pure cube-loader loop
   bool isCubeLoaderForOp(scf::ForOp forOp);

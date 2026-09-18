@@ -28,6 +28,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -1098,6 +1099,9 @@ bool isDisqualifyingLoaderOp(Operation *op) {
 } // namespace
 
 bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
+  if (forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+    return false;
+
   // Every result must be live and used only by CUBE consumers
   for (Value result : forOp.getResults()) {
     for (Operation *user : result.getUsers()) {
@@ -1157,7 +1161,7 @@ markLoopBodyAsCube(Operation *loop, Block *body,
   opCoreTypes[loop] = OP_CUBE_ONLY;
 }
 
-int OpClassifierPass::penetrateCubeIntoForLoops() {
+llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
   // Collect first so recoloring earlier loops cannot perturb the scan.
   // Use a combined walk to collect both ForOps and WhileOps
   llvm::SmallVector<Operation *> loaderLoops;
@@ -1176,7 +1180,7 @@ int OpClassifierPass::penetrateCubeIntoForLoops() {
       markLoopBodyAsCube(loop, body, opCoreTypes);
   }
 
-  return 0;
+  return llvm::success();
 }
 
 // ============================================================================
@@ -1867,8 +1871,7 @@ void OpClassifierPass::runOnOperation() {
   }
 
   // Step 4: Penetrate CUBE coloring into pure loader for-loops.
-  if (CVPipeline::isCubeBlockMergeEnabled() &&
-      penetrateCubeIntoForLoops() != 0) {
+  if (penetrateCubeIntoForLoops().failed()) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }

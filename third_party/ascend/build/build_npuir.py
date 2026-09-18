@@ -152,13 +152,32 @@ def _init_npuir_repo():
     _log("Nested submodule sources ready.")
 
 
+def _create_clang_wrapper():
+    """Wrap clang++ with the workarounds the Ascend LLVM fork needs.
+
+    The Ascend LLVM fork excludes <cstdint> in Affine
+    ValueBoundsOpInterfaceImpl.h under BSPUB_DAVINCI_BISHENGIR_A5, and the
+    clang in the manylinux CI images resolves a libstdc++ that no longer
+    provides stdint.h transitively — so force-include cstdint. clang 21's
+    new -Wall warnings (e.g. -Wunnecessary-virtual-specifier) also trip
+    -Werror on LLVM 19 code, so demote warnings to non-fatal (clang
+    last-wins semantics; warnings still print).
+    """
+    wrapper = Path("/tmp/clang++-cstdint")
+    wrapper.write_text('#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n')
+    wrapper.chmod(0o755)
+    return wrapper
+
+
 def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Release", rebuild=True):
     """Configure, build and install AscendNPU-IR via its build.sh script."""
     repo_dir = Path(repo_dir)
     build_script = repo_dir / "build-tools" / "build.sh"
     if not build_script.exists():
         raise RuntimeError(f"Build script not found: {build_script}")
-    max_jobs = min(os.cpu_count() // 8, 32)
+    # Respect MAX_JOBS when set (the wheel build passes it as a build arg);
+    # otherwise fall back to the standalone heuristic tuned for the CI hosts.
+    max_jobs = min(max(1, int(os.getenv("MAX_JOBS") or os.cpu_count() // 8)), 32)
     build_path = repo_dir / "build"
     if build_path.exists():
         shutil.rmtree(str(build_path))
@@ -167,8 +186,8 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
         "bash",
         str(build_script), f"--build-type={str(build_type)}", "-o",
         str(build_path), "-t", "-j",
-        str(max_jobs), f"--bisheng-compiler={str(bisheng_compiler_path)}", "--add-cmake-options",
-        "-DLLVM_ENABLE_LLD=ON -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache",
+        str(max_jobs), f"--bisheng-compiler={str(bisheng_compiler_path)}",
+        f"--cxx-compiler={str(_create_clang_wrapper())}", "--add-cmake-options", "-DLLVM_ENABLE_LLD=ON",
         "--build-triton", "--build-torch-mlir", "--build-shmem-template", "--bishengir-publish", "ON",
         "--collect-binary"
     ]
@@ -219,6 +238,11 @@ def _copy_artifacts():
 
 
 def build_npuir():
+    # Default ccache dir into the repo: container CI often mounts $HOME
+    # read-only (/root/.cache is not writable). An explicit CCACHE_DIR from
+    # the caller (e.g. a workflow cache dir) takes precedence.
+    os.environ.setdefault("CCACHE_DIR", str(_REPO_ROOT / ".ccache"))
+
     _log("Step 1/5: checking disk space ...")
     _check_disk_space()
 
@@ -240,3 +264,7 @@ def build_npuir():
     _log("Step 5/5: copying artifacts ...")
     _copy_artifacts()
     _log("All done.")
+
+
+if __name__ == "__main__":
+    build_npuir()

@@ -1063,11 +1063,6 @@ static void release_npu_tensor_handle(void* handle) {{
     elif mix_mode != "aiv":
         raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
 
-    # This compiler-derived bit is the final proof that the generated kernel
-    # has the grid-stride coverage required for a physical-block cap.  Do not
-    # recompute the decision in the launcher: pure-SIMT RowCoalescing can
-    # deliberately leave it disabled, and future compiler safety gates must
-    # be honored here as well.
     launcher_cap_enabled = auto_blockify_enabled
 
     program_grid_finalization = ""

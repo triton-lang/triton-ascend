@@ -172,9 +172,7 @@ def test_make_launcher_rejects_unmatched_coalescing_metadata(
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
-@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
 def test_make_launcher_uses_ceil_div_for_row_coalescing(
-    _mock_auto_map,
     _mock_backend_func_patch,
     _mock_ffts,
     _mock_disable_ffts,
@@ -187,6 +185,7 @@ def test_make_launcher_uses_ceil_div_for_row_coalescing(
     metadata.coalesce_axis = 2
     metadata.coalesce_grid_ceil_div = True
     metadata.row_coalescing_applied = True
+    metadata.auto_blockify_enabled = True
 
     src = driver.make_launcher(
         constants={},
@@ -203,9 +202,7 @@ def test_make_launcher_uses_ceil_div_for_row_coalescing(
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
-@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
 def test_make_launcher_allows_auto_blockify_with_iat_mapping(
-    _mock_auto_map,
     _mock_backend_func_patch,
     _mock_ffts,
     _mock_disable_ffts,
@@ -270,7 +267,7 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
 
 
 @pytest.mark.parametrize(
-    ("auto_map_enabled", "blacklisted"),
+    ("auto_blockify_enabled", "blacklisted"),
     (
         (False, False),
         (False, True),
@@ -282,23 +279,19 @@ def test_make_launcher_enables_91095_simt_for_sls_mixed_parallel_mode(
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
-@patch.object(driver, "_is_auto_map_parallel_blocks_enabled")
-def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
-    mock_auto_map,
+def test_make_launcher_block_cap_follows_compiler_auto_blockify_decision(
     _mock_backend_func_patch,
     _mock_ffts,
     _mock_disable_ffts,
     mock_npu_utils,
-    auto_map_enabled,
+    auto_blockify_enabled,
     blacklisted,
 ):
-    mock_auto_map.return_value = auto_map_enabled
     mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
     mock_npu_utils.return_value.get_aicore_num.return_value = 20
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
-    for auto_blockify_enabled, is_pure_simt, row_coalescing_applied in product(
-        (False, True),
+    for is_pure_simt, row_coalescing_applied in product(
         (False, True),
         (False, True),
     ):
@@ -316,16 +309,10 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
             signature={0: "*fp32", 1: "*fp32"},
             metadata=metadata,
         )
-        if is_pure_simt:
-            # The launcher must use the compiler's final AutoBlockify decision.
-            # In particular, RowCoalescing can leave a pure-SIMT kernel without
-            # the grid-stride loop required for a physical-block cap.
-            expected_per_launch_path = 1 if auto_blockify_enabled else 0
-        else:
-            expected_per_launch_path = 1 if (auto_map_enabled and not blacklisted) else 0
+        expected_per_launch_path = 1 if auto_blockify_enabled else 0
         c_abi_launch, cpp_launch = _split_launch_functions(src)
-        case = (f"E={auto_map_enabled}, P={is_pure_simt}, B={blacklisted}, "
-                f"R={row_coalescing_applied}, A={auto_blockify_enabled}")
+        case = (f"P={is_pure_simt}, B={blacklisted}, R={row_coalescing_applied}, "
+                f"A={auto_blockify_enabled}")
         assert c_abi_launch.count(cap) == expected_per_launch_path, case
         assert cpp_launch.count(cap) == expected_per_launch_path, case
 
@@ -334,9 +321,7 @@ def test_make_launcher_block_cap_uses_backend_policy_and_blacklist(
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
-@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=True)
 def test_make_launcher_disables_block_cap_for_ptsm(
-    _mock_auto_map,
     _mock_backend_func_patch,
     _mock_ffts,
     _mock_disable_ffts,

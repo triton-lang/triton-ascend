@@ -53,6 +53,7 @@ std::unique_ptr<OperationPass<ModuleOp>>
 createMergeInputInitSharedCubeBlockPass();
 
 std::unique_ptr<OperationPass<ModuleOp>> createSplitIfByBlockIdPass();
+std::unique_ptr<OperationPass<ModuleOp>> createCloneCubeDepInIfPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpSubfPatternPass();
 std::unique_ptr<OperationPass<ModuleOp>> createExpLoadPatternPass();
 void registerSplitIfByBlockIdPass();

@@ -31,16 +31,16 @@ jobs:
     # Use buildkit runner matching the target platform.
     runs-on: ${{ matrix.platforms == 'amd64' && 'linux-amd64-cpu-4' || 'linux-aarch64-cpu-4' }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 360
 
     strategy:
       fail-fast: false
       # Limit parallelism: too many concurrent builds overwhelm the shared
       # buildkitd workers and SWR (auth timeouts / connection resets).
-      max-parallel: 6
+      max-parallel: 8
       matrix:
-        cann_version: [8.5.0, 9.0.0-beta.2]
+        cann_version: [9.0.0-beta.2, 9.2.0-beta.1]
         chip_type: [910b, a3]
         os: [ubuntu22.04]
         python_version: ["3.10", "3.11"]
@@ -87,5 +87,5 @@ jobs:
             PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple
             PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local
             TORCH_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/whl/cpu
-          cache-from: type=registry,ref=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }}
-          cache-to: type=registry,ref=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }},mode=max
+          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }}
+          cache-to: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-buildcache:${{ matrix.cann_version }}-${{ matrix.platforms }},mode=max

@@ -1,14 +1,13 @@
 # Build triton-ascend wheels inside a manylinux container.
 # Used by wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
 # on the runner; buildx talks to remote buildkitd.
+#
+# Layer order matters for the registry cache used by wheels.yml: everything
+# that does not depend on the source tree (dnf, pip) must come BEFORE the
+# COPY of the workspace, so those layers hit the cache across runs.
 
-ARG MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_arrch64:latest
+ARG MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
 FROM ${MANYLINUX_IMAGE} AS builder
-
-# ---------------------------------------------------------------------------
-# Build dependencies (matching CIBW_BEFORE_ALL)
-# ---------------------------------------------------------------------------
-RUN dnf install -y clang lld ccache cmake
 
 # ---------------------------------------------------------------------------
 # Build args — set by the workflow matrix
@@ -17,13 +16,24 @@ ARG PYTHON_VERSION=cp310
 ARG MAX_JOBS=4
 ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
 ARG BUILD_DATE=00000000
+ARG TRITON_BUILD_NPUIR=OFF
+ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
 
 # ---------------------------------------------------------------------------
-# Copy the full workspace.  Different branches keep setup.py in different
-# places (root vs python/), so the build step detects it below.
+# Build dependencies (matching CIBW_BEFORE_ALL)
 # ---------------------------------------------------------------------------
-COPY . /project/
-WORKDIR /project
+RUN dnf install -y clang lld ccache cmake
+
+# ---------------------------------------------------------------------------
+# Install setuptools + wheel for the target Python (not pre-installed in
+# minimal manylinux images). Source-independent: cacheable layer.
+# ---------------------------------------------------------------------------
+RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple \
+    && export PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local \
+    && export PIP_TIMEOUT=120 \
+    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m ensurepip \
+    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install --upgrade pip \
+    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install setuptools wheel cmake ninja pybind11
 
 # ---------------------------------------------------------------------------
 # Environment matching the original CIBW_ENVIRONMENT
@@ -34,18 +44,16 @@ ENV MAX_JOBS=${MAX_JOBS} \
     TRITON_WHEEL_NAME=triton-ascend \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
     TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
+    TRITON_BUILD_NPUIR=${TRITON_BUILD_NPUIR} \
+    ASCEND_HOME_PATH=${ASCEND_HOME_PATH} \
     IS_MANYLINUX=TRUE
 
 # ---------------------------------------------------------------------------
-# Install setuptools + wheel for the target Python (not pre-installed in
-# minimal manylinux images).
+# Copy the full workspace.  Different branches keep setup.py in different
+# places (root vs python/), so the build step detects it below.
 # ---------------------------------------------------------------------------
-RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple \
-    && export PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local \
-    && export PIP_TIMEOUT=120 \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m ensurepip \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install --upgrade pip \
-    && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install setuptools wheel cmake ninja pybind11
+COPY . /project/
+WORKDIR /project
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.

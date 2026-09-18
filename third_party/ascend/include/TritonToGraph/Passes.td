@@ -73,8 +73,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let summary = "Optimize Triton IR with graph analyses";
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
-    Option<"ruleMask", "rule-mask", "uint64_t", "3071",
-           "Bitmask of known 32-bit graph rule identities; default 3071 preserves the legacy native bundle and enables IAT/PTSM. RLF/IPBE/SCP/CBAF remain explicit opt-in">,
+    Option<"ruleMask", "rule-mask", "uint64_t", "68607",
+           "Bitmask of known 32-bit graph rule identities; default 68607 preserves the legacy native bundle and enables IAT/PTSM/Gather. RLF/IPBE/SCP/CBAF remain explicit opt-in">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
            "64", "Maximum graph rewrites per function">,
     Option<"ubCapacityBytes", "ub-capacity-bytes", "uint64_t", "0",
@@ -87,6 +87,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
            "Percent of UB capacity available to resource candidates">,
     Option<"reservedUBBytes", "reserved-ub-bytes", "uint64_t", "0",
            "UB bytes reserved for lowering/backend workspace before candidate budgeting">,
+    Option<"targetArch", "target-arch", "std::string", "\"\"",
+           "Target architecture for Gather eligibility; unsupported targets disable Gather">,
     Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
            "Compilation mode; legacy elementwise RowCoalescing is enabled only for simt_only">,
   ];

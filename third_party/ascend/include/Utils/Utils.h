@@ -164,6 +164,32 @@ void traverseForwardUpdateUserChainIf(
     std::function<void(OpBuilder &, Operation *)> actionFn,
     llvm::SmallPtrSet<Operation *, 16> &stopOps);
 
+// Traverse back from operand's defining op (inclusive) for the first op
+// matching condFn, or nullptr.
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn);
+
+// Traverse back from rootOp's operands (exclusive of rootOp itself) for the
+// first op matching condFn, or nullptr.
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn);
+
+// Traverse back from operand's defining op (inclusive) for the first op
+// matching condFn, or nullptr; stop early (also returning nullptr) if
+// stopFn matches first.
+mlir::Operation *findOperandDefinitionWithCondition(
+    mlir::Value operand, const std::function<bool(Operation *)> &condFn,
+    const std::function<bool(Operation *)> &stopFn);
+
+// Traverse back from rootOp's operands (exclusive of rootOp itself) for the
+// first op matching condFn, or nullptr; stop early (also returning nullptr)
+// if stopFn matches first.
+mlir::Operation *
+findPrecedingOpWithCondition(mlir::Operation *rootOp,
+                             const std::function<bool(Operation *)> &condFn,
+                             const std::function<bool(Operation *)> &stopFn);
+
 // UseAnalysis will tag operations whose results are used only as meta-data
 // with "MetaUse" tag.
 bool isMetaUse(Operation *op);

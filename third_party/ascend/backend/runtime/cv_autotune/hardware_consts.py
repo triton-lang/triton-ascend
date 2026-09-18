@@ -24,10 +24,18 @@ This module defines hardware-specific constraints for NPU hardware,
 including memory limits, cache sizes, and other resource constraints.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
-from ..utils import target
+from .. import utils as runtime_utils
+
+
+def _arch_default(legacy_value: int, a5_value: int) -> int:
+    # Only called for an omitted constructor argument, never during import.
+    arch = runtime_utils.target.arch
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return a5_value
+    return legacy_value
 
 
 @dataclass
@@ -51,18 +59,13 @@ class HardwareConstraints:
     # Default ArchType : A2/A3
     l0a_size: int = 64 * 1024  # 64 KB - for matrix A
     l0b_size: int = 64 * 1024  # 64 KB - for matrix B
-    l0c_size: int = 128 * 1024  # 128 KB - for matrix C
+    l0c_size: int = field(default_factory=lambda: _arch_default(128 * 1024, 256 * 1024))
 
     # Memory limits (in bytes)
     max_l0_size: int = 128 * 1024  # 128 KB
     max_l1_size: int = 512 * 1024  # 512 KB
-    max_l2_size: int = 192 * 1024 * 1024  # 192 MB
-    ub_size: int = 192 * 1024  # 192KB
-
-    if target.arch.startswith("Ascend910_95") or target.arch.startswith("Ascend950"):
-        l0c_size: int = 256 * 1024
-        ub_size: int = 248 * 1024
-        max_l2_size: int = 128 * 1024 * 1024  # 128 MB
+    max_l2_size: int = field(default_factory=lambda: _arch_default(192 * 1024 * 1024, 128 * 1024 * 1024))
+    ub_size: int = field(default_factory=lambda: _arch_default(192 * 1024, 248 * 1024))
 
     def __post_init__(self):
         """Validate hardware constraints after initialization."""

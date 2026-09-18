@@ -937,7 +937,6 @@ InterCoreTransferAndSyncPass::getTransferPipeConfig(Operation *transferOp,
   auto pipeVAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_V);
   auto pipeMte3Attr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_MTE3);
   auto pipeMte1Attr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_MTE1);
-  auto pipeMAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_M);
   auto pipeSAttr = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
   TransferPipeConfig config;
   if (isa<hivm::FixpipeOp>(transferOp)) {
@@ -963,7 +962,7 @@ InterCoreTransferAndSyncPass::getTransferPipeConfig(Operation *transferOp,
   } else if (isa<hivm::CopyOp>(transferOp)) {
     config.forReadTPipe = pipeMte3Attr;
     config.forReadPipe = pipeMte1Attr;
-    config.forWriteTPipe = pipeMAttr;
+    config.forWriteTPipe = pipeMte1Attr;
     config.forWritePipe = pipeMte3Attr;
     config.srcCoreAttr = vecCoreAttr;
     config.dstCoreAttr = cubeCoreAttr;

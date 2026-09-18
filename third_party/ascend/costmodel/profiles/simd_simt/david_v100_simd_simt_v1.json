@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 12,
-  "profile_version": "david-v100-simd-simt-20260915-v23",
+  "profile_version": "david-v100-simd-simt-20260918-v27-segmented-issue-fixed-transition",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -336,6 +336,12 @@
       "prefix_scan": {
         "dependency_factor": 1.0,
         "description": "SIMT shuffle throughput already represents the lane dependency chain measured by the A5 scan sweep."
+      },
+      "logical_tensor_parallelism": {
+        "max_effective_warp_groups": 4,
+        "description": "Legacy capacity retained for profile compatibility and audit. Stage costs use aggregate resource throughput without an additional logical-tensor warp division.",
+        "source": "profiles/microbench/data_provider/tput.cce warp sweep; first measured saturation knee",
+        "confidence": "medium"
       },
       "indirect_memory": {
         "load_transactions_per_system_cycle": 0.5,

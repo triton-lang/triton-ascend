@@ -124,6 +124,9 @@ struct StageAtomicRate {
 
 struct StageModeProfile {
   double setupCycles = 0.0;
+  /// Physical SIMD instruction width.  Unlike vectorWidth, this preserves
+  /// bytes/bits so FP16 and FP32 short-axis segments are priced correctly.
+  int64_t vectorWidthBits = 1;
   int64_t vectorWidth = 1;
   int64_t issueWidth = 1;
   llvm::StringMap<StageOperationRate> operationRates;
@@ -158,6 +161,9 @@ struct HardwareProfile {
   /// option, not a hardware constant, and bounds cross-group interleaving in
   /// recurrence Stage models.
   int64_t logicalWarpGroupCount = 1;
+  /// Legacy profile field retained for compatibility. Aggregate resource
+  /// throughput is no longer discounted by this capacity.
+  int64_t simtLogicalTensorParallelismCapacity = 1;
   /// Long-lived recurrence state consumes finite register/stack bandwidth.
   /// The byte rate is shared by the SIMD recurrence-state term and the extra
   /// pressure created when a SIMT SuperBlock replicates that state; neither

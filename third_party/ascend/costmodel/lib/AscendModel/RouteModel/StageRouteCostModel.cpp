@@ -77,9 +77,11 @@ static double mixedBaseStageCost(const LogicalStageCost &stage,
 
 /// AutoBlockify V1 is a route-conditional execution schedule.  The analysis
 /// view contains its real dispatch/loop operations so pure-SIMT and Mixed can
-/// pay them, but an all-SIMD executable restores the original logical grid.
-/// Keep the Stage positions for report alignment and remove only their cost
-/// from the all-SIMD candidate.
+/// pay them, but an all-SIMD executable does not materialize this TA schedule.
+/// Keep stage positions for report alignment. Kernel setup may be attached to
+/// the first dispatch stage: it is not conditional on materializing that stage.
+/// This removes only the TA schedule body; an independently lowered NPU-IR
+/// AutoBlockify schedule is not priced by these TA operation counts.
 static void removeAutoBlockifyCostFromAllSIMD(StageRoutePlan &plan,
                                               const StageCostTable &costTable) {
   if (!plan.legal || plan.logicalStageCycles.size() != costTable.stages.size())
@@ -88,8 +90,18 @@ static void removeAutoBlockifyCostFromAllSIMD(StageRoutePlan &plan,
     const llvm::StringRef model = costTable.stages[index].model;
     if (model != "auto_blockify_dispatch" && model != "auto_blockify_loop")
       continue;
-    plan.totalCycles -= plan.logicalStageCycles[index];
-    plan.logicalStageCycles[index] = 0.0;
+    double setup = 0.0;
+    for (const auto &cost : costTable.stages[index].implementations) {
+      if (cost.implementation.mode == StageMode::SIMD &&
+          cost.implementation.superblockFactor == 1 &&
+          !cost.implementation.localScope) {
+        setup =
+            cost.resources.setup * static_cast<double>(plan.runtimeWaveCount);
+        break;
+      }
+    }
+    plan.totalCycles -= plan.logicalStageCycles[index] - setup;
+    plan.logicalStageCycles[index] = setup;
     plan.entryTransitionCycles[index] = 0.0;
   }
   plan.totalCycles = std::max(0.0, plan.totalCycles);
@@ -186,8 +198,31 @@ llvm::json::Object AtomicWorkload::toJSON() const {
   return result;
 }
 
+bool TensorOperationWorkload::isFiniteAndNonNegative() const {
+  const std::array<double, 3> values = {logicalElements, segmentCount,
+                                        logicalOperationInstances};
+  return !operation.empty() && elementBitWidth > 0 &&
+         contiguousElementsPerSegment > 0 &&
+         std::all_of(values.begin(), values.end(), [](double value) {
+           return std::isfinite(value) && value >= 0.0;
+         });
+}
+
+llvm::json::Object TensorOperationWorkload::toJSON() const {
+  return llvm::json::Object{
+      {"operation", operation},
+      {"element_bit_width", elementBitWidth},
+      {"logical_elements_per_iteration", logicalElements},
+      {"segment_count_per_iteration", segmentCount},
+      {"contiguous_elements_per_segment", contiguousElementsPerSegment},
+      {"logical_operation_instances_per_iteration", logicalOperationInstances},
+      {"simd_lowering", simdScalarFallback
+                            ? "scalar_fallback_unaligned_outer_stride"
+                            : "segmented_vector"}};
+}
+
 bool StageWorkload::isFiniteAndNonNegative() const {
-  const std::array<double, 15> values = {scalarOperations,
+  const std::array<double, 16> values = {scalarOperations,
                                          loadBytes,
                                          storeBytes,
                                          loadWarpInstructions,
@@ -196,6 +231,7 @@ bool StageWorkload::isFiniteAndNonNegative() const {
                                          indirectStoreBytes,
                                          indirectLoadTransactions,
                                          indirectStoreTransactions,
+                                         maximumLogicalTensorElements,
                                          predicateElements,
                                          shuffleLaneSteps,
                                          scanShuffleLaneSteps,
@@ -215,6 +251,10 @@ bool StageWorkload::isFiniteAndNonNegative() const {
                         return std::isfinite(entry.second) &&
                                entry.second >= 0.0;
                       }) &&
+         llvm::all_of(tensorOperationWorkloads,
+                      [](const TensorOperationWorkload &tensor) {
+                        return tensor.isFiniteAndNonNegative();
+                      }) &&
          llvm::all_of(atomicWorkloads, [](const AtomicWorkload &atomic) {
            return atomic.isFiniteAndNonNegative();
          });
@@ -226,6 +266,10 @@ llvm::json::Object StageWorkload::toJSON() const {
   for (const auto &[name, elements] : operationElements)
     operations[name] = elements;
   result["operation_elements_per_iteration"] = std::move(operations);
+  llvm::json::Array tensors;
+  for (const TensorOperationWorkload &tensor : tensorOperationWorkloads)
+    tensors.push_back(tensor.toJSON());
+  result["tensor_operation_workloads"] = std::move(tensors);
   result["scalar_operations_per_iteration"] = scalarOperations;
   result["load_bytes_per_iteration"] = loadBytes;
   result["store_bytes_per_iteration"] = storeBytes;
@@ -246,6 +290,7 @@ llvm::json::Object StageWorkload::toJSON() const {
   for (const AtomicWorkload &atomic : atomicWorkloads)
     atomics.push_back(atomic.toJSON());
   result["atomic_workloads"] = std::move(atomics);
+  result["maximum_logical_tensor_elements"] = maximumLogicalTensorElements;
   result["predicate_elements_per_iteration"] = predicateElements;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
   result["scan_shuffle_lane_steps_per_iteration"] = scanShuffleLaneSteps;
@@ -315,13 +360,16 @@ llvm::json::Object StageResourceCycles::toJSON() const {
 
 bool StageImplementationCost::isValid() const {
   return implementation.isValid() && std::isfinite(totalCycles) &&
-         totalCycles >= 0.0 && resources.isFiniteAndNonNegative();
+         totalCycles >= 0.0 && logicalTensorParallelismFactor > 0 &&
+         resources.isFiniteAndNonNegative();
 }
 
 llvm::json::Object StageImplementationCost::toJSON() const {
-  return llvm::json::Object{{"implementation", implementation.toJSON()},
-                            {"total_system_cycles", totalCycles},
-                            {"resource_system_cycles", resources.toJSON()}};
+  return llvm::json::Object{
+      {"implementation", implementation.toJSON()},
+      {"total_system_cycles", totalCycles},
+      {"logical_tensor_parallelism_factor", logicalTensorParallelismFactor},
+      {"resource_system_cycles", resources.toJSON()}};
 }
 
 llvm::json::Object LogicalStageCost::toJSON() const {

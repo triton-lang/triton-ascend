@@ -28,6 +28,7 @@ using mlir::ascend::StageScheduleKind;
 using mlir::ascend::StageTransitionCost;
 using mlir::ascend::StageWorkload;
 using mlir::ascend::StageWorkloadAnalysis;
+using mlir::ascend::TensorOperationWorkload;
 using mlir::ascend::TriangularSolveFacts;
 
 namespace {
@@ -58,6 +59,7 @@ HardwareProfile hardwareProfile(StageTransitionCost transition = {}) {
   profile.superblockPersistentStateBytesPerCycle = 8.0;
   auto fill = [](auto &mode) {
     mode.setupCycles = 10.0;
+    mode.vectorWidthBits = 2048;
     mode.vectorWidth = 64;
     mode.issueWidth = 64;
     mode.operationRates["f32.add"] = {1.0, 1.0};
@@ -84,6 +86,7 @@ HardwareProfile hardwareProfile(StageTransitionCost transition = {}) {
   fill(profile.simd);
   fill(profile.simt);
   profile.simt.vectorWidth = 1;
+  profile.simt.vectorWidthBits = 1;
   profile.simt.issueWidth = 32;
   profile.transition = std::move(transition);
   return profile;
@@ -127,6 +130,111 @@ TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
             StageMode::SIMD);
   EXPECT_EQ(table->stages.front().implementations[1].implementation.mode,
             StageMode::SIMT);
+}
+
+TEST(SimdSimtCostModelTest, SimdPricesShortAxesPerSegmentAndElementWidth) {
+  auto simdCost = [](int64_t elementBits, int64_t contiguousElements,
+                     double segmentCount, bool scalarFallback) {
+    LogicalStage stage =
+        logicalStage("short-axis", StageCostModelKind::ScalarMath);
+    stage.workload.operationElements["f32.add"] =
+        static_cast<double>(contiguousElements) * segmentCount;
+    TensorOperationWorkload tensor;
+    tensor.operation = "f32.add";
+    tensor.elementBitWidth = elementBits;
+    tensor.logicalElements =
+        static_cast<double>(contiguousElements) * segmentCount;
+    tensor.segmentCount = segmentCount;
+    tensor.contiguousElementsPerSegment = contiguousElements;
+    tensor.logicalOperationInstances = 1.0;
+    tensor.simdScalarFallback = scalarFallback;
+    stage.workload.tensorOperationWorkloads.push_back(std::move(tensor));
+    auto table = evaluateOneStage(std::move(stage));
+    if (!table) {
+      ADD_FAILURE() << llvm::toString(table.takeError());
+      return mlir::ascend::StageResourceCycles{};
+    }
+    return table->stages.front().implementations.front().resources;
+  };
+
+  // All three shapes contain 64 FP32 elements.  Aggregating before ceil would
+  // price each as one 256-byte vector instruction; the segmented model keeps
+  // the four and eight independently masked rows visible.
+  auto fourBySixteen = simdCost(32, 16, 4.0, false);
+  auto eightByEight = simdCost(32, 8, 8.0, false);
+  auto sixteenByFour = simdCost(32, 4, 16.0, true);
+  EXPECT_DOUBLE_EQ(fourBySixteen.compute, 4.0);
+  EXPECT_DOUBLE_EQ(eightByEight.compute, 8.0);
+  EXPECT_DOUBLE_EQ(sixteenByFour.compute, 0.0);
+  EXPECT_DOUBLE_EQ(sixteenByFour.scalar, 64.0);
+  EXPECT_DOUBLE_EQ(fourBySixteen.issue, 1.0);
+  EXPECT_DOUBLE_EQ(eightByEight.issue, 2.0);
+  EXPECT_DOUBLE_EQ(sixteenByFour.issue, 16.0);
+
+  // FP16 uses twice as many elements per 256-byte instruction; width is not
+  // silently inherited from the old FP32-only vectorWidth field.
+  auto fp16Rows = simdCost(16, 128, 2.0, false);
+  EXPECT_DOUBLE_EQ(fp16Rows.compute, 2.0);
+}
+
+TEST(SimdSimtCostModelTest,
+     WorkloadPreservesEqualTotalElementwiseSegmentGeometry) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module {
+      func.func @kernel(%a4x16: tensor<4x16xf32>,
+                        %b4x16: tensor<4x16xf32>,
+                        %a8x8: tensor<8x8xf32>,
+                        %b8x8: tensor<8x8xf32>,
+                        %a16x4: tensor<16x4xf32>,
+                        %b16x4: tensor<16x4xf32>) {
+        %four_by_sixteen = arith.addf %a4x16, %b4x16 : tensor<4x16xf32>
+        %eight_by_eight = arith.addf %a8x8, %b8x8 : tensor<8x8xf32>
+        %sixteen_by_four = arith.addf %a16x4, %b16x4 : tensor<16x4xf32>
+        return
+      }
+    }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+
+  StagePartition partition;
+  partition.operationOwnershipComplete = true;
+  LogicalStage stage =
+      logicalStage("short_axis_geometry", StageCostModelKind::ScalarMath);
+  auto function = module->lookupSymbol<mlir::func::FuncOp>("kernel");
+  ASSERT_TRUE(function);
+  for (mlir::Operation &operation :
+       function.getBody().front().without_terminator())
+    stage.operations.push_back(&operation);
+  partition.stages.push_back(std::move(stage));
+
+  if (llvm::Error error = StageWorkloadAnalysis().analyze(partition))
+    FAIL() << llvm::toString(std::move(error));
+  const auto &workloads =
+      partition.stages.front().workload.tensorOperationWorkloads;
+  ASSERT_EQ(workloads.size(), 3u);
+  auto findRun = [&](int64_t run) -> const TensorOperationWorkload * {
+    auto iterator = llvm::find_if(workloads, [&](const auto &workload) {
+      return workload.contiguousElementsPerSegment == run;
+    });
+    return iterator == workloads.end() ? nullptr : &*iterator;
+  };
+  const TensorOperationWorkload *fourBySixteen = findRun(16);
+  const TensorOperationWorkload *eightByEight = findRun(8);
+  const TensorOperationWorkload *sixteenByFour = findRun(4);
+  ASSERT_NE(fourBySixteen, nullptr);
+  ASSERT_NE(eightByEight, nullptr);
+  ASSERT_NE(sixteenByFour, nullptr);
+  EXPECT_DOUBLE_EQ(fourBySixteen->logicalElements, 64.0);
+  EXPECT_DOUBLE_EQ(fourBySixteen->segmentCount, 4.0);
+  EXPECT_FALSE(fourBySixteen->simdScalarFallback);
+  EXPECT_DOUBLE_EQ(eightByEight->segmentCount, 8.0);
+  EXPECT_FALSE(eightByEight->simdScalarFallback);
+  EXPECT_DOUBLE_EQ(sixteenByFour->segmentCount, 16.0);
+  EXPECT_TRUE(sixteenByFour->simdScalarFallback);
 }
 
 TEST(SimdSimtCostModelTest,
@@ -433,6 +541,94 @@ TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {
     FAIL() << llvm::toString(plainScaled.takeError());
   EXPECT_DOUBLE_EQ(plainScaled->stages.front().implementations[0].totalCycles,
                    baseline->stages.front().implementations[0].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest,
+     SimtLogicalTensorWorkDoesNotDiscountAggregateThroughput) {
+  LogicalStage stage =
+      logicalStage("logical_tensor", StageCostModelKind::ScalarIssue);
+  stage.workload.maximumLogicalTensorElements = 512.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 32;
+  profile.simtLogicalTensorParallelismCapacity = 4;
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  const StageImplementationCost &simt =
+      table->stages.front().implementations.back();
+  ASSERT_EQ(simt.implementation.mode, StageMode::SIMT);
+  EXPECT_EQ(simt.logicalTensorParallelismFactor, 1);
+  // setup=10 plus body=64: the aggregate resource rates already include
+  // parallel execution. A legacy capacity must not discount them again.
+  EXPECT_DOUBLE_EQ(simt.totalCycles, 74.0);
+}
+
+TEST(SimdSimtCostModelTest,
+     SimtNarrowLogicalTensorDoesNotDiscountAggregateThroughput) {
+  LogicalStage stage =
+      logicalStage("narrow_logical_tensor", StageCostModelKind::ScalarIssue);
+  stage.workload.maximumLogicalTensorElements = 64.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 32;
+  profile.simtLogicalTensorParallelismCapacity = 4;
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  const StageImplementationCost &simt =
+      table->stages.front().implementations.back();
+  EXPECT_EQ(simt.logicalTensorParallelismFactor, 1);
+  EXPECT_DOUBLE_EQ(simt.totalCycles, 74.0);
+}
+
+TEST(SimdSimtCostModelTest, SimtDotRetainsSerialLogicalTensorSpan) {
+  LogicalStage stage = logicalStage("dot", StageCostModelKind::CubeRoofline);
+  stage.features.hasDot = true;
+  stage.workload.maximumLogicalTensorElements = 512.0;
+  stage.workload.dotFlops = 8192.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 32;
+  profile.simtLogicalTensorParallelismCapacity = 4;
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  const StageImplementationCost &simt =
+      table->stages.front().implementations.back();
+  ASSERT_EQ(simt.implementation.mode, StageMode::SIMT);
+  EXPECT_EQ(simt.logicalTensorParallelismFactor, 1);
+}
+
+TEST(SimdSimtCostModelTest, SimtAtomicRetainsSerialLogicalTensorSpan) {
+  LogicalStage stage = logicalStage("atomic", StageCostModelKind::AtomicMemory);
+  stage.features.hasAtomicMemory = true;
+  stage.workload.maximumLogicalTensorElements = 512.0;
+  mlir::ascend::AtomicWorkload atomic;
+  atomic.kind = "fadd";
+  atomic.dataType = "f32";
+  atomic.memorySemantic = "acq_rel";
+  atomic.memoryScope = "gpu";
+  atomic.logicalElements = 512.0;
+  atomic.logicalOperationInstances = 1.0;
+  atomic.addressDependsOnLoadedIndex = true;
+  atomic.contentionUnknown = true;
+  stage.workload.atomicWorkloads.push_back(std::move(atomic));
+
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 32;
+  profile.simtLogicalTensorParallelismCapacity = 4;
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  const StageImplementationCost &simt =
+      table->stages.front().implementations.back();
+  ASSERT_EQ(simt.implementation.mode, StageMode::SIMT);
+  EXPECT_EQ(simt.logicalTensorParallelismFactor, 1);
 }
 
 TEST(SimdSimtCostModelTest, IndependentLoopUsesSimdRooflineAndSerialSimtCost) {
@@ -887,6 +1083,55 @@ TEST(SimdSimtCostModelTest, AllSimdDoesNotPayRouteConditionalAutoBlockify) {
   EXPECT_DOUBLE_EQ(routes->allSimd.totalCycles, 100.0);
   ASSERT_TRUE(routes->allSimt.legal);
   EXPECT_DOUBLE_EQ(routes->allSimt.totalCycles, 110.0);
+}
+
+TEST(SimdSimtCostModelTest, AllSimdPreservesSetupOnConditionalSchedule) {
+  for (const auto *model : {"auto_blockify_dispatch", "auto_blockify_loop"}) {
+    for (int64_t programs : {1, 5}) {
+      StageCostTable table;
+      table.profileVersion = "unit-test-profile-v1";
+      table.logicalProgramCountHint = programs;
+      table.physicalCoreCountHint = 2;
+      auto makeCost = [](StageMode mode, double total, double setup) {
+        mlir::ascend::StageImplementationCost cost;
+        cost.implementation = {mode, 1, false};
+        cost.totalCycles = total;
+        cost.resources.setup = setup;
+        return cost;
+      };
+      mlir::ascend::LogicalStageCost dispatch;
+      dispatch.id = "dispatch";
+      dispatch.model = model;
+      dispatch.implementations = {makeCost(StageMode::SIMD, 40.0, 20.0),
+                                  makeCost(StageMode::SIMT, 30.0, 25.0)};
+      mlir::ascend::LogicalStageCost payload;
+      payload.id = "payload";
+      payload.model = "scalar_issue";
+      payload.implementations = {makeCost(StageMode::SIMD, 100.0, 0.0),
+                                 makeCost(StageMode::SIMT, 80.0, 0.0)};
+      table.stages = {dispatch, payload};
+      auto routes = solveStageRoutes(table, StageTransitionCost{});
+      if (!routes)
+        FAIL() << llvm::toString(routes.takeError());
+      const double waves = (programs + 1) / 2;
+      ASSERT_TRUE(routes->allSimd.legal);
+      EXPECT_DOUBLE_EQ(routes->allSimd.logicalStageCycles[0], 20.0 * waves);
+      EXPECT_DOUBLE_EQ(routes->allSimd.logicalStageCycles[1], 100.0 * waves);
+      EXPECT_DOUBLE_EQ(routes->allSimd.totalCycles, 120.0 * waves);
+      ASSERT_TRUE(routes->allSimt.legal);
+      EXPECT_DOUBLE_EQ(routes->allSimt.totalCycles, 110.0 * waves);
+
+      // Moving setup to the payload must not change the all-SIMD total.
+      table.stages[0].implementations[0].resources.setup = 0.0;
+      table.stages[0].implementations[0].totalCycles -= 20.0;
+      table.stages[1].implementations[0].resources.setup = 20.0;
+      table.stages[1].implementations[0].totalCycles += 20.0;
+      auto moved = solveStageRoutes(table, StageTransitionCost{});
+      if (!moved)
+        FAIL() << llvm::toString(moved.takeError());
+      EXPECT_DOUBLE_EQ(moved->allSimd.totalCycles, routes->allSimd.totalCycles);
+    }
+  }
 }
 
 TEST(SimdSimtCostModelTest, MixedRouteChargesEveryMaterializedScope) {
@@ -1386,6 +1631,54 @@ TEST(SimdSimtCostModelTest, GenericSemanticStagesDoNotRequireAWorkloadDomain) {
             StageCostModelKind::PredicateMask);
   EXPECT_EQ(partition->stages[3].costModelKind,
             StageCostModelKind::ContinuousTileStore);
+}
+
+TEST(SimdSimtCostModelTest, ClippedDynamicLoopUsesStaticTripCountCap) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  for (bool capped : {false, true}) {
+    std::string source = R"mlir(
+      module {
+        func.func @kernel(%limit: i32, %initial: i32) -> i32 {
+          %c1 = arith.constant 1 : i32
+          %c2 = arith.constant 2 : i32
+          %c16 = arith.constant 16 : i32
+          %cap = arith.minsi %limit, %c16 : i32
+          %result = scf.for %i = %c2 to UPPER step %c1
+              iter_args(%state = %initial) -> (i32) : i32 {
+            %next = arith.addi %state, %i : i32
+            scf.yield %next : i32
+          }
+          %second = scf.for %j = %c2 to %cap step %c1
+              iter_args(%state = %result) -> (i32) : i32 {
+            %next = arith.addi %state, %j : i32
+            scf.yield %next : i32
+          }
+          return %second : i32
+        }
+      }
+    )mlir";
+    source.replace(source.find("UPPER"), 5, capped ? "%cap" : "%limit");
+    if (!capped)
+      source.replace(source.find("to %cap"), 7, "to %limit");
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+    mlir::ascend::SimtAnchorPlan anchors;
+    auto partition = StagePartitioner().partition(*module, anchors,
+                                                  StagePartitionerOptions{});
+    if (!partition)
+      FAIL() << llvm::toString(partition.takeError());
+    if (llvm::Error error = StageFeatureAnalysis().analyze(*partition))
+      FAIL() << llvm::toString(std::move(error));
+    int64_t maximumIterations = 1;
+    for (const auto &stage : partition->stages) {
+      maximumIterations = std::max(maximumIterations, stage.iterationCount);
+      EXPECT_EQ(stage.features.parallelRecurrenceGroupCount, 1);
+    }
+    EXPECT_EQ(maximumIterations, capped ? 14 : 1);
+  }
 }
 
 TEST(SimdSimtCostModelTest, AdjacentStructuredLoopsRemainSerialStages) {

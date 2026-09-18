@@ -87,17 +87,51 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   const StageWorkload &work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
   resources.setup = work.paysKernelSetup ? profile.setupCycles : 0.0;
+  llvm::StringMap<double> describedElements;
+  llvm::StringMap<double> describedVectorInstructions;
+  llvm::StringMap<double> describedScalarFallbackElements;
+  double describedIssueElements = 0.0;
+  double describedIssueInstructions = 0.0;
+  if (simd) {
+    for (const TensorOperationWorkload &tensor :
+         work.tensorOperationWorkloads) {
+      describedElements[tensor.operation] += tensor.logicalElements;
+      describedIssueElements += tensor.logicalElements;
+      if (tensor.simdScalarFallback) {
+        describedScalarFallbackElements[tensor.operation] +=
+            tensor.logicalElements;
+        describedIssueInstructions += tensor.logicalElements;
+        continue;
+      }
+      const double segmentBits =
+          static_cast<double>(tensor.contiguousElementsPerSegment) *
+          static_cast<double>(tensor.elementBitWidth);
+      const double vectorInstructions =
+          tensor.segmentCount *
+          std::ceil(segmentBits / static_cast<double>(profile.vectorWidthBits));
+      describedVectorInstructions[tensor.operation] += vectorInstructions;
+      describedIssueInstructions += vectorInstructions;
+    }
+  }
   for (const auto &[name, elements] : work.operationElements) {
     auto rate = profile.operationRates.find(name);
     if (rate == profile.operationRates.end() || rate->second.throughput <= 0.0)
       continue;
-    const double instructions =
-        simd ? std::ceil(elements / static_cast<double>(profile.vectorWidth))
-             : elements;
+    double instructions = elements;
+    if (simd) {
+      const double described = describedElements.lookup(name);
+      const double tolerance = 1e-9 * std::max(1.0, elements);
+      instructions =
+          std::abs(described - elements) <= tolerance
+              ? describedVectorInstructions.lookup(name)
+              : std::ceil(elements / static_cast<double>(profile.vectorWidth));
+      resources.scalar += describedScalarFallbackElements.lookup(name) /
+                          profile.scalarOperationsPerCycle;
+    }
     resources.compute +=
         instructions / rate->second.throughput * rate->second.factor;
   }
-  resources.scalar = work.scalarOperations / profile.scalarOperationsPerCycle;
+  resources.scalar += work.scalarOperations / profile.scalarOperationsPerCycle;
   const double directLoadBytes = work.loadBytes - work.indirectLoadBytes;
   const double directStoreBytes = work.storeBytes - work.indirectStoreBytes;
   const double directLoadInstructions =
@@ -141,11 +175,21 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
       resources.atomic +=
           atomic.logicalOperationInstances * atomicRate.resultDependencyCycles;
   }
+  double predicateInstructions = work.predicateElements;
+  if (simd) {
+    const double described = describedElements.lookup("predicate.cmp");
+    const double tolerance = 1e-9 * std::max(1.0, work.predicateElements);
+    predicateInstructions =
+        std::abs(described - work.predicateElements) <= tolerance
+            ? describedVectorInstructions.lookup("predicate.cmp")
+            : std::ceil(work.predicateElements /
+                        static_cast<double>(profile.vectorWidth));
+    resources.scalar +=
+        describedScalarFallbackElements.lookup("predicate.cmp") /
+        profile.scalarOperationsPerCycle;
+  }
   resources.predicate =
-      (simd ? std::ceil(work.predicateElements /
-                        static_cast<double>(profile.vectorWidth))
-            : work.predicateElements) /
-      profile.predicateOperationsPerCycle;
+      predicateInstructions / profile.predicateOperationsPerCycle;
   resources.shuffle = work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
   resources.scanShuffle =
       work.scanShuffleLaneSteps / profile.shuffleLanesPerCycle;
@@ -153,9 +197,19 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
     resources.setup += profile.dotSetupCycles;
     resources.dot = work.dotFlops / profile.dotFlopsPerCycle;
   }
-  resources.issue =
-      std::ceil(work.issueElements / static_cast<double>(profile.issueWidth)) /
-      profile.issueOperationsPerCycle;
+  double issueInstructions =
+      std::ceil(work.issueElements / static_cast<double>(profile.issueWidth));
+  if (simd) {
+    // Keep the issue floor consistent with operation pricing.  Aggregating
+    // unrelated short rows before dividing by the vector width makes several
+    // independently issued instructions look like one full-width operation.
+    const double undescribedIssueElements =
+        std::max(0.0, work.issueElements - describedIssueElements);
+    issueInstructions = describedIssueInstructions +
+                        std::ceil(undescribedIssueElements /
+                                  static_cast<double>(profile.issueWidth));
+  }
+  resources.issue = issueInstructions / profile.issueOperationsPerCycle;
   resources.spill =
       work.estimatedSpillTransactions / profile.spillTransactionsPerCycle;
   if (stage.features.hasLoopCarriedDataDependency)
@@ -437,7 +491,7 @@ bool StageAtomicRate::isValid() const {
 }
 
 bool StageModeProfile::isValid(StageMode mode) const {
-  const std::array<double, 13> common = {setupCycles,
+  const std::array<double, 14> common = {setupCycles,
                                          predicateOperationsPerCycle,
                                          shuffleLanesPerCycle,
                                          dotSetupCycles,
@@ -448,6 +502,7 @@ bool StageModeProfile::isValid(StageMode mode) const {
                                          indirectLoadTransactionsPerCycle,
                                          indirectStoreTransactionsPerCycle,
                                          prefixScanDependencyFactor,
+                                         static_cast<double>(vectorWidthBits),
                                          static_cast<double>(vectorWidth),
                                          static_cast<double>(issueWidth)};
   if (!std::all_of(
@@ -478,7 +533,9 @@ bool StageModeProfile::isValid(StageMode mode) const {
 
 bool HardwareProfile::isValid() const {
   return !profileVersion.empty() && !target.empty() &&
-         logicalWarpGroupCount > 0 && superblockUsefulFactorLimit > 0 &&
+         logicalWarpGroupCount > 0 &&
+         simtLogicalTensorParallelismCapacity > 0 &&
+         superblockUsefulFactorLimit > 0 &&
          superblockPersistentStatePressureFreeFactor > 0 &&
          superblockPersistentStatePressureFreeFactor <=
              superblockUsefulFactorLimit &&
@@ -569,6 +626,10 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;
+      // Resource rates already describe aggregate single-AIV throughput.
+      // Do not discount the stage body again for configured warp groups.
+      // Keep the legacy diagnostic field at its identity value.
+      cost.logicalTensorParallelismFactor = 1;
       cost.totalCycles = applySuperBlock(
           stage, resources, implementation, profile,
           estimateStage(stage, profile, implementation.mode, resources));

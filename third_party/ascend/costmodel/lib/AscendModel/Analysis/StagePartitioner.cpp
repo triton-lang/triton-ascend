@@ -142,6 +142,17 @@ static double getOperationElements(Operation *operation) {
   return elements;
 }
 
+static double getMaximumTensorElements(Operation *operation) {
+  double elements = 0.0;
+  for (Type type : operation->getResultTypes())
+    if (isa<ShapedType>(type))
+      elements = std::max(elements, getTypeElementCount(type));
+  for (Value value : operation->getOperands())
+    if (isa<ShapedType>(value.getType()))
+      elements = std::max(elements, getTypeElementCount(value.getType()));
+  return elements;
+}
+
 static bool hasTensorResult(Operation *operation) {
   return llvm::any_of(operation->getResultTypes(),
                       [](Type type) { return isa<ShapedType>(type); });
@@ -165,6 +176,96 @@ static llvm::StringRef getProfileOperationName(Operation *operation) {
              "convert.cast")
       .Cases("arith.fptosi", "arith.fptoui", "convert.cast")
       .Default("generic.issue");
+}
+
+static RankedTensorType getRepresentativeTensorType(Operation *operation) {
+  RankedTensorType representative;
+  int64_t maximumElements = -1;
+  auto consider = [&](Type type) {
+    auto tensor = dyn_cast<RankedTensorType>(type);
+    if (!tensor || !tensor.hasStaticShape())
+      return;
+    const int64_t elements = tensor.getNumElements();
+    if (elements > maximumElements) {
+      representative = tensor;
+      maximumElements = elements;
+    }
+  };
+  for (Type type : operation->getResultTypes())
+    consider(type);
+  if (!representative)
+    for (Value operand : operation->getOperands())
+      consider(operand.getType());
+  return representative;
+}
+
+static bool hasTensorBroadcast(Operation *operation,
+                               RankedTensorType outputType) {
+  if (!outputType || !outputType.hasStaticShape())
+    return false;
+  for (Value operand : operation->getOperands()) {
+    if (Operation *producer = operand.getDefiningOp()) {
+      const llvm::StringRef producerName = producer->getName().getStringRef();
+      if (producerName == "tt.broadcast" || producerName == "tt.expand_dims")
+        return true;
+    }
+    auto input = dyn_cast<RankedTensorType>(operand.getType());
+    if (!input || !input.hasStaticShape() ||
+        input.getRank() != outputType.getRank())
+      continue;
+    for (int64_t dimension = 0; dimension < input.getRank(); ++dimension)
+      if (input.getShape()[dimension] == 1 &&
+          outputType.getShape()[dimension] > 1)
+        return true;
+  }
+  return false;
+}
+
+static void accumulateTensorOperationWorkload(Operation *operation,
+                                              llvm::StringRef profileName,
+                                              double elements,
+                                              StageWorkload &work) {
+  RankedTensorType tensor = getRepresentativeTensorType(operation);
+  if (!tensor || tensor.getRank() == 0 || !tensor.hasStaticShape())
+    return;
+  const int64_t elementBits = getScalarBitWidth(tensor.getElementType());
+  const int64_t contiguousElements = tensor.getShape().back();
+  if (elementBits <= 0 || contiguousElements <= 0)
+    return;
+  const double segments = elements / static_cast<double>(contiguousElements);
+  // Dense TTIR tensors lower to row-major memrefs for this template.  For a
+  // non-broadcast multidimensional operation, a row shorter than one 32-byte
+  // block makes the outer stride illegal and NPUIR selects scalar_eltwise_*.
+  constexpr int64_t npuVectorDataBlockBits = 32 * 8;
+  // The scalar fallback rule belongs to NPU-IR elementwise templates.  Shape
+  // construction and pointer bookkeeping currently share generic.issue in the
+  // profile, but they do not lower through scalar_eltwise_* and must not
+  // inherit this rule.
+  const bool scalarFallback =
+      profileName != "generic.issue" && tensor.getRank() > 1 &&
+      !hasTensorBroadcast(operation, tensor) &&
+      (contiguousElements * elementBits) % npuVectorDataBlockBits != 0;
+
+  for (TensorOperationWorkload &group : work.tensorOperationWorkloads) {
+    if (group.operation == profileName &&
+        group.elementBitWidth == elementBits &&
+        group.contiguousElementsPerSegment == contiguousElements &&
+        group.simdScalarFallback == scalarFallback) {
+      group.logicalElements += elements;
+      group.segmentCount += segments;
+      group.logicalOperationInstances += 1.0;
+      return;
+    }
+  }
+  TensorOperationWorkload group;
+  group.operation = profileName.str();
+  group.elementBitWidth = elementBits;
+  group.logicalElements = elements;
+  group.segmentCount = segments;
+  group.contiguousElementsPerSegment = contiguousElements;
+  group.logicalOperationInstances = 1.0;
+  group.simdScalarFallback = scalarFallback;
+  work.tensorOperationWorkloads.push_back(std::move(group));
 }
 
 static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
@@ -256,6 +357,8 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
     return;
   const llvm::StringRef name = operation->getName().getStringRef();
   const double elements = getOperationElements(operation);
+  work.maximumLogicalTensorElements = std::max(
+      work.maximumLogicalTensorElements, getMaximumTensorElements(operation));
 
   if ((name == "tt.load" || name == "tt.gather") &&
       operation->getNumResults() > 0) {
@@ -295,6 +398,8 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
     accumulateReductionWorkload(operation, work, name == "tt.scan");
   if (name == "arith.cmpi" || name == "arith.cmpf") {
     work.predicateElements += elements;
+    accumulateTensorOperationWorkload(operation, "predicate.cmp", elements,
+                                      work);
     return;
   }
   if (name == "scf.for" || name == "scf.if" || name == "scf.while")
@@ -304,7 +409,9 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
     work.scalarOperations += 1.0;
     return;
   }
-  work.operationElements[getProfileOperationName(operation)] += elements;
+  const llvm::StringRef profileName = getProfileOperationName(operation);
+  work.operationElements[profileName] += elements;
+  accumulateTensorOperationWorkload(operation, profileName, elements, work);
 }
 
 static void mergeWorkload(StageWorkload &into, StageWorkload from);
@@ -322,6 +429,11 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   for (AtomicWorkload &atomic : work.atomicWorkloads) {
     atomic.logicalElements *= scale;
     atomic.logicalOperationInstances *= scale;
+  }
+  for (TensorOperationWorkload &tensor : work.tensorOperationWorkloads) {
+    tensor.logicalElements *= scale;
+    tensor.segmentCount *= scale;
+    tensor.logicalOperationInstances *= scale;
   }
   work.predicateElements *= scale;
   work.shuffleLaneSteps *= scale;
@@ -349,10 +461,24 @@ static int64_t getLoopTripCount(Operation *operation,
   if (name == "scf.for" && operation->getNumOperands() >= 3) {
     const std::optional<int64_t> lower =
         getConstantInteger(operation->getOperand(0));
-    const std::optional<int64_t> upper =
-        getConstantInteger(operation->getOperand(1));
+    std::optional<int64_t> upper = getConstantInteger(operation->getOperand(1));
     const std::optional<int64_t> step =
         getConstantInteger(operation->getOperand(2));
+    // Price a clipped dynamic loop using its static iteration cap instead of
+    // a single iteration. This is an upper-bound cost estimate: a partial
+    // tile may execute fewer iterations at runtime.
+    if (!upper) {
+      Operation *bound = operation->getOperand(1).getDefiningOp();
+      if (bound && bound->getName().getStringRef() == "arith.minsi" &&
+          bound->getNumOperands() == 2) {
+        const auto lhs = getConstantInteger(bound->getOperand(0));
+        const auto rhs = getConstantInteger(bound->getOperand(1));
+        if (lhs && rhs)
+          upper = std::min(*lhs, *rhs);
+        else
+          upper = lhs ? lhs : rhs;
+      }
+    }
     if (lower && upper && step && *step > 0 && *upper > *lower)
       return (*upper - *lower + *step - 1) / *step;
   }
@@ -421,6 +547,26 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   into.indirectLoadTransactions += from.indirectLoadTransactions;
   into.indirectStoreTransactions += from.indirectStoreTransactions;
   llvm::append_range(into.atomicWorkloads, std::move(from.atomicWorkloads));
+  for (TensorOperationWorkload &source : from.tensorOperationWorkloads) {
+    auto destination = llvm::find_if(
+        into.tensorOperationWorkloads,
+        [&](const TensorOperationWorkload &item) {
+          return item.operation == source.operation &&
+                 item.elementBitWidth == source.elementBitWidth &&
+                 item.contiguousElementsPerSegment ==
+                     source.contiguousElementsPerSegment &&
+                 item.simdScalarFallback == source.simdScalarFallback;
+        });
+    if (destination == into.tensorOperationWorkloads.end()) {
+      into.tensorOperationWorkloads.push_back(std::move(source));
+      continue;
+    }
+    destination->logicalElements += source.logicalElements;
+    destination->segmentCount += source.segmentCount;
+    destination->logicalOperationInstances += source.logicalOperationInstances;
+  }
+  into.maximumLogicalTensorElements = std::max(
+      into.maximumLogicalTensorElements, from.maximumLogicalTensorElements);
   into.predicateElements += from.predicateElements;
   into.shuffleLaneSteps += from.shuffleLaneSteps;
   into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;
@@ -1373,8 +1519,9 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
     }
     facts.hasContiguousMemory = hasMemory && hasContiguousMemory;
     if (algorithmLoopCount > 0 && stage.iterationCount > 1) {
-      if (facts.hasLoopCarriedDataDependency)
-        facts.parallelRecurrenceGroupCount = algorithmLoopCount;
+      // Multiple loop operations in one stage do not prove concurrent
+      // execution. In particular, adjacent scf.for loops execute serially;
+      // counting them as parallel groups discounts their dependent work.
       facts.loopBackedgeCount = 1;
       facts.conditionalBranchCount =
           std::max<int64_t>(facts.conditionalBranchCount > 0 ? 1 : 0,

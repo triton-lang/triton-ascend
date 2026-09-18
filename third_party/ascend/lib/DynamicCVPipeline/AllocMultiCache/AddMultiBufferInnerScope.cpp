@@ -155,27 +155,6 @@ static int getForOpPriority(scf::ForOp f) {
   return 0;
 }
 
-scf::ForOp findMainloopInScope(scope::ScopeOp scope) {
-  SmallVector<Operation *> allOps;
-  collectNestedOps(&scope.getBodyRegion().front(), allOps);
-
-  scf::ForOp mainLoopForOp;
-  int bestPriority = INT_MAX;
-
-  for (Operation *op : allOps) {
-    auto f = dyn_cast<scf::ForOp>(op);
-    if (!f)
-      continue;
-
-    int priority = getForOpPriority(f);
-    if (priority > 0 && priority < bestPriority) {
-      mainLoopForOp = f;
-      bestPriority = priority;
-    }
-  }
-  return mainLoopForOp;
-}
-
 // Collect a single dependency value to depValueMap. Same-block check uses
 // outermost id so inner ops of a multi-region op (e.g. subview at block 3
 // inside ifOp at block 4) are not treated as cross-block consumers of a

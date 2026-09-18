@@ -213,6 +213,10 @@ cloneChainForBlock(SharedArgInfo &info, Operation *compOp,
       continue;
 
     Operation *cloned = cloneBuilder.clone(*op, opMapper);
+    if (!cloned) {
+      LDBG("Clone chain failed when cloning op " << *op);
+      return failure();
+    }
     cloned->setAttr(CVPipeline::kBlockId,
                     cloneBuilder.getI32IntegerAttr(info.nonOwnerBlockId));
     cloned->setAttr(CVPipeline::kArg,

@@ -1612,7 +1612,9 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
   Operation *transferOp = insertVectorToCubeTransfer(
       builder, srcValue, normalizedVal, prodEnd, consStart, loc, transferIndex,
       dep, is1DTensorDependency(dep.value), &consumedDataOp);
-
+  if (!transferOp) {
+    return failure();
+  }
   int flagId = flagManager.acquireId();
   auto [newConsStart, newConsEnd] =
       getBlockStartEnd(dep.consumerBlockId, module);

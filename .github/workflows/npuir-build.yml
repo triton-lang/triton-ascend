@@ -7,13 +7,11 @@ on:
       - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/patch-npuir-templates.py
-      - .github/workflows/build/extract-bisheng-run.py
   pull_request:
     paths:
       - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/patch-npuir-templates.py
-      - .github/workflows/build/extract-bisheng-run.py
 
 concurrency:
   group: npuir-build-${{ github.ref }}
@@ -24,27 +22,38 @@ permissions:
 
 jobs:
 
-  # Builds the payload inside manylinux_2_28 so the binaries satisfy the
-  # manylinux ABI: wheels.yml bundles this variant into the published wheel
-  # (auditwheel rejects binaries built on newer glibc). Same recipe as the
-  # upstream AscendNPU-IR wheel CI: manylinux base image + dnf toolchain +
-  # CANN toolkit .run download to get the bisheng compiler.
+  # Builds the payload inside the CANN 9.2 manylinux_2_34 base image so the
+  # binaries satisfy the manylinux ABI: wheels.yml bundles this variant into
+  # the published wheel (auditwheel rejects binaries built on newer glibc).
+  # The base image (base_image/ascend-ci/manylinux:9.2.0-beta.2-<chip>-...)
+  # ships CANN 9.2.0-beta.2 preinstalled, replacing the previous
+  # manylinux_2_28 + on-the-fly CANN install (oepkgs yum / OBS .run); glibc
+  # 2.28 was too old for the 9.2 bisheng compiler binaries anyway.
   build-npuir-manylinux:
     name: Build npuir payload manylinux (${{ matrix.config.arch }})
     runs-on: ${{ matrix.config.runs_on }}
     timeout-minutes: 360
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
     strategy:
       fail-fast: false
       matrix:
         config:
+          # The "a3" tag is chip-shape, not arch: it is a multi-arch index
+          # (linux/amd64 + linux/arm64), so both matrix entries pull the
+          # same tag and Docker resolves the platform-specific manifest.
           - {runs_on: 'linux-amd64-cpu-16', arch: 'x86_64'}
           - {runs_on: 'linux-aarch64-cpu-16', arch: 'aarch64'}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
         with:
+          # One level only: the AscendNPU-IR pin. "recursive" would also
+          # dig into torch-mlir's own externals (github.com llvm-project and
+          # stablehlo), which the build does not need and which stall on the
+          # pods' github connectivity. The nested submodules (llvm-project /
+          # torch-mlir / shmem) are fetched by the next step via direct
+          # depth-1 SHA pulls (gitcode branch fetches are unreliable here).
           submodules: "true"
 
       - name: Add git safe directory
@@ -60,7 +69,9 @@ jobs:
           set -eu -o pipefail
           NPUIR=third_party/ascend/AscendNPU-IR
           # Depth-1 SHA fetches from gitcode: `want <sha>` requests work from
-          # the self-hosted pods where branch clones fail.
+          # the self-hosted pods where branch clones fail. The checkout above
+          # is intentionally single-level, so these nested submodules are
+          # always fetched here.
           git -C "$NPUIR" ls-tree HEAD third-party/ | while read -r _ _ sha path; do
             name=$(basename "$path")
             url=$(git -C "$NPUIR" config -f .gitmodules --get "submodule.$path.url")
@@ -83,88 +94,20 @@ jobs:
         run: |
           # Same toolchain as the upstream AscendNPU-IR wheel CI (their
           # manylinux build): dnf clang/lld/ccache; cmake+ninja from pip
-          # because manylinux_2_28 ships cmake 3.22 (npuir needs >= 3.28).
+          # because the base image's cmake is too old (npuir needs >= 3.28).
+          # The base image's Python lives at /usr/local/python3.12.14 (on
+          # PATH ahead of /usr/bin), not the manylinux-standard /opt/python.
           yum install -y clang lld ccache
-          /opt/python/cp310-cp310/bin/python3 -m pip install cmake ninja
-          cp /opt/python/cp310-cp310/bin/cmake /usr/local/bin/
-          cp /opt/python/cp310-cp310/bin/ninja /usr/local/bin/
+          python3 -m pip install cmake ninja
+          cmake --version | head -1
+          ninja --version
 
-      - name: Install CANN toolkit and locate bisheng compiler
+      - name: Locate bisheng compiler
         id: bisheng
         run: |
           set -eu
-          BISHENG_DIR=""
-          # Prefer the official yum online install of CANN 9.2.x (has the
-          # CCE_PRINT_CC device-print support the npuir templates expect).
-          # https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/softwareinst/instg/instg_0000.html?OS=openEuler&InstallType=netyum
-          # oepkgs.net is flaky (DNS resolves but TCP 443 times out, seen
-          # from both the pods and outside); treat the 9.2 yum path as
-          # best-effort and fall through to the 9.1.0 .run extraction below
-          # when it is unreachable.
-          curl --retry 2 --retry-delay 5 --connect-timeout 20 -fsSL \
-            https://repo.oepkgs.net/ascend/cann/ascend.repo -o /etc/yum.repos.d/ascend.repo || true
-          yum makecache || true
-          # yum list output: first column is name.arch, the version-release is
-          # the SECOND column (e.g. Ascend-cann-toolkit.aarch64 9.2.0_beta.2-linux ...).
-          CANN_VERSION=$(yum list available 'Ascend-cann-toolkit*' 2>/dev/null | awk '/^Ascend-cann-toolkit/ {print $2}' | grep -E '^9\.2' | sort -V | tail -1 || true)
-          if [ -n "${CANN_VERSION}" ]; then
-            echo "Installing Ascend-cann-toolkit-${CANN_VERSION} via yum"
-            # The CANN 9.2 yum install needs three accommodations on the
-            # manylinux_2_28 base image (verified against the aarch64 RPM):
-            # 1. The RPM's %post scriptlet runs the bundled .run installer
-            #    with output redirected to /dev/tty; without a controlling tty
-            #    (GH Actions containers) the redirect fails and the scriptlet
-            #    exits 2, failing the transaction. Run the install under a pty
-            #    via script(1) so /dev/tty resolves; the scriptlet only writes
-            #    to the tty, so there is nothing to block on. (-e propagates
-            #    yum's exit code; -q hides the "Script started/done" lines.)
-            # 2. rpm scriptlets run with a restricted PATH (/sbin:/bin:
-            #    /usr/sbin:/usr/bin), so the manylinux pips at /opt/python or
-            #    /usr/local/bin are invisible to them. The ge-compiler and
-            #    asc-devkit sub-installers pip-install wheels (llm_datadist_v1,
-            #    asc_op_compile_base) during their custom install steps and
-            #    fail without pip. Give /usr/bin/python3 (3.12 on AlmaLinux
-            #    8.10, ships without pip) a pip and expose pip3 on the
-            #    restricted PATH:
-            /usr/bin/python3 -m ensurepip --upgrade || true
-            if [ -x /usr/local/bin/pip3 ]; then
-              ln -sf /usr/local/bin/pip3 /usr/bin/pip3
-            fi
-            script -qec "yum install -y 'Ascend-cann-toolkit-${CANN_VERSION}'" /dev/null
-            BISHENG_DIR=$(find /usr/local/Ascend -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
-          fi
-          if [ -z "${BISHENG_DIR}" ] || [ ! -x "${BISHENG_DIR}/ccec" ]; then
-            # oepkgs yum unavailable: pull the 9.2.0-beta.2 full .run from
-            # Huawei OBS (same public bucket the upstream AscendNPU-IR wheel
-            # CI uses) and extract the bisheng compiler from it. 9.1.0 lacks
-            # the CCE_PRINT_CC device-print support the npuir templates
-            # expect, so this is the primary fallback; 9.1.0 below is the
-            # last resort.
-            echo "CANN 9.2 not available via yum; trying 9.2.0-beta.2 .run from Huawei OBS" >&2
-            CANN_ARCH="${{ matrix.config.arch }}"
-            curl -fLO "https://ascend-cann-open.obs.cn-north-4.myhuaweicloud.com/CANN/CANN%209.2.0-beta.2/Ascend-cann_9.2.0-beta.2_linux-${CANN_ARCH}.run"
-            bash "./Ascend-cann_9.2.0-beta.2_linux-${CANN_ARCH}.run" --noexec --extract=cann920
-            rm -f "./Ascend-cann_9.2.0-beta.2_linux-${CANN_ARCH}.run"
-            # The bisheng compiler package cannot be extracted by its own
-            # makeself wrapper: its tar payload contains a self-referential
-            # hardlink (toolkit/toolchain/hcc -> itself), which makes tar exit
-            # non-zero. Extract with python instead, skipping that entry.
-            BISHENG_RUN=$(ls cann920/run_package/cann-bisheng-compiler_*.run)
-            python3 .github/workflows/build/extract-bisheng-run.py "$BISHENG_RUN" bisheng_toolkit
-            rm -rf cann920
-            BISHENG_DIR=$(find "$GITHUB_WORKSPACE/bisheng_toolkit" -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
-          fi
-          if [ -z "${BISHENG_DIR}" ] || [ ! -x "${BISHENG_DIR}/ccec" ]; then
-            echo "CANN 9.2 .run unavailable; falling back to 9.1.0 .run extraction" >&2
-            CANN_ARCH="${{ matrix.config.arch }}"
-            curl -fLO "https://ascend-repo.obs.cn-east-2.myhuaweicloud.com/CANN/CANN%209.1.0/Ascend-cann-toolkit_9.1.0_linux-${CANN_ARCH}.run"
-            bash "./Ascend-cann-toolkit_9.1.0_linux-${CANN_ARCH}.run" --noexec --extract=cann910
-            rm -f "./Ascend-cann-toolkit_9.1.0_linux-${CANN_ARCH}.run"
-            BISHENG_RUN=$(ls cann910/run_package/cann-bisheng-compiler_*.run)
-            python3 .github/workflows/build/extract-bisheng-run.py "$BISHENG_RUN" bisheng_toolkit
-            rm -rf cann910
-            BISHENG_DIR=$(find "$GITHUB_WORKSPACE/bisheng_toolkit" -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
-          fi
+          # CANN 9.2.0-beta.2 is preinstalled in the base image.
+          BISHENG_DIR=$(find /usr/local/Ascend -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
           test -x "${BISHENG_DIR}/ccec"
           test -x "${BISHENG_DIR}/llvm-link"
           echo "Found bisheng compiler at ${BISHENG_DIR}"
@@ -174,9 +117,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: npuir-ccache-ml-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
           restore-keys: |
-            npuir-ccache-ml-${{ matrix.config.arch }}-
+            npuir-ccache-ml-2_34-${{ matrix.config.arch }}-
 
       - name: Build AscendNPU-IR
         env:
@@ -186,21 +129,14 @@ jobs:
           cd third_party/ascend/AscendNPU-IR
           # Self-hosted pods are 16 CPUs / 32 GB (cgroup); 12 parallel jobs
           # leaves ~2.5 GB per compile (heavy MLIR TUs peak at 3-5 GB).
-          # AlmaLinux 8.10 AppStream's clang is now 21.1.8, which depends on
-          # and auto-detects gcc-toolset-15 (libstdc++ 15). libstdc++ 15
-          # dropped the transitive stdint.h include, and the Ascend LLVM fork
-          # excludes <cstdint> in Affine ValueBoundsOpInterfaceImpl.h under
-          # BSPUB_DAVINCI_BISHENGIR_A5, so ValueBoundsOpInterfaceImpl.cpp
-          # dies with "unknown type name 'int64_t'". Force-include cstdint
-          # via a CXX compiler wrapper (--gcc-toolchain=/usr is ignored by
-          # clang 21, verified in a manylinux_2_28 container).
-          # LLVM 19 + clang 21 is also not a supported pairing: clang 21
-          # added warnings to -Wall that LLVM 19 code trips (e.g.
-          # -Wunnecessary-virtual-specifier in ConstantFolder.h's final-class
-          # anchor). With -Werror every such warning aborts the build, and
-          # more of them keep surfacing, so demote warnings to non-fatal at
-          # the end of the command line (clang last-wins semantics); the
-          # warnings still print in the log.
+          # The CXX wrapper carries workarounds the Ascend LLVM fork needs
+          # in these manylinux images: the fork excludes <cstdint> in Affine
+          # ValueBoundsOpInterfaceImpl.h under BSPUB_DAVINCI_BISHENGIR_A5,
+          # while the image clang resolves a libstdc++ that no longer
+          # provides stdint.h transitively, and clang 21's new -Wall
+          # warnings trip -Werror on LLVM 19 code. Verified still required
+          # on the manylinux_2_34 image (trial run hit the int64_t error
+          # without it).
           printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint
           chmod +x /tmp/clang++-cstdint
           build-tools/build.sh -o build -j 12 \
@@ -218,7 +154,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: npuir-ccache-ml-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
 
       - name: Upload npuir payload
         uses: actions/upload-artifact@v4
@@ -226,27 +162,3 @@ jobs:
           name: npuir-payload-manylinux-${{ matrix.config.arch }}
           path: npuir-payload/
           if-no-files-found: error
-
-      - name: Publish npuir payload to OBS
-        if: github.event_name != 'pull_request' && github.repository == 'triton-lang/triton-ascend'
-        env:
-          AK: ${{ secrets.OBS_AK }}
-          SK: ${{ secrets.OBS_SK }}
-        run: |
-          set -eu
-          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-            echo "OBS credentials are empty."
-            exit 1
-          fi
-          SHA8=$(git -C third_party/ascend/AscendNPU-IR rev-parse --short=8 HEAD)
-          TARBALL="npuir-payload-manylinux-${{ matrix.config.arch }}-${SHA8}.tar.gz"
-          tar czf "$TARBALL" -C npuir-payload .
-          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}.tar.gz" -o obsutil.tar.gz
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil_linux_* obsutil
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
-          # Immutable per-pin object, plus a rolling -latest that wheels.yml
-          # downloads for bundling into the published wheel.
-          obsutil/obsutil cp "$TARBALL" "obs://triton-ascend-artifacts/npuir/$TARBALL"
-          obsutil/obsutil cp "$TARBALL" "obs://triton-ascend-artifacts/npuir/npuir-payload-manylinux-${{ matrix.config.arch }}-latest.tar.gz"

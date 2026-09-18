@@ -140,7 +140,7 @@ conv_state_T = conv_state.reshape(128, 16 * 3).transpose().reshape(16, 3 * 128).
 
 ### 先将数据搬运到UB上，再从UB中select目标值
 
-【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从share中select目标值。
+【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从shared中select目标值。
 
 - 示例
 

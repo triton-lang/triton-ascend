@@ -157,12 +157,14 @@ private:
                             bool hasCounter, Value counter, Value step);
 
   void populateNewElseBlock(scf::IfOp newIfOp, scf::IfOp oldIfOp,
-                            bool oldHasElse, bool hasCounter, Value counter);
+                            bool oldHasElse, bool hasCounter, Value counter,
+                            Value step, Value ssbufCondBeforeSplitted);
 
   scf::IfOp
   createNewIfOpWithBlocks(scf::IfOp oldIfOp, Value combinedCond,
                           DenseMap<Value, VarUpdateType> &varUpdateTypes,
-                          bool hasCounter, Value counter, Value step);
+                          bool hasCounter, Value counter, Value step,
+                          Value ssbufCondBeforeSplitted);
 
   int setIntraCoreCondition(
       ModuleOp module, scf::IfOp ifOp,
@@ -184,9 +186,12 @@ private:
   int updateLoopYield(Operation *loopOp);
 
   // loopOp is scf.for or scf.while main_loop.
+  // splittedIfCond is and-ed after the other predicates when ifOp has any
+  // first-level ssbuffer.splitted_if; empty when that pattern is absent.
   int combineConditions(ModuleOp module, Value crossCoreCond,
-                        Value intraCoreCond, Value flowOptCond, scf::IfOp ifOp,
-                        Operation *loopOp, size_t &usedCounterNum,
+                        Value intraCoreCond, Value flowOptCond,
+                        Value splittedIfCond, scf::IfOp ifOp, Operation *loopOp,
+                        size_t &usedCounterNum,
                         DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int setCrossCoreCondition(

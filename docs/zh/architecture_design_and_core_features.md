@@ -20,13 +20,16 @@
   接收来自上层 Triton compiler 生成的中间表示文件 `TTIR`（Triton IR），执行一系列适配昇腾硬件的转换。
 
   ```text
-  Triton IR → Linalg IR → AscendNPU IR → triton_xxx_kernel.o
+  Triton IR → Linalg IR → AscendNPU IR → kernel*.o
   ```
 
-  Triton IR 转换为 Linalg IR，再经 BiSheng Compiler 生成面向 Ascend NPU 的可执行二进制文件 `triton_xxx_kernel.o`。
+  整个编译流程分为两个阶段：
+
+  - **Triton-Ascend 阶段（Triton IR → Linalg IR）**：由 Triton-Ascend 的 MLIR Pass（如 `TritonToLinalg`）将 Triton IR 降级为 Linalg IR，完成算子语义到结构化线性代数表示的转换。
+  - **BiSheng Compiler 阶段（Linalg IR → AscendNPU IR → `kernel*.o`）**：BiSheng Compiler 接管后续编译，将 Linalg IR 降级为面向 Ascend NPU 的 AscendNPU IR，执行硬件相关的指令选择、内存分配与调度优化，最终生成设备侧可执行二进制文件 `kernel*.o`。
 
 - **`driver`**
-  提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力，加载由 BiSheng Compiler 生成的设备侧可执行内核 `triton_xxx_kernel.o`。
+  提供 Triton 运行时与 Ascend 软件栈（CANN）之间的对接能力，加载由 BiSheng Compiler 生成的设备侧可执行内核 `kernel*.o`。
 
 ## 2.代码结构
 

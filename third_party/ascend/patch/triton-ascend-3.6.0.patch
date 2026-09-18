@@ -402,10 +402,40 @@ index 1b72c1376..ee5defb6e 100644
    }
    return success();
 diff --git a/python/src/ir.cc b/python/src/ir.cc
-index 5af645bc0..011f82d60 100644
+index 5af645bc0..b0aac2c2b 100644
 --- a/python/src/ir.cc
 +++ b/python/src/ir.cc
-@@ -332,6 +332,7 @@ void init_triton_ir(py::module &&m) {
+@@ -1,6 +1,7 @@
+ #include "ir.h"
+
++#include <cstdlib>
+ #include <optional>
+ #include <pybind11/cast.h>
+ #include <pybind11/functional.h>
+ #include <pybind11/pybind11.h>
+@@ -175,9 +176,19 @@ struct ConsoleReproducerStream : public mlir::ReproducerStream {
+   ~ConsoleReproducerStream() override {}
+
+   StringRef description() override {
+-    return "std::errs, please share the reproducer above with Triton project.";
++    return "console reproducer (set TRITON_DEBUG=1 to print IR)";
+   }
+-  raw_ostream &os() override { return llvm::errs(); }
++  raw_ostream &os() override {
++    const char *debug = std::getenv("TRITON_DEBUG");
++    if (debug && (StringRef(debug) == "1" ||
++                  StringRef(debug).equals_insensitive("true") ||
++                  StringRef(debug).equals_insensitive("on")))
++      return llvm::errs();
++    return nullStream;
++  }
++
++private:
++  llvm::raw_null_ostream nullStream;
+ };
+
+ ReproducerStreamFactory makeConsoleReproducer() {
+@@ -332,6 +343,7 @@ void init_triton_ir(py::module &&m) {
        .value("TF32", InputPrecision::TF32)
        .value("TF32x3", InputPrecision::TF32x3)
        .value("IEEE", InputPrecision::IEEE)
@@ -413,7 +443,7 @@ index 5af645bc0..011f82d60 100644
        .value("BF16x3", InputPrecision::BF16x3)
        .value("BF16x6", InputPrecision::BF16x6)
        .export_values();
-@@ -1790,6 +1791,18 @@ void init_triton_ir(py::module &&m) {
+@@ -1790,6 +1802,18 @@ void init_triton_ir(py::module &&m) {
                                                  llvm::StringRef(message));
               self.create<AssertOp>(condition, messageAttr);
             })

@@ -394,8 +394,7 @@ Value materializeAffineForOffsetCarrier(Value value, triton::AddPtrOp addPtr,
 // equivalent to the carried phi (init plus iteration times a constant-splat
 // step). All other structural checks stay in place, and every other consumer
 // of the carrier keeps reading the untouched phi.
-Value materializeBoundarySlotOffsetCarrier(Value value,
-                                           triton::AddPtrOp addPtr,
+Value materializeBoundarySlotOffsetCarrier(Value value, triton::AddPtrOp addPtr,
                                            RewriterBase &rewriter) {
   auto blockArg = dyn_cast<BlockArgument>(value);
   if (!blockArg || blockArg.getArgNumber() == 0)
@@ -904,19 +903,18 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
       Value broadcastMaterializedOffset;
       if (carrierInfo != offsetMap.end() &&
           tailAxisRecoverable(carrierInfo->second, resultType.getRank()))
-        broadcastMaterializedOffset = materializeBoundarySlotOffsetCarrier(
-            offsetValue, op, rewriter);
+        broadcastMaterializedOffset =
+            materializeBoundarySlotOffsetCarrier(offsetValue, op, rewriter);
       LLVM_DEBUG({
         auto &os = llvm::dbgs();
         os << "[tailBroadcastRecovery] carrierFound="
-           << (carrierInfo != offsetMap.end())
-           << " carrierRecoverable="
+           << (carrierInfo != offsetMap.end()) << " carrierRecoverable="
            << (carrierInfo != offsetMap.end()
                    ? tailAxisRecoverable(carrierInfo->second,
                                          resultType.getRank())
                    : false)
-           << " materialized="
-           << (broadcastMaterializedOffset != nullptr) << "\n";
+           << " materialized=" << (broadcastMaterializedOffset != nullptr)
+           << "\n";
       });
       if (broadcastMaterializedOffset) {
         SmallVector<PtrOffsetInfo::AxisInfo> tailStructuredAxes(

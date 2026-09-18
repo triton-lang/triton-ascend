@@ -45,8 +45,8 @@ def nearest_resize_kernel(img_src_ptr, img_dst_ptr, src_rows, src_cols, dst_rows
     sx = tl.floor(fx)
 
     src_offsets = (block_id_c[None, None] * stride_in_c +
-                   tl.clamp(sy, 0, src_rows - 1)[:, None].to(tl.int32) * stride_in_h +
-                   tl.clamp(sx, 0, src_cols - 1)[None, :].to(tl.int32) * stride_in_w)
+                   tl.minimum(tl.maximum(sy, 0), src_rows - 1)[:, None].to(tl.int32) * stride_in_h +
+                   tl.minimum(tl.maximum(sx, 0), src_cols - 1)[None, :].to(tl.int32) * stride_in_w)
     src_val = tl.load(img_src_ptr + src_offsets)
     dst_mask = (dest_h_offs[:, None] < dst_rows) & (dest_w_offs[None, :] < dst_cols)
     tl.store(img_dst_ptr + dest_offs, src_val, mask=dst_mask)

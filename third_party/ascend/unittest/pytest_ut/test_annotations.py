@@ -25,6 +25,7 @@ import torch
 import triton
 import triton.language as tl
 import pytest
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 def annotated_function(return_type=None, **arg_types):
@@ -44,6 +45,9 @@ def annotated_function(return_type=None, **arg_types):
 ] + [(False, 1)]
                          )
 def test_int_annotation(signed, width, device="npu"):
+    if not signed and width in (16, 32, 64) and not is_compile_on_910_95(
+            triton.runtime.driver.active.get_current_target().arch):
+        pytest.skip("tl.store only supports uint16/uint32/uint64 on Ascend 950 (A5); unsupported on A2/A3.")
 
     @triton.jit
     @annotated_function(X=torch.tensor, v=f"tl.{'' if signed else 'u'}int{width}")

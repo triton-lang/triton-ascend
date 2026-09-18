@@ -37,6 +37,7 @@
 #include <mlir/Dialect/LLVMIR/LLVMDialect.h>
 #include <mlir/IR/Builders.h>
 #include <mlir/IR/BuiltinAttributes.h>
+#include <mlir/IR/BuiltinOps.h>
 #include <mlir/IR/Location.h>
 #include <mlir/IR/Operation.h>
 #include <mlir/IR/PatternMatch.h>
@@ -64,6 +65,31 @@ static constexpr unsigned kMaxLocDepth = 16;
 // NOP insertion helpers.
 //===----------------------------------------------------------------------===//
 
+static bool moduleContainsScope(PatternRewriter &rewriter) {
+  Block *insertionBlock = rewriter.getInsertionBlock();
+  if (!insertionBlock)
+    return false;
+
+  Operation *parentOp = insertionBlock->getParentOp();
+  if (!parentOp)
+    return false;
+
+  ModuleOp module = dyn_cast<ModuleOp>(parentOp);
+  if (!module)
+    module = parentOp->getParentOfType<ModuleOp>();
+  if (!module)
+    return false;
+
+  bool found = false;
+  module.walk([&](Operation *op) {
+    if (op->getName().getStringRef() != "scope.scope")
+      return WalkResult::advance();
+    found = true;
+    return WalkResult::interrupt();
+  });
+  return found;
+}
+
 Location unwrapFusedLocForDebug(Location loc, unsigned depth) {
   if (depth > kMaxLocDepth)
     return loc;
@@ -79,7 +105,7 @@ Location unwrapFusedLocForDebug(Location loc, unsigned depth) {
 }
 
 void insertDebugNop(Location loc, PatternRewriter &rewriter) {
-  if (!isDebugNopEnabled())
+  if (!isDebugNopEnabled() || moduleContainsScope(rewriter))
     return;
   auto unwrapped = unwrapFusedLocForDebug(loc);
 
@@ -130,7 +156,7 @@ static void collectUserLineLocs(Location loc,
 }
 
 void insertDebugNopForAllLines(Location loc, PatternRewriter &rewriter) {
-  if (!isDebugNopEnabled())
+  if (!isDebugNopEnabled() || moduleContainsScope(rewriter))
     return;
 
   llvm::SmallDenseSet<Location> seen;

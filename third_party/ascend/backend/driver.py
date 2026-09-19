@@ -551,20 +551,23 @@ def make_tensordesc_arg(arg):
 
 
 def wrap_handle_tensordesc(launcher, signature):
-    has_tensor_desc_arg = any(isinstance(sig, str) and sig.startswith("tensordesc") for sig in signature.values())
-    if not has_tensor_desc_arg:
+    if not any(isinstance(sig, tuple) or sig.startswith("tensordesc") for sig in signature.values()):
         return launcher
 
-    tensordesc_indices = set(
-        [i for i, sig in enumerate(signature.values()) if isinstance(sig, str) and sig.startswith("tensordesc")])
+    def append_arg(output, arg, sig):
+        # Follow the signature: a constexpr may itself contain a Python tuple.
+        if isinstance(sig, tuple):
+            for value, ty in zip(arg, sig):
+                append_arg(output, value, ty)
+        elif sig.startswith("tensordesc"):
+            output.extend(make_tensordesc_arg(arg))
+        else:
+            output.append(arg)
 
     def inner(*args):
         final_args = list(args[:_BASE_ARGS_FORMAT_LEN])
-        for i, arg in enumerate(args[_BASE_ARGS_FORMAT_LEN:]):
-            if i in tensordesc_indices:
-                final_args.extend(make_tensordesc_arg(arg))
-            else:
-                final_args.append(arg)
+        for arg, sig in zip(args[_BASE_ARGS_FORMAT_LEN:], signature.values()):
+            append_arg(final_args, arg, sig)
         return launcher(*final_args)
 
     return inner
@@ -783,7 +786,9 @@ def make_launcher(constants, signature, metadata):
         # Expand tensor descriptor arguments into base pointer, shape and
         # strides. Ascend always rewrites tensordesc to pointer (no TMA).
         for sig in signature:
-            if isinstance(sig, str) and sig.startswith("tensordesc"):
+            if isinstance(sig, tuple):
+                output.extend(_expand_signature(sig))
+            elif sig.startswith("tensordesc"):
                 match = re.match("tensordesc<([^[>]*)\\[([^]]*)\\]", sig)
                 dtype = match.group(1)
                 shape = match.group(2)
@@ -807,14 +812,6 @@ def make_launcher(constants, signature, metadata):
                 output.append(sig)
 
         return output
-
-    def _flatten_signature(sig, output):
-        # Flatten tuples
-        if isinstance(sig, tuple):
-            for x in sig:
-                _flatten_signature(x, output)
-        else:
-            output.append(sig)
 
     def _extracted_type(ty):
         if isinstance(ty, tuple):
@@ -918,10 +915,6 @@ def make_launcher(constants, signature, metadata):
     args_format = ''.join([format_of(ty) for ty in signature.values()])
     format = _BASE_ARGS_FORMAT + args_format
 
-    flat_signature = []
-    for sig in signature.values():
-        _flatten_signature(sig, flat_signature)
-    signature = {i: s for i, s in enumerate(flat_signature)}
     args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
     # Total expected argument count for METH_FASTCALL arity check.
     total_nargs = _BASE_ARGS_FORMAT_LEN + len(signature)

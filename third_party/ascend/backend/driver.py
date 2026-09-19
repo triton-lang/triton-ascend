@@ -1196,7 +1196,7 @@ static void release_npu_tensor_handle(void* handle) {{
       int dataTypes[MSPROF_GE_TENSOR_DATA_NUM];
       if (tensorShapes.size() > 0) {{
         {LINE_CHANGE_CHAR.join(
-          f'dataTypes[{idx}] = {convert_sigtype_to_int(ty[1:])};'
+          f'dataTypes[{idx}] = {convert_sigtype_to_int(ty[1:].removeprefix("k"))};'
           for idx, (_, ty) in enumerate(
             (k, v) for k, v in signature.items() if v.startswith("*")
           )

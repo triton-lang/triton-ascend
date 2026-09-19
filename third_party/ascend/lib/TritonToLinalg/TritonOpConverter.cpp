@@ -3085,6 +3085,26 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
+  if (!lhsScale) {
+    auto lhsTy = cast<RankedTensorType>(lhs.getType());
+    int64_t k = lhsTy.getShape().back();
+    if (lhsElemType == triton::ScaleDotElemType::E2M1 && op.getLhsKPack())
+      k *= 2;
+    auto defaultScaleTy = RankedTensorType::get(
+        {dstType.getDimSize(dstType.getRank() - 2), (k + 31) / 32},
+        rewriter.getI8Type());
+    // MX inputs use biased E8M0; the floating-point fallback uses signed
+    // exponents. Their encodings of a scale factor of one are 127 and 0.
+    auto unitScale = isFP8Input || isFP4Input ? 127 : 0;
+    Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI8IntegerAttr(unitScale));
+    Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
+        loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
+    lhsScale = rewriter
+                   .create<linalg::FillOp>(loc, ValueRange{defaultScaleVal},
+                                           ValueRange{defaultScaleEmpty})
+                   .getResult(0);
+  }
   if (isFP8Input || isFP4Input) {
     if (!rhsScale) {
       RankedTensorType defaultScaleTy =
@@ -3134,10 +3154,6 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     }
     rewriter.replaceOp(op, finalResult);
     return success();
-  }
-
-  if (!lhsScale) {
-    return op.emitError("lhsScale is required for non-FP8 input");
   }
 
   RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());

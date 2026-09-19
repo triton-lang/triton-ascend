@@ -38,13 +38,14 @@ from numpy.random import RandomState
 from triton.language.extra import libdevice
 
 
-@pytest.mark.parametrize("M, N, K, rhs_scale, normal_type, acc_num, num_warps",
-                         [(M, N, K, rhs_scale, normal_type, acc_num, 4)
+@pytest.mark.parametrize("M, N, K, lhs_scale, rhs_scale, normal_type, acc_num, num_warps",
+                         [(M, N, K, lhs_scale, rhs_scale, normal_type, acc_num, 4)
                           for M, N, K in itertools.product([32, 64], [32, 64], [32])
+                          for lhs_scale in [False, True]
                           for rhs_scale in [False, True]
                           for normal_type in ["bf16", "fp16"]
                           for acc_num in [None, 1, 2]])
-def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
+def test_scaled_dot(M, N, K, lhs_scale, rhs_scale, normal_type, num_warps, acc_num):
     device = "npu"
 
     @triton.jit
@@ -108,15 +109,20 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
     min_scale, max_scale = (0, 142) if type_b == torch.bfloat16 else (124, 131)
     scale_y = torch.randint(min_scale - 128, max_scale - 127, (N, K // 32), dtype=torch.int8, device=device)
 
+    if not lhs_scale:
+        scale_x = None
     if not rhs_scale:
         scale_y = None
 
     def golden_ref(x, scale_x, y, scale_y):
-        shape_expand_x = x.shape[-1] // scale_x.shape[-1]
-        if x.dtype == torch.bfloat16:
+        if scale_x is None:
+            upscale_x = torch.ones_like(x)
+        elif x.dtype == torch.bfloat16:
+            shape_expand_x = x.shape[-1] // scale_x.shape[-1]
             upscale_x = scale_x.repeat_interleave(shape_expand_x, dim=1).to(torch.int16)
             upscale_x = (upscale_x + 127 << 7).view(torch.bfloat16)
         else:
+            shape_expand_x = x.shape[-1] // scale_x.shape[-1]
             scale_fp32 = scale_x.repeat_interleave(shape_expand_x, dim=1).to(torch.int32)
             scale_fp32 = (scale_fp32 + 127 << 23).view(torch.float32)
             upscale_x = scale_fp32.to(torch.float16)

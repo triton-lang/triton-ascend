@@ -396,7 +396,11 @@ def _copy_bishengir_payload(build_lib):
     if source is None:
         return
 
-    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
+    # Must match the runtime lookup in backend/utils.py:
+    #   <dir of utils.py>/bishengir/bin/bishengir-compile
+    # where utils.py installs to triton/backends/ascend/backend/utils.py
+    # (same layout as build_npuir.py's _copy_artifacts).
+    destination = Path(build_lib) / "triton" / "backends" / "ascend" / "backend" / "bishengir"
     if destination.exists():
         shutil.rmtree(destination)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -532,14 +536,30 @@ def patch_module(mod):
 
             if is_manylinux:
                 file = glob.glob(os.path.join(self.dist_dir, "*-linux_*.whl"))[0]
+                target_policy = f"manylinux_2_34_{platform.machine()}"
+                # Pre-flight: repair can only succeed if this image's auditwheel
+                # knows the target policy. Wheels built in the glibc 2.34 image
+                # carry GLIBC_2.33/2.34 symbols, which no manylinux <= 2_31
+                # policy accepts, so fail here with the policy list instead of
+                # a cryptic ABI error at the very end of the build.
+                try:
+                    import auditwheel.policy as auditwheel_policy
+                    policies = getattr(auditwheel_policy, "_POLICIES", None) or \
+                        getattr(auditwheel_policy, "policies", [])
+                    known = sorted(p["name"] for p in policies)
+                    print(f"[auditwheel] known policies: {known}")
+                    if target_policy not in known:
+                        raise RuntimeError(f"auditwheel does not know policy {target_policy}; "
+                                           f"known policies: {known}")
+                except ImportError:
+                    print("[auditwheel] not importable from this Python; "
+                          "skipping policy pre-flight")
                 auditwheel_cmd = [
                     "auditwheel",
                     "-v",
                     "repair",
                     "--plat",
-                    f"manylinux_2_27_{platform.machine()}",
-                    "--plat",
-                    f"manylinux_2_28_{platform.machine()}",
+                    target_policy,
                     "-w",
                     self.dist_dir,
                     file,

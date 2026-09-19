@@ -28,7 +28,7 @@ jobs:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 360
 
     strategy:
@@ -36,7 +36,7 @@ jobs:
       # Limit parallelism: wheel builds compile hundreds of C++ files on
       # memory-constrained workers; too many at once causes OOM kills and
       # buildkitd/SWR auth timeouts.
-      max-parallel: 6
+      max-parallel: 8
       matrix:
         config:
         - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
@@ -76,6 +76,73 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
+      - name: Download npuir payload from PR build
+        id: payload-pr
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        # Pre-merge testing: take the payload built by this PR's npuir-build
+        # run (GitHub artifact). Falls back to OBS objects below.
+        uses: dawidd6/action-download-artifact@v9
+        continue-on-error: true
+        with:
+          workflow: npuir-build.yml
+          workflow_conclusion: success
+          # PRs from forks run npuir-build on the fork, not on this repo;
+          # without allow_forks the action skips exactly the run we want.
+          allow_forks: true
+          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
+          name: npuir-payload-manylinux-${{ matrix.config.arch }}
+          path: npuir-artifacts
+
+      - name: Prepare npuir payload
+        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        shell: bash
+        run: |
+          set -eu
+          # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
+          # wheels.Dockerfile. Sources, in order: PR artifact, OBS object for
+          # the exact pinned commit, rolling -latest (retried briefly in case
+          # the publish is in flight; may not match the pin on old branches).
+          ARCH=${{ matrix.config.arch }}
+          OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/npuir"
+          BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
+          if [ -n "${BIN}" ]; then
+            PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+            echo "Using PR-build payload at ${PAYLOAD_DIR}"
+          else
+            # Read the pin from the gitlink; the wheels checkout does not
+            # initialize submodules.
+            SHA8=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print substr($3, 1, 8)}')
+            if ! curl -fL --connect-timeout 30 --retry 3 --retry-all-errors \
+                 --retry-delay 5 \
+                 "${OBS_BASE}/npuir-payload-manylinux-${ARCH}-${SHA8}.tar.gz" \
+                 -o npuir-payload.tar.gz; then
+              echo "Pin object for ${SHA8} not found; falling back to -latest" >&2
+              for attempt in 1 2 3 4 5; do
+                if curl -fL --connect-timeout 30 --retry 3 --retry-all-errors \
+                     --retry-delay 5 \
+                     "${OBS_BASE}/npuir-payload-manylinux-${ARCH}-latest.tar.gz" \
+                     -o npuir-payload.tar.gz; then
+                  break
+                fi
+                echo "Payload not available yet (attempt ${attempt}), waiting 60s..." >&2
+                sleep 60
+              done
+            fi
+            test -s npuir-payload.tar.gz
+            mkdir -p npuir-payload-dl
+            tar xzf npuir-payload.tar.gz -C npuir-payload-dl
+            PAYLOAD_DIR="$GITHUB_WORKSPACE/npuir-payload-dl"
+          fi
+          rm -rf .npuir-payload
+          mkdir -p .npuir-payload
+          cp -a "${PAYLOAD_DIR}/bin" .npuir-payload/
+          cp -a "${PAYLOAD_DIR}/lib" .npuir-payload/
+          # GitHub artifact zips carry no unix permission bits (upload-artifact
+          # zips without setUnixMode) and action-download-artifact extracts
+          # via adm-zip as 0644, so restore the exec bit explicitly.
+          chmod -R a+x .npuir-payload/bin
+          ls -la .npuir-payload/bin
+
       - name: Compute build variables
         id: vars
         shell: bash
@@ -95,17 +162,23 @@ jobs:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
           build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
+            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
             MAX_JOBS=${{ steps.vars.outputs.max_jobs }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          # Same registry-cache pattern as build-docker-image.yml: the dnf and
+          # pip layers of wheels.Dockerfile (kept before the COPY of the
+          # workspace) hit the cache across runs; the source-dependent wheel
+          # build layer still rebuilds, but skips the dependency setup.
+          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
+          cache-to: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }},mode=max
           outputs: type=local,dest=./wheelhouse
 
       - uses: actions/upload-artifact@v4
         if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
 
       - name: Setup obsutil and upload to OBS

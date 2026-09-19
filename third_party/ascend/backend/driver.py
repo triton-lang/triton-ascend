@@ -32,9 +32,8 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
-                                          _is_auto_map_parallel_blocks_enabled, is_ffts_supported, force_disable_ffts,
-                                          get_backend_func, get_cann_version)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int, is_ffts_supported,
+                                          force_disable_ffts, get_backend_func, get_cann_version)
 from triton.backends.ascend.program_grid import (
     PROGRAM_GRID_TRANSFORMS_VERSION,
     ProgramGridContractError,
@@ -954,10 +953,6 @@ def make_launcher(constants, signature, metadata):
     enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
     enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
-    is_pure_simt = bool(getattr(metadata, "is_pure_simt", False))
-    has_auto_blockify_blacklist_op = bool(getattr(metadata, "has_auto_blockify_blacklist_op", False))
-    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled()
-                                       and (is_pure_simt or not has_auto_blockify_blacklist_op))
     npu_utils = NPUUtils()
     num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
@@ -1068,7 +1063,7 @@ static void release_npu_tensor_handle(void* handle) {{
     elif mix_mode != "aiv":
         raise RuntimeError("persistent program-grid transform requires final mix_mode=aiv")
 
-    launcher_cap_enabled = enable_auto_map_parallel_blocks and not ptsm_cap_authorized
+    launcher_cap_enabled = auto_blockify_enabled
 
     program_grid_finalization = ""
     if program_grid_transforms is not None:

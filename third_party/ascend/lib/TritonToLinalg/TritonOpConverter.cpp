@@ -2709,7 +2709,8 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   };
 
   Operation *matmulOp;
-  if (mlir::isa<mlir::FloatType>(elemTy) && !elemTy.isF32()) {
+  if (mlir::isa<mlir::FloatType>(elemTy) &&
+      elemTy.getIntOrFloatBitWidth() < 32) {
     RankedTensorType opcFp32Ty =
         RankedTensorType::get(dstType.getShape(), rewriter.getF32Type());
     Value opcFp32 = rewriter.create<arith::ExtFOp>(op.getLoc(), opcFp32Ty, opc);

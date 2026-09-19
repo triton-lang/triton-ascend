@@ -329,7 +329,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # This is compiler-derived safety metadata, never a user compile option.
     # Derive it even when the feature is currently disabled so a later runtime
     # environment change cannot enable AutoBlockify for unsafe TTIR.
-    blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code)
+    blacklist_reasons = _get_auto_blockify_blacklist_reasons(ttir_code, compile_on_910_95=metadata["compile_on_910_95"])
     has_auto_blockify_blacklist_op = bool(blacklist_reasons)
     metadata["has_auto_blockify_blacklist_op"] = has_auto_blockify_blacklist_op
     if auto_map_parallel_blocks_enabled and has_auto_blockify_blacklist_op and blacklist_reasons:
@@ -622,7 +622,8 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
     metadata["name"] = metadata["kernel_name"]
     # Keep this as compiler-derived safety metadata.  In particular, do not
     # trust a caller-provided False value to override an unsafe TTIR pattern.
-    metadata["has_auto_blockify_blacklist_op"] = bool(_get_auto_blockify_blacklist_reasons(ttir))
+    metadata["has_auto_blockify_blacklist_op"] = bool(
+        _get_auto_blockify_blacklist_reasons(ttir, compile_on_910_95=metadata["compile_on_910_95"]))
     # Parse all tensor kinds from arguments
     metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
     return metadata

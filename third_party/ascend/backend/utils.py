@@ -298,8 +298,9 @@ def is_compile_on_910_95(arch: str = None) -> bool:
     return _is_compile_on_910_95
 
 
+AUTO_BLOCKIFY_ATOMIC_RULE = (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations")
+
 AUTO_BLOCKIFY_BLACKLIST_RULES = (
-    (re.compile(r"\btt\.atomic_(?:rmw|cas)\b"), "atomic operations"),
     (re.compile(r"\btt\.elementwise_inline_asm\b"), "inline elementwise assembly"),
     (
         re.compile(r"\btt\.load\b[^\n]*\bisVolatile\s*=\s*true\b"),
@@ -600,8 +601,11 @@ def _is_auto_map_parallel_blocks_enabled() -> bool:
     return True
 
 
-def _get_auto_blockify_blacklist_reasons(ir_text: str):
-    return [description for pattern, description in AUTO_BLOCKIFY_BLACKLIST_RULES if pattern.search(ir_text)]
+def _get_auto_blockify_blacklist_reasons(ir_text: str, *, compile_on_910_95: bool = False):
+    blacklist_rules = AUTO_BLOCKIFY_BLACKLIST_RULES
+    if not compile_on_910_95:
+        blacklist_rules = (AUTO_BLOCKIFY_ATOMIC_RULE, ) + blacklist_rules
+    return [description for pattern, description in blacklist_rules if pattern.search(ir_text)]
 
 
 def _warn_auto_blockify_disabled(kernel_name: str, blacklist_reasons) -> None:

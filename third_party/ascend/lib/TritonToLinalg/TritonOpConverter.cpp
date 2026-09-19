@@ -3087,10 +3087,15 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
   if (isFP8Input || isFP4Input) {
     if (!rhsScale) {
-      RankedTensorType defaultScaleTy =
-          RankedTensorType::get({1}, rewriter.getI8Type());
-      Value defaultScaleVal =
-          rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(1));
+      auto rhsTy = cast<RankedTensorType>(rhs.getType());
+      int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
+      if (rhsElemType == triton::ScaleDotElemType::E2M1 && op.getRhsKPack())
+        k *= 2;
+      auto defaultScaleTy = RankedTensorType::get(
+          {dstType.getShape().back(), (k + 31) / 32}, rewriter.getI8Type());
+      // E8M0 encodes a scale factor of one with exponent bias 127.
+      Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI8IntegerAttr(127));
       Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
           loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
       rhsScale = rewriter

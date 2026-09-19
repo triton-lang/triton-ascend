@@ -545,6 +545,37 @@ def ty_to_cpp(ty):
 _BASE_ARGS_FORMAT = "iiiKKOOOO"
 _BASE_ARGS_FORMAT_LEN = len(_BASE_ARGS_FORMAT)
 
+_CPP_LOW_PRECISION_SCALARS = r"""
+// Encode scalar arguments using round-to-nearest-even, preserving Inf/NaN.
+static inline uint16_t float_to_fp16(float value) {
+  uint32_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  uint16_t sign = (bits >> 16) & 0x8000;
+  uint32_t magnitude = bits & 0x7fffffff;
+  if (magnitude >= 0x7f800000)
+    return sign | (magnitude > 0x7f800000 ? 0x7e00 : 0x7c00);
+  if (magnitude >= 0x477ff000)
+    return sign | 0x7c00;
+  if (magnitude <= 0x33000000)
+    return sign;
+  if (magnitude < 0x38800000) {
+    uint32_t significand = (magnitude & 0x7fffff) | 0x800000;
+    unsigned shift = 126 - (magnitude >> 23);
+    uint32_t rounding = ((1u << (shift - 1)) - 1) + ((significand >> shift) & 1);
+    return sign | ((significand + rounding) >> shift);
+  }
+  return sign | ((magnitude - 0x38000000 + 0xfff + ((magnitude >> 13) & 1)) >> 13);
+}
+
+static inline uint16_t float_to_bf16(float value) {
+  uint32_t bits;
+  memcpy(&bits, &value, sizeof(bits));
+  if ((bits & 0x7fffffff) > 0x7f800000)
+    return (bits >> 16) | 0x40;
+  return (bits + 0x7fff + ((bits >> 16) & 1)) >> 16;
+}
+"""
+
 
 def make_tensordesc_arg(arg):
     return [arg.base, *arg.shape, *arg.strides, arg.padding == "nan", *arg.shape, *arg.strides]
@@ -922,6 +953,15 @@ def make_launcher(constants, signature, metadata):
     for sig in signature.values():
         _flatten_signature(sig, flat_signature)
     signature = {i: s for i, s in enumerate(flat_signature)}
+
+    def device_arg_type(ty):
+        return "uint16_t" if ty in ("fp16", "bf16") else ty_to_cpp(ty)
+
+    def device_arg_value(ty, index):
+        if ty in ("fp16", "bf16"):
+            return f"float_to_{ty}(arg{index})"
+        return f"static_cast<{ty_to_cpp(ty)}>(arg{index})"
+
     args_list = ', ' + ', '.join(f"&_arg{i}" for i, ty in signature.items()) if len(signature) > 0 else ''
     # Total expected argument count for METH_FASTCALL arity check.
     total_nargs = _BASE_ARGS_FORMAT_LEN + len(signature)
@@ -1467,6 +1507,7 @@ void triton_launch_kernel(const char* kernelName, cann_func_handle func, cann_st
 {_launch_lambda_post.replace('__KERNEL_LAUNCH_CALL__', cpp_kernel_launch)}
 }} // extern "C"
 
+{_CPP_LOW_PRECISION_SCALARS if any(ty in ("fp16", "bf16") for ty in signature.values()) else ''}
 static void _launch(const char* kernelName, cann_func_handle func, cann_stream stream,
     int gridX, int gridY, int gridZ,
     std::vector<std::vector<int64_t>> &tensorShapes, std::vector<int> &tensorKinds{(', ' + arg_decls) if len(arg_decls) > 0 else ''}) {{
@@ -1481,7 +1522,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
-      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
+      {' '.join(f'{device_arg_type(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
 {original_grid_struct_fields}      {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
@@ -1491,7 +1532,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {('static_cast<void*>(syncBlockLock_ptr),' if has_sync_block_lock else 'nullptr,') if not metadata.is_pure_simt else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
-        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
+        [device_arg_value(ty, i) for i, ty in signature.items() if ty != "constexpr"]
       )}
 {original_grid_struct_values}      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}

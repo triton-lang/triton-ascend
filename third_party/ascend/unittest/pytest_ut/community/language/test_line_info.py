@@ -1,0 +1,179 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+# Copyright 2018-2020 Philippe Tillet
+# Copyright 2020-2022 OpenAI
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Source: python/test/unit/language/test_line_info.py at main-dev@396df6cb5b001314e36f22220be07a560de44664
+
+import inspect
+import subprocess
+import tempfile
+
+import pytest
+import torch
+
+import triton
+import triton.language as tl
+from triton._internal_testing import is_interpreter
+from triton._filecheck import run_filecheck
+
+
+@triton.jit
+def kernel_single(X, Y, BLOCK: tl.constexpr):
+    x = tl.load(X + tl.arange(0, BLOCK))
+    tl.store(Y + tl.arange(0, BLOCK), x)
+
+
+@triton.jit
+def device_inline(x):
+    return x + x
+
+
+@triton.jit
+def kernel_call(X, Y, BLOCK: tl.constexpr):
+    x = tl.load(X + tl.arange(0, BLOCK))
+    y = device_inline(x)
+    tl.store(Y + tl.arange(0, BLOCK), y)
+
+
+@triton.jit(noinline=True)
+def device_noinline(X, Y, BLOCK: tl.constexpr):
+    x = tl.load(X + tl.arange(0, BLOCK))
+    y = x + x
+    tl.store(Y + tl.arange(0, BLOCK), y)
+
+
+@triton.jit
+def kernel_call_noinline(X, Y, BLOCK: tl.constexpr):
+    device_noinline(X, Y, BLOCK)
+
+
+@triton.autotune(
+    configs=[
+        triton.Config({"BLOCK": 128}, num_warps=4),
+    ],
+    key=[],
+)
+@triton.jit
+def kernel_autotune(X, Y, SIZE: tl.constexpr, BLOCK: tl.constexpr):
+    for i in range(0, SIZE, BLOCK):
+        x = tl.load(X + i + tl.arange(0, BLOCK))
+        tl.store(Y + i + tl.arange(0, BLOCK), x)
+
+
+# AddIOp(DotOp(a, b, c), d) and c==0 => DotOp(a, b, d)
+# Since the + symbol will take effect in the dot op after combination,
+# it seems making sense to annotate with the same line as dot.
+@triton.jit
+def kernel_dot_combine(x):
+    c = tl.full((32, 32), 4, dtype=tl.int8)
+    a = (tl.arange(0, 32)[:, None] + tl.arange(0, 32)[None, :]).to(tl.int8)
+    d = tl.dot(a, a)
+    d = d + c
+    tl.device_print("", d)
+
+
+# Call another jit function (cdiv) not in this file
+@triton.jit
+def kernel_cdiv(x):
+    c = tl.full((32, 32), 4, dtype=tl.int8)
+    d = tl.cdiv(c, 4)
+    tl.device_print("", d)
+
+
+def get_disassembler_command_and_debug_line_format():
+    """Gets backend specific disassembler information.
+
+    Returns a tuple: (object file kind, disassembler tool command,
+    debug line anchor, debug line file and line number separator).
+    """
+    backend = triton.runtime.driver.active.get_current_target().backend
+
+    if backend == "cuda":
+        nvdisasm = triton.knobs.nvidia.nvdisasm.path
+        return ("cubin", [nvdisasm, "-g"], "## File", ",")
+
+    if backend == "hip":
+        import shutil
+        # Try to find llvm-objdump from the current PATH to disassmble hsaco.
+        tool = shutil.which("llvm-objdump")
+        if tool is not None:
+            return ("hsaco", [tool, "-D", "-l", "--arch=amdgcn"], ";", ":")
+        raise RuntimeError("llvm-objdump not found in PATH")
+
+    raise RuntimeError(f"unknown backend {backend}")
+
+
+def extract_file_lines(command, anchor, separator, asm):
+    fd, path = tempfile.mkstemp()
+    with open(fd, 'wb') as cubin:
+        cubin.write(asm)
+    asm = subprocess.check_output(command + [path]).decode("utf-8")
+    file_lines = []
+    lines = asm.splitlines()
+    for line in lines:
+        # We are looking for an anchor string and a separator between the file name and line number.
+        if anchor in line and separator in line:
+            entries = line[line.index(anchor):].split(separator)
+            if len(entries) == 2 and all(len(e) != 0 for e in entries):
+                file_lines.append((entries[0].strip(), entries[1].strip()))
+    return file_lines
+
+
+def check_file_lines(file_lines, file_name, lineno, should_contain=True):
+    """
+    Check if the file name and line number is in the file_lines
+
+    Args:
+        file_lines: list of (file_name, line_number)
+        file_name: file name
+        lineno: line number, -1 means do not check line number
+        should_contain: whether the file name and line number should be in the file_lines
+    """
+    for file, line in file_lines:
+        if lineno == -1 and file_name in file:
+            return True
+        if file_name in file and str(lineno) in line:
+            return should_contain
+    return not should_contain
+
+
+func_types = ["single", "call", "call_noinline", "autotune", "dot_combine", "cdiv"]
+
+
+def test_map_elementwise_has_lineinfo():
+
+    @triton.jit
+    def compare(x, y):
+        if x < y:
+            return x
+        return y
+
+    @triton.jit
+    def kernel(X, Y):
+        # CHECK-NOT: loc(unknown)
+        x = tl.load(X + tl.arange(0, 4))
+        y = tl.load(Y + tl.arange(0, 4))
+        z = tl.map_elementwise(compare, x, y)
+        tl.device_print("", z)
+
+    kernel_info = kernel.warmup(torch.float32, torch.float32, grid=(1, ))
+    check_template = inspect.getsource(kernel.fn)
+    run_filecheck("test", kernel_info.asm["ttir"], check_template)

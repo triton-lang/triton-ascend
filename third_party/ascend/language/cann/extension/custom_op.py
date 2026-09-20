@@ -142,6 +142,11 @@ def _to_value(value, _semantic=None, ty=None):
             # that specified by type hint 'ty', insert a cast for it.
             return _semantic.cast(value, ty).handle
         return value.handle
+    if isinstance(value, tl.base_value):
+        # Any other handle-carrying value, in particular a bl.buffer used to
+        # name a non-UB destination such as L1. There is nothing to cast: the
+        # buffer's type already fixes its shape and address space.
+        return value.handle
     if isinstance(value, bool):
         return _semantic.builder.get_int1(value)
     if isinstance(value, int):
@@ -293,6 +298,36 @@ def _add_optional_extra_buffer_attr(op, builder, attrs):
     attrs[name + "_sizes"] = builder.get_i64_array_attr(list(extra_buffer_sizes))
 
 
+def _add_optional_gm_addr_args_indices_attr(op, builder, attrs):
+    # Which operands are GM addresses. For a name the compiler already knows as
+    # a builtin its canonicalizer fills this in, but a toolchain whose HIVM
+    # dialect predates the builtin treats the op as an ordinary custom op and
+    # leaves it unset -- and then the GM pointers never get registered as
+    # kernel GM addresses, so the kernel dereferences whatever the operand
+    # happened to hold. Spelling it out keeps the op correct either way.
+    name = 'gm_addr_args_indices'
+    if not hasattr(op, name):
+        return
+
+    indices = getattr(op, name)
+    joined = ', '.join(str(int(i)) for i in indices)
+    attrs[name] = builder.parse_attr(f"array<i32: {joined}>")
+
+
+def _add_optional_inline_mode_attr(op, builder, attrs):
+    # A custom op's template is called, not inlined, unless it asks otherwise.
+    # On the cube core the generated caller keeps values live in the argument
+    # registers X0-X4 across that call while the callee is free to overwrite
+    # them, so an address computed before the call is garbage after it.
+    # always_inline removes the call, and with it the hazard.
+    name = 'inline_mode'
+    if not hasattr(op, name):
+        return
+
+    mode = getattr(op, name)
+    attrs['hivm.inline_mode'] = builder.parse_attr(f"#hivm.inline_mode<{mode}>")
+
+
 def _add_optional_indexing_map_attr(op, builder, attrs):
     # Optional indexing map attribute:
     # `indexing_map` should be an iterable of al.affine_map (MLIR AffineMap) objects.
@@ -343,6 +378,8 @@ def _make_attrs(op, builder, is_macro):
     # Add bit code path attribute, formalize to abosulte path.
     _add_bitcode_attr(op, builder, attrs)
 
+    _add_optional_gm_addr_args_indices_attr(op, builder, attrs)
+    _add_optional_inline_mode_attr(op, builder, attrs)
     _add_optional_indexing_map_attr(op, builder, attrs)
     _add_optional_iterator_types_attr(op, builder, attrs)
 
@@ -357,14 +394,22 @@ def _make_attrs(op, builder, is_macro):
     return attrs
 
 
+def _rewrap(handle, ty):
+    # Rebuild through the type so an output keeps the class it was passed in as:
+    # a tl.dtype/block_type yields a tl.tensor, a bl.buffer_type yields a
+    # bl.buffer that still carries its address space.
+    value, _ = ty._unflatten_ir([handle], 0)
+    return value
+
+
 def _to_result(res, res_types):
     assert (len(res) == len(res_types))
     n_res = len(res)
     if n_res == 0:
         return None
     if n_res == 1:
-        return tl.tensor(res[0], res_types[0])
-    return tl.tuple(tl.tensor(res[i], res_types[i]) for i in range(n_res))
+        return _rewrap(res[0], res_types[0])
+    return tl.tuple(_rewrap(res[i], res_types[i]) for i in range(n_res))
 
 
 def _init_op(op_class, *args, **kwargs):
@@ -411,8 +456,9 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
         res = builder.create_custom_macro_op(name, attrs, inputs, outputs, arg_attrs)
     else:
         res = builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
-    # Results with same types as outputs.
-    res_types = [out.type for out in outs]
+    # Results with same types as outputs. A buffer out is written in place and
+    # the op yields nothing, so there is nothing to rewrap.
+    res_types = [out.type for out in outs][:len(res)]
     return _to_result(res, res_types)
 
 

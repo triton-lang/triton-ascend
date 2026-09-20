@@ -2897,6 +2897,20 @@ DotConverter::matchAndRewrite(triton::ascend::DotOp op, OpAdaptor adaptor,
   Value b = op.getFractalB()
                 ? dotFractalToND(rewriter, loc, adaptor.getB(), /*isLhs=*/false)
                 : adaptor.getB();
+  // transpose_b: B arrives as [N,K], so name the [K,N] the matmul wants. Left as
+  // a linalg.transpose on the operand, which is the form the backend folds into
+  // the mmad's own b_transpose (its L1 -> L0B load transposes) rather than
+  // materialising; the same fold already handles a `tl.trans` on a dot operand.
+  if (op.getTransposeB()) {
+    auto bTy = cast<RankedTensorType>(b.getType());
+    ArrayRef<int64_t> bShape = bTy.getShape();
+    Value init = rewriter.create<tensor::EmptyOp>(
+        loc, ArrayRef<int64_t>{bShape[1], bShape[0]}, bTy.getElementType());
+    b = rewriter
+            .create<linalg::TransposeOp>(loc, b, init,
+                                         ArrayRef<int64_t>{1, 0})
+            ->getResult(0);
+  }
   Type inElemTy = cast<RankedTensorType>(a.getType()).getElementType();
   if (failed(reconcileDotContractionK(op, a, b, inElemTy, rewriter, loc)))
     return failure();

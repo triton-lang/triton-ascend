@@ -303,24 +303,10 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op) {
   }
 }
 
-SmallVector<MemoryEffects::EffectInstance>
-MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
-                                           bool recursive) {
-  unknown = false;
+using EffectsTy = SmallVector<MemoryEffects::EffectInstance>;
 
-  if (auto markOp = dyn_cast<annotation::MarkOp>(op)) {
-    if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
-      return {};
-    } else {
-      MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
-      return {remapEffectValue(scopedWrite, markOp.getSrc())};
-    }
-  }
-
-  if (auto allocTensorOp = dyn_cast<bufferization::AllocTensorOp>(op)) {
-    return {};
-  }
-
+static EffectsTy collectOuterEffectsDefault(Operation *op, bool &unknown,
+                                            bool recursive) {
   std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
   if (recursive) {
     raw = getEffectsRecursively(op);
@@ -351,6 +337,40 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
     filtered.push_back(source == value ? e : remapEffectValue(e, source));
   }
   return filtered;
+}
+
+EffectsTy MemoryDependenceGraph::collectOuterEffects(Operation *op,
+                                                     bool &unknown,
+                                                     bool recursive) {
+  unknown = false;
+
+  return llvm::TypeSwitch<Operation *, EffectsTy>(op)
+      .Case([](annotation::MarkOp markOp) -> EffectsTy {
+        if (markOp->hasAttr(CVPipeline::kInlinableQuantScaleAttr)) {
+          return {};
+        }
+        MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Write::get());
+        return {remapEffectValue(scopedWrite, markOp.getSrc())};
+      })
+      .Case([](bufferization::AllocTensorOp) { return EffectsTy{}; })
+      .Case([](bufferization::ToTensorOp toTensorOp) -> EffectsTy {
+        MemoryEffects::EffectInstance scopedWrite(MemoryEffects::Read::get());
+        return {remapEffectValue(scopedWrite, toTensorOp.getBuffer())};
+      })
+      .Case([&](hivm::CustomOp customOp) -> EffectsTy {
+        EffectsTy effects;
+        for (auto operand : customOp.getOperands()) {
+          if (isa<MemRefType>(operand.getType())) {
+            MemoryEffects::EffectInstance scopedWrite(
+                MemoryEffects::Write::get());
+            effects.push_back(remapEffectValue(scopedWrite, operand));
+          }
+        }
+        return effects;
+      })
+      .Default([&](Operation *op) {
+        return collectOuterEffectsDefault(op, unknown, recursive);
+      });
 }
 
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
@@ -508,7 +528,6 @@ void MemoryDependenceGraph::applyEffects(
     if (isa<BaseMemRefType>(result.getType())) {
       if (MemSlot *s = getOrCreateSlot(result)) {
         s->dataSource = op;
-        s->lastWriter = op;
         s->pendingReads.clear();
       }
     }

@@ -122,7 +122,7 @@ private:
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int collectIntraCoreOutputConditions(
-      OpBuilder &builder, Location loc,
+      ModuleOp module, OpBuilder &builder, Location loc,
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           &intraCoreBuffers,
       SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,

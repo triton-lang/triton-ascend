@@ -554,6 +554,7 @@ def test_program_grid_plan_modes(policy, sequence, expected, as_json):
                  program_grid_transforms=json.dumps(contract) if as_json else contract,
                  ptsm_cap_authorized=any(t[2] for t in sequence)), policy)
     assert spec.flags & (launcher.IAT | launcher.PTSM) == expected
+    assert not spec.flags & launcher.AUTO_MAP
     assert (spec.coalesce_factor, spec.coalesce_axis) == (1, -1)
 
 
@@ -583,7 +584,7 @@ def test_program_grid_rejects_inconsistent_metadata(policy, changes, error):
     ({"mix_mode": "mix"}, "requires final mix_mode=aiv"),
     ({"row_coalescing_applied": True}, "conflict with legacy RowCoalescing"),
     ({"coalesce_factor": 4}, "conflict with legacy coalesce metadata"),
-    ({"auto_blockify_enabled": True}, "conflicts with a rewritten program mapping"),
+    ({"auto_blockify_enabled": True}, "cannot both be true"),
     ({"program_grid_transforms": _grid_contract([(0, 32, True)])}, "invalid program_grid_transforms"),
 ])
 def test_program_grid_rejects_unsafe_mapping_combinations(policy, changes, error):
@@ -597,11 +598,24 @@ def test_program_grid_rejects_unsafe_mapping_combinations(policy, changes, error
 @pytest.mark.parametrize("auto_map", [False, True])
 @pytest.mark.parametrize("blacklisted", [False, True])
 @pytest.mark.parametrize("auto_blockify", [False, True])
-def test_block_cap_preserves_upstream_policy(policy, monkeypatch, auto_map, blacklisted, auto_blockify):
+@pytest.mark.parametrize("pure_simt", [False, True])
+@pytest.mark.parametrize("mapping", ["none", "row", "iat"])
+def test_block_cap_follows_compiler_decision(policy, monkeypatch, auto_map, blacklisted, auto_blockify, pure_simt,
+                                             mapping):
+    # The runtime policy may differ from the one used to compile a cached
+    # binary. Only the recorded compiler decision authorizes the block cap.
     monkeypatch.setattr(utils, "_is_auto_map_parallel_blocks_enabled", lambda: auto_map)
-    spec = launcher.make_launch_spec(
-        metadata(has_auto_blockify_blacklist_op=blacklisted, auto_blockify_enabled=auto_blockify), policy)
-    assert bool(spec.flags & launcher.AUTO_MAP) == (auto_map and not blacklisted)
+    fields = dict(has_auto_blockify_blacklist_op=blacklisted, auto_blockify_enabled=auto_blockify,
+                  is_pure_simt=pure_simt)
+    if mapping == "row":
+        fields.update(row_coalescing_applied=True, coalesce_factor=4, coalesce_axis=0, coalesce_grid_ceil_div=True)
+    elif mapping == "iat":
+        fields.update(program_grid_mapping_applied=True, program_grid_transforms=_grid_contract([(1, 16, False)]))
+    spec = launcher.make_launch_spec(metadata(**fields), policy)
+    assert bool(spec.flags & launcher.AUTO_MAP) == auto_blockify
+    assert bool(spec.flags & launcher.IAT) == (mapping == "iat")
+    assert bool(spec.flags & launcher.COALESCE_CEIL) == (mapping == "row")
+    assert spec.physical_blocks == 40
 
 
 @pytest.fixture(scope="module")

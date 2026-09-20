@@ -487,14 +487,24 @@ def _load_make_launcher(source):
     return namespace["make_launcher"], state
 
 
-def _load_launch_plan():
-    from unittest.mock import patch
+def _load_launch_plan(compiler_source):
     from triton.backends.ascend import launcher
     state = {"auto_map_enabled": False}
 
+    namespace = {
+        "_is_auto_map_parallel_blocks_enabled": lambda: state["auto_map_enabled"],
+        "normalize_program_grid_transforms": launcher.normalize_program_grid_transforms,
+        "get_persistent_transform": launcher.get_persistent_transform,
+        "ProgramGridContractError": launcher.ProgramGridContractError,
+    }
+    _exec_functions(compiler_source, ("_finalize_program_launch_policy", ), namespace)
+
     def create(*, metadata, **_kwargs):
-        with patch.object(launcher.utils, "_is_auto_map_parallel_blocks_enabled", lambda: state["auto_map_enabled"]):
-            return launcher.make_launch_spec(metadata, _FakeNPUUtils())
+        # Execute the current compiler policy before constructing the plan.
+        # The launcher must honor that recorded decision, including pure-SIMT
+        # RowCoalescing, instead of recomputing a blacklist-only cap.
+        namespace["_finalize_program_launch_policy"](vars(metadata), metadata)
+        return launcher.make_launch_spec(metadata, _FakeNPUUtils())
 
     return create, state
 
@@ -577,7 +587,7 @@ def test_895_launcher_coalescing_and_block_cap_closure(
     source_pairs,
 ):
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, target_state = _load_launch_plan()
+    target_make_launcher, target_state = _load_launch_plan(source_pairs["compiler"][1])
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
 
     for env_enabled, is_pure_simt, blacklisted in itertools.product(
@@ -617,19 +627,19 @@ def test_895_launcher_coalescing_and_block_cap_closure(
         from triton.backends.ascend.launcher import AUTO_MAP, COALESCE_CEIL
         assert (target_src.coalesce_factor, target_src.coalesce_axis) == (factor, axis), case
         assert bool(target_src.flags & COALESCE_CEIL) == ceil_div, case
-        assert bool(target_src.flags & AUTO_MAP) == (env_enabled and not blacklisted), case
+        assert bool(target_src.flags & AUTO_MAP) == (env_enabled and not is_pure_simt and not blacklisted), case
         assert target_src.physical_blocks == 40, case
         assert len(baseline_paths) == 2, case
         for baseline_path in baseline_paths:
             assert baseline_path.count(assignment) == 1, case
             if guard is not None:
                 assert baseline_path.count(guard) == 1, case
-            assert baseline_path.count(cap) == int(bool(target_src.flags & AUTO_MAP)), case
+            assert baseline_path.count(cap) == int(env_enabled and not blacklisted), case
 
 
 def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
     baseline_make_launcher, baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, target_state = _load_launch_plan()
+    target_make_launcher, target_state = _load_launch_plan(source_pairs["compiler"][1])
     grid_names = ("gridX", "gridY", "gridZ")
     cap = "blockNum = std::min(blockNum, (uint32_t)40);"
     families = (
@@ -668,7 +678,7 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
             from triton.backends.ascend.launcher import AUTO_MAP, COALESCE_CEIL
             assert (target_src.coalesce_factor, target_src.coalesce_axis) == (factor, axis), case
             assert bool(target_src.flags & COALESCE_CEIL) == ceil_div, case
-            assert bool(target_src.flags & AUTO_MAP) == bool(expected_cap_count), case
+            assert bool(target_src.flags & AUTO_MAP) == (env_enabled and not is_pure_simt and not blacklisted), case
             for baseline_path in _launcher_paths(baseline_src):
                 assert baseline_path.count(expected_assignment) == 1, case
                 if not ceil_div:
@@ -680,7 +690,7 @@ def test_895_launcher_all_emittable_coalescing_metadata_cases(source_pairs):
 def test_895_launcher_keeps_mixed_simt_sls_marker_in_both_paths(source_pairs):
     """SLS still selects the original 910_95 mixed-SIMT launch ABI."""
     baseline_make_launcher, _baseline_state = _load_make_launcher(source_pairs["driver"][0])
-    target_make_launcher, _target_state = _load_launch_plan()
+    target_make_launcher, _target_state = _load_launch_plan(source_pairs["compiler"][1])
 
     metadata = _make_metadata(
         factor=1,

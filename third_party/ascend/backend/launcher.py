@@ -120,8 +120,6 @@ def _program_grid_flags(metadata):
     persistent = get_persistent_transform(transforms) if transforms is not None else None
     if transforms is not None and metadata.row_coalescing_applied:
         raise RuntimeError("program-grid transforms conflict with legacy RowCoalescing")
-    if metadata.auto_blockify_enabled and (mapping or metadata.row_coalescing_applied):
-        raise RuntimeError("auto_blockify_enabled conflicts with a rewritten program mapping")
     if metadata.auto_blockify_enabled and metadata.ptsm_cap_authorized:
         raise RuntimeError("auto_blockify_enabled and ptsm_cap_authorized cannot both be true")
     if persistent is None:
@@ -169,7 +167,9 @@ def make_launch_spec(metadata, npu_utils):
         flags |= PURE_SIMT
     if _enabled("TRITON_ENABLE_TASKQUEUE", True):
         flags |= TASKQUEUE
-    if utils._is_auto_map_parallel_blocks_enabled() and not getattr(metadata, "has_auto_blockify_blacklist_op", False):
+    # The compiler owns AutoBlockify policy, including pure-SIMT exceptions
+    # and compatibility with RowCoalescing/IAT. Do not recompute it at launch.
+    if metadata.auto_blockify_enabled:
         flags |= AUTO_MAP
     if _enabled("TRITON_GRID_WARN_PRINT"):
         flags |= GRID_WARNING

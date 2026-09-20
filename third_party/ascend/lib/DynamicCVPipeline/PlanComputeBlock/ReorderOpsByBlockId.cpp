@@ -21,12 +21,15 @@
  */
 
 #include <algorithm>
+#include <functional>
 #include <string_view>
 #include <utility>
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/Support/Casting.h"
@@ -37,13 +40,17 @@
 #include "DynamicCVPipeline/Common/DependencyHelper.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Block.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Visitors.h"
 #include "mlir/Pass/Pass.h"
@@ -428,6 +435,311 @@ orderInOneCBlock(ArrayRef<Operation *> opsInSameBlock,
   return ordered;
 }
 
+// Ops that materialize kernel inputs (GM loads, views, local scratch buffers
+// and scalar index arithmetic). A chain made only of these ops is a pure
+// function of its operands and can be safely cloned per consumer block.
+static bool isCloneableInputChainOp(Operation *op) {
+  if (isa<
+          arith::ConstantOp, arith::AddIOp, arith::SubIOp, arith::MulIOp,
+          arith::DivSIOp, arith::DivUIOp, arith::RemSIOp, arith::RemUIOp,
+          arith::AndIOp, arith::OrIOp, arith::XOrIOp, arith::ExtSIOp,
+          arith::ExtUIOp, arith::TruncIOp, arith::IndexCastOp, arith::MaxSIOp,
+          arith::MinSIOp, arith::MaxUIOp, arith::MinUIOp, arith::CmpIOp,
+          arith::SelectOp, memref::ReinterpretCastOp, memref::SubViewOp,
+          memref::AllocOp, memref::AllocaOp, memref::CastOp, memref::CopyOp,
+          memref::LoadOp, bufferization::ToTensorOp, tensor::EmptyOp,
+          tensor::ExtractSliceOp, tensor::CastOp, tensor::CollapseShapeOp,
+          tensor::ExpandShapeOp, linalg::FillOp, linalg::CopyOp>(op)) {
+    return true;
+  }
+  if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+    // Conditionally filled scratch buffers are cloneable as long as every op
+    // inside the regions is itself a cloneable input-chain op.
+    auto isScalarCond = !isa<ShapedType>(ifOp.getCondition().getType());
+    if (!isScalarCond) {
+      return false;
+    }
+    return !ifOp->walk<WalkOrder::PreOrder>([&](Operation *nested) {
+             if (nested == ifOp.getOperation() ||
+                 nested->hasTrait<OpTrait::IsTerminator>()) {
+               return WalkResult::advance();
+             }
+             return isCloneableInputChainOp(nested) ? WalkResult::advance()
+                                                    : WalkResult::interrupt();
+           }).wasInterrupted();
+  }
+  return false;
+}
+
+// Walk up from `defOp` and collect the cloneable chain of ops that materialize
+// the value. Ops in `targetGroup` (already where we clone to) and in
+// non-cyclic groups are referenced, not cloned. The chain must not touch any
+// other cyclic group, otherwise cloning could just move the cycle around.
+// `chainTopo` is filled upstream-first so cloning in order keeps defs before
+// uses.
+// Ops that (indirectly) write into a memref value through view chains, e.g.
+// the GM->UB copy and the conditional zero-fill of a load scratch buffer.
+static Value getMemrefWriteDest(Operation *op) {
+  if (auto copy = dyn_cast<memref::CopyOp>(op)) {
+    return copy.getTarget();
+  }
+  if (auto fill = dyn_cast<linalg::FillOp>(op)) {
+    if (!fill.getOutputs().empty()) {
+      return fill.getOutputs()[0];
+    }
+    return nullptr;
+  }
+  if (auto mat = dyn_cast<bufferization::MaterializeInDestinationOp>(op)) {
+    return mat.getDest();
+  }
+  return nullptr;
+}
+
+// Collect top-level ops in `mlirBlock` whose write destination reaches
+// `alloc` through memref view chains (subview / reinterpret_cast / cast).
+static SmallVector<Operation *> findWritersOf(Operation *alloc,
+                                              Block *mlirBlock) {
+  SmallVector<Operation *> writers;
+  DenseSet<Operation *> seen;
+  mlirBlock->walk([&](Operation *w) {
+    Value dest = getMemrefWriteDest(w);
+    if (!dest) {
+      return WalkResult::advance();
+    }
+    Value v = dest;
+    while (Operation *d = v.getDefiningOp()) {
+      if (d == alloc) {
+        Operation *topLevel = mlirBlock->findAncestorOpInBlock(*w);
+        if (topLevel && seen.insert(topLevel).second) {
+          writers.push_back(topLevel);
+        }
+        return WalkResult::advance();
+      }
+      if (isa<memref::SubViewOp, memref::CastOp, memref::ReinterpretCastOp>(d)) {
+        v = d->getOperand(0);
+        continue;
+      }
+      return WalkResult::advance();
+    }
+    return WalkResult::advance();
+  });
+  return writers;
+}
+
+static bool collectPureInputChain(
+    Operation *defOp, int sourceGroup, int targetGroup, Block *mlirBlock,
+    const DenseMap<Operation *, int> &opBlockId,
+    const DenseSet<int> &cyclicGroups, SmallPtrSetImpl<Operation *> &visited,
+    SmallVectorImpl<Operation *> &chainTopo) {
+  std::function<bool(Operation *)> visit = [&](Operation *op) -> bool {
+    if (visited.contains(op)) {
+      return true;
+    }
+    if (!isCloneableInputChainOp(op)) {
+      LOG_DEBUG("chain bail: non-whitelisted op: " << *op << "\n");
+      return false;
+    }
+    visited.insert(op);
+    // Writers of a local scratch buffer produce the buffer's contents, so
+    // they must move together with it (SSA operands alone would miss them).
+    if (isa<memref::AllocOp>(op)) {
+      for (Operation *writer : findWritersOf(op, mlirBlock)) {
+        auto it = opBlockId.find(writer);
+        if (it == opBlockId.end()) {
+          return false; // unknown group: be conservative
+        }
+        int writerGroup = it->second;
+        if (writerGroup == sourceGroup) {
+          if (!visit(writer)) {
+            return false;
+          }
+          continue;
+        }
+        if (cyclicGroups.contains(writerGroup)) {
+          LOG_DEBUG("chain bail: writer in cyclic group " << writerGroup
+                                                          << ": " << *writer << "\n");
+          return false; // writer inside the cycle but outside source group
+        }
+        // Non-cyclic writer group: stays where it is; the moved buffer keeps
+        // depending on it through the regular dependency machinery.
+      }
+    }
+    for (OpOperand &operand : op->getOpOperands()) {
+      Operation *def = operand.get().getDefiningOp();
+      if (!def) {
+        continue; // block arg / iter arg / func arg: reference as-is
+      }
+      Operation *ancestor = mlirBlock->findAncestorOpInBlock(*def);
+      if (!ancestor || ancestor == op) {
+        continue; // defined outside this MLIR block: reference as-is
+      }
+      auto it = opBlockId.find(ancestor);
+      if (it == opBlockId.end()) {
+        continue; // unknown group: reference as-is
+      }
+      int defGroup = it->second;
+      if (defGroup == sourceGroup) {
+        if (ancestor != defOp && !visit(ancestor)) {
+          return false; // extend the chain within the source group
+        }
+        continue;
+      }
+      if (defGroup == targetGroup) {
+        continue; // already materialized where we clone to: reference
+      }
+      if (cyclicGroups.contains(defGroup)) {
+        LOG_DEBUG("chain bail: ancestor in cyclic group " << defGroup << ": "
+                                                          << *ancestor << "\n");
+        return false; // would drag another cyclic group into the chain
+      }
+      continue; // non-cyclic group: reference as-is
+    }
+    chainTopo.push_back(op);
+    return true;
+  };
+  return visit(defOp);
+}
+
+// Groups that remain after trimming in-degree-zero nodes are stuck in (or
+// downstream of) a cycle in the group-level dependency graph.
+static DenseSet<int> computeCyclicGroups(
+    const BlockOpGraph &graph, const DenseMap<Operation *, int> &opBlockId) {
+  DenseSet<int> groups;
+  for (Operation *op : graph.ops) {
+    auto it = opBlockId.find(op);
+    if (it != opBlockId.end()) {
+      groups.insert(it->second);
+    }
+  }
+  DenseMap<int, SmallVector<int>> groupSuccs;
+  DenseMap<int, unsigned> inDeg;
+  DenseSet<std::pair<int, int>> seen;
+  for (Operation *pred : graph.ops) {
+    int a = opBlockId.at(pred);
+    for (Operation *succ : graph.succs.at(pred)) {
+      int b = opBlockId.at(succ);
+      if (a == b || !seen.insert({a, b}).second) {
+        continue;
+      }
+      groupSuccs[a].push_back(b);
+      inDeg[b]++;
+    }
+  }
+  SmallVector<int> ready;
+  for (int g : groups) {
+    if (inDeg[g] == 0) {
+      ready.push_back(g);
+    }
+  }
+  DenseSet<int> removed;
+  while (!ready.empty()) {
+    int g = ready.pop_back_val();
+    removed.insert(g);
+    for (int s : groupSuccs[g]) {
+      if (--inDeg[s] == 0) {
+        ready.push_back(s);
+      }
+    }
+  }
+  DenseSet<int> cyclic;
+  for (int g : groups) {
+    if (!removed.contains(g)) {
+      cyclic.insert(g);
+    }
+  }
+  return cyclic;
+}
+
+static std::optional<StringRef> getGroupCoreType(Operation *opInGroup) {
+  if (auto attr = opInGroup->getAttrOfType<StringAttr>(
+          static_cast<StringRef>(CVPipeline::kCoreType))) {
+    return attr.getValue();
+  }
+  return std::nullopt;
+}
+
+// Try to break cross-block cycles by splitting pure input chains (GM loads,
+// views, scratch fills) out of their producing block into a dedicated new
+// block, so the producing block no longer appears as a dependency of the
+// consuming block. The chain stays a single shared load; consumers receive it
+// through the regular inter-block dependency machinery. Only same-core group
+// pairs are handled; anything else is left to the caller's fallback.
+static bool breakCyclesBySplittingInputChains(
+    const BlockOpGraph &graph, const DenseMap<Operation *, int> &opBlockId,
+    Block *mlirBlock, ComputeBlockIdManager &bm) {
+  DenseSet<int> cyclicGroups = computeCyclicGroups(graph, opBlockId);
+  if (cyclicGroups.empty()) {
+    return false;
+  }
+
+  for (Operation *succ : graph.ops) {
+    auto succIt = opBlockId.find(succ);
+    if (succIt == opBlockId.end() || !cyclicGroups.contains(succIt->second)) {
+      continue;
+    }
+    int targetGroup = succIt->second;
+    auto targetCore = getGroupCoreType(succ);
+    if (!targetCore) {
+      continue;
+    }
+    for (OpOperand &operand : succ->getOpOperands()) {
+      Value value = operand.get();
+      Operation *def = value.getDefiningOp();
+      if (!def) {
+        continue;
+      }
+      Operation *ancestor = mlirBlock->findAncestorOpInBlock(*def);
+      if (!ancestor || ancestor == succ) {
+        continue;
+      }
+      auto defIt = opBlockId.find(ancestor);
+      if (defIt == opBlockId.end()) {
+        continue;
+      }
+      int sourceGroup = defIt->second;
+      if (sourceGroup == targetGroup || !cyclicGroups.contains(sourceGroup)) {
+        continue;
+      }
+      auto sourceCore = getGroupCoreType(ancestor);
+      if (!sourceCore || *sourceCore != *targetCore) {
+        continue; // cross-core cycles are not handled here
+      }
+
+      SmallPtrSet<Operation *, 16> visited;
+      SmallVector<Operation *> chainTopo;
+      if (!collectPureInputChain(ancestor, sourceGroup, targetGroup, mlirBlock,
+                                 opBlockId, cyclicGroups, visited, chainTopo)) {
+        continue;
+      }
+      if (chainTopo.empty()) {
+        continue;
+      }
+
+      OpBuilder builder(succ);
+      // Move the chain ops into the consumer group (same core). The edge
+      // producer->consumer is thereby reversed: the consumer now hosts the
+      // shared input chain and the producing block only depends on it, so
+      // the group graph becomes acyclic. The load stays single; cross-block
+      // value delivery is handled by the regular inter-block dependency
+      // machinery.
+      int loadGroupId = targetGroup;
+      for (Operation *chainOp : chainTopo) {
+        // WithInner so ops nested in moved regions (e.g. the conditional fill
+        // inside a scf.if) follow the new block id as well.
+        bm.updateBlockIdWithInner(chainOp, loadGroupId);
+        LOG_DEBUG("Cycle break: moved pure input chain op into new group "
+                  << loadGroupId << ": " << *chainOp << "\n");
+      }
+      LOG_DEBUG("Cycle break: group " << sourceGroup << " -> " << targetGroup
+                                      << " detached by splitting input chain "
+                                         "into group "
+                                      << loadGroupId << "\n");
+      return true;
+    }
+  }
+  return false;
+}
+
 // Stable sort ops based on their group orders
 static llvm::FailureOr<SmallVector<Operation *>> buildReorderedOps(
     const BlockOpGraph &graph, const DenseMap<Operation *, int> &opBlockId,
@@ -470,65 +782,87 @@ static void applyReorder(Block &block, ArrayRef<Operation *> reordered) {
 static llvm::LogicalResult
 reorderOpsInBlock(Block &block, const MemoryDependenceGraph &memGraph,
                   ComputeBlockIdManager &bm) {
-  const auto allOps =
-      llvm::to_vector(llvm::make_pointer_range(block.without_terminator()));
+  // If the group-level dependency graph is cyclic (e.g. a GM input load was
+  // planned into one CUBE block while another block consuming it also feeds
+  // back into the first), try to detach the offending input chains by cloning
+  // them into a dedicated block before giving up.
+  constexpr unsigned kMaxCycleBreakAttempts = 4;
+  for (unsigned attempt = 0;; ++attempt) {
+    const auto allOps =
+        llvm::to_vector(llvm::make_pointer_range(block.without_terminator()));
 
-  const BlockOpGraph graph{allOps, &block, memGraph};
-  llvm::FailureOr<DenseMap<Operation *, int>> opBlockIdOpt =
-      collectBlockIds(allOps, bm);
-  if (failed(opBlockIdOpt)) {
-    return failure();
-  }
-
-  auto &opBlockId = *opBlockIdOpt;
-  LOG_DEBUG("Initial opBlockIds:\n");
-  for (Operation *op : allOps) {
-    LOG_DEBUG("  Op: " << *op << ", opBlockId = " << opBlockId[op] << "\n");
-  }
-
-  const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm, memGraph);
-  if (failed(reorderedRes)) {
-    return failure();
-  }
-
-  applyReorder(block, reorderedRes.value());
-
-  // Verify the sync fence invariant: every op that preceded (followed) a
-  // gpu.barrier / hivm.sync_block_all in the original source order must still
-  // precede (follow) it.
-  LLVM_DEBUG({
-    DenseMap<Operation *, unsigned> sourceIdx;
-    for (unsigned i = 0; i < allOps.size(); ++i) {
-      sourceIdx[allOps[i]] = i;
+    const BlockOpGraph graph{allOps, &block, memGraph};
+    llvm::FailureOr<DenseMap<Operation *, int>> opBlockIdOpt =
+        collectBlockIds(allOps, bm);
+    if (failed(opBlockIdOpt)) {
+      return failure();
     }
-    for (Operation &op : block) {
-      if (!CVPipeline::isSyncOp(&op)) {
-        continue;
-      }
-      bool seenBarrier = false;
-      unsigned barrierIdx = sourceIdx[&op];
-      for (Operation &it : block) {
-        if (&it == &op) {
-          seenBarrier = true;
-          continue;
-        }
-        if (!sourceIdx.contains(&it)) {
-          continue;
-        }
-        unsigned idx = sourceIdx.at(&it);
-        if (seenBarrier && idx < barrierIdx) {
-          LOG_DEBUG("Barrier fence violated: op after barrier in source moved "
-                    << "before it: " << it << "\n");
-        }
-        if (!seenBarrier && idx > barrierIdx) {
-          LOG_DEBUG("Barrier fence violated: op before barrier in source moved "
-                    << "after it: " << it << "\n");
-        }
+
+    auto &opBlockId = *opBlockIdOpt;
+    if (attempt == 0) {
+      LOG_DEBUG("Initial opBlockIds:\n");
+      for (Operation *op : allOps) {
+        LOG_DEBUG("  Op: " << *op << ", opBlockId = " << opBlockId[op] << "\n");
       }
     }
-  });
 
-  return llvm::success();
+    const auto reorderedRes = buildReorderedOps(graph, opBlockId, bm, memGraph);
+    if (succeeded(reorderedRes)) {
+      applyReorder(block, reorderedRes.value());
+
+      // Verify the sync fence invariant: every op that preceded (followed) a
+      // gpu.barrier / hivm.sync_block_all in the original source order must
+      // still precede (follow) it.
+      LLVM_DEBUG({
+        DenseMap<Operation *, unsigned> sourceIdx;
+        for (unsigned i = 0; i < allOps.size(); ++i) {
+          sourceIdx[allOps[i]] = i;
+        }
+        for (Operation &op : block) {
+          if (!CVPipeline::isSyncOp(&op)) {
+            continue;
+          }
+          bool seenBarrier = false;
+          unsigned barrierIdx = sourceIdx[&op];
+          for (Operation &it : block) {
+            if (&it == &op) {
+              seenBarrier = true;
+              continue;
+            }
+            if (!sourceIdx.contains(&it)) {
+              continue;
+            }
+            unsigned idx = sourceIdx.at(&it);
+            if (seenBarrier && idx < barrierIdx) {
+              LOG_DEBUG("Barrier fence violated: op after barrier in source "
+                        "moved "
+                        << "before it: " << it << "\n");
+            }
+            if (!seenBarrier && idx > barrierIdx) {
+              LOG_DEBUG("Barrier fence violated: op before barrier in source "
+                        "moved "
+                        << "after it: " << it << "\n");
+            }
+          }
+        }
+      });
+
+      return llvm::success();
+    }
+
+    if (attempt >= kMaxCycleBreakAttempts) {
+      return failure();
+    }
+    LOG_DEBUG("Topological order failed (attempt " << attempt
+                                                   << "); trying to break the "
+                                                      "cycle by splitting pure "
+                                                      "input chains\n");
+    if (!breakCyclesBySplittingInputChains(graph, opBlockId, &block, bm)) {
+      LOG_DEBUG("No splittable pure input chain found to break the cycle; "
+                "falling back as before\n");
+      return failure();
+    }
+  }
 }
 
 void ReorderOpsByBlockIdPass::runOnOperation() {

@@ -25,7 +25,8 @@ using namespace mlir::ascend;
 namespace {
 
 static void recomputeIssueElements(StageWorkload &work) {
-  double elements = work.scalarOperations + work.predicateElements;
+  double elements = work.scalarOperations + work.predicateElements +
+                    work.scalarLoadCount + work.scalarStoreCount;
   for (const auto &entry : work.operationElements)
     elements += entry.second;
   elements += 32.0 * (work.loadWarpInstructions + work.storeWarpInstructions);
@@ -251,6 +252,9 @@ static AtomicWorkload getAtomicWorkload(Operation *operation) {
   return atomic;
 }
 
+static bool isScalarIndirectLoadOperation(Operation *op);
+static bool isScalarIndirectStoreOperation(Operation *op);
+
 static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
   if (!operation || operation->hasTrait<OpTrait::IsTerminator>())
     return;
@@ -260,6 +264,20 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
   if ((name == "tt.load" || name == "tt.gather") &&
       operation->getNumResults() > 0) {
     Value result = operation->getResult(0);
+    // A scalar tt.load (non-shaped result) is executed by the scalar unit,
+    // not by the vector MTE pipes.  Keep it separate from tile loads.
+    if (name == "tt.load" && !isa<ShapedType>(result.getType())) {
+      work.scalarLoadCount += 1.0;
+      if (isScalarIndirectLoadOperation(operation))
+        work.indirectScalarLoadCount += 1.0;
+      else
+        work.directScalarLoadCount += 1.0;
+      // Conservative default: every dynamic scalar load may touch a distinct
+      // line.  Feature analysis can lower this to 1 when line sharing is
+      // provable from the IR.
+      work.scalarLoadUniqueLines += 1.0;
+      return;
+    }
     const double bytes = getValueBytes(result);
     const double logicalMemoryGroups = std::ceil(elements / 32.0);
     work.loadBytes += bytes;
@@ -272,6 +290,17 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
   }
   if (name == "tt.store" && operation->getNumOperands() > 1) {
     Value value = operation->getOperand(1);
+    // A scalar tt.store (non-shaped stored value) is executed by the scalar
+    // unit and should not be counted as a vector tile store.
+    if (name == "tt.store" && !isa<ShapedType>(value.getType())) {
+      work.scalarStoreCount += 1.0;
+      // Conservative default: each scalar store may touch a distinct line.
+      // The same-line proof can lower this to 1.
+      work.scalarStoreUniqueLines += 1.0;
+      if (isScalarIndirectStoreOperation(operation))
+        work.indirectScalarStoreCount += 1.0;
+      return;
+    }
     const double bytes = getValueBytes(value);
     const double logicalMemoryGroups =
         std::ceil(getTypeElementCount(value.getType()) / 32.0);
@@ -328,6 +357,13 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   work.scanShuffleLaneSteps *= scale;
   work.dotFlops *= scale;
   work.estimatedSpillTransactions *= scale;
+  work.scalarLoadCount *= scale;
+  work.directScalarLoadCount *= scale;
+  work.indirectScalarLoadCount *= scale;
+  work.scalarStoreCount *= scale;
+  work.indirectScalarStoreCount *= scale;
+  work.scalarLoadUniqueLines *= scale;
+  work.scalarStoreUniqueLines *= scale;
   for (auto &entry : work.operationElements)
     entry.second *= scale;
   recomputeIssueElements(work);
@@ -426,6 +462,13 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;
   into.dotFlops += from.dotFlops;
   into.estimatedSpillTransactions += from.estimatedSpillTransactions;
+  into.scalarLoadCount += from.scalarLoadCount;
+  into.directScalarLoadCount += from.directScalarLoadCount;
+  into.indirectScalarLoadCount += from.indirectScalarLoadCount;
+  into.scalarStoreCount += from.scalarStoreCount;
+  into.indirectScalarStoreCount += from.indirectScalarStoreCount;
+  into.scalarLoadUniqueLines += from.scalarLoadUniqueLines;
+  into.scalarStoreUniqueLines += from.scalarStoreUniqueLines;
   for (const auto &[name, elements] : from.operationElements)
     into.operationElements[name] += elements;
   recomputeIssueElements(into);
@@ -762,6 +805,266 @@ static double semanticRootEntryMultiplicity(Operation *root) {
   return static_cast<double>(enclosingSplitLoopTripCount(root));
 }
 
+static bool isScalarLoadOperation(Operation *op) {
+  if (!op || op->getName().getStringRef() != "tt.load" ||
+      op->getNumResults() == 0)
+    return false;
+  return !isa<ShapedType>(op->getResult(0).getType());
+}
+
+static bool isScalarStoreOperation(Operation *op) {
+  if (!op || op->getName().getStringRef() != "tt.store" ||
+      op->getNumOperands() < 2)
+    return false;
+  return !isa<ShapedType>(op->getOperand(1).getType());
+}
+
+static bool operationTreeHasScalarLoad(Operation *root) {
+  bool found = root && isScalarLoadOperation(root);
+  if (!root || found)
+    return found;
+  root->walk([&](Operation *nested) {
+    if (!found)
+      found = isScalarLoadOperation(nested);
+  });
+  return found;
+}
+
+static bool operationTreeHasScalarStore(Operation *root) {
+  bool found = root && isScalarStoreOperation(root);
+  if (!root || found)
+    return found;
+  root->walk([&](Operation *nested) {
+    if (!found)
+      found = isScalarStoreOperation(nested);
+  });
+  return found;
+}
+
+/// Collect the immediate producer loads (`tt.load` / `tt.gather`) on which
+/// the address chain of `memoryOp` depends.  A producer feeding several
+/// consumers in the same Stage is inserted once per producer `Operation*`;
+/// callers deduplicate the set across all indirect memory ops so fan-out is
+/// charged one dependency exposure instead of one per consumer.  The walk
+/// also follows `scf.for` loop-carried address block arguments and `scf.if`
+/// region yields (e.g. an index selected by a loaded value).
+static void
+collectScalarPointerDependencySources(Operation *memoryOp,
+                                      llvm::DenseSet<Operation *> &sources) {
+  if (!memoryOp || memoryOp->getNumOperands() == 0)
+    return;
+  llvm::SmallVector<Value> worklist{memoryOp->getOperand(0)};
+  llvm::DenseSet<Value> visited;
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    if (!visited.insert(value).second)
+      continue;
+
+    if (auto argument = dyn_cast<BlockArgument>(value)) {
+      Operation *parent = argument.getOwner()->getParentOp();
+      unsigned number = argument.getArgNumber();
+      if (parent && parent->getName().getStringRef() == "scf.for" &&
+          number > 0 && number + 2 < parent->getNumOperands()) {
+        worklist.push_back(parent->getOperand(number + 2));
+        Operation *yield = argument.getOwner()->getTerminator();
+        if (yield && number - 1 < yield->getNumOperands())
+          worklist.push_back(yield->getOperand(number - 1));
+      }
+      continue;
+    }
+
+    Operation *producer = value.getDefiningOp();
+    if (!producer)
+      continue;
+    const llvm::StringRef name = producer->getName().getStringRef();
+    if (name == "tt.load" || name == "tt.gather") {
+      // Stop at the immediate producer.  For a serial chain A -> B -> C the
+      // walk for B records A and the walk for C records B, so the Stage still
+      // sees two exposures; for a fan-out P -> C1, C2 both walks record P and
+      // deduplication keeps one.
+      sources.insert(producer);
+      continue;
+    }
+    // Follow structured-control-flow results (e.g. a `scf.if` that selects
+    // between a loaded index and a constant) to their region yield values.
+    if (auto result = dyn_cast<OpResult>(value)) {
+      const unsigned resultNumber = result.getResultNumber();
+      bool followedYield = false;
+      for (Region &region : producer->getRegions()) {
+        if (region.empty())
+          continue;
+        Operation *terminator = region.front().getTerminator();
+        if (terminator && resultNumber < terminator->getNumOperands()) {
+          worklist.push_back(terminator->getOperand(resultNumber));
+          followedYield = true;
+        }
+      }
+      if (followedYield)
+        continue;
+    }
+    llvm::append_range(worklist, producer->getOperands());
+  }
+}
+
+/// True when the address chain of `memoryOp` reaches a scalar `tt.load` (or
+/// `tt.gather`) result.  This is the legacy scalar_ldst dependency test:
+/// such an edge exposes an extra load-to-use latency that independent scalar
+/// operations cannot hide.
+static bool scalarPointerDependsOnLoadedIndex(Operation *memoryOp) {
+  llvm::DenseSet<Operation *> sources;
+  collectScalarPointerDependencySources(memoryOp, sources);
+  return !sources.empty();
+}
+
+static bool isScalarIndirectLoadOperation(Operation *op) {
+  return isScalarLoadOperation(op) && scalarPointerDependsOnLoadedIndex(op);
+}
+
+static bool isScalarIndirectStoreOperation(Operation *op) {
+  return isScalarStoreOperation(op) && scalarPointerDependsOnLoadedIndex(op);
+}
+
+/// Conservative same-line proof for the scalar loads owned by one Stage:
+/// all loads must use the same SSA base pointer plus constant element
+/// offsets whose byte span fits in one 64B AIV DCache line.  Loads inside a
+/// loop are rejected because the base may advance across iterations, and
+/// block-argument bases (loop-carried pointers) are rejected for the same
+/// reason.  Returning false is always safe; callers then use the diff-line
+/// model.
+static bool scalarLoadsShareOneLine(llvm::ArrayRef<Operation *> roots) {
+  llvm::SmallVector<Operation *, 4> loads;
+  for (Operation *root : roots) {
+    if (!root)
+      continue;
+    if (isScalarLoadOperation(root))
+      loads.push_back(root);
+    root->walk([&](Operation *nested) {
+      if (isScalarLoadOperation(nested))
+        loads.push_back(nested);
+    });
+  }
+  if (loads.size() <= 1)
+    return true;
+  for (Operation *load : loads) {
+    for (Operation *parent = load->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      llvm::StringRef name = parent->getName().getStringRef();
+      if (name == "scf.for" || name == "scf.while")
+        return false;
+    }
+  }
+  Value commonBase;
+  int64_t minOffset = 0;
+  int64_t maxOffset = 0;
+  bool first = true;
+  for (Operation *load : loads) {
+    if (load->getNumOperands() < 1)
+      return false;
+    Value base = load->getOperand(0);
+    int64_t offset = 0;
+    while (Operation *definition = base.getDefiningOp()) {
+      if (definition->getName().getStringRef() != "tt.addptr" ||
+          definition->getNumOperands() < 2)
+        break;
+      std::optional<int64_t> delta =
+          getConstantInteger(definition->getOperand(1));
+      if (!delta)
+        return false;
+      offset += *delta;
+      base = definition->getOperand(0);
+    }
+    if (!base.getDefiningOp())
+      return false;
+    if (first) {
+      commonBase = base;
+      minOffset = maxOffset = offset;
+      first = false;
+      continue;
+    }
+    if (base != commonBase)
+      return false;
+    minOffset = std::min(minOffset, offset);
+    maxOffset = std::max(maxOffset, offset);
+  }
+  if (!commonBase || loads.empty() || loads.front()->getNumResults() == 0)
+    return false;
+  const double elementBytes = getValueBytes(loads.front()->getResult(0));
+  if (elementBytes <= 0.0)
+    return false;
+  const double spanBytes =
+      static_cast<double>(maxOffset - minOffset + 1) * elementBytes;
+  return spanBytes <= 64.0;
+}
+
+/// Conservative same-line proof for the scalar stores owned by one Stage.
+/// This mirrors `scalarLoadsShareOneLine`; the white-box SIMT store same-line
+/// branch is only applied to K >= 2 stores, so a single store still uses the
+/// first-store (diff-line) preparation.
+static bool scalarStoresShareOneLine(llvm::ArrayRef<Operation *> roots) {
+  llvm::SmallVector<Operation *, 4> stores;
+  for (Operation *root : roots) {
+    if (!root)
+      continue;
+    if (isScalarStoreOperation(root))
+      stores.push_back(root);
+    root->walk([&](Operation *nested) {
+      if (isScalarStoreOperation(nested))
+        stores.push_back(nested);
+    });
+  }
+  if (stores.size() <= 1)
+    return true;
+  for (Operation *store : stores) {
+    for (Operation *parent = store->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      llvm::StringRef name = parent->getName().getStringRef();
+      if (name == "scf.for" || name == "scf.while")
+        return false;
+    }
+  }
+  Value commonBase;
+  int64_t minOffset = 0;
+  int64_t maxOffset = 0;
+  bool first = true;
+  for (Operation *store : stores) {
+    if (store->getNumOperands() < 2)
+      return false;
+    Value base = store->getOperand(0);
+    int64_t offset = 0;
+    while (Operation *definition = base.getDefiningOp()) {
+      if (definition->getName().getStringRef() != "tt.addptr" ||
+          definition->getNumOperands() < 2)
+        break;
+      std::optional<int64_t> delta =
+          getConstantInteger(definition->getOperand(1));
+      if (!delta)
+        return false;
+      offset += *delta;
+      base = definition->getOperand(0);
+    }
+    if (!base.getDefiningOp())
+      return false;
+    if (first) {
+      commonBase = base;
+      minOffset = maxOffset = offset;
+      first = false;
+      continue;
+    }
+    if (base != commonBase)
+      return false;
+    minOffset = std::min(minOffset, offset);
+    maxOffset = std::max(maxOffset, offset);
+  }
+  if (!commonBase || stores.empty())
+    return false;
+  const double elementBytes = getValueBytes(stores.front()->getOperand(1));
+  if (elementBytes <= 0.0)
+    return false;
+  const double spanBytes =
+      static_cast<double>(maxOffset - minOffset + 1) * elementBytes;
+  return spanBytes <= 64.0;
+}
+
 /// Classify one transitive semantic ownership unit.  This function consumes
 /// only TTIR structure; it does not inspect a kernel name, workload name,
 /// measured performance, or route score.
@@ -789,6 +1092,12 @@ static StageCostModelKind classifySemanticRoot(Operation *root) {
           root, {"tt.fp_to_fp", "arith.extf", "arith.truncf", "arith.fptosi",
                  "arith.fptoui", "arith.sitofp", "arith.uitofp"}))
     return StageCostModelKind::ConversionPack;
+  const bool hasScalarLoad = operationTreeHasScalarLoad(root);
+  const bool hasScalarStore = operationTreeHasScalarStore(root);
+  if (hasScalarStore && !hasScalarLoad)
+    return StageCostModelKind::ScalarStore;
+  if (hasScalarLoad || hasScalarStore)
+    return StageCostModelKind::ScalarLoad;
   const bool hasLoad = operationTreeHasAnyName(root, {"tt.load"});
   const bool hasStore = operationTreeHasAnyName(root, {"tt.store"});
   if (hasStore && !hasLoad)
@@ -1100,6 +1409,9 @@ static int semanticKindPriority(StageCostModelKind kind) {
   case StageCostModelKind::PredicateMask:
   case StageCostModelKind::LoopPredicate:
     return 20;
+  case StageCostModelKind::ScalarLoad:
+  case StageCostModelKind::ScalarStore:
+    return 35;
   case StageCostModelKind::IndexGeneration:
     return 10;
   default:
@@ -1348,11 +1660,32 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
       if (name.contains("barrier") || name.contains("sync"))
         ++facts.synchronizationCount;
       if (name == "tt.load" || name == "tt.store" || name == "tt.gather") {
-        hasMemory = true;
-        const bool indirect =
-            isLoadedIndexDependentMemoryOp(operation) || name == "tt.gather";
-        facts.hasIndirectMemory |= indirect;
-        hasContiguousMemory |= !indirect;
+        const bool scalarLoad = isScalarLoadOperation(operation);
+        const bool scalarStore = isScalarStoreOperation(operation);
+        const bool scalarIndirect = isScalarIndirectLoadOperation(operation) ||
+                                    isScalarIndirectStoreOperation(operation);
+        if (scalarLoad)
+          facts.hasScalarLoad = true;
+        if (scalarStore)
+          facts.hasScalarStore = true;
+        if (scalarIndirect) {
+          facts.hasScalarIndirectMemory = true;
+          if (scalarLoad)
+            facts.hasScalarIndirectLoad = true;
+          if (scalarStore)
+            facts.hasScalarIndirectStore = true;
+        }
+        // Scalar loads/stores are scalar-pipe operations, not vector tile
+        // memory.  Only non-scalar memory should mark hasContiguousMemory.
+        if (!scalarLoad && !scalarStore) {
+          hasMemory = true;
+          const bool indirect =
+              isLoadedIndexDependentMemoryOp(operation) || name == "tt.gather";
+          facts.hasIndirectMemory |= indirect;
+          hasContiguousMemory |= !indirect;
+        }
+        if (scalarIndirect)
+          facts.hasIndirectMemory = true;
       }
       if (name.starts_with("tt.atomic")) {
         hasMemory = true;
@@ -1371,7 +1704,30 @@ llvm::Error StageFeatureAnalysis::analyze(StagePartition &partition) const {
           name == "tt.fp_to_fp" || name.contains("convert") ||
           name.contains("pack") || name.contains("unpack");
     }
+    if (facts.hasScalarLoad) {
+      facts.scalarLoadsShareLine = scalarLoadsShareOneLine(stage.operations);
+      // Same-line reuse is the only case that can lower the conservative
+      // per-load line count.  Unknown/diff-line Stages keep scalarLoadCount.
+      if (facts.scalarLoadsShareLine && stage.workload.scalarLoadCount > 0.0)
+        stage.workload.scalarLoadUniqueLines = 1.0;
+    }
+    if (facts.hasScalarStore) {
+      facts.scalarStoresShareLine = scalarStoresShareOneLine(stage.operations);
+      if (facts.scalarStoresShareLine && stage.workload.scalarStoreCount > 0.0)
+        stage.workload.scalarStoreUniqueLines = 1.0;
+    }
     facts.hasContiguousMemory = hasMemory && hasContiguousMemory;
+    costModelDebug() << "features stage=" << stage.id
+                     << " loop=" << facts.hasLoop
+                     << " carried=" << facts.hasLoopCarriedDataDependency
+                     << " reduction=" << facts.hasReduction
+                     << " dot=" << facts.hasDot
+                     << " indirect=" << facts.hasIndirectMemory
+                     << " contiguous=" << facts.hasContiguousMemory
+                     << " conversion=" << facts.hasConversionPack
+                     << " scalar_share_line=" << facts.scalarLoadsShareLine
+                     << " store_share_line=" << facts.scalarStoresShareLine
+                     << "\n";
     if (algorithmLoopCount > 0 && stage.iterationCount > 1) {
       if (facts.hasLoopCarriedDataDependency)
         facts.parallelRecurrenceGroupCount = algorithmLoopCount;
@@ -1421,6 +1777,10 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
       return facts.hasContiguousMemory;
     case StageCostModelKind::ConversionPack:
       return facts.hasConversionPack;
+    case StageCostModelKind::ScalarLoad:
+      return facts.hasScalarLoad && !facts.hasContiguousMemory;
+    case StageCostModelKind::ScalarStore:
+      return facts.hasScalarStore && !facts.hasContiguousMemory;
     default:
       return true;
     }
@@ -1459,6 +1819,10 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
         return StageCostModelKind::IndirectGatherMemory;
       if (facts.hasConversionPack)
         return StageCostModelKind::ConversionPack;
+      if (!facts.hasContiguousMemory && facts.hasScalarLoad)
+        return StageCostModelKind::ScalarLoad;
+      if (!facts.hasContiguousMemory && facts.hasScalarStore)
+        return StageCostModelKind::ScalarStore;
       if (facts.hasContiguousMemory)
         return stage.workload.storeBytes > 0.0 &&
                        stage.workload.loadBytes == 0.0
@@ -1508,6 +1872,30 @@ llvm::Error StageWorkloadAnalysis::analyze(StagePartition &partition) const {
       accumulateDynamicOperationTree(root, work,
                                      semanticRootEntryMultiplicity(root),
                                      fallbackLoopTripCount);
+    // Derive the producer-side indirect dependency exposures once per Stage.
+    // Fan-out consumers (several indirect loads sharing one producer load)
+    // collapse to one exposure; serial chains keep one exposure per edge.
+    // The scalar prologue stages this model targets are straight-line; nested
+    // loops currently keep the syntactic producer count and may need dynamic
+    // multiplicity refinement later.
+    {
+      llvm::DenseSet<Operation *> indirectLoadSources;
+      llvm::DenseSet<Operation *> indirectStoreSources;
+      for (Operation *root : stage.operations) {
+        root->walk([&](Operation *operation) {
+          if (isScalarIndirectLoadOperation(operation))
+            collectScalarPointerDependencySources(operation,
+                                                  indirectLoadSources);
+          if (isScalarIndirectStoreOperation(operation))
+            collectScalarPointerDependencySources(operation,
+                                                  indirectStoreSources);
+        });
+      }
+      work.indirectScalarLoadExposureCount =
+          static_cast<double>(indirectLoadSources.size());
+      work.indirectScalarStoreExposureCount =
+          static_cast<double>(indirectStoreSources.size());
+    }
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);

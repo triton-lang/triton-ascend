@@ -45,7 +45,7 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
-constexpr int64_t kSupportedProfileSchemaVersion = 12;
+constexpr int64_t kSupportedProfileSchemaVersion = 13;
 
 struct StructuralProfile {
   int64_t tinyDotFlopsMax = 0;
@@ -112,6 +112,18 @@ public:
     if (auto value = parent.getNumber(key))
       return *value;
     return defaultValue;
+  }
+
+  std::vector<double> optionalNumberArray(const llvm::json::Object &parent,
+                                          llvm::StringRef key) {
+    std::vector<double> result;
+    const llvm::json::Array *array = parent.getArray(key);
+    if (!array)
+      return result;
+    for (const llvm::json::Value &value : *array)
+      if (std::optional<double> number = value.getAsNumber())
+        result.push_back(*number);
+    return result;
   }
 
   bool failed() const { return !error.empty(); }
@@ -248,6 +260,88 @@ static void readStageResources(ProfileJSONReader &reader,
   if (const auto *scan = resources->getObject("prefix_scan"))
     profile.prefixScanDependencyFactor =
         reader.number(*scan, "dependency_factor", prefix + ".prefix_scan");
+  if (const auto *scalarMemory =
+          reader.object(*resources, "scalar_memory", prefix)) {
+    const std::string path = prefix + ".scalar_memory";
+    profile.scalarLoadInstructionsPerCycle = reader.number(
+        *scalarMemory, "load_instructions_per_system_cycle", path);
+    profile.scalarStoreInstructionsPerCycle = reader.number(
+        *scalarMemory, "store_instructions_per_system_cycle", path);
+    profile.scalarLoadLatencyCycles =
+        reader.number(*scalarMemory, "load_latency_system_cycles", path);
+    profile.scalarStoreLatencyCycles =
+        reader.number(*scalarMemory, "store_latency_system_cycles", path);
+    profile.scalarIndirectDependencyLatencyCycles = reader.optionalNumber(
+        *scalarMemory, "indirect_dependency_latency_system_cycles",
+        profile.scalarIndirectDependencyLatencyCycles);
+    // White-box CAModel load models.  Optional so provisional/legacy profiles
+    // keep falling back to the scalar-pipe throughput fields above.
+    profile.mainScalarLoadPrepCycles =
+        reader.optionalNumber(*scalarMemory, "main_load_prep_system_cycles",
+                              profile.mainScalarLoadPrepCycles);
+    profile.mainScalarLoadFillCycles =
+        reader.optionalNumber(*scalarMemory, "main_load_fill_system_cycles",
+                              profile.mainScalarLoadFillCycles);
+    profile.mainScalarLoadHitCycles =
+        reader.optionalNumber(*scalarMemory, "main_load_hit_system_cycles",
+                              profile.mainScalarLoadHitCycles);
+    profile.mainScalarLoadIssueCycles =
+        reader.optionalNumber(*scalarMemory, "main_load_issue_system_cycles",
+                              profile.mainScalarLoadIssueCycles);
+    profile.simtUniformLoadPrepCycles =
+        reader.optionalNumber(*scalarMemory, "uniform_load_prep_system_cycles",
+                              profile.simtUniformLoadPrepCycles);
+    profile.simtUniformLoadFillCycles =
+        reader.optionalNumber(*scalarMemory, "uniform_load_fill_system_cycles",
+                              profile.simtUniformLoadFillCycles);
+    profile.simtUniformLoadSameLineSerialCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_load_same_line_serial_system_cycles",
+        profile.simtUniformLoadSameLineSerialCycles);
+    profile.mainScalarLoadOutstandingLines =
+        reader.optionalNumber(*scalarMemory, "main_load_outstanding_line_count",
+                              profile.mainScalarLoadOutstandingLines);
+    profile.mainScalarLoadExtraLineLowCycles = reader.optionalNumber(
+        *scalarMemory, "main_load_extra_line_low_system_cycles",
+        profile.mainScalarLoadExtraLineLowCycles);
+    profile.mainScalarLoadExtraLineHighCycles = reader.optionalNumber(
+        *scalarMemory, "main_load_extra_line_high_system_cycles",
+        profile.mainScalarLoadExtraLineHighCycles);
+    profile.mainScalarLoadExtraLineHighThreshold = reader.optionalNumber(
+        *scalarMemory, "main_load_extra_line_high_threshold",
+        profile.mainScalarLoadExtraLineHighThreshold);
+    profile.simtUniformLoadDiffLineIssueCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_load_diff_line_issue_system_cycles",
+        profile.simtUniformLoadDiffLineIssueCycles);
+    // White-box Triton SIMD scalar store model (MTE3 UB -> OUT).  Optional so
+    // profiles that only carry the legacy store fit keep using the fallback.
+    profile.mte3StorePrepCycles =
+        reader.optionalNumber(*scalarMemory, "mte3_store_prep_system_cycles",
+                              profile.mte3StorePrepCycles);
+    profile.mte3StoreFillCycles =
+        reader.optionalNumber(*scalarMemory, "mte3_store_fill_system_cycles",
+                              profile.mte3StoreFillCycles);
+    profile.mte3StoreSerialCycles =
+        reader.optionalNumber(*scalarMemory, "mte3_store_serial_system_cycles",
+                              profile.mte3StoreSerialCycles);
+    profile.simtUniformStoreSameLineBaseCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_store_same_line_base_system_cycles",
+        profile.simtUniformStoreSameLineBaseCycles);
+    profile.simtUniformStoreSameLineSerialCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_store_same_line_serial_system_cycles",
+        profile.simtUniformStoreSameLineSerialCycles);
+    profile.simtUniformStoreDiffLineBaseCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_store_diff_line_base_system_cycles",
+        profile.simtUniformStoreDiffLineBaseCycles);
+    profile.simtUniformStoreDiffLineIssueCycles = reader.optionalNumber(
+        *scalarMemory, "uniform_store_diff_line_issue_system_cycles",
+        profile.simtUniformStoreDiffLineIssueCycles);
+    if (reader.failed())
+      return;
+    profile.scalarLoadCyclesFit =
+        reader.optionalNumberArray(*scalarMemory, "load_cycles_fit");
+    profile.scalarStoreCyclesFit =
+        reader.optionalNumberArray(*scalarMemory, "store_cycles_fit");
+  }
   if (const auto *indirect =
           reader.object(*resources, "indirect_memory", prefix)) {
     const std::string path = prefix + ".indirect_memory";

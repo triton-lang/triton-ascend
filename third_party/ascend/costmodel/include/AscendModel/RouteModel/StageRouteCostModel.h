@@ -55,6 +55,24 @@ struct StageModelFeatures {
   bool hasContiguousMemory = false;
   bool hasIndirectMemory = false;
   bool hasAtomicMemory = false;
+  bool hasScalarLoad = false;
+  bool hasScalarStore = false;
+  /// Legacy scalar_ldst feature modifiers: a scalar load/store whose address
+  /// chain contains another scalar load exposes an extra load-to-use edge.
+  /// These flags/fields are restored from the pre-white-box scalar model so
+  /// the diff-line fallback can still charge dependency latency.
+  bool hasScalarIndirectMemory = false;
+  bool hasScalarIndirectLoad = false;
+  bool hasScalarIndirectStore = false;
+  /// True when every scalar load owned by this Stage provably targets the
+  /// same 64B/128B cache line (same base pointer plus constant in-line
+  /// offsets).  The conservative default is false: when the IR cannot prove
+  /// line sharing, the diff-line model is used.
+  bool scalarLoadsShareLine = false;
+  /// Same-line proof for owned scalar stores, used by the white-box store
+  /// model.  A single store is trivially same-line; the SIMT store formula
+  /// still uses the diff-line first-store preparation for K == 1.
+  bool scalarStoresShareLine = false;
   bool hasReduction = false;
   bool hasPrefixScan = false;
   bool hasDot = false;
@@ -134,6 +152,36 @@ struct StageWorkload {
   double dotFlops = 0.0;
   double issueElements = 0.0;
   double estimatedSpillTransactions = 0.0;
+  double scalarLoadCount = 0.0;
+  /// Subset of scalarLoadCount whose address depends on another scalar load.
+  double directScalarLoadCount = 0.0;
+  /// Legacy consumer-side count: number of scalar loads whose address depends
+  /// on another scalar load.  This counts fan-out consumers separately and is
+  /// kept for reporting/backward compatibility only.
+  double indirectScalarLoadCount = 0.0;
+  /// Number of dependency exposures actually charged for indirect scalar
+  /// loads: producer loads whose result feeds at least one indirect scalar
+  /// load address in this Stage.  A producer feeding several consumers is
+  /// counted once (fan-out dedupe); a serial chain contributes one per edge.
+  /// Zero means "not analyzed"; cost evaluation then falls back to the legacy
+  /// `indirectScalarLoadCount`.
+  double indirectScalarLoadExposureCount = 0.0;
+  double scalarStoreCount = 0.0;
+  /// Legacy consumer-side count: number of scalar stores whose address
+  /// depends on another scalar load.
+  double indirectScalarStoreCount = 0.0;
+  /// Producer-side deduplicated count for indirect scalar stores, analogous
+  /// to `indirectScalarLoadExposureCount`.  Zero means "not analyzed".
+  double indirectScalarStoreExposureCount = 0.0;
+  /// Number of distinct cache lines touched by independent scalar loads in
+  /// one Stage iteration.  Accumulation seeds it with scalarLoadCount (the
+  /// conservative "no line sharing" value); analysis may lower it to 1 when
+  /// the Stage provably owns same-line scalar loads.
+  double scalarLoadUniqueLines = 0.0;
+  /// Number of distinct cache lines written by independent scalar stores in
+  /// one Stage iteration.  Accumulation seeds it with scalarStoreCount; the
+  /// analysis lowers it to 1 when same-line stores are provable.
+  double scalarStoreUniqueLines = 0.0;
   bool paysKernelSetup = false;
 
   bool isFiniteAndNonNegative() const;

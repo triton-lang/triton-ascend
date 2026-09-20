@@ -1,0 +1,1279 @@
+// Board marginal sys_cnt probes: each kernel loops REP times over a K-op sequence.
+// ABI: (out, gm, base, reps). Host fits REP=4 vs REP=16 slope.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+constexpr int REP_STRIDE = 1 << 14;   // 64 KiB / 4B = 16384 elements
+
+extern "C" __global__ [aicore] void
+m_loop_nop(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  DT acc = (DT)0;
+  for (int r = 0; r < reps; ++r) {
+    acc += (DT)1;
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)acc;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_nop_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  sink[lane] = (DT)0;
+ (void)p;
+}
+extern "C" __global__ [aicore] void
+m_loop_simt_nop(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  cce::async_invoke<m_simt_nop_core>(cce::dim3{32,1,1}, (__gm__ DT*)0, sink);
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    cce::async_invoke<m_simt_nop_core>(cce::dim3{32,1,1}, (__gm__ DT*)0, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_same_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_diff_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_same_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_diff_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_same_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  sink[lane] = (DT)(a0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_same_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_same_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_diff_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  sink[lane] = (DT)(a0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_diff_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_diff_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_contig_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*32 + lane];
+  sink[lane] = (DT)(a0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_contig_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_contig_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_strided_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*1024 + lane*32];
+  sink[lane] = (DT)(a0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_strided_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_strided_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_same_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_same_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_same_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_diff_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_diff_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_diff_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_contig_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*32 + lane] = (DT)(lane + 0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_contig_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_contig_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_strided_k1_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*1024 + lane*32] = (DT)(lane + 0);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_strided_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_strided_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ub_copy_k1_core(__ubuf__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[1024 + 0*32 + lane] = p[0*32 + lane];
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ub_copy_k1(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k1_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_same_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[1];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_diff_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[16];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_same_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[1] = (DT)(1+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_diff_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[16] = (DT)(1+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_same_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[1];
+  sink[lane] = (DT)(a0 + a1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_same_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_same_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_diff_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[32];
+  sink[lane] = (DT)(a0 + a1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_diff_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_diff_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_contig_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*32 + lane];
+  DT a1 = p[1*32 + lane];
+  sink[lane] = (DT)(a0 + a1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_contig_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_contig_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_strided_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*1024 + lane*32];
+  DT a1 = p[1*1024 + lane*32];
+  sink[lane] = (DT)(a0 + a1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_strided_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_strided_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_same_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[1] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_same_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_same_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_diff_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[32] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_diff_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_diff_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_contig_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*32 + lane] = (DT)(lane + 0);
+  p[1*32 + lane] = (DT)(lane + 1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_contig_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_contig_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_strided_k2_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*1024 + lane*32] = (DT)(lane + 0);
+  p[1*1024 + lane*32] = (DT)(lane + 1);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_strided_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_strided_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ub_copy_k2_core(__ubuf__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[1024 + 0*32 + lane] = p[0*32 + lane];
+  p[1024 + 1*32 + lane] = p[1*32 + lane];
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ub_copy_k2(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k2_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_same_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[1];
+    acc += p[2];
+    acc += p[3];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_diff_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[16];
+    acc += p[32];
+    acc += p[48];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_same_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[1] = (DT)(1+1);
+    p[2] = (DT)(2+1);
+    p[3] = (DT)(3+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_diff_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[16] = (DT)(1+1);
+    p[32] = (DT)(2+1);
+    p[48] = (DT)(3+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_same_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[1];
+  DT a2 = p[2];
+  DT a3 = p[3];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_same_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_same_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_diff_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[32];
+  DT a2 = p[64];
+  DT a3 = p[96];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_diff_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_diff_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_contig_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*32 + lane];
+  DT a1 = p[1*32 + lane];
+  DT a2 = p[2*32 + lane];
+  DT a3 = p[3*32 + lane];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_contig_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_contig_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_strided_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*1024 + lane*32];
+  DT a1 = p[1*1024 + lane*32];
+  DT a2 = p[2*1024 + lane*32];
+  DT a3 = p[3*1024 + lane*32];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_strided_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_strided_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_same_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[1] = (DT)1.0f;
+  p[2] = (DT)1.0f;
+  p[3] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_same_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_same_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_diff_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[32] = (DT)1.0f;
+  p[64] = (DT)1.0f;
+  p[96] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_diff_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_diff_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_contig_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*32 + lane] = (DT)(lane + 0);
+  p[1*32 + lane] = (DT)(lane + 1);
+  p[2*32 + lane] = (DT)(lane + 2);
+  p[3*32 + lane] = (DT)(lane + 3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_contig_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_contig_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_strided_k4_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*1024 + lane*32] = (DT)(lane + 0);
+  p[1*1024 + lane*32] = (DT)(lane + 1);
+  p[2*1024 + lane*32] = (DT)(lane + 2);
+  p[3*1024 + lane*32] = (DT)(lane + 3);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_strided_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_strided_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ub_copy_k4_core(__ubuf__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[1024 + 0*32 + lane] = p[0*32 + lane];
+  p[1024 + 1*32 + lane] = p[1*32 + lane];
+  p[1024 + 2*32 + lane] = p[2*32 + lane];
+  p[1024 + 3*32 + lane] = p[3*32 + lane];
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ub_copy_k4(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k4_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_same_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[1];
+    acc += p[2];
+    acc += p[3];
+    acc += p[4];
+    acc += p[5];
+    acc += p[6];
+    acc += p[7];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_ld_diff_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  DT acc = (DT)0;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    acc += p[0];
+    acc += p[16];
+    acc += p[32];
+    acc += p[48];
+    acc += p[64];
+    acc += p[80];
+    acc += p[96];
+    acc += p[112];
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  out[1] = (long long)(acc);
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_same_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[1] = (DT)(1+1);
+    p[2] = (DT)(2+1);
+    p[3] = (DT)(3+1);
+    p[4] = (DT)(4+1);
+    p[5] = (DT)(5+1);
+    p[6] = (DT)(6+1);
+    p[7] = (DT)(7+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+extern "C" __global__ [aicore] void
+m_main_st_diff_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    volatile __gm__ DT* p = basep + r * REP_STRIDE;
+    p[0] = (DT)(0+1);
+    p[16] = (DT)(1+1);
+    p[32] = (DT)(2+1);
+    p[48] = (DT)(3+1);
+    p[64] = (DT)(4+1);
+    p[80] = (DT)(5+1);
+    p[96] = (DT)(6+1);
+    p[112] = (DT)(7+1);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_same_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[1];
+  DT a2 = p[2];
+  DT a3 = p[3];
+  DT a4 = p[4];
+  DT a5 = p[5];
+  DT a6 = p[6];
+  DT a7 = p[7];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_same_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_same_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_uni_diff_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0];
+  DT a1 = p[32];
+  DT a2 = p[64];
+  DT a3 = p[96];
+  DT a4 = p[128];
+  DT a5 = p[160];
+  DT a6 = p[192];
+  DT a7 = p[224];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_uni_diff_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_uni_diff_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_contig_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*32 + lane];
+  DT a1 = p[1*32 + lane];
+  DT a2 = p[2*32 + lane];
+  DT a3 = p[3*32 + lane];
+  DT a4 = p[4*32 + lane];
+  DT a5 = p[5*32 + lane];
+  DT a6 = p[6*32 + lane];
+  DT a7 = p[7*32 + lane];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_contig_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_contig_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ld_strided_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  DT a0 = p[0*1024 + lane*32];
+  DT a1 = p[1*1024 + lane*32];
+  DT a2 = p[2*1024 + lane*32];
+  DT a3 = p[3*1024 + lane*32];
+  DT a4 = p[4*1024 + lane*32];
+  DT a5 = p[5*1024 + lane*32];
+  DT a6 = p[6*1024 + lane*32];
+  DT a7 = p[7*1024 + lane*32];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3 + a4 + a5 + a6 + a7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ld_strided_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_ld_strided_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_same_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[1] = (DT)1.0f;
+  p[2] = (DT)1.0f;
+  p[3] = (DT)1.0f;
+  p[4] = (DT)1.0f;
+  p[5] = (DT)1.0f;
+  p[6] = (DT)1.0f;
+  p[7] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_same_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_same_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_uni_diff_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0] = (DT)1.0f;
+  p[32] = (DT)1.0f;
+  p[64] = (DT)1.0f;
+  p[96] = (DT)1.0f;
+  p[128] = (DT)1.0f;
+  p[160] = (DT)1.0f;
+  p[192] = (DT)1.0f;
+  p[224] = (DT)1.0f;
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_uni_diff_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_uni_diff_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_contig_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*32 + lane] = (DT)(lane + 0);
+  p[1*32 + lane] = (DT)(lane + 1);
+  p[2*32 + lane] = (DT)(lane + 2);
+  p[3*32 + lane] = (DT)(lane + 3);
+  p[4*32 + lane] = (DT)(lane + 4);
+  p[5*32 + lane] = (DT)(lane + 5);
+  p[6*32 + lane] = (DT)(lane + 6);
+  p[7*32 + lane] = (DT)(lane + 7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_contig_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_contig_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_st_strided_k8_core(__gm__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[0*1024 + lane*32] = (DT)(lane + 0);
+  p[1*1024 + lane*32] = (DT)(lane + 1);
+  p[2*1024 + lane*32] = (DT)(lane + 2);
+  p[3*1024 + lane*32] = (DT)(lane + 3);
+  p[4*1024 + lane*32] = (DT)(lane + 4);
+  p[5*1024 + lane*32] = (DT)(lane + 5);
+  p[6*1024 + lane*32] = (DT)(lane + 6);
+  p[7*1024 + lane*32] = (DT)(lane + 7);
+}
+
+extern "C" __global__ [aicore] void
+m_simt_st_strided_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  volatile __gm__ DT* basep = gm + base;
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __gm__ DT* p = (__gm__ DT*)(basep + r * REP_STRIDE);
+    cce::async_invoke<m_simt_st_strided_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+  return;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+m_simt_ub_copy_k8_core(__ubuf__ DT* p, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  p[1024 + 0*32 + lane] = p[0*32 + lane];
+  p[1024 + 1*32 + lane] = p[1*32 + lane];
+  p[1024 + 2*32 + lane] = p[2*32 + lane];
+  p[1024 + 3*32 + lane] = p[3*32 + lane];
+  p[1024 + 4*32 + lane] = p[4*32 + lane];
+  p[1024 + 5*32 + lane] = p[5*32 + lane];
+  p[1024 + 6*32 + lane] = p[6*32 + lane];
+  p[1024 + 7*32 + lane] = p[7*32 + lane];
+}
+
+extern "C" __global__ [aicore] void
+m_simt_ub_copy_k8(__gm__ long long* out, __gm__ DT* gm, int base, int reps) {
+  (void)gm; (void)base;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t0 = get_sys_cnt();
+  for (int r = 0; r < reps; ++r) {
+    __ubuf__ DT* p = reinterpret_cast<__ubuf__ DT*>((r * 4096));
+    cce::async_invoke<m_simt_ub_copy_k8_core>(cce::dim3{32,1,1}, p, sink);
+  }
+  pipe_barrier(PIPE_ALL);
+  long long t1 = get_sys_cnt();
+  out[0] = t1 - t0;
+}

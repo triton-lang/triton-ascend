@@ -23,8 +23,8 @@
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
     },
     "schema_version": {
-      "const": 12,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values."
+      "const": 13,
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 12 represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values. Version 13 adds scalar load/store white-box rates on top of the atomic-RMW policy."
     },
     "profile_version": {
       "type": "string",
@@ -698,6 +698,124 @@
         "source": {
           "type": "string",
           "minLength": 1
+        },
+        "scalar_memory": {
+          "type": "object",
+          "properties": {
+            "load_instructions_per_system_cycle": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "store_instructions_per_system_cycle": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "load_latency_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "store_latency_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "indirect_dependency_latency_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_prep_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_fill_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_hit_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_issue_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_load_prep_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_load_fill_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_load_same_line_serial_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_outstanding_line_count": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_extra_line_low_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_extra_line_high_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "main_load_extra_line_high_threshold": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_load_diff_line_issue_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "load_cycles_fit": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "store_cycles_fit": {
+              "type": "array",
+              "items": {
+                "type": "number"
+              }
+            },
+            "description": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mte3_store_prep_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mte3_store_fill_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mte3_store_serial_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_store_same_line_base_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_store_same_line_serial_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_store_diff_line_base_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "uniform_store_diff_line_issue_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

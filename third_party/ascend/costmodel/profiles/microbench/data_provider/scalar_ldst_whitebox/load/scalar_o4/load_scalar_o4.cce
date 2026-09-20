@@ -1,0 +1,64 @@
+// scalar_ldst_whitebox/load/scalar_o4
+// Four scalar load ops, same-line vs diff-line:
+//   simd_main_ld_same_o4          MainScalar 4 loads in one 64B line
+//   simd_main_ld_diff_o4          MainScalar 4 loads, one 64B line each
+//   simt_ld_uniform_same_o4       SIMT uniform 4 loads in one 128B line
+//   simt_ld_uniform_diff_o4       SIMT uniform 4 loads, one 128B line each
+// ABI: (out, gm, iters, mode), same as load_scalar_o1_host.cpp.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+
+// ---- MainScalar: one 64B line (p[0..3]) ----
+extern "C" __global__ [aicore] void
+simd_main_ld_same_o4(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0]; DT a1 = p[1]; DT a2 = p[2]; DT a3 = p[3];
+  out[0] = (long long)(a0 + a1 + a2 + a3);
+}
+
+// ---- MainScalar: four 64B lines (p[0], p[16], p[32], p[48]) ----
+extern "C" __global__ [aicore] void
+simd_main_ld_diff_o4(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0 * 16]; DT a1 = p[1 * 16]; DT a2 = p[2 * 16]; DT a3 = p[3 * 16];
+  out[0] = (long long)(a0 + a1 + a2 + a3);
+}
+
+// ---- SIMT uniform: one 128B line (all lanes p[0..3]) ----
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+simt_ld_uniform_same_o4_core(__gm__ DT* gm, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0]; DT a1 = p[1]; DT a2 = p[2]; DT a3 = p[3];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+simt_ld_uniform_same_o4(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  cce::async_invoke<simt_ld_uniform_same_o4_core>(cce::dim3{32, 1, 1}, gm, sink);
+  out[0] = 0;
+}
+
+// ---- SIMT uniform: four 128B lines (all lanes p[0], p[32], p[64], p[96]) ----
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+simt_ld_uniform_diff_o4_core(__gm__ DT* gm, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0 * 32]; DT a1 = p[1 * 32]; DT a2 = p[2 * 32]; DT a3 = p[3 * 32];
+  sink[lane] = (DT)(a0 + a1 + a2 + a3);
+}
+
+extern "C" __global__ [aicore] void
+simt_ld_uniform_diff_o4(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  cce::async_invoke<simt_ld_uniform_diff_o4_core>(cce::dim3{32, 1, 1}, gm, sink);
+  out[0] = 0;
+}

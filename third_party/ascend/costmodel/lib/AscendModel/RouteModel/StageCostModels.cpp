@@ -58,6 +58,64 @@ static bool permitsSimdOverlap(const LogicalStage &stage) {
          stage.features.permitsSimdRoofline();
 }
 
+/// Structured CAModel active-cycle model for `K` MainScalar scalar loads that
+/// touch `U` distinct 64B AIV DCache lines (round 1-6 calibration):
+///   T = prep + fill
+///       + max(0, U - outstanding) * perLineCost(U)
+///       + (K - U) * hit
+///       + (K - 1) * issue
+/// `sameLine` forces U = 1 (white-box same-line branch).
+static double mainScalarLoadCycles(double opCount, double uniqueLines,
+                                   bool sameLine,
+                                   const StageModeProfile &profile) {
+  const double k = std::max(1.0, opCount);
+  const double u = sameLine ? 1.0 : std::clamp(uniqueLines, 1.0, k);
+  const double perLine = u <= profile.mainScalarLoadExtraLineHighThreshold
+                             ? profile.mainScalarLoadExtraLineLowCycles
+                             : profile.mainScalarLoadExtraLineHighCycles;
+  return profile.mainScalarLoadPrepCycles + profile.mainScalarLoadFillCycles +
+         std::max(0.0, u - profile.mainScalarLoadOutstandingLines) * perLine +
+         (k - u) * profile.mainScalarLoadHitCycles +
+         (k - 1.0) * profile.mainScalarLoadIssueCycles;
+}
+
+/// Structured CAModel active-cycle model for `K` SIMT warp-uniform scalar
+/// loads.  Same-line reuse serializes through the (CAModel) SIMT DCache;
+/// distinct 128B lines can overlap and only pay the LSU issue floor.
+static double simtUniformLoadCycles(double opCount, bool sameLine,
+                                    const StageModeProfile &profile) {
+  const double k = std::max(1.0, opCount);
+  const double marginal = sameLine ? profile.simtUniformLoadSameLineSerialCycles
+                                   : profile.simtUniformLoadDiffLineIssueCycles;
+  return profile.simtUniformLoadPrepCycles + profile.simtUniformLoadFillCycles +
+         (k - 1.0) * marginal;
+}
+
+/// White-box CAModel active-cycle model for `K` Triton SIMD scalar stores.
+/// Triton lowers a scalar `tt.store` to `SCALAR ST_XD_XN_IMM -> UB staging`
+/// followed by MTE3 `MOV_SRC_TO_DST_ALIGNv2 UB -> OUT`; the CCE MainScalar
+/// `ST_XD_XN_IMM -> GM` write-allocate path is not used.  The MTE3 window is
+/// modeled as `prep + fill + (K - 1) * serial`.
+static double mte3StoreCycles(double opCount, const StageModeProfile &profile) {
+  const double k = std::max(1.0, opCount);
+  return profile.mte3StorePrepCycles + profile.mte3StoreFillCycles +
+         (k - 1.0) * profile.mte3StoreSerialCycles;
+}
+
+/// Structured CAModel active-cycle model for `K` SIMT warp-uniform scalar
+/// stores (`SCALAR-MODEL.md` section 3.4/4.6).  The same-line serial branch
+/// is only meaningful for K >= 2 stores that land on one line; a single
+/// scalar store uses the first-store (diff-line) preparation.
+static double simtUniformStoreCycles(double opCount, bool sameLine,
+                                     const StageModeProfile &profile) {
+  const double k = std::max(1.0, opCount);
+  if (sameLine && k > 1.0)
+    return profile.simtUniformStoreSameLineBaseCycles +
+           (k - 1.0) * profile.simtUniformStoreSameLineSerialCycles;
+  return profile.simtUniformStoreDiffLineBaseCycles +
+         (k - 1.0) * profile.simtUniformStoreDiffLineIssueCycles;
+}
+
 static StageResourceCycles
 materializeControlFlow(const LogicalStage &stage, StageMode mode,
                        StageResourceCycles resources,
@@ -80,9 +138,24 @@ materializeControlFlow(const LogicalStage &stage, StageMode mode,
   return resources;
 }
 
+/// Legacy `scalar_ldst` cheap-hash fit:
+///   cycles = a + b*warps + c*ops + d*warps*ops
+/// It models warm/runtime-loop throughput rather than a cold Stage active
+/// window, so it is only used when the structured white-box fields are absent.
+static double lookupThroughputByCyclesFit(const std::vector<double> &fit,
+                                          double opCount, double warpCount) {
+  if (fit.size() != 4 || opCount <= 0.0 || warpCount <= 0.0)
+    return 0.0;
+  const double cycles = fit[0] + fit[1] * warpCount + fit[2] * opCount +
+                        fit[3] * warpCount * opCount;
+  if (!(cycles > 0.0))
+    return 0.0;
+  return warpCount * opCount / cycles;
+}
+
 static StageResourceCycles mapWorkload(const LogicalStage &stage,
                                        const StageModeProfile &profile,
-                                       StageMode mode) {
+                                       StageMode mode, int64_t effectiveWarps) {
   StageResourceCycles resources;
   const StageWorkload &work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
@@ -140,6 +213,101 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
     if (atomic.resultUsed)
       resources.atomic +=
           atomic.logicalOperationInstances * atomicRate.resultDependencyCycles;
+  }
+  // Scalar loads/stores execute on the scalar pipe, not on vector MTE.
+  // Prefer structured CAModel active-cycle formulas when present.  The
+  // conservative default is the diff-line branch: scalarLoadsShareLine is
+  // only true when the IR proves all scalar loads fall inside one 64B line.
+  if (work.scalarLoadCount > 0.0) {
+    const double k = work.scalarLoadCount;
+    const double inferredLines =
+        work.scalarLoadUniqueLines > 0.0 ? work.scalarLoadUniqueLines : k;
+    const double uniqueLines = stage.features.scalarLoadsShareLine
+                                   ? 1.0
+                                   : std::max(1.0, std::min(k, inferredLines));
+    const bool hasMainScalarDiffFields =
+        profile.mainScalarLoadOutstandingLines > 0.0 &&
+        profile.mainScalarLoadExtraLineLowCycles > 0.0;
+    const bool useMainScalarStructured =
+        simd && profile.mainScalarLoadFillCycles > 0.0 &&
+        (stage.features.scalarLoadsShareLine || hasMainScalarDiffFields);
+    const bool useSimtStructured =
+        !simd && profile.simtUniformLoadFillCycles > 0.0 &&
+        (stage.features.scalarLoadsShareLine ||
+         profile.simtUniformLoadDiffLineIssueCycles > 0.0);
+    if (useMainScalarStructured) {
+      resources.load += mainScalarLoadCycles(
+          k, uniqueLines, stage.features.scalarLoadsShareLine, profile);
+    } else if (useSimtStructured) {
+      resources.load += simtUniformLoadCycles(
+          k, stage.features.scalarLoadsShareLine, profile);
+    } else {
+      double throughput = profile.scalarLoadInstructionsPerCycle;
+      if (!simd) {
+        const double fitted = lookupThroughputByCyclesFit(
+            profile.scalarLoadCyclesFit, k, effectiveWarps);
+        if (fitted > 0.0)
+          throughput = fitted;
+      }
+      if (throughput > 0.0)
+        resources.load += k / throughput + profile.scalarLoadLatencyCycles;
+      else
+        resources.load += profile.scalarLoadLatencyCycles;
+    }
+    // Charge legacy serial-chain load-to-use latency only for edges beyond
+    // the first exposure.  A single shallow edge (one producer feeding one
+    // consumer, or one producer fanning out) is already covered by the
+    // consumer's own white-box line cost; charging the full legacy 65.4 cyc
+    // on this first edge over-predicted the binned SIMT indirect load.
+    // Deeper serial chains still pay one extra latency per additional edge.
+    const double indirectLoadExposures =
+        work.indirectScalarLoadExposureCount > 0.0
+            ? work.indirectScalarLoadExposureCount
+            : work.indirectScalarLoadCount;
+    if (stage.features.hasScalarIndirectLoad && indirectLoadExposures > 1.0)
+      resources.load += (indirectLoadExposures - 1.0) *
+                        profile.scalarIndirectDependencyLatencyCycles;
+  }
+  if (work.scalarStoreCount > 0.0) {
+    const double k = std::max(1.0, work.scalarStoreCount);
+    const bool useMte3StoreStructured =
+        simd && profile.mte3StoreFillCycles > 0.0;
+    const bool useSimtStoreStructured =
+        !simd && profile.simtUniformStoreDiffLineBaseCycles > 0.0;
+    if (useMte3StoreStructured) {
+      // White-box Triton SIMD scalar store lowering: scalar ST -> UB staging
+      // followed by MTE3 MOV UB -> OUT.
+      resources.store += mte3StoreCycles(k, profile);
+    } else if (useSimtStoreStructured) {
+      // White-box SIMT warp-uniform store: same-line serial branch only for
+      // K >= 2; a single scalar store uses the first-store preparation.
+      resources.store += simtUniformStoreCycles(
+          k, stage.features.scalarStoresShareLine, profile);
+    } else {
+      // Legacy scalar_ldst fallback: SIMT uses the `store_cycles_fit`
+      // aggregate fit (warm/runtime-loop throughput); SIMD keeps the
+      // provisional scalar-pipe throughput.
+      double throughput = profile.scalarStoreInstructionsPerCycle;
+      if (!simd) {
+        const double fitted =
+            lookupThroughputByCyclesFit(profile.scalarStoreCyclesFit,
+                                        work.scalarStoreCount, effectiveWarps);
+        if (fitted > 0.0)
+          throughput = fitted;
+      }
+      if (throughput > 0.0)
+        resources.store += work.scalarStoreCount / throughput +
+                           profile.scalarStoreLatencyCycles;
+      else
+        resources.store += profile.scalarStoreLatencyCycles;
+    }
+    const double indirectStoreExposures =
+        work.indirectScalarStoreExposureCount > 0.0
+            ? work.indirectScalarStoreExposureCount
+            : work.indirectScalarStoreCount;
+    if (stage.features.hasScalarIndirectStore && indirectStoreExposures > 1.0)
+      resources.store += (indirectStoreExposures - 1.0) *
+                         profile.scalarIndirectDependencyLatencyCycles;
   }
   resources.predicate =
       (simd ? std::ceil(work.predicateElements /
@@ -378,6 +546,10 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "scalar_control";
   case StageCostModelKind::ScalarMath:
     return "scalar_math";
+  case StageCostModelKind::ScalarLoad:
+    return "scalar_load";
+  case StageCostModelKind::ScalarStore:
+    return "scalar_store";
   case StageCostModelKind::IndexGeneration:
     return "index_generation";
   case StageCostModelKind::PredicateMask:
@@ -450,11 +622,66 @@ bool StageModeProfile::isValid(StageMode mode) const {
                                          prefixScanDependencyFactor,
                                          static_cast<double>(vectorWidth),
                                          static_cast<double>(issueWidth)};
+  const bool hasWhiteboxLoad = mode == StageMode::SIMD
+                                   ? mainScalarLoadFillCycles > 0.0
+                                   : simtUniformLoadFillCycles > 0.0;
   if (!std::all_of(
           common.begin(), common.end(),
           [](double value) { return std::isfinite(value) && value > 0.0; }) ||
+      !std::isfinite(scalarLoadInstructionsPerCycle) ||
+      scalarLoadInstructionsPerCycle < 0.0 ||
+      (!hasWhiteboxLoad && scalarLoadInstructionsPerCycle == 0.0) ||
+      !std::isfinite(scalarStoreInstructionsPerCycle) ||
+      scalarStoreInstructionsPerCycle <= 0.0 ||
       !std::isfinite(indirectDependencyLatencyCycles) ||
       indirectDependencyLatencyCycles < 0.0 ||
+      !std::isfinite(scalarLoadLatencyCycles) ||
+      scalarLoadLatencyCycles < 0.0 ||
+      !std::isfinite(scalarStoreLatencyCycles) ||
+      scalarStoreLatencyCycles < 0.0 ||
+      !std::isfinite(scalarIndirectDependencyLatencyCycles) ||
+      scalarIndirectDependencyLatencyCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadPrepCycles) ||
+      mainScalarLoadPrepCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadFillCycles) ||
+      mainScalarLoadFillCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadHitCycles) ||
+      mainScalarLoadHitCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadIssueCycles) ||
+      mainScalarLoadIssueCycles < 0.0 ||
+      !std::isfinite(simtUniformLoadPrepCycles) ||
+      simtUniformLoadPrepCycles < 0.0 ||
+      !std::isfinite(simtUniformLoadFillCycles) ||
+      simtUniformLoadFillCycles < 0.0 ||
+      !std::isfinite(simtUniformLoadSameLineSerialCycles) ||
+      simtUniformLoadSameLineSerialCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadOutstandingLines) ||
+      mainScalarLoadOutstandingLines < 0.0 ||
+      !std::isfinite(mainScalarLoadExtraLineLowCycles) ||
+      mainScalarLoadExtraLineLowCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadExtraLineHighCycles) ||
+      mainScalarLoadExtraLineHighCycles < 0.0 ||
+      !std::isfinite(mainScalarLoadExtraLineHighThreshold) ||
+      mainScalarLoadExtraLineHighThreshold < 0.0 ||
+      !std::isfinite(simtUniformLoadDiffLineIssueCycles) ||
+      simtUniformLoadDiffLineIssueCycles < 0.0 ||
+      !std::isfinite(mte3StorePrepCycles) || mte3StorePrepCycles < 0.0 ||
+      !std::isfinite(mte3StoreFillCycles) || mte3StoreFillCycles < 0.0 ||
+      !std::isfinite(mte3StoreSerialCycles) || mte3StoreSerialCycles < 0.0 ||
+      !std::isfinite(simtUniformStoreSameLineBaseCycles) ||
+      simtUniformStoreSameLineBaseCycles < 0.0 ||
+      !std::isfinite(simtUniformStoreSameLineSerialCycles) ||
+      simtUniformStoreSameLineSerialCycles < 0.0 ||
+      !std::isfinite(simtUniformStoreDiffLineBaseCycles) ||
+      simtUniformStoreDiffLineBaseCycles < 0.0 ||
+      !std::isfinite(simtUniformStoreDiffLineIssueCycles) ||
+      simtUniformStoreDiffLineIssueCycles < 0.0 ||
+      !std::all_of(
+          scalarLoadCyclesFit.begin(), scalarLoadCyclesFit.end(),
+          [](double value) { return std::isfinite(value); }) ||
+      !std::all_of(
+          scalarStoreCyclesFit.begin(), scalarStoreCyclesFit.end(),
+          [](double value) { return std::isfinite(value); }) ||
       !controlFlow.isFiniteAndNonNegative())
     return false;
   if (mode == StageMode::SIMD) {
@@ -562,10 +789,15 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' has an illegal candidate",
                                        stage.id.c_str());
+      const int64_t effectiveWarps =
+          implementation.mode == StageMode::SIMT
+              ? std::max<int64_t>(1, profile.logicalWarpGroupCount *
+                                         implementation.superblockFactor)
+              : 1;
       StageResourceCycles resources = mapWorkload(
           stage,
           implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
+          implementation.mode, effectiveWarps);
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;

@@ -28,6 +28,8 @@ enum class StageCostModelKind {
   ScalarIssue,
   ScalarControl,
   ScalarMath,
+  ScalarLoad,
+  ScalarStore,
   IndexGeneration,
   PredicateMask,
   LoopPredicate,
@@ -139,6 +141,74 @@ struct StageModeProfile {
   double scalarOperationsPerCycle = 0.0;
   double issueOperationsPerCycle = 0.0;
   double spillTransactionsPerCycle = 0.0;
+  /// Scalar pipe load/store throughput and latency.  Scalar loads/stores are
+  /// executed by the scalar unit (MainScalar/AuxScalar/SIMT scalar path), not
+  /// by the vector MTE pipes.
+  double scalarLoadInstructionsPerCycle = 0.0;
+  double scalarStoreInstructionsPerCycle = 0.0;
+  double scalarLoadLatencyCycles = 0.0;
+  double scalarStoreLatencyCycles = 0.0;
+  /// Extra uncovered dependency latency for scalar load/store chains whose
+  /// address is produced by another scalar load.  Restored from the legacy
+  /// `scalar_ldst` model, but charged per **producer-side exposure** on top of
+  /// the white-box/diff-line line cost: one producer feeding several consumer
+  /// loads counts once, while a serial chain counts one per edge.
+  double scalarIndirectDependencyLatencyCycles = 0.0;
+  /// White-box CAModel load models.  When the corresponding `*FillCycles`
+  /// is positive, ScalarLoad uses these first-line formulas instead of the
+  /// provisional scalar-pipe throughput above.
+  ///
+  /// SIMD MainScalar same-64B-line load:
+  ///   T = prep + fill + (K - 1) * (hit + issue)
+  /// SIMT warp-uniform same-128B-line load:
+  ///   T = prep + fill + (K - 1) * sameLineSerial
+  /// Values are CAModel active cycles (first ISSUE to last RETIRE) for the
+  /// the `load/scalar_o1` and `load/scalar_o4` probe shapes; see
+  /// `data_provider/scalar_ldst_whitebox/README.md`.
+  double mainScalarLoadPrepCycles = 0.0;
+  double mainScalarLoadFillCycles = 0.0;
+  double mainScalarLoadHitCycles = 0.0;
+  double mainScalarLoadIssueCycles = 0.0;
+  /// Structured diff-line MainScalar load model (CAModel round 6):
+  ///   T = prep + fill
+  ///       + max(0, U - outstanding) * perLineCost(U)
+  ///       + (K - U) * hit + (K - 1) * issue
+  /// where U is the number of distinct 64B lines and
+  /// perLineCost(U) = low for U <= highThreshold, else high.
+  double mainScalarLoadOutstandingLines = 0.0;
+  double mainScalarLoadExtraLineLowCycles = 0.0;
+  double mainScalarLoadExtraLineHighCycles = 0.0;
+  double mainScalarLoadExtraLineHighThreshold = 0.0;
+  double simtUniformLoadPrepCycles = 0.0;
+  double simtUniformLoadFillCycles = 0.0;
+  double simtUniformLoadSameLineSerialCycles = 0.0;
+  /// Diff-line SIMT warp-uniform load model (CAModel round 6): distinct
+  /// 128B lines can overlap, so only the LSU issue floor remains:
+  ///   T = prep + fill + (K - 1) * diffLineIssue
+  double simtUniformLoadDiffLineIssueCycles = 0.0;
+  /// White-box CAModel store model for the Triton SIMD scalar-store lowering
+  /// (MTE3 `MOV_SRC_TO_DST_ALIGNv2` UB -> OUT; this target does not use the
+  /// CCE MainScalar `ST_XD_XN_IMM` GM path):
+  ///   T = prep + fill + (K - 1) * serial
+  /// `prep` covers scalar value -> UB staging / issue, `fill` is the first
+  /// BIU write completion, `serial` is the extra per-store serialization when
+  /// several MTE3 stores cannot overlap.
+  double mte3StorePrepCycles = 0.0;
+  double mte3StoreFillCycles = 0.0;
+  double mte3StoreSerialCycles = 0.0;
+  /// White-box SIMT warp-uniform store model.  The same-line branch models
+  /// K >= 2 stores that land on one 128B line; a single scalar store has no
+  /// repeated line access and uses the diff-line first-store preparation.
+  double simtUniformStoreSameLineBaseCycles = 0.0;
+  double simtUniformStoreSameLineSerialCycles = 0.0;
+  double simtUniformStoreDiffLineBaseCycles = 0.0;
+  double simtUniformStoreDiffLineIssueCycles = 0.0;
+  /// Optional legacy scalar_ldst cheap-hash fit
+  ///   cycles = a + b*warps + c*ops + d*warps*ops
+  /// retained as a warm/runtime-throughput fallback for profiles that do
+  /// not provide the structured white-box fields above.
+  std::vector<double> scalarLoadCyclesFit;
+  std::vector<double> scalarStoreCyclesFit;
   /// Loaded-index memory cannot use the continuous MTE/LSU throughput model.
   /// These rates operate on logical warp/transaction counts and include one
   /// uncovered dependency latency per Stage iteration.

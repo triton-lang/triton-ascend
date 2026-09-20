@@ -3,6 +3,7 @@
 #include "AscendModel/RouteModel/StageCostModels.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Parser/Parser.h"
@@ -75,6 +76,10 @@ HardwareProfile hardwareProfile(StageTransitionCost transition = {}) {
     mode.scalarOperationsPerCycle = 1.0;
     mode.issueOperationsPerCycle = 4.0;
     mode.spillTransactionsPerCycle = 1.0;
+    mode.scalarLoadInstructionsPerCycle = 1.0;
+    mode.scalarStoreInstructionsPerCycle = 1.0;
+    mode.scalarLoadLatencyCycles = 0.0;
+    mode.scalarStoreLatencyCycles = 0.0;
     mode.indirectLoadTransactionsPerCycle = 0.5;
     mode.indirectStoreTransactionsPerCycle = 0.5;
     mode.indirectDependencyLatencyCycles = 20.0;
@@ -1187,7 +1192,7 @@ TEST(SimdSimtCostModelTest,
   ASSERT_EQ(result->stages.size(), 2u);
   EXPECT_EQ(result->stages.front().operations.size(), 3u);
   EXPECT_EQ(result->stages.front().costModelKind,
-            StageCostModelKind::ContinuousTileMemory);
+            StageCostModelKind::ScalarLoad);
   ASSERT_EQ(result->stages.back().operations.size(), 1u);
   EXPECT_EQ(result->stages.back().operations.front(), roots.back());
 }
@@ -1551,4 +1556,292 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   ASSERT_TRUE(static_cast<bool>(error));
   EXPECT_NE(llvm::toString(std::move(error)).find("requires_split"),
             std::string::npos);
+}
+
+TEST(SimdSimtCostModelTest, ScalarLoadUsesCamodelWhiteboxSameLineModels) {
+  LogicalStage stage =
+      logicalStage("scalar_load_probe", StageCostModelKind::ScalarLoad);
+  stage.features.hasScalarLoad = true;
+  stage.features.scalarLoadsShareLine = true;
+  stage.workload.scalarLoadCount = 4.0;
+  stage.workload.scalarLoadUniqueLines = 1.0;
+  stage.workload.scalarStoreCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  // SIMD MainScalar same-64B-line model, calibrated for K=1..8.
+  profile.simd.mainScalarLoadPrepCycles = 30.0;
+  profile.simd.mainScalarLoadFillCycles = 450.0;
+  profile.simd.mainScalarLoadHitCycles = 4.0;
+  profile.simd.mainScalarLoadIssueCycles = 1.0;
+  // SIMT warp-uniform same-128B-line model, calibrated for K=1..8.
+  profile.simt.simtUniformLoadPrepCycles = 50.0;
+  profile.simt.simtUniformLoadFillCycles = 500.0;
+  profile.simt.simtUniformLoadSameLineSerialCycles = 450.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // 30 + 450 + (4 - 1) * (4 + 1)
+  EXPECT_DOUBLE_EQ(costs[0].resources.load, 495.0);
+  // 50 + 500 + (4 - 1) * 450
+  EXPECT_DOUBLE_EQ(costs[1].resources.load, 1900.0);
+}
+
+TEST(SimdSimtCostModelTest, ScalarLoadDefaultsToDiffLineStructuredModel) {
+  LogicalStage stage =
+      logicalStage("scalar_load_diff_line", StageCostModelKind::ScalarLoad);
+  stage.features.hasScalarLoad = true;
+  stage.features.scalarLoadsShareLine = false;
+  stage.workload.scalarLoadCount = 4.0;
+  // Conservative accumulation seeds one line per load; without a same-line
+  // proof the Stage keeps U = K.
+  stage.workload.scalarLoadUniqueLines = 4.0;
+  stage.workload.scalarStoreCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.mainScalarLoadPrepCycles = 30.0;
+  profile.simd.mainScalarLoadFillCycles = 450.0;
+  profile.simd.mainScalarLoadHitCycles = 4.0;
+  profile.simd.mainScalarLoadIssueCycles = 1.0;
+  profile.simd.mainScalarLoadOutstandingLines = 2.0;
+  profile.simd.mainScalarLoadExtraLineLowCycles = 250.0;
+  profile.simd.mainScalarLoadExtraLineHighCycles = 350.0;
+  profile.simd.mainScalarLoadExtraLineHighThreshold = 4.0;
+  profile.simt.simtUniformLoadPrepCycles = 50.0;
+  profile.simt.simtUniformLoadFillCycles = 500.0;
+  profile.simt.simtUniformLoadSameLineSerialCycles = 450.0;
+  profile.simt.simtUniformLoadDiffLineIssueCycles = 2.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // SIMD: 30 + 450 + max(0, 4 - 2) * 250 + (4 - 3) * 1
+  EXPECT_DOUBLE_EQ(costs[0].resources.load, 983.0);
+  // SIMT: 50 + 500 + (4 - 1) * 2
+  EXPECT_DOUBLE_EQ(costs[1].resources.load, 556.0);
+}
+
+TEST(SimdSimtCostModelTest, BinnedScalarLoadsPartitionWithDiffLineWorkload) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  context.getOrLoadDialect<mlir::cf::ControlFlowDialect>();
+  context.allowUnregisteredDialects();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module {
+      func.func @kernel(%a: i64, %b: i64, %arg2: i32, %arg3: i32,
+                        %indices: i64, %bins: i64) {
+        %c0 = arith.constant 0 : i32
+        %cm1 = arith.constant -1 : i32
+        %c2 = arith.constant 2 : i32
+        %pid0 = "tt.get_program_id"() : () -> i32
+        %pid1 = "tt.get_program_id"() : () -> i32
+        %m = arith.muli %pid0, %arg3 : i32
+        %sum = arith.addi %m, %pid1 : i32
+        %gt = arith.cmpi sgt, %pid0, %c0 : i32
+        %prev = scf.if %gt -> (i32) {
+          %p1 = "tt.addptr"(%bins, %pid0) : (i64, i32) -> i64
+          %p2 = "tt.addptr"(%p1, %cm1) : (i64, i32) -> i64
+          %l1 = "tt.load"(%p2) : (i64) -> i32
+          scf.yield %l1 : i32
+        } else {
+          scf.yield %c0 : i32
+        }
+        %p3 = "tt.addptr"(%bins, %pid0) : (i64, i32) -> i64
+        %l2 = "tt.load"(%p3) : (i64) -> i32
+        %d = arith.subi %l2, %prev : i32
+        %ge = arith.cmpi sge, %pid1, %d : i32
+        cf.cond_br %ge, ^bb1, ^bb2
+      ^bb1:
+        return
+      ^bb2:
+        %p4 = "tt.addptr"(%indices, %prev) : (i64, i32) -> i64
+        %p5 = "tt.addptr"(%p4, %pid1) : (i64, i32) -> i64
+        %l3 = "tt.load"(%p5) : (i64) -> i64
+        %mul = arith.muli %l3, %l3 : i64
+        %p6 = "tt.addptr"(%a, %mul) : (i64, i64) -> i64
+        %mul2 = arith.muli %sum, %c2 : i32
+        %p7 = "tt.addptr"(%b, %mul2) : (i64, i32) -> i64
+        return
+      }
+    }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+  auto partition = StagePartitioner().partition(
+      *module, mlir::ascend::SimtAnchorPlan{}, StagePartitionerOptions{});
+  ASSERT_TRUE(static_cast<bool>(partition))
+      << llvm::toString(partition.takeError());
+  bool sawScalarLoad = false;
+  bool sawIndirectScalarLoad = false;
+  for (const LogicalStage &stage : partition->stages) {
+    if (stage.workload.scalarLoadCount > 0.0) {
+      sawScalarLoad = true;
+      EXPECT_GT(stage.workload.scalarLoadUniqueLines, 0.0);
+      EXPECT_LE(stage.workload.scalarLoadUniqueLines,
+                stage.workload.scalarLoadCount);
+      if (stage.features.hasScalarIndirectLoad) {
+        sawIndirectScalarLoad = true;
+        EXPECT_GT(stage.workload.indirectScalarLoadCount, 0.0);
+        EXPECT_GT(stage.workload.indirectScalarLoadExposureCount, 0.0);
+      }
+    }
+  }
+  EXPECT_TRUE(sawScalarLoad);
+  EXPECT_TRUE(sawIndirectScalarLoad);
+}
+
+TEST(SimdSimtCostModelTest, ScalarIndirectLoadChargesOnlyExtraDependencyEdges) {
+  LogicalStage stage =
+      logicalStage("scalar_indirect_load", StageCostModelKind::ScalarLoad);
+  stage.features.hasScalarLoad = true;
+  stage.features.hasScalarIndirectLoad = true;
+  stage.features.scalarLoadsShareLine = true;
+  stage.workload.scalarLoadCount = 1.0;
+  // Two exposures represent a serial chain: the first edge is covered by the
+  // consumer's own white-box line cost, the second edge pays legacy latency.
+  stage.workload.indirectScalarLoadCount = 0.0;
+  stage.workload.indirectScalarLoadExposureCount = 2.0;
+  stage.workload.scalarLoadUniqueLines = 1.0;
+  stage.workload.scalarStoreCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.mainScalarLoadPrepCycles = 30.0;
+  profile.simd.mainScalarLoadFillCycles = 450.0;
+  profile.simd.mainScalarLoadHitCycles = 4.0;
+  profile.simd.mainScalarLoadIssueCycles = 1.0;
+  profile.simd.scalarIndirectDependencyLatencyCycles = 40.0;
+  profile.simt.simtUniformLoadPrepCycles = 50.0;
+  profile.simt.simtUniformLoadFillCycles = 500.0;
+  profile.simt.simtUniformLoadSameLineSerialCycles = 450.0;
+  profile.simt.simtUniformLoadDiffLineIssueCycles = 2.0;
+  profile.simt.scalarIndirectDependencyLatencyCycles = 10.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // SIMD: (30 + 450) + (2 - 1) * 40.
+  EXPECT_DOUBLE_EQ(costs[0].resources.load, 520.0);
+  // SIMT: (50 + 500) + (2 - 1) * 10.
+  EXPECT_DOUBLE_EQ(costs[1].resources.load, 560.0);
+}
+
+TEST(SimdSimtCostModelTest, ScalarIndirectLoadDeduplicatesFanOutExposure) {
+  LogicalStage stage =
+      logicalStage("scalar_indirect_fanout", StageCostModelKind::ScalarLoad);
+  stage.features.hasScalarLoad = true;
+  stage.features.hasScalarIndirectLoad = true;
+  stage.features.scalarLoadsShareLine = false;
+  stage.workload.scalarLoadCount = 2.0;
+  // Two consumers share one producer load: the legacy count sees two, the
+  // exposure count must collapse them to one.
+  stage.workload.indirectScalarLoadCount = 2.0;
+  stage.workload.indirectScalarLoadExposureCount = 1.0;
+  stage.workload.scalarLoadUniqueLines = 2.0;
+  stage.workload.scalarStoreCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.mainScalarLoadPrepCycles = 30.0;
+  profile.simd.mainScalarLoadFillCycles = 450.0;
+  profile.simd.mainScalarLoadHitCycles = 4.0;
+  profile.simd.mainScalarLoadIssueCycles = 1.0;
+  profile.simd.mainScalarLoadOutstandingLines = 2.0;
+  profile.simd.mainScalarLoadExtraLineLowCycles = 250.0;
+  profile.simd.mainScalarLoadExtraLineHighCycles = 350.0;
+  profile.simd.mainScalarLoadExtraLineHighThreshold = 4.0;
+  profile.simd.scalarIndirectDependencyLatencyCycles = 40.0;
+  profile.simt.simtUniformLoadPrepCycles = 50.0;
+  profile.simt.simtUniformLoadFillCycles = 500.0;
+  profile.simt.simtUniformLoadSameLineSerialCycles = 450.0;
+  profile.simt.simtUniformLoadDiffLineIssueCycles = 2.0;
+  profile.simt.scalarIndirectDependencyLatencyCycles = 10.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // SIMD K=2/U=2 diff-line: 30 + 450 + 1 = 481; fan-out collapses to one
+  // exposure and the first edge does not charge legacy latency.
+  EXPECT_DOUBLE_EQ(costs[0].resources.load, 481.0);
+  // SIMT K=2 diff-line: 50 + 500 + 2 = 552; same rule for the first edge.
+  EXPECT_DOUBLE_EQ(costs[1].resources.load, 552.0);
+}
+
+TEST(SimdSimtCostModelTest, ScalarStoreUsesMte3WhiteboxModel) {
+  LogicalStage stage =
+      logicalStage("scalar_store_mte3", StageCostModelKind::ScalarStore);
+  stage.features.hasScalarStore = true;
+  stage.workload.scalarStoreCount = 1.0;
+  stage.workload.scalarStoreUniqueLines = 1.0;
+  stage.workload.scalarLoadCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.mte3StorePrepCycles = 20.0;
+  profile.simd.mte3StoreFillCycles = 450.0;
+  profile.simd.mte3StoreSerialCycles = 480.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // Triton SIMD scalar store MTE3 K == 1: 20 + 450 + 0 * 480.
+  EXPECT_DOUBLE_EQ(costs[0].resources.store, 470.0);
+}
+
+TEST(SimdSimtCostModelTest, ScalarStoreUsesSimtDiffLineFirstStore) {
+  LogicalStage stage =
+      logicalStage("scalar_store_simt", StageCostModelKind::ScalarStore);
+  stage.features.hasScalarStore = true;
+  stage.features.scalarStoresShareLine = true;
+  stage.workload.scalarStoreCount = 1.0;
+  stage.workload.scalarStoreUniqueLines = 1.0;
+  stage.workload.scalarLoadCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simt.simtUniformStoreSameLineBaseCycles = 555.0;
+  profile.simt.simtUniformStoreSameLineSerialCycles = 480.0;
+  profile.simt.simtUniformStoreDiffLineBaseCycles = 450.0;
+  profile.simt.simtUniformStoreDiffLineIssueCycles = 20.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // A single scalar store has no repeated same-line access: use first-store
+  // prep.
+  EXPECT_DOUBLE_EQ(costs[1].resources.store, 450.0);
+}
+
+TEST(SimdSimtCostModelTest, ScalarStoreUsesSimtSameLineSerialModel) {
+  LogicalStage stage =
+      logicalStage("scalar_store_same_line", StageCostModelKind::ScalarStore);
+  stage.features.hasScalarStore = true;
+  stage.features.scalarStoresShareLine = true;
+  stage.workload.scalarStoreCount = 2.0;
+  stage.workload.scalarStoreUniqueLines = 1.0;
+  stage.workload.scalarLoadCount = 0.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simt.simtUniformStoreSameLineBaseCycles = 555.0;
+  profile.simt.simtUniformStoreSameLineSerialCycles = 480.0;
+  profile.simt.simtUniformStoreDiffLineBaseCycles = 450.0;
+  profile.simt.simtUniformStoreDiffLineIssueCycles = 20.0;
+
+  auto table = evaluateOneStage(stage, profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  const auto &costs = table->stages.front().implementations;
+  ASSERT_EQ(costs.size(), 2u);
+  // K == 2 same-line: 555 + 1 * 480.
+  EXPECT_DOUBLE_EQ(costs[1].resources.store, 1035.0);
 }

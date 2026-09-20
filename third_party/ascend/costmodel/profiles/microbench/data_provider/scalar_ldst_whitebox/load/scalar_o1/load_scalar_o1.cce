@@ -1,0 +1,43 @@
+// scalar_ldst_whitebox/load/scalar_o1
+// Single scalar load op:
+//   simd_main_ld_o1          MainScalar GM load (one op)
+//   simt_ld_uniform_o1        SIMT uniform GM load, 32-thread launch
+//   simt_ld_uniform_o1_t1     same core, 1-thread launch
+// ABI: (out, gm, iters, mode), same as scalar_bench_host.cpp.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+
+extern "C" __global__ [aicore] void
+simd_main_ld_o1(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0];
+  out[0] = (long long)(a0);
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+simt_ld_uniform_o1_core(__gm__ DT* gm, __ubuf__ DT* sink) {
+  int lane = threadIdx.x;
+  volatile __gm__ DT* p = gm;
+  DT a0 = p[0];
+  sink[lane] = (DT)(a0);
+}
+
+extern "C" __global__ [aicore] void
+simt_ld_uniform_o1(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  cce::async_invoke<simt_ld_uniform_o1_core>(cce::dim3{32, 1, 1}, gm, sink);
+  out[0] = 0;
+}
+
+extern "C" __global__ [aicore] void
+simt_ld_uniform_o1_t1(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  auto sink = reinterpret_cast<__ubuf__ DT*>(0);
+  cce::async_invoke<simt_ld_uniform_o1_core>(cce::dim3{1, 1, 1}, gm, sink);
+  out[0] = 0;
+}

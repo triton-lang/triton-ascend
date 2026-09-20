@@ -1,0 +1,22 @@
+# 6-kernel scalar load/store 打分总表（SYS_CNT profile，matched + stage union）
+
+固定：`shape=(4,256,4,2)`, `BLOCK_X=64`, `superblock_factor=1`, `num_warps=1`。
+
+profile cycle 是 SYS_CNT 域（988.9MHz）；`costmodel_camodel_cycles = costmodel_sys_cycles × 1800/988.9` 用于和 CAModel core-cycle window 比较。
+
+| kernel | mode | 类别 | costmodel SYS_CNT cyc | costmodel CAModel-equiv cyc | CAModel union cyc | 误差 | matched stages | 备注 |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| padded_copy_gather | simt | direct_scalar_load | 534.01 | 972.0 | 1113.0 | -12.7% | 2/2 |  |
+| padded_copy_gather | simt | indirect_scalar_load | 267.0 | 486.0 | 509.0 | -4.5% | 1/1 | matched indirect stages; per-stage union |
+| padded_copy_scatter | simt | direct_scalar_load | 534.01 | 972.0 | 1115.0 | -12.8% | 2/2 |  |
+| padded_copy_scatter | simt | indirect_scalar_load | 534.01 | 972.0 | 973.0 | -0.1% | 2/2 | matched indirect stages; per-stage union |
+| padded_copy_wgrad | simt | direct_scalar_load | 534.01 | 972.0 | 897.0 | 8.4% | 2/2 |  |
+| padded_copy_wgrad | simt | indirect_scalar_load | 267.0 | 486.0 | 481.0 | 1.0% | 1/1 | matched indirect stages; per-stage union |
+| padded_copy_wgrad | simt | scalar_store | 247.22 | 450.0 | 559.0 | -19.5% | 1/1 | CAModel SIMT_STG |
+| binned_copy_gather | simt | direct_scalar_load | 267.0 | 486.0 | 497.0 | -2.2% | 1/2 | unmatched stage (control-flow) |
+| binned_copy_gather | simt | indirect_scalar_load | 267.0 | 486.0 | 436.0 | 11.5% | 1/1 | matched indirect stages; per-stage union |
+| binned_copy_scatter | simt | direct_scalar_load | 267.0 | 486.0 | 497.0 | -2.2% | 1/2 | unmatched stage (control-flow) |
+| binned_copy_scatter | simt | indirect_scalar_load | 267.0 | 486.0 | 436.0 | 11.5% | 1/1 | matched indirect stages; per-stage union |
+| binned_copy_wgrad | simt | direct_scalar_load | 267.0 | 486.0 | 442.0 | 10.0% | 1/2 | unmatched stage (control-flow) |
+| binned_copy_wgrad | simt | indirect_scalar_load | 267.0 | 486.0 | 406.0 | 19.7% | 1/1 | matched indirect stages; per-stage union |
+| binned_copy_wgrad | simt | scalar_store | 247.22 | 450.0 | 551.0 | -18.3% | 1/1 | CAModel SIMT_STG |

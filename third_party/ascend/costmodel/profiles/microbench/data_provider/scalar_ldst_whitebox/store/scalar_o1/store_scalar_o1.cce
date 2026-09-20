@@ -1,0 +1,31 @@
+// scalar_ldst_whitebox/store/scalar_o1
+// Single scalar store op:
+//   simd_main_st_o1        MainScalar GM store (one target op p[0])
+//   simt_st_uniform_o1     SIMT uniform GM store, 32-thread launch
+// ABI: (out, gm, iters, mode); out[0] is only a sink, not part of the target op.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+
+using DT = float;
+
+extern "C" __global__ [aicore] void
+simd_main_st_o1(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  volatile __gm__ DT* p = gm;
+  p[0] = (DT)(0 + 1);
+  out[0] = 0;
+}
+
+__simt_vf__ LAUNCH_BOUND(32) __aiv__ __attribute__((always_inline)) static void
+simt_st_uniform_o1_core(__gm__ DT* gm) {
+  volatile __gm__ DT* p = gm;
+  p[0] = 1.0f;
+}
+
+extern "C" __global__ [aicore] void
+simt_st_uniform_o1(__gm__ long long* out, __gm__ DT* gm, int iters, int mode) {
+  (void)iters; (void)mode;
+  cce::async_invoke<simt_st_uniform_o1_core>(cce::dim3{32, 1, 1}, gm);
+  out[0] = 0;
+}

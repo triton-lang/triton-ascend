@@ -97,7 +97,15 @@ static std::string formatCubeBlock(const CubeBlock &c) {
 
 } // namespace
 
-/// Scan a region (then-block or else-block) and produce maximal CUBE runs.
+/// Scan a region (then-block or else-block) and produce maximal runs of
+/// CUBE ops sharing the same (non -1) block_id. VECTOR/UNDETERMINED ops
+/// (e.g. block_id=17) are NOT collected as cubes — otherwise an if-region
+/// that mixes CUBE and VECTOR blocks would incorrectly trigger cloning of
+/// the CUBE blocks into the later CUBE block (e.g. block_id=9 cloning
+/// block_id=5 just because block_id=9 also depends on block_id=17's
+/// tensor.empty output). Nested `scf.if` ops are attached to the most
+/// recent CUBE cube block when the surrounding block_id matches — their
+/// internal `linalg.fill` is then deep-cloned together with the scf.if.
 static SmallVector<CubeBlock> collectCubeBlocksInRegion(Block &block) {
   SmallVector<CubeBlock> cubes;
   auto *parentOp = block.getParentOp();
@@ -115,13 +123,26 @@ static SmallVector<CubeBlock> collectCubeBlocksInRegion(Block &block) {
       continue;
     }
 
+    if (isa<scf::IfOp>(op)) {
+      // Attach the nested scf.if to the most recent cube block IF the
+      // scf.if's outer block_id matches that cube. This preserves the
+      // initialization chain (linalg.fill inside) together with its
+      // memref.alloc host when the surrounding block is CUBE.
+      if (!cubes.empty() && cubes.back().blockId == *bid) {
+        cubes.back().ops.push_back(&op);
+      }
+      continue;
+    }
+
+    // Only CUBE_ONLY ops anchor a cube block. VECTOR or undetermined
+    // ops are silently skipped so they don't become cube-block
+    // boundaries.
     CoreType ct = CVPipeline::getOpCoreType(&op);
     if (ct != CoreType::CUBE_ONLY) {
       continue;
     }
 
-    if (!cubes.empty() && cubes.back().blockId == *bid &&
-        !cubes.back().ops.empty()) {
+    if (!cubes.empty() && cubes.back().blockId == *bid) {
       cubes.back().ops.push_back(&op);
     } else {
       cubes.push_back({*bid, {&op}});

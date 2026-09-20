@@ -40,6 +40,7 @@
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 #include <climits>
+#include <functional>
 
 static constexpr const char *DEBUG_TYPE = "AddMultiBufferInnerScope";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
@@ -1811,8 +1812,17 @@ static bool
 hasMemrefDepValue(DenseMap<Value, SmallVector<Value>> &depValueMap) {
   for (auto &p : depValueMap) {
     for (Value depVal : p.second) {
-      if (isa<MemRefType>(depVal.getType()))
+      if (isa<MemRefType>(depVal.getType())) {
+        LLVM_DEBUG({
+          DBGS() << "Memref dep value: ";
+          depVal.print(llvm::dbgs());
+          llvm::dbgs() << "\n";
+          if (Operation *def = depVal.getDefiningOp()) {
+            DBGS() << "  defined by: " << *def << "\n";
+          }
+        });
         return true;
+      }
     }
   }
   return false;
@@ -2002,10 +2012,200 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
     yieldOp->setOperands(newOperands);
 }
 
+// True when the chain rooted at `op` only consists of GM view ops and scalar
+// index math, and every leaf is a block argument (GM function argument /
+// iter arg) or a constant. Such chains are pure functions of their operands
+// and can be re-materialized per consumer block.
+static bool isPureGmViewChain(Operation *op, Block *loopBody,
+                              SmallPtrSetImpl<Operation *> &visited) {
+  if (!visited.insert(op).second) {
+    return true;
+  }
+  if (isa<memref::ReinterpretCastOp, memref::SubViewOp, memref::CastOp,
+          arith::ConstantOp>(op)) {
+    for (OpOperand &operand : op->getOpOperands()) {
+      Operation *def = operand.get().getDefiningOp();
+      if (!def) {
+        continue; // block arg / constant operand: leaf root
+      }
+      Operation *ancestor = loopBody->findAncestorOpInBlock(*def);
+      if (!ancestor) {
+        continue; // defined outside the loop: leaf root
+      }
+      if (!isPureGmViewChain(ancestor, loopBody, visited)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  if (isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivSIOp,
+          arith::RemSIOp, arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp,
+          arith::IndexCastOp, arith::MaxSIOp, arith::MinSIOp, arith::CmpIOp>(
+          op)) {
+    for (OpOperand &operand : op->getOpOperands()) {
+      Operation *def = operand.get().getDefiningOp();
+      if (!def) {
+        continue;
+      }
+      Operation *ancestor = loopBody->findAncestorOpInBlock(*def);
+      if (!ancestor) {
+        continue;
+      }
+      if (!isPureGmViewChain(ancestor, loopBody, visited)) {
+        return false;
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
+// Re-materialize cross-block memref view chains inside their consumer blocks
+// so that AddMultiBufferInnerScope no longer sees them as cross-block memref
+// dependencies. Only chains rooted at block arguments / constants (GM
+// accumulate buffers and their views) are handled; anything else keeps the
+// original fallback behavior.
+static void
+rematerializeCrossBlockMemrefViews(const MainLoop &mainLoop) {
+  Block *loopBody = mainLoop.getBody();
+  if (!loopBody) {
+    return;
+  }
+
+  // Resolve a nested op to its top-level ancestor within the loop body.
+  auto topLevelInLoop = [&](Operation *op) -> Operation * {
+    Operation *topLevel = op;
+    while (topLevel && topLevel->getBlock() != loopBody) {
+      topLevel = topLevel->getParentOp();
+    }
+    return topLevel;
+  };
+
+  // Collect (value, consumer block) requests in program order.
+  struct RematRequest {
+    Value value;
+    Operation *insertBefore;
+    int userBlockId;
+    Operation *userInGroup;
+  };
+  SmallVector<RematRequest> requests;
+  DenseSet<std::pair<Value, int>> seen;
+  loopBody->walk([&](Operation *user) {
+    for (OpOperand &operand : user->getOpOperands()) {
+      Value value = operand.get();
+      if (!isa<MemRefType>(value.getType())) {
+        continue;
+      }
+      Operation *def = value.getDefiningOp();
+      if (!def) {
+        continue; // block arg: not a cross-block dep
+      }
+      Operation *ancestor = loopBody->findAncestorOpInBlock(*def);
+      if (!ancestor) {
+        continue; // defined outside the loop: not an intra-loop dep
+      }
+      Operation *topLevel = topLevelInLoop(user);
+      if (!topLevel || topLevel == ancestor) {
+        continue;
+      }
+      auto defId = getOpBlockId(ancestor);
+      auto userId = getOpBlockId(topLevel);
+      if (!defId || !userId || *defId == *userId) {
+        continue;
+      }
+      auto key = std::make_pair(value, *userId);
+      if (!seen.insert(key).second) {
+        continue;
+      }
+      requests.push_back({value, topLevel, *userId, topLevel});
+    }
+  });
+
+  for (RematRequest &req : requests) {
+    Operation *def = req.value.getDefiningOp();
+    Operation *ancestor = loopBody->findAncestorOpInBlock(*def);
+    if (!ancestor) {
+      continue;
+    }
+    // View ops are core-agnostic metadata; only skip when both sides carry
+    // explicit and conflicting core types.
+    auto defCore = ancestor->getAttrOfType<StringAttr>(
+        static_cast<StringRef>(CVPipeline::kCoreType));
+    auto userCore = req.userInGroup->getAttrOfType<StringAttr>(
+        static_cast<StringRef>(CVPipeline::kCoreType));
+    if (defCore && userCore && defCore != userCore) {
+      continue;
+    }
+
+    SmallPtrSet<Operation *, 8> visited;
+    if (!isPureGmViewChain(ancestor, loopBody, visited)) {
+      LDBG("Cross-block memref dep is not a pure GM view chain; keeping it");
+      continue;
+    }
+
+    // Collect the chain ops upstream-first.
+    SmallVector<Operation *> chain;
+    std::function<void(Operation *)> collect = [&](Operation *op) {
+      if (llvm::is_contained(chain, op)) {
+        return;
+      }
+      for (OpOperand &operand : op->getOpOperands()) {
+        Operation *defOp = operand.get().getDefiningOp();
+        if (!defOp) {
+          continue;
+        }
+        Operation *chainAncestor = loopBody->findAncestorOpInBlock(*defOp);
+        if (!chainAncestor) {
+          continue;
+        }
+        collect(chainAncestor);
+      }
+      if (!llvm::is_contained(chain, op)) {
+        chain.push_back(op);
+      }
+    };
+    collect(ancestor);
+
+    OpBuilder builder(req.insertBefore);
+    IRMapping mapping;
+    for (Operation *chainOp : chain) {
+      Operation *clone = builder.clone(*chainOp, mapping);
+      clone->setAttr(static_cast<StringRef>(CVPipeline::kBlockId),
+                     builder.getI32IntegerAttr(req.userBlockId));
+    }
+    Value newVal = mapping.lookup(req.value);
+    if (!newVal) {
+      continue;
+    }
+    req.value.replaceUsesWithIf(newVal, [&](OpOperand &use) {
+      Operation *userAnc = loopBody->findAncestorOpInBlock(*use.getOwner());
+      if (!userAnc) {
+        return false;
+      }
+      auto userId = getOpBlockId(userAnc);
+      return userId.has_value() && *userId == req.userBlockId;
+    });
+    LLVM_DEBUG({
+      DBGS() << "Re-materialized cross-block GM view chain into block "
+             << req.userBlockId << "\n";
+    });
+  }
+}
+
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
                                scope::ScopeOp vectorScope, int &groupId,
                                bool &i1Found) {
   OpBuilder globalBuilder(mainLoop.getContext());
+
+  // Cross-block memref dependencies rooted at GM function arguments (e.g. a
+  // DQ accumulate buffer that one block reads and another block writes back)
+  // are not multi-buffered by this pass; their ordering is owned by the
+  // SplitDataflow memory-dependency sync. Materializing the pure view chain
+  // (reinterpret casts / subviews over scalar index math) locally in each
+  // consumer block removes the cross-block memref reference without
+  // duplicating any data movement, so the memref-dep fallback below no
+  // longer fires for them.
+  rematerializeCrossBlockMemrefViews(mainLoop);
 
   // Two-phase dep collection for empty+fill cloning:
   //   Phase 1 (initial): collect deps, build user map, then clone the
@@ -2055,6 +2255,10 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
 
   // Memref-type dep values are not supported here.
   if (hasMemrefDepValue(depValueMap)) {
+    LLVM_DEBUG({
+      DBGS() << "IR at memref dep fallback (main loop):\n"
+             << *mainLoop.getOperation() << "\n";
+    });
     LDBG("ERROR: Memref type dependent values found in user IR, fallback");
     return -1;
   }

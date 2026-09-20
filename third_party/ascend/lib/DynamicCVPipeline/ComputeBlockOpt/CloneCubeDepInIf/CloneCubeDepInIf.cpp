@@ -221,11 +221,35 @@ laterCubeDependsOnEarlier(const llvm::SmallDenseSet<Operation *> &earlierOps,
   return false;
 }
 
+/// Recursively rewrite every op inside `cloned`'s regions so its
+/// `ssbuffer.block_id` attribute matches `blockId` (this is what we want
+/// for a cloned region whose outer op already carries block_id=blockId,
+/// e.g. the `linalg.fill` nested inside a cloned `scf.if`). The kClone
+/// attribute is preserved on the outer op; nested ops inherit the
+/// block_id but keep their original core_type etc.
+static void retagNestedBlockIds(Operation *cloned, int blockId,
+                                OpBuilder &builder) {
+  for (Region &region : cloned->getRegions()) {
+    region.walk([&](Operation *nested) {
+      if (nested == cloned) {
+        return;
+      }
+      if (CVPipeline::getOpBlockId(nested).has_value()) {
+        nested->setAttr(CVPipeline::kBlockId,
+                        builder.getI32IntegerAttr(blockId));
+      }
+    });
+  }
+}
+
 /// Clone a single op using an IRMapping seeded with all previously cloned
-/// values. Mirrors CloneOps::cloneOpWithMapping.
+/// values. Mirrors CloneOps::cloneOpWithMapping. After cloning, every
+/// cloned op whose block_id is non -1 (including ops nested in regions,
+/// e.g. the `linalg.fill` inside a cloned `scf.if`) has its block_id
+/// rewritten to `blockId` so the whole subtree is uniformly anchored.
 static Operation *
 cloneOpWithMapping(Operation *op, OpBuilder &builder,
-                   llvm::DenseMap<Value, Value> &valueMap) {
+                   llvm::DenseMap<Value, Value> &valueMap, int blockId) {
   IRMapping mapper;
   for (const auto &entry : valueMap) {
     mapper.map(entry.first, entry.second);
@@ -234,6 +258,7 @@ cloneOpWithMapping(Operation *op, OpBuilder &builder,
   for (auto it : llvm::zip(op->getResults(), cloned->getResults())) {
     valueMap[std::get<0>(it)] = std::get<1>(it);
   }
+  retagNestedBlockIds(cloned, blockId, builder);
   return cloned;
 }
 
@@ -309,7 +334,7 @@ cloneEarlierCubesInto(ArrayRef<CubeBlock> earlierCubes, int laterBlockId,
 
   llvm::DenseMap<Value, Value> valueMap;
   for (Operation *op : toClone) {
-    Operation *cloned = cloneOpWithMapping(op, builder, valueMap);
+    Operation *cloned = cloneOpWithMapping(op, builder, valueMap, laterBlockId);
     cloned->setAttr(CVPipeline::kBlockId,
                     builder.getI32IntegerAttr(laterBlockId));
     if (auto origBlockIdOpt = CVPipeline::getOpBlockId(op)) {
@@ -425,6 +450,16 @@ static void cleanupSide(Block *block,
 
   llvm::DenseSet<Operation *> erasedOps;
 
+  // True if `a` and `b` both carry the same concrete (non -1) block_id.
+  // Ops without a block_id attribute are treated as "different" (return
+  // false); callers decide whether to interpret that as a "live anchor"
+  // by short-circuiting on the primary op's missing block_id.
+  auto sameBlockId = [](Operation *a, Operation *b) {
+    auto aId = CVPipeline::getOpBlockId(a);
+    auto bId = CVPipeline::getOpBlockId(b);
+    return aId && bId && *aId == *bId;
+  };
+
   for (int idx = static_cast<int>(opsInBlock.size()) - 1; idx >= 0; --idx) {
     Operation *op = opsInBlock[idx];
     if (isa<scf::YieldOp>(*op)) {
@@ -437,19 +472,20 @@ static void cleanupSide(Block *block,
       continue;
     }
 
+    // Ops without a concrete block_id are conservatively treated as
+    // pinned (we don't know their group and won't erase them).
+    if (!CVPipeline::getOpBlockId(op).has_value()) {
+      continue;
+    }
+
     // Decide whether to erase this op.
     auto hasLiveSameBlockIdUser = [&](Operation *op) {
-      auto opBlockId = CVPipeline::getOpBlockId(op);
-      if (!opBlockId) {
-        return true;
-      }
       for (auto result : op->getResults()) {
         for (Operation *user : result.getUsers()) {
           if (erasedOps.contains(user)) {
             continue;
           }
-          auto userBlockId = CVPipeline::getOpBlockId(user);
-          if (userBlockId && *userBlockId == *opBlockId) {
+          if (sameBlockId(op, user)) {
             return true;
           }
         }
@@ -458,16 +494,11 @@ static void cleanupSide(Block *block,
     };
 
     auto hasLiveSameBlockIdExecAfter = [&](Operation *op) {
-      auto opBlockId = CVPipeline::getOpBlockId(op);
-      if (!opBlockId) {
-        return true;
-      }
       for (Operation *execOp : memGraph.getExecAfter(op)) {
         if (erasedOps.contains(execOp)) {
           continue;
         }
-        auto execBlockId = CVPipeline::getOpBlockId(execOp);
-        if (execBlockId && *execBlockId == *opBlockId) {
+        if (sameBlockId(op, execOp)) {
           return true;
         }
       }

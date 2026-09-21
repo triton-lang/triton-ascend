@@ -7,11 +7,11 @@ on:
       - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/patch-npuir-templates.py
-  pull_request:
-    paths:
-      - third_party/ascend/AscendNPU-IR
-      - .github/workflows/npuir-build.yml
-      - .github/workflows/build/patch-npuir-templates.py
+  # pull_request:
+  #   paths:
+  #     - third_party/ascend/AscendNPU-IR
+  #     - .github/workflows/npuir-build.yml
+  #     - .github/workflows/build/patch-npuir-templates.py
 
 concurrency:
   group: npuir-build-${{ github.ref }}
@@ -121,14 +121,48 @@ jobs:
           restore-keys: |
             npuir-ccache-ml-2_34-${{ matrix.config.arch }}-
 
+      # TEMP(debug): dump the pod's cgroup view to explain why the backend's
+      # 28u/96g request surfaces as 16 CPUs / 32 GiB in cgroup-resources.sh.
+      # Remove once the platform side is confirmed.
+      - name: Diagnose cgroup resources
+        run: |
+          set +e
+          echo "== /proc/self/cgroup =="
+          cat /proc/self/cgroup
+          CGV2=$(awk -F: '$1 == "0" {print $3}' /proc/self/cgroup)
+          echo "== cgroup v2 @ /sys/fs/cgroup${CGV2} =="
+          cat "/sys/fs/cgroup${CGV2}/cpu.max" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/memory.max" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/cpuset.cpus.effective" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/cgroup.controllers" 2>/dev/null
+          CGV1=$(awk -F: '/\bcpu(,|$)/ {print $3; exit}' /proc/self/cgroup)
+          echo "== cgroup v1 @ /sys/fs/cgroup/cpu${CGV1} =="
+          cat "/sys/fs/cgroup/cpu${CGV1}/cpu.cfs_quota_us" "/sys/fs/cgroup/cpu${CGV1}/cpu.cfs_period_us" 2>/dev/null
+          cat "/sys/fs/cgroup/memory${CGV1}/memory.limit_in_bytes" 2>/dev/null
+          echo "== fallback sources (nproc / cpuinfo / meminfo) =="
+          nproc
+          grep -c '^processor' /proc/cpuinfo
+          grep MemTotal /proc/meminfo
+          echo "== lscpu (top) =="
+          command -v lscpu >/dev/null && lscpu | head -8
+
       - name: Build AscendNPU-IR
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           BISHENG_DIR: ${{ steps.bisheng.outputs.bisheng_dir }}
         run: |
           cd third_party/ascend/AscendNPU-IR
-          # Self-hosted pods are 16 CPUs / 32 GB (cgroup); 12 parallel jobs
-          # leaves ~2.5 GB per compile (heavy MLIR TUs peak at 3-5 GB).
+          # Size the build to the pod's actual cgroup quota (nproc reports
+          # the host's 320 cores, which would over-subscribe memory). Budget
+          # ~2.5 GiB per job (heavy MLIR TUs peak at 3-5 GB) and cap by the
+          # effective CPU count.
+          . "$GITHUB_WORKSPACE/.github/workflows/build/cgroup-resources.sh"
+          NPROC=$(cg_cpus)
+          MEM_BYTES=$(cg_mem_bytes)
+          JOBS=$(( MEM_BYTES / (2500 * 1024 * 1024) ))
+          if [ "$JOBS" -gt "$NPROC" ]; then JOBS=$NPROC; fi
+          if [ "$JOBS" -lt 1 ]; then JOBS=1; fi
+          echo "cgroup: ${NPROC} CPUs, $(( MEM_BYTES / (1024*1024*1024) )) GiB mem -> -j ${JOBS}"
           # The CXX wrapper carries workarounds the Ascend LLVM fork needs
           # in these manylinux images: the fork excludes <cstdint> in Affine
           # ValueBoundsOpInterfaceImpl.h under BSPUB_DAVINCI_BISHENGIR_A5,
@@ -139,7 +173,7 @@ jobs:
           # without it).
           printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint
           chmod +x /tmp/clang++-cstdint
-          build-tools/build.sh -o build -j 12 \
+          build-tools/build.sh -o build -j "${JOBS}" \
             --cxx-compiler=/tmp/clang++-cstdint \
             --add-cmake-options="-DCMAKE_LINKER=LLD" \
             --add-cmake-options="-DLLVM_ENABLE_LLD=ON" \

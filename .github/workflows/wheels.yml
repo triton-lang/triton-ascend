@@ -30,7 +30,8 @@ jobs:
     container:
       image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
     timeout-minutes: 360
-
+    env:
+      PYTHON: ${{matrix.python}}
     strategy:
       fail-fast: false
       # Limit parallelism: wheel builds compile hundreds of C++ files on
@@ -127,11 +128,9 @@ jobs:
         id: vars
         shell: bash
         run: |
-          NUM_PROCS=$(( $(nproc) / 6 ))
-          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          # Hard-cap at 8 to avoid OOM on memory-constrained buildkitd workers.
-          if [ "$NUM_PROCS" -gt 8 ]; then NUM_PROCS=8; fi
-          echo "max_jobs=${NUM_PROCS}" >> $GITHUB_OUTPUT
+          # Parallelism is decided inside the Docker build (the job pod's
+          # cgroup here is tiny and unrelated to the shared buildkitd the
+          # compile actually runs on; see wheels.Dockerfile).
           BUILD_DATE=$(date -u +%Y%m%d)
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
 
@@ -144,23 +143,21 @@ jobs:
           build-args: |
             MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
-            MAX_JOBS=${{ steps.vars.outputs.max_jobs }}
             TRITON_BUILD_NPUIR=${{ matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
-          # Same registry-cache pattern as build-docker-image.yml: the dnf and
-          # pip layers of wheels.Dockerfile (kept before the COPY of the
-          # workspace) hit the cache across runs; the source-dependent wheel
-          # build layer still rebuilds, but skips the dependency setup.
-          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
-          cache-to: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }},mode=max
           outputs: type=local,dest=./wheelhouse
 
       - uses: actions/upload-artifact@v4
-        if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
+        # GitHub artifacts are only a PR review convenience (manual wheel
+        # download). push/schedule already publish to OBS, and nothing else
+        # consumes these artifacts, so skip the slow upload outside PRs.
+        if: github.event_name == 'pull_request'
         with:
           name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
+          # Wheels are already zip-compressed; skip the re-compress pass.
+          compression-level: 0
 
       - name: Setup obsutil and upload to OBS
         if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')

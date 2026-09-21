@@ -34,6 +34,17 @@ jobs:
         with:
           submodules: "true"
 
+      # Pull request runs re-merge the latest base branch so the tested tree
+      # matches what would actually land, instead of the refs/pull/N/merge
+      # snapshot GitHub generated when the PR was last updated.
+      - name: Merge latest base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch --no-tags --unshallow origin "+refs/heads/${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+          git merge --no-ff "origin/${{ github.base_ref }}"
+
       - name: Add git safe directory
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 

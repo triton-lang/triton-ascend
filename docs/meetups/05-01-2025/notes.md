@@ -6,7 +6,7 @@
 
 # Notes
 
-## What are the plans for existing block pointer programming model? (Context: Intel GPU backend relies heavily on it an will need time to fully move to tensor descriptor programming model)
+## What are the plans for existing block pointer programming model? (Context: Intel GPU backend relies heavily on it and will need time to fully move to tensor descriptor programming model)
 
 Speakers: Jianhui Li (Intel), Keren Zhou (George Mason Univ)
 

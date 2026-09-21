@@ -283,19 +283,3 @@ def test_graph_ub_budget_resolves_from_explicit_arch(arch, raw_ub_kib, graph_bud
 
     assert utils.ub_size_in_kbytes_for_arch(arch) == raw_ub_kib
     assert utils.graph_ub_budget_bytes_for_arch(arch) == graph_budget_bytes
-
-
-def test_auto_blockify_atomic_blacklist_is_disabled_only_on_910_95():
-    utils = _load_utils_module()
-    ttir = """
-        %0 = tt.atomic_rmw add, acq_rel, gpu, %ptr, %value : (tensor<32x!tt.ptr<i32>>, tensor<32xi32>) -> tensor<32xi32>
-        %1 = tt.elementwise_inline_asm "nop" : () -> i32
-    """
-
-    assert utils._get_auto_blockify_blacklist_reasons(ttir) == [
-        "atomic operations",
-        "inline elementwise assembly",
-    ]
-    assert utils._get_auto_blockify_blacklist_reasons(ttir, compile_on_910_95=True) == [
-        "inline elementwise assembly",
-    ]

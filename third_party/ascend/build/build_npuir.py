@@ -98,10 +98,13 @@ def _fetch_nested_via_sha(npuir_dir, path, sha):
     ).strip()
     dest = npuir_dir / path
     shutil.rmtree(dest, ignore_errors=True)
-    subprocess.check_call(["git", "init", "-q", str(dest)])
-    subprocess.check_call(["git", "-C", str(dest), "remote", "add", "origin", url])
-    subprocess.check_call(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha])
-    subprocess.check_call(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
+    _run_with_retry(["git", "init", "-q", str(dest)])
+    _run_with_retry(["git", "-C", str(dest), "remote", "add", "origin", url])
+    # gitcode intermittently answers 503 (server-side throttling) on large
+    # depth-1 fetches; retry with a longer window than the default.
+    _run_with_retry(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha],
+                    retries=5, interval=10)
+    _run_with_retry(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
 
 
 def _init_nested_submodule_sources(npuir_dir):
@@ -152,6 +155,54 @@ def _init_npuir_repo():
     _log("Nested submodule sources ready.")
 
 
+def _cgroup_limits():
+    """Effective CPU quota and memory limit, cgroup-aware (v1 and v2).
+
+    nproc/os.cpu_count() report the host's cores (320 on the CI pods),
+    which over-subscribes memory when scheduling parallel compiles.
+    """
+    quota, period = None, 100000
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            q, p = f.read().split()
+            quota, period = (None if q == "max" else int(q)), int(p)
+    except (FileNotFoundError, ValueError):
+        try:
+            quota = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+            period = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+            if quota == -1:
+                quota = None
+        except (FileNotFoundError, ValueError):
+            pass
+    cpus = os.cpu_count() or 1
+    if quota is not None:
+        cpus = max(1, min(cpus, (quota + period - 1) // period))
+    mem_bytes = None
+    try:
+        lim = open("/sys/fs/cgroup/memory.max").read().strip()
+    except FileNotFoundError:
+        try:
+            lim = open("/sys/fs/cgroup/memory/memory.limit_in_bytes").read().strip()
+        except FileNotFoundError:
+            lim = None
+    if lim and lim != "max":
+        try:
+            mem_bytes = int(lim)
+        except ValueError:
+            pass
+    if mem_bytes:
+        # v1's unlimited sentinel (9223372036854771712) means "no limit";
+        # clamp to the host's memory like the shell helper does.
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemTotal:"):
+                    host_bytes = int(line.split()[1]) * 1024
+                    if mem_bytes > host_bytes:
+                        mem_bytes = host_bytes
+                    break
+    return cpus, mem_bytes
+
+
 def _create_clang_wrapper():
     """Wrap clang++ with the workarounds the Ascend LLVM fork needs.
 
@@ -177,7 +228,17 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
         raise RuntimeError(f"Build script not found: {build_script}")
     # Respect MAX_JOBS when set (the wheel build passes it as a build arg);
     # otherwise fall back to the standalone heuristic tuned for the CI hosts.
-    max_jobs = min(max(1, int(os.getenv("MAX_JOBS") or os.cpu_count() // 8)), 32)
+    # Default parallelism from the effective cgroup quota: ~2.5 GiB per job
+    # (heavy MLIR TUs peak at 3-5 GB), capped by the CPU quota. MAX_JOBS
+    # overrides explicitly.
+    cpus, mem_bytes = _cgroup_limits()
+    default_jobs = cpus
+    if mem_bytes:
+        default_jobs = max(1, min(cpus, mem_bytes // (2500 * 1024 * 1024)))
+    # (v1 unlimited sentinel shows up as the host MemTotal after clamping)
+    max_jobs = min(max(1, int(os.getenv("MAX_JOBS") or default_jobs)), 32)
+    _log(f"cgroup: {cpus} CPUs, mem limit "
+         f"{round(mem_bytes / (1024**3), 1) if mem_bytes else 'unset'} GiB -> -j {max_jobs}")
     build_path = repo_dir / "build"
     if build_path.exists():
         shutil.rmtree(str(build_path))

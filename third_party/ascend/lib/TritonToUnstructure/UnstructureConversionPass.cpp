@@ -401,6 +401,20 @@ LogicalResult tryRewriteUnstructuredLoadStoreFastPath(
     // Keep IntToPtr bases visible through AddPtr so the type converter can
     // materialize the expected memref for the template ABI.
     Value base = srcPtr;
+    // For bool loads, unwrap ptr<i1> -> ptr<i8> bitcasts, same as the StoreOp
+    // branch below. UseAnalysis marks the base operand of the unstructured
+    // access as MetaUse, so a bitcast left here is erased by MetaUseEraser and
+    // the converter can no longer materialize a memref for it. Keeping ptr<i1>
+    // lets the type converter map the source to memref<?xi8>.
+    if (auto bitcastOp = srcPtr.template getDefiningOp<triton::BitcastOp>()) {
+      auto srcPtrTy =
+          dyn_cast<triton::PointerType>(bitcastOp.getSrc().getType());
+      auto dstPtrTy = dyn_cast<triton::PointerType>(bitcastOp.getType());
+      if (srcPtrTy && dstPtrTy && srcPtrTy.getPointeeType().isInteger(1) &&
+          dstPtrTy.getPointeeType().isInteger(8)) {
+        base = bitcastOp.getSrc();
+      }
+    }
     if (auto intToPtrOp = srcPtr.template getDefiningOp<triton::IntToPtrOp>()) {
       auto zeroOffset = rewriter.create<arith::ConstantOp>(
           loc, rewriter.getZeroAttr(intToPtrOp.getSrc().getType()));

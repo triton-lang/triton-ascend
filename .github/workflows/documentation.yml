@@ -186,15 +186,15 @@ jobs:
           echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             --retry-delay 10 -C - \
-            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.tar.gz
           if [ -n "${BISHENG_SHA256}" ]; then
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+            echo "${BISHENG_SHA256}  bisheng.tar.gz" | sha256sum -c -
           else
             echo "Warning: No SHA256 checksum provided, skipping verification"
           fi
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+          mkdir -p /usr/local/bisheng
+          tar xzf bisheng.tar.gz -C /usr/local/bisheng --strip-components=1
+          echo "/usr/local/bisheng/bin" >> $GITHUB_PATH
 
       - name: Build and install triton-ascend
         shell: bash
@@ -210,7 +210,7 @@ jobs:
           TRITON_APPEND_CMAKE_ARGS: "-DTRITON_BUILD_UT=ON"
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          export PATH="/usr/local/bisheng/bin:$PATH"
           npu-smi info
           ccache --zero-stats
           NUM_PROCS=$(( $(nproc) / 3 ))
@@ -237,7 +237,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          export PATH="/usr/local/bisheng/bin:$PATH"
           ${PYTHON} -m pytest -s -v -n 8 --dist=loadfile \
             --import-mode=importlib \
             --override-ini="python_files=triton.*.py" \

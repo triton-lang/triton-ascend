@@ -56,7 +56,7 @@ jobs:
             exit 0
           fi
 
-          # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
+          # The ascendnpu-ir package is arch-specific: aarch64 (a3) and
           # x86_64 (a5) each have their own; select by the container's arch.
           ARCH=$(uname -m)
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
@@ -74,18 +74,18 @@ jobs:
           # networks; -C - resumes from where the previous attempt stopped.
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             --retry-delay 10 -C - \
-            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
+            "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.tar.gz
 
           if [ -n "${BISHENG_SHA256}" ]; then
             echo "Verifying SHA256 checksum..."
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
+            echo "${BISHENG_SHA256}  bisheng.tar.gz" | sha256sum -c -
           else
             echo "Warning: No SHA256 checksum provided, skipping verification"
           fi
 
-          chmod +x bisheng.run
-          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+          mkdir -p /usr/local/bisheng
+          tar xzf bisheng.tar.gz -C /usr/local/bisheng --strip-components=1
+          echo "/usr/local/bisheng/bin" >> $GITHUB_PATH
 
       - name: Build and install triton-ascend
         shell: bash
@@ -102,7 +102,7 @@ jobs:
         run: |
           nproc
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          export PATH="/usr/local/bisheng/bin:$PATH"
           npu-smi info
           if [ -n "${ASCEND_TOOLKIT_HOME}" ] && [ -f "${ASCEND_TOOLKIT_HOME}/cann/version.info" ]; then
             cat "${ASCEND_TOOLKIT_HOME}/cann/version.info"
@@ -136,7 +136,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          export PATH="/usr/local/bisheng/bin:$PATH"
           NUM_PROCS=$(( $(nproc) / 9 ))
           if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
           ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/pytest_ut
@@ -149,7 +149,7 @@ jobs:
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          export PATH="/usr/local/bisheng/bin:$PATH"
           TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
           echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then

@@ -1348,9 +1348,6 @@ class NPUOptions:
             raise ValueError(f"invalid GraphOptimize rule_mask: {error}") from error
         if normalized_rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
             object.__setattr__(self, "rule_mask", normalized_rule_mask)
-        if self.simt_stack_limit is not None:
-            _validate_simt_stack_limit(self.simt_stack_limit)
-
         compile_mode = str(_normalize_compile_mode(self.compile_mode, arch))
         object.__setattr__(self, "compile_mode", compile_mode)
 
@@ -1440,7 +1437,7 @@ def ttir_to_npubin(mod, metadata, opt):
             _compile_option_list += [f"--threads-per-warp={opt.warp_size}"]
             if opt.simt_optimization_mode != 0000000:
                 _compile_option_list += [f"--simt-optimization-mode={opt.simt_optimization_mode}"]
-            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit(opt.simt_stack_limit)}"]
+            _compile_option_list += [f"--simt-stack-limit={get_simt_stack_limit()}"]
             if opt.shared_mem_dynamic_size is not None:
                 _compile_option_list += [f"--shared-mem-dynamic-size={opt.shared_mem_dynamic_size}"]
             if opt.disable_fma:
@@ -1473,20 +1470,10 @@ def ttir_to_npubin(mod, metadata, opt):
         return Path(bin_path).read_bytes()
 
 
-def _validate_simt_stack_limit(stack_limit):
-    if isinstance(stack_limit, bool) or not isinstance(stack_limit, int) or stack_limit <= 0:
-        raise ValueError("simt_stack_limit must be a positive integer")
-    return stack_limit
-
-
-def get_simt_stack_limit(user_stack_limit=None):
+def get_simt_stack_limit():
     # simt_stack_limit resolution precedence:
-    #  1. An explicit Triton compile option.
-    #  2. torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}.
-    #  3. The kernel-time default simt_stack_limit=1152.
-    if user_stack_limit is not None:
-        return _validate_simt_stack_limit(user_stack_limit)
-
+    #  1. torch_npu's acl_default.json "StackSize":{"simt_stack_size":N}.
+    #  2. The kernel-time default simt_stack_limit=1152.
     _simt_stack_limit = 1152
     try:
         import torch_npu

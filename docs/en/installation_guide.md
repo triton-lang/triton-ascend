@@ -100,7 +100,7 @@ If you need to customize the LLVM build process, follow the steps below to compi
     TRITON_BUILD_PROTON=OFF \
     TRITON_WHEEL_NAME="triton_ascend" \
     TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-    python3 setup_ascend.py install
+    python3 setup.py install
     ```
 
   **Table 1** Source‑build environment‑variable reference

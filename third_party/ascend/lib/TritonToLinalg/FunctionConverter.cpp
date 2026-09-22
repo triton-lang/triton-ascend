@@ -22,10 +22,31 @@
 
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/Utils/DebugUtils.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 
 namespace FunctionConverter {
 using namespace mlir;
 using namespace triton;
+
+LogicalResult
+CallOpConverter::matchAndRewrite(triton::CallOp op, OpAdaptor adaptor,
+                                 ConversionPatternRewriter &rewriter) const {
+  SmallVector<Type> resultTypes;
+  if (failed(
+          getTypeConverter()->convertTypes(op.getResultTypes(), resultTypes)))
+    return failure();
+
+  auto caller = op->getParentOfType<FunctionOpInterface>();
+  constexpr unsigned programInfoArgCount =
+      2 * (getMaxEnumValForProgramIDDim() + 1);
+  SmallVector<Value> operands(adaptor.getOperands());
+  // addProgramInfo appends grid sizes and program IDs to every Triton function.
+  llvm::append_range(operands,
+                     caller.getArguments().take_back(programInfoArgCount));
+  rewriter.replaceOpWithNewOp<func::CallOp>(op, op.getCallee(), resultTypes,
+                                            operands);
+  return success();
+}
 
 LogicalResult GetProgramIDConverter::matchAndRewrite(
     triton::GetProgramIdOp op, OpAdaptor adaptor,

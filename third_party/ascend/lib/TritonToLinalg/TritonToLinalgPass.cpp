@@ -945,10 +945,9 @@ void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
     func.getBody().front().addArgument(b.getI32Type(), func.getLoc());
   }
 
-  if (globalKernel) {
-    func->setAttr(globalKernelAttr, b.getStringAttr(""));
-  } else {
-    func->setAttr(globalKernelAttr, b.getStringAttr("local"));
+  if (func.isPublic()) {
+    func->setAttr(globalKernelAttr,
+                  b.getStringAttr(globalKernel ? "" : "local"));
   }
 }
 
@@ -1157,6 +1156,12 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
   auto castType = FunctionType::get(func.getContext(), inputTypes, retTypes);
 
   auto funcFunc = builder.create<func::FuncOp>(func.getLoc(), name, castType);
+  if (auto visibility = func.getSymVisibilityAttr();
+      visibility && visibility.getValue() != "public")
+    funcFunc.setSymVisibilityAttr(visibility);
+  if (auto noinline = func->getAttrOfType<BoolAttr>("noinline");
+      noinline && noinline.getValue())
+    funcFunc->setAttr("no_inline", builder.getUnitAttr());
   funcFunc.setAllArgAttrs(argAttrs);
   funcFunc.setAllResultAttrs(resAttrs);
   auto kernelAttr = func->getAttr(globalKernelAttr);
@@ -1435,6 +1440,8 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   nd2nzFlag = this->enableNd2nzOnVector;
   populateFunctionOpInterfaceTypeConversionPattern<triton::FuncOp>(
       patterns, typeConverter);
+  patterns.add<FunctionConverter::CallOpConverter>(typeConverter,
+                                                   patterns.getContext());
 
   patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
@@ -1862,7 +1869,7 @@ void TritonToLinalgPass::runOnOperation() {
     return !op->hasAttr("UnhandledLoopOp");
   };
 
-  target.addIllegalOp<triton::ScanOp>();
+  target.addIllegalOp<triton::CallOp, triton::ScanOp>();
   target.addIllegalOp<triton::MapElementwiseOp>();
   target.addDynamicallyLegalOp<scf::ForOp>(loopOpLegalFn);
   target.addDynamicallyLegalOp<scf::WhileOp>(loopOpLegalFn);

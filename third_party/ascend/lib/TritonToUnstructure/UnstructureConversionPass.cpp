@@ -58,74 +58,6 @@ static bool isTensorOfPointers(Type type) {
   return tensorType && isa<triton::PointerType>(tensorType.getElementType());
 }
 
-// Loop bounds consume the mask on extracted dimensions. Keep the remaining
-// rectangle on the inner load: selecting `other` afterwards cannot guard reads.
-// Rebuild range comparisons rather than slicing the original mask, since
-// MaskState does not parse arbitrary tensor.extract_slice operations.
-static Value createStructuredLoadMask(const MaskState &state,
-                                      const PtrOffsetInfo &ptrInfo,
-                                      ArrayRef<int64_t> shape, Location loc,
-                                      PatternRewriter &rewriter) {
-  auto isRetainedAxis = [&](size_t axis) {
-    return ptrInfo.getStructured()[axis] == PtrOffsetInfo::AxisInfo::structured;
-  };
-  SmallVector<int64_t> innerShape(shape);
-  for (auto [axis, size] : llvm::enumerate(innerShape))
-    if (!isRetainedAxis(axis))
-      size = 1;
-  auto maskType = RankedTensorType::get(innerShape, rewriter.getI1Type());
-  Value mask;
-  for (size_t axis = 0; axis < shape.size(); ++axis) {
-    if (!isRetainedAxis(axis) ||
-        (isConstantIntValue(state.offsets[axis], 0) &&
-         isConstantIntValue(state.dims[axis], shape[axis])))
-      continue;
-
-    Value lower =
-        getValueOrCreateConstantIndexOp(rewriter, loc, state.offsets[axis]);
-    Value extent =
-        getValueOrCreateConstantIndexOp(rewriter, loc, state.dims[axis]);
-    Value upper = rewriter.create<arith::AddIOp>(loc, lower, extent);
-    Value axisMask;
-    if (shape[axis] == 1) {
-      // A singleton range has no varying axis for MaskState::parseCmp.
-      Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
-      Value above = rewriter.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::sge, zero, lower);
-      Value below = rewriter.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::slt, zero, upper);
-      Value valid = rewriter.create<arith::AndIOp>(loc, above, below);
-      axisMask = rewriter.create<triton::SplatOp>(loc, maskType, valid);
-    } else {
-      auto rangeType =
-          RankedTensorType::get({shape[axis]}, rewriter.getI32Type());
-      Value range =
-          rewriter.create<triton::MakeRangeOp>(loc, rangeType, 0, shape[axis]);
-      auto wideType =
-          RankedTensorType::get({shape[axis]}, rewriter.getI64Type());
-      range = rewriter.create<arith::ExtSIOp>(loc, wideType, range);
-      lower = rewriter.create<arith::IndexCastOp>(loc, rewriter.getI64Type(),
-                                                  lower);
-      upper = rewriter.create<arith::IndexCastOp>(loc, rewriter.getI64Type(),
-                                                  upper);
-      lower = rewriter.create<triton::SplatOp>(loc, wideType, lower);
-      upper = rewriter.create<triton::SplatOp>(loc, wideType, upper);
-      Value above = rewriter.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::sge, range, lower);
-      Value below = rewriter.create<arith::CmpIOp>(
-          loc, arith::CmpIPredicate::slt, range, upper);
-      axisMask = rewriter.create<arith::AndIOp>(loc, above, below);
-      for (size_t dim = 0; dim < shape.size(); ++dim)
-        if (dim != axis)
-          axisMask = rewriter.create<triton::ExpandDimsOp>(loc, axisMask, dim);
-      axisMask = rewriter.create<triton::BroadcastOp>(loc, maskType, axisMask);
-    }
-    mask =
-        mask ? rewriter.create<arith::AndIOp>(loc, mask, axisMask) : axisMask;
-  }
-  return mask;
-}
-
 constexpr int64_t kBitsPerByte = 8;
 
 static triton::PointerType getScalarPointerType(Type type) {
@@ -986,13 +918,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     }
   });
 
-  Value structuredLoadMask;
-  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (mstate && !ptrOffsetInfo.isUnstructuredOrScalarlike())
-      structuredLoadMask = createStructuredLoadMask(*mstate, ptrOffsetInfo,
-                                                    resultShape, loc, rewriter);
-  }
-
   Value iterArg = nullptr;
 
   // Only load case
@@ -1136,8 +1061,14 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
         createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
   }
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (structuredLoadMask)
-      accessedOp.getMaskMutable().assign(structuredLoadMask);
+    // Preserve the mask on retained dimensions, just as stores and atomics do.
+    // BubbleUpOperation exposes the sliced mask for structured lowering.
+    if (mstate && !fullyUnstructured) {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPoint(accessedOp);
+      accessedOp.getMaskMutable().assign(createExtractOp(
+          loc, op.getMask(), rewriter, offsets, sizes, strides));
+    }
   }
 
   accessedOp->setAttr(ConverterUtils::discreteAttrName,

@@ -9,13 +9,14 @@
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // T2U-LABEL: tt.func public @mixed_axis_load_mask(
   // T2U: scf.for
-  // T2U: tt.load %{{[^,]+}}, %{{.*}} {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
+  // T2U: %[[MASK:.*]] = tensor.extract_slice %{{.*}}[%{{.*}}, 0] [1, 32] [1, 1] {DiscreteMemAccess} : tensor<3x32xi1> to tensor<1x32xi1>
+  // T2U: tt.load %{{[^,]+}}, %[[MASK]] {DiscreteMemAccess} : tensor<1x32x!tt.ptr<f32>>
   // T2U: arith.select
   // LOWER-LABEL: func.func @mixed_axis_load_mask(
   // LOWER: scf.for
   // LOWER: %[[BASE:.*]] = memref.reinterpret_cast
   // LOWER: %[[SOURCE:.*]] = memref.subview %[[BASE]]
-  // LOWER: memref.copy %[[SOURCE]], %{{.*}} : memref<1x?xf32,
+  // LOWER: memref.copy %[[SOURCE]], %{{.*}} : memref<?x?xf32,
   // LOWER: return
   tt.func public @mixed_axis_load_mask(%input: !tt.ptr<f32>, %output: !tt.ptr<f32>, %rows: i32, %lower: i32, %upper: i32) {
     %x = tt.make_range {start = 0 : i32, end = 3 : i32} : tensor<3xi32>

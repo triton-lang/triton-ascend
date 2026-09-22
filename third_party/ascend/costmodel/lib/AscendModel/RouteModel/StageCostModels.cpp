@@ -11,6 +11,8 @@
 #include <array>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
+#include <optional>
 #include <system_error>
 
 using namespace mlir;
@@ -44,10 +46,11 @@ static double controlBody(const StageResourceCycles &resources) {
 }
 
 static double serialBody(const StageResourceCycles &resources) {
-  const double execution =
-      resources.scalar + resources.load + resources.store + resources.atomic +
-      resources.compute + resources.predicate + resources.shuffle +
-      resources.dot + controlBody(resources) + resources.spill;
+  const double execution = resources.scalar + resources.load + resources.store +
+                           resources.atomic + resources.compute +
+                           resources.predicate + resources.shuffle +
+                           resources.reduction + resources.dot +
+                           controlBody(resources) + resources.spill;
   // Issue is a shared front-end throughput bound, not an extra instruction
   // stream.  Adding it to execution double-counts every instruction.
   return std::max(execution, resources.issue);
@@ -85,6 +88,292 @@ static double simtUniformStoreCycles(const StageModeProfile &profile) {
   return profile.simtUniformStoreBaseCycles;
 }
 
+static const std::vector<double> *
+getReductionParameters(const ReductionCostProfile &profile, llvm::StringRef key,
+                       size_t expectedSize) {
+  auto found = profile.parameters.find(key);
+  if (found == profile.parameters.end() || found->second.size() != expectedSize)
+    return nullptr;
+  return &found->second;
+}
+
+static std::string reductionRoute(const ReductionWorkload &work) {
+  return work.kind + "_" + work.dataType;
+}
+
+static bool isSupportedReductionRoute(const ReductionWorkload &work) {
+  const llvm::StringRef op(work.kind);
+  const llvm::StringRef dtype(work.dataType);
+  if (op == "sum" || op == "max" || op == "min")
+    return dtype == "f16" || dtype == "bf16" || dtype == "f32" ||
+           dtype == "i32";
+  if (op == "prod")
+    return dtype == "f16" || dtype == "bf16" || dtype == "f32" ||
+           dtype == "i8" || dtype == "i16" || dtype == "i32" || dtype == "i64";
+  if (op == "xor" || op == "or" || op == "and")
+    return dtype == "i8" || dtype == "i16" || dtype == "i32" || dtype == "i64";
+  return false;
+}
+
+static std::string canonicalStandardRoute(const ReductionWorkload &work) {
+  const std::string route = reductionRoute(work);
+  if (work.kind == "min")
+    return "max_" +
+           (work.dataType == "bf16" ? std::string("f16") : work.dataType);
+  if (work.dataType == "bf16" && (work.kind == "sum" || work.kind == "max"))
+    return work.kind + "_f16";
+  return route;
+}
+
+static std::optional<int64_t> checkedProduct(llvm::ArrayRef<int64_t> values) {
+  int64_t result = 1;
+  for (int64_t value : values) {
+    if (value <= 0 || result > std::numeric_limits<int64_t>::max() / value)
+      return std::nullopt;
+    result *= value;
+  }
+  return result;
+}
+
+static std::optional<int64_t> nextPowerOfTwo(int64_t value) {
+  int64_t result = 1;
+  while (result < value) {
+    if (result > std::numeric_limits<int64_t>::max() / 2)
+      return std::nullopt;
+    result *= 2;
+  }
+  return result;
+}
+
+static std::optional<double>
+estimateSimdRank1(const ReductionWorkload &work,
+                  const ReductionCostProfile &profile, int64_t k) {
+  const std::string route = canonicalStandardRoute(work);
+  if (const auto *p =
+          getReductionParameters(profile, "r1_standard_" + route, 3)) {
+    const double q = (*p)[0];
+    return (*p)[1] + (*p)[2] * std::max(0.0, std::ceil(k / q) - 1.0);
+  }
+  const std::string raw = reductionRoute(work);
+  if (const auto *p =
+          getReductionParameters(profile, "r1_piecewise_" + raw, 6)) {
+    if (k < 32) {
+      if (k != 2 && k != 4 && k != 8 && k != 16)
+        return std::nullopt;
+      unsigned index = static_cast<unsigned>(std::log2(k)) - 1;
+      return (*p)[index];
+    }
+    return (*p)[4] + (*p)[5] * static_cast<double>(k);
+  }
+  return std::nullopt;
+}
+
+static std::optional<double>
+estimateSimdRankN(const ReductionWorkload &work,
+                  const ReductionCostProfile &profile, int64_t g, int64_t k) {
+  const std::string route = canonicalStandardRoute(work);
+  if (route == "xor_i64" && k == 2) {
+    if (const auto *p = getReductionParameters(profile, "rn_xor_i64_k2", 2))
+      return (*p)[0] + (*p)[1] * static_cast<double>(g);
+    return std::nullopt;
+  }
+  if (const auto *p =
+          getReductionParameters(profile, "rn_standard_" + route, 5)) {
+    const double h = std::max(0.0, std::ceil(k / (*p)[0]) - 1.0);
+    const double shortK = k >= 2 && k <= 8 ? 1.0 : 0.0;
+    return (*p)[1] + (*p)[2] * g + (*p)[3] * g * h + (*p)[4] * g * shortK;
+  }
+  const std::string raw = reductionRoute(work);
+  if (const auto *p = getReductionParameters(profile, "rn_linear_" + raw, 2)) {
+    const double combines = static_cast<double>(g) * (k - 1);
+    return std::max((*p)[0], (*p)[1] * combines);
+  }
+  return std::nullopt;
+}
+
+static std::string simtRank1Class(const ReductionWorkload &work) {
+  if (work.kind == "prod" &&
+      (work.dataType == "f16" || work.dataType == "bf16"))
+    return "prod16";
+  if (work.dataType == "i64" && work.kind == "prod")
+    return "prod_i64";
+  if (work.dataType == "i64" &&
+      (work.kind == "xor" || work.kind == "or" || work.kind == "and"))
+    return "i64";
+  return "standard";
+}
+
+static std::optional<double>
+rank1WarpFactor(const ReductionCostProfile &profile, llvm::StringRef routeClass,
+                int64_t warps, int64_t b) {
+  const auto *p = getReductionParameters(
+      profile, ("r1_w_" + routeClass + "_" + llvm::Twine(warps)).str(), 12);
+  if (!p || b < 2 || (b & (b - 1)) != 0)
+    return std::nullopt;
+  // The warp-factor table is calibrated for B = 2..4096 (12 entries).
+  // For larger reductions, reuse the largest calibrated factor so the tree
+  // formula extrapolates without an out-of-range fallback.
+  const int64_t clampedB = std::min(b, int64_t(4096));
+  return (*p)[static_cast<size_t>(std::log2(clampedB)) - 1];
+}
+
+static std::optional<double>
+estimateSimtRank1(const ReductionWorkload &work,
+                  const ReductionCostProfile &profile, int64_t warps,
+                  int64_t k) {
+  const auto padded = nextPowerOfTwo(k);
+  if (!padded)
+    return std::nullopt;
+  const int64_t b = *padded;
+  if (b < 2)
+    return std::nullopt;
+  const std::string routeClass = simtRank1Class(work);
+  const auto factor = rank1WarpFactor(profile, routeClass, warps, b);
+  if (!factor)
+    return std::nullopt;
+  const double l = std::log2(static_cast<double>(b));
+  double base = 0.0;
+  if (routeClass == "prod16") {
+    const auto *p = getReductionParameters(profile, "r1_base_prod16", 9);
+    if (!p)
+      return std::nullopt;
+    base = b <= 128 ? (*p)[static_cast<size_t>(l) - 1]
+                    : (*p)[7] + (*p)[8] * (l - 7.0);
+  } else {
+    const std::string baseClass =
+        routeClass == "prod_i64" ? std::string("i64") : routeClass;
+    const auto *p = getReductionParameters(profile, "r1_base_" + baseClass, 4);
+    if (!p)
+      return std::nullopt;
+    base = (*p)[0] + (*p)[1] * l + (*p)[2] * (b >= 64 ? 1.0 : 0.0) +
+           (*p)[3] * std::max(l - 6.0, 0.0);
+  }
+  return base * *factor;
+}
+
+static std::string simtRankNBaseRoute(const ReductionWorkload &work) {
+  if (work.kind == "min")
+    return "max_" +
+           (work.dataType == "bf16" ? std::string("f16") : work.dataType);
+  if (work.kind == "or" || work.kind == "and")
+    return "xor_" + work.dataType;
+  if (work.dataType == "bf16" &&
+      (work.kind == "sum" || work.kind == "max" || work.kind == "prod"))
+    return work.kind + "_f16";
+  if (work.kind == "prod" && work.dataType == "i32")
+    return "prod_f32";
+  return reductionRoute(work);
+}
+
+static std::optional<double>
+estimateSimtRankN(const ReductionWorkload &work,
+                  const ReductionCostProfile &profile, int64_t warps, int64_t g,
+                  int64_t k) {
+  const std::string baseRoute = simtRankNBaseRoute(work);
+  const std::string candidateKey = "rn_candidate_" + baseRoute;
+  if (profile.parameters.count(candidateKey)) {
+    // Q, N0, then coefficients for: 1, G, G*H, P, G*H^2, P^2/64,
+    // G*log2(K), G*sqrt(K), G*K/64, I(K<=128), G*I(K<=128),
+    // G*H/(1+G/16), H, P*I(G<=4), G*K/64*I(G<=4), G^2.
+    const auto *p = getReductionParameters(profile, candidateKey, 18);
+    const auto *scale =
+        getReductionParameters(profile, "rn_alias_" + reductionRoute(work), 1);
+    const auto *warp = getReductionParameters(
+        profile, "rn_w_" + baseRoute + "_" + std::to_string(warps), 1);
+    if (!p || !scale || !warp || (*p)[0] <= 0.0 || (*p)[1] < 0.0 ||
+        (*scale)[0] <= 0.0 || (*warp)[0] <= 0.0)
+      return std::nullopt;
+    const double groups = static_cast<double>(g);
+    const double extent = static_cast<double>(k);
+    const double h = std::max(0.0, std::ceil(extent / (*p)[0]) - 1.0);
+    const double n = groups * extent / 64.0;
+    const double excess = std::max(groups * extent - (*p)[1], 0.0) / 64.0;
+    const double smallK = k <= 128 ? 1.0 : 0.0;
+    const double smallG = g <= 4 ? 1.0 : 0.0;
+    const std::array<double, 16> terms = {1.0,
+                                          groups,
+                                          groups * h,
+                                          excess,
+                                          groups * h * h,
+                                          excess * excess / 64.0,
+                                          groups * std::log2(extent),
+                                          groups * std::sqrt(extent),
+                                          n,
+                                          smallK,
+                                          groups * smallK,
+                                          groups * h / (1.0 + groups / 16.0),
+                                          h,
+                                          excess * smallG,
+                                          n * smallG,
+                                          groups * groups};
+    double base = 0.0;
+    for (size_t i = 0; i < terms.size(); ++i)
+      base += (*p)[i + 2] * terms[i];
+    // A nonpositive extrapolation is not a free reduction. Use the complete
+    // legacy shuffle fallback, rather than clipping it to zero or combining
+    // new multipliers with the previous calibrated polynomial.
+    if (!std::isfinite(base) || base <= 0.0)
+      return std::nullopt;
+    return (*scale)[0] * (*warp)[0] * base;
+  }
+  // Compatibility for profiles that still use the original eight-term model.
+  const auto *p = getReductionParameters(profile, "rn_base_" + baseRoute, 8);
+  const auto *scale =
+      getReductionParameters(profile, "rn_alias_" + reductionRoute(work), 1);
+  const auto *warp = getReductionParameters(
+      profile, "rn_w_" + baseRoute + "_" + std::to_string(warps), 1);
+  if (!p || !scale || !warp)
+    return std::nullopt;
+  const double h = std::max(0.0, std::ceil(k / (*p)[0]) - 1.0);
+  const double excess =
+      std::max(static_cast<double>(g) * k - (*p)[1], 0.0) / 64.0;
+  const double base = (*p)[2] + (*p)[3] * g + (*p)[4] * g * h +
+                      (*p)[5] * excess + (*p)[6] * g * h * h +
+                      (*p)[7] * excess * excess / 64.0;
+  return (*scale)[0] * (*warp)[0] * base;
+}
+
+static std::optional<double>
+estimateTailAxisReductionCycles(const ReductionWorkload &work,
+                                const ReductionCostProfile &profile,
+                                StageMode mode, int64_t numWarps) {
+  if (!work.isFiniteAndNonNegative() || work.axis + 1 != work.shape.size() ||
+      !isSupportedReductionRoute(work))
+    return std::nullopt;
+  const int64_t k = work.shape.back();
+  if (k <= 1)
+    return 0.0;
+  std::optional<double> cycles;
+  if (work.shape.size() == 1) {
+    cycles = mode == StageMode::SIMD
+                 ? estimateSimdRank1(work, profile, k)
+                 : estimateSimtRank1(work, profile, numWarps, k);
+  } else {
+    auto g = checkedProduct(llvm::ArrayRef<int64_t>(work.shape).drop_back());
+    if (!g)
+      return std::nullopt;
+    cycles = mode == StageMode::SIMD
+                 ? estimateSimdRankN(work, profile, *g, k)
+                 : estimateSimtRankN(work, profile, numWarps, *g, k);
+  }
+  if (!cycles || !std::isfinite(*cycles) || *cycles < 0.0)
+    return std::nullopt;
+  return cycles;
+}
+
+static double legacyReductionShuffleCycles(const ReductionWorkload &work,
+                                           double shuffleLanesPerCycle) {
+  if (!work.isFiniteAndNonNegative() || shuffleLanesPerCycle <= 0.0)
+    return 0.0;
+  auto elements = checkedProduct(work.shape);
+  const int64_t extent = work.shape[work.axis];
+  if (!elements || extent <= 1)
+    return 0.0;
+  return work.instances * static_cast<double>(*elements) *
+         std::ceil(std::log2(static_cast<double>(extent))) /
+         shuffleLanesPerCycle;
+}
+
 static StageResourceCycles
 materializeControlFlow(const LogicalStage &stage, StageMode mode,
                        StageResourceCycles resources,
@@ -109,7 +398,7 @@ materializeControlFlow(const LogicalStage &stage, StageMode mode,
 
 static StageResourceCycles mapWorkload(const LogicalStage &stage,
                                        const StageModeProfile &profile,
-                                       StageMode mode) {
+                                       StageMode mode, int64_t numWarps) {
   StageResourceCycles resources;
   const StageWorkload &work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
@@ -215,6 +504,15 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   resources.predicate =
       predicateInstructions / profile.predicateOperationsPerCycle;
   resources.shuffle = work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
+  for (const ReductionWorkload &reduction : work.reductionWorkloads) {
+    auto cycles = estimateTailAxisReductionCycles(
+        reduction, profile.tailAxisReduction, mode, numWarps);
+    if (cycles)
+      resources.reduction += reduction.instances * *cycles;
+    else
+      resources.shuffle +=
+          legacyReductionShuffleCycles(reduction, profile.shuffleLanesPerCycle);
+  }
   resources.scanShuffle =
       work.scanShuffleLaneSteps / profile.shuffleLanesPerCycle;
   if (work.dotFlops > 0.0) {
@@ -239,10 +537,10 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   if (stage.features.hasLoopCarriedDataDependency)
     resources.criticalPath = resources.scalar + resources.compute +
                              resources.predicate + resources.shuffle +
-                             resources.dot;
+                             resources.reduction + resources.dot;
   else if (stage.features.hasReduction)
-    resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle;
+    resources.criticalPath = resources.compute + resources.predicate +
+                             resources.shuffle + resources.reduction;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 
@@ -260,7 +558,7 @@ static double applySuperBlock(const LogicalStage &stage,
       factor, static_cast<double>(profile.superblockUsefulFactorLimit));
   const double latencySensitivePerIteration =
       resources.load + resources.store + resources.atomic + resources.shuffle +
-      resources.divergence;
+      resources.reduction + resources.divergence;
   const double latencySensitive =
       iterations(stage) * latencySensitivePerIteration;
   // SuperBlock creates `factor` independent logical-program groups on one
@@ -337,7 +635,7 @@ static double estimateStage(const LogicalStage &stage,
       return r.setup +
              count *
                  (std::max({r.load, r.store, r.atomic,
-                            r.compute + r.dot + r.shuffle,
+                            r.compute + r.dot + r.shuffle + r.reduction,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
     return serial;
@@ -391,7 +689,7 @@ static double estimateStage(const LogicalStage &stage,
                             r.issue);
   case StageCostModelKind::PrefixScan: {
     const double scanCritical =
-        r.compute + r.predicate +
+        r.compute + r.predicate + r.reduction +
         r.shuffle * (mode == StageMode::SIMD
                          ? profile.simd.prefixScanDependencyFactor
                          : profile.simt.prefixScanDependencyFactor);
@@ -404,7 +702,7 @@ static double estimateStage(const LogicalStage &stage,
   case StageCostModelKind::TinyCubeRoofline:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
       return r.setup + count * (r.scalar + r.predicate + controlBody(r) +
-                                r.shuffle + r.spill +
+                                r.shuffle + r.reduction + r.spill +
                                 std::max({r.load, r.compute + r.dot, r.store,
                                           r.atomic, r.issue}));
     return serial;
@@ -419,7 +717,7 @@ static double estimateStage(const LogicalStage &stage,
       return r.setup +
              count *
                  (std::max({r.load, r.store, r.atomic,
-                            r.compute + r.dot + r.shuffle,
+                            r.compute + r.dot + r.shuffle + r.reduction,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
     return serial;
@@ -518,6 +816,17 @@ bool StageAtomicRate::isValid() const {
          unknownContentionMultiplier >= 1.0;
 }
 
+bool ReductionCostProfile::isValid() const {
+  // An empty profile is a supported compatibility state: every reduction
+  // falls back to the legacy shuffle formula.  Production schema v14 still
+  // requires non-empty calibrated parameters.
+  return llvm::all_of(parameters, [](const auto &entry) {
+    return !entry.second.empty() &&
+           llvm::all_of(entry.second,
+                        [](double value) { return std::isfinite(value); });
+  });
+}
+
 bool StageModeProfile::isValid(StageMode mode) const {
   const std::array<double, 14> common = {setupCycles,
                                          predicateOperationsPerCycle,
@@ -554,7 +863,7 @@ bool StageModeProfile::isValid(StageMode mode) const {
                                std::isfinite(entry.second.factor) &&
                                entry.second.factor > 0.0;
                       }) &&
-         atomicRates.contains("default") &&
+         atomicRates.contains("default") && tailAxisReduction.isValid() &&
          llvm::all_of(atomicRates,
                       [](const auto &entry) { return entry.second.isValid(); });
 }
@@ -648,7 +957,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       StageResourceCycles resources = mapWorkload(
           stage,
           implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
+          implementation.mode, profile.logicalWarpGroupCount);
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;

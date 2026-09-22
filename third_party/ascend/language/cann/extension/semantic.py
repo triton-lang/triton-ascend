@@ -197,13 +197,13 @@ def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.ten
 
 
 def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c: bool, output_shape,
-        _semantic=None) -> tl.tensor:
+        transpose_b: bool = False, _semantic=None) -> tl.tensor:
     # Go through `_ascend_builder` explicitly rather than the unified-builder
     # allow-list (builder.py:setup_unified_builder): `create_dot` collides with
     # upstream `ir.builder.create_dot`, so attaching it to the main builder
     # would shadow the one `tl.dot` uses.
     out = _semantic.builder._ascend_builder.create_dot(a.handle, b.handle, bool(fractal_a), bool(fractal_b),
-                                                       bool(fractal_c))
+                                                       bool(fractal_c), bool(transpose_b))
     # Result carries the cube accumulator dtype: f32 for float inputs, i32 for int8.
     in_ty = a.type.element_ty
     acc_ty = tl.float32 if in_ty.is_floating() else tl.int32

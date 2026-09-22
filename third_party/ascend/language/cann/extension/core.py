@@ -626,7 +626,8 @@ def _dot_operand_is_fractal(name, fmt):
 
 
 @builtin
-def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
+def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", transpose_b=False,
+        _semantic=None) -> tl.tensor:
     """
     Matrix multiply ``D = A * B`` with per-operand layout format.
 
@@ -645,6 +646,11 @@ def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _sema
     :param format_a: layout of A: "fractal" | "nd" | "" (default ND).
     :param format_b: layout of B: "fractal" | "nd" | "" (default ND).
     :param format_c: layout of D: "fractal" | "nd" | "" (default ND).
+    :param transpose_b: compute ``A * B^T``, with B given as [N,K] (or the zN of
+        [N,K]). The cube's L1 -> L0B load transposes, so this is free; producing
+        ``D^T`` and transposing afterwards is not, because fixpipe out of L0C
+        costs one burst per output row and ``D^T`` has as many rows as D has
+        columns.
 
     :return: D = A * B (fractal 4D if ``format_c="fractal"`` else 2D ND).
     :rtype: tensor
@@ -669,12 +675,15 @@ def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _sema
 
     a_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in a.shape], fractal_a, True)
     b_nd = _dot_to_nd_shape([_unwrap_if_constexpr(s) for s in b.shape], fractal_b, False)
-    m, n = a_nd[0], b_nd[1]
+    transpose_b = bool(_unwrap_if_constexpr(transpose_b))
+    # transpose_b takes B as [N,K], so N is its leading dim.
+    m, n = a_nd[0], b_nd[0] if transpose_b else b_nd[1]
     # The result carries the cube accumulator dtype (f32/i32, see semantic.dot);
     # fractal_c is the L0C accumulator fractal, whose block is 16x16.
     output_shape = [n // 16, m // 16, 16, 16] if fractal_c else [m, n]
 
-    return semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, _semantic=_semantic)
+    return semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, transpose_b=transpose_b,
+                        _semantic=_semantic)
 
 
 @builtin

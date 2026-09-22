@@ -558,6 +558,15 @@ def DotOp : TT_Ascend_Op<"dot", [
         float inputs, i32 for int8), and its type is inferred from A, B and
         these flags.
 
+        `transpose_b` computes `A * B^T`: B is then given as [N,K] (or the zN of
+        [N,K]) and the contraction runs over its trailing dim. The cube loads B
+        through L1 -> L0B, which can transpose on the way, so this costs nothing
+        at run time -- unlike transposing the result afterwards. It is the way to
+        keep M on the operand that has the larger extent: with B supplied as the
+        natural layout of a tall [K_rows, N] tile, `A * B` would have to put that
+        tile on the left and emit `D^T`, whose N is then small, and fixpipe out of
+        L0C costs one burst per output row.
+
         zN convention (non-transpose; inner block [16, b], b = 32 / elem_bytes,
         i.e. f16/bf16 -> b=16, f32 -> b=8, int8 -> b=32):
           A [M,K] <-> [K1, M1, 16, b]     (ND = [d1*d2, d0*d3])
@@ -576,7 +585,8 @@ def DotOp : TT_Ascend_Op<"dot", [
         TT_Tensor:$b,
         DefaultValuedAttr<BoolAttr, "false">:$fractal_a,
         DefaultValuedAttr<BoolAttr, "false">:$fractal_b,
-        DefaultValuedAttr<BoolAttr, "false">:$fractal_c
+        DefaultValuedAttr<BoolAttr, "false">:$fractal_c,
+        DefaultValuedAttr<BoolAttr, "false">:$transpose_b
     );
 
     let results = (outs TT_Tensor:$d);

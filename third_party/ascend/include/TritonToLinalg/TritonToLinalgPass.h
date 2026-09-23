@@ -70,20 +70,6 @@ class TritonToLinalgPass : public TritonToLinalgBase<TritonToLinalgPass> {
       LAUNCH_GRID_RANK * 2;
 
 private:
-  // Stage helpers follow the execution order in runOnOperation.
-  LogicalResult initializeTargetOptions();
-  void normalizeMemoryAccessForms(ModuleOp moduleOp);
-  LogicalResult prepareMemoryConversion(ModuleOp moduleOp);
-  LogicalResult convertMemoryAndPointers(ModuleOp moduleOp);
-  LogicalResult convertRemainingComputations(ModuleOp moduleOp);
-  LogicalResult finalizeLoweredModule(ModuleOp moduleOp, bool hasCubeOps,
-                                      bool hasSimtOps);
-
-  LogicalResult finalizePointerCasts(ModuleOp moduleOp);
-  void optimizeInterleavedStores(ModuleOp moduleOp);
-  void addRuntimeWorkspaceArguments(ModuleOp moduleOp);
-  void repairUnknownLocations(ModuleOp moduleOp);
-
   // grid构造 num_programs 3维, program_id 3维
   // remember 'xxxOp' is usually a Pointer, so that we can change target memory
   // without giving a reference argument

@@ -49,7 +49,9 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
@@ -945,10 +947,13 @@ void TritonToLinalgPass::addProgramInfo(triton::FuncOp func,
     func.getBody().front().addArgument(b.getI32Type(), func.getLoc());
   }
 
-  if (globalKernel) {
-    func->setAttr(globalKernelAttr, b.getStringAttr(""));
-  } else {
-    func->setAttr(globalKernelAttr, b.getStringAttr("local"));
+  // Only the public entry kernel carries the global_kernel attribute
+  if (func.getSymVisibility() == "public") {
+    if (globalKernel) {
+      func->setAttr(globalKernelAttr, b.getStringAttr(""));
+    } else {
+      func->setAttr(globalKernelAttr, b.getStringAttr("local"));
+    }
   }
 }
 
@@ -1157,6 +1162,9 @@ void TritonToLinalgPass::convertTTFunc(triton::FuncOp func, const bool existDot,
   auto castType = FunctionType::get(func.getContext(), inputTypes, retTypes);
 
   auto funcFunc = builder.create<func::FuncOp>(func.getLoc(), name, castType);
+  // Preserve the original visibility: private jit-function callees must stay
+  // private.
+  funcFunc.setVisibility(func.getVisibility());
   funcFunc.setAllArgAttrs(argAttrs);
   funcFunc.setAllResultAttrs(resAttrs);
   auto kernelAttr = func->getAttr(globalKernelAttr);
@@ -1230,7 +1238,16 @@ void TritonToLinalgPass::addDynamicLegal(
       });
 
   target.addDynamicallyLegalOp<triton::FuncOp>([&](triton::FuncOp op) {
-    return tritonTypeConverter.isSignatureLegal(op.getFunctionType());
+    // Arguments must be converted (tt.ptr -> memref), but tensor results are
+    // allowed to stay tensors:
+    auto type = op.getFunctionType();
+    for (Type arg : type.getInputs())
+      if (!tritonTypeConverter.isLegal(arg))
+        return false;
+    for (Type res : type.getResults())
+      if (!isa<RankedTensorType>(res) && !tritonTypeConverter.isLegal(res))
+        return false;
+    return true;
   });
 
   // For CustomOp/CustomMacroOp, tt.ptr should be converted to memref.
@@ -1317,6 +1334,176 @@ void TritonToLinalgPass::addDynamicLegal(
 }
 
 namespace {
+
+/// Convert the signature of a `tt.func` like the generic function-interface
+/// pattern, but keep tensor results unconverted. A tensor crossing a call
+/// boundary (noinline callee or a not-yet-inlined `tt.call`) must stay a
+/// tensor: converting it to a memref in the signature would mismatch the
+/// `tt.return` operands inside the callee and the `func.call` results in the
+/// caller. The later bufferization materializes tensor results into the
+/// store destinations.
+class TritonFuncOpSignaturePattern
+    : public OpConversionPattern<triton::FuncOp> {
+public:
+  using OpConversionPattern<triton::FuncOp>::OpConversionPattern;
+
+  LogicalResult
+  matchAndRewrite(triton::FuncOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    const TypeConverter *typeConverter = getTypeConverter();
+    if (!typeConverter)
+      return rewriter.notifyMatchFailure(op, "requires a type converter");
+
+    FunctionType type = op.getFunctionType();
+
+    // Convert the function arguments (tt.ptr -> memref).
+    TypeConverter::SignatureConversion sigConv(type.getNumInputs());
+    if (failed(typeConverter->convertSignatureArgs(type.getInputs(), sigConv)))
+      return failure();
+
+    // Convert the function results, but keep tensor results as tensors.
+    SmallVector<Type> resultTypes;
+    for (Type resultType : type.getResults()) {
+      if (isa<RankedTensorType>(resultType)) {
+        resultTypes.push_back(resultType);
+        continue;
+      }
+      SmallVector<Type> converted;
+      if (failed(typeConverter->convertTypes(resultType, converted)))
+        return failure();
+      resultTypes.append(converted.begin(), converted.end());
+    }
+
+    // Convert the entry block signature and update the function type
+    // in-place, mirroring the upstream generic FunctionOpInterface
+    // conversion. A replacement op would transiently coexist with the old one
+    // and duplicate its symbol name during the driver, tripping SymbolTable
+    // assertions in unrelated passes.
+    if (!op.getBody().empty())
+      rewriter.applySignatureConversion(&op.getBody().front(), sigConv,
+                                        typeConverter);
+    rewriter.modifyOpInPlace(op, [&] {
+      op.setType(FunctionType::get(getContext(), sigConv.getConvertedTypes(),
+                                   resultTypes));
+    });
+    return success();
+  }
+};
+
+/// Convert a `tt.call` into a real device function call.
+class TritonCallOpPattern : public OpConversionPattern<triton::CallOp> {
+public:
+  using OpConversionPattern<triton::CallOp>::OpConversionPattern;
+
+  // Matches TritonToLinalgPass::TRITON_PROGRAM_INFO_ARG_COUNT
+  // (= LAUNCH_GRID_RANK * 2), kept local like the constants in
+  // FunctionConverter's GetProgramIDConverter/GetNumProgramsConverter.
+  static uint32_t constexpr PROGRAM_INFO_ARG_COUNT =
+      (getMaxEnumValForProgramIDDim() + 1) * 2;
+
+  LogicalResult
+  matchAndRewrite(triton::CallOp op, OpAdaptor adaptor,
+                  ConversionPatternRewriter &rewriter) const override {
+    auto caller = op->getParentOfType<triton::FuncOp>();
+    if (!caller)
+      return failure();
+
+    const TypeConverter *typeConverter = getTypeConverter();
+    if (!typeConverter)
+      return rewriter.notifyMatchFailure(op, "requires a type converter");
+
+    // Convert the result types, but keep tensor results as tensors so the call
+    // site matches the callee signature
+    SmallVector<Type> resultTypes;
+    for (Type resultType : op.getResultTypes()) {
+      if (isa<RankedTensorType>(resultType)) {
+        resultTypes.push_back(resultType);
+        continue;
+      }
+      SmallVector<Type> converted;
+      if (failed(typeConverter->convertTypes(resultType, converted)))
+        return failure();
+      resultTypes.append(converted.begin(), converted.end());
+    }
+
+    SmallVector<Value> operands(adaptor.getOperands().begin(),
+                                adaptor.getOperands().end());
+    Block &callerEntry = caller.getBody().front();
+    auto callerArgs = callerEntry.getArguments();
+    if (callerArgs.size() < PROGRAM_INFO_ARG_COUNT)
+      return failure();
+    for (unsigned i = 0; i < PROGRAM_INFO_ARG_COUNT; ++i) {
+      operands.push_back(
+          callerArgs[callerArgs.size() - PROGRAM_INFO_ARG_COUNT + i]);
+    }
+
+    rewriter.replaceOpWithNewOp<func::CallOp>(op, op.getCallee(), resultTypes,
+                                              operands);
+    return success();
+  }
+};
+
+/// Inline private callees into their callers so the downstream ttadapter sees a
+/// single kernel function.
+static void inlinePrivateCallees(ModuleOp moduleOp) {
+  SmallVector<func::CallOp> callOps;
+  moduleOp.walk([&](func::CallOp call) { callOps.push_back(call); });
+
+  SmallVector<triton::FuncOp> inlinedCallees;
+  for (func::CallOp call : callOps) {
+    triton::FuncOp callee = nullptr;
+    for (auto func : moduleOp.getOps<triton::FuncOp>()) {
+      if (func.getName() == call.getCallee()) {
+        callee = func;
+        break;
+      }
+    }
+    if (!callee)
+      continue;
+    if (!callee.getBody().hasOneBlock() ||
+        !isa<triton::ReturnOp>(callee.getBody().front().getTerminator()))
+      continue;
+
+    if (auto noinlineAttr = callee->getAttrOfType<BoolAttr>("noinline");
+        noinlineAttr && noinlineAttr.getValue())
+      call.emitWarning(
+          "Ascend has no device-side calling convention, so the "
+          "noinline attribute is not honored; inlining the callee");
+
+    Block &entry = callee.getBody().front();
+    auto retOp = cast<triton::ReturnOp>(entry.getTerminator());
+    if (retOp.getNumOperands() != call.getNumResults())
+      continue;
+
+    inlinedCallees.push_back(callee);
+    OpBuilder builder(call);
+    IRMapping map;
+    for (auto [arg, operand] :
+         llvm::zip(entry.getArguments(), call.getOperands()))
+      map.map(arg, operand);
+    // Deep-clone the callee body (regions included), except the terminator.
+    for (Operation &op : entry.without_terminator())
+      builder.clone(op, map);
+
+    SmallVector<Value> results;
+    for (Value operand : retOp.getOperands())
+      results.push_back(map.lookupOrDefault(operand));
+    call.replaceAllUsesWith(results);
+    call.erase();
+  }
+
+  // Erase only the callees that were actually inlined above (and are no
+  // longer referenced by any remaining call). Other private functions must
+  // stay: single-function test modules declare their kernel as private.
+  DenseSet<StringRef> referenced;
+  moduleOp.walk(
+      [&](func::CallOp call) { referenced.insert(call.getCallee()); });
+  for (triton::FuncOp func : inlinedCallees) {
+    if (func.getSymVisibility() != "public" &&
+        !referenced.contains(func.getName()))
+      func.erase();
+  }
+}
 
 /// Route the specific `splat(base) -> addptr(scan) -> addptr(constant) ->
 /// store` form through the existing indirect-store operation before use
@@ -1433,9 +1620,10 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
     TypeConverter &typeConverter, RewritePatternSet &patterns,
     unsigned int launchGridRank) {
   nd2nzFlag = this->enableNd2nzOnVector;
-  populateFunctionOpInterfaceTypeConversionPattern<triton::FuncOp>(
-      patterns, typeConverter);
+  patterns.add<TritonFuncOpSignaturePattern>(typeConverter,
+                                             patterns.getContext());
 
+  patterns.add<TritonCallOpPattern>(typeConverter, patterns.getContext());
   patterns.add<triton::MetaUseEraser>(patterns.getContext());
   patterns.add<LoadStoreConverter::StoreConverter>(patterns.getContext());
   patterns.add<LoadStoreConverter::AddPtrConverter>(patterns.getContext());
@@ -1963,7 +2151,9 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
   }
 
-  // 8. Convert function prologue/epilogue.
+  // 8. Inline private callees so the downstream ttadapter sees a single kernel
+  // function, then convert function prologue/epilogue.
+  inlinePrivateCallees(moduleOp);
   moduleOp.walk([&](triton::FuncOp func) {
     this->convertTTFunc(func, existDot, existSIMTOp);
   });
@@ -2279,7 +2469,7 @@ void TritonToLinalgPass::runOnOperation() {
   // Force to add an argument at the beginning of function arguments, which
   // represents stub arg for workspace. Default type is memref<?xi8>
   for (auto func : getOperation().getOps<func::FuncOp>()) {
-    if (!func->hasAttr("global_kernel"))
+    if (!func->hasAttr("global_kernel") || func.isPrivate())
       continue;
 
     auto context = func.getContext();

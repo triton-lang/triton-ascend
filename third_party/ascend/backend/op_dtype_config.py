@@ -725,9 +725,11 @@ OP_DTYPE_RULES = {
         },
         "supported": {
             "a2": [
+                "fp16",
                 "fp32",
             ],
             "a5": [
+                "fp16",
                 "fp32",
             ],
         },

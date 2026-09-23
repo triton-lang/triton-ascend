@@ -91,6 +91,9 @@ inline bool isTensorComputeOpLegacy(Operation *op) {
 }
 
 inline bool isTensorComputeOp(Operation *op) {
+  if(isa<linalg::FillOp>(op)) {
+    return false;
+  }
   auto funcOp = op->getParentOfType<func::FuncOp>();
   if (funcOp) {
     constexpr llvm::StringLiteral legacyFuncNames[]{"pcb10_tc01_kernel"};

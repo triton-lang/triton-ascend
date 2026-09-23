@@ -117,7 +117,7 @@ jobs:
                 "python_version": "3.11"
               },
               {
-                "runs_on": ["linux-amd64-a5-4"],
+                "runs_on": ["linux-amd64-a5-2"],
                 "chip_type": "950",
                 "cann_version": "9.1.0",
                 "os": "ubuntu22.04",

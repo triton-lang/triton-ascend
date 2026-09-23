@@ -404,6 +404,11 @@ convertToTimelineTrace(TraceData::Trace *trace,
         getStringValue(kernelEvent.cycleMetric, CycleMetric::KernelName);
     metadata->scopeName = scopeIdToName;
     metadata->callStack = std::move(callStack);
+    uint64_t devType =
+        getInt64Value(kernelEvent.cycleMetric, CycleMetric::DeviceType);
+    if (static_cast<DeviceType>(devType) == DeviceType::ASCEND)
+      // Ascend AICore system counter runs at 50MHz.
+      metadata->cycleCounterFreqMhz = 50.0;
     if (timeShiftCost > 0)
       timeShift(timeShiftCost, parserResult);
     results.emplace_back(parserResult, metadata);

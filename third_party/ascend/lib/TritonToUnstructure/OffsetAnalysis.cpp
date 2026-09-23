@@ -652,6 +652,13 @@ void parseTritonOp(Operation *tritonOp, const Location &loc,
     parseAdvance(advanceOp, loc, rewriter, offsetMap);
   } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(tritonOp)) {
     parseIntToPtr(intToPtrOp, loc, rewriter, offsetMap);
+  } else if (auto callOp = dyn_cast<triton::CallOp>(tritonOp)) {
+    // Each returned scalar pointer is a complete runtime address, including
+    // any displacement computed by the callee. Use it as a fresh base.
+    for (Value result : callOp.getResults()) {
+      if (isScalarPointer(result))
+        recordOpaqueScalarPointer(result, offsetMap);
+    }
   }
 }
 

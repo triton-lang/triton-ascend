@@ -548,18 +548,9 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
   //
   if (isa<triton::PointerType>(operand.getType())) {
     // Just consider two state: ptr<scalar> and ptr<tensor<scalar>>
-    // AddPtr and bitcast are structural address expressions. Parse them from
-    // their original operands even when the conversion driver has not created
-    // a remapping for the current result yet.
-    Operation *definingOp = operand.getDefiningOp();
-    if (auto addPtrOp = dyn_cast_or_null<triton::AddPtrOp>(definingOp))
-      return parseAddPtr(addPtrOp, data, loc, rewriter, known);
-    if (auto bitcastOp = dyn_cast_or_null<triton::BitcastOp>(definingOp))
-      return parseBitcast(bitcastOp, data, loc, rewriter, known);
-
     Value remappedPtr = rewriter.getRemappedValue(operand);
     if (!remappedPtr) {
-      if (definingOp)
+      if (Operation *definingOp = operand.getDefiningOp())
         return definingOp->emitError("scalar pointer has no converted value");
       emitError(loc) << "scalar pointer block argument has no converted value: "
                      << operand;
@@ -569,18 +560,21 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
     // UCC from a converted memref.  Consume that memref as the transport
     // source instead of asking the driver to materialize the pointer back.
     remappedPtr = unwrapScalarPointerMemRefCarrier(remappedPtr);
-    if (definingOp) {
-      if (auto makeTensorPtrOp =
-              dyn_cast<triton::MakeTensorPtrOp>(definingOp)) {
+    if (auto op = operand.getDefiningOp()) {
+      if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(op)) {
+        return parseAddPtr(addPtrOp, data, loc, rewriter, known);
+      } else if (auto bitcastOp = dyn_cast<triton::BitcastOp>(op)) {
+        return parseBitcast(bitcastOp, data, loc, rewriter, known);
+      } else if (auto makeTensorPtrOp = dyn_cast<triton::MakeTensorPtrOp>(op)) {
         return parseTensorPtr(makeTensorPtrOp, data, loc, rewriter, known);
-      } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(definingOp)) {
+      } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(op)) {
         // To support
         // ptr_0 = tl.advance(ptr)
         // ptr_1 = tl.advance(ptr_0)
         return parseTensorPtr(advanceOp, data, loc, rewriter, known);
-      } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(definingOp)) {
+      } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(op)) {
         if (!isa<BaseMemRefType>(remappedPtr.getType())) {
-          return definingOp->emitError(
+          return op->emitError(
               "int_to_ptr did not convert to a memref carrier");
         }
         data.setSource(remappedPtr);
@@ -592,11 +586,11 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
         data.getOffsetsRef().push_back(rewriter.getIndexAttr(0));
         data.getSizesRef().push_back(rewriter.getIndexAttr(1));
         data.getStridesRef().push_back(rewriter.getIndexAttr(1));
-      } else if (isDistributedTypeCustomOp(definingOp)) {
+      } else if (isDistributedTypeCustomOp(op)) {
         data.setSource(remappedPtr);
-      } else if (isScalarPointerTransport(definingOp)) {
+      } else if (isScalarPointerTransport(op)) {
         if (!isa<BaseMemRefType>(remappedPtr.getType())) {
-          return definingOp->emitError(
+          return op->emitError(
               "scalar pointer transport did not convert to a memref");
         }
         data.setSource(remappedPtr);
@@ -608,11 +602,10 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
         data.getSizesRef().push_back(rewriter.getIndexAttr(1));
         data.getStridesRef().push_back(rewriter.getIndexAttr(1));
       } else {
-        return definingOp->emitError()
-               << "unsupported scalar pointer producer '"
-               << definingOp->getName() << "' with original type "
-               << operand.getType() << " and converted type "
-               << remappedPtr.getType();
+        return op->emitError()
+               << "unsupported scalar pointer producer '" << op->getName()
+               << "' with original type " << operand.getType()
+               << " and converted type " << remappedPtr.getType();
       }
     } else {
       data.setSource(remappedPtr);
@@ -928,11 +921,29 @@ LogicalResult BlockDataParser::parseBitcast(
     resElemPointeeTy =
         dyn_cast<triton::PointerType>(resElemTy).getPointeeType();
   } else {
-    // Pointer bitcasts are part of the address description. Keep the parsed
-    // source/offset/stride facts and change only the element type represented
-    // by the materialized memref. This structural rule replaces the old
-    // use-role-dependent choice between parsing and remapping the operation.
-    resElemPointeeTy = cast<triton::PointerType>(resType).getPointeeType();
+    auto srcPointeeType =
+        cast<triton::PointerType>(op.getSrc().getType()).getPointeeType();
+    auto resPointeeType = cast<triton::PointerType>(resType).getPointeeType();
+
+    // Handling special case
+    // If Op is MetaUse or src is i1 block argument and dst is i8,
+    // it should be converted to UnrealizedConversionCast
+    if (op->hasAttr("MetaUse") ||
+        (isa<BlockArgument>(op.getSrc()) &&
+         srcPointeeType == rewriter.getIntegerType(1) &&
+         resPointeeType == rewriter.getIntegerType(8))) {
+      resElemPointeeTy = resPointeeType;
+    } else {
+      auto remappedValue = rewriter.getRemappedValue(op);
+      if (!remappedValue)
+        return op.emitOpError("bitcast result has no converted value");
+      data.setSource(remappedValue);
+      LLVM_DEBUG({
+        llvm::dbgs() << "Remapping bitcastOp:\n";
+        llvm::dbgs() << op << "\nto \n";
+        llvm::dbgs() << remappedValue << "\n";
+      });
+    }
   }
   data.setResElemTy(resElemPointeeTy);
   return success();

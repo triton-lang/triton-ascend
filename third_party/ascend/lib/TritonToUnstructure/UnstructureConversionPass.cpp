@@ -551,6 +551,49 @@ bool UnstructuredMemAccessConverter<triton::StoreOp>::checkUnstructureAnnotated(
   });
 }
 
+// A null result denotes a predicate already enforced by the generated loops.
+// Keep this limited to conjunctions and broadcast upper bounds. In particular,
+// do not remove scalar gates or predicates with nonzero/unknown loop starts.
+static Value getResidualLoadMask(Value mask, ArrayRef<bool> boundedLoopAxes,
+                                 PatternRewriter &rewriter) {
+  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
+    Value lhs = getResidualLoadMask(andOp.getLhs(), boundedLoopAxes, rewriter);
+    Value rhs = getResidualLoadMask(andOp.getRhs(), boundedLoopAxes, rewriter);
+    if (!lhs)
+      return rhs;
+    if (!rhs)
+      return lhs;
+    if (lhs == andOp.getLhs() && rhs == andOp.getRhs())
+      return mask;
+    return rewriter.create<arith::AndIOp>(andOp.getLoc(), lhs, rhs);
+  }
+
+  auto broadcast = mask.getDefiningOp<triton::BroadcastOp>();
+  if (!broadcast)
+    return mask;
+  auto sourceType = cast<RankedTensorType>(broadcast.getSrc().getType());
+  if (sourceType.getShape().size() != boundedLoopAxes.size())
+    return mask;
+  bool hasLoopAxis = false;
+  for (auto [axis, size] : llvm::enumerate(sourceType.getShape())) {
+    if (size == 1)
+      continue;
+    if (!boundedLoopAxes[axis])
+      return mask;
+    hasLoopAxis = true;
+  }
+  if (!hasLoopAxis)
+    return mask;
+
+  Value predicate = broadcast.getSrc();
+  while (auto expand = predicate.getDefiningOp<triton::ExpandDimsOp>())
+    predicate = expand.getSrc();
+  auto cmp = predicate.getDefiningOp<arith::CmpIOp>();
+  if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::slt)
+    return mask;
+  return {};
+}
+
 template <typename MemAccOpTy>
 Value UnstructuredMemAccessConverter<MemAccOpTy>::createExtractOp(
     Location loc, Value value, PatternRewriter &rewriter,
@@ -964,6 +1007,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   SmallVector<OpFoldResult> sizes;
   SmallVector<OpFoldResult> strides;
   SmallVector<int64_t> extractedShape;
+  SmallVector<bool> boundedLoopAxes(resultShape.size(), false);
 
   for (size_t i = 0; i < resultShape.size(); i++) {
     auto size = resultShape[i];
@@ -1003,6 +1047,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
         maskDim = rewriter.create<arith::AddIOp>(loc, maskOffset, maskDim);
         maskDim = rewriter.create<arith::MinSIOp>(loc, maskDim, sizeVal);
         loopUpper = maskDim;
+        // With a zero mask offset, [0, loopUpper) is contained in the
+        // analyzed interval. Do not infer this for a clipped negative start:
+        // clamping the start can otherwise shift a nonempty interval.
+        boundedLoopAxes[i] = mstate->isMask() &&
+                             mstate->dims.size() == resultShape.size() &&
+                             isConstantIntValue(mstate->offsets[i], 0);
       }
 
       if (isLoadLike) {
@@ -1090,6 +1140,19 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   } else {
     accessedOp =
         createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
+  }
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    // Preserve the mask on retained dimensions, just as stores and atomics do.
+    // BubbleUpOperation exposes the sliced mask for structured lowering.
+    if (mstate && !fullyUnstructured) {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPoint(accessedOp);
+      Value residualMask =
+          getResidualLoadMask(op.getMask(), boundedLoopAxes, rewriter);
+      if (residualMask)
+        accessedOp.getMaskMutable().assign(createExtractOp(
+            loc, residualMask, rewriter, offsets, sizes, strides));
+    }
   }
 
   accessedOp->setAttr(ConverterUtils::discreteAttrName,

@@ -1,4 +1,4 @@
-// RUN: triton-opt --triton-to-linalg --split-input-file %s | FileCheck %s
+// RUN: triton-opt --triton-to-linalg="named-ops=true" --split-input-file %s | FileCheck %s
 
 // Address-only tensor computations lose their last uses when memory
 // operations are lowered. The intermediate cleanup must remove them before
@@ -36,11 +36,19 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // -----
 
 // A producer shared by the address and data paths must remain live after the
-// address use disappears and be lowered normally in the numerical stage.
+// address use disappears. In named-ops mode the range becomes a generic while
+// tensor additions stay as arith.addi. Check that the shared offsets still
+// contribute to the value written to the destination.
 // CHECK-LABEL: func.func @shared_address_and_data
-// CHECK: memref.copy
-// CHECK: linalg.generic
-// CHECK: bufferization.materialize_in_destination
+// CHECK: %[[ONE:.*]] = arith.constant 1 : i32
+// CHECK: %[[ONES:.*]] = linalg.fill ins(%[[ONE]] : i32)
+// CHECK: %[[RANGE:.*]] = linalg.generic
+// CHECK-SAME: tt.from_make_range
+// CHECK: %[[OFFSETS:.*]] = arith.addi %[[RANGE]], %[[ONES]] : tensor<8xi32>
+// CHECK: memref.copy %{{.*}}, %[[BUFFER:.*]] :
+// CHECK: %[[LOADED:.*]] = bufferization.to_tensor %[[BUFFER]]
+// CHECK: %[[VALUE:.*]] = arith.addi %[[LOADED]], %[[OFFSETS]] : tensor<8xi32>
+// CHECK: bufferization.materialize_in_destination %[[VALUE]] in writable
 // CHECK-NOT: tt.make_range
 // CHECK-NOT: tt.addptr
 

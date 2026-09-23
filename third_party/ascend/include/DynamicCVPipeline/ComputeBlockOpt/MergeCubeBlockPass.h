@@ -79,6 +79,11 @@ private:
                     const MemoryDependenceGraph &memGraph,
                     ComputeBlockIdManager &bm);
 
+  // Detect a downstream chain starting from `node` of the shape
+  //   cube -> vector -> cube
+  // where the trailing cube block has no vector successor.
+  bool hasDeadEndDownstreamCube(BlockNode *node, BlockDependencyGraph &graph);
+
   // Return the subset of `blocks` whose type (cube/vector) differs from
   // `currentNode`'s. Returned as a DenseSet so callers can do O(N) set
   // intersection directly.

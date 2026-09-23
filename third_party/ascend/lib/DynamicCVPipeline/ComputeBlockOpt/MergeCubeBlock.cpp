@@ -50,7 +50,6 @@ static const llvm::DenseSet<llvm::StringRef> kDisableMergeCubeKernel = {
     "kernel_sdpa_bwd_q",
     "_sdpa_infer_kernel",
     "pcb06_tc02_c2v2v2c_chain",
-    "flex_attention_backward_dq_kernel",
     "parallel_deltaformer_bwd_kernel_qk",
     "chunk_kda_bwd_kernel_intra",
 };
@@ -253,6 +252,16 @@ bool MergeCubeBlockPass::canMergeBlocks(BlockNode *target, BlockNode *source,
 
   // Step 3: cube blocks at the same depth (with matching successor depths).
   if (hasSameDepth(target, source, graph)) {
+    // Step 4: refuse to merge when both candidates sit on a chain of
+    // shape  cube -> vector -> cube  whose terminal cube has no vector
+    // successor.
+    if (hasDeadEndDownstreamCube(target, graph) &&
+        hasDeadEndDownstreamCube(source, graph)) {
+      LDBG("Blocks " << target->blockId << " and " << source->blockId
+                     << " cannot merge: dead-end downstream cube detected\n");
+      return false;
+    }
+
     LDBG("Blocks " << target->blockId << " and " << source->blockId
                    << " can merge: cube blocks have same depth\n");
     return true;
@@ -295,6 +304,37 @@ bool MergeCubeBlockPass::hasSameDepth(BlockNode *node1, BlockNode *node2,
   }
 
   return maxSuccDepth1 == maxSuccDepth2;
+}
+
+bool MergeCubeBlockPass::hasDeadEndDownstreamCube(BlockNode *node,
+                                                  BlockDependencyGraph &graph) {
+  if (!node || !node->isCube)
+    return false;
+
+  // Walk one cross-core hop (cube -> vector), then another (vector ->
+  // cube). If any cube reached this way has no vector successor, the
+  // path degenerates into a cube-only tail and merging the originating
+  // cube pair would erase the required vector hop.
+  auto cubeSuccs = graph.getSuccessors(node);
+  for (BlockNode *v1 : cubeSuccs) {
+    if (!v1 || v1->isCube)
+      continue;
+    auto vectorSuccs = graph.getSuccessors(v1);
+    for (BlockNode *cNext : vectorSuccs) {
+      if (!cNext || !cNext->isCube)
+        continue;
+      bool hasVectorSucc = false;
+      for (BlockNode *cNextSucc : graph.getSuccessors(cNext)) {
+        if (cNextSucc && !cNextSucc->isCube) {
+          hasVectorSucc = true;
+          break;
+        }
+      }
+      if (!hasVectorSucc)
+        return true;
+    }
+  }
+  return false;
 }
 
 llvm::DenseSet<BlockNode *> MergeCubeBlockPass::getBlocksOfDifferentType(

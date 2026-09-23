@@ -2256,21 +2256,26 @@ def atan2(arg0, arg1, _semantic=None):
                        f"Expected dtype fp16/fp32/bf16, but got {core.constexpr(arg0.dtype)}", _semantic=_semantic)
 
     half_pi: core.constexpr = 0.5 * pi
-    atan_input = _semantic.truediv(arg0.to(core.dtype("fp32"), _semantic=_semantic),
-                                   arg1.to(core.dtype("fp32"), _semantic=_semantic))
+    arg0_fp32 = arg0.to(core.dtype("fp32"), _semantic=_semantic)
+    arg1_fp32 = arg1.to(core.dtype("fp32"), _semantic=_semantic)
+    atan_input = _semantic.truediv(arg0_fp32, arg1_fp32)
 
-    base = _semantic.where(_semantic.equal(arg1, 0), 0.0, atan(atan_input, _semantic=_semantic))
-    base = _semantic.where(_semantic.logical_and(_semantic.equal(arg1, 0), _semantic.greater_than(arg0, 0)), half_pi,
-                           base)
-    base = _semantic.where(_semantic.logical_and(_semantic.equal(arg1, 0), _semantic.less_than(arg0, 0)), -half_pi,
-                           base)
+    # Ordering comparisons cannot tell -0.0 from +0.0, so the sign bit decides
+    # the quadrant of a zero operand: atan2(-0.0, -1.0) is -pi, not +pi.
+    y_negative = signbit(arg0_fp32, _semantic=_semantic)
+    x_is_zero = _semantic.equal(arg1_fp32, 0)
+    y_is_zero = _semantic.equal(arg0_fp32, 0)
+    x_is_negative_zero = _semantic.logical_and(x_is_zero, signbit(arg1_fp32, _semantic=_semantic))
 
-    add_pi = _semantic.where(_semantic.logical_and(_semantic.less_than(arg1, 0), _semantic.greater_equal(arg0, 0)), pi,
-                             0.0)
-    sub_pi = _semantic.where(_semantic.logical_and(_semantic.less_than(arg1, 0), _semantic.less_than(arg0, 0)), -pi,
-                             0.0)
+    # y / x is not finite at x == 0, so those quadrants are selected directly:
+    # +-pi / 2 for a non-zero y, and +-0.0 (or +-pi when x == -0.0) for y == 0.
+    zero_axis = _semantic.where(y_is_zero, _semantic.where(x_is_negative_zero, pi, 0.0), half_pi)
+    zero_axis = _semantic.where(y_negative, _semantic.mul(zero_axis, -1.0, True), zero_axis)
+    base = _semantic.where(x_is_zero, zero_axis, atan(atan_input, _semantic=_semantic))
 
-    ret = _semantic.add(_semantic.add(base, add_pi, True), sub_pi, True)
+    # x < 0 rotates the result by +-pi, with the sign taken from y.
+    rotated = _semantic.where(y_negative, _semantic.sub(base, pi, True), _semantic.add(base, pi, True))
+    ret = _semantic.where(_semantic.less_than(arg1_fp32, 0), rotated, base)
     return ret.to(arg1.dtype, _semantic=_semantic)
 
 

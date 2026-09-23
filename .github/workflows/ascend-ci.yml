@@ -19,9 +19,9 @@ on:
       - 'Makefile'
       - 'safe_compile.cmake'
       - 'version.txt'
-      - '.github/workflows/ci.yml'
+      - '.github/workflows/ascend-ci.yml'
       - '.github/workflows/integration-tests-ascend.yml'
-      - '.github/workflows/runner-preparation.yml'
+      - '.github/workflows/ascend-runner-preparation.yml'
   merge_group:
     branches: [main, 'release/**', '**-dev']
     types: [checks_requested]
@@ -36,7 +36,7 @@ permissions: read-all
 jobs:
 
   runner-preparation:
-    uses: ./.github/workflows/runner-preparation.yml
+    uses: ./.github/workflows/ascend-runner-preparation.yml
 
   integration-tests-ascend:
     needs: runner-preparation

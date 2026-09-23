@@ -1728,6 +1728,22 @@ void TritonToLinalgPass::runOnOperation() {
   // with them it must be tagged mix mode, otherwise the cube tile-and-slice
   // fails (cbuf overflow).
   bool existDot = false;
+  moduleOp.walk([&](hivm::CustomOp customOp) {
+    if (customOp.getCoreType() == hivm::TCoreType::CUBE_AND_VECTOR ||
+        customOp.getCoreType() == hivm::TCoreType::CUBE) {
+      existDot = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  moduleOp.walk([&](hivm::CustomMacroOp customMacroOp) {
+    if (customMacroOp.getCoreType() == hivm::TCoreType::CUBE_AND_VECTOR ||
+        customMacroOp.getCoreType() == hivm::TCoreType::CUBE) {
+      existDot = true;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
   moduleOp.walk([&](Operation *op) {
     if (isa<triton::DotOp, triton::DotScaledOp, triton::ascend::DotOp,
             hfusion::Conv1DOp, hfusion::Conv2DOp>(op)) {

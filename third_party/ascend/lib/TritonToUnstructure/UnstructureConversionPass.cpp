@@ -1060,16 +1060,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     accessedOp =
         createMemAccOp(op, ptrToAccess, loc, rewriter, offsets, sizes, strides);
   }
-  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    // Preserve the mask on retained dimensions, just as stores and atomics do.
-    // BubbleUpOperation exposes the sliced mask for structured lowering.
-    if (mstate && !fullyUnstructured) {
-      OpBuilder::InsertionGuard guard(rewriter);
-      rewriter.setInsertionPoint(accessedOp);
-      accessedOp.getMaskMutable().assign(createExtractOp(
-          loc, op.getMask(), rewriter, offsets, sizes, strides));
-    }
-  }
 
   accessedOp->setAttr(ConverterUtils::discreteAttrName,
                       UnitAttr::get(rewriter.getContext()));

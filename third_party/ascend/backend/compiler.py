@@ -321,7 +321,7 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
-def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
+def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = str(mod)
@@ -1598,7 +1598,7 @@ class AscendBackend(BaseBackend):
             if options.is_pure_simt:
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options, named_ops=True)
             # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
             stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
             stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)

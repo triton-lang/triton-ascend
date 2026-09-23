@@ -1,4 +1,10 @@
 // RUN: triton-opt -allow-unregistered-dialect --triton-to-linalg="named-ops=True" --split-input-file %s | FileCheck %s
+// RUN: triton-opt --triton-to-unstructure --triton-to-linalg="named-ops=True" %s | FileCheck %s
+// RUN: sed 's/Ascend910B2/Ascend950PR_9579/' %s | triton-opt --triton-to-unstructure='compile-on-910-95=true' --triton-to-linalg='named-ops=true compile-on-910-95=true' | FileCheck %s
+
+// Unstructured lowering makes the final store an indirect-memory consumer
+// of the shared mask. The two loads and atomic must still use its dynamic
+// active extent, even though that consumer also needs the tensor value.
 
 module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
   tt.func public @moe_align_block_size_stage4(%arg0: !tt.ptr<i32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<i32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<i32> {tt.divisibility = 16 : i32} , %arg3: !tt.ptr<i32> {tt.divisibility = 16 : i32} , %arg4: !tt.ptr<i32> {tt.divisibility = 16 : i32} , %arg5: i32) attributes {noinline = false} {

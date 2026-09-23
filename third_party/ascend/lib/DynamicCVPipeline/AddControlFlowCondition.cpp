@@ -135,6 +135,10 @@ void AddControlFlowConditionPass::runOnOperation() {
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
+  // Step7: Wrap ssbuffer.if with unique first-level ssbuffer.splitted_if
+  // cond (for only). Inner split if then is spliced in; else ++ counter.
+  pm.addPass(createWrapSplittedIfPass(&info));
+
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");
     if (!CVPipeline::hasFallbackAttr(module)) {

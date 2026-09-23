@@ -132,6 +132,13 @@ public:
 
 std::unique_ptr<OperationPass<ModuleOp>> createAddControlFlowConditionPass();
 
+// After UpdateLoopIterTimes: unique first-level ssbuffer.splitted_if
+// (scf.for only). Wrap ssbuffer.if with a new outer splitted_if; splice the
+// inner then into ssbuffer.if (replace %if#N with then yields). Split cond
+// is hoisted; ssbuf cond is moved into the wrapper.
+std::unique_ptr<OperationPass<ModuleOp>>
+createWrapSplittedIfPass(ControlFlowConditionInfo *info);
+
 void registerAddControlFlowConditionPasses();
 } // namespace triton
 } // namespace mlir

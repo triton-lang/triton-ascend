@@ -86,15 +86,16 @@ jobs:
       - name: Restore npuir payload from local cache
         id: npuir-cache
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
-        env:
-          NPUIR_CACHE_KEY: ${{ matrix.config.arch }}-npuir-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt') }}
         shell: bash
         run: |
           set -eu
-          # The shared-volume PVC (/root/.cache) persists across runner pods;
-          # cache the payload there (keyed by the npuir pin) to skip the slow
-          # artifact download on subsequent runs.
-          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_CACHE_KEY}"
+          # The payload is the BishengIR compiler built from the AscendNPU-IR
+          # submodule; key the cache on that submodule's pinned gitlink SHA so
+          # it invalidates only when the payload actually changes (not on every
+          # commit). Cached on the shared-volume PVC (/root/.cache).
+          NPUIR_SHA=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print $3}')
+          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"
+          echo "cache_dir=${CACHE_DIR}" >> "$GITHUB_OUTPUT"
           if [ -x "${CACHE_DIR}/bin/bishengir-compile" ]; then
             echo "npuir payload cache hit: ${CACHE_DIR}"
             rm -rf .npuir-payload
@@ -104,7 +105,7 @@ jobs:
             chmod -R a+x .npuir-payload/bin
             echo "cache_hit=true" >> "$GITHUB_OUTPUT"
           else
-            echo "npuir payload cache miss (key=${NPUIR_CACHE_KEY})"
+            echo "npuir payload cache miss (npuir sha=${NPUIR_SHA})"
             echo "cache_hit=false" >> "$GITHUB_OUTPUT"
           fi
 
@@ -127,8 +128,6 @@ jobs:
       - name: Prepare npuir payload
         id: prepare-payload
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
-        env:
-          NPUIR_CACHE_KEY: ${{ matrix.config.arch }}-npuir-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt') }}
         shell: bash
         run: |
           set -eu
@@ -159,13 +158,17 @@ jobs:
           # zips without setUnixMode) and action-download-artifact extracts
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
-          # Save to the shared-volume PVC so the next run skips the download.
-          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_CACHE_KEY}"
+          # Seed the shared-volume PVC cache atomically (write temp, then mv)
+          # so the next run skips the slow download and concurrent writers
+          # (same key, identical content) never expose a half-written dir.
+          CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
+          rm -rf "${CACHE_DIR}.tmp"
+          mkdir -p "${CACHE_DIR}.tmp"
+          cp -a .npuir-payload/bin "${CACHE_DIR}.tmp/"
+          cp -a .npuir-payload/lib "${CACHE_DIR}.tmp/"
+          chmod -R a+x "${CACHE_DIR}.tmp/bin"
           rm -rf "${CACHE_DIR}"
-          mkdir -p "${CACHE_DIR}"
-          cp -a .npuir-payload/bin "${CACHE_DIR}/"
-          cp -a .npuir-payload/lib "${CACHE_DIR}/"
-          chmod -R a+x "${CACHE_DIR}/bin"
+          mv "${CACHE_DIR}.tmp" "${CACHE_DIR}"
           echo "Saved npuir payload to local cache ${CACHE_DIR}"
           ls -la .npuir-payload/bin
           echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"

@@ -2,6 +2,8 @@
 
 #include "AscendModel/RouteModel/StageCostModels.h"
 
+#include "mlir/IR/BuiltinTypes.h"
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -308,6 +310,131 @@ static double applySuperBlock(const LogicalStage &stage,
          persistentStatePressure;
 }
 
+//===---------------------------------------------------------------------===//
+// Histogram (tt.histogram) calibrated model
+//===---------------------------------------------------------------------===//
+// Provenance: device-side microbenchmark sweep on dav-c310 (950PR), 609
+// cases, dual-binary A/B (dhistv2 template vs SIMT-only baseline), per-path
+// least squares with a 20% pre-registration holdout.  Holdout median APE
+// <= 3.4% per path; dhistv2-vs-SIMT route-decision agreement 98.4%.  See
+// profiles/microbench/data_provider/camodel/histogram_costmodel_notes.md.
+//
+// The lowering template (SIMTHistogram1D.cpp) dispatches between a dhistv2
+// SIMD fast path and a SIMT atomicAdd fallback.  The formulas mirror that
+// dispatch, including the dhistv2SegmentEligible gate: when the gate fails
+// the vector scope itself queues the SIMT template, so the SIMT formula is
+// the correct estimate for a SIMD-mode Stage as well.  Unmasked i32/u32
+// calls with constant bins <= 256 additionally route through the small-bins
+// library entries (see the small-bins branch below).  All coefficients are
+// AIV system cycles per histogram call.
+static double estimateHistogramCycles(int64_t inputElements, int64_t numBins,
+                                      unsigned widthBytes, StageMode mode,
+                                      bool unmasked) {
+  const double n = static_cast<double>(inputElements);
+  const double chunks = std::ceil(n / 256.0);
+  const int64_t segments = (numBins + 255) / 256;
+  const bool dhistEligible = widthBytes <= 4 && [&] {
+    if (widthBytes == 1)
+      return true;
+    const int64_t maxSegments = widthBytes == 2 ? 16 : 8;
+    if (segments > maxSegments)
+      return false;
+    if (segments <= 4)
+      return true;
+    return (inputElements >> 8) >= 2 * segments;
+  }();
+  if (mode == StageMode::SIMT || !dhistEligible) {
+    // SIMT atomicAdd fallback: C = intercept + scan*n + count*n_counted.
+    // n_counted (elements whose value lands inside the bin range) is data
+    // dependent and statically unknown; charge the worst case n_counted = n
+    // so the SIMT estimate is an upper bound, mirroring the atomic-contention
+    // policy of StageAtomicRate.  i64 inputs were not calibrated; the i32
+    // rate is the proxy.
+    switch (widthBytes) {
+    case 1:
+      return 215.3 + (0.27 + 0.64) * n;
+    case 2:
+      return 164.2 + (0.35 + 0.54) * n;
+    default:
+      return 197.8 + (0.28 + 0.65) * n;
+    }
+  }
+  const double segs = static_cast<double>(segments);
+  const double tail = (inputElements % 256) != 0 ? 1.0 : 0.0;
+  if (widthBytes == 1)
+    return 38.4 + 7.26 * chunks;
+  if (numBins <= 256) {
+    // Sentinel-clamp single pass.  bins == 256 stores the full accumulator;
+    // bins < 256 pays partial store masks instead.
+    if (widthBytes == 2) {
+      if (numBins < 256)
+        return 52.6 + 7.41 * chunks;
+      // Piecewise kink at 32 chunks: a u16 input beyond 32 KB leaves the
+      // single-pass unified-buffer working window.
+      return 127.6 + 6.31 * std::min(chunks, 32.0) +
+             7.90 * std::max(chunks - 32.0, 0.0);
+    }
+    // Unmasked i32/u32 with constant bins <= 256 routes to the small-bins
+    // library entry (_mlir_ciface_histogram_1d_{u}int32_t_small_bins).  The
+    // template gate (bins <= 256, 0 < n <= 65280, n % 256 == 0) selects
+    // histogram_256_i32_dhistv2: u16 accumulators, no sentinel clamp and no
+    // tail handling, but a fixed 4-segment vunpack/masked store.  A
+    // dedicated 112-case sweep measured the entry at 0.995-1.003x the
+    // generic clamp path across 30 matched shapes (coefficients within
+    // 1.5%); when the gate fails the entry falls through to the generic
+    // dispatch below.
+    if (unmasked && inputElements % 256 == 0 && inputElements <= 65280)
+      return numBins < 256 ? 164.3 + 9.28 * chunks : 185.4 + 13.77 * chunks;
+    // Generic sentinel-clamp single pass (masked calls, or n % 256 != 0,
+    // or n > 65280 where the small-bins gate fails).
+    return numBins < 256 ? 162.0 + 9.35 * chunks : 186.3 + 13.68 * chunks;
+  }
+  // Segmented pass: the input is re-read once per 256-bin segment.
+  if (widthBytes == 2)
+    return 101.5 + 7.58 * chunks * segs + (48.3 - 5.9 * tail) * segs;
+  return 88.3 + 13.76 * chunks * segs + (95.6 - 5.1 * tail) * segs;
+}
+
+/// Sum the calibrated per-call cost of every tt.histogram owned by this
+/// Stage.  Returns false when the Stage has no statically shaped histogram
+/// (the caller then keeps the generic resource-based estimate).  Each op is
+/// billed once per Stage iteration: the tensor types are the per-iteration
+/// tile shapes, matching the trip-count semantics of scaleWorkload.  A
+/// histogram nested inside an intra-Stage loop is not trip-counted here
+/// (loop bodies are normally split into their own Stages).
+static bool estimateHistogramStageCost(const LogicalStage &stage,
+                                       StageMode mode, double &perCallTotal) {
+  perCallTotal = 0.0;
+  bool found = false;
+  for (Operation *root : stage.operations) {
+    if (!root)
+      continue;
+    root->walk([&](Operation *op) {
+      if (op->getName().getStringRef() != "tt.histogram")
+        return;
+      auto input = op->getNumOperands() > 0
+                       ? dyn_cast<RankedTensorType>(op->getOperand(0).getType())
+                       : RankedTensorType();
+      auto result = op->getNumResults() > 0
+                        ? dyn_cast<RankedTensorType>(op->getResult(0).getType())
+                        : RankedTensorType();
+      if (!input || !result || !input.hasStaticShape() ||
+          !result.hasStaticShape() || result.getRank() != 1)
+        return;
+      const int64_t bits = input.getElementTypeBitWidth();
+      const int64_t elements = input.getNumElements();
+      const int64_t bins = result.getShape()[0];
+      if (elements <= 0 || bins <= 0 || bits == 0 || bits % 8 != 0 || bits > 64)
+        return;
+      perCallTotal += estimateHistogramCycles(
+          elements, bins, static_cast<unsigned>(bits / 8), mode,
+          /*unmasked=*/op->getNumOperands() == 1);
+      found = true;
+    });
+  }
+  return found;
+}
+
 static double estimateStage(const LogicalStage &stage,
                             const HardwareProfile &profile, StageMode mode,
                             const StageResourceCycles &r) {
@@ -414,6 +541,32 @@ static double estimateStage(const LogicalStage &stage,
                                 std::max({r.scalar + r.compute, r.load, r.store,
                                           r.atomic, r.issue}));
     return serial;
+  case StageCostModelKind::Histogram: {
+    // Calibrated model composed with the generic resource attributes.
+    // tt.histogram itself is invisible to mapWorkload's memory/atomic
+    // counters (the template-internal vlds/vsts/atomicAdd never appear in
+    // TTIR, and the profile has no "tt.histogram" operation rate, so a pure
+    // histogram Stage maps to r.compute = r.load = r.store = r.atomic = 0
+    // with only the issue floor).  The calibrated perCall replaces exactly
+    // that hidden body.  Sibling operations owned by the same Stage (the
+    // producing tt.load, elementwise ops, the consuming tt.store) still
+    // contribute r.load/r.store/r.compute/r.atomic, and perCall does NOT
+    // include GM<->UB movement (the microbenchmark staged its input in UB),
+    // so perCall composes with them like any compute resource: overlapped
+    // under SIMD pipelining, summed in the serial case.  r.setup and the
+    // r.issue floor keep their generic meaning.
+    double perCall = 0.0;
+    if (!estimateHistogramStageCost(stage, mode, perCall))
+      return serial;
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+      return r.setup +
+             count * (r.scalar + r.predicate + controlBody(r) + r.spill +
+                      std::max({r.load, r.store, r.atomic, perCall, r.issue}));
+    const double execution = r.scalar + r.predicate + r.load + r.store +
+                             r.atomic + r.compute + r.dot + r.shuffle +
+                             controlBody(r) + r.spill + perCall;
+    return r.setup + count * std::max(execution, r.issue);
+  }
   default:
     if (mode == StageMode::SIMD)
       return r.setup +
@@ -480,6 +633,8 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "indirect_gather_memory";
   case StageCostModelKind::AtomicMemory:
     return "atomic_memory";
+  case StageCostModelKind::Histogram:
+    return "histogram";
   case StageCostModelKind::IndependentPipelinedLoop:
     return "independent_pipelined_loop";
   case StageCostModelKind::LoopCarriedRecurrence:

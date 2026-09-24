@@ -40,6 +40,7 @@ enum class StageCostModelKind {
   IndirectScalarMemory,
   IndirectGatherMemory,
   AtomicMemory,
+  Histogram,
   IndependentPipelinedLoop,
   LoopCarriedRecurrence,
   RowwiseReduction,

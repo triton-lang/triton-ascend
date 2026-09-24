@@ -132,14 +132,6 @@ private:
   LogicalResult addStates(const MaskState &lhsState, const MaskState &rhsState,
                           const Location &loc, OpBuilder &builder);
 
-  LogicalResult subStateScalar(const MaskState &state,
-                               const OpFoldResult scalar, const Location &loc,
-                               OpBuilder &builder);
-
-  // Only supports (range - scalar).
-  LogicalResult subStates(const MaskState &lhsState, const MaskState &rhsState,
-                          const Location &loc, OpBuilder &builder);
-
   LogicalResult divStateScalar(const MaskState &state,
                                const OpFoldResult scalar, const Location &loc,
                                OpBuilder &builder);
@@ -166,10 +158,6 @@ private:
 
   // TODO
   LogicalResult parseAdd(arith::AddIOp addOp, const Location &loc,
-                         OpBuilder &builder);
-
-  // Operand is the result of subi (range - scalar).
-  LogicalResult parseSub(arith::SubIOp subOp, const Location &loc,
                          OpBuilder &builder);
 
   // operand is the result of divsi

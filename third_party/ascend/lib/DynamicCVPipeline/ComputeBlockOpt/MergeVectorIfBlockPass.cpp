@@ -111,7 +111,7 @@ static LogicalResult getUpstreamBlockId(scf::IfOp ifOp,
                                         CVPipeline::ComputeBlockIdManager &bm,
                                         int &target) {
   Block *parent = ifOp->getBlock();
-  llvm::SmallDenseSet<int, CVPipeline::INIT_SIZE> ids;
+  llvm::SmallDenseSet<int, CVPipeline::kInitSize> ids;
 
   auto addSource = [&](Value v) {
     Operation *def = v.getDefiningOp();
@@ -198,7 +198,7 @@ collectDownstreamBlockIds(scf::IfOp ifOp, int target,
 
   // Collect the users with the program order.
   SmallVector<int> ordered;
-  llvm::SmallDenseSet<int, CVPipeline::INIT_SIZE> seen;
+  llvm::SmallDenseSet<int, CVPipeline::kInitSize> seen;
   for (Operation &op : *parent) {
     if (!userAnchors.contains(&op)) {
       continue;

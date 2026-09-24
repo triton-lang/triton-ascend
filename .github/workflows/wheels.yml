@@ -149,6 +149,17 @@ jobs:
             TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          # Same registry-cache pattern as build-docker-image.yml: the dnf and
+          # pip layers of wheels.Dockerfile (kept before the COPY of the
+          # workspace) hit the cache across runs; the source-dependent wheel
+          # build layer still rebuilds, but skips the dependency setup.
+          # mode=max also exports the ccache mount, so the Triton/npuir
+          # compile objects persist across runs. Keyed by arch only so the
+          # four python variants of one arch share a single ccache (populated
+          # once, reused 4x); the concurrent cache-to is last-writer-wins and
+          # self-converges.
+          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
+          cache-to: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }},mode=max
           outputs: type=local,dest=./wheelhouse
 
       - uses: actions/upload-artifact@v4

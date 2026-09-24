@@ -736,7 +736,11 @@ static std::vector<int64_t> _get_tensor_shape(PyObject* tensor) {
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def make_launcher(constants, signature, metadata):
     import os
-    const_scalar_idxs = {k[0] for k in constants if isinstance(k, tuple) and len(k) == 1} | {k for k in constants if isinstance(k, int)}
+    const_scalar_idxs = {k[0]
+                         for k in constants
+                         if isinstance(k, tuple) and len(k) == 1} | {k
+                                                                     for k in constants
+                                                                     if isinstance(k, int)}
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
     lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.

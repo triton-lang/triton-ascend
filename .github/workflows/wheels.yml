@@ -47,7 +47,7 @@ jobs:
         # npuir: ON builds the BishengIR payload in-image via build_npuir.py
         # (requires the TRITON_BUILD_NPUIR handling in third_party/ascend/build
         # on that branch); OFF uses the prebuilt payload from npuir-build.yml.
-        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'ON'}
+        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
         # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
 
     permissions:
@@ -83,18 +83,17 @@ jobs:
       - name: Download npuir payload from PR build
         id: payload-pr
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
-        # Take the payload from this repo's npuir-build runs (GitHub
-        # artifact): PR - this PR's run; push/schedule - the latest
-        # successful run on the branch.
+        # Reuse the canonical payload from this repo's npuir-build runs: the
+        # payload only depends on the AscendNPU-IR submodule pin, so a PR
+        # that runs wheels.yml never changes that pin and can use the base
+        # branch's payload instead of re-running the expensive LLVM build on
+        # the fork. push/schedule use the matrix branch's payload.
         uses: dawidd6/action-download-artifact@v9
         continue-on-error: true
         with:
           workflow: npuir-build.yml
           workflow_conclusion: success
-          # PRs from forks run npuir-build on the fork, not on this repo;
-          # without allow_forks the action skips exactly the run we want.
-          allow_forks: true
-          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
+          branch: ${{ github.event_name == 'pull_request' && github.base_ref || matrix.branch.ref }}
           name: npuir-payload-manylinux-${{ matrix.config.arch }}
           path: npuir-artifacts
 

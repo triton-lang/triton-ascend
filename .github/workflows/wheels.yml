@@ -98,18 +98,21 @@ jobs:
           path: npuir-artifacts
 
       - name: Prepare npuir payload
+        id: prepare-payload
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
         shell: bash
         run: |
           set -eu
           # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
-          # wheels.Dockerfile. Sourced solely from the npuir-build GitHub
-          # artifact downloaded above.
+          # wheels.Dockerfile. Sourced from the npuir-build GitHub artifact
+          # downloaded above; when it is missing (fresh branch, expired
+          # artifact) fall back to compiling the payload in-image so the build
+          # still produces a correct wheel instead of failing.
           BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
           if [ -z "${BIN}" ]; then
-            echo "No npuir-payload artifact for ${{ matrix.config.arch }}." >&2
-            echo "Expected a successful npuir-build.yml run on this branch." >&2
-            exit 1
+            echo "No npuir-payload artifact for ${{ matrix.config.arch }}; falling back to in-image build (slow)."
+            echo "build_npuir=ON" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
           echo "Using npuir-build payload at ${PAYLOAD_DIR}"
@@ -122,6 +125,7 @@ jobs:
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
           ls -la .npuir-payload/bin
+          echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
 
       - name: Compute build variables
         id: vars
@@ -142,7 +146,7 @@ jobs:
           build-args: |
             MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
-            TRITON_BUILD_NPUIR=${{ matrix.branch.npuir }}
+            TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
           outputs: type=local,dest=./wheelhouse

@@ -102,8 +102,7 @@ def _fetch_nested_via_sha(npuir_dir, path, sha):
     _run_with_retry(["git", "-C", str(dest), "remote", "add", "origin", url])
     # gitcode intermittently answers 503 (server-side throttling) on large
     # depth-1 fetches; retry with a longer window than the default.
-    _run_with_retry(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha],
-                    retries=5, interval=10)
+    _run_with_retry(["git", "-C", str(dest), "fetch", "--depth", "1", "origin", sha], retries=5, interval=10)
     _run_with_retry(["git", "-C", str(dest), "checkout", "-q", "FETCH_HEAD"])
 
 

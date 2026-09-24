@@ -7,11 +7,11 @@ on:
       - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/patch-npuir-templates.py
-  # pull_request:
-  #   paths:
-  #     - third_party/ascend/AscendNPU-IR
-  #     - .github/workflows/npuir-build.yml
-  #     - .github/workflows/build/patch-npuir-templates.py
+  pull_request:
+    paths:
+      - third_party/ascend/AscendNPU-IR
+      - .github/workflows/npuir-build.yml
+      - .github/workflows/build/patch-npuir-templates.py
 
 concurrency:
   group: npuir-build-${{ github.ref }}

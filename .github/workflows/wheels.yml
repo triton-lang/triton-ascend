@@ -89,6 +89,9 @@ jobs:
         shell: bash
         run: |
           set -eu
+          # The checkout dir is owned by the runner UID, not the job container
+          # user, so git would fail with "dubious ownership" on git ls-tree.
+          git config --global --add safe.directory "*"
           # The payload is the BishengIR compiler built from the AscendNPU-IR
           # submodule; key the cache on that submodule's pinned gitlink SHA so
           # it invalidates only when the payload actually changes (not on every
@@ -158,17 +161,19 @@ jobs:
           # zips without setUnixMode) and action-download-artifact extracts
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
-          # Seed the shared-volume PVC cache atomically (write temp, then mv)
-          # so the next run skips the slow download and concurrent writers
-          # (same key, identical content) never expose a half-written dir.
+          # Seed the shared-volume PVC cache atomically (write a per-process
+          # temp dir, then mv) so the next run skips the slow download and the
+          # concurrent same-arch jobs (same key, identical content) never
+          # clobber each other's temp or expose a half-written dir.
           CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
-          rm -rf "${CACHE_DIR}.tmp"
-          mkdir -p "${CACHE_DIR}.tmp"
-          cp -a .npuir-payload/bin "${CACHE_DIR}.tmp/"
-          cp -a .npuir-payload/lib "${CACHE_DIR}.tmp/"
-          chmod -R a+x "${CACHE_DIR}.tmp/bin"
+          TMP_DIR="${CACHE_DIR}.tmp.$$"
+          rm -rf "${TMP_DIR}"
+          mkdir -p "${TMP_DIR}"
+          cp -a .npuir-payload/bin "${TMP_DIR}/"
+          cp -a .npuir-payload/lib "${TMP_DIR}/"
+          chmod -R a+x "${TMP_DIR}/bin"
           rm -rf "${CACHE_DIR}"
-          mv "${CACHE_DIR}.tmp" "${CACHE_DIR}"
+          mv "${TMP_DIR}" "${CACHE_DIR}"
           echo "Saved npuir payload to local cache ${CACHE_DIR}"
           ls -la .npuir-payload/bin
           echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"

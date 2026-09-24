@@ -24,6 +24,7 @@ file(GLOB ADD_CONTROLFLOW_CONDITION_SRC_FILES CONFIGURE_DEPENDS
 
 file(GLOB Compute_BLOCK_OPT_SRC_FILES CONFIGURE_DEPENDS
     "ComputeBlockOpt/*.cpp"
+    "ComputeBlockOpt/CloneCubeDepInIf/*.cpp"
     "ComputeBlockOpt/SplitIfByBlockId/*.cpp"
 )
 

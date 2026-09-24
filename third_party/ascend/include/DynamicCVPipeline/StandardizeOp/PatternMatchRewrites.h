@@ -34,13 +34,19 @@ namespace mlir::triton::CVSplit {
 class SplitMatmulPattern : public mlir::OpRewritePattern<linalg::MatmulOp> {
 public:
   explicit SplitMatmulPattern(mlir::MLIRContext *context, bool needSplitAll)
-      : OpRewritePattern<linalg::MatmulOp>(context),
-        needSplitAll(needSplitAll) {}
+      : OpRewritePattern<linalg::MatmulOp>(context), needSplitAll(needSplitAll),
+        coupledMatmulAndStoreCounter(0) {}
   llvm::LogicalResult matchAndRewrite(linalg::MatmulOp matmulOp,
                                       PatternRewriter &rewriter) const override;
 
+  static int getNextCoupledMatmulAndStoreId() {
+    static int counter = 0;
+    return counter++;
+  }
+
 private:
   bool needSplitAll;
+  mutable int coupledMatmulAndStoreCounter;
 };
 
 class FoldExpandExtCollapse

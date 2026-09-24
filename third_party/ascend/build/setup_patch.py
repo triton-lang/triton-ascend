@@ -664,7 +664,7 @@ def _build_setup_kwargs(mod, kwargs):
 
     kwargs["name"] = os.environ.get("TRITON_WHEEL_NAME", "triton_ascend")
     kwargs["version"] = _get_version(is_manylinux, mod.get_git_commit_hash)
-    kwargs["url"] = "https://gitcode.com/Ascend/triton-ascend/"
+    kwargs["url"] = "https://github.com/triton-lang/triton-ascend/"
 
     # README as long_description
     readme = _REPO_ROOT / "README.md"

@@ -192,14 +192,34 @@ def _cgroup_limits():
     if mem_bytes:
         # v1's unlimited sentinel (9223372036854771712) means "no limit";
         # clamp to the host's memory like the shell helper does.
+        host = _host_memory_bytes()
+        if host and mem_bytes > host:
+            mem_bytes = host
+    elif mem_bytes is None:
+        # No cgroup memory limit (plain desktop/macOS): budget against the
+        # physical memory so local builds don't oversubscribe and OOM.
+        mem_bytes = _host_memory_bytes()
+    return cpus, mem_bytes
+
+
+def _host_memory_bytes():
+    """Physical memory of the host, or None when it cannot be determined."""
+    import subprocess
+    import sys
+
+    if sys.platform == "darwin":
+        try:
+            return int(subprocess.check_output(["sysctl", "-n", "hw.memsize"]).strip())
+        except Exception:
+            return None
+    try:
         with open("/proc/meminfo") as f:
             for line in f:
                 if line.startswith("MemTotal:"):
-                    host_bytes = int(line.split()[1]) * 1024
-                    if mem_bytes > host_bytes:
-                        mem_bytes = host_bytes
-                    break
-    return cpus, mem_bytes
+                    return int(line.split()[1]) * 1024
+    except FileNotFoundError:
+        pass
+    return None
 
 
 def _create_clang_wrapper():

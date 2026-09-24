@@ -83,9 +83,34 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
+      - name: Restore npuir payload from local cache
+        id: npuir-cache
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+        env:
+          NPUIR_CACHE_KEY: ${{ matrix.config.arch }}-npuir-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt') }}
+        shell: bash
+        run: |
+          set -eu
+          # The shared-volume PVC (/root/.cache) persists across runner pods;
+          # cache the payload there (keyed by the npuir pin) to skip the slow
+          # artifact download on subsequent runs.
+          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_CACHE_KEY}"
+          if [ -x "${CACHE_DIR}/bin/bishengir-compile" ]; then
+            echo "npuir payload cache hit: ${CACHE_DIR}"
+            rm -rf .npuir-payload
+            mkdir -p .npuir-payload
+            cp -a "${CACHE_DIR}/bin" .npuir-payload/
+            cp -a "${CACHE_DIR}/lib" .npuir-payload/
+            chmod -R a+x .npuir-payload/bin
+            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npuir payload cache miss (key=${NPUIR_CACHE_KEY})"
+            echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download npuir payload from PR build
         id: payload-pr
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true'
         # Pull this PR's npuir-build artifact first (pre-merge testing); for
         # fork PRs the run lives on the fork, so allow_forks is required.
         # push/schedule use the matrix branch's payload.
@@ -102,9 +127,17 @@ jobs:
       - name: Prepare npuir payload
         id: prepare-payload
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+        env:
+          NPUIR_CACHE_KEY: ${{ matrix.config.arch }}-npuir-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt') }}
         shell: bash
         run: |
           set -eu
+          # Cache hit already populated .npuir-payload in the restore step.
+          if [ "${{ steps.npuir-cache.outputs.cache_hit }}" = "true" ]; then
+            echo "Using locally cached npuir payload."
+            echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
           # wheels.Dockerfile. Sourced from the npuir-build GitHub artifact
           # downloaded above; when it is missing (fresh branch, expired
@@ -126,6 +159,14 @@ jobs:
           # zips without setUnixMode) and action-download-artifact extracts
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
+          # Save to the shared-volume PVC so the next run skips the download.
+          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_CACHE_KEY}"
+          rm -rf "${CACHE_DIR}"
+          mkdir -p "${CACHE_DIR}"
+          cp -a .npuir-payload/bin "${CACHE_DIR}/"
+          cp -a .npuir-payload/lib "${CACHE_DIR}/"
+          chmod -R a+x "${CACHE_DIR}/bin"
+          echo "Saved npuir payload to local cache ${CACHE_DIR}"
           ls -la .npuir-payload/bin
           echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
 

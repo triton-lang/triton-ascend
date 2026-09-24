@@ -86,17 +86,16 @@ jobs:
       - name: Download npuir payload from PR build
         id: payload-pr
         if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
-        # Reuse the canonical payload from this repo's npuir-build runs: the
-        # payload only depends on the AscendNPU-IR submodule pin, so a PR
-        # that runs wheels.yml never changes that pin and can use the base
-        # branch's payload instead of re-running the expensive LLVM build on
-        # the fork. push/schedule use the matrix branch's payload.
+        # Pull this PR's npuir-build artifact first (pre-merge testing); for
+        # fork PRs the run lives on the fork, so allow_forks is required.
+        # push/schedule use the matrix branch's payload.
         uses: dawidd6/action-download-artifact@v9
         continue-on-error: true
         with:
           workflow: npuir-build.yml
           workflow_conclusion: success
-          branch: ${{ github.event_name == 'pull_request' && github.base_ref || matrix.branch.ref }}
+          allow_forks: true
+          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
           name: npuir-payload-manylinux-${{ matrix.config.arch }}
           path: npuir-artifacts
 

@@ -1,0 +1,198 @@
+name: NPUIR Payload Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - third_party/ascend/AscendNPU-IR
+      - .github/workflows/npuir-build.yml
+      - .github/workflows/build/patch-npuir-templates.py
+  pull_request:
+    paths:
+      - third_party/ascend/AscendNPU-IR
+      - .github/workflows/npuir-build.yml
+      - .github/workflows/build/patch-npuir-templates.py
+
+concurrency:
+  group: npuir-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+
+  # Builds the payload inside the CANN 9.2 manylinux_2_34 base image so the
+  # binaries satisfy the manylinux ABI: wheels.yml bundles this variant into
+  # the published wheel (auditwheel rejects binaries built on newer glibc).
+  # The base image (base_image/ascend-ci/manylinux:9.2.0-beta.2-<chip>-...)
+  # ships CANN 9.2.0-beta.2 preinstalled, replacing the previous
+  # manylinux_2_28 + on-the-fly CANN install (oepkgs yum / OBS .run); glibc
+  # 2.28 was too old for the 9.2 bisheng compiler binaries anyway.
+  build-npuir-manylinux:
+    name: Build npuir payload manylinux (${{ matrix.config.arch }})
+    runs-on: ${{ matrix.config.runs_on }}
+    timeout-minutes: 360
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # The "a3" tag is chip-shape, not arch: it is a multi-arch index
+          # (linux/amd64 + linux/arm64), so both matrix entries pull the
+          # same tag and Docker resolves the platform-specific manifest.
+          - {runs_on: 'linux-amd64-cpu-16', arch: 'x86_64'}
+          - {runs_on: 'linux-aarch64-cpu-16', arch: 'aarch64'}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # One level only: the AscendNPU-IR pin. "recursive" would also
+          # dig into torch-mlir's own externals (github.com llvm-project and
+          # stablehlo), which the build does not need and which stall on the
+          # pods' github connectivity. The nested submodules (llvm-project /
+          # torch-mlir / shmem) are fetched by the next step via direct
+          # depth-1 SHA pulls (gitcode branch fetches are unreliable here).
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "*"
+
+      - name: Initialize nested submodules directly
+        shell: bash
+        env:
+          # Abort stalled gitcode transfers instead of hanging the job.
+          GIT_HTTP_LOW_SPEED_LIMIT: 1000
+          GIT_HTTP_LOW_SPEED_TIME: 30
+        run: |
+          set -eu -o pipefail
+          NPUIR=third_party/ascend/AscendNPU-IR
+          # Depth-1 SHA fetches from gitcode: `want <sha>` requests work from
+          # the self-hosted pods where branch clones fail. The checkout above
+          # is intentionally single-level, so these nested submodules are
+          # always fetched here.
+          git -C "$NPUIR" ls-tree HEAD third-party/ | while read -r _ _ sha path; do
+            name=$(basename "$path")
+            url=$(git -C "$NPUIR" config -f .gitmodules --get "submodule.$path.url")
+            echo "Fetching ${path} @ ${sha} from ${url}"
+            rm -rf "/tmp/${name}"
+            git init -q "/tmp/${name}"
+            git -C "/tmp/${name}" remote add origin "$url"
+            git -C "/tmp/${name}" fetch --depth 1 origin "$sha"
+            git -C "/tmp/${name}" checkout -q FETCH_HEAD
+            rm -rf "$NPUIR/$path"
+            mv "/tmp/${name}" "$NPUIR/$path"
+            echo "Initialized ${path} @ ${sha}"
+          done
+
+      - name: Install build tools
+        env:
+          # In-cluster pypi cache, same as llvm-build.yml / integration tests.
+          PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+          PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+        run: |
+          # Same toolchain as the upstream AscendNPU-IR wheel CI (their
+          # manylinux build): dnf clang/lld/ccache; cmake+ninja from pip
+          # because the base image's cmake is too old (npuir needs >= 3.28).
+          # The base image's Python lives at /usr/local/python3.12.14 (on
+          # PATH ahead of /usr/bin), not the manylinux-standard /opt/python.
+          yum install -y clang lld ccache
+          python3 -m pip install cmake ninja
+          cmake --version | head -1
+          ninja --version
+
+      - name: Locate bisheng compiler
+        id: bisheng
+        run: |
+          set -eu
+          # CANN 9.2.0-beta.2 is preinstalled in the base image.
+          BISHENG_DIR=$(find /usr/local/Ascend -maxdepth 6 -type f -name ccec 2>/dev/null | head -1 | xargs -r dirname)
+          test -x "${BISHENG_DIR}/ccec"
+          test -x "${BISHENG_DIR}/llvm-link"
+          echo "Found bisheng compiler at ${BISHENG_DIR}"
+          echo "bisheng_dir=${BISHENG_DIR}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore ccache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          restore-keys: |
+            npuir-ccache-ml-2_34-${{ matrix.config.arch }}-
+
+      # TEMP(debug): dump the pod's cgroup view to explain why the backend's
+      # 28u/96g request surfaces as 16 CPUs / 32 GiB in cgroup-resources.sh.
+      # Remove once the platform side is confirmed.
+      - name: Diagnose cgroup resources
+        run: |
+          set +e
+          echo "== /proc/self/cgroup =="
+          cat /proc/self/cgroup
+          CGV2=$(awk -F: '$1 == "0" {print $3}' /proc/self/cgroup)
+          echo "== cgroup v2 @ /sys/fs/cgroup${CGV2} =="
+          cat "/sys/fs/cgroup${CGV2}/cpu.max" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/memory.max" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/cpuset.cpus.effective" 2>/dev/null
+          cat "/sys/fs/cgroup${CGV2}/cgroup.controllers" 2>/dev/null
+          CGV1=$(awk -F: '/\bcpu(,|$)/ {print $3; exit}' /proc/self/cgroup)
+          echo "== cgroup v1 @ /sys/fs/cgroup/cpu${CGV1} =="
+          cat "/sys/fs/cgroup/cpu${CGV1}/cpu.cfs_quota_us" "/sys/fs/cgroup/cpu${CGV1}/cpu.cfs_period_us" 2>/dev/null
+          cat "/sys/fs/cgroup/memory${CGV1}/memory.limit_in_bytes" 2>/dev/null
+          echo "== fallback sources (nproc / cpuinfo / meminfo) =="
+          nproc
+          grep -c '^processor' /proc/cpuinfo
+          grep MemTotal /proc/meminfo
+          echo "== lscpu (top) =="
+          command -v lscpu >/dev/null && lscpu | head -8
+
+      - name: Build AscendNPU-IR
+        env:
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          BISHENG_DIR: ${{ steps.bisheng.outputs.bisheng_dir }}
+        run: |
+          cd third_party/ascend/AscendNPU-IR
+          # Size the build to the pod's actual cgroup quota (nproc reports
+          # the host's 320 cores, which would over-subscribe memory). Budget
+          # ~2.5 GiB per job (heavy MLIR TUs peak at 3-5 GB) and cap by the
+          # effective CPU count.
+          . "$GITHUB_WORKSPACE/.github/workflows/build/cgroup-resources.sh"
+          NPROC=$(cg_cpus)
+          MEM_BYTES=$(cg_mem_bytes)
+          JOBS=$(( MEM_BYTES / (2500 * 1024 * 1024) ))
+          if [ "$JOBS" -gt "$NPROC" ]; then JOBS=$NPROC; fi
+          if [ "$JOBS" -lt 1 ]; then JOBS=1; fi
+          echo "cgroup: ${NPROC} CPUs, $(( MEM_BYTES / (1024*1024*1024) )) GiB mem -> -j ${JOBS}"
+          # The CXX wrapper carries workarounds the Ascend LLVM fork needs
+          # in these manylinux images: the fork excludes <cstdint> in Affine
+          # ValueBoundsOpInterfaceImpl.h under BSPUB_DAVINCI_BISHENGIR_A5,
+          # while the image clang resolves a libstdc++ that no longer
+          # provides stdint.h transitively, and clang 21's new -Wall
+          # warnings trip -Werror on LLVM 19 code. Verified still required
+          # on the manylinux_2_34 image (trial run hit the int64_t error
+          # without it).
+          printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint
+          chmod +x /tmp/clang++-cstdint
+          build-tools/build.sh -o build -j "${JOBS}" \
+            --cxx-compiler=/tmp/clang++-cstdint \
+            --add-cmake-options="-DCMAKE_LINKER=LLD" \
+            --add-cmake-options="-DLLVM_ENABLE_LLD=ON" \
+            --add-cmake-options="-DLLVM_PARALLEL_LINK_JOBS=1" \
+            -t \
+            --bisheng-compiler="${BISHENG_DIR}" \
+            --build-torch-mlir \
+            --safety-options --safety-ld-options --skip-rpath \
+            --collect-binary "$GITHUB_WORKSPACE/npuir-payload"
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+
+      - name: Upload npuir payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: npuir-payload-manylinux-${{ matrix.config.arch }}
+          path: npuir-payload/
+          if-no-files-found: error

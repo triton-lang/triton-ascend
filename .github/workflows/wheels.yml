@@ -29,9 +29,12 @@ jobs:
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      # PYTHON must live under container.env (not job env) so ARC maps it into
+      # the job container's pod-spec env, where the runner pod's postStart hook
+      # (buildkitd node pinning) can read it. Same pattern as vllm-ascend's SOC.
+      env:
+        PYTHON: ${{matrix.python}}
     timeout-minutes: 360
-    env:
-      PYTHON: ${{matrix.python}}
     strategy:
       fail-fast: false
       # Limit parallelism: wheel builds compile hundreds of C++ files on

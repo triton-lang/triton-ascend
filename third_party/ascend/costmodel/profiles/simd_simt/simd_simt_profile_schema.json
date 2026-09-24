@@ -23,8 +23,8 @@
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
     },
     "schema_version": {
-      "const": 12,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 retains the legacy SIMT logical-tensor capacity field and represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values."
+      "const": 13,
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 retains the legacy SIMT logical-tensor capacity field and represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values. Version 13 adds target-calibrated tail-axis reduction formula parameters."
     },
     "profile_version": {
       "type": "string",
@@ -486,6 +486,7 @@
         "scalar_operations_per_system_cycle",
         "issue_instructions_per_system_cycle",
         "spill_transactions_per_system_cycle",
+        "tail_axis_reduction",
         "indirect_memory",
         "atomic_memory",
         "control_flow",
@@ -507,6 +508,18 @@
         "spill_transactions_per_system_cycle": {
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "tail_axis_reduction": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Named finite numeric parameter vectors for target-calibrated tail-axis tt.reduce formulas.",
+          "additionalProperties": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "number"
+            }
+          }
         },
         "prefix_scan": {
           "type": "object",

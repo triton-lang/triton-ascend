@@ -58,6 +58,48 @@ static std::string typeToString(Type type) {
   return text;
 }
 
+static std::string getReductionDataType(Type type) {
+  type = getScalarElementType(type);
+  if (type.isF16())
+    return "f16";
+  if (type.isBF16())
+    return "bf16";
+  if (type.isF32())
+    return "f32";
+  if (auto integer = dyn_cast<IntegerType>(type))
+    return ("i" + llvm::Twine(integer.getWidth())).str();
+  return "unknown";
+}
+
+static llvm::StringRef getReductionCombineKind(Operation *operation) {
+  if (!operation || operation->getNumOperands() != 1 ||
+      operation->getNumResults() != 1 || operation->getNumRegions() != 1)
+    return "unknown";
+  llvm::StringRef found;
+  bool ambiguous = false;
+  operation->getRegion(0).walk([&](Operation *nested) {
+    const llvm::StringRef name = nested->getName().getStringRef();
+    llvm::StringRef kind = llvm::StringSwitch<llvm::StringRef>(name)
+                               .Cases("arith.addf", "arith.addi", "sum")
+                               .Cases("arith.maximumf", "arith.maxnumf",
+                                      "arith.maxsi", "arith.maxui", "max")
+                               .Cases("arith.minimumf", "arith.minnumf",
+                                      "arith.minsi", "arith.minui", "min")
+                               .Cases("arith.mulf", "arith.muli", "prod")
+                               .Case("arith.xori", "xor")
+                               .Case("arith.ori", "or")
+                               .Case("arith.andi", "and")
+                               .Default("");
+    if (kind.empty())
+      return;
+    if (found.empty())
+      found = kind;
+    else if (found != kind)
+      ambiguous = true;
+  });
+  return ambiguous || found.empty() ? llvm::StringRef("unknown") : found;
+}
+
 static bool isPointerLikeType(Type type) {
   if (auto tensor = dyn_cast<RankedTensorType>(type))
     type = tensor.getElementType();
@@ -319,9 +361,18 @@ static void accumulateReductionWorkload(Operation *operation,
     return;
   const double depth = std::ceil(std::log2(static_cast<double>(extent)));
   const double steps = getTypeElementCount(input) * depth;
-  work.shuffleLaneSteps += steps;
-  if (isScan)
+  if (isScan) {
+    work.shuffleLaneSteps += steps;
     work.scanShuffleLaneSteps += steps;
+    return;
+  }
+
+  ReductionWorkload reduction;
+  reduction.kind = getReductionCombineKind(operation).str();
+  reduction.dataType = getReductionDataType(input.getElementType());
+  reduction.shape.assign(input.getShape().begin(), input.getShape().end());
+  reduction.axis = dimension;
+  work.reductionWorkloads.push_back(std::move(reduction));
 }
 
 static std::string getAtomicEnumName(Operation *operation,
@@ -460,6 +511,8 @@ static void scaleWorkload(StageWorkload &work, double scale) {
     tensor.logicalElements *= scale;
     tensor.segmentCount *= scale;
   }
+  for (ReductionWorkload &reduction : work.reductionWorkloads)
+    reduction.instances *= scale;
   work.predicateElements *= scale;
   work.shuffleLaneSteps *= scale;
   work.scanShuffleLaneSteps *= scale;
@@ -590,6 +643,8 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
     destination->logicalElements += source.logicalElements;
     destination->segmentCount += source.segmentCount;
   }
+  llvm::append_range(into.reductionWorkloads,
+                     std::move(from.reductionWorkloads));
   into.predicateElements += from.predicateElements;
   into.shuffleLaneSteps += from.shuffleLaneSteps;
   into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;

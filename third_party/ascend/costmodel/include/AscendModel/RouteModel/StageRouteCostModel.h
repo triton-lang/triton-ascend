@@ -123,6 +123,20 @@ struct TensorOperationWorkload {
   llvm::json::Object toJSON() const;
 };
 
+/// Route-independent semantic description of one dynamically executed
+/// tt.reduce.  Mode-specific instruction/cycle costs are deliberately not
+/// stored here: they are selected later from the target profile.
+struct ReductionWorkload {
+  std::string kind;
+  std::string dataType;
+  std::vector<int64_t> shape;
+  int64_t axis = -1;
+  double instances = 1.0;
+
+  bool isFiniteAndNonNegative() const;
+  llvm::json::Object toJSON() const;
+};
+
 /// Mode-independent work owned exactly once by one Stage.  Values are
 /// logical elements/bytes, not mode-specific instructions or cycles.
 struct StageWorkload {
@@ -142,11 +156,13 @@ struct StageWorkload {
   double indirectLoadTransactions = 0.0;
   double indirectStoreTransactions = 0.0;
   std::vector<AtomicWorkload> atomicWorkloads;
+  std::vector<ReductionWorkload> reductionWorkloads;
   double predicateElements = 0.0;
   double shuffleLaneSteps = 0.0;
   /// Portion of shuffleLaneSteps contributed by tt.scan (prefix-scan class).
-  /// The remainder is contributed by tt.reduce.  Only the scan portion
-  /// consumes the prefix-scan dependency factor inside recurrence stages.
+  /// Calibrated tt.reduce work is represented by reductionWorkloads.  An
+  /// unsupported reduction is converted back to legacy shuffle work by the
+  /// mode-specific evaluator.
   double scanShuffleLaneSteps = 0.0;
   double dotFlops = 0.0;
   double issueElements = 0.0;
@@ -172,6 +188,7 @@ struct StageResourceCycles {
   double compute = 0.0;
   double predicate = 0.0;
   double shuffle = 0.0;
+  double reduction = 0.0;
   /// Cycles for the tt.scan-contributed portion of shuffle at the ideal rate.
   double scanShuffle = 0.0;
   double dot = 0.0;

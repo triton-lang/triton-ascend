@@ -124,6 +124,15 @@ struct StageAtomicRate {
   bool isValid() const;
 };
 
+/// Target-calibrated numeric parameters for tail-axis tt.reduce formulas.
+/// Keys are stable formula/route identifiers; keeping values in the hardware
+/// profile allows recalibration without changing the evaluator source.
+struct ReductionCostProfile {
+  llvm::StringMap<std::vector<double>> parameters;
+
+  bool isValid() const;
+};
+
 struct StageModeProfile {
   double setupCycles = 0.0;
   /// Physical SIMD instruction width.  Unlike vectorWidth, this preserves
@@ -165,6 +174,7 @@ struct StageModeProfile {
   double indirectStoreTransactionsPerCycle = 0.0;
   double indirectDependencyLatencyCycles = 0.0;
   llvm::StringMap<StageAtomicRate> atomicRates;
+  ReductionCostProfile tailAxisReduction;
   StageControlFlowRates controlFlow;
 
   bool isValid(StageMode mode) const;

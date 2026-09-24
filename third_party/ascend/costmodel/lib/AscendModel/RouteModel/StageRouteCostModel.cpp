@@ -217,6 +217,25 @@ llvm::json::Object TensorOperationWorkload::toJSON() const {
       {"simd_lowering", "segmented_vector"}};
 }
 
+bool ReductionWorkload::isFiniteAndNonNegative() const {
+  return !kind.empty() && !dataType.empty() && !shape.empty() && axis >= 0 &&
+         static_cast<size_t>(axis) < shape.size() &&
+         llvm::all_of(
+             shape, [](int64_t extent) { return extent > 0; }) &&
+         std::isfinite(instances) && instances >= 0.0;
+}
+
+llvm::json::Object ReductionWorkload::toJSON() const {
+  llvm::json::Array jsonShape;
+  for (int64_t extent : shape)
+    jsonShape.push_back(extent);
+  return llvm::json::Object{{"kind", kind},
+                            {"data_type", dataType},
+                            {"shape", std::move(jsonShape)},
+                            {"axis", axis},
+                            {"instances_per_iteration", instances}};
+}
+
 bool StageWorkload::isFiniteAndNonNegative() const {
   const std::array<double, 17> values = {scalarOperations,
                                          loadBytes,
@@ -252,9 +271,14 @@ bool StageWorkload::isFiniteAndNonNegative() const {
                       [](const TensorOperationWorkload &tensor) {
                         return tensor.isFiniteAndNonNegative();
                       }) &&
-         llvm::all_of(atomicWorkloads, [](const AtomicWorkload &atomic) {
-           return atomic.isFiniteAndNonNegative();
-         });
+         llvm::all_of(atomicWorkloads,
+                      [](const AtomicWorkload &atomic) {
+                        return atomic.isFiniteAndNonNegative();
+                      }) &&
+         llvm::all_of(reductionWorkloads,
+                      [](const ReductionWorkload &reduction) {
+                        return reduction.isFiniteAndNonNegative();
+                      });
 }
 
 llvm::json::Object StageWorkload::toJSON() const {
@@ -287,6 +311,10 @@ llvm::json::Object StageWorkload::toJSON() const {
   for (const AtomicWorkload &atomic : atomicWorkloads)
     atomics.push_back(atomic.toJSON());
   result["atomic_workloads"] = std::move(atomics);
+  llvm::json::Array reductions;
+  for (const ReductionWorkload &reduction : reductionWorkloads)
+    reductions.push_back(reduction.toJSON());
+  result["reduction_workloads"] = std::move(reductions);
   result["predicate_elements_per_iteration"] = predicateElements;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
   result["scan_shuffle_lane_steps_per_iteration"] = scanShuffleLaneSteps;
@@ -324,11 +352,11 @@ llvm::json::Object StageModelFeatures::toJSON() const {
 }
 
 bool StageResourceCycles::isFiniteAndNonNegative() const {
-  const std::array<double, 17> values = {
-      setup,       scalar,        load,       store,           atomic,
-      compute,     predicate,     shuffle,    scanShuffle,     dot,
-      loopControl, branchControl, divergence, synchronization, spill,
-      issue,       criticalPath};
+  const std::array<double, 18> values = {
+      setup,   scalar,      load,          store,      atomic,
+      compute, predicate,   shuffle,       reduction,  scanShuffle,
+      dot,     loopControl, branchControl, divergence, synchronization,
+      spill,   issue,       criticalPath};
   return std::all_of(values.begin(), values.end(), [](double value) {
     return std::isfinite(value) && value >= 0.0;
   });
@@ -344,6 +372,7 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   result["compute_per_iteration"] = compute;
   result["predicate_per_iteration"] = predicate;
   result["shuffle_per_iteration"] = shuffle;
+  result["reduction_per_iteration"] = reduction;
   result["scan_shuffle_per_iteration"] = scanShuffle;
   result["dot_per_iteration"] = dot;
   result["loop_control_per_iteration"] = loopControl;

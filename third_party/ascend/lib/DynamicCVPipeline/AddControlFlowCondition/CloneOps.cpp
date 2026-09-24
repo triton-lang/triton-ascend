@@ -205,7 +205,7 @@ static bool shouldEraseOpForCube(
     const llvm::DenseSet<Operation *> &erasedOps) {
   // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
-      isa<hivm::FixpipeOp>(op)) {
+      isa<hivm::FixpipeOp>(op) || isIfOpWithOnlySyncOps(op)) {
     return true;
   }
 

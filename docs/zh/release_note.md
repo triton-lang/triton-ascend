@@ -8,6 +8,8 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 
 | Triton-Ascend 版本 | Python 版本 | Manylinux 版本 | 硬件平台 | 硬件产品 |
 | --- | --- | --- | --- | --- |
+| 3.2.2 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
+| 3.2.1 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
 | 3.2.0 | >=3.9, <=3.11 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3|
 
 ## 发布计划
@@ -16,6 +18,7 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 
 | 主版本 | 发布分支切出时间 | 发布日期 | 补丁发布日期 |
 | --- | --- | --- | --- |
+| 3.6.0 | TBD | TBD | --- |
 | 3.2.0 | 2025年12月08日 | 2026年1月 | --- |
 
 ## 版本亮点
@@ -110,6 +113,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 | Triton-Ascend | Triton | Python              | CANN    | PyTorch | LLVM commit hash | LLVM 补丁 |
 |---------------| ------ | ------------------- |---------| ------- | ---------------- | --------- |
+| `main`        | `3.6.0` | `3.9~3.13`          | `9.1.0` | `2.10.0`  | `f6ded0b`        | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 | `3.2.2`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.1.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |

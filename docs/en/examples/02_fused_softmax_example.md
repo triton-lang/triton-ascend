@@ -36,7 +36,7 @@ def naive_softmax(x):
 Purpose of kernel fusion
 
 When implemented naively in PyTorch, computing `y = naive_softmax(x)` requires reading 5 × *MN* + 2 × *M* elements from DRAM and writing back 3 *MN* + 2 *M* elements. Obviously, this is very inefficient. A more efficient solution is to use a custom "fused" kernel that reads `x` only once and completes all necessary computations on the chip.
-Doing so requires reading and writing back only 2 × *MN* bytes. Therefore, the theoretical speedup ratio is about 4 times, that is, (8 × *MN* + 4 × *M*) / (2 × *MN*).
+Doing so requires reading and writing back only 2 × *MN* elements. Therefore, the theoretical speedup ratio is about 4 times, that is, (8 × *MN* + 4 × *M*) / (2 × *MN*).
 
 `torch.jit.script` is designed to automatically perform this kind of "kernel fusion", but it is still far from ideal.
 
@@ -123,7 +123,7 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(y_triton-y_torch))}')
 ```
 
-Output:
+Output
 
 ```bash
 tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],

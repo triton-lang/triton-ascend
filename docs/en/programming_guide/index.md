@@ -188,6 +188,8 @@ Description of each metric:
 
 According to the data in the table, the values of aiv_mte2_time(μs) and aiv_mte2_ratio before and after optimization differ significantly. The optimization solution first transfers most of the data to the UB, reducing the number of times small batches of data are transferred from the L2 to the UB, thereby reducing the total time of transferring data from the L2 to the UB.
 
+> Note: The aiv_mte2_time after optimization is actually higher. This is because the optimized approach bulk-loads a large amount of data to the UB at once (increasing MTE2 time), but eliminates the inefficient path of scattered L2-to-UB transfers, resulting in better overall performance.
+
 ### Parallel Storage and Computation
 
 Triton-Ascend supports two data processing modes: serial storage and computation and parallel storage and computation.

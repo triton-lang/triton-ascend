@@ -36,7 +36,7 @@ def naive_softmax(x):
 内核融合的目的
 
 当在 PyTorch 中以原生方式实现时，计算`y=naive_softmax(x)`需要从 DRAM 中读取 5MN+2M 个元素，并写回 3MN+2M 个元素。显然这是非常低效的；我们更希望使用一个自定义的“融合”内核，它只需读取一次 x，并在芯片上完成所有必要的计算。
-这样一来只需读取和写回 2MN 个字节，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。
+这样一来只需读取和写回 2MN 个元素，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。
 
 `torch.jit.script`旨在自动执行这种“内核融合”，但它仍然远未达到理想状态。
 
@@ -123,7 +123,7 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(y_triton-y_torch))}')
 ```
 
-Out:
+输出结果
 
 ```bash
 tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],

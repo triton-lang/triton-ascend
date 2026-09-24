@@ -4,10 +4,12 @@
 
 CONSTRAINTS = {
     "triton.Config": {
+
         "constraints": [
-            "``num_stages``: Not applicable on Ascend",
-            "``num_ctas``: Not applicable on Ascend",
-            "``maxnreg``: No effect on Ascend",
+            "``num_warps``: Only effective in SIMT compile mode (``compile_mode=\"simt_only\"``, Ascend 950); no effect on the default SIMD path.",
+            "``num_stages``: No GPU-style software pipelining on Ascend; ``num_stages=1`` disables the default multi-buffer optimization.",
+            "``num_ctas``: Not applicable on Ascend (no block cluster concept)",
+            "``maxnreg``: No effect on Ascend (register allocation is compiler-managed)",
         ],
         "example":
         "triton.Config",
@@ -19,15 +21,37 @@ CONSTRAINTS = {
         "example": "triton.autotune",
     },
     "triton.extension.buffer.language.alloc": {
+        "replace_docstring": [
+            "Allocates a region of local memory with the specified shape and type.",
+            "",
+            ":param etype: the element type of the buffer.",
+            ":type etype: tl.dtype",
+            ":param shape: a list of non-negative integers representing the shape of the buffer.",
+            ":type shape: List[tl.constexpr]",
+            ":param _address_space: (optional) backend-specific local memory address space.",
+            ":type _address_space: bl.address_space",
+        ],
         "constraints": [
-            "DataType: Ascend A2/A3/950 supports int8, int16, int32, uint8, uint64, int64, fp32, bf16, bool. Does not support uint16, uint32, fp16.",
-            "Shape: Each element must be a positive integer.",
+            "Shape: each element must be a positive integer.",
             "Address space: must fit within the specified address space size limits.",
         ],
+        "dtype_support": """
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | 平台         | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +==============+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Ascend A2/A3 |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950   |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            """,
         "example":
         "triton.extension.buffer.language.alloc",
     },
     "triton.extension.buffer.language.fixpipe": {
+        "replace_docstring": [
+            "Directly store a tensor on L0C to a local buffer via fixpipe.",
+            "Fixpipe is a pipeline that performs data movement from L0C to other memory hierarchies.",
+        ],
         "constraints": [
             "DataType: Operates on L0C to UB data movement (Ascend 950/Ascend hardware specific).",
             "Source must be the result of a dot (matrix multiply) operation.",
@@ -37,6 +61,16 @@ CONSTRAINTS = {
         "triton.extension.buffer.language.fixpipe",
     },
     "triton.extension.buffer.language.to_buffer": {
+        "replace_docstring": [
+            "Convert a tensor to a buffer.",
+            "",
+            ":param tensor: the tensor to convert.",
+            ":type tensor: tl.tensor",
+            ":param space: the address space for the buffer (optional).",
+            ":type space: address_space",
+            ":param bind_buffer: an existing buffer to bind the tensor to (optional).",
+            ":type bind_buffer: buffer",
+        ],
         "constraints": [
             "Address space must be one of UB, L1, L0A, L0B, L0C.",
             "When using bind_buffer, tensor and bind_buffer must have identical shapes and element types.",
@@ -46,6 +80,14 @@ CONSTRAINTS = {
         "triton.extension.buffer.language.to_buffer",
     },
     "triton.extension.buffer.language.to_tensor": {
+        "replace_docstring": [
+            "Create a tl.tensor from a bl.buffer.",
+            "",
+            ":param memref: the input bl.buffer object.",
+            ":type memref: bl.buffer",
+            ":param writable: if True, the resultant tensor is considered \"writable\" during bufferization.",
+            ":type writable: bool",
+        ],
         "constraints": [
             "Same type support constraints as alloc.",
         ],
@@ -223,6 +265,13 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.bitonic_merge",
+        "replace_docstring": [
+            "Merge the values in ``input`` along the given dimension using a bitonic sorting network.",
+            "",
+            ":param input: the input tensor to be merge-sorted.",
+            ":param dim: the dimension along which to merge. If None, the last dimension is used.",
+            ":param descending: whether to sort in descending order. Default is False.",
+        ],
     },
     "triton.language.associative_scan": {
         "constraints": [
@@ -253,6 +302,11 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.assume",
+        "replace_docstring": [
+            "Allow the compiler to assume that the given condition is True.",
+            "",
+            ":param cond: the condition that the compiler may assume to be True.",
+        ],
     },
     "triton.language.atomic_add": {
         "constraints": [
@@ -849,12 +903,29 @@ CONSTRAINTS = {
             """,
     },
     "triton.language.extra.cann.extension.ascend_address_space": {
+        "replace_docstring": [
+            "Ascend hardware address space constants for buffer allocation.",
+            "",
+            "Provides named address space specifiers that map to Ascend NPU memory regions:",
+            "",
+            "- ``UB`` — Unified Buffer (on-chip shared memory)",
+            "- ``L1`` — L1 cache buffer",
+            "- ``L0A`` — L0 buffer A (Cube unit input)",
+            "- ``L0B`` — L0 buffer B (Cube unit input)",
+            "- ``L0C`` — L0 buffer C (Cube unit output)",
+        ],
         "constraints": [
             "Provides UB, L1, L0A, L0B, L0C address space constants for use with bl.alloc.",
         ],
         "example": "triton.language.extra.cann.extension.ascend_address_space",
     },
     "triton.language.extra.cann.extension.copy": {
+        "replace_docstring": [
+            "Copies data from the Unified Buffer (UB) to the Unified Buffer (UB) or L1 Buffer.",
+            "",
+            ":param src: the source data located in the Unified Buffer.",
+            ":param dst: the destination buffer located in the Unified Buffer (UB) or L1 memory.",
+        ],
         "constraints": [
             "Source must be in UB address space. Destination must be L1 or UB address space.",
             "Source and destination must have the same data type and shape.",
@@ -863,6 +934,12 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.copy",
     },
     "triton.language.extra.cann.extension.copy_from_ub_to_l1": {
+        "replace_docstring": [
+            "Copies data from the Unified Buffer (UB) to the L1 Buffer.",
+            "",
+            ":param src: the source data located in the Unified Buffer.",
+            ":param dst: the destination buffer located in L1 memory.",
+        ],
         "constraints": [
             "Deprecated: use al.copy instead.",
             "Source must be in UB address space. Destination must be in L1 address space.",
@@ -872,6 +949,14 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.copy_from_ub_to_l1",
     },
     "triton.language.extra.cann.extension.debug_barrier": {
+        "replace_docstring": [
+            "Inserts a synchronization barrier between vector/scalar load/store instructions.",
+            "",
+            "Provides fine-grained control over which instruction types are blocked until",
+            "prior instructions complete. Intended for use within an :func:`scope` context.",
+            "",
+            ":param sync_mode: the barrier type specifying which instruction classes to synchronize.",
+        ],
         "constraints": [
             "sync_mode: must be a SYNC_IN_VF enum value.",
             "Intended for use within an al.scope context.",
@@ -950,6 +1035,13 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.parallel",
     },
     "triton.language.extra.cann.extension.scope": {
+        "replace_docstring": [
+            "Context manager for entering and exiting a scope, where operations",
+            "within a scope share some common characteristics.",
+            "",
+            ":param core_mode: explicitly specifies which core type should be used for",
+            "    operations within the code block. Either ``\"cube\"`` or ``\"vector\"``.",
+        ],
         "constraints": [
             "core_mode: must be 'vector', 'cube'.",
             "Each kernel supports one cube scope and one vector scope; they execute in parallel.",
@@ -959,6 +1051,9 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.scope",
     },
     "triton.language.extra.cann.extension.sub_vec_id": {
+        "replace_docstring": [
+            "Get the Vector Core index on the AI Core.",
+        ],
         "constraints": [
             "Only valid in mixed AIC+AIV scenarios (Cube + Vector cores).",
             "Using it in pure-Cube or pure-Vector kernels will cause a compilation error.",
@@ -977,6 +1072,13 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.subview",
     },
     "triton.language.extra.cann.extension.sync_block_all": {
+        "replace_docstring": [
+            "Performs global synchronization across all cores of a specified type.",
+            "",
+            ":param mode: synchronization scope. One of ``\"all_cube\"``, ``\"all_vector\"``,",
+            "    ``\"all\"``, ``\"all_sub_vector\"``.",
+            ":param event_id: event marker ID in range [0, 15].",
+        ],
         "constraints": [
             "mode: must be one of 'all_cube', 'all_vector', 'all', 'all_sub_vector'.",
             "event_id: must be in range [0, 15].",
@@ -985,6 +1087,16 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.sync_block_all",
     },
     "triton.language.extra.cann.extension.sync_block_set": {
+        "replace_docstring": [
+            "Sets a cross-core synchronization flag for producer-consumer sync",
+            "between Cube and Vector cores.",
+            "",
+            ":param sender: sending core type, ``\"cube\"`` or ``\"vector\"`` (must differ from receiver).",
+            ":param receiver: receiving core type, ``\"cube\"`` or ``\"vector\"``.",
+            ":param event_id: sync flag identifier in range [0, 15].",
+            ":param sender_pipe: sender-side pipeline type (e.g. PIPE_FIX, PIPE_MTE3).",
+            ":param receiver_pipe: receiver-side pipeline type (defaults to PIPE_MTE2).",
+        ],
         "constraints": [
             "sender/receiver: must be 'cube' or 'vector', and must differ from each other.",
             "event_id: must be in range [0, 15].",
@@ -994,6 +1106,15 @@ CONSTRAINTS = {
         "triton.language.extra.cann.extension.sync_block_set",
     },
     "triton.language.extra.cann.extension.sync_block_wait": {
+        "replace_docstring": [
+            "Waits on a cross-core synchronization flag set by :func:`sync_block_set`.",
+            "",
+            ":param sender: sending core type, ``\"cube\"`` or ``\"vector\"``.",
+            ":param receiver: receiving core type, ``\"cube\"`` or ``\"vector\"``.",
+            ":param event_id: must match the ID used by the corresponding sync_block_set.",
+            ":param sender_pipe: sender-side pipeline type.",
+            ":param receiver_pipe: receiver-side pipeline type (defaults to PIPE_MTE2).",
+        ],
         "constraints": [
             "sender/receiver: must be 'cube' or 'vector', and must differ from each other.",
             "event_id: must match the ID used by the corresponding sync_block_set.",
@@ -1001,6 +1122,107 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.sync_block_wait",
+    },
+    "triton.language.extra.cann.extension.sub_vec_num": {
+        "replace_docstring": [
+            "Get the Vector Core number on one AI Core.",
+        ],
+        "constraints": [
+            "Only valid in mixed AIC+AIV scenarios (Cube + Vector cores).",
+            "Using it in pure-Cube or pure-Vector kernels will cause a compilation error.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.sub_vec_num",
+    },
+    "triton.language.extra.cann.extension.custom": {
+        "replace_docstring": [
+            "Invoke a custom operation with the given name and arguments.",
+            "",
+            ":param name: the name of the registered custom operation.",
+            ":param args: positional arguments forwarded to the custom op.",
+            ":param kwargs: keyword arguments forwarded to the custom op.",
+        ],
+    },
+    "triton.language.extra.cann.extension.custom_semantic": {
+        "replace_docstring": [
+            "Internal semantic handler for custom operations (used by the code generator).",
+            "",
+            "User code should use :func:`custom` instead.",
+            "",
+            ":param name: the name of the registered custom operation.",
+            ":param args: positional arguments forwarded to the custom op.",
+            ":param kwargs: keyword arguments forwarded to the custom op.",
+        ],
+    },
+    "triton.language.extra.cann.extension.register_custom_op": {
+        "replace_docstring": [
+            "Register a custom operation so that it can be invoked via :func:`custom`.",
+            "",
+            "Used as a class decorator. The decorated class must define a ``core`` field",
+            "(a :class:`CORE` value), a ``pipe`` field (a :class:`PIPE` value), and for",
+            "non-CUBE ops a ``mode`` field (a :class:`MODE` value).",
+            "",
+            ":param op: the custom op class to register.",
+        ],
+    },
+    "triton.language.extra.cann.extension.PIPE": {
+        "replace_docstring": [
+            "Enumeration of Ascend pipeline types.",
+            "",
+            "Members: ``PIPE_S``, ``PIPE_V``, ``PIPE_M``, ``PIPE_MTE1``, ``PIPE_MTE2``,",
+            "``PIPE_MTE3``, ``PIPE_ALL``, ``PIPE_FIX``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.MODE": {
+        "replace_docstring": [
+            "Enumeration of Ascend execution modes.",
+            "",
+            "Members: ``SIMD``, ``SIMT``, ``MIX``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.CORE": {
+        "replace_docstring": [
+            "Enumeration of Ascend core types.",
+            "",
+            "Members: ``VECTOR``, ``CUBE``, ``CUBE_OR_VECTOR``, ``CUBE_AND_VECTOR``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.IteratorType": {
+        "replace_docstring": [
+            "Enumeration of Ascend iterator types for affine iteration semantics.",
+            "",
+            "Members: ``Parallel``, ``Broadcast``, ``Transpose``, ``Reduction``,",
+            "``Interleave``, ``Deinterleave``, ``Inverse``, ``Pad``, ``Concat``,",
+            "``Gather``, ``Cumulative``, ``Opaque``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.FixpipeDMAMode": {
+        "replace_docstring": [
+            "Enumeration of fixpipe DMA transfer modes.",
+            "",
+            "Members: ``NZ2DN``, ``NZ2ND``, ``NZ2NZ``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.FixpipeDualDstMode": {
+        "replace_docstring": [
+            "Enumeration of fixpipe dual-destination split modes.",
+            "",
+            "Members: ``NO_DUAL``, ``COLUMN_SPLIT``, ``ROW_SPLIT``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.FixpipePreQuantMode": {
+        "replace_docstring": [
+            "Enumeration of fixpipe pre-quantization modes.",
+            "",
+            "Members: ``NO_QUANT``, ``F322BF16``, ``F322F16``, ``S322I8``.",
+        ],
+    },
+    "triton.language.extra.cann.extension.FixpipePreReluMode": {
+        "replace_docstring": [
+            "Enumeration of fixpipe pre-ReLU modes.",
+            "",
+            "Members: ``LEAKY_RELU``, ``NO_RELU``, ``NORMAL_RELU``, ``P_RELU``.",
+        ],
     },
     "triton.language.flip": {
         "constraints": [],
@@ -1459,6 +1681,15 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.max_constancy",
+        "replace_docstring": [
+            "Let the compiler know that the first ``value`` elements in ``input`` are constant.",
+            "",
+            "For example, if ``values`` is [4], then each group of 4 values in ``input``",
+            "should all be equal, e.g. [0, 0, 0, 0, 1, 1, 1, 1].",
+            "",
+            ":param input: the input tensor.",
+            ":param values: the number of leading constant values per dimension.",
+        ],
     },
     "triton.language.max_contiguous": {
         "constraints": [
@@ -1474,6 +1705,12 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.max_contiguous",
+        "replace_docstring": [
+            "Let the compiler know that the first ``value`` elements in ``input`` are contiguous.",
+            "",
+            ":param input: the input tensor.",
+            ":param values: the number of leading contiguous values per dimension.",
+        ],
     },
     "triton.language.maximum": {
         "constraints": [],
@@ -1577,6 +1814,12 @@ CONSTRAINTS = {
             """,
         "example":
         "triton.language.multiple_of",
+        "replace_docstring": [
+            "Let the compiler know that the values in ``input`` are all multiples of ``value``.",
+            "",
+            ":param input: the input tensor.",
+            ":param values: the divisor each leading value is a multiple of, per dimension.",
+        ],
     },
     "triton.language.neg": {
         "constraints": [],
@@ -1832,6 +2075,13 @@ CONSTRAINTS = {
             """,
         "example":
         "triton.language.sort",
+        "replace_docstring": [
+            "Sorts the values in ``x`` along the given dimension.",
+            "",
+            ":param x: the input tensor to be sorted.",
+            ":param dim: the dimension along which to sort. If None, the last dimension is used.",
+            ":param descending: whether to sort in descending order. Default is False.",
+        ],
     },
     "triton.language.topk": {
         "constraints": [],
@@ -1939,6 +2189,16 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.static_print",
+        "replace_docstring": [
+            "Print the values at compile time.  The parameters are the same as the builtin :code:`print`.",
+            "",
+            "NOTE: Calling the Python builtin :code:`print` is not the same as calling this,",
+            "it instead maps to :code:`device_print`, which has special requirements for the arguments.",
+            "",
+            ":param values: the values to print at compile time.",
+            ":param sep: string inserted between values. Default is a single space.",
+            ":param end: string appended after the last value. Default is a newline.",
+        ],
     },
     "triton.language.static_assert": {
         "constraints": [
@@ -1956,6 +2216,13 @@ CONSTRAINTS = {
             """,
         "example":
         "triton.language.static_assert",
+        "replace_docstring": [
+            "Assert the condition at compile time.  Does not require that the :code:`TRITON_DEBUG`",
+            "environment variable is set.",
+            "",
+            ":param cond: the compile-time condition to assert.",
+            ":param msg: message displayed when the assertion fails. Default is an empty string.",
+        ],
     },
     "triton.language.static_range": {
         "constraints": [
@@ -2271,6 +2538,29 @@ CONSTRAINTS = {
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
         "example": "triton.language.zeros_like",
+    },
+    "triton.language.tensor": {
+        "replace_docstring": [
+            "Represents an N-dimensional array of values or pointers.",
+            "",
+            ":code:`tensor` is the fundamental data structure in Triton programs.",
+            "Most functions in :py:mod:`triton.language` operate on and return tensors.",
+            "",
+            "Most of the named member functions here are duplicates of the free functions",
+            "in :code:`triton.language`. For example, :code:`triton.language.sqrt(x)` is",
+            "equivalent to :code:`x.sqrt()`.",
+            "",
+            ":code:`tensor` also defines most of the magic/dunder methods, so you can",
+            "write :code:`x+y`, :code:`x << 2`, etc.",
+        ],
+    },
+    "triton.language.tensor_descriptor": {
+        "replace_docstring": [
+            "A descriptor representing a tensor in global memory.",
+            "",
+            "Used together with :func:`make_tensor_descriptor`, :func:`load_tensor_descriptor`",
+            "and :func:`store_tensor_descriptor` to load/store blocks of data from global memory.",
+        ],
     },
     # --- tensor operator syntax (no tl. prefix; documented via doc stubs) ---
     "triton.language.invert": {

@@ -8,6 +8,8 @@ The following is the release compatibility matrix for Triton-Ascend versions:
 
 | Triton-Ascend Version | Python Version | Manylinux Version | Hardware Platform | Hardware Product |
 | --- | --- | --- | --- | --- |
+| 3.2.2 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
+| 3.2.1 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
 | 3.2.0 | >=3.9, <=3.11 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3|
 
 ## Release Schedule
@@ -16,6 +18,7 @@ The following is the Triton-Ascend release schedule. Note that patch releases ar
 
 | Major Version | Release Branch Cut Date | Release Date | Patch Release Date |
 | --- | --- | --- | --- |
+| 3.6.0 | TBD | TBD | --- |
 | 3.2.0 | December 08, 2025 | January 2026 | --- |
 
 ## Release Highlights
@@ -108,6 +111,7 @@ Maintenance branch statuses include:
 
 | Triton-Ascend | Triton | Python              | CANN    | PyTorch | LLVM commit hash | LLVM Patch |
 |---------------| ------ | ------------------- |---------| ------- | ---------------- | --------- |
+| `main`        | `3.6.0` | `3.9~3.13`          | `9.1.0` | `2.10.0`  | `f6ded0b`        | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 | `3.2.2`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.1.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -         |
 | `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |

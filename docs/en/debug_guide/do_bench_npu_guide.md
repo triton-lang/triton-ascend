@@ -40,13 +40,34 @@ This means:
 - `fn` has the same semantics as in community `do_bench` and represents the callable function to be benchmarked;
 - `do_bench_npu` on Triton-Ascend means “let the NPU profiling tools capture pure Device-side kernel execution time”, effectively eliminating Host-side overhead from the measurement.
 
+## Parameter Reference
+
+The complete parameter list of `do_bench_npu` is as follows (based on source code `third_party/ascend/backend/testing.py`):
+
+| Parameter | Type | Default | Description |
+|:---|:---|:---|:---|
+| `fn` | Callable or List[Callable] | (required) | The callable function or list of functions to benchmark. When a list is passed, a list of corresponding times is returned. |
+| `warmup` | int | 5 | Warmup iterations. The number of times `fn` is run before actual timing, used to stabilize performance. |
+| `active` | int | 30 | Active iterations to record for timing. The final result is the average over these iterations. |
+| `clear_l2_cache` | bool | False | Whether to clear the L2 cache before each `fn` execution. Used to measure worst-case performance or simulate cold-start scenarios. |
+| `prof_dir` | str | None | Directory to save profiler results. When set to non-None, forces fallback to the `torch_npu.profiler` path. |
+| `keep_res` | bool | False | Whether to keep the raw profiler output files (e.g., CSVs). When set to True, forces fallback to the `torch_npu.profiler` path. |
+| `target_kernel_name` | str | None | Specifies the NPU kernel name to measure. When set to non-None, only the execution time of that kernel is measured, and the `torch_npu.profiler` path is forced. |
+
 ## Prerequisites
 
 ### 1. Understand the difference between Host-side and Device-side timing
 
+In NPU performance benchmarking, understanding the difference between Host-side and Device-side timing is crucial:
+
+- **Host side (CPU side)**: The side where Python code runs and kernel launches are issued. Host-side timing includes kernel launch overhead, Python call overhead, driver-layer overhead, and other overheads unrelated to the kernel computation itself.
+- **Device side (NPU hardware side)**: The side where the kernel actually executes computation on the NPU hardware. Device-side timing measures only the pure execution time of the kernel on the hardware, excluding Host-side launch and dispatch overhead.
+
 The community `triton.testing.do_bench` uses `Event` to measure, and the recorded start and end times will include Host-side launch overhead.
 
 `do_bench_npu` leverages NPU profiling tools (`MSPTI` or `torch_npu.profiler`), guaranteeing that the returned time is strictly the Device-side kernel execution times.
+
+**Why this matters**: For kernels with very short execution times, Host-side launch overhead may far exceed the kernel's own execution time. In such cases, Host-side timing is dominated by overhead, making it difficult to accurately compare the real performance differences between kernels. Using Device-side timing eliminates this interference, yielding measurements that reflect the kernel's true computational efficiency.
 
 ### 2. Environment requirements for the fast path (`mspti`)
 

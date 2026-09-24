@@ -12,7 +12,7 @@
 <h2 id="入门.md">入门</h2>
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
-- 阅读[README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md)获取项目信息和构建开发环境。
+- 阅读[README_zh.md](https://github.com/triton-lang/triton-ascend/blob/main/README_zh.md)获取项目信息和构建开发环境。
 
 <h2 id="开发者来源认证.md">开发者来源认证（DCO）</h2>
 
@@ -42,7 +42,7 @@ git commit -s -m "your commit message"
 
 - 单元测试指南
 
-  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/custom_op/test_gather_load.py)，[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)
+  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)，[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)
 
 - 重构指南
 

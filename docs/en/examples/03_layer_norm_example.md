@@ -1,6 +1,6 @@
 # Layer Normalization
 
-In this section, you will use Triton to write a high-performance layer normalization kernel that runs faster than the PyTorch implementation.
+In this section, you will use Triton to write a high-performance layer normalization (Layer Normalization) kernel. By fusing the mean, variance computation, and normalization into a single kernel, the number of global memory reads and writes is reduced, which can achieve better performance than the PyTorch operation-by-operation implementation.
 
 ## Compute Kernel
 
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     _layer_norm(128, 128, torch.float32)
 ```
 
-Result
+Output
 
 ```bash
 y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],

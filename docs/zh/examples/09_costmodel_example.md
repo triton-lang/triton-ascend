@@ -94,6 +94,26 @@ for config, latency_us in sorted(latencies.items(), key=lambda item: item[1]):
     print(f"{config}: {latency_us:.3f} us")
 ```
 
+## TTIR 示例
+
+调用 `make_ttir` 生成的 TTIR 示例（截取关键部分）：
+
+```text
+#("/usr/local/lib/python3.11/site-packages/triton/language/standard.py":433:9-433:14)
+module {
+  tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 32 : i32}, ...) -> !tt.ptr<f32> {
+    %c0 = arith.constant 0 : i32
+    %0 = tt.get_program_id x : i32
+    %1 = arith.muli %0, %c1024_i32 : i32
+    %2 = tt.make_range %arg3 end = 1024 : tensor<1024xi32>
+    %3 = arith.addi %1, %2 : tensor<1024xi32>
+    ...
+    tt.store %arg2, %7, %6 : !tt.ptr<f32>
+    tt.return
+  }
+}
+```
+
 ## 示例输出
 
 不同版本的 costmodel 参数可能会使具体数值略有不同，但输出结构类似：

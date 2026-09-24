@@ -15,7 +15,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://triton-ascend.readthedocs.io/en/latest/programming_guide/index.html"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
 </p>
 
 ---
@@ -58,7 +58,7 @@ Minimum hardware configuration: single card with 32GB memory (recommended)
 
 Determine and install the Python, CANN, and TorchNPU software versions. This step must be completed before both package installation and source code compilation installation.
 
-- Python version selection: py3.9-py3.11 are all supported.
+- Python version selection: py3.9-py3.13 are all supported.
 
 - CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.1.0.
 
@@ -85,6 +85,7 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 ```bash
 apt update
+# Supported clang versions: clang-15, clang-17, clang-20.1.8
 apt install zlib1g-dev clang-15 lld-15
 apt install ccache # optional
 update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
@@ -198,25 +199,25 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## ✏️ Documentation Entry
 
-- [Quick Start](./docs/zh/quick_start.md)
+- [Quick Start](./docs/en/quick_start.md)
 
-- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
+- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/en/latest/index.html)
 
-- [Installation Guide](./docs/zh/installation_guide.md)
+- [Installation Guide](./docs/en/installation_guide.md)
 
-- [Architecture Design and Core Features](./docs/zh/architecture_design_and_core_features.md)
+- [Architecture Design and Core Features](./docs/en/architecture_design_and_core_features.md)
 
-- [Operator Development Guide](./docs/zh/programming_guide/index.md)
+- [Operator Development Guide](./docs/en/programming_guide/index.md)
 
-- [Operator Migration Guide](./docs/zh/migration_guide/migrate_from_gpu.md)
+- [Operator Migration Guide](./docs/en/migration_guide/migrate_from_gpu.md)
 
-- [Operator Debugging Guide](./docs/zh/debug_guide/debugging.md#)
+- [Operator Debugging Guide](./docs/en/debug_guide/debugging.md#)
 
-- [Performance Tuning Guide](./docs/zh/debug_guide/profiling.md#)
+- [Performance Tuning Guide](./docs/en/debug_guide/profiling.md#)
 
-- [Environment Variables Reference](./docs/zh/environment_variable_and_compiler_options_reference.md)
+- [Environment Variables Reference](./docs/en/environment_variable_and_compiler_options_reference.md)
 
-- [FAQ](./docs/zh/FAQ.md)
+- [FAQ](./docs/en/FAQ.md)
 
 ## 🏘️ Community Activities
 
@@ -224,6 +225,6 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 🤝 Community and Contribution
 
-- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/zh/community/CONTRIBUTING_zh.md)
+- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/en/community/CONTRIBUTING.md)
 
 - Please report any bugs you encounter via [Issue](https://github.com/triton-lang/triton-ascend/issues).

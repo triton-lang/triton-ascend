@@ -105,20 +105,22 @@ if __name__ == "__main__":
 #     2. If the user defines Config and auto_gen_config=False, the framework does not generate Configs and only uses the user-defined Configs;
 #     3. If the user defines Config and auto_gen_config=True, the framework automatically generates Configs and merges them with the user-defined Configs to select the optimal configuration;
 #
-# key (list[str]/Dict[str,str]):
+# key (list[str]):
 # - A list of runtime argument names is passed in. A change in the value of any argument in the list triggers the regeneration and evaluation of the candidate configurations.
-# Notes: 1. If hints passes the split axis (split_params), tiling axis (tiling_params), low-dimensional axis (low_dim_axes), and reduction axis (reduction_axes) information, the key type must be Dict[str,str], as shown in Example 1:
-#        2. If hints does not pass the split axis (split_params), tiling axis (tiling_params), low-dimensional axis (low_dim_axes), and reduction axis (reduction_axes) information, the key type must be list[str], and the axis information is assigned in the parameter order, as shown in Example 2:
+# Notes: 1. The key type must always be a list[str]. It cannot be a dict or a set.
+#        2. To map the split axis (split_params), tiling axis (tiling_params), low-dimensional axis (low_dim_axes), and reduction axis (reduction_axes) to specific argument names, specify the axis name -> argument name mapping through hints["axes"], as shown in Example 1:
+#        3. If no mapping is specified in hints["axes"], the axis information is assigned in the parameter order of key, as shown in Example 2:
 
 Example 1:
 @triton.autotune(
     configs=[],
-    key={"x":"n_elements"},
+    key=["n_elements"],
     hints={
         "split_params":{"x":"BLOCK_SIZE"},
         "tiling_params":{},
         "low_dim_axes":["x"],
         "reduction_axes":[],
+        "axes": {"x": "n_elements"},
     }
 )
 Example 2:
@@ -155,7 +157,7 @@ def add_kernel(
 Note:
 
 1. By default, Triton-Ascend uses the benchmark mode to obtain the on-chip computation time. After the environment variable is set by running `export TRITON_BENCH_METHOD="npu"`, the on-chip computation time of each kernel is obtained by using `torch_npu.profiler.profile`. For some Triton kernels that compute fast, such as small-shape operators, this method can obtain more accurate computation time than the default method. However, this will significantly increase the overall autotune time. Therefore, exercise caution when enabling this method.
-2. Currently, this advanced usage is mainly used for vector operators and is not supported by cube operators. For more advanced usage examples, see [Advanced Autotune Cases](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/).
+2. The advanced autotune currently supports Vector, Cube, and CV (fused) kernel types. For more advanced usage examples, see [Advanced Autotune Cases](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/).
 
 ### Automatic Parameter Parsing
 
@@ -191,7 +193,7 @@ Notes: 1. The split axis parameter must be multiplied by `tl.program_id()`. 2. T
 ```Python
 @triton.autotune(
     configs=[],
-    key={"n_elements"} # It needs to be specified.
+    key=["n_elements"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -225,7 +227,7 @@ Notes: 1. The tiling axis parameters must be used in the call of `tl.arange()` a
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # It needs to be specified.
+    key=["n_rows", "n_cols"] # It needs to be specified.
     ...
 )
 @triton.jit
@@ -261,7 +263,7 @@ Notes: 1. The low-dimensional axis must be computed using `tl.arange()` and slic
 
 ```Python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
+    key=["n_rows", "n_cols"] # Automatically allocated in the order of {"x": "n_rows", "y": "n_cols"}
     ...
 )
 @triton.jit
@@ -311,10 +313,10 @@ def triton_func(input_ptr, output_ptr, ...):
 ### Automatically Generating the Profiling Result of the Optimal Configuration
 
 ```Python
-# Automatically generate the profiling result of the optimal kernel configuration of the current autotune in the `auto_profile_dir` directory, that is, the performance data collected by `torch_npu.profiler.profile`.
+# Automatically generate the profiling result of the optimal kernel configuration of the current autotune in the `auto_prof_dir` directory, that is, the performance data collected by `torch_npu.profiler.profile`.
 # This takes effect in both the community autotune usage and advanced autotune usage.
 @triton.autotune(
-    auto_profile_dir="./profile_result",
+    auto_prof_dir="./profile_result",
     ...
 )
 ```

@@ -1,6 +1,6 @@
 # 层标准化 （Layer Normalization）
 
-在本节中，我们将使用 Triton 编写一个比 PyTorch 实现运行更快的高性能层标准化 (Layer Normalization) 内核。
+在本节中，我们将使用 Triton 编写一个高性能层标准化 (Layer Normalization) 内核。通过将均值、方差计算和归一化融合到单个 kernel 中，减少了全局内存的读写次数，相比 PyTorch 的逐操作实现可以获得更好的性能。
 
 ## 计算内核
 
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     _layer_norm(128, 128, torch.float32)
 ```
 
-结果
+输出结果
 
 ```bash
 y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],

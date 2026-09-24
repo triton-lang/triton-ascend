@@ -1,4 +1,4 @@
-# Tutorials
+# 典型算子样例
 
 ## Triton 示例列表
 

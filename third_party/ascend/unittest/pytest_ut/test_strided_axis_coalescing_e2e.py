@@ -16,7 +16,7 @@ an option in the test: a one-dimensional block pointer has ``stride=S`` and a
 base of ``ptr + (pid % S)``; ``pid // S`` selects the T tile.  The default NPU
 compile mode is ``simd_simt_template`` (also called ``unstructured_in_simt``),
 which supplies the historical template-SIMT half of the T2L gate on a real
-910_95/A5 target.
+Ascend 950 target.
 
 Do not run this test on a generic/B4 machine.  Pretending that such a machine
 is 910_95 would exercise a different compiler/toolchain contract and would not
@@ -40,7 +40,7 @@ except Exception:
 
 pytestmark = pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="StridedAxisCoalescing native validation requires an Ascend 910_95/A5 toolchain",
+    reason="StridedAxisCoalescing native validation requires an Ascend 950 toolchain",
 )
 
 

@@ -1149,8 +1149,8 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
 
     ``simd_simt_template`` is the portable default: it retains the ordinary
     SIMD pipeline on A2/A3 and enables the existing template-SIMT subpaths on
-    A5.  ``unstructured_in_simt`` is an equivalent spelling of that mode.
-    Pure-SIMT remains an A5-only explicit compile mode.
+    Ascend 950.  ``unstructured_in_simt`` is an equivalent spelling of that mode.
+    Pure-SIMT remains an Ascend 950-only explicit compile mode.
     """
     if not isinstance(compile_mode, str):
         raise ValueError("compile_mode must be a string; expected one of: " + ", ".join(_CANONICAL_COMPILE_MODES))
@@ -1161,7 +1161,7 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
                          ", ".join(_CANONICAL_COMPILE_MODES))
 
     if canonical_mode == "simt_only" and not _is_a5_target_arch(arch):
-        raise ValueError('compile_mode="simt_only" is supported only on A5 targets.')
+        raise ValueError('compile_mode="simt_only" is supported only on Ascend 950 targets.')
     return canonical_mode
 
 
@@ -1214,7 +1214,7 @@ class NPUOptions:
     enable_hivm_auto_cv_balance: bool = None
     # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
     enable_hivm_batch_matmul: bool = False
-    # Only takes effect on the A5 non-pure-SIMT BiShengIR compilation path.
+    # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
     sync_solver: bool = None
     unit_flag: bool = None
@@ -1248,7 +1248,7 @@ class NPUOptions:
     is_pure_simt: bool = field(default=False, init=False)
     # Only takes effect on the pure-SIMT path.
     shared_mem_dynamic_size: int = None
-    # A5 pure-SIMT-only option passed as -simt-optimization-mode
+    # Ascend 950 pure-SIMT-only option passed as -simt-optimization-mode
     # to bishengir-compile. Its value grammar belongs to the toolchain.
     # Individual digits are passed to various passes to control behavior,
     # and are parsed right-to-left.
@@ -1390,7 +1390,7 @@ def _is_internal_npu_options(options, target_arch: str) -> bool:
 
 
 def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_options) -> None:
-    """Restrict the vendor SIMT optimization switch to its A5 pure-SIMT path."""
+    """Restrict the vendor SIMT optimization switch to its Ascend 950 pure-SIMT path."""
     option_name = "simt_optimization_mode"
     if option_name not in raw_options:
         return
@@ -1401,7 +1401,7 @@ def _normalize_bishengir_simt_optimization_for_context(options: NPUOptions, raw_
         return
 
     warnings.warn(
-        "simt_optimization_mode only takes effect for A5 "
+        "simt_optimization_mode only takes effect for Ascend 950 "
         "pure-SIMT compilation; ignoring the explicit value.",
         UserWarning,
         stacklevel=3,

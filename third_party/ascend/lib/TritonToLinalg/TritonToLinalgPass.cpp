@@ -515,10 +515,10 @@ static bool isSIMTOp(Operation *op) {
     }
   }
 
-  // math.sin / math.cos on f16/f32 inputs: downstream (A5 RegBase normalize,
-  // enable-high-precision defaults to true) rewrites them into a Payne-Hanek
-  // range reduction that looks up a 320xi32 2/pi limbs table with two
-  // hfusion.gather ops per collapsed region.  Match that scenario here and
+  // math.sin / math.cos on f16/f32 inputs: downstream (Ascend 950 RegBase
+  // normalize, enable-high-precision defaults to true) rewrites them into a
+  // Payne-Hanek range reduction that looks up a 320xi32 2/pi limbs table with
+  // two hfusion.gather ops per collapsed region.  Match that scenario here and
   // route it to the SIMT template so the table gathers run in SIMT.
   if (compileOn91095Flag && (isa<math::SinOp>(op) || isa<math::CosOp>(op))) {
     Type inElem = getElementTypeOrSelf(op->getOperand(0).getType());

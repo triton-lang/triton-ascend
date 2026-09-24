@@ -8,7 +8,7 @@
 // RUN: diff %t.control %t.disabled
 // RUN: diff %t.control %t.simt
 
-// The same valid candidates must remain unchanged on non-A5 targets.
+// The same valid candidates must remain unchanged on non-Ascend 950 targets.
 // RUN: sed 's/Ascend950PR_9579/Ascend910B2/g' %s > %t.a2.mlir
 // RUN: triton-opt --split-input-file %t.a2.mlir -canonicalize -cse -o %t.a2.control
 // RUN: triton-opt --split-input-file --verify-each %t.a2.mlir -graph-optimize='rule-mask=8' -canonicalize -cse -o %t.a2
@@ -17,7 +17,7 @@
 // RUN: triton-opt --split-input-file %t.a3.mlir -canonicalize -cse -o %t.a3.control
 // RUN: triton-opt --split-input-file --verify-each %t.a3.mlir -graph-optimize='rule-mask=8' -canonicalize -cse -o %t.a3
 // RUN: diff %t.a3.control %t.a3
-// Missing target information must not enable the A5-only pattern.
+// Missing target information must not enable the Ascend 950-only pattern.
 // RUN: sed 's/hacc.target = #hacc.target<"Ascend950PR_9579">, //g' %s > %t.no-target.mlir
 // RUN: triton-opt --split-input-file %t.no-target.mlir -canonicalize -cse -o %t.no-target.control
 // RUN: triton-opt --split-input-file --verify-each %t.no-target.mlir -graph-optimize='rule-mask=8' -canonicalize -cse -o %t.no-target

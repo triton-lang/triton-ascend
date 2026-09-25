@@ -28,6 +28,7 @@ import functools
 import ast
 import gc
 import inspect
+import math
 import os
 import pprint
 import threading
@@ -77,6 +78,66 @@ _RESERVED_HINT_KEYS = {
 }
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
 _DEFAULT_COMPILE_MODE = "simd_simt_template"
+_FAILURE_DETAIL_MAX_LENGTH = 512
+
+
+def _format_autotune_failure(exc) -> str:
+    """Summarize a failure without retaining its exception or traceback."""
+    try:
+        detail = getattr(exc, "error_message", None) or str(exc)
+        detail = " ".join(str(detail).split())
+    except Exception:
+        detail = ""
+    summary = type(exc).__name__ + (f": {detail}" if detail else "")
+    if len(summary) > _FAILURE_DETAIL_MAX_LENGTH:
+        summary = summary[:_FAILURE_DETAIL_MAX_LENGTH - 3] + "..."
+    return summary
+
+
+class _UserConfigDiagnostics:
+    """Track explicit configs for one invocation, including hints expansion."""
+
+    _REPORTED = "reported"
+    _PENDING = {"not_evaluated", "compiling", "benchmarking", "running"}
+
+    def __init__(self, configs):
+        self.reset_configs(configs)
+
+    def reset_configs(self, configs):
+        # An equal generated config may be the key retained by the benchmark dict.
+        self.results = [[config, "not_evaluated", "No benchmark result was produced."] for config in configs]
+
+    def record(self, config, status, detail="", exc=None):
+        matched = False
+        for result in self.results:
+            if result[0] is config or result[0] == config:
+                if status == "pruned" and result[1] == "rough_benchmark_failed":
+                    # Keep the actual error when time-budget pruning follows it.
+                    result[2] += f" {detail}"
+                    matched = True
+                    continue
+                result[1] = status
+                result[2] = detail + (f" {_format_autotune_failure(exc)}" if exc is not None else "")
+                matched = True
+        return matched
+
+    def abort(self, exc):
+        for result in self.results:
+            if result[1] in self._PENDING:
+                result[2] += f" Autotuning interrupted: {_format_autotune_failure(exc)}"
+
+    def report(self):
+        incomplete = {
+            "compiling": "compilation_incomplete",
+            "benchmarking": "benchmark_incomplete",
+            "running": "evaluation_incomplete",
+        }
+        for config, status, detail in self.results:
+            if status == self._REPORTED:
+                continue
+            status = incomplete.get(status, status)
+            field = "result" if status in {"benchmarked", "selected", "cache_hit"} else "reason"
+            print(f"Triton autotuning: user config={config}; status={status}; {field}={detail}")
 
 
 def _format_autotune_timing(timing) -> str:
@@ -1963,7 +2024,7 @@ class AutoTilingTuner(Autotuner):
 
         return configs
 
-    def _rough_bench_once(self, fn) -> float:
+    def _rough_bench_once(self, fn, config=None) -> float:
         di = triton.runtime.driver.active.get_device_interface()
         di.synchronize()
         try:
@@ -1975,6 +2036,8 @@ class AutoTilingTuner(Autotuner):
             di.synchronize()
             return start_event.elapsed_time(end_event)
         except Exception as exc:
+            if config is not None:
+                self._record_user_config(config, "rough_benchmark_failed", exc=exc)
             print("Triton autotuning compile debug: "
                   f"one-shot rough benchmark failed, reason={type(exc).__name__}: {exc}")
             return float("inf")
@@ -1987,7 +2050,7 @@ class AutoTilingTuner(Autotuner):
 
         rough_timings = {}
         for config, fn in run_fns.items():
-            rough_timings[config] = self._rough_bench_once(fn)
+            rough_timings[config] = self._rough_bench_once(fn, config=config)
 
         sorted_configs = sorted(rough_timings.keys(), key=lambda c: rough_timings[c])
 
@@ -2018,6 +2081,11 @@ class AutoTilingTuner(Autotuner):
                 print(f"Triton autotuning compile debug: "
                       f"[{status}] config={config}, rough_time={rough_timings[config]:.4f}ms")
 
+        for config in run_fns:
+            if config not in valid_configs:
+                self._record_user_config(
+                    config, "pruned",
+                    f"Excluded by the {time_limit}s benchmark time budget; rough_time={rough_timings[config]} ms.")
         return {cfg: run_fns[cfg] for cfg in valid_configs}
 
     def generate_key_and_configs(self, *args, **kwargs):
@@ -2072,6 +2140,9 @@ class AutoTilingTuner(Autotuner):
                 self.user_configs,
                 self.config_hints,
             )
+            self._expanded_user_configs = expanded_user_configs
+            if getattr(self, "_user_config_diagnostics", None) is not None:
+                self._user_config_diagnostics.reset_configs(expanded_user_configs)
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
                 self.configs = [Config(
                     {},
@@ -2102,7 +2173,41 @@ class AutoTilingTuner(Autotuner):
         if isinstance(outermost, int) and outermost > 1:
             kwargs["grid_num_tiles"] = _InternalNPUOptionInt(outermost)
 
+    def _record_user_config(self, config, status, detail="", exc=None):
+        diagnostics = getattr(self, "_user_config_diagnostics", None)
+        return diagnostics is not None and diagnostics.record(config, status, detail, exc)
+
+    def _is_user_config(self, config):
+        configs = getattr(self, "_expanded_user_configs", getattr(self, "user_configs", []))
+        return any(candidate is config or candidate == config for candidate in configs)
+
+    def _record_user_timings(self, timings, source="benchmark"):
+        if getattr(self, "_user_config_diagnostics", None) is None:
+            return
+        for config, timing in timings.items():
+            if not self._is_user_config(config):
+                continue
+            values = timing if isinstance(timing, (tuple, list)) else (timing, )
+            if values and all(math.isfinite(value) for value in values):
+                self._record_user_config(config, "benchmarked", f"source={source}; {_format_autotune_timing(timing)}")
+            else:
+                self._record_user_config(config, "invalid_timing", f"source={source}; No finite benchmark timing.")
+
     def run(self, *args, **kwargs):
+        configs = getattr(self, "_expanded_user_configs", getattr(self, "user_configs", []))
+        self._user_config_diagnostics = _UserConfigDiagnostics(configs) if self.print_autotuning and configs else None
+        try:
+            return self._run_autotune(*args, **kwargs)
+        except Exception as exc:
+            if self._user_config_diagnostics is not None:
+                self._user_config_diagnostics.abort(exc)
+            raise
+        finally:
+            if self._user_config_diagnostics is not None:
+                self._user_config_diagnostics.report()
+            self._user_config_diagnostics = None
+
+    def _run_autotune(self, *args, **kwargs):
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         key = self.generate_key_and_configs(*args, **kwargs)
@@ -2113,6 +2218,11 @@ class AutoTilingTuner(Autotuner):
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
+            diagnostics = self._user_config_diagnostics
+            if diagnostics is not None:
+                for config, _, _ in diagnostics.results:
+                    if config not in pruned_configs:
+                        diagnostics.record(config, "pruned", "Removed by early_config_prune or perf_model/top_k.")
             if self.enable_ubtuner or len(pruned_configs) > 1:
 
                 def benchmark():
@@ -2126,9 +2236,18 @@ class AutoTilingTuner(Autotuner):
                     full_nargs = {**self.nargs, **kwargs, **self.cache[key].all_kwargs()}
                     self.pre_hook(full_nargs, reset_only=True)
                     self.configs_timings = timings
+                    self._record_user_timings(timings)
 
                 if self.cache_results:
                     disk_cache_hit = self.check_disk_cache(key, pruned_configs, benchmark)
+                    if disk_cache_hit and self._user_config_diagnostics is not None:
+                        self._record_user_timings(self.configs_timings, source="disk_cache")
+                        for config in pruned_configs:
+                            if config not in self.configs_timings:
+                                self._record_user_config(
+                                    config, "skipped_cache_hit",
+                                    "Autotune disk cache hit; no timing or failure detail is available for this config."
+                                )
                 else:
                     benchmark()
 
@@ -2138,6 +2257,17 @@ class AutoTilingTuner(Autotuner):
                 single_config_cache_pending = True
         else:
             config = self.cache[key]
+            if self._user_config_diagnostics is not None:
+                # configs_timings is not keyed by the tuning key. It may belong
+                # to a different invocation, so only report the cached winner.
+                for user_config, _, _ in self._user_config_diagnostics.results:
+                    if user_config == config:
+                        self._record_user_config(user_config, "cache_hit",
+                                                 "Autotune memory cache hit; cached best config; timing unavailable.")
+                    else:
+                        self._record_user_config(
+                            user_config, "skipped_cache_hit",
+                            "Autotune memory cache hit; no per-config timing or failure detail is available.")
 
         self.best_config = config
 
@@ -2151,6 +2281,8 @@ class AutoTilingTuner(Autotuner):
         ub_cfg = dict(getattr(config, "ubtune_cfg", {}))
         final_kwargs = dict(config.all_kwargs(), **kwargs)
         final_kwargs.update(ub_cfg)
+        if single_config_cache_pending:
+            self._record_user_config(config, "running", "Single-config execution did not complete.")
         if config.pre_hook is not None:
             config.pre_hook({**self.nargs, **final_kwargs})
         try:
@@ -2160,7 +2292,16 @@ class AutoTilingTuner(Autotuner):
             )
             if single_config_cache_pending:
                 self.cache[key] = config
+                self._record_user_config(config, "selected", "Only one config remains; executed without benchmarking.")
             return ret
+        except Exception as exc:
+            from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
+            from triton.runtime.errors import OutOfResources
+
+            status = "compile_failed" if isinstance(exc, (CompileTimeAssertionFailure, MLIRCompilationError,
+                                                          OutOfResources)) else "evaluation_failed"
+            self._record_user_config(config, status, exc=exc)
+            raise
         finally:
             self.nargs = None
             if did_benchmark and not disk_cache_hit:
@@ -2186,6 +2327,26 @@ class AutoTilingTuner(Autotuner):
             if self.print_autotuning:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
 
+    def _handle_compile_failure(self, *args, config, excp, run_fns, compile_key, **kwargs):
+        self._try_ubtuner(*args, config=config, excp=excp, run_fns=run_fns, **kwargs)
+        self._compile_failed_configs.append(config)
+        if config not in run_fns:
+            self._remember_compile_failure(compile_key, excp)
+            self._record_user_config(config, "compile_failed", exc=excp)
+        else:
+            self._record_user_config(config, "benchmarking",
+                                     "UBTuner returned a fallback config; no benchmark result was produced.")
+
+    def _bench_config(self, config, fn):
+        self._record_user_config(config, "benchmarking", "Benchmark did not complete.")
+        try:
+            timing = self.do_bench(fn, quantiles=(0.5, 0.2, 0.8))
+        except Exception as exc:
+            self._record_user_config(config, "benchmark_failed", exc=exc)
+            raise
+        self._record_user_timings({config: timing})
+        return timing
+
     def _print_benchmark_results(self, timings) -> None:
         if not self.print_autotuning:
             return
@@ -2194,6 +2355,9 @@ class AutoTilingTuner(Autotuner):
         for config, timing in timings.items():
             selected = " [selected]" if config == self.best_config else ""
             print(f"  config={config}; {_format_autotune_timing(timing)}{selected}")
+            values = timing if isinstance(timing, (tuple, list)) else (timing, )
+            if values and all(math.isfinite(value) for value in values):
+                self._record_user_config(config, "reported")
 
     def _get_jit_compile_cache_key(self, *args, config, **meta):
         """Return the JIT compilation identity for one autotune Config.
@@ -2301,6 +2465,7 @@ class AutoTilingTuner(Autotuner):
             if self.print_autotuning:
                 print("Triton autotuning: skip cached compile-failed config "
                       f"{config}; previous failure: {failure['exception_type']}")
+                self._record_user_config(config, "reported")
 
         self._cached_compile_failed_configs = cached_configs
         return active_configs, compile_keys
@@ -2309,7 +2474,13 @@ class AutoTilingTuner(Autotuner):
         from triton.compiler.errors import CompileTimeAssertionFailure, MLIRCompilationError
         from triton.runtime.errors import OutOfResources
 
-        kernels_call = {config: self._make_kernel_call(*args, config=config, **kwargs) for config in configs}
+        kernels_call = {}
+        for config in configs:
+            try:
+                kernels_call[config] = self._make_kernel_call(*args, config=config, **kwargs)
+            except Exception as exc:
+                self._record_user_config(config, "configuration_failed", exc=exc)
+                raise
         active_configs, compile_keys = self._filter_cached_compile_failures(
             *args,
             configs=configs,
@@ -2335,13 +2506,20 @@ class AutoTilingTuner(Autotuner):
 
             max_workers = min(psutil.cpu_count(logical=False) * 3 // 4, len(kernels_call))
             future_kernels = []
+            failed_submission = None
             try:
                 with (
                         ThreadPoolExecutor(max_workers=max_workers) as executor,
                         triton.AsyncCompileMode(executor),
                 ):
                     for config, fn in kernels_call.items():
-                        future_kernels.append((config, fn(warmup=True)))
+                        self._record_user_config(config, "compiling", "Compilation did not complete.")
+                        try:
+                            future_kernels.append((config, fn(warmup=True)))
+                        except (CompileTimeAssertionFailure, MLIRCompilationError, OutOfResources) as e:
+                            failed_submission = config
+                            self._record_user_config(config, "compile_failed", exc=e)
+                            raise
 
                     for config, fut in future_kernels:
                         try:
@@ -2350,39 +2528,49 @@ class AutoTilingTuner(Autotuner):
                             if hasattr(fut, "packed_metadata"):
                                 kernels_call[config].target_kernel_name = fut.packed_metadata.get("kernel_name")
                             run_fns[config] = functools.partial(kernels_call[config], warmup=False)
+                            self._record_user_config(config, "benchmarking",
+                                                     "Compilation completed; no benchmark result was produced.")
                         except (CompileTimeAssertionFailure, MLIRCompilationError, OutOfResources) as e:
                             import traceback
                             exc_stack = traceback.format_exc()
                             exc = e
-                            self._try_ubtuner(*args, config=config, excp=e, run_fns=run_fns, **kwargs)
-                            self._compile_failed_configs.append(config)
-                            if config not in run_fns:
-                                self._remember_compile_failure(compile_keys.get(config), e)
+                            self._handle_compile_failure(*args, config=config, excp=e, run_fns=run_fns,
+                                                         compile_key=compile_keys.get(config), **kwargs)
             except Exception as e:
                 # ignore exception from __exit__() of AsyncCompileMode
                 triton.runtime._async_compile.active_mode.set(None)
+                for pending in kernels_call:
+                    if (pending not in run_fns and pending not in self._compile_failed_configs
+                            and pending is not failed_submission):
+                        # __exit__ can re-raise an earlier future's exception;
+                        # it cannot identify a failure in this pending config.
+                        self._record_user_config(pending, "not_evaluated", "Parallel compilation interrupted:", exc=e)
         else:
             for config, fn in kernels_call.items():
+                self._record_user_config(config, "compiling", "Compilation or initial execution did not complete.")
                 try:
                     compiled_kernel = fn(warmup=False)
                     if hasattr(compiled_kernel, "packed_metadata"):
                         fn.target_kernel_name = compiled_kernel.packed_metadata.get("kernel_name")
                     run_fns[config] = functools.partial(fn, warmup=False)
+                    self._record_user_config(config, "benchmarking",
+                                             "Compilation completed; no benchmark result was produced.")
                 except (CompileTimeAssertionFailure, MLIRCompilationError, OutOfResources) as e:
                     import traceback
                     exc_stack = traceback.format_exc()
                     exc = e
-                    self._try_ubtuner(*args, config=config, excp=e, run_fns=run_fns, **kwargs)
-                    self._compile_failed_configs.append(config)
-                    if config not in run_fns:
-                        self._remember_compile_failure(compile_keys.get(config), e)
+                    self._handle_compile_failure(*args, config=config, excp=e, run_fns=run_fns,
+                                                 compile_key=compile_keys.get(config), **kwargs)
+                except Exception as e:
+                    self._record_user_config(config, "evaluation_failed", exc=e)
+                    raise
 
         if len(run_fns) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc} \nStack trace: {exc_stack}")
 
         if len(run_fns) == 1:
             # we ignore expensive profiling method when only single config is left
-            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            return {config: self._bench_config(config, fn) for config, fn in run_fns.items()}
 
         parser_mode = getattr(self, "parser_mode", None) or "vector"
         cv_parse_result = getattr(self, "cv_parse_result", None)
@@ -2408,7 +2596,9 @@ class AutoTilingTuner(Autotuner):
                     target_kernel_name=target_kernel_name,
                 )
                 assert len(time_cost) == len(run_fns)
-                return {config: cost for config, cost in zip(run_fns.keys(), time_cost)}
+                timings = dict(zip(run_fns.keys(), time_cost))
+                self._record_user_timings(timings)
+                return timings
             except ProfilerResultMismatchError as exc:
                 warnings.warn(
                     "Filtered profiler rows do not match the expected count for autotune benchmarking; "
@@ -2417,9 +2607,9 @@ class AutoTilingTuner(Autotuner):
                     RuntimeWarning,
                     stacklevel=2,
                 )
-                return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+                return {config: self._bench_config(config, fn) for config, fn in run_fns.items()}
         else:
-            return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
+            return {config: self._bench_config(config, fn) for config, fn in run_fns.items()}
 
     def _resolve_target_kernel_name(self, kernels_call, configs) -> Optional[str]:
         for config in configs:
@@ -2758,6 +2948,9 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
     :code:`"1"`, Triton will print a message to stdout after autotuning each
     kernel, including the benchmark timing for each valid configuration, the
     time spent autotuning, and the best configuration.
+    Additional feedback for user-provided configurations (including hints
+    expansion) explains failures, pruning, and cache hits. Cache hits report
+    only existing information; missing records are reported as skipped.
 
     :param configs: a list of :code:`triton.Config` objects
     :type configs: list[triton.Config]

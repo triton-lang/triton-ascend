@@ -42,15 +42,40 @@ msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-versi
 
 - 注：上述示例 `soc-version=Ascend910B3`
 
-| Ascend 910 系列 | Ascend 310 / 310P 系列 | Ascend 310B 系列 |
-| :---: | :---: | :---: |
-|Ascend910A|Ascend310|Ascend310B1|
-|Ascend910B|Ascend310P1|Ascend310B2|
-|Ascend910B1|Ascend310P2|Ascend310B3|
-|Ascend910B2|Ascend310P3|Ascend310B4|
-|Ascend910B2C|Ascend310P4|-|
-|Ascend910B3|Ascend310P5|-|
-|Ascend910B4|Ascend310P7|-|
+| Ascend 910 系列 | Ascend 310 / 310P 系列 | Ascend 310B 系列 | Ascend 610 系列 | Ascend 920 系列 | Ascend 950 系列 |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend910A | Ascend310 | Ascend310B1 | Ascend610 | Ascend920A | Ascend950PR_950x |
+| Ascend910B | Ascend310P1 | Ascend310B2 | Ascend610Lite | - | Ascend950PR_950y |
+| Ascend910B1 | Ascend310P2 | Ascend310B3 | - | - | Ascend950PR_950z |
+| Ascend910B2 | Ascend310P3 | Ascend310B4 | - | - | Ascend950PR_9571 |
+| Ascend910B2C | Ascend310P4 | - | - | - | Ascend950PR_9572 |
+| Ascend910B3 | Ascend310P5 | - | - | - | Ascend950PR_9573 |
+| Ascend910B4 | Ascend310P7 | - | - | - | Ascend950PR_9574 |
+| Ascend910PremiumA | - | - | - | - | Ascend950PR_9575 |
+| Ascend910ProA | - | - | - | - | Ascend950PR_9576 |
+| Ascend910ProB | - | - | - | - | Ascend950PR_9577 |
+| Ascend910_9362 | - | - | - | - | Ascend950PR_9578 |
+| Ascend910_9372 | - | - | - | - | Ascend950PR_957b |
+| Ascend910_9381 | - | - | - | - | Ascend950PR_957c |
+| Ascend910_9382 | - | - | - | - | Ascend950PR_957d |
+| Ascend910_9391 | - | - | - | - | Ascend950PR_9581 |
+| Ascend910_9392 | - | - | - | - | Ascend950PR_9582 |
+| - | - | - | - | - | Ascend950PR_9583 |
+| - | - | - | - | - | Ascend950PR_9584 |
+| - | - | - | - | - | Ascend950PR_9585 |
+| - | - | - | - | - | Ascend950PR_9586 |
+| - | - | - | - | - | Ascend950PR_9587 |
+| - | - | - | - | - | Ascend950PR_9588 |
+| - | - | - | - | - | Ascend950PR_9589 |
+| - | - | - | - | - | Ascend950PR_958a |
+| - | - | - | - | - | Ascend950PR_958b |
+| - | - | - | - | - | Ascend950PR_9591 |
+| - | - | - | - | - | Ascend950PR_9592 |
+| - | - | - | - | - | Ascend950PR_9595 |
+| - | - | - | - | - | Ascend950PR_9596 |
+| - | - | - | - | - | Ascend950PR_9599 |
+| - | - | - | - | - | Ascend950PR_95A1 |
+| - | - | - | - | - | Ascend950PR_95A2 |
 
 以下两个文件中保存了获取的性能数据：
 

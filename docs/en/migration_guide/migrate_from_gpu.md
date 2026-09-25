@@ -49,6 +49,8 @@ NPU and GPU compute units differ in supported data types and execution behavior.
 
 ### Example 1: Complete Vector Addition Migration
 
+The following example demonstrates correctness verification by comparing the results of native PyTorch computation with those of a Triton kernel after migrating a vector addition operator from CUDA to NPU:
+
 ```diff
 import torch
 # [Added] Import Ascend NPUs' PyTorch adaptation library to support NPU devices.

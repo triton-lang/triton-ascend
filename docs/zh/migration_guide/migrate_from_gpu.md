@@ -49,6 +49,8 @@ NPU 与 GPU 的计算单元和支持的数据类型存在差异。迁移后应�
 
 ### 示例 1：向量加法完整迁移
 
+以下示例展示将向量加法算子从 CUDA 迁移到 NPU 后，通过对比 PyTorch 原生计算与 Triton kernel 结果进行正确性验证：
+
 ```diff
 import torch
 import torch_npu  # 【新增】导入昇腾NPU PyTorch适配库，提供NPU设备支持

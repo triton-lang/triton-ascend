@@ -4,7 +4,7 @@ Vector operators are mainly executed by Vector Cores. Typical examples include e
 
 ## Simple Vector Operator Development
 
-For a simple Vector operator, start with the [Vector Addition example](../examples/01_vector_add_example.md) or `third_party/ascend/tutorials/01-vector-add.py`. The basic pattern is:
+For a simple Vector operator, start with the [Vector Addition example](../examples/01_vector_add_example.md) or [`third_party/ascend/tutorials/01-vector-add.py`](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py). The basic pattern is:
 
 1. Build contiguous offsets for the current tile with `tl.arange`.
 2. Use `mask` to guard the tail block and avoid out-of-bounds load/store.
@@ -30,7 +30,7 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 Check these items first:
 
-- **Data type**: Ascend Vector units have different performance for integer types. Prefer `int32` for indices, lengths, and offsets when precision allows. See `triton-ascend-ops/tutorial/basic/001-vector_add.zh.md` and `002-vector_cmp.zh.md`.
+- **Data type**: Ascend Vector units have different performance for integer types. Prefer `int32` for indices, lengths, and offsets when precision allows. See  [`triton-ascend-ops/tutorial/basic/001-vector_add.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/basic/001-vector_add.py) and [`triton-ascend-ops/tutorial/basic/002-vector_cmp.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/basic/002-vector_cmp.zh.md).
 - **BLOCK_SIZE**: Keep it as large as possible without exceeding UB capacity. If UB overflow occurs, reduce the tile size or split it into sub-blocks.
 - **Core count**: An NPU typically has dozens of physical Vector Cores. GPU-style small tiles with very large grids often cause repeated dispatch overhead on NPUs.
 

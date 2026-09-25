@@ -1,5 +1,7 @@
 # Development Differences Between Ascend and GPUs
 
+This article systematically outlines the differences between the two platforms regarding core architecture, programming rules, and optimization techniques. It breaks down the specific development features and adaptation requirements for Ascend NPU Triton, helping developers quickly adopt the appropriate development mindset, accurately execute operator migration, code adaptation, and performance tuning, and avoid common migration pitfalls.
+
 ## Multi-Core Task Parallelism Strategy
 
 In Triton multi-core parallelism, NPUs use a strong physical-core binding model, which is a core difference from the GPU model of logical-dimension parallelism with automatic hardware mapping. The core comparison is shown in the following table:

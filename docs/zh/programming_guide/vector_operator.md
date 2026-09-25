@@ -4,7 +4,7 @@ Vector 算子主要由 Vector Core 执行，典型形态包括逐元素计算、
 
 ## Vector 简单算子开发
 
-简单 Vector 算子可以从本仓的 [向量相加样例](../examples/01_vector_add_example.md) 或 `third_party/ascend/tutorials/01-vector-add.py` 入手。该类算子的基本步骤如下：
+简单 Vector 算子可以从本仓的 [向量相加样例](../examples/01_vector_add_example.md) 或 [`third_party/ascend/tutorials/01-vector-add.py`](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py) 入手。该类算子的基本步骤如下：
 
 1. 用 `tl.arange` 构造当前 tile 的连续偏移。
 2. 用 `mask` 保护尾块，避免越界 load/store。
@@ -30,7 +30,7 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 
 开发时优先检查三类问题：
 
-- **数据类型**：Ascend Vector 单元对不同整数类型的支持和性能不同。对于不影响精度的索引、长度、偏移类数据，优先使用 `int32`，可参考 `triton-ascend-ops/tutorial/basic/001-vector_add.zh.md` 和 `002-vector_cmp.zh.md`。
+- **数据类型**：Ascend Vector 单元对不同整数类型的支持和性能不同。对于不影响精度的索引、长度、偏移类数据，优先使用 `int32`，可参考 [`triton-ascend-ops/tutorial/basic/001-vector_add.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/basic/001-vector_add.py) 和 [`triton-ascend-ops/tutorial/basic/002-vector_cmp.zh.md`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/basic/002-vector_cmp.zh.md)。
 - **BLOCK_SIZE**：BLOCK_SIZE 需要在 UB 容量内尽量大。若出现 UB overflow，先降低单次处理元素数，再考虑拆分子块。
 - **分核数**：NPU 物理 Vector Core 数量通常为几十个。小 tile 大 grid 的 GPU 写法迁移到 NPU 时，容易因多轮下发带来明显开销。
 

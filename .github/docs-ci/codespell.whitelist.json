@@ -238,5 +238,6 @@
   "xdist",
   "manylinux",
   "NVTX",
-  "CUPTI"
+  "CUPTI",
+  "LLDB"
 ]

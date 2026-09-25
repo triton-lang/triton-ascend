@@ -312,6 +312,43 @@ def _add_optional_iterator_types_attr(op, builder, attrs):
     attrs[name] = builder.get_iterator_types_attr([iterator_type.value for iterator_type in getattr(op, name)])
 
 
+def _add_optional_flatten_symbols_attr(op, builder, attrs):
+    # `flatten_symbols` maps a collapsed rank to the symbol implementing the op
+    # at that rank, e.g. {1: "custom_add_1d"}. It is emitted as the paired
+    # `flatten_ranks` / `flatten_symbols` attributes `hivm-flatten-ops` reads:
+    # once the operands are collapsed to `flatten_ranks[i]` the op calls
+    # `flatten_symbols[i]` instead of `symbol`. A rank without an entry is
+    # never produced, so the op keeps its rank and its original `symbol`.
+    # Declaring the table promises equivalent implementations for every
+    # supported reassociation and layout. The compiler only flattens ops whose
+    # iterator types are all parallel; rank alone cannot encode axis semantics.
+    name = 'flatten_symbols'
+    if not hasattr(op, name):
+        return
+
+    table = getattr(op, name)
+    if not isinstance(table, dict):
+        raise TypeError(f"'{name}' should be a dict mapping a collapsed rank to a symbol.")
+    if not table:
+        raise ValueError(f"'{name}' should be non-empty.")
+    # Validate the entire declaration before constructing or publishing attrs.
+    # In particular, do not coerce 1.5 / '1' to rank 1, or None to a symbol.
+    for rank, symbol in table.items():
+        if isinstance(rank, bool) or not isinstance(rank, int):
+            raise TypeError(f"'{name}' ranks should be integers, excluding bool.")
+        if not 1 <= rank <= (1 << 63) - 1:
+            raise ValueError(f"'{name}' ranks should be positive signed 64-bit integers.")
+        if not isinstance(symbol, str):
+            raise TypeError(f"'{name}' symbols should be strings.")
+        if not symbol:
+            raise ValueError(f"'{name}' symbols should be non-empty.")
+    ranks = sorted(table)
+    ranks_attr = builder.get_i64_array_attr(ranks)
+    symbols_attr = builder.get_array_attr([builder.get_string_attr(table[rank]) for rank in ranks])
+    attrs['flatten_ranks'] = ranks_attr
+    attrs[name] = symbols_attr
+
+
 def _add_sync_event_slots_attr(op, builder, attrs):
     if not hasattr(op, 'sync_event_slots'):
         return
@@ -345,6 +382,7 @@ def _make_attrs(op, builder, is_macro):
 
     _add_optional_indexing_map_attr(op, builder, attrs)
     _add_optional_iterator_types_attr(op, builder, attrs)
+    _add_optional_flatten_symbols_attr(op, builder, attrs)
 
     _add_optional_extra_buffer_attr(op, builder, attrs)
 

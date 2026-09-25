@@ -224,6 +224,26 @@ The goal of this feature is to lower the usage barrier and tuning cost while mak
 
 If automatic tiling cannot generate any valid candidate configurations, you need to switch back to handwritten `triton.Config`. It is also recommended to file an issue for such cases so that Triton-Ascend can improve parsing and automatic-generation coverage later.
 
+## Inspecting Feedback for User Configurations
+
+With `TRITON_PRINT_AUTOTUNING=1`, existing autotuning logs are preserved, including rough timings, benchmark results, and compilation-failure cache-hit messages for generated configurations. Additional feedback supplies previously missing timings or reasons for failure, pruning, interruption, and tuning-cache skips. This additional feedback applies only to configurations explicitly supplied in `configs`, including variants expanded through `hints`.
+
+| Outcome | Feedback |
+| --- | --- |
+| Benchmark completed | Timing and whether the configuration was selected |
+| Pruned | Known pruning stage or time-budget reason |
+| Compilation or benchmark failed | Failure stage, exception type, and a short error message |
+| Tuning interrupted | Incomplete stage and known interruption reason, without inferring a compilation error |
+| Only one configuration remains and executes successfully | Explanation that no benchmark was needed, without inventing a timing |
+
+Cache hits report only existing information. Diagnostics do not trigger additional compilation or benchmarking:
+
+- The **in-memory tuning cache** stores only the best configuration per key. Feedback identifies that configuration and reports other user configurations as skipped due to the cache hit. Timings from the most recent tuning of another key are not reused.
+- User timings in the **disk tuning cache** are marked `source=disk_cache`. Configurations with no cached record receive `skipped_cache_hit`, without inferring a historical failure.
+- A **compilation-failure cache** hit reports the stored exception type and explains that compilation was not retried.
+
+Feedback does not change cache formats, cache keys, configuration selection, or exception propagation. The selected kernel still executes normally after a tuning-cache hit.
+
 ## Handwritten `triton.Config` Mode
 
 If automatic tiling fails, or if the generated tiling result does not meet your performance target, you can return directly to the standard community-style handwritten configuration path. Triton-Ascend keeps this part of the interface compatible:

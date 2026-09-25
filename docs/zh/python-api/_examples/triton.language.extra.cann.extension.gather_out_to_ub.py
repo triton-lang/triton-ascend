@@ -29,12 +29,12 @@ def kernel(src_ptr, index_ptr, out_ptr):
 
 
 def test_gather_out_to_ub():
-    # TODO: re-enable once bisheng fixes the A5 library implementation.
+    # TODO: re-enable once bisheng fixes the Ascend 950PR&950DT products library implementation.
     # ConvertLinalgIRToBinary currently fails on a dynamic-size UB
     # memref.alloc; see third_party/ascend/unittest/pytest_ut/
     # test_cann_extension.py, which pins the same failure via
     # pytest.raises(MLIRCompilationError).
-    pytest.skip("gather_out_to_ub is currently broken on Ascend 950")
+    pytest.skip("gather_out_to_ub is currently broken on Ascend 950PR&950DT products")
     # src(4,2) = [[1.,2.],[3.,4.],[5.,6.],[7.,8.]]
     src = torch.tensor([[1., 2.], [3., 4.], [5., 6.], [7., 8.]], device='npu')
     # index(2,2) = [[0,1],[2,3]]

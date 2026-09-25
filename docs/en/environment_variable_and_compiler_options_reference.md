@@ -101,9 +101,9 @@ The following table describes the options.
 | **CV fusion** | `enable_auto_bind_sub_block` | `None`, `True`, `False` | Enables or disables automatic sub-block binding. | `triton.Config` or launch meta-parameter |
 | **CV fusion** | `enable_hivm_auto_cv_balance` | `None`, `True`, `False` | Enables or disables automatic CV balance. | `triton.Config` or autotune parameter |
 | **CV fusion** | `enable_cube_block_merge` | `False` (default), `True` | Controls Cube block merging in the DynamicCV pipeline. | `triton.Config` or launch meta-parameter |
-| **VF fusion** | `vf_fusion_mode` | `None` (default; uses the BiShengIR default of `"max-parallel"`), `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | Selects the VF fusion strategy during BiShengIR compilation on Ascend 950. | `triton.Config` or launch meta-parameter |
-| **VF fusion** | `enable_vf_fusion` | `None` (default; uses the BiShengIR default of `True`), `True`, `False` | Controls whether VF fusion is enabled during BiShengIR compilation on Ascend 950. This option is the VF fusion master switch; `vf_fusion_mode` only selects the fusion strategy. | `triton.Config` or launch meta-parameter |
-| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False` (default), `True` | Controls multiple-consumer fusion during BiShengIR compilation on Ascend 950. | `triton.Config` or launch meta-parameter |
+| **VF fusion** | `vf_fusion_mode` | `None` (default; uses the BiShengIR default of `"max-parallel"`), `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | Selects the VF fusion strategy during BiShengIR compilation on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
+| **VF fusion** | `enable_vf_fusion` | `None` (default; uses the BiShengIR default of `True`), `True`, `False` | Controls whether VF fusion is enabled during BiShengIR compilation on Ascend 950PR&950DT products. This option is the VF fusion master switch; `vf_fusion_mode` only selects the fusion strategy. | `triton.Config` or launch meta-parameter |
+| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False` (default), `True` | Controls multiple-consumer fusion during BiShengIR compilation on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
 | **CV fusion/sync** | `sync_solver` | `None`, `True`, `False` | Enables or disables the HIVM synchronization solver. | `triton.Config` or launch meta-parameter |
 | **Synchronization** | `unit_flag` | `None`, `True`, `False` | Cube-output synchronization option. | `triton.Config` or autotune parameter |
 | **Synchronization** | `inject_barrier_all` | `None`, `True`, `False` | Enables or disables automatic barrier synchronization injection. | `triton.Config` or launch meta-parameter |
@@ -116,7 +116,7 @@ The following table describes the options.
 | **DynamicCV buffering** | `buf_slot_num_of_veccore` | `None` (default) or an integer | Configures the number of vector-core-local buffer slots. | `triton.Config` or launch meta-parameter |
 | **DynamicCV buffering** | `buf_slot_num_of_crosscore` | `None` (default) or an integer | Configures the number of cross-core buffer slots. | `triton.Config` or launch meta-parameter |
 | **DynamicCV buffering** | `buf_slot_num_of_gm` | `None` (default) or an integer | Configures the number of GM load buffer slots. | `triton.Config` or launch meta-parameter |
-| **Compilation mode** | `compile_mode` | `"simd_simt_template"` (default), `"simd"`, `"simt_only"` | Controls SIMD / SIMT compilation. `"simd"`: pure SIMD; `"simd_simt_template"`: the standard SIMD pipeline with template-SIMT subpaths enabled on Ascend 950; `"simt_only"`: the pure-SIMT path (`ttir→npubin`), supported only on Ascend 950. | `triton.Config` or launch meta-parameter |
+| **Compilation mode** | `compile_mode` | `"simd_simt_template"` (default), `"simd"`, `"simt_only"` | Controls SIMD / SIMT compilation. `"simd"`: pure SIMD; `"simd_simt_template"`: the standard SIMD pipeline with template-SIMT subpaths enabled on Ascend 950PR&950DT products; `"simt_only"`: the pure-SIMT path (`ttir→npubin`), supported only on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
 
 (compiler-option-cleanup-and-compatibility)=
 

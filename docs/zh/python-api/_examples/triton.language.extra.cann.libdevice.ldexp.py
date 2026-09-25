@@ -10,7 +10,7 @@ import triton.language.extra.cann.libdevice as libdevice
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 _SIMT_SKIP_MSG = ("SIMT libdevice ops are not supported on A3; "
-                  "only runs on Ascend 950 with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
+                  "only runs on Ascend 950PR&950DT products with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 
 def torch_ldexp_reference(x0, x1):

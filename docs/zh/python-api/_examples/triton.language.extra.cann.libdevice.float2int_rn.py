@@ -9,7 +9,7 @@ import triton.language.extra.cann.libdevice as libdevice
 import torch
 from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
-_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950 target "
+_SIMT_SKIP_MSG = ("SIMT libdevice ops require an Ascend 950PR&950DT products target "
                   "with TRITON_ENABLE_LIBDEVICE_SIMT=1; skipping.")
 
 _OUT_DTYPE = torch.int32

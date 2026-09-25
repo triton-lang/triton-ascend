@@ -101,9 +101,9 @@ if __name__ == "__main__":
 | **CV 融合** | `enable_auto_bind_sub_block` | `None`、`True`、`False` | 启用或禁用自动绑定 sub-block。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合** | `enable_hivm_auto_cv_balance` | `None`、`True`、`False` | 启用或禁用自动 CV balance。 | `triton.Config` 或 Autotune 参数 |
 | **CV 融合** | `enable_cube_block_merge` | `False`（默认）、`True` | 控制 DynamicCV pipeline 的 Cube block merge。 | `triton.Config` 或 launch meta-parameter |
-| **VF 融合** | `vf_fusion_mode` | `None`（默认，遵循 BiShengIR 默认值 `"max-parallel"`）、`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | 选择 Ascend 950 BiShengIR 阶段的 VF fusion 策略。 | `triton.Config` 或 launch meta-parameter |
-| **VF 融合** | `enable_vf_fusion` | `None`（默认，遵循 BiShengIR 默认值 `True`）、`True`、`False` | 控制 Ascend 950 BiShengIR 阶段是否启用 VF fusion。该选项是 VF fusion 的总开关；`vf_fusion_mode` 仅用于选择融合策略。 | `triton.Config` 或 launch meta-parameter |
-| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False`（默认）、`True` | 控制 Ascend 950 BiShengIR 阶段的多 consumer 融合。 | `triton.Config` 或 launch meta-parameter |
+| **VF 融合** | `vf_fusion_mode` | `None`（默认，遵循 BiShengIR 默认值 `"max-parallel"`）、`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | 选择 Ascend 950PR&950DT products BiShengIR 阶段的 VF fusion 策略。 | `triton.Config` 或 launch meta-parameter |
+| **VF 融合** | `enable_vf_fusion` | `None`（默认，遵循 BiShengIR 默认值 `True`）、`True`、`False` | 控制 Ascend 950PR&950DT products BiShengIR 阶段是否启用 VF fusion。该选项是 VF fusion 的总开关；`vf_fusion_mode` 仅用于选择融合策略。 | `triton.Config` 或 launch meta-parameter |
+| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False`（默认）、`True` | 控制 Ascend 950PR&950DT products BiShengIR 阶段的多 consumer 融合。 | `triton.Config` 或 launch meta-parameter |
 | **CV 融合/同步** | `sync_solver` | `None`、`True`、`False` | 启用或禁用 HIVM 同步求解器。 | `triton.Config` 或 launch meta-parameter |
 | **同步** | `unit_flag` | `None`、`True`、`False` | Cube 搬出相关同步优化项。 | `triton.Config` 或 Autotune 参数 |
 | **同步** | `inject_barrier_all` | `None`、`True`、`False` | 启用或禁用自动注入 barrier 同步。 | `triton.Config` 或 launch meta-parameter |
@@ -116,7 +116,7 @@ if __name__ == "__main__":
 | **DynamicCV 缓冲** | `buf_slot_num_of_veccore` | `None`（默认）或整数 | 配置 veccore 内部 buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
 | **DynamicCV 缓冲** | `buf_slot_num_of_crosscore` | `None`（默认）或整数 | 配置跨 core buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
 | **DynamicCV 缓冲** | `buf_slot_num_of_gm` | `None`（默认）或整数 | 配置 GM load buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
-| **编译模式** | `compile_mode` | `"simd_simt_template"`（默认）、`"simd"`、`"simt_only"` | 控制 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"simd_simt_template"`：普通 SIMD pipeline，并在 Ascend 950 上启用 template-SIMT 子路径；`"simt_only"`：仅 Ascend 950 支持的纯 SIMT 路径（`ttir→npubin`）。 | `triton.Config` 或 launch meta-parameter |
+| **编译模式** | `compile_mode` | `"simd_simt_template"`（默认）、`"simd"`、`"simt_only"` | 控制 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"simd_simt_template"`：普通 SIMD pipeline，并在 Ascend 950PR&950DT products 上启用 template-SIMT 子路径；`"simt_only"`：仅 Ascend 950PR&950DT products 支持的纯 SIMT 路径（`ttir→npubin`）。 | `triton.Config` 或 launch meta-parameter |
 
 (compiler-option-cleanup-and-compatibility)=
 

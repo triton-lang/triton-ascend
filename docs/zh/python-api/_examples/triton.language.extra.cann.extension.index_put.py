@@ -26,12 +26,12 @@ def kernel(value_ptr, index_ptr, dst_ptr):
 
 
 def test_index_put():
-    # TODO: re-enable once bisheng fixes the A5 library implementation.
+    # TODO: re-enable once bisheng fixes the Ascend 950PR&950DT products library implementation.
     # ConvertLinalgIRToBinary currently fails on a dynamic-size UB
     # memref.alloc; see third_party/ascend/unittest/pytest_ut/
     # test_cann_extension.py, which pins the same failure via
     # pytest.raises(MLIRCompilationError).
-    pytest.skip("index_put is currently broken on Ascend 950")
+    pytest.skip("index_put is currently broken on Ascend 950PR&950DT products")
     # dst: (4,2) of zeros
     dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
     # value = [[1., 2.],

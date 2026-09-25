@@ -1,0 +1,2346 @@
+{
+  "schema_version": 1,
+  "files": [
+    "python/test/unit/cuda/test_libdevice.py",
+    "python/test/unit/cuda/test_mixed_io.py",
+    "python/test/unit/cuda/test_tensor_descriptor.py",
+    "python/test/unit/cuda/test_tma_descriptor.py",
+    "python/test/unit/cuda/test_tma_store_gemm.py",
+    "python/test/unit/instrumentation/test_gpuhello.py",
+    "python/test/unit/language/test_annotations.py",
+    "python/test/unit/language/test_block_pointer.py",
+    "python/test/unit/language/test_compile_errors.py",
+    "python/test/unit/language/test_compile_only.py",
+    "python/test/unit/language/test_conversions.py",
+    "python/test/unit/language/test_core.py",
+    "python/test/unit/language/test_decorator.py",
+    "python/test/unit/language/test_frontend.py",
+    "python/test/unit/language/test_libdevice.py",
+    "python/test/unit/language/test_line_info.py",
+    "python/test/unit/language/test_matmul.py",
+    "python/test/unit/language/test_module.py",
+    "python/test/unit/language/test_mxfp.py",
+    "python/test/unit/language/test_pipeliner.py",
+    "python/test/unit/language/test_random.py",
+    "python/test/unit/language/test_reproducer.py",
+    "python/test/unit/language/test_standard.py",
+    "python/test/unit/language/test_subprocess.py",
+    "python/test/unit/language/test_tensor_descriptor.py",
+    "python/test/unit/language/test_tuple.py",
+    "python/test/unit/language/test_warp_specialization.py",
+    "python/test/unit/runtime/test_autotuner.py",
+    "python/test/unit/runtime/test_bindings.py",
+    "python/test/unit/runtime/test_blaslt.py",
+    "python/test/unit/runtime/test_build.py",
+    "python/test/unit/runtime/test_cache.py",
+    "python/test/unit/runtime/test_compilation_listener.py",
+    "python/test/unit/runtime/test_driver.py",
+    "python/test/unit/runtime/test_launch.py",
+    "python/test/unit/runtime/test_specialize.py",
+    "python/test/unit/runtime/test_subproc.py",
+    "python/test/unit/test_debug.py",
+    "python/test/unit/test_debug_dump.py",
+    "python/test/unit/test_debuginfo.py",
+    "python/test/unit/test_filecheck.py",
+    "python/test/unit/test_knobs.py",
+    "python/test/unit/test_link.py",
+    "python/test/unit/test_perf_warning.py",
+    "python/test/unit/tools/test_aot.py",
+    "python/test/unit/tools/test_disasm.py",
+    "python/test/unit/tools/test_irsource.py",
+    "python/test/unit/tools/test_linear_layout.py",
+    "python/test/unit/tools/test_triton_to_gluon.py"
+  ],
+  "definitions": [
+    {
+      "id": "python/test/unit/cuda/test_libdevice.py::test_math_extern",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_mixed_io.py::test_add",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_mixed_io.py::test_load_reduce",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_tensor_descriptor.py::test_specialization_after_host_tensordesc",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_tma_descriptor.py::test_1d_tma_descriptor_exception",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_tma_descriptor.py::test_2d_tma_descriptor_exception",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_tma_descriptor.py::test_ragged_tma",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/cuda/test_tma_store_gemm.py::test_tma_load_store",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/instrumentation/test_gpuhello.py::test_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_annotations.py::test_int_annotation",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_annotations.py::test_unknown_annotation",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_annotations.py::test_float_annotation",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_block_pointer.py::test_block_copy",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_block_pointer.py::test_block_ptr_matmul_no_scf",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_undefined_variable",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_in_binary_operator",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_static_assert",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_in_unary_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_in_binary_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_in_nested_call",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_in_builtin",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_two_returns_no_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_not_const_annotate_no_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_returns_branched_on_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_returns_branched_on_non_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_power_of_two_shapes",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_power_of_two_shapes_2",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_global_var_access",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_constexpr_annotated_global_var_access",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_constexpr_global_var_access",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_global_type_alias_access",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_global_access_in_fn_default_arg",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_defaults_assign_no_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_where_warning",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_fp8_support",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_min_dot_size",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_max_num_imprecise_acc_limit",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_unused_result",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_err_constexpr_and_do_not_specialize",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_errors.py::test_dot_scaled_shape_verification",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_only.py::test_compile_only_sm100",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_only.py::test_compile_only_dot",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_only.py::test_compile_only_k_loop",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_only.py::test_compile_only_dot_mxfp",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_compile_only.py::test_signature_ordering",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_conversions.py::test_typeconvert_upcast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_conversions.py::test_typeconvert_downcast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_conversions.py::test_typeconvert_downcast_clamping",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_scalar_overflow",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dtype_codegen",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_bin_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_addptr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_floordiv",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_unsigned_name_mangling",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_bitwise_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_shift_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_compare_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_broadcast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_slice",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_invalid_slice",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_expand_dims",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_expand_dims_error_cases",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_invalid_pid_axis",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_where",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_where_broadcast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_unary_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_math_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_math_erf_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_math_fma_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_math_divide_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_precise_math",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_abs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_abs_fp8",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_shapes_as_params",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_transpose",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_index1d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_noinline",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_atomic_rmw",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_atomic_rmw_predicate",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_rmw",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_add_non_exclusive_offset",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_add_shift_1",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_add_access_patterns",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_rmw_block",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_atomic_cas",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_cas",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_load_scope_sem_coop_grid_cta_not_one",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_load_scope_sem_coop_grid_cta_one",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_atomic_min_max_neg_zero",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_atomic_unsupported_type",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_atomic_use_result",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_cast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_cat",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_store_constant",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_load_store_same_ptr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_umulhi",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_join",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_join_scalars",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_join_with_mma",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_interleave",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_interleave_scalars",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_split",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_split_to_scalar",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_convert_float16_to_float32",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_max_returns_zero",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_max_min_with_nan",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_reduce1d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_reduce",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_sum_dtype",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_scan2d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_histogram",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_histogram_silent_data_corruption",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_histogram_mask",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_scan_1d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_optimize_thread_locality",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_no_rematerialization_op",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_generic_reduction",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_permute",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_trans_2d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_trans_4d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_scaled_dot",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot3d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot_mulbroadcasted",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_full",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_const",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot_without_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_arange",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_masked_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_masked_load_scalar",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_masked_load_shared_memory",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_load_cache_modifier",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_vectorization",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_vectorization_hints",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_assume",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_store_cache_modifier",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_store_eviction_policy",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_default",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_pointer_arguments",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_value_specialization",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_value_specialization_overflow",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_bin_op_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr_shape",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr_scalar_shape",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_reshape",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_reshape_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tma_load_block_shape_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tma_store_block_shape_err",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_trans_reshape",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_call",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_if",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_num_warps_pow2",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_inline_asm",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_inline_asm_packed",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_inline_asm_with_pointers",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_inline_asm_multiple_outputs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_inline_asm_packed_multiple_outputs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_map_elementwise",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_map_elementwise_multiple_outputs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_map_elementwise_pack",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_for_iv",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_if_else",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_if_return",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_if_call",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_nested_if_else_return",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_while",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_nested_while",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr_if_return",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr_flattens",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_constexpr_assignment",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_poison_return",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_num_threads",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_globaltimer",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_smid",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_load_scalar_with_mask",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_ptx_cast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot_max_num_imprecise_acc",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_enable_fp_fusion",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_enable_reflect_ftz",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_override_arch",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_num_ctas_pre_sm90",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_propagate_nan",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_clamp",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_clamp_symmetric",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_static_range",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tl_range_num_stages",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tl_range_fuse",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tl_range_fuse_dependent",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tl_range_option_none",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_disable_licm",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_maxnreg",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_temp_var_in_loop",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_num_programs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_unroll_attr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_side_effectful_reduction",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_side_effectful_reduction_2d",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dtype",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_side_effectful_scan",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_chained_reductions",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_gather",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_jit_function_arg",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_zero_strided_tensors",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_aliasing",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_strided_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_strided_store",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_indirect_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_indirect_store",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dtype_tensor",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_short_circuiting",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_unsplat",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_cumsum_dtype",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_tensor_member",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_core.py::test_dot_multidim",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_decorator.py::test_decorator_with_def",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_decorator.py::test_triton_heuristic",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_assign_attribute",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_augassign_attribute",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_retrieve_item",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_assign_item",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_augassign_item",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_jit_method",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_jit_getitem",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_initializers",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_modification_in_for_loop",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_modification_in_while_loop",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_list_of_functions",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_call_in_loop",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_function_name_mangling",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_with_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_with_tuple",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_function_from_jit",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_function_from_python",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_assign_tuple_attrs_kernel",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_reassign_aggregate_with_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_getitem",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_late_bound_class_reference",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_specialized_recursion",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_call_in_while",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_return_in_while",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_tuple_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_aggregate_constexpr_function",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_function_taking_list",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_min_max",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_min_error",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_constexpr_max_error",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_frontend.py::test_for_loop_iv_modification",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_libdevice.py::test_bessel",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_libdevice.py::test_libdevice_rename",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_line_info",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_line_info_interpreter",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_line_info_env",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_line_info_ir_source",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_use_name_loc_as_prefix",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_line_info.py::test_map_elementwise_has_lineinfo",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_simple_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_simple_persistent_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_mxfp",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_preshuffle_scale_mxfp_cdna4",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_blocked_scale_mxfp",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_lhs_in_tmem",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_lhs_in_tmem_mxfp",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_block_scale_fp4",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_matmul.py::test_mxfp8_mxfp4_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_roundtrip",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_packed_tensor",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_padding",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_zero_values",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_out_of_range_values",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_subnormal_numbers",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_rounding_edge_cases",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_negative_values",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_negative_out_of_range",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_packing",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_packing_with_padding",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_invalid_packing_dimension",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXFP4Tensor::test_empty_tensor",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXScaleTensor::test_positive_values",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXScaleTensor::test_special_values",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXScaleTensor::test_e8m0_nan_to_float_nan",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXScaleTensor::test_random_generation",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_mxfp.py::TestMXScaleTensor::test_roundtrip",
+      "device": "cpu",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_pipeline_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_pipeline_vecadd",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_pipeline_epilogue",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_indirect_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_scatter_pipeline",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_pipeliner.py::test_conditional_store_pipeline",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_random.py::test_randint",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_random.py::test_rand",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_random.py::test_seed_is_int",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_random.py::test_randn",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_random.py::test_rand_limits",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_reproducer.py::test_triton_reproducer_path",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_maximum_minium",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_sort",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_flip",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_flip_inf",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_ravel",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_standard.py::test_swizzle2d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_subprocess.py::test_print",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_store",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_functional_interface",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_load3d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_store3d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_load_nd",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_store_nd",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_padding",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_in_function",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_return_value",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_argument",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_make_tensor_descriptor_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_make_tensor_descriptor_loop_carried",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_batched_gemm_2d_tma",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_batched_gemm_3d_tma",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_rank_reducing_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_rank_reducing_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_reshape_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_mxfp8_mxfp4_matmul_tma",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tma_gather",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tma_gather_dot_pipeline",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tma_scatter",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_reduce",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_host_tensor_descriptor_load",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_host_tensor_descriptor_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tensor_descriptor.py::test_tensor_descriptor_store_downcast",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_index",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_assign",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_assign_return",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_serialize",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_namedtuple",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_eq",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_add",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_passing_tuple_with_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_passing_nested_tuple_with_constexpr",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_passing_nested_tuple_with_constexpr_and_jit_hook",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_passing_tuple_to_make_tensor_descriptor",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_modifying_tuples",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_tuple_logic",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_tuple.py::test_tuple_float",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warp_specialize_basic_ir",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warp_specialize_tmem_ir",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warpgroup_reduction",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warp_specialize_tma_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warp_specialize_tma_matmul_persistent",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/language/test_warp_specialization.py::test_warp_specialize_attention_forward",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_kwargs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_no_do_bench",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_restore",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_hooks",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_prune_configs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_override_ttir",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_override_ttgir",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_override_ptx",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_exceed_tmem",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_exceed_threads",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_autotuner.py::test_prune_all_configs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_bindings.py::test_module_walk",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_bindings.py::test_python_func_in_visit_call",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_blaslt.py::test_blaslt",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_build.py::test_compile_module",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_build.py::test_compile_module_bad_cache",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_nochange",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_toplevel_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_nested1_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_nested2_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_combine_fn_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_constexpr_fn_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_invalid_constexpr_fn",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_changed_line_numbers_invalidate_cache",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_reuse",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_specialize",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_annotation",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_kernel_default_arg",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_kernel_global_var_change",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_local_shadows_global",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_local_does_not_shadow_global",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_conflicting_global_in_inner_function",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_use_builtin",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_no_cache_module_as_global",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_cache_builtin_as_global",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_cache_closure",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_no_cache_callable",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_constexpr_cache_invalidation_recreated",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_jit_warmup_cache",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_jit_debug",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_jit_noinline",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_preload",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_hooks",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_within_2gb",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_function_arguments",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_async_compile_mock",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_async_compile",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_cache.py::test_higher_order_kernel",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_compilation_listener.py::test_compile_stats",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_driver.py::test_is_lazy",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_driver.py::test_kernel_in_thread",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_metadata",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_memory_leak",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_load_hook",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_multiple_hooks",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_launch_with_options",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_launch.py::test_pre_run_hooks",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_specialize.py::test_specialize_impl",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/runtime/test_subproc.py::test_compile_in_subproc",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/runtime/test_subproc.py::test_compile_in_forked_subproc",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/runtime/test_subproc.py::test_compile_in_forked_subproc_with_forced_gc",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_device_assert",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_device_assert_barrier",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_static_assert",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_sanitize_int_add_overflow",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_sanitize_int_mul_overflow",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_debug.py::test_sanitize_int_sub_overflow",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_debug_dump.py::test_fn_dump",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_debuginfo.py::test_triton_debuginfo_on",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_filecheck.py::test_filecheck_positive",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_filecheck.py::test_filecheck_negative",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_knobs_utils",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_knobs_scope",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_env_updated",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_read_env",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_triton_home",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_set_knob_directly",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_nvidia_tool",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_knobs.py::test_opt_bool",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_link.py::test_link_extern_libs",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_perf_warning.py::test_mma_remark",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_perf_warning.py::test_remark_vectorization",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/test_perf_warning.py::test_remark_swp_op_before_operands",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_compile_link_matmul_no_specialization",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_compile_link_matmul",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_launcher_has_no_available_kernel",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_compile_link_autotune_matmul",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_ttgir_to_asm",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_aot.py::test_gluon_kernel",
+      "device": "npu_or_frontend",
+      "isolate": true
+    },
+    {
+      "id": "python/test/unit/tools/test_disasm.py::test_disam_cubin",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_irsource.py::test_mlir_attribute_parsing",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_identity_1d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_zeros_1d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_identity_2d",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_operator_mul_identity",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_operator_mul_disjoint_dims",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_compose",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_invert",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_invert_and_compose",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_get_matrix_view_identity",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_get_matrix_view_strided",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_linear_layout.py::test_get_matrix_view_from_bases",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_simple_kernel",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_triton_to_gluon_dot_minimal",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_simple_matmul",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_triton_to_gluon_descriptor_roundtrip",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_triton_to_gluon_descriptor_load_roundtrip",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_triton_reshape_trans",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_split",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_reduce_to_scalar",
+      "device": "npu_or_frontend",
+      "isolate": false
+    },
+    {
+      "id": "python/test/unit/tools/test_triton_to_gluon.py::test_num_threads",
+      "device": "npu_or_frontend",
+      "isolate": false
+    }
+  ]
+}

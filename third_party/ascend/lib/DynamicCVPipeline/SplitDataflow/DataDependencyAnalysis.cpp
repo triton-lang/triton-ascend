@@ -42,6 +42,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include <limits>
 
 using namespace mlir;
 
@@ -1064,6 +1065,90 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
   LOG_DEBUG("=== mem dep analysis complete ===\n");
 }
 
+void DataDependencyAnalysisPass::sortMemoryDependencies(
+    llvm::SmallVector<DependencyInfo> &memoryDependencies) {
+  llvm::DenseMap<int, unsigned> blockOrder;
+  unsigned order = 0;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    auto blockId = CVPipeline::getOpBlockId(op);
+    if (blockId && !blockOrder.count(*blockId)) {
+      blockOrder[*blockId] = order;
+    }
+    ++order;
+  });
+
+  auto getBlockOrder = [&](int blockId) {
+    auto it = blockOrder.find(blockId);
+    return it == blockOrder.end() ? std::numeric_limits<unsigned>::max()
+                                  : it->second;
+  };
+
+  std::stable_sort(memoryDependencies.begin(), memoryDependencies.end(),
+                   [&](const DependencyInfo &lhs, const DependencyInfo &rhs) {
+                     auto lhsProducer = getBlockOrder(lhs.iniProducerBlockId);
+                     auto rhsProducer = getBlockOrder(rhs.iniProducerBlockId);
+                     if (lhsProducer != rhsProducer) {
+                       return lhsProducer < rhsProducer;
+                     }
+                     return getBlockOrder(lhs.iniConsumerBlockId) <
+                            getBlockOrder(rhs.iniConsumerBlockId);
+                   });
+}
+
+void DataDependencyAnalysisPass::updateDependencyGraph(
+    int producerBlockId, int consumerBlockId,
+    llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap) {
+  llvm::DenseSet<int> successors;
+  successors.insert(consumerBlockId);
+  auto consumerIt = reachableMap.find(consumerBlockId);
+  if (consumerIt != reachableMap.end()) {
+    successors.insert(consumerIt->second.begin(), consumerIt->second.end());
+  }
+
+  for (auto &entry : reachableMap) {
+    if (entry.first == producerBlockId ||
+        entry.second.contains(producerBlockId)) {
+      entry.second.insert(successors.begin(), successors.end());
+    }
+  }
+  reachableMap[producerBlockId].insert(successors.begin(), successors.end());
+}
+
+void DataDependencyAnalysisPass::buildInitialDependencyGraph(
+    DataDependencyInfo &info,
+    llvm::DenseMap<int, llvm::DenseSet<int>> &reachableMap) {
+  for (const auto &dep : info.getV2CDependencies()) {
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                          reachableMap);
+  }
+  for (const auto &dep : info.getC2VDependencies()) {
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                          reachableMap);
+  }
+}
+
+void DataDependencyAnalysisPass::optimizeMemoryDependencies(
+    DataDependencyInfo &info) {
+  auto &memoryDependencies = info.getMemoryDependencies();
+  sortMemoryDependencies(memoryDependencies);
+
+  llvm::DenseMap<int, llvm::DenseSet<int>> reachableMap;
+  buildInitialDependencyGraph(info, reachableMap);
+
+  llvm::SmallVector<DependencyInfo> necessaryDependencies;
+  for (const auto &dep : memoryDependencies) {
+    auto &successors = reachableMap[dep.producerBlockId];
+    if (successors.contains(dep.consumerBlockId)) {
+      continue;
+    }
+    necessaryDependencies.push_back(dep);
+    updateDependencyGraph(dep.producerBlockId, dep.consumerBlockId,
+                          reachableMap);
+  }
+
+  memoryDependencies = std::move(necessaryDependencies);
+}
+
 // Producer/Consumer Hierarchy Analysis
 std::pair<int, int> DataDependencyAnalysisPass::findCommonLevelBlockIds(
     DataDependencyInfo &info, int producerBlockId, int consumerBlockId) {
@@ -1197,6 +1282,23 @@ void DataDependencyAnalysisPass::runOnOperation() {
   deduplicateDependencies(info.getC2VDependencies());
   deduplicateDependencies(info.getC2CDependencies());
   deduplicateDependencies(info.getMemoryDependencies());
+
+  {
+    auto &memDependencies = info.getMemoryDependencies();
+    LOG_DEBUG("[MemDep before optimize] size: " << memDependencies.size()
+                                                << "\n");
+    for (size_t i = 0; i < memDependencies.size(); ++i) {
+      const auto &dep = memDependencies[i];
+      LOG_DEBUG("[MemDep before optimize][" << i << "] value = " << dep.value
+                << " producerBlockId = " << dep.producerBlockId
+                << ", consumerBlockId = " << dep.consumerBlockId
+                << ", iniProducerBlockId = " << dep.iniProducerBlockId
+                << ", iniConsumerBlockId = " << dep.iniConsumerBlockId
+                << "\n");
+    }
+  }
+
+  optimizeMemoryDependencies(info);
 
   info.setValid(true);
 

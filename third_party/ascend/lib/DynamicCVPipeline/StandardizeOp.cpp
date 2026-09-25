@@ -30,6 +30,7 @@
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/HoistIfCondition.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
 using namespace mlir;
@@ -51,6 +52,7 @@ void StandardizeOpPass::runOnOperation() {
 
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
+  pm.addPass(createHoistIfConditionPass());
   pm.addPass(createPatternMatchRewritePass());
 
   if (llvm::failed(runPipeline(pm, op))) {
@@ -80,6 +82,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass() {
 void registerStandardizeOpPasses() {
   registerPass(createStandardizeOpPass);
   registerPass(createPatternMatchRewritePass);
+  registerPass(createHoistIfConditionPass);
 }
 
 } // namespace mlir::triton

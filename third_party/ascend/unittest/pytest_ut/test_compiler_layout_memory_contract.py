@@ -625,6 +625,7 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     assert graph_calls == [{
         "ub_capacity_bytes": 192 * 1024 * 80 // 100,
         "compile_mode": "simt_only",
+        "target_arch": "Ascend910B1",
     }]
     assert events[-1] == "run_row"
 
@@ -868,3 +869,36 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     # Legacy spellings remain discoverable while compile_mode controls lowering.
     assert explicit_only.__dict__["force_simt_only"] is False
     assert explicit_template.__dict__["force_simt_template"] is False
+
+
+@pytest.mark.parametrize("arch", ["Ascend910B1", "Ascend910_9391", "Ascend910_9589", "Ascend950", "unknown"])
+@pytest.mark.parametrize("rule_mask", [0, 512, 3071, 65536, 68607])
+def test_make_ttir_forwards_gather_target_and_mask(compiler_module, monkeypatch, arch, rule_mask):
+    options = SimpleNamespace(enable_graph_optimize=True, target_arch=arch, compile_mode="simd_simt_template",
+                              rule_mask=rule_mask, debug=False)
+    _, calls = _run_make_ttir_with_recorded_graph_options(compiler_module, monkeypatch, options)
+    assert len(calls) == 1
+    assert calls[0]["target_arch"] == arch
+    assert calls[0]["ub_capacity_bytes"] == _stub_graph_ub_budget_bytes_for_arch(arch)
+    assert calls[0].get("rule_mask", compiler_module.DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK) == rule_mask
+
+
+@pytest.mark.parametrize("other_rules", [0, 511, 512, 3071])
+def test_gather_toggle_preserves_mapping_resource_options(compiler_module, other_rules):
+
+    def kwargs(mask):
+        options = SimpleNamespace(target_arch="Ascend910B1", compile_mode="simd_simt_template", rule_mask=mask)
+        result = compiler_module._graph_optimize_kwargs(options)
+        result.pop("rule_mask", None)
+        return result
+
+    off, on = kwargs(other_rules), kwargs(other_rules | 65536)
+    assert off == on
+    assert off["ub_capacity_bytes"] == 192 * 1024 * 80 // 100
+    # Preserve upstream's existing default/non-default mapping budget policy.
+    if other_rules == 3071:
+        assert "mapping_ub_capacity_bytes" not in off
+    else:
+        assert off["mapping_ub_capacity_bytes"] == 192 * 1024
+        assert off["ub_safety_percent"] == 80
+        assert off["reserved_ub_bytes"] == 0

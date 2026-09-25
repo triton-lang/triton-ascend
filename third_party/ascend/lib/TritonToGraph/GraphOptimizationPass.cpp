@@ -28,6 +28,7 @@
 #include "Utils/Utils.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/PassManager.h"
@@ -59,7 +60,7 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
     GraphOptimizationRulePhase::ProgramMapping,
@@ -71,6 +72,8 @@ constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
     GraphOptimizationRulePhase::StoreCoveragePlanning,
     GraphOptimizationRulePhase::StoreCoalescing,
     GraphOptimizationRulePhase::ContiguousBlockAccessFormation,
+    // Match Gather against the final shapes produced by the preceding rules.
+    GraphOptimizationRulePhase::GatherOptimization,
 };
 
 using ProgramOrderMap = llvm::DenseMap<Operation *, unsigned>;
@@ -131,10 +134,12 @@ public:
     this->ubSafetyPercent = options.ubSafetyPercent;
     this->reservedUBBytes = options.reservedUBBytes;
     this->compileMode = options.compileMode;
+    this->targetArch = options.targetArch;
   }
 
   void getDependentDialects(DialectRegistry &registry) const override {
-    registry.insert<arith::ArithDialect, tensor::TensorDialect>();
+    registry
+        .insert<arith::ArithDialect, scf::SCFDialect, tensor::TensorDialect>();
   }
 
   void runOnOperation() override;
@@ -231,6 +236,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.ubSafetyPercent = static_cast<unsigned>(cliUBSafetyPercent);
   options.reservedUBBytes = static_cast<unsigned>(cliReservedUBBytes);
   options.compileMode = this->compileMode;
+  options.targetArch = this->targetArch;
   options.independentAxisTensorize.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
   options.independentAxisTensorize.iatAndPtsmEnabled =
@@ -553,6 +559,16 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::ContiguousBlockAccessFormation)) {
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
+  }
+  // A2/A3 use the SIMD Gather path in explicit and default/template modes.
+  // A5 lowers Gather through SIMT and needs separate cost-model validation.
+  llvm::StringRef target = options.targetArch;
+  bool gatherTarget =
+      target.starts_with("Ascend910B") || target.starts_with("Ascend910_93");
+  if (gatherTarget &&
+      isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::GatherOptimization)) {
+    rules.push_back(createGatherOptimizationRule(options.ubCapacityBytes));
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);

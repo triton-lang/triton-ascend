@@ -1,0 +1,38 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-08-11 02:23+0000\n"
+"PO-Revision-Date: 2026-08-11 02:23+0000\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr "好的，请提供需要翻译的中文文本，我会严格按照规则将其翻译为英文。"
+
+msgid "Next"
+msgstr "Next"
+
+msgid "Previous"
+msgstr "Previous"
+
+msgid "Home"
+msgstr "Home"
+
+msgid "<a href=\"%(path)s\">Copyright</a> &#169; %(copyright)s"
+msgstr "<a href=\"%(path)s\">Copyright</a> &#169; %(copyright)s"
+
+msgid "Copyright &#169; %(copyright)s"
+msgstr "Copyright &#169; %(copyright)s"
+
+msgid "Last updated on %(last_updated)s"
+msgstr "Last updated on %(last_updated)s"

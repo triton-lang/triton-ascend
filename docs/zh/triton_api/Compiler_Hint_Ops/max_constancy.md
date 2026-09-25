@@ -46,11 +46,11 @@ def basic_constancy_example(A, B, BLOCK_SIZE: tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     input_data = tl.load(A + offsets)
 
-    # 使用constexpr声明常量性模式：每4个连续的值都是相等的
-    # 例如输入模式：[0,0,0,0,1,1,1,1,2,2,2,2,...]
+    # Use constexpr to declare the constancy pattern: every 4 consecutive values are equal
+    # For example, input pattern: [0,0,0,0,1,1,1,1,2,2,2,2,...]
     input_data = tl.max_constancy(input_data, [4])
 
-    # 编译器可以基于这个信息进行优化
+    # The compiler can optimize based on this information
     result = input_data * 2
     tl.store(B + offsets, result)
 ```

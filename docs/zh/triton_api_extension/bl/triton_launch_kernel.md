@@ -65,7 +65,7 @@ void triton_launch_kernel(
 [ffts_addr] → [syncBlockLock_ptr] → [workspace_addr_ptr] →
 [kernel_arg_0] [kernel_arg_1] ... [kernel_arg_N-1] →
 [gridX] [gridY] [gridZ] →
-[DTData]   // 仅当 TRITON_DEVICE_PRINT="true" 时存在
+[DTData]   // Present only when TRITON_DEVICE_PRINT="true"
 ```
 
 > **注意：** 此布局由 `generate_npu_wrapper_src()` 根据当前 kernel 的 signature、metadata、编译选项动态生成，不同编译产物的布局可能不同。
@@ -92,23 +92,23 @@ void triton_launch_kernel(
 此路径**不经过** `triton_launch_kernel`，是 Triton 的标准调用方式：
 
 ```bash
-用户代码:  kernel[grid](args...)
-  │
-  ▼
+User code:  kernel[grid](args...)
+  |
+  v
 NPULauncher.__call__()                    [driver.py:136]
-  │  动态加载 .so launcher stub
-  │  调用 self.launch(gridX, gridY, gridZ, stream, func, ...)
-  ▼
-Python C 扩展函数 launch()               [driver.py:1063 — 模板生成]
-  │  PyArg_ParseTuple 解析 Python 参数
-  │  提取 tensorShapes、tensorKinds
-  │  调用 _launch(kernelName, func, stream, gridX, gridY, gridZ, ...)
-  ▼
-_launch() 内部函数                        [driver.py:946 — 模板生成]
-  │  处理 workspace / syncBlockLock 分配
-  │  组装 launch_args，调用 rtKernelLaunch()
-  ▼
-rtKernelLaunch() → NPU 硬件执行
+  |  Dynamically load the .so launcher stub
+  |  Call self.launch(gridX, gridY, gridZ, stream, func, ...)
+  v
+Python C extension function launch()     [driver.py:1063 -- template-generated]
+  |  PyArg_ParseTuple parses Python arguments
+  |  Extract tensorShapes, tensorKinds
+  |  Call _launch(kernelName, func, stream, gridX, gridY, gridZ, ...)
+  v
+_launch() internal function              [driver.py:946 -- template-generated]
+  |  Handle workspace / syncBlockLock allocation
+  |  Assemble launch_args, call rtKernelLaunch()
+  v
+rtKernelLaunch() -> NPU hardware execution
 ```
 
 ### 5.2 路径 B：外部 C 接口路径（直接调用 triton_launch_kernel）
@@ -116,16 +116,16 @@ rtKernelLaunch() → NPU 硬件执行
 面向需要 C 级别 kernel 发射的场景：
 
 ```bash
-第三方 C/C++ 代码
-  │  dlopen / dlsym 获取 triton_launch_kernel 符号
-  │  或直接链接 launcher stub .so
-  ▼
-triton_launch_kernel()                   [driver.py:800 — 模板生成]
-  │  深拷贝 kernel_args
-  │  处理 workspace / syncBlockLock 分配
-  │  组装 launch_args，调用 rtKernelLaunch()
-  ▼
-rtKernelLaunch() → NPU 硬件执行
+Third-party C/C++ code
+  |  dlopen / dlsym to get the triton_launch_kernel symbol
+  |  or directly link the launcher stub .so
+  v
+triton_launch_kernel()                   [driver.py:800 -- template-generated]
+  |  Deep copy kernel_args
+  |  Handle workspace / syncBlockLock allocation
+  |  Assemble launch_args, call rtKernelLaunch()
+  v
+rtKernelLaunch() -> NPU hardware execution
 ```
 
 ### 5.3 适用场景
@@ -147,9 +147,9 @@ rtKernelLaunch() → NPU 硬件执行
 #include <cstring>
 #include <dlfcn.h>
 #include <vector>
-#include "rt.h"  // CANN runtime 头文件
+#include "rt.h"  // CANN runtime header file
 
-// 函数指针类型定义（与 launcher stub 导出的签名一致）
+// Function pointer type definition (consistent with the signature exported by the launcher stub)
 typedef void (*triton_launch_kernel_t)(
     const char* kernelName,
     const void* func,
@@ -167,11 +167,11 @@ typedef void (*triton_launch_kernel_t)(
 void launch_kernel_via_stub(
     const char* stub_so_path,
     const char* kernel_name,
-    const void* func,          // 已通过 CANN runtime 注册完成的 kernel function handle
+    const void* func,          // Kernel function handle already registered via CANN runtime
     rtStream_t stream,
     int grid_x, int grid_y, int grid_z)
 {
-    // 1. 加载 launcher stub 并获取 triton_launch_kernel 符号
+    // 1. Load the launcher stub and obtain the triton_launch_kernel symbol
     void* handle = dlopen(stub_so_path, RTLD_LAZY);
     if (!handle) {
         fprintf(stderr, "dlopen failed: %s\n", dlerror());
@@ -184,19 +184,19 @@ void launch_kernel_via_stub(
         return;
     }
 
-    // 2. 组装 kernel 参数
+    // 2. Assemble the kernel arguments
     float alpha = 1.0f;
     int N = 1024;
     const void* arg_ptrs[] = { &alpha, &N };
     const size_t arg_sizes[] = { sizeof(float), sizeof(int) };
 
-    // 3. shapes_data / tensor_kinds（仅用于 profiling，可为空）
-    //    此处以 2 个 tensor 为例：input shape [1, 1024]、output shape [1, 1024]
+    // 3. shapes_data / tensor_kinds (used only for profiling; may be empty)
+    //    Here we use 2 tensors as an example: input shape [1, 1024], output shape [1, 1024]
     const int64_t shapes[] = {1, 1024, 1, 1024};
     const int dims[] = {2, 2};
     const int kinds[] = {0, 1};  // INPUT, OUTPUT
 
-    // 4. 调用 triton_launch_kernel
+    // 4. Invoke triton_launch_kernel
     launch_fn(
         kernel_name, func, stream,
         grid_x, grid_y, grid_z,
@@ -204,8 +204,8 @@ void launch_kernel_via_stub(
         arg_ptrs, arg_sizes, 2
     );
 
-    // 5. 非 TaskQueue 模式下可在此处同步；TaskQueue 模式默认启用，
-    //    函数已提交任务到队列并返回，同步由调用方自行管理
+    // 5. In non-TaskQueue mode you can synchronize here; TaskQueue mode is enabled by default,
+    //    the function has submitted the task to the queue and returned; synchronization is managed by the caller
     dlclose(handle);
 }
 ```
@@ -220,12 +220,12 @@ void launch_kernel_via_stub(
 import ctypes
 from pathlib import Path
 
-# 假设 launcher stub .so 路径已知（可通过 NPULauncher.get_launcher_so_path() 获取）
+# Assume the launcher stub .so path is known (can be obtained via NPULauncher.get_launcher_so_path())
 stub_path = Path("/path/to/launcher_cxx11abi1.cpython-39-aarch64-linux-gnu.so")
 
 lib = ctypes.CDLL(str(stub_path))
 
-# 定义函数签名
+# Define the function signature
 lib.triton_launch_kernel.argtypes = [
     ctypes.c_char_p,           # kernelName
     ctypes.c_void_p,           # func
@@ -243,8 +243,8 @@ lib.triton_launch_kernel.argtypes = [
 ]
 lib.triton_launch_kernel.restype = None  # void
 
-# 组装参数（示例省略 func handle 获取步骤，
-# 实际需通过 CANN runtime Python 绑定获取）
+# Assemble the arguments (the func handle acquisition step is omitted in this example;
+# it actually needs to be obtained via the CANN runtime Python bindings)
 # ...
 # lib.triton_launch_kernel(kernel_name, func, stream, ...)
 ```
@@ -273,8 +273,8 @@ y = torch.randn(1024, device='npu')
 output = torch.empty_like(x)
 grid = lambda meta: (triton.cdiv(1024, meta['BLOCK_SIZE']),)
 add_kernel[grid](x, y, output, 1024, BLOCK_SIZE=256)
-# 此调用经过路径 A：NPULauncher → launch() → _launch() → rtKernelLaunch()
-# 不经过 triton_launch_kernel()
+# This call goes through Path A: NPULauncher → launch() → _launch() → rtKernelLaunch()
+# It does not go through triton_launch_kernel()
 ```
 
 ## 7. 环境变量影响

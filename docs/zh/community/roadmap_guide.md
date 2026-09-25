@@ -5,7 +5,7 @@
 下面是一个完整的路线图 Issue 示例，展示了所有推荐元素的实际应用。建议先查看此示例获得整体印象，再阅读后续的详细规范说明。
 
 ```markdown
-创建 Issue 标题：[Roadmap] Triton-Ascend Roadmap 2026 Q2
+Issue title: [Roadmap] Triton-Ascend Roadmap 2026 Q2
 
 ---
 # Triton-Ascend Roadmap 2026 Q2

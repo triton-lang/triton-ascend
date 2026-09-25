@@ -57,14 +57,14 @@
 ```python
 @triton.jit
 def matrix_add_bias_kernel(x_ptr, bias_ptr, output_ptr, M, N, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    # 加载数据块
+    # Load the data block
     x = tl.load(x_ptr + offsets, mask=mask)
 
-    # 广播bias到匹配的形状
+    # Broadcast bias to the matching shape
     bias = tl.load(bias_ptr)
     bias_broadcast = bias.broadcast_to([BLOCK_M, BLOCK_N])
 
-    # 执行加法
+    # Perform the addition
     output = x + bias_broadcast
     tl.store(output_ptr + offsets, output, mask=mask)
 ```

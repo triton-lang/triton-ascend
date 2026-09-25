@@ -55,13 +55,13 @@
 ```python
 @triton.jit
 def complex_split_kernel(complex_ptr, real_ptr, imag_ptr, M, N, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
-    # 加载复数数据
+    # Load complex data
     complex_data = tl.load(complex_ptr + offsets, mask=mask)
 
-    # 分割成实部和虚部
+    # Split into real and imaginary parts
     real_part, imag_part = complex_data.split()
 
-    # 存储实部和虚部
+    # Store the real and imaginary parts
     tl.store(real_ptr + offsets, real_part, mask=mask)
     tl.store(imag_ptr + offsets, imag_part, mask=mask)
 ```

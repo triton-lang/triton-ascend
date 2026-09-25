@@ -238,5 +238,9 @@
   "xdist",
   "manylinux",
   "NVTX",
-  "CUPTI"
+  "CUPTI",
+  "AMDGCN",
+  "ncore",
+  "xblock",
+  "xblock_sub"
 ]

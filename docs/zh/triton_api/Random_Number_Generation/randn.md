@@ -57,9 +57,9 @@ import triton.language as tl
 @triton.jit
 def kernel_randn(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.constexpr):
     block_offset = tl.program_id(0) * XBLOCK
-    offsets = block_offset + tl.arange(0, XBLOCK)  # 块级 offset 张量
+    offsets = block_offset + tl.arange(0, XBLOCK)  # Block-level offset tensor
     mask = offsets < N
-    rand_vals = tl.randn(5, 10 + offsets, n_rounds)  # 一次生成一整块随机数
+    rand_vals = tl.randn(5, 10 + offsets, n_rounds)  # Generate a whole block of random numbers at once
     tl.store(x_ptr + offsets, rand_vals, mask=mask)
 
 shape = (1024,)

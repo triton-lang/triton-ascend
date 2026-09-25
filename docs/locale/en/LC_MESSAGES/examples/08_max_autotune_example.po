@@ -1,0 +1,51 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-09-14 19:16+0800\n"
+"PO-Revision-Date: 2026-09-14 19:16+0800\n"
+
+"X-Source-Commit: 18828c7796c281714ea1969fe6fc72d5f8922d9b\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+
+msgid "max_autotune 使用示例"
+msgstr "max_autotune usage example"
+
+msgid "`max_autotune` 是 Triton-Ascend 提供的增强自动调优装饰器，旨在简化多参数调优的代码编写。与社区版 `autotune` 要求用户手动枚举所有 `triton.Config` 不同，`max_autotune` 允许用户仅提供少量基础配置（如分块大小），并自动将相关的编译器选项（如 `num_stages`、`enable_hivm_auto_cv_balance` 等）纳入最优组合的搜索空间。用户也可以通过参数列表显式控制搜索范围。"
+msgstr "`max_autotune` is an enhanced auto-tuning decorator provided by Triton-Ascend, designed to simplify the code writing for multi-parameter tuning. Unlike the community version of `autotune`, which requires users to manually enumerate all `triton.Config` instances, `max_autotune` allows users to provide only a small set of base configurations (such as block sizes) and automatically incorporates related compiler options (such as `num_stages`, `enable_hivm_auto_cv_balance`, etc.) into the search space for optimal combinations. Users can also explicitly control the search scope through a parameter list."
+
+msgid "**适用场景**：Ascend NPU 上的 `cube`、`mix`、`vector` 算子，尤其适合需要同时调整多个硬件相关参数的场景。"
+msgstr "**Applicable Scenarios**: `cube`, `mix`, and `vector` operators on Ascend NPU, particularly suitable for scenarios where multiple hardware-related parameters need to be adjusted simultaneously."
+
+msgid "基本使用示例"
+msgstr "Basic usage example"
+
+msgid "以下示例演示了使用 `max_autotune` 对一个简单的向量加法 kernel 进行自动调优。与社区版 `autotune` 相比，`max_autotune` 还会自动将不同的编译器选项纳入调优空间，无需用户手动指定。"
+msgstr "The following example demonstrates automatic tuning of a simple vector addition kernel using `max_autotune`. Compared to the community edition `autotune`, `max_autotune` also automatically includes different compiler options in the tuning space, without requiring users to specify them manually."
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "进阶使用：精确控制调优参数"
+msgstr "Advanced Usage: Precisely Controlling Tuning Parameters"
+
+msgid "用户可以通过 **tuning_params** 显式指定需要调优的编译器选项及其取值列表；未指定的参数会使用内置默认值。以下示例展示了如何对多个参数进行组合搜索。"
+msgstr "You can use **tuning_params** to explicitly specify the compiler options for tuning and their lists of values. Parameters that are not specified use built-in default values. The following example shows how to perform a combined search across multiple parameters."
+
+msgid "from triton.backends.ascend.runtime import max_autotune\\n"
+msgstr "from triton.backends.ascend.runtime import max_autotune"

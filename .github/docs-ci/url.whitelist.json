@@ -3,5 +3,6 @@
   "^(https?://)?localhost.*",
   "^(https?://)?192\\.168\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?).*",
   "https://example.com/*",
-  "https://pytorch.org/*"
+  "https://pytorch.org/*",
+  "https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/custom_op/test_gather_load.py"
 ]

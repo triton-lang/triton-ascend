@@ -55,6 +55,6 @@ def kernel(x_ptr):
     idy = tl.arange(0,4)
     offset = idx[:,None] * 4 + idy[None,:]
     val = tl.load(x_ptr + offset)
-    # 打印二维张量val的值
+    # Print the value of the 2D tensor val
     tl.device_print("val:",val)
 ```

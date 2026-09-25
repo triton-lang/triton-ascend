@@ -1,0 +1,549 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-09-23 11:46+0800\n"
+"PO-Revision-Date: 2026-09-23 11:46+0800\n"
+
+"X-Source-Commit: f5512e2c3ff10e6419196696eeea136d91c02fb4\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+
+msgid "Triton算子开发指南"
+msgstr "Triton Operator Development Guide"
+
+msgid "概述：本文着重介绍了在NPU上进行Triton算子开发中值得注意的问题，分为三个方面：多核任务并行、单核数据搬运、单核数据运算。首先在多核任务并行中介绍了设置最大硬件核数的依据以及具体的实现。然后在单核数据搬运中具体描述了如何设置合适的循环内数据分块大小，并且介绍了过程中常用的优化手段，还补充了可能面临的UB OVERFLOW问题的处理方式。最后回归单个算子，在单核数据运算层面着重介绍了如何开发Triton算子，并强调了相关的关键点。"
+msgstr "Overview: This article focuses on notable issues in Triton operator development on NPU, divided into three aspects: multi-core task parallelism, single-core data movement, and single-core data computation. First, it introduces the basis for setting the maximum number of hardware cores and the specific implementation in multi-core task parallelism. Then, it details how to set an appropriate data chunk size within loops during single-core data movement, introduces common optimization techniques used in the process, and supplements the handling of potential UB OVERFLOW issues. Finally, it returns to a single operator, focusing on how to develop Triton operators at the single-core data computation level, and emphasizes the relevant key points."
+
+msgid "文档组织"
+msgstr "Document Organization"
+
+msgid "本指南将通用开发原则和按硬件执行单元划分的算子开发路径分开组织："
+msgstr "This guide separates general development principles from operator development paths organized by hardware execution units:"
+
+msgid "本页介绍所有 Triton-Ascend 算子都需要关注的通用问题，包括分核、片上内存、访存、Tiling 和 Autotune。"
+msgstr "This page introduces common issues that all Triton-Ascend operators need to pay attention to, including core partitioning, on-chip memory, memory access, Tiling, and Autotune."
+
+msgid "[Vector 算子开发](./vector_operator.md) 介绍主要由 Vector Core 执行的逐元素、归约、Gather/Scatter 等算子。"
+msgstr "[Vector Operator Development](./vector_operator.md) introduces operators such as element-wise, reduction, Gather/Scatter, etc., primarily executed by the Vector Core."
+
+msgid "[Cube 算子开发](./cube_operator.md) 介绍以 `tl.dot`、矩阵乘、批量矩阵乘为核心的算子。"
+msgstr "[Cube Operator Development](./cube_operator.md) introduces operators centered around `tl.dot`, matrix multiplication, and batched matrix multiplication."
+
+msgid "[CV 融合算子开发](./cv_fusion_operator.md) 介绍同一个算子中同时存在 Cube 计算和 Vector 后处理、归约、Softmax 或跨核协同的场景。"
+msgstr "[CV Fusion Operator Development](./cv_fusion_operator.md) introduces scenarios where Cube computation and Vector post-processing, reduction, Softmax, or cross-core collaboration coexist within the same operator."
+
+msgid "简单算子优先参考本仓 `docs/zh/examples/` 和 `third_party/ascend/tutorials/`；复杂算子优先参考 GitHub 上的 [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) 中 `tutorial/best_practice/` 的完整优化案例。"
+msgstr "For simple operators, refer primarily to `docs/zh/examples/` and `third_party/ascend/tutorials/` in this repository; for complex operators, refer primarily to the complete optimization cases in `tutorial/best_practice/` under [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops) on GitHub."
+
+msgid "通用多核任务并行"
+msgstr "Generic multi-core task parallelism"
+
+msgid "设置最大硬件核数"
+msgstr "Set the maximum number of hardware cores."
+
+msgid "在一个Triton算子中，通常使用grid进行分核操作。对于GPU而言，其计算核心SM通常是几十到几百量级。但是对于昇腾NPU平台而言，其计算核心AI Core的数量在几十个的量级。 虽然运行时接口允许下发并发任务数最大为65535，但超过物理核数的部分是通过新一轮的下发来完成的。如果直接将GPU上的Triton算子拿到昇腾平台上运行，这些大量的任务会引入可观的核启动和核初始化时的额外开销，影响到算子性能表现。 因此，需要针对昇腾平台特性修改分核逻辑。最推荐的做法是**将分核的数量直接固定为硬件的物理核数**，在核内做更为细致的数据分块："
+msgstr "In a Triton operator, the grid is typically used for core partitioning. For GPUs, the number of compute cores (SMs) is typically on the order of tens to hundreds. However, for the Ascend NPU platform, the number of compute cores (AI Cores) is on the order of tens. Although the runtime interface allows dispatching up to 65535 concurrent tasks, tasks exceeding the number of physical cores are completed through additional dispatch rounds. If you directly run a GPU Triton operator on the Ascend Platform, the large number of tasks introduces significant kernel launch and core initialization overhead, affecting operator performance. Therefore, you need to modify the core partitioning logic to suit the characteristics of the Ascend Platform. The most recommended approach is to **directly set the number of core partitions to the number of physical cores on the hardware** and perform more fine-grained data tiling within each core:"
+
+msgid "<br />\\n"
+msgstr "<br />"
+
+msgid "\\\\\\n"
+msgstr "\\\\\\n"
+
+msgid "对于纯Vector算子，分核数等于**Vector核数量**。"
+msgstr "For pure Vector operators, the number of split cores equals the **number of Vector cores**."
+
+msgid "对于CV融合算子，分核数等于**Cube核数量**（通常为Vector核数量的一半），算子执行时会按1：2的比例调用Vector核。"
+msgstr "For CV fusion operators, the number of split cores equals the **number of Cube cores** (usually half the number of Vector cores). During operator execution, Vector cores are invoked at a 1:2 ratio."
+
+msgid "一般而言，在NPU卡上，一个计算核心AI Core含有一个Cube核，每个Cube核配有两个Vector核，因此可以通过以下接口获取**Vector核数(vectorcore_num)**与**Cube核数量(aicore_num)**："
+msgstr "Generally, on an NPU card, a compute core (AI Core) contains one Cube core, and each Cube core is equipped with two Vector cores. Therefore, you can obtain the **number of Vector cores (vectorcore_num)** and **number of Cube cores (aicore_num)** through the following interface:"
+
+msgid "import torch\\n"
+msgstr "import torch"
+
+msgid "参考示例代码，先固定核数，再通过内部循环分批处理任务分块："
+msgstr "Refer to the sample code, first fix the number of cores, then process task chunks in batches through an inner loop:"
+
+msgid "NUM_CORE = vectorcore_num\\n"
+msgstr "NUM_CORE = vectorcore_num"
+
+msgid "通用单核数据搬运"
+msgstr "General single-core data transfer"
+
+msgid "设置合适的循环内数据分块大小（BLOCK SIZE）"
+msgstr "Set an appropriate data block size (BLOCK SIZE) for the loop."
+
+msgid "以add_kernel为例，变量和操作共同决定了片上内存的空间占用大小，通过修改BLOCK_SIZE大小可以调整循环内数据分块和计算中间结果占用的大小。如果超过上限则算子编译时会提示预期占用大小并报错。要达到最大计算访存比，BLOCK_SIZE需要在不超出片上内存的空间时尽可能大，这可以通过Triton-Ascend的[Autotune](../examples/06_autotune_example.md)预先设置不同的BLOCK_SIZE，运行时会自动选取最优设置。"
+msgstr "Taking add_kernel as an example, variables and operations together determine the on-chip memory space usage. By modifying the BLOCK_SIZE, you can adjust the data blocking within the loop and the space occupied by intermediate computation results. If the usage exceeds the upper limit, the operator compilation prompts the expected space usage and reports an error. To achieve the maximum computation-to-memory-access ratio, BLOCK_SIZE needs to be as large as possible without exceeding the on-chip memory space. You can use the [Autotune](../examples/06_autotune_example.md) feature of Triton-Ascend to pre-set different BLOCK_SIZE values, and the runtime automatically selects the optimal setting."
+
+msgid "import triton.language as tl\\n"
+msgstr "import triton.language as tl"
+
+msgid "保证Tensor尾轴大小对齐"
+msgstr "Ensure that the Tensor trailing axis size is aligned"
+
+msgid "【描述】昇腾硬件的UB（Unified Buffer，统一缓冲区）对Tensor的尾轴（最后一个维度）大小有对齐要求：尾轴数据量需为对齐单位的整数倍，若尾轴长度不足，硬件会自动补齐。不同算子类型的对齐要求如下表所示。"
+msgstr "[Description] The UB (Unified Buffer) of Ascend Hardware has alignment requirements for the size of the tail axis (the last dimension) of a Tensor. The data size of the tail axis must be an integer multiple of the alignment unit. If the tail axis length is insufficient, the hardware automatically pads it. The alignment requirements for different operator types are shown in the following table."
+
+msgid "算子类型"
+msgstr "Operator type"
+
+msgid "使用的计算单元"
+msgstr "Compute unit used"
+
+msgid "尾轴对齐要求"
+msgstr "Trailing axis alignment requirements"
+
+msgid "VV类算子（Vector-Vector，纯向量计算类算子）"
+msgstr "VV operators (Vector-Vector, pure vector computation operators)"
+
+msgid "仅使用Vector核"
+msgstr "Use only the Vector core"
+
+msgid "尾轴大小能被32B整除"
+msgstr "The tail axis size is divisible by 32B"
+
+msgid "CV类算子（Cube-Vector，Cube核与Vector核融合计算类算子）"
+msgstr "CV operators (Cube-Vector, a class of operators that fuse Cube core and Vector core computation)"
+
+msgid "使用Cube核+Vector核"
+msgstr "Using the Cube core and Vector core"
+
+msgid "尾轴大小能被512B整除"
+msgstr "The tail axis size is divisible by 512B."
+
+msgid "【描述】对模型中shape为(2048,3)和(2048,1)Tensor的种种操作，都会因为自动补齐导致性能明显恶化，此时可考虑通过转置操作将对齐轴转到低维，直到store时再转置为原始状态，从而规避自动补齐，优化计算速度。 同时由于转置操作本身也受自动补齐规则的影响，因此同样需要特殊技巧来规避补齐。这里列出一个“借轴转置”的tip，适用于**tensor.numel() % 256Byte == 0**的场景，具体操作如下："
+msgstr "[Description] Various operations on tensors with shapes (2048,3) and (2048,1) in the model all suffer from significant performance degradation due to automatic padding. In this case, consider transposing the alignment axis to a lower dimension, and then transposing back to the original state when storing. This avoids automatic padding and optimizes computation speed. Since transpose operations themselves are also affected by automatic padding rules, special techniques are also needed to avoid padding. Here is a \"borrow-axis transpose\" tip applicable to scenarios where **tensor.numel() % 256Byte == 0**. The specific operations are as follows:"
+
+msgid "注：VV类算子表示该类算子在运算过程中只使用了Vector Core；CV类算子表示该类算子运算过程中既使用了AI Core又使用了Vector Core。"
+msgstr "Note: VV-type operators indicate that such operators only use the Vector Core during computation; CV-type operators indicate that such operators use both the AI Core and the Vector Core during computation."
+
+msgid "示例"
+msgstr "Example"
+
+msgid "# conv_state = tensor([2048, 3], bfloat16)\\n"
+msgstr "# conv_state = tensor([2048, 3], bfloat16)"
+
+msgid "先将数据搬运到UB上，再从UB中select目标值"
+msgstr "First move the data to UB, then select the target value from UB."
+
+msgid "【描述】在NPU的离散场景下，可以先将数据搬运到UB，再从shared中select目标值。"
+msgstr "[Description] In discrete NPU scenarios, you can first move the data to the UB, and then select the target value from shared."
+
+msgid "@triton.jit\\n"
+msgstr "@triton.jit"
+
+msgid "优化前后性能分析和对比"
+msgstr "Performance analysis and comparison before and after optimization"
+
+msgid "通过msprof工具执行用例可得到PROF_*文件夹，里面包含了op_summary_\\*.csv文件，该文件可以帮助分析流水情况。注：“\\*”表示时间戳，[性能数据采集参考方法](../debug_guide/profiling.md)。"
+msgstr "Running test cases with the msprof tool generates a PROF_* folder, which contains the op_summary_\\*.csv file. This file helps analyze pipeline conditions. Note: \"\\*\" represents a timestamp, [refer to the performance data collection method](../debug_guide/profiling.md)."
+
+msgid "优化状态"
+msgstr "Optimization status"
+
+msgid "Op Name"
+msgstr "Op Name"
+
+msgid "aiv_mte2_time(μs)"
+msgstr "aiv_mte2_time(μs)"
+
+msgid "aiv_mte2_ratio"
+msgstr "aiv_mte2_ratio"
+
+msgid "未优化"
+msgstr "Unoptimized"
+
+msgid "pick_kernel"
+msgstr "pick_kernel"
+
+msgid "0.686"
+msgstr "0.686"
+
+msgid "0.008"
+msgstr "0.008"
+
+msgid "优化"
+msgstr "Optimization"
+
+msgid "1.041"
+msgstr "1.041"
+
+msgid "0.066"
+msgstr "0.066"
+
+msgid "各指标含义说明："
+msgstr "Description of each metric:"
+
+msgid "**aiv_mte2_time(μs)**：AI Vector（AIV）核上 MTE2（Move Engine 2）搬运阶段耗时，单位为微秒（μs），反映数据从全局内存搬运到片上内存（UB）的时间开销。"
+msgstr "**aiv_mte2_time(μs)**: The duration of the MTE2 (Move Engine 2) data movement phase on the AI Vector (AIV) core, measured in microseconds (μs). This metric reflects the time overhead of moving data from global memory to on-chip memory (UB)."
+
+msgid "**aiv_mte2_ratio**：MTE2 搬运时间占算子总执行时间的比例，数值越大说明搬运耗时占比越高，可用于评估搬运与计算的重叠程度。"
+msgstr "**aiv_mte2_ratio**: The ratio of MTE2 data movement time to the total operator execution time. A larger value indicates a higher proportion of time spent on data movement, which can be used to evaluate the degree of overlap between data movement and computation."
+
+msgid "通过分析表格中的数据可以发现，优化前后的aiv_mte2_time(μs)和aiv_mte2_ratio差距较大，优化方案通过先将大部分数据搬运到UB上，减少小批量数据通过L2搬运到UB的次数，减少了L2搬运到UB上的总时间。"
+msgstr "The data in the table shows a significant difference in aiv_mte2_time(μs) and aiv_mte2_ratio before and after optimization. The optimization approach moves most data to the UB first. This reduces the number of times small batches of data are moved through the L2 to the UB. Consequently, the total time for moving data from the L2 to the UB is reduced."
+
+msgid "存算并行"
+msgstr "Compute-Storage Parallelism"
+
+msgid "Triton-Ascend支持两种数据处理模式：存算串行和存算并行。"
+msgstr "Triton-Ascend supports two data processing modes: storage-compute serial and storage-compute parallel."
+
+msgid "存算串行：先从全局内存搬运数据到片上内存，完成计算后，再搬运下一批数据。这种方式存在明显的空闲等待时间，效率较低。"
+msgstr "Load-compute serial: first move data from global memory to on-chip memory, complete the computation, then move the next batch of data. This approach has obvious idle waiting time and is less efficient."
+
+msgid "存算并行：在搬运第一批数据至片上内存的同时，已开始对其执行计算；随后继续搬运第二批数据，形成“搬运+计算”重叠的流水线式操作，显著提升整体吞吐率。"
+msgstr "Compute-in-parallel: While transferring the first batch of data to on-chip memory, computation on it has already begun; subsequently, the second batch of data is transferred, forming a pipelined operation where \"transfer + compute\" overlap, significantly improving overall throughput."
+
+msgid "实现存算并行的关键在于合理设计数据切分（Tiling）策略，使得在当前批次数据计算过程中，能够提前准备下一阶段所需的数据，从而实现数据搬运与计算过程的并行化。目前，编译器默认配置multiBuffer=True，默认支持存算并行。"
+msgstr "The key to achieving memory-compute parallelism is to properly design a data tiling strategy. This enables the data required for the next stage to be prepared in advance during the computation of the current batch, thereby parallelizing data movement and computation. Currently, the compiler defaults to multiBuffer=True, supporting memory-compute parallelism by default."
+
+msgid "Tiling优化"
+msgstr "Tiling optimization"
+
+msgid "AI Core进行计算的时候要先将数据搬运至片上内存，而片上内存的空间通常远小于AI Core要处理的总数据量，以Atlas 800T/I A2产品为例，片上内存容量为192KB，默认开启doublebuffer特性后容量还会减至原来的一半。因此算子计算时需要对数据进行分块操作，每次只加载处理其中的一小部分数据。"
+msgstr "When AI Core performs computation, data must first be moved to on-chip memory, and the space of on-chip memory is usually much smaller than the total amount of data that AI Core needs to process. Taking the Atlas 800T/I A2 product as an example, the on-chip memory capacity is 192KB, and after the double buffer feature is enabled by default, the capacity is reduced to half of the original. Therefore, during operator computation, data needs to be divided into blocks, and only a small portion of the data is loaded and processed at a time."
+
+msgid "@libentry()\\n"
+msgstr "@libentry()"
+
+msgid "Triton Autotune 自动调优"
+msgstr "Triton Autotune automatic tuning"
+
+msgid "在 Tiling 分块优化中，BLOCK_SIZE、BLOCK_SIZE_SUB等分块参数的取值直接影响算子性能，但手动调试参数组合效率低且难以找到最优值。triton.autotune是Triton框架提供的自动调优工具，能遍历预设的参数配置，通过实际运行对比性能，自动选择最优参数组合，是Tiling优化的核心配套手段。"
+msgstr "In Tiling optimization, the values of block parameters such as BLOCK_SIZE and BLOCK_SIZE_SUB directly affect operator performance, but manually debugging parameter combinations is inefficient and difficult to find the optimal values. triton.autotune is an automatic tuning tool provided by the Triton framework that can iterate over preset parameter configurations, compare performance through actual execution, and automatically select the optimal parameter combination, making it a core complementary approach to Tiling optimization."
+
+msgid "如果你关注 Triton-Ascend 上 `configs=[]` 的推荐用法、自动 Tiling 的适用边界，可进一步参考 [Triton-Ascend autotune 使用指南](../autotune_guide.md)。"
+msgstr "If you are interested in the recommended usage of `configs=[]` on Triton-Ascend and the applicable boundaries of automatic Tiling, you can further refer to the [Triton-Ascend autotune usage guide](../autotune_guide.md)."
+
+msgid "核心作用 自动遍历参数空间：针对BLOCK_SIZE、BLOCK_SIZE_SUB等 constexpr 类型的分块参数，批量测试不同取值的性能。 性能基准对比：以算子的执行耗时为指标，筛选出适配当前硬件的最优参数。 缓存调优结果：调优后的最优配置会被缓存，后续调用算子时直接复用，避免重复调优。"
+msgstr "Core Function: Automatically traverse the parameter space: For constexpr-type block parameters such as BLOCK_SIZE and BLOCK_SIZE_SUB, batch test the performance of different values. Performance benchmark comparison: Use the operator's execution time as the metric to filter out the optimal parameters adapted to the current hardware. Cache tuning results: The optimal configuration after tuning is cached and directly reused in subsequent operator calls, avoiding repeated tuning."
+
+msgid "简单示例"
+msgstr "Simple example"
+
+msgid "注：设置以下环境变量，便可打印出最优参数信息。"
+msgstr "Note: Set the following environment variables to print out the optimal parameter information."
+
+msgid "export TRITON_PRINT_AUTOTUNING=1\\n"
+msgstr "export TRITON_PRINT_AUTOTUNING=1"
+
+msgid "进阶：使用 max_autotune 自动调优"
+msgstr "Advanced: Using max_autotune for Automatic Tuning"
+
+msgid "对于 Ascend NPU 算子，要想达到最优性能，除BLOCK_SIZE外，还需调优 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop 等多个硬件相关参数。若使用 @triton.autotune 手动枚举所有组合，会导致配置列表爆炸式增长，代码难以维护。"
+msgstr "For Ascend NPU operators, to achieve optimal performance, in addition to BLOCK_SIZE, multiple hardware-related parameters such as num_stages, enable_hivm_auto_cv_balance, and tile_mix_vector_loop also need to be tuned. If @triton.autotune is used to manually enumerate all combinations, the configuration list will grow explosively, making the code difficult to maintain."
+
+msgid "max_autotune 是专为 Ascend NPU 设计的扩展装饰器（位于 triton.backends.ascend.runtime），允许用户仅提供基础配置，其余调优参数以列表形式传入，装饰器自动生成全部组合的 Config 列表。"
+msgstr "max_autotune is an extended decorator specifically designed for Ascend NPU (located in triton.backends.ascend.runtime), which allows users to provide only the basic configuration while passing the remaining tuning parameters as a list. The decorator automatically generates a list of Configs for all combinations."
+
+msgid "核心作用 开发者只需提供少量基础配置（如BLOCK_SIZE），所有与该算子类型相关的编译器选项（例如 num_stages、enable_hivm_auto_cv_balance、tile_mix_vector_loop、enable_ubuf_saving 等）都会通过内置的合理默认值自动纳入最优组合的搜索范围，无需开发者显式列举，一次性完成最优 tiling 和编译器选项组合的自动寻优。若开发者希望对某些参数进行限定，也可通过显式传入列表来覆盖默认搜索范围。"
+msgstr "Core function: Developers only need to provide a small amount of basic configuration (such as BLOCK_SIZE), and all compiler options related to this operator type (e.g., num_stages, enable_hivm_auto_cv_balance, tile_mix_vector_loop, enable_ubuf_saving, etc.) will be automatically included in the search scope for the optimal combination through built-in reasonable default values, without requiring developers to explicitly enumerate them. This completes automatic optimization of the best tiling and compiler option combination in one pass. If developers wish to constrain certain parameters, they can also override the default search scope by explicitly passing in a list."
+
+msgid "from triton.backends.ascend.runtime import max_autotune\\n"
+msgstr "from triton.backends.ascend.runtime import max_autotune"
+
+msgid "如何在NPU上避免UB OVERFLOW"
+msgstr "How to avoid UB OVERFLOW on NPU"
+
+msgid "【描述】在NPU上，UB（Unified Buffer，统一缓冲区）与L1（一级片上缓存）等片上内存的容量存在硬件上限。当核函数单个tile（分块）搬运、计算所需的片上缓冲区超过该上限时，编译器会在编译期报`ub overflow`错误，核函数无法编译通过。该错误高发于以下场景：块大小参数（如BLOCK_SIZE）设置过大、长序列被一次性整段搬运、核函数内中间张量过多，以及multi-buffer（存算并行多缓冲）默认开启导致部分张量需要保留多份副本。出现该错误时，需要减少单次搬运的数据量：调小块大小参数，或在核函数内以for循环按序列维度分块处理长序列场景。"
+msgstr "[Description] On the NPU, the capacity of on-chip memory such as UB (Unified Buffer) and L1 (level-1 on-chip cache) has a hardware limit. When the on-chip buffer required for data movement and computation of a single tile (block) in a kernel exceeds this limit, the compiler reports the `ub overflow` error at compile time, and the kernel fails to compile. This error frequently occurs in the following scenarios: the block size parameter (such as BLOCK_SIZE) is set too large, a long sequence is moved in its entirety at once, there are too many intermediate tensors in the kernel, and multi-buffer (compute-storage parallel multi-buffering) is enabled by default, causing some tensors to require multiple copies. When this error occurs, reduce the amount of data moved at a time: reduce the block size parameter, or use a for loop within the kernel to process long-sequence scenarios in blocks along the sequence dimension."
+
+msgid "错误信息示例"
+msgstr "Error message example"
+
+msgid "以下为pytest回显的Triton编译失败日志：每行开头的`E`为pytest错误输出前缀（表示该行来自pytest捕获的错误输出），并非日志本身内容。"
+msgstr "The following is the Triton compilation failure log printed by pytest: The `E` at the beginning of each line is the pytest error output prefix (indicating that the line comes from the error output captured by pytest), and is not part of the log content itself."
+
+msgid "E triton.compiler.errors.MLIRCompilationError:\\n"
+msgstr "E triton.compiler.errors.MLIRCompilationError:"
+
+msgid "错误原因分析"
+msgstr "Error Cause Analysis"
+
+msgid "**触发阶段：** 该错误发生在核函数编译期——昇腾后端在将MLIR转换为二进制阶段失败，而非程序运行期；编译失败意味着核函数未生成可执行二进制。"
+msgstr "**Trigger phase:** This error occurs during kernel compilation — the Ascend backend fails during the MLIR-to-binary conversion phase, rather than during program runtime; compilation failure means no executable binary is generated for the kernel."
+
+msgid "**直接原因：** 编译器估算单个tile所需UB为3072256 bit，而硬件可用UB上限为1572864 bit（A2系列，即192 KB），需求量超出上限1499392 bit（3072256 − 1572864 = 1499392），约为可用容量的1.95倍，因此判定ub overflow。"
+msgstr "**Direct cause:** The compiler estimates that the UB required for a single tile is 3072256 bits, while the hardware's available UB upper limit is 1572864 bits (A2 series, that is, 192 KB). The required amount exceeds the upper limit by 1499392 bits (3072256 − 1572864 = 1499392), which is approximately 1.95 times the available capacity. Therefore, a UB overflow is determined."
+
+msgid "**根本原因：** ①块大小参数（如BLOCK_SIZE）过大，单个tile元素数过多；②编译器默认开启multi-buffer存算并行（编译器侧配置项为`multiBuffer=True`，用户在`triton.Config`或kernel launch中通过`multibuffer`参数控制，默认开启），为搬运与计算的流水重叠创建多份张量副本，部分算子需要额外local buffer，使UB占用成倍放大；③核函数内中间张量过多，累积占用超过上限。"
+msgstr "**Root cause:** ① The block size parameter (such as BLOCK_SIZE) is too large, and the number of elements in a single tile is too large; ② The compiler enables multi-buffer compute-memory parallelism by default (the compiler-side configuration item is `multiBuffer=True`, which you control through the `multibuffer` parameter in `triton.Config` or kernel launch, and it is enabled by default). It creates multiple tensor copies for the pipeline overlap of data movement and computation. Some operators require additional local buffers, causing the UB usage to multiply; ③ The kernel contains too many intermediate tensors, and the accumulated usage exceeds the upper limit."
+
+msgid "日志关键字段解读如下："
+msgstr "The key log fields are described as follows:"
+
+msgid "日志关键字段"
+msgstr "Key Log Fields"
+
+msgid "含义"
+msgstr "Description"
+
+msgid "`triton.compiler.errors.MLIRCompilationError`"
+msgstr "`triton.compiler.errors.MLIRCompilationError`"
+
+msgid "Triton编译器在MLIR编译阶段抛出的编译错误，核函数未生成可执行二进制"
+msgstr "Compilation error thrown by the Triton compiler during the MLIR compilation phase: the kernel did not generate an executable binary"
+
+msgid "`[ConvertLinalgRToBinary] encounters error`、`Failed to run BishengHIR pipeline`"
+msgstr "`[ConvertLinalgRToBinary] encounters error`, `Failed to run BishengHIR pipeline`"
+
+msgid "昇腾后端在MLIR到二进制的转换阶段失败"
+msgstr "The Ascend backend fails during the MLIR-to-binary conversion phase."
+
+msgid "`ub overflow`"
+msgstr "`ub overflow`"
+
+msgid "UB（统一缓冲区）溢出：编译期估算的片上缓冲区需求量超过硬件容量上限"
+msgstr "UB (Unified Buffer) overflow: The on-chip buffer requirement estimated at compile time exceeds the hardware capacity limit."
+
+msgid "`requires 3072256 bits`"
+msgstr "`requires 3072256 bits`"
+
+msgid "本次编译中单个tile所需的UB位数：3072256 bit（约375 KB）"
+msgstr "The number of UB bits required for a single tile in this compilation: 3072256 bit (approximately 375 KB)"
+
+msgid "`1572864 bits available`"
+msgstr "`1572864 bits available`"
+
+msgid "当前硬件可用UB上限：1572864 bit，即192 KB（A2系列）"
+msgstr "The maximum available UB on the current hardware is 1572864 bit, that is, 192 KB (A2 series)."
+
+msgid "`multi-buffer feature is enabled and some ops need extra local buffer`"
+msgstr "`multi-buffer feature is enabled and some ops need extra local buffer`"
+
+msgid "编译器提示：multi-buffer（存算并行多缓冲）已开启，部分算子需要额外local buffer副本，会放大UB占用"
+msgstr "Compiler hint: multi-buffer (compute-storage parallel multi-buffer) is enabled. Some operators require additional local buffer copies, which increases UB usage."
+
+msgid "解决步骤"
+msgstr "Resolution steps"
+
+msgid "按以下顺序处理，每完成一步即重新编译验证；任一步骤后溢出消失即可停止："
+msgstr "Follow these steps in order. Recompile and verify after completing each step. Stop if the overflow disappears after any step:"
+
+msgid "**调小块大小参数。** 将BLOCK_SIZE等块大小参数按2的幂次逐级调小（如由4096调至2048、1024），grid会随块大小自动扩大（grid = ceil(n_elements / BLOCK_SIZE)），处理的元素总量不变。"
+msgstr "**Reduce the block size parameters.** Gradually reduce block size parameters such as BLOCK_SIZE by powers of 2 (for example, from 4096 to 2048 or 1024). The grid automatically expands as the block size decreases (grid = ceil(n_elements / BLOCK_SIZE)), and the total number of elements processed remains unchanged."
+
+msgid "修改前（BLOCK_SIZE过大，触发ub overflow）："
+msgstr "Before modification (BLOCK_SIZE is too large, triggering ub overflow):"
+
+msgid "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4096)\\n"
+msgstr "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4096)"
+
+msgid "修改后（调小BLOCK_SIZE）："
+msgstr "After the modification (reducing BLOCK_SIZE):"
+
+msgid "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)\\n"
+msgstr "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024)"
+
+msgid "**for循环按序列维度分块处理长序列。** 当序列长度远大于单个tile可安全容纳的元素数时，在核函数内部用for循环按序列轴切分：load、计算、store均在循环体内完成，每次只处理BLOCK_SIZE_SUB个元素，任一时刻UB中仅驻留一个子块的数据。参数约束：BLOCK_SIZE_SUB应不大于BLOCK_SIZE，建议取2的幂次（如1024、2048）且最好能整除BLOCK_SIZE；不能整除时尾块由mask自动处理，不影响正确性。完整核函数示例如下："
+msgstr "**for loops process long sequences by tiling along the sequence dimension.** When the sequence length far exceeds what a single tile can safely hold, use a for loop inside the kernel to split along the sequence axis. The load, compute, and store operations are all completed within the loop body, processing only BLOCK_SIZE_SUB elements at a time. At any given time, only one sub-block of data resides in the UB. Parameter constraint: BLOCK_SIZE_SUB should not be larger than BLOCK_SIZE. It is recommended to use a power of 2 (such as 1024 or 2048) that ideally divides BLOCK_SIZE evenly. When it does not divide evenly, the tail block is automatically handled by the mask, which does not affect correctness. The complete kernel example is as follows:"
+
+msgid "与触发溢出的大块写法（核函数内一次性load整个BLOCK_SIZE，如`offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)`）相比，关键差异是：分块写法把同样的数据量拆到for循环中逐子块搬运和计算，单次搬运数据量从BLOCK_SIZE降为BLOCK_SIZE_SUB。"
+msgstr "Compared with the large-block approach that triggers overflow (loading the entire BLOCK_SIZE at once in the kernel, for example, `offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)`), the key difference is: the tiling approach splits the same data volume into a for loop, performing data movement and computation sub-block by sub-block, and reduces the single data movement amount from BLOCK_SIZE to BLOCK_SIZE_SUB."
+
+msgid "**关闭multi-buffer存算并行。** 若调小块大小后仍溢出，可在autotune配置中设置`multibuffer=False`关闭多缓冲（对应编译器侧默认开启的`multiBuffer=True`配置），减少张量副本带来的额外local buffer占用："
+msgstr "**Disable multi-buffer compute-memory parallelism.** If an overflow still occurs after you reduce the block size, set `multibuffer=False` in the autotune configuration to disable multi-buffering. This reduces the extra local buffer usage caused by tensor copies (which corresponds to the `multiBuffer=True` configuration that the compiler enables by default):"
+
+msgid "@triton.autotune(\\n"
+msgstr "@triton.autotune("
+
+msgid "也可在kernel launch时作为meta-parameter传入："
+msgstr "You can also pass it as a meta-parameter during kernel launch:"
+
+msgid "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=False)\\n"
+msgstr "add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=False)"
+
+msgid "关闭multi-buffer会降低搬运与计算的流水重叠度、可能影响性能，建议仅在UB紧张时使用，并优先通过autotune在多组配置间对比取舍（参见本文档「存算并行」章节）。"
+msgstr "Disabling multi-buffer reduces the pipeline overlap between data movement and computation, which may affect performance. Use this option only when UB space is limited, and prioritize using autotune to compare and make trade-offs among multiple configurations (refer to the \"Memory-Computation Parallelism\" chapter in this document)."
+
+msgid "**重新编译验证。** 重新运行核函数编译或测试用例，确认日志中不再出现`ub overflow`、`MLIRCompilationError`报错，核函数编译通过且输出结果与预期一致，即为解决。若以上步骤全部执行后仍溢出，请对照日志中`requires`与`available`两个数值继续减小分块参数，并核对目标产品的UB规格（见文末规格表）。"
+msgstr "**Recompile and verify.** Rerun the kernel compilation or test cases, and confirm that the `ub overflow` and `MLIRCompilationError` errors no longer appear in the logs. If the kernel compilation passes and the output results match the expected results, the issue is resolved. If overflow still occurs after you execute all the preceding steps, compare the `requires` and `available` values in the log and continue reducing the tiling parameters. Verify the UB specifications of the target product as well (see the specification table at the end of this document)."
+
+msgid "预防措施"
+msgstr "Precautions"
+
+msgid "说明"
+msgstr "Description"
+
+msgid "编码前估算UB占用"
+msgstr "Estimate UB usage before coding"
+
+msgid "单个tile的UB占用（bit）≈ tile元素数 × 每元素字节数 × buffer份数 × 8；实际还需叠加多个中间张量与对齐开销，应预留充足余量。建议BLOCK_SIZE_SUB从1024~4096起步并以autotune实测为准"
+msgstr "The UB usage (in bits) of a single tile ≈ number of tile elements × bytes per element × number of buffers × 8. In practice, you also need to account for multiple intermediate tensors and alignment overhead, so reserve sufficient margin. It is recommended to start BLOCK_SIZE_SUB from 1024 to 4096 and rely on autotune empirical results."
+
+msgid "优先使用autotune"
+msgstr "Prefer using autotune"
+
+msgid "用`triton.autotune`枚举多组BLOCK_SIZE（可含`multibuffer`开关）配置，由运行时自动选择不溢出且性能最优的组合，避免手工反复试错（参见本文档「triton.autotune 自动调优」章节）"
+msgstr "Use `triton.autotune` to enumerate multiple BLOCK_SIZE configurations (which can include the `multibuffer` switch). The runtime automatically selects the combination that does not overflow and delivers optimal performance, avoiding repeated manual trial and error (refer to the \"triton.autotune autotune\" section in this document)"
+
+msgid "关注multi-buffer影响"
+msgstr "Pay attention to the impact of multi-buffer."
+
+msgid "编译器默认开启存算并行（`multiBuffer=True`），多缓冲使UB占用按buffer份数成倍增加；UB紧张时在Config中设置`multibuffer=False`（参见本文档「存算并行」章节）"
+msgstr "The compiler enables data movement and compute parallelism (`multiBuffer=True`) by default. Multi-buffering multiplies UB usage by the number of buffers. If UB space is limited, set `multibuffer=False` in the Config (see the 'Data Movement and Compute Parallelism' section in this document)."
+
+msgid "长序列分批处理"
+msgstr "Long sequence batch processing"
+
+msgid "当序列长度导致单tile估算占用接近或超过UB上限时，在核函数内用for循环按序列维度分块load/计算/store，避免单次整段搬运"
+msgstr "When the sequence length causes the estimated memory usage of a single tile to approach or exceed the UB limit, use a for loop inside the kernel to load, compute, and store in blocks along the sequence dimension. This avoids moving the entire segment in a single pass."
+
+msgid "UB占用估算示例：65536个float32元素（4字节）、双缓冲（2份）时，仅该张量即需65536×4×2×8 = 4194304 bit，已超过A2系列可用的1572864 bit；按A2系列1572864 bit上限反推，单张量float16、双缓冲下的理论上限约49152个元素（1572864÷8÷2÷2 = 49152）。"
+msgstr "UB usage estimation example: With 65536 float32 elements (4 bytes each) and double buffering (2 copies), this single tensor alone requires 65536×4×2×8 = 4194304 bits, which already exceeds the 1572864 bits available on the A2 series. Working backwards from the 1572864-bit upper limit of the A2 series, the theoretical upper limit for a single float16 tensor with double buffering is approximately 49152 elements (1572864÷8÷2÷2 = 49152)."
+
+msgid "【注意】A2系列产品UB大小为192 KB（即1572864 bit）。各产品系列片上内存规格如下："
+msgstr "Note: The UB size of A2 series products is 192 KB (that is, 1572864 bits). The on-chip memory specifications for each product series are as follows:"
+
+msgid "产品系列"
+msgstr "Product Series"
+
+msgid "UB容量"
+msgstr "UB capacity"
+
+msgid "L1容量"
+msgstr "L1 capacity"
+
+msgid "A2系列"
+msgstr "A2 series"
+
+msgid "192 KB"
+msgstr "192 KB"
+
+msgid "512 KB"
+msgstr "512 KB"
+
+msgid "A3系列"
+msgstr "A3 series"
+
+msgid "A5系列"
+msgstr "A5 series"
+
+msgid "248 KB"
+msgstr "248 KB"
+
+msgid "通用单核数据运算"
+msgstr "General single-core data computation"
+
+msgid "开发目标"
+msgstr "Development Objectives"
+
+msgid "在昇腾NPU单核上实现基础数据运算算子（如加减乘除、激活函数、简单矩阵元素运算）。保证算子在单核内高效执行，为后续多核并行和分布式扩展打下基础。"
+msgstr "Implement basic data operation operators (such as addition, subtraction, multiplication, division, activation functions, and simple matrix element-wise operations) on a single Ascend NPU core. Ensure the operators execute efficiently within a single core, laying the foundation for subsequent multi-core parallelism and distributed scaling."
+
+msgid "开发步骤"
+msgstr "Development Steps"
+
+msgid "确定算子功能  -明确输入/输出张量的形状、数据类型（float16/float32/int32等）。  -确认是否需要广播、边界处理。"
+msgstr "Determine the operator functionality  -Specify the shape and data type (such as float16, float32, and int32) of the input/output tensors.  -Confirm whether broadcasting and boundary handling are required."
+
+msgid "编写核函数（kernel）  单核运算通常对应块级的数据处理。  单核数据运算示例：向量加法"
+msgstr "Writing a kernel  Single-core computation usually corresponds to block-level data processing.  Single-core data computation example: vector addition"
+
+msgid "\\n"
+msgstr "# 索引"
+
+msgid "调用："
+msgstr "Call:"
+
+msgid "def add(x: torch.Tensor, y: torch.Tensor):\\n"
+msgstr "def add(x: torch.Tensor, y: torch.Tensor):"
+
+msgid "使用上述函数计算两个 torch.tensor 对象的 element-wise sum，并测试其正确性"
+msgstr "Use the above function to compute the element-wise sum of two torch.tensor objects, and test its correctness."
+
+msgid "torch.manual_seed(0)\\n"
+msgstr "torch.manual_seed(0)"
+
+msgid "单核运算的关键点"
+msgstr "Key points of single-core computation"
+
+msgid "-块级数据处理：每个计算块负责一小段数据，保证并行性。"
+msgstr "- Block-level data processing: Each compute block processes a small segment of data to ensure parallelism."
+
+msgid "-边界检查：使用 mask 或 if (tid < N) 避免越界。"
+msgstr "-Bounds checking: Use a mask or if (tid < N) to avoid out-of-bounds access."
+
+msgid "-块大小选择：合理设置 block 和 grid"
+msgstr "-Block size selection: Set the block and grid appropriately."
+
+msgid "性能要点："
+msgstr "Performance key points:"
+
+msgid "(1)访存优化  -保证连续访问。  -使用对齐的 stride，避免跨行/跨列跳跃式访问。  -尽量让数据块大小对齐到 32 字节边界。  输入输出 buffer 在分配时保证对齐，避免访存性能下降。  例："
+msgstr "(1) Memory access optimization  - Ensure contiguous access.  - Use aligned strides to avoid jumping access across rows or columns.  - Align data block sizes to the 32-byte boundary as much as possible.  Ensure that input and output buffers are aligned during allocation to prevent memory access performance degradation.  Example:"
+
+msgid "BLOCK_SIZE = 256  # 256 * 4 Byte = 1024 Byte, well aligned\\n"
+msgstr "BLOCK_SIZE = 256  # 256 * 4 Byte = 1024 Byte, well aligned\\n"
+
+msgid "(2)子块划分  -将大矩阵分解为小block，每个block在 UB 内完成计算。  -子块划分要兼顾访存连续性和计算单元利用率。  例："
+msgstr "(2) Sub-block partitioning  -Decompose a large matrix into small blocks, with each block completing computation within the UB.  -Sub-block partitioning must balance memory access continuity and compute unit utilization.  Example:"
+
+msgid "BLOCK_M = 64   # Each block processes 64 rows\\n"
+msgstr "BLOCK_M = 64   # Each block processes 64 rows\\n"
+
+msgid "通用多维张量切分"
+msgstr "General multidimensional tensor slicing."
+
+msgid "Triton 算子处理多维张量时，核心思想是将高维数据映射到硬件的 Block、Core、硬件单元中。本节提供二维与三维张量的典型处理示例。"
+msgstr "When Triton operators process multi-dimensional tensors, the core idea is to map high-dimensional data to hardware Blocks, Cores, and hardware units. This section provides typical processing examples for two-dimensional and three-dimensional tensors."
+
+msgid "二维张量切分：以矩阵乘法（GEMM）为例"
+msgstr "2D tensor partitioning: taking matrix multiplication (GEMM) as an example"
+
+msgid "对于二维矩阵乘法，通常需要在高度（M）和宽度（N）上进行二维切分，并在深度（K）上进行循环迭代。"
+msgstr "For two-dimensional matrix multiplication, it is typically necessary to perform two-dimensional partitioning along the height (M) and width (N), and iterate in a loop over the depth (K)."
+
+msgid "**要点**："
+msgstr "**Key Points**:"
+
+msgid "`pid_m` / `pid_n` 分别对应 M / N 维度上的 block 编号"
+msgstr "`pid_m` / `pid_n` correspond to the block indices along the M / N dimensions, respectively."
+
+msgid "`stride_*` 显式处理多维步长，避免假设连续内存"
+msgstr "`stride_*` explicitly handles multi-dimensional strides, avoiding assumptions about contiguous memory."
+
+msgid "K 维度通过循环分块累加"
+msgstr "K dimension is accumulated through loop tiling."
+
+msgid "三维及以上张量切分：以 Batched GEMM 为例"
+msgstr "Slicing of tensors with three or more dimensions: taking Batched GEMM as an example"
+
+msgid "处理三维张量（如 `[Batch, M, N]`）时，可以将 `Batch` 维度（B）直接映射到 Triton 的 `Grid` 维度上，或者将其与 `M/N` 维度展平后重新映射。"
+msgstr "When processing three-dimensional tensors (e.g., `[Batch, M, N]`), you can directly map the `Batch` dimension (B) to Triton's `Grid` dimension, or flatten it with the `M/N` dimensions and then remap."
+
+msgid "启动 `Grid` 时增加 `Batch` 维度"
+msgstr "Add a `Batch` dimension when starting `Grid`."
+
+msgid "grid = lambda meta: (triton.cdiv(M, meta['BLOCK_M']), triton.cdiv(N, meta['BLOCK_N']), B)\\n"
+msgstr "grid = lambda meta: (triton.cdiv(M, meta['BLOCK_M']), triton.cdiv(N, meta['BLOCK_N']), B)"
+
+msgid "核函数实现"
+msgstr "Kernel function implementation"
+
+msgid "`tl.program_id(2)` 取得 Batch 维度的索引"
+msgstr "`tl.program_id(2)` obtains the index of the Batch dimension."
+
+msgid "每个 Batch 独立计算自己的 `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`"
+msgstr "Each Batch independently computes its own `a_batch_ptr` / `b_batch_ptr` / `c_batch_ptr`."
+
+msgid "后续 M / N / K 维度的切分逻辑与二维 GEMM 一致"
+msgstr "The subsequent splitting logic for the M / N / K dimensions is consistent with that of the two-dimensional GEMM."

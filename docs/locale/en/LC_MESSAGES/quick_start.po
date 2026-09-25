@@ -1,0 +1,180 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-09-22 17:26+0800\n"
+"PO-Revision-Date: 2026-09-22 17:26+0800\n"
+
+"X-Source-Commit: 1ed1694edcc1d97b2a98538748d0476e7ce5ea71\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (DeepSeek)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid ""
+msgstr ""
+
+msgid "快速入门"
+msgstr "Quick Start"
+
+msgid "项目介绍"
+msgstr "Project Introduction"
+
+msgid "**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。"
+msgstr "**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors, used for efficient kernel auto-tuning, operator compilation, and deployment. By being compatible with Triton core syntax and performing deep optimization for Ascend NPU features, it helps users quickly develop and deploy high-performance computing tasks on the Ascend Platform."
+
+msgid "本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。"
+msgstr "This guide helps you quickly get started with **Triton-Ascend** by installing and running the vector addition sample online through software package deployment in an **Ubuntu 22.04** environment. For more installation methods, refer to the [Installation Guide](./installation_guide.md) document."
+
+msgid "环境准备"
+msgstr "Environment Preparation"
+
+msgid "**硬件要求**"
+msgstr "**Hardware Requirements**"
+
+msgid "支持的操作系统：Linux（aarch64/x86_64）"
+msgstr "Supported operating systems: Linux (aarch64/x86_64)"
+
+msgid "支持的Ascend产品：Atlas A2/A3/950系列"
+msgstr "Supported Ascend products: Atlas A2/A3/950 series"
+
+msgid "最小硬件配置：单卡32GB内存（推荐）"
+msgstr "Minimum hardware configuration: single card with 32GB memory (recommended)"
+
+msgid "**软件依赖**"
+msgstr "**Software Dependencies**"
+
+msgid "确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。"
+msgstr "Determine the software versions of CANN, Python, and TorchNPU, and install them. For driver and firmware installation, refer to the [CANN Quick Installation](https://www.hiascend.com/cann/download) guide on the Ascend community official website."
+
+msgid "CANN版本：9.1.0"
+msgstr "CANN version: 9.1.0"
+
+msgid "Python版本：python3.11"
+msgstr "Python version: python3.11"
+
+msgid "TorchNPU版本：2.7.1.post8"
+msgstr "TorchNPU version: 2.7.1.post8"
+
+msgid "注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。"
+msgstr "Note: For more compatibility details, please refer to the [Version Compatibility Matrix](./release_note.md#version-compatibility-matrix)."
+
+msgid "快速安装"
+msgstr "Quick Start Installation"
+
+msgid "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi\\n"
+msgstr "pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi"
+
+msgid "快速开始"
+msgstr "Quick Start"
+
+msgid "**运行tutorials中的向量加法示例验证结果**"
+msgstr "**Run the vector addition sample in the tutorials to verify the results**"
+
+msgid "向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) 通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。"
+msgstr "Vector addition sample: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) compares the outputs of the Triton operator and the native PyTorch calculation, demonstrating that the Ascend NPU device correctly calls the Triton operator and ensures calculation accuracy."
+
+msgid "⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。"
+msgstr "⚠️ Run the following commands in a bash environment. If you use POSIX sh, replace `source` with `.`."
+
+msgid "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)\\n"
+msgstr "# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)"
+
+msgid "观察到类似的输出即说明环境配置正确。"
+msgstr "Observing similar output indicates that the environment configuration is correct."
+
+msgid "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')\\n"
+msgstr "tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')"
+
+msgid "下一步：从样例到完整开发"
+msgstr "Next steps: From samples to full development"
+
+msgid "本页帮助您完成安装与首个样例验证。若希望继续上手算子开发全流程，可按下面路径推进："
+msgstr "This page helps you complete the installation and verify your first sample. If you want to proceed with the full operator development workflow, follow the path below:"
+
+msgid "**算子开发**：按算子类型阅读 Vector / Cube / 融合开发教程，再对照典型样例修改 Kernel，完成开发、编译、验证闭环。"
+msgstr "**Operator development**: Read the Vector / Cube / fusion development tutorials by operator type. Then modify the kernel by referring to typical samples to complete the development, compilation, and verification closed loop."
+
+msgid "**自动调优**：使用 Autotune 选择合适的 Tiling 配置。"
+msgstr "**Autotune**: Use Autotune to select an appropriate tiling configuration."
+
+msgid "**调试与调优**：掌握打印调试与性能采集方法。"
+msgstr "**Debugging and tuning**: Master print debugging and performance profiling methods."
+
+msgid "**迁移与进阶**：从 GPU Triton 迁移到 Ascend，或查阅环境变量与编译选项。"
+msgstr "**Migration and Advanced Topics**: Migrate from GPU Triton to Ascend, or refer to environment variables and compilation options."
+
+msgid "开发指南"
+msgstr "Development Guide"
+
+msgid "文档"
+msgstr "Documentation"
+
+msgid "说明"
+msgstr "Description"
+
+msgid "[Triton-Ascend 算子开发](./programming_guide/index.md)"
+msgstr "[Triton-Ascend Operator Development](./programming_guide/index.md)"
+
+msgid "分核、片上内存、访存、Tiling 等通用开发原则"
+msgstr "General development principles such as core partitioning, on-chip memory, memory access, and tiling"
+
+msgid "[Triton-Ascend 算子迁移](./migration_guide/index.md)"
+msgstr "[Triton-Ascend Operator Migration](./migration_guide/index.md)"
+
+msgid "GPU Triton 算子迁移到昇腾 NPU"
+msgstr "Migrating GPU Triton Operators to Ascend NPU"
+
+msgid "[Triton-Ascend 算子调试与调优](./debug_guide/index.md)"
+msgstr "[Triton-Ascend operator debugging and tuning](./debug_guide/index.md)"
+
+msgid "调试、性能分析与精度排查"
+msgstr "Debugging, Performance Analysis, and Accuracy Troubleshooting"
+
+msgid "[环境变量与编译选项](./environment_variable_and_compiler_options_reference.md)"
+msgstr "[Environment Variables and Compilation Options](./environment_variable_and_compiler_options_reference.md)"
+
+msgid "运行与编译相关配置说明"
+msgstr "Run and Compilation Configuration Description"
+
+msgid "教程与样例"
+msgstr "Tutorials and Samples"
+
+msgid "[Vector 算子开发](./programming_guide/vector_operator.md)"
+msgstr "[Vector Operator Development](./programming_guide/vector_operator.md)"
+
+msgid "逐元素、归约、Gather/Scatter 等 Vector Core 算子"
+msgstr "Element-wise, reduction, Gather/Scatter, and other Vector Core operators"
+
+msgid "[Cube 算子开发](./programming_guide/cube_operator.md)"
+msgstr "[Cube Operator Development](./programming_guide/cube_operator.md)"
+
+msgid "以 `tl.dot`、矩阵乘为核心的 Cube 算子"
+msgstr "Cube operators centered on `tl.dot` and matrix multiplication"
+
+msgid "[融合算子开发](./programming_guide/cv_fusion_operator.md)"
+msgstr "[Fusion Operator Development](./programming_guide/cv_fusion_operator.md)"
+
+msgid "同一 Kernel 中 Cube + Vector 协同的 CV 融合场景"
+msgstr "CV fusion scenario of Cube + Vector collaboration in the same kernel"
+
+msgid "[Triton-Ascend autotune](./autotune_guide.md)"
+msgstr "[Triton-Ascend autotune](./autotune_guide.md)"
+
+msgid "Autotune 推荐用法与自动 Tiling 适用边界"
+msgstr "Recommended Autotune Usage and Applicable Boundaries of Automatic Tiling"
+
+msgid "[典型算子样例](./examples/index.md)"
+msgstr "[Typical operator samples](./examples/index.md)"
+
+msgid "Softmax、LayerNorm、Attention、Matmul 等端到端样例"
+msgstr "End-to-end samples such as Softmax, LayerNorm, Attention, and Matmul"

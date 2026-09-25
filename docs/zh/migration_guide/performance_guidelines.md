@@ -32,7 +32,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
         N :tl.constexpr = BLOCK_SIZE
         idx = tl.arange(0, N)
         mask = idx < M
-        data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
+        data = tl.load(input + idx, mask = mask) # or specify other=-1, etc.
     ```
 
     为了提升性能，在load加载数据只能部分填充到指向的内存空间时，如果未填充的部分不影响后续的计算结果，可以在load语句中，添加care_padding=False来去掉默认值的填充，增加并行度，提升性能，上面算子的优化写法如下：
@@ -48,8 +48,8 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
         N = BLOCK_SIZE
         idx = tl.arange(0, N)
         mask = idx < M
-        # data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
-        data = tl.load(input + idx, mask = mask, care_padding=False) # 或者指定other=-1等值
+    -   data = tl.load(input + idx, mask = mask) # or specify other=-1, etc.
+    +   data = tl.load(input + idx, mask = mask, care_padding=False) # or specify other=-1, etc.
     ```
 
 - 示例2：在Triton算子内，使用for循环，增加Tiling，提升并行度

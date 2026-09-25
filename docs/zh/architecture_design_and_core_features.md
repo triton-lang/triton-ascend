@@ -231,13 +231,13 @@ Ascend 950PR&950DT系列产品 在 SIMD 路径之外增加 SIMT 能力，用于�
 用法示例：
 
 ```python
-# 纯 SIMD
+# Pure SIMD
 kernel[grid](..., compile_mode="simd")
 
-# 混合（默认；Ascend 950PR&950DT系列产品 上离散访存优先走 SIMT）
+# Hybrid (default; on 950, discrete memory access prefers the SIMT path)
 kernel[grid](..., compile_mode="simd_simt_template")
 
-# 纯 SIMT
+# Pure SIMT
 kernel[grid](..., compile_mode="simt_only", num_warps=32)
 ```
 
@@ -249,33 +249,32 @@ flowchart TD
     A --> C["simd_simt_template"]
     A --> D["simt_only"]
 
-    %% simt_only 分支
-    D --> D1[直接下发 Triton IR，纯SIMT编译，Triton IR → AscendNPU IR]
+    %% simt_only branch
+    D --> D1[Send Triton IR directly for pure SIMT compilation, Triton IR → AscendNPU IR]
 
-    %% simd 完整链路
+    %% simd full path
     B --> B1[discrete-mask-access-conversion]
-    B1 --> B2[拆成连续/离散后用 SIMD 方式处理]
+    B1 --> B2[Split into contiguous/discrete parts and handle via SIMD]
     B2 --> B3[triton-to-unstructured]
-    B3 --> B4[离散访存展开为标量循环]
+    B3 --> B4[Expand discrete access into scalar loops]
     B4 --> B5[TritonToLinalg]
     B5 --> B6[AscendNPU IR]
 
-    %% simd_simt_template 完整链路
+    %% simd_simt_template full pipeline
     C --> C1[discrete-mask-access-conversion]
-    C1 --> C2[满足条件打上标记，下发下层SIMT处理]
+    C1 --> C2[Mark when conditions are met and defer to downstream SIMT handling]
     C2 --> C3[triton-to-unstructured]
-    C3 --> C4{离散访存可转为 indirect_load/store SIMT 模板？}
-    C4 -- 是 --> B5
-    C4 -- 否 --> C5[回退标量循环]
+    C3 --> C4{Can discrete access be converted to indirect_load/store SIMT templates?}
+    C4 -- Yes --> B5
+    C4 -- No --> C5[Fall back to scalar loops]
     C5 --> B5
 
-    %% 样式定义
+    %% styling
     classDef root fill:#e6f7ff,stroke:#1890ff
     classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
     classDef logic fill:#f0fff4,stroke:#52c41a
     classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
 
-    %% 绑定样式
     class A root
     class B1,C1,B3,C3,B5,B6 pass
     class B2,B4,C2,C4,C5 logic

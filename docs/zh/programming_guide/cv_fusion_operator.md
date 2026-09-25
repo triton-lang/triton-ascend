@@ -14,10 +14,10 @@ CV 融合算子指同一个算子中同时使用 Cube Core 和 Vector Core：Cub
 示例结构：
 
 ```python
-# 在 matmul kernel 内部，K 循环完成后得到 fp32 accumulator。
-acc = tl.dot(a, b, acc)  # 通常位于 K 维循环内，这里仅展示结构。
+# Inside the matmul kernel, the fp32 accumulator is obtained after the K loop completes.
+acc = tl.dot(a, b, acc)  # Usually located inside the K-dimension loop; shown here for structure only.
 
-# 在写回前融合轻量 Vector 后处理。
+# Fuse a lightweight Vector post-processing step before writing back.
 acc = tl.where(acc >= 0, acc, 0.01 * acc)
 c = acc.to(tl.float16)
 

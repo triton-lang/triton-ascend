@@ -59,16 +59,16 @@ import triton.language as tl
 
 @triton.jit
 def interleave_example():
-    # 创建两个2x3的张量
+    # Create two 2x3 tensors
     x = tl.zeros([2, 3], dtype=tl.float32)
     y = tl.ones([2, 3], dtype=tl.float32)
 
-    # 交错排列，变成2x6
+    # Interleave them, turning into 2x6
     z = tl.interleave(x, y)
 
     return z
 
-## 调用示例
+## Invocation example
 result = interleave_example()
-print(result.shape)  # 输出: (2, 6)
+print(result.shape)  # Output: (2, 6)
 ```

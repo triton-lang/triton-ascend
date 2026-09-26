@@ -939,9 +939,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             bishengir_hivm_opt = "--enable-hivm-compile=true"
         bin_path = os.path.join(tmpdir, bin_file_with_ext)
         callback_path = os.path.join(tmpdir, "libkernel.so")
-        _compile_option_list = [
-            f"--target={NPUUtils().get_arch()}",
-        ]
+        _compile_option_list = get_common_bishengir_compile_options(metadata)
 
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")

@@ -207,6 +207,10 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
   get_property(triton_libs GLOBAL PROPERTY TRITON_LIBS)
   get_property(triton_plugins GLOBAL PROPERTY TRITON_PLUGINS)
+  list(REMOVE_ITEM triton_libs
+    NVGPUIR
+    TritonNVIDIAGPUToLLVM
+    TritonAMDGPUToLLVM)
   set(TRITON_LIBRARIES
     ${triton_libs}
     ${triton_plugins}
@@ -277,6 +281,21 @@ if(TRITON_BUILD_PYTHON_MODULE)
 
   set(TRITON_BACKENDS_TUPLE "(${TRITON_BACKENDS_TUPLE})")
   add_compile_definitions(TRITON_BACKENDS_TUPLE=${TRITON_BACKENDS_TUPLE})
+  if(NOT TARGET TritonAMDGPUTableGen)
+    add_subdirectory(
+      third_party/amd/include/Dialect/TritonAMDGPU/IR
+      ${CMAKE_BINARY_DIR}/third_party/amd/include/Dialect/TritonAMDGPU/IR)
+  endif()
+  if(NOT TARGET TritonAMDUtils)
+    add_subdirectory(
+      third_party/amd/lib/Dialect/TritonAMDGPU/Utility
+      ${CMAKE_BINARY_DIR}/third_party/amd/lib/Dialect/TritonAMDGPU/Utility)
+  endif()
+  if(NOT TARGET TritonAMDGPUIR)
+    add_subdirectory(
+      third_party/amd/lib/Dialect/TritonAMDGPU/IR
+      ${CMAKE_BINARY_DIR}/third_party/amd/lib/Dialect/TritonAMDGPU/IR)
+  endif()
   add_library(triton SHARED ${PYTHON_SRC_PATH}/main.cc
                   ${PYTHON_SRC_PATH}/ir.cc
                   ${PYTHON_SRC_PATH}/../triton/extension/buffer/src/buffer_ir.cc
@@ -286,9 +305,11 @@ if(TRITON_BUILD_PYTHON_MODULE)
                   ${PYTHON_SRC_PATH}/interpreter.cc
                   ${PYTHON_SRC_PATH}/llvm.cc
                   ${PYTHON_SRC_PATH}/specialize.cc)
+  add_dependencies(triton TritonAMDGPUTableGen TritonAMDGPUAttrDefsIncGen)
 
   # Link triton with its dependencies
   target_link_libraries(triton PRIVATE ${TRITON_LIBRARIES})
+  target_link_libraries(triton PRIVATE TritonAMDGPUIR)
   if(WIN32)
     target_link_libraries(triton PRIVATE ${CMAKE_DL_LIBS})
     set_target_properties(triton PROPERTIES SUFFIX ".pyd")

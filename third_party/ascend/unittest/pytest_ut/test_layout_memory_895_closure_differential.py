@@ -218,7 +218,6 @@ def _make_opt(
         num_warps=4,
         warp_size=32,
         simt_optimization_mode=1000017,
-        simt_stack_limit=64,
         shared_mem_dynamic_size=4096,
         disable_fma=True,
         superblock_factor=superblock_factor,
@@ -280,7 +279,7 @@ def _run_ttir_to_npubin(
     ]
     closure["_get_npucompiler_path"] = lambda: ("bishengir-compile", {})
     closure["_is_auto_map_parallel_blocks_enabled"] = lambda: env_enabled
-    closure["get_simt_stack_limit"] = lambda _user_stack_limit=None: 64
+    closure["get_simt_stack_limit"] = lambda: 64
     closure["subprocess"].run = run_bisheng
 
     result = closure["ttir_to_npubin"](

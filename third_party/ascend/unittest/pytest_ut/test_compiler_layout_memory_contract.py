@@ -296,7 +296,6 @@ def _make_opt(
     is_pure_simt,
     superblock_factor=0,
     simt_optimization_mode=0,
-    simt_stack_limit=None,
     shared_mem_dynamic_size=None,
     disable_fma=False,
     compile_on_910_95=False,
@@ -306,7 +305,6 @@ def _make_opt(
         num_warps=4,
         warp_size=32,
         simt_optimization_mode=simt_optimization_mode,
-        simt_stack_limit=simt_stack_limit,
         shared_mem_dynamic_size=shared_mem_dynamic_size,
         disable_fma=disable_fma,
         superblock_factor=superblock_factor,
@@ -336,7 +334,6 @@ def _run_ttir_to_npubin(
     superblock_factor=0,
     common_options=(),
     simt_optimization_mode=0,
-    simt_stack_limit=None,
     resolved_simt_stack_limit=1152,
     shared_mem_dynamic_size=None,
     disable_fma=False,
@@ -384,10 +381,9 @@ def _run_ttir_to_npubin(
     )
 
     # Keep this argv matrix independent of the host torch_npu configuration
-    # while checking that Pure-SIMT passes the explicit option to the resolver.
-    def get_simt_stack_limit(user_stack_limit):
-        assert user_stack_limit == simt_stack_limit
-        return resolved_simt_stack_limit if user_stack_limit is None else user_stack_limit
+    # while checking that Pure-SIMT uses the backend-resolved stack limit.
+    def get_simt_stack_limit():
+        return resolved_simt_stack_limit
 
     monkeypatch.setattr(compiler, "get_simt_stack_limit", get_simt_stack_limit)
     monkeypatch.setattr(compiler.subprocess, "run", run_bisheng)
@@ -399,7 +395,6 @@ def _run_ttir_to_npubin(
             is_pure_simt=is_pure_simt,
             superblock_factor=superblock_factor,
             simt_optimization_mode=simt_optimization_mode,
-            simt_stack_limit=simt_stack_limit,
             shared_mem_dynamic_size=shared_mem_dynamic_size,
             disable_fma=disable_fma,
         ),
@@ -407,6 +402,13 @@ def _run_ttir_to_npubin(
     assert result == b"npubin"
     assert len(commands) == 1
     return events, commands[0]
+
+
+def test_simt_stack_limit_is_not_a_compile_option(compiler_module):
+    assert "simt_stack_limit" not in compiler_module.NPUOptions.__dataclass_fields__
+    assert "simt_stack_limit" not in _parse_options(compiler_module, "Ascend910_9581").__dict__
+    with pytest.raises(TypeError, match="simt_stack_limit"):
+        compiler_module.NPUOptions(arch="Ascend910_9581", simt_stack_limit=8192)
 
 
 def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op):

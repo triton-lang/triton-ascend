@@ -53,6 +53,7 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createMergeVectorIfBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
+  pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createUBUsageOptPass());
   pm.addPass(createBroadcastUBOptPass());

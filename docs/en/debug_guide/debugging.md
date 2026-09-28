@@ -88,7 +88,7 @@ export TRITON_ALWAYS_COMPILE=1
 
 Cache verification: If you suspect that the issue is caused by the cache, delete related cache files and perform the test again.
 
-(debug-dump-files)=
+<a id="debug-dump-files"></a>
 
 ### 3.2 Dump Files
 
@@ -257,7 +257,7 @@ TTIR is converted to TTAdapter IR to adapt to the Ascend NPU architecture in the
 
 TTAdapter IR has been abstracted from Triton to adapt to the Ascend NPU format.
 
-(debug-interpreter-mode)=
+<a id="debug-interpreter-mode"></a>
 
 ## 4 Interpreter Mode
 
@@ -290,7 +290,7 @@ export TRITON_INTERPRET=0
 
 ## 5 Debugging Methods
 
-(debug-printing)=
+<a id="debug-printing"></a>
 
 ### 5.1 Debugging by Printing
 
@@ -411,7 +411,7 @@ Description of environment variables:
 
 **TRITON_DEBUG=1**: enables all debugging outputs (including compilation and runtime printing).
 
-(debug-compilation-error)=
+<a id="debug-compilation-error"></a>
 
 ### 5.2 Compilation Error Debugging
 

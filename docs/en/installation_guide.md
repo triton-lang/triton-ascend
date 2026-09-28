@@ -30,7 +30,7 @@ Note: For more compatibility relationships, refer to the [Release Notes](./relea
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
-(install-from-source)=
+<a id="install-from-source"></a>
 
 ## Source Installation
 

@@ -118,7 +118,7 @@ The following table describes the options.
 | **DynamicCV buffering** | `buf_slot_num_of_gm` | `None` (default) or an integer | Configures the number of GM load buffer slots. | `triton.Config` or launch meta-parameter |
 | **Compilation mode** | `compile_mode` | `"simd_simt_template"` (default), `"simd"`, `"simt_only"` | Controls SIMD / SIMT compilation. `"simd"`: pure SIMD; `"simd_simt_template"`: the standard SIMD pipeline with template-SIMT subpaths enabled on Ascend 950PR&950DT products; `"simt_only"`: the pure-SIMT path (`ttir→npubin`), supported only on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
 
-(compiler-option-cleanup-and-compatibility)=
+<a id="compiler-option-cleanup-and-compatibility"></a>
 
 ### Compiler Option Cleanup and Compatibility
 

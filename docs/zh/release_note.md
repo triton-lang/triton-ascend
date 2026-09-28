@@ -107,7 +107,7 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 | 2025-11-12 | 发布预览版本 `3.2.0rc3` |
 | 2025-05-26 | 发布预览版本 `3.2.0rc2` |
 
-(version-compatibility-matrix)=
+<a id="version-compatibility-matrix"></a>
 
 ## 版本兼容性矩阵
 

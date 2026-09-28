@@ -26,7 +26,7 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 **图1** PipeUtilization.csv（计算单元和搬运单元耗时占比）文件示例
 ![alt text](../figures/time_consumed.png)
 
-(operator-simulation-pipeline)=
+<a id="operator-simulation-pipeline"></a>
 
 ### 算子仿真流水图
 
@@ -121,7 +121,7 @@ export TRITON_DISABLE_LINE_INFO=0
 
 ## 分析性能数据
 
-(theoretical-parameters)=
+<a id="theoretical-parameters"></a>
 
 ### 理论参数
 
@@ -136,7 +136,7 @@ export TRITON_DISABLE_LINE_INFO=0
 >
 - 计算相关流水（Cube/Vector/Scalar等）的理论耗时 = 计算数据量（单位：Element） / 理论算力。例如：某款AI处理器对float数据类型的Vector理论峰值算力为11.06 TOPS，想要进行一次32k float类型的Element单指令计算，计算的理论耗时是32k / 11.06TOPS = 3ns（按照1k = 1000来计算）。
 
-(locating-bottlenecks)=
+<a id="locating-bottlenecks"></a>
 
 ### 查找瓶颈
 

@@ -16,7 +16,7 @@
 
 2. 用户安装和使用过程需要做好权限控制，建议参考[文件权限参考](#file-permission-reference)进行设置。
 
-(file-permission-reference)=
+<a id="file-permission-reference"></a>
 
 ### 文件权限参考
 
@@ -48,7 +48,7 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖第三方库�
 
 在Triton-Ascend的配置文件和脚本中存在[公网地址](#public-network-addresses)
 
-(public-network-addresses)=
+<a id="public-network-addresses"></a>
 
 ### 公网地址
 

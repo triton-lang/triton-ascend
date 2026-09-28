@@ -118,7 +118,7 @@ if __name__ == "__main__":
 | **DynamicCV 缓冲** | `buf_slot_num_of_gm` | `None`（默认）或整数 | 配置 GM load buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
 | **编译模式** | `compile_mode` | `"simd_simt_template"`（默认）、`"simd"`、`"simt_only"` | 控制 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"simd_simt_template"`：普通 SIMD pipeline，并在 Ascend 950PR&950DT products 上启用 template-SIMT 子路径；`"simt_only"`：仅 Ascend 950PR&950DT products 支持的纯 SIMT 路径（`ttir→npubin`）。 | `triton.Config` 或 launch meta-parameter |
 
-(compiler-option-cleanup-and-compatibility)=
+<a id="compiler-option-cleanup-and-compatibility"></a>
 
 ### 编译选项清理与兼容性
 

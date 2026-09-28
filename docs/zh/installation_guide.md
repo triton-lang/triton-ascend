@@ -31,7 +31,7 @@
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
-(install-from-source)=
+<a id="install-from-source"></a>
 
 ## 源码安装
 

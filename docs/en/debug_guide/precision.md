@@ -37,8 +37,10 @@ def test_vector_add(n, dtype):
         tl.store(out_ptr + idx, a + b)
 
     def triton_func(x, y):
-        out = torch.empty_like(x).npu()
-        add_kernel[(1,)](x.npu(), y.npu(), out, n=x.numel())
+        x_dev = x.npu()
+        y_dev = y.npu()
+        out = torch.empty_like(x_dev)
+        add_kernel[(1,)](x_dev, y_dev, out, n=x.numel())
         return out
 
     triton_cal = triton_func(x, y)

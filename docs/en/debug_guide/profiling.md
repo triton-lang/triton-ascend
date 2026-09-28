@@ -26,7 +26,7 @@ msprof op --kernel-name=_layer_norm_fwd_fused python3 03-layer-norm.py
 **Figure 1** PipeUtilization.csv (ratios of time taken by compute units and MTEs)
 ![alt text](../figures/time_consumed.png)
 
-(operator-simulation-pipeline)=
+<a id="operator-simulation-pipeline"></a>
 
 ### Operator Simulation Pipeline Diagram
 
@@ -121,7 +121,7 @@ To verify it took effect: the `[DEBUG] cmd_list:` line in the log should now inc
 
 ## Analyzing Performance Data
 
-(theoretical-parameters)=
+<a id="theoretical-parameters"></a>
 
 ### Theoretical Parameters
 
@@ -136,7 +136,7 @@ The theoretical performance is the ideal objective of the actual performance of 
 >
 - Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32k float elements is 32k/11.06 TOPS = 3 ns (calculated based on 1k = 1000).
 
-(locating-bottlenecks)=
+<a id="locating-bottlenecks"></a>
 
 ### Locating Bottlenecks
 

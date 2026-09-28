@@ -344,7 +344,3 @@ def build_npuir():
     _log("Step 5/5: copying artifacts ...")
     _copy_artifacts()
     _log("All done.")
-
-
-if __name__ == "__main__":
-    build_npuir()

@@ -408,6 +408,7 @@ def generate_npu_header_src():
 #include <stdbool.h>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <memory>
 #include <sys/syscall.h>

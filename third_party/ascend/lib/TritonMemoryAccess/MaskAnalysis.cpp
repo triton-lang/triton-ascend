@@ -290,6 +290,8 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
           [&](auto op) { return this->parseConstant(op, loc, builder); })
       .Case<arith::AddIOp>(
           [&](auto op) { return this->parseAdd(op, loc, builder); })
+      .Case<arith::SubIOp>(
+          [&](auto op) { return this->parseSub(op, loc, builder); })
       .Case<arith::AndIOp>(
           [&](auto op) { return this->parseAnd(op, loc, builder); })
       .Case<arith::CmpIOp>(
@@ -475,6 +477,42 @@ LogicalResult MaskState::addStates(const MaskState &lhsState,
   }
 }
 
+LogicalResult MaskState::subStateScalar(const MaskState &state,
+                                        const OpFoldResult scalar,
+                                        const Location &loc,
+                                        OpBuilder &builder) {
+  start = subOpFoldResult(state.start, scalar, loc, builder);
+  end = subOpFoldResult(state.end, scalar, loc, builder);
+  if (!start || !end)
+    return failure();
+  dims = state.dims;
+  offsets = state.offsets;
+
+  bool allDimsOne = llvm::all_of(state.dims, [](OpFoldResult dim) {
+    return getConstantIntValue(dim).value() == std::optional<int64_t>(1);
+  });
+  if (allDimsOne) {
+    this->scalar = this->start;
+  }
+
+  return success();
+}
+
+LogicalResult MaskState::subStates(const MaskState &lhsState,
+                                   const MaskState &rhsState,
+                                   const Location &loc, OpBuilder &builder) {
+  // Contiguous mask indices only keep a monotonic range when subtracting a
+  // scalar from a range: (arange - C). scalar - range is rejected.
+  if (!lhsState.scalar && rhsState.scalar)
+    return subStateScalar(lhsState, rhsState.scalar, loc, builder);
+
+  InFlightDiagnostic diag =
+      emitWarning(loc)
+      << "Unsupported subi for continuous mask: only (range - scalar) is "
+         "supported";
+  return failure();
+}
+
 LogicalResult MaskState::divStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
@@ -589,6 +627,21 @@ LogicalResult MaskState::parseAdd(arith::AddIOp addOp, const Location &loc,
     return failure();
   }
   return this->addStates(lhsState, rhsState, loc, builder);
+}
+
+LogicalResult MaskState::parseSub(arith::SubIOp subOp, const Location &loc,
+                                  OpBuilder &builder) {
+  assert(this->isEmpty());
+  MaskState lhsState;
+  if (failed(lhsState.parse(subOp.getLhs(), loc, builder))) {
+    return failure();
+  }
+
+  MaskState rhsState;
+  if (failed(rhsState.parse(subOp.getRhs(), loc, builder))) {
+    return failure();
+  }
+  return this->subStates(lhsState, rhsState, loc, builder);
 }
 
 LogicalResult MaskState::parseDiv(arith::DivSIOp divOp, const Location &loc,

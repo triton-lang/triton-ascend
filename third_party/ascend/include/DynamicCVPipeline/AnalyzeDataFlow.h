@@ -151,6 +151,26 @@ public:
   }
 };
 
+// Pass for analyzing split-if scenarios. Rolls back the dynamic CV pipeline
+// when a split-if is the only meaningful compute in both the VECTOR and CUBE
+// main loops (i.e. the split-if enables no cube/vector overlap), and the same
+// ssbuffer.splitted_if tag set appears on both cores.
+class AnalyzeSplitIfPass
+    : public PassWrapper<AnalyzeSplitIfPass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(AnalyzeSplitIfPass)
+
+  AnalyzeSplitIfPass() = default;
+
+  void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "analyze-split-if"; }
+  llvm::StringRef getDescription() const override {
+    return "Analyze split-if scenarios and roll back when split-if is the "
+           "only compute in both VECTOR and CUBE main loops";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeArgsPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeFlagPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeNamePass();
@@ -159,6 +179,7 @@ createAnalyzeCubeContolFLowInputChainPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeDataFlowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeScopePass();
 std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeWhileConditionArgsPass();
+std::unique_ptr<OperationPass<ModuleOp>> createAnalyzeSplitIfPass();
 
 void registerAnalyzeDataFlowPasses();
 

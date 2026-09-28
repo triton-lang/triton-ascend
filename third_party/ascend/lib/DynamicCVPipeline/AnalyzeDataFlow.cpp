@@ -55,6 +55,8 @@ void AnalyzeDataFlowPass::runOnOperation() {
 
   pm.addPass(createAnalyzeWhileConditionArgsPass());
 
+  pm.addPass(createAnalyzeSplitIfPass());
+
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
       LDBG("Pass failed; fallback to compilation without dynamic CV pipeline.");
@@ -80,6 +82,7 @@ void registerAnalyzeDataFlowPasses() {
   registerPass(createAnalyzeDataFlowPass);
   registerPass(createAnalyzeWhileConditionArgsPass);
   registerPass(createAnalyzeCubeContolFLowInputChainPass);
+  registerPass(createAnalyzeSplitIfPass);
 }
 
 } // namespace triton

@@ -5,7 +5,7 @@
 // CHECK: scf.for %[[IV:.*]] = {{.*}} to {{.*}} step {{.*}} {
 // CHECK:   %[[IV32:.*]] = arith.index_cast %[[IV]] : index to i32
 // CHECK:   arith.addi %[[PIDOFF]], %[[IV32]] : i32
-// CHECK:   func.call @triton_print_{{[0-9]+}}({{.*}}) : (i32) -> ()
+// CHECK:   func.call @triton_print{{[_0-9]*}}({{.*}}) : (i32) -> ()
 // CHECK: }
 
 module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
@@ -29,7 +29,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 
 // -----
 
-// CHECK-LABEL:  func.func private @triton_print_0(i32)
+// CHECK-LABEL:  func.func private @triton_print{{[_0-9]*}}(i32)
 // CHECK-LABEL:  func.func @triton_max_6d_dimm1
 // CHECK-DAG:    %[[C31744:.*]] = arith.constant 31744 : index
 // CHECK-DAG:    %[[C1024:.*]] = arith.constant 1024 : index
@@ -45,7 +45,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK:                %{{.*}} = arith.addi
 // CHECK:                %{{.*}} = arith.addi %{{.*}}, %[[IV3]] : index
 // CHECK:                %{{.*}} = arith.index_cast %{{.*}} : index to i32
-// CHECK:                func.call @triton_print_{{[0-9]+}}(%{{.*}}) : (i32) -> ()
+// CHECK:                func.call @triton_print{{[_0-9]*}}(%{{.*}}) : (i32) -> ()
 // CHECK:              }
 // CHECK:            }
 // CHECK:          }
@@ -155,7 +155,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK:               %{{.*}} = arith.muli %[[IV3]], %[[C3]] : index
 // CHECK:               %{{.*}} = arith.addi
 // CHECK:               %{{.*}} = arith.index_cast {{.*}} : index to i32
-// CHECK:               func.call @triton_print_{{[0-9]+}}({{.*}}) : (i32) -> ()
+// CHECK:               func.call @triton_print{{[_0-9]*}}({{.*}}) : (i32) -> ()
 // CHECK:             }
 // CHECK:           }
 // CHECK:         }
@@ -259,7 +259,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK:         %[[MUL:.*]] = arith.muli %[[DIV]], %[[C2]] : i32
 // CHECK:         %[[REM:.*]] = arith.remsi %[[IV32]], %{{.*}} : i32
 // CHECK:         %{{.*}} = arith.addi %[[MUL]], %[[REM]] : i32
-// CHECK:         func.call @triton_print_{{[0-9]+}}({{.*}}) : (i32) -> ()
+// CHECK:         func.call @triton_print{{[_0-9]*}}({{.*}}) : (i32) -> ()
 // CHECK:       }
 // CHECK-NOT:   arith.remsi {{.*}} : tensor<16xi32>
 // CHECK-NOT:   arith.divsi {{.*}} : tensor<16xi32>
@@ -291,7 +291,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK:       scf.for %[[IV:.*]] = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK:         %[[IV32:.*]] = arith.index_cast %[[IV]] : index to i32
 // CHECK:         %{{.*}} = arith.subi %[[C15]], %[[IV32]] : i32
-// CHECK:         func.call @triton_print_{{[0-9]+}}({{.*}}) : (i32) -> ()
+// CHECK:         func.call @triton_print{{[_0-9]*}}({{.*}}) : (i32) -> ()
 // CHECK:       }
 // CHECK-NOT:   arith.subi {{.*}} : tensor<16xi32>
 
@@ -318,7 +318,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK:       scf.for %[[IV:.*]] = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK:         %[[IV32:.*]] = arith.index_cast %[[IV]] : index to i32
 // CHECK:         %{{.*}} = arith.remsi %[[IV32]], %[[C4]] : i32
-// CHECK:         func.call @triton_print_{{[0-9]+}}({{.*}}) : (i32) -> ()
+// CHECK:         func.call @triton_print{{[_0-9]*}}({{.*}}) : (i32) -> ()
 // CHECK:       }
 // CHECK-NOT:   arith.remsi {{.*}} : tensor<16xi32>
 
@@ -343,7 +343,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 // CHECK-LABEL: func.func @triton_max_1d_dimm1
 // CHECK:       scf.for %[[IV:.*]] = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK:         %[[IV32:.*]] = arith.index_cast %[[IV]] : index to i32
-// CHECK:         func.call @triton_print_{{[0-9]+}}(%[[IV32]]) : (i32) -> ()
+// CHECK:         func.call @triton_print{{[_0-9]*}}(%[[IV32]]) : (i32) -> ()
 // CHECK:       }
 // CHECK-NOT:   linalg.generic {{.*}} attrs {{.*}} tt.from_make_range {{.*}} tensor<2xi32>
 
@@ -375,11 +375,11 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 
 // -----
 
-// CHECK:       func.func private @triton_print_{{[0-9]+}}(i32){{.*}}prefix = " idx_B10: "
+// CHECK:       func.func private @triton_print{{[_0-9]*}}(i32){{.*}}prefix = " idx_B10: "
 // CHECK-LABEL: func.func @kernel_B10_2d_dynamic_offset
 // CHECK:       scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK:         scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} {
-// CHECK:           func.call @triton_print_{{[0-9]+}}(%{{.*}}) : (i32) -> ()
+// CHECK:           func.call @triton_print{{[_0-9]*}}(%{{.*}}) : (i32) -> ()
 // CHECK:         }
 // CHECK:       }
 
@@ -419,12 +419,12 @@ module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
 
 
 // CHECK-LABEL: func.func @kernel_B11_2d_divmod_linearization
-// CHECK-NOT:   func.call @triton_print_{{[0-9]+}}({{.*}}) : (tensor<{{.*}}xi32>)
+// CHECK-NOT:   func.call @triton_print{{[_0-9]*}}({{.*}}) : (tensor<{{.*}}xi32>)
 // CHECK:       scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK:         scf.for %{{.*}} = %{{.*}} to %{{.*}} step %{{.*}} {
 // CHECK-DAG:       arith.divsi
 // CHECK-DAG:       arith.remsi
-// CHECK:           func.call @triton_print_{{[0-9]+}}(%{{.*}}) : (i32) -> ()
+// CHECK:           func.call @triton_print{{[_0-9]*}}(%{{.*}}) : (i32) -> ()
 // CHECK:         }
 // CHECK:       }
 

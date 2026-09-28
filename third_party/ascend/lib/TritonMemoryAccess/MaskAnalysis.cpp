@@ -880,24 +880,10 @@ LogicalResult MaskState::parseSplat(triton::SplatOp splatOp,
   if (failed(this->parse(src, loc, builder)))
     return failure();
 
-  auto splatAsMask = [&](Operation *userOp) -> bool {
-    return TypeSwitch<Operation *, bool>(userOp)
-        .Case<arith::AndIOp>([&](arith::AndIOp andOp) { return true; })
-        .Case<arith::SelectOp>([&](arith::SelectOp selectOp) {
-          return selectOp.getCondition() == dst;
-        })
-        .Case<triton::LoadOp>(
-            [&](triton::LoadOp loadOp) { return loadOp.getMask() == dst; })
-        .Case<triton::StoreOp>(
-            [&](triton::StoreOp storeOp) { return storeOp.getMask() == dst; })
-        .Case<triton::AtomicRMWOp>([&](triton::AtomicRMWOp atomicOp) {
-          return atomicOp.getMask() == dst;
-        })
-        .Default([&](Operation *op) { return false; });
-  };
-
-  if (src.getType().isInteger(1) && !splatOp->use_empty() &&
-      llvm::all_of(splatOp->getUsers(), splatAsMask)) {
+  // A uniform boolean mask covers either the whole tensor or no elements.
+  // Its other uses (including numerical and indirect-memory consumers) must
+  // not change the active extent of the memory access being analyzed.
+  if (src.getType().isInteger(1)) {
     for (auto s : dstShape) {
       auto currentDim = mulOpFoldResult(builder.getIndexAttr(s), this->scalar,
                                         loc, builder, builder.getIndexType());

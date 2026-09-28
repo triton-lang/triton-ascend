@@ -75,6 +75,6 @@ module attributes {hacc.target = #hacc.target<"Ascend910B2">} {
 // CHECK: memref.copy
 // CHECK: linalg.matmul
 // CHECK: annotation.mark %{{[0-9]+}} {enable_i4} : tensor<128x128xi32>
-// CHECK: call @triton_print_0
+// CHECK: call @triton_print{{[_0-9]*}}
 // CHECK: bufferization.materialize_in_destination
 // CHECK: return

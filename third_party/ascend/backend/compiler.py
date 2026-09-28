@@ -656,6 +656,12 @@ def _save_npuir_debug_output(stdout_bytes: bytes, stderr_bytes: bytes, tmpdir: s
     dump_manager.put(Path(output_path).read_text(encoding='utf-8'), "kernel.npuir.mlir", binary=False)
 
 
+def _dump_kernel_binary(metadata_hash: str, bin_path: str):
+    """Copy the compiled kernel object into the TRITON_DEBUG dump directory."""
+    dump_manager = get_dump_manager(metadata_hash)
+    dump_manager.put(Path(bin_path).read_bytes(), os.path.basename(bin_path), binary=True)
+
+
 def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: dict, opt) -> Tuple[bool, str]:
     """
     Try to compile with given UB config, return (success, error_msg).
@@ -876,7 +882,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print_cmd_list = cmd_list.copy()
-            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
@@ -900,6 +906,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
+
+        if opt.debug:
+            _dump_kernel_binary(metadata["hash"], bin_path)
 
         if Path(callback_path).is_file():
             lib = ctypes.CDLL(callback_path)
@@ -1075,7 +1084,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
             print_cmd_list = cmd_list.copy()
-            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
+            print_cmd_list[1], print_cmd_list[-1] = _get_dump_paths(metadata["hash"], ttadapter_path, bin_path)
             print(f"[DEBUG] cmd_list: {shlex.join(print_cmd_list)}")
 
         try:
@@ -1098,6 +1107,9 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             print(f"[DEBUG] {bin_path} is not found")
             print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
+
+        if opt.debug:
+            _dump_kernel_binary(metadata["hash"], bin_path)
 
         if Path(callback_path).is_file():
             lib = ctypes.CDLL(callback_path)

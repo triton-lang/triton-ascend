@@ -283,7 +283,7 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
 
     # Operator symbol (``>>`` for a dunder) or the concise rule/function name.
     label = op_label or rule_id
-    arch_name = "Ascend 910_95/950" if bucket == "a5" else "Ascend A2/A3"
+    arch_name = "Ascend 950PR&950DT" if bucket == "a5" else "Atlas A2 products/Atlas A3 products"
     # The interception decision uses the blacklist above; the message tells
     # the user which dtypes ARE supported, so it is built from the complement
     # of that blacklist derived on the fly.
@@ -298,7 +298,7 @@ def validate(rule_id, args, bucket, op_label=None, kws=None, fn=None):
         token = _canonical_token(name)
         if token in blocked:
             raise UnsupportedDtypeError(
-                f"[Ascend] operator '{label}' does not support dtype '{_display_dtype(name)}'"
+                f"operator '{label}' does not support dtype '{_display_dtype(name)}'"
                 f" (operand #{index + 1}); supported dtypes on {arch_name}: {supported_list}."
                 f" Please cast the operand to a supported dtype via tl.cast before calling '{label}'.")
 

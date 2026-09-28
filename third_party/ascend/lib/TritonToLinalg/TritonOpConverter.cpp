@@ -1740,14 +1740,13 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
       argTypes.push_back(rewriter.getI1Type());
     }
     auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
-    auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
-
-    SymbolTable symTab(moduleOp);
-    auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-    if (failed(maybePrintFuncNameAttr)) {
-      return op->emitError(
-          "failed to create a unique func name for device_print");
-    }
+    // Unique the name before creating the op: building a SymbolTable over a
+    // module that already holds a symbol of this name -- a kernel named
+    // "triton_cumsum", say -- trips SymbolTable's "uniquely named symbol
+    // operations" assertion before any renaming can happen.
+    auto uniqueName = generateUniqueFuncName(moduleOp, funcName);
+    auto funcOp =
+        rewriter.create<func::FuncOp>(loc, uniqueName.str(), libFnType);
     SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
 
     rewriter.setInsertionPoint(op);
@@ -2605,14 +2604,11 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
     inputTypes.push_back(arg.getType());
   }
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_print" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_print");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   auto prefixAttr = op.getPrefixAttr();
   funcOp->setAttr(prefixAttrName, prefixAttr);
@@ -2644,14 +2640,11 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
   auto conditionType = op.getCondition().getType();
 
   auto libFnType = rewriter.getFunctionType({conditionType}, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_assert" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  mlir::SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_assert");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   funcOp->setAttr(msgAttrName, msgAttr);
 

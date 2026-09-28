@@ -1,4 +1,4 @@
-// RUN: triton-opt --triton-to-linalg --split-input-file %s | FileCheck %s
+// RUN: triton-opt --triton-to-linalg=named-ops=false --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func @test_parse_fptosi
 // CHECK: %[[GENERIC:.*]] = linalg.generic

@@ -9,8 +9,7 @@
 // MASK: tt.load %{{.*}}, %[[NEXT]], %{{.*}} {MixCompileDiscreteMask, RuntimeLoopMask}
 // LOWER-LABEL: func.func @loop_suffix
 // LOWER: scf.for {{.*}} -> (tensor<16xi1>, tensor<16xf32>)
-// LOWER: %[[NEXT:.*]] = linalg.generic {{.*}}ins({{.*}} : tensor<16xi1>, tensor<16xi1>)
-// LOWER: arith.andi {{.*}} : i1
+// LOWER: %[[NEXT:.*]] = arith.andi {{.*}} : tensor<16xi1>
 // LOWER: func.call @triton_indirect_load({{.*}}%[[NEXT]],
 // LOWER: scf.yield %[[NEXT]],
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
@@ -49,8 +48,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // MASK: tt.load %{{.*}}, %[[NEXT]], %{{.*}} {MixCompileDiscreteMask, RuntimeLoopMask}
 // LOWER-LABEL: func.func @while_permuted_mask
 // LOWER: scf.while
-// LOWER: %[[NEXT:.*]] = linalg.generic {{.*}}ins({{.*}} : tensor<16xi1>, tensor<16xi1>)
-// LOWER: arith.andi {{.*}} : i1
+// LOWER: %[[NEXT:.*]] = arith.andi {{.*}} : tensor<16xi1>
 // LOWER: func.call @triton_indirect_load({{.*}}%[[NEXT]],
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @while_permuted_mask(%x: !tt.ptr<f32>, %out: !tt.ptr<f32>, %steps: i32) {

@@ -327,7 +327,7 @@ def make_ttir(mod, metadata, opt):
     return mod
 
 
-def ttir_to_linalg(mod, metadata, opt, *, named_ops=False):
+def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
     # use triton_adapter to lower Triton-MLIR to linalg
     # Get Triton-MLIR as string
     ttir_code = _serialize_module(mod, opt)
@@ -570,6 +570,8 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
+    module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
+    metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module
     metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
     # Turn off auto-blockify only for the ORDERED (token-ring) sync_block_lock:
@@ -640,6 +642,27 @@ def get_common_bishengir_compile_options(metadata):
     bishengir_target = metadata['target'].arch
     bishengir_target_opt = f"--target={bishengir_target}"
     return [bishengir_target_opt]
+
+
+@functools.lru_cache()
+def _supports_full_row_copy_inlining(compiler_path):
+    try:
+        result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return result.returncode == 0 and "--enable-lib-call-no-inline" in result.stdout
+
+
+def _full_row_copy_compile_options(metadata, compiler_path):
+    # A shared noinline load helper loses constant-width specialization when
+    # the masked tail also calls it. Scope this to compiler-versioned A5 SIMD
+    # loads; other kernels retain the NPU compiler's default inlining policy.
+    if (metadata.get("has_full_row_copy", False) and metadata["target"].arch.startswith("Ascend950")
+            and metadata.get("mix_mode") == "aiv" and metadata.get("parallel_mode") == "simd"
+            and _supports_full_row_copy_inlining(compiler_path)):
+        return ["--enable-lib-call-no-inline=false"]
+    return []
 
 
 def get_auto_bind_sub_block_option(metadata):
@@ -861,6 +884,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
+            _compile_option_list += _full_row_copy_compile_options(metadata, npu_compiler_path)
             # Temporary until the NPU compiler enables batch matmul by default in Q4.
             if metadata.get("enable_hivm_batch_matmul"):
                 _compile_option_list += ["--enable-hivm-batch-matmul"]
@@ -1602,7 +1626,7 @@ class AscendBackend(BaseBackend):
             if options.is_pure_simt:
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options, named_ops=True)
+            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
             # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
             stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
             stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)

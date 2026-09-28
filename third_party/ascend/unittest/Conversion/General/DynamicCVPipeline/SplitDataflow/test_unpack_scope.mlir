@@ -15,7 +15,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // CHECK-LABEL: func.func @test_unpack_custom_op_scope
   // CHECK-NOT: scope.scope
   // CHECK: %[[ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
-  // CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} : memref<2048xf32> to tensor<2048xf32>
+  // CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
   // CHECK: %[[CUSTOM:.*]] = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR", symbol = "tanh_fp32"} "tanh_fp32" ins(%arg0 : tensor<2048xf32>) outs(%[[TENSOR]] : tensor<2048xf32>) -> tensor<2048xf32>
   // CHECK: %[[EXP:.*]] = tensor.expand_shape %[[CUSTOM]] {{\[\[}}0, 1{{\]\]}} output_shape [64, 32] {ssbuffer.block_id = 12 : i32, ssbuffer.core_type = "VECTOR"} : tensor<2048xf32> into tensor<64x32xf32>
   // CHECK: return %[[EXP]] : tensor<64x32xf32>
@@ -56,7 +56,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // CHECK: scf.for
   // CHECK-NOT: scope.scope
   // CHECK: %[[ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<64xf32>
-  // CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<64xf32> to tensor<64xf32>
+  // CHECK: %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR"} : memref<64xf32>
   // CHECK: %[[CUSTOM:.*]] = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", symbol = "tanh_fp32"} "tanh_fp32" ins(%{{.*}} : tensor<64xf32>) outs(%[[TENSOR]] : tensor<64xf32>) -> tensor<64xf32>
   // CHECK: scf.yield %[[CUSTOM]] : tensor<64xf32>
   func.func @test_unpack_scope_inside_loop(%arg0: tensor<64xf32>, %lb: index, %ub: index, %step: index) -> tensor<64xf32> {

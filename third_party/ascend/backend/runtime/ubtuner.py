@@ -543,7 +543,7 @@ class UBTuner(KernelInterface):
             if npu_options is None:
                 return UBConfig()
 
-            asm_key = 'bcmlir'
+            asm_key = 'ttadapter'
             linalg_ir = compiled_kernel.asm.get(asm_key) if hasattr(compiled_kernel, 'asm') else None
             if linalg_ir is None:
                 _log_debug("Could not get linalg IR, using default config")

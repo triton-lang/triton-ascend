@@ -10,7 +10,7 @@
 // CHECK: hivm.hir.fixpipe {channel_split = true, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 1 : i32]} ins({{%.*}} : tensor<32x32xf32>) outs({{%.*}} : memref<32x32xf32, #hivm.address_space<cbuf>>)
 
 // CHECK: memref.memory_space_cast {{%.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<32x32xf32, #hivm.address_space<cbuf>> to memref<32x32xf32>
-// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
+// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
 
 // CHECK-NOT: ssbuffer.main_loop
 // CHECK: return
@@ -45,7 +45,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 1 : i32]} ins({{%.*}} : tensor<32x32xf32>) outs({{%.*}} : memref<32x32xf16, #hivm.address_space<cbuf>>)
 
 // CHECK: memref.memory_space_cast {{%.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<32x32xf16, #hivm.address_space<cbuf>> to memref<32x32xf16>
-// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16> to tensor<32x32xf16>
+// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
 
 // CHECK-NOT: ssbuffer.main_loop
 // CHECK-NOT: arith.truncf
@@ -83,7 +83,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK-NOT: channel_split
 
 // CHECK: memref.memory_space_cast {{%.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<32x32xf16, #hivm.address_space<cbuf>> to memref<32x32xf16>
-// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16> to tensor<32x32xf16>
+// CHECK: bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf16>
 
 // CHECK: return
 
@@ -118,7 +118,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: hivm.hir.fixpipe {channel_split = true, ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 1 : i32]} ins([[MM1:%.*]] : tensor<32x32xf32>) outs({{%.*}} : memref<32x32xf32, #hivm.address_space<cbuf>>)
 
 // CHECK: memref.memory_space_cast {{%.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.intraDeps = [0 : i32, 0 : i32]} : memref<32x32xf32, #hivm.address_space<cbuf>> to memref<32x32xf32>
-// CHECK: [[TO_TENSOR:%.*]] = bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
+// CHECK: [[TO_TENSOR:%.*]] = bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
 
 // Verify: the consumer matmul uses [[TO_TENSOR]] as input and [[MM1]] as init
 // CHECK: linalg.matmul {{.*}} ins([[TO_TENSOR]], {{%.*}} : tensor<32x32xf32>, tensor<32x32xf32>) outs([[MM1]] : tensor<32x32xf32>)
@@ -155,7 +155,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: hivm.hir.fixpipe {channel_split = true, ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} ins([[MM1:%.*]] : tensor<32x32xf32>) outs({{%.*}} : memref<32x32xf32, #hivm.address_space<cbuf>>)
 
 // CHECK: memref.memory_space_cast {{%.*}} {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32, #hivm.address_space<cbuf>> to memref<32x32xf32>
-// CHECK: [[TO_TENSOR:%.*]] = bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
+// CHECK: [[TO_TENSOR:%.*]] = bufferization.to_tensor {{%.*}} restrict writable {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
 
 // Verify: the consumer matmul uses [[TO_TENSOR]] as input and [[MM1]] as init
 // CHECK: linalg.matmul {{.*}} ins([[TO_TENSOR]], {{%.*}} : tensor<32x32xf32>, tensor<32x32xf32>) outs([[MM1]] : tensor<32x32xf32>)

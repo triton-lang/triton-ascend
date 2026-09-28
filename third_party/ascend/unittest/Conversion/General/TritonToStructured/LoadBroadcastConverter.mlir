@@ -140,5 +140,5 @@ module {
 }
 
 // CHECK-LABEL: func.func @kernel_load_same_axis_broadcast
-// CHECK:      bufferization.to_tensor %{{.*}} restrict writable : memref<1x64xf32> to tensor<1x64xf32>
+// CHECK:      bufferization.to_tensor %{{.*}} restrict writable : memref<1x64xf32>
 // CHECK:      linalg.broadcast ins(%{{.*}} : tensor<64xf32>) outs(%{{.*}} : tensor<256x64xf32>) dimensions = [0]

@@ -56,6 +56,7 @@ public:
 // Create the pass
 std::unique_ptr<OperationPass<ModuleOp>> createSplitDataflowPass();
 std::unique_ptr<OperationPass<ModuleOp>> createCheckUnsupportedScenarioPass();
+std::unique_ptr<OperationPass<ModuleOp>> createUnpackScopePass();
 
 } // namespace triton
 } // namespace mlir

@@ -35,6 +35,24 @@ import pybind11
 
 _is_compile_on_910_95 = None
 
+
+def _multibuffer_mode_to_tuple(value):
+    """Freeze a mode dictionary, or restore its pairs from a JSON cache.
+
+    Sort keys for stable hashing regardless of dictionary insertion order.
+    NPU IR owns level names, count semantics and legacy-option handling.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = tuple(value.items())
+    if not isinstance(value, (list, tuple)) or any(not isinstance(pair, (list, tuple)) or len(pair) != 2
+                                                   or not isinstance(pair[0], str) or type(pair[1]) is not int
+                                                   for pair in value):
+        raise TypeError("multibuffer_mode must be a dict[str, int], cached (str, int) pairs, or None")
+    return tuple(sorted((level, count) for level, count in value))
+
+
 # Compatibility boundary for compile-option cleanup.  Public dictionaries
 # route renamed options and discard backend-managed options before community
 # JIT validates the remaining keys.

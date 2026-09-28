@@ -48,7 +48,7 @@ from triton._C.libtriton import get_cache_invalidating_env_vars
 from triton.runtime.autotuner import Autotuner, Config
 from triton.runtime.jit import compute_cache_key
 from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
-                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95)
+                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95, _multibuffer_mode_to_tuple)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -251,20 +251,25 @@ def _multibuffer_to_num_stages(multibuffer: bool) -> int:
 def _normalize_config_hints(
     config_hints: Optional[Dict[str, object]],
     inject_default_num_stages: bool = False,
+    has_multibuffer_mode: bool = False,
 ):
     normalized_hints = {} if config_hints is None else dict(config_hints)
     has_explicit_num_stages = "num_stages" in normalized_hints
 
-    multibuffer_values = normalized_hints.pop("multibuffer", None)
+    has_mode = has_multibuffer_mode or "multibuffer_mode" in normalized_hints
+    if has_mode and has_explicit_num_stages:
+        raise ValueError("num_stages and multibuffer_mode cannot be specified together")
+    multibuffer_values = (normalized_hints.get("multibuffer") if has_mode else normalized_hints.pop(
+        "multibuffer", None))
     if multibuffer_values is not None:
         if not isinstance(multibuffer_values, (list, tuple)) or len(multibuffer_values) == 0:
             raise ValueError("hints['multibuffer'] must be a non-empty list/tuple when used for config expansion.")
         if not all(isinstance(value, bool) for value in multibuffer_values):
             raise ValueError("hints['multibuffer'] must contain only boolean values.")
-        if not has_explicit_num_stages:
+        if not has_explicit_num_stages and not has_mode:
             normalized_hints["num_stages"] = [_multibuffer_to_num_stages(value) for value in multibuffer_values]
 
-    if inject_default_num_stages and "num_stages" not in normalized_hints:
+    if inject_default_num_stages and "num_stages" not in normalized_hints and not has_mode:
         normalized_hints["num_stages"] = list(_DEFAULT_HINT_NUM_STAGES)
 
     return normalized_hints
@@ -345,10 +350,11 @@ class AutoTilingTuner(Autotuner):
         hints = _remove_deprecated_npu_options(hints or {})
         configs = _normalize_user_configs(configs)
         _validate_user_hints(fn, hints)
-        reserved_hints, config_hints = _split_hints(hints)
+        reserved_hints, raw_config_hints = _split_hints(hints)
         config_hints = _normalize_config_hints(
-            config_hints,
-            inject_default_num_stages=bool(configs) and bool(config_hints),
+            raw_config_hints,
+            inject_default_num_stages=bool(configs) and bool(raw_config_hints),
+            has_multibuffer_mode=any(config.kwargs.get("multibuffer_mode") is not None for config in (configs or ())),
         )
 
         super().__init__(
@@ -369,6 +375,8 @@ class AutoTilingTuner(Autotuner):
         )
         self.user_defined_do_bench = do_bench is not None
         self.hints = reserved_hints
+        # Retain user hints to reconsider defaults when a launch supplies a mode.
+        self._raw_config_hints = raw_config_hints
         self.config_hints = config_hints
         self.vv_parser_v2_mode = resolve_vv_parser_v2_mode(self.hints)
         self.enable_vv_parser_v2 = resolve_vv_parser_v2_enabled(self.hints)
@@ -398,6 +406,7 @@ class AutoTilingTuner(Autotuner):
         self.is_simt_mode = False
         self.user_specified_warps = None
         self.user_specified_num_stages = None
+        self.user_specified_multibuffer_mode = None
         self.user_specified_multibuffer = None
         target_arch = triton.runtime.driver.active.get_current_target().arch
         self.default_multibuffer = not is_compile_on_910_95(target_arch)
@@ -486,6 +495,8 @@ class AutoTilingTuner(Autotuner):
         return expanded_configs
 
     def _expand_simd_multibuffer_configs(self, base_configs: List[Config]) -> List[Config]:
+        if self.user_specified_multibuffer_mode is not None or "multibuffer_mode" in self.config_hints:
+            return base_configs
         if (self.user_specified_multibuffer is not None or self.user_specified_num_stages is not None):
             normalized_configs = []
             for base_cfg in base_configs:
@@ -507,6 +518,9 @@ class AutoTilingTuner(Autotuner):
         opposite_default_multibuffer = not self.default_multibuffer
         simd_configs = []
         for base_cfg in base_configs:
+            if base_cfg.kwargs.get("multibuffer_mode") is not None:
+                simd_configs.append(base_cfg)
+                continue
             base_multibuffer = base_cfg.kwargs.get("multibuffer", self.default_multibuffer)
             base_cfg.kwargs["multibuffer"] = base_multibuffer
             base_cfg.num_stages = _multibuffer_to_num_stages(base_multibuffer)
@@ -2097,6 +2111,7 @@ class AutoTilingTuner(Autotuner):
             self.user_specified_warps = kwargs['num_warps']
         else:
             self.user_specified_warps = None
+        self.user_specified_multibuffer_mode = _multibuffer_mode_to_tuple(kwargs.get("multibuffer_mode"))
         if 'num_stages' in kwargs and kwargs['num_stages'] is not None:
             self.user_specified_num_stages = kwargs['num_stages']
         else:
@@ -2105,6 +2120,18 @@ class AutoTilingTuner(Autotuner):
             self.user_specified_multibuffer = kwargs['multibuffer']
         else:
             self.user_specified_multibuffer = None
+
+        has_mode = self.user_specified_multibuffer_mode is not None or "multibuffer_mode" in self._raw_config_hints
+        config_has_mode = any(config.kwargs.get("multibuffer_mode") is not None for config in self.user_configs)
+        if (has_mode or config_has_mode) and self.user_specified_num_stages is not None:
+            raise ValueError("num_stages and multibuffer_mode cannot be specified together")
+        if has_mode and any(config.num_stages is not None for config in self.user_configs):
+            raise ValueError("num_stages and multibuffer_mode cannot be specified together")
+        self.config_hints = _normalize_config_hints(
+            self._raw_config_hints,
+            inject_default_num_stages=bool(self.user_configs) and bool(self._raw_config_hints),
+            has_multibuffer_mode=has_mode or config_has_mode,
+        )
 
         # generate key
         all_args = {**self.nargs, **kwargs}
@@ -2120,6 +2147,8 @@ class AutoTilingTuner(Autotuner):
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
         key.append(("compile_mode", compile_mode))
+        if self.user_specified_multibuffer_mode is not None:
+            key.append(("multibuffer_mode", self.user_specified_multibuffer_mode))
 
         key = tuple(key)
         if key not in self.cache:
@@ -2131,6 +2160,10 @@ class AutoTilingTuner(Autotuner):
                     if arg_name in _args
                 }
                 self._gen_tile_configs(_kv_dict, dtype, all_args)
+                if has_mode:
+                    # Tile generators supply legacy stage defaults, not user options.
+                    for config in self.gen_configs:
+                        config.num_stages = None
                 self.gen_configs = _expand_configs_with_hints(
                     self.fn,
                     self.gen_configs,
@@ -2145,12 +2178,11 @@ class AutoTilingTuner(Autotuner):
             if getattr(self, "_user_config_diagnostics", None) is not None:
                 self._user_config_diagnostics.reset_configs(expanded_user_configs)
             if len(self.gen_configs) == 0 and len(self.user_configs) == 0:
-                self.configs = [Config(
-                    {},
-                    num_warps=4,
-                    num_stages=2,
-                    num_ctas=1,
-                )]
+                self.configs = _expand_configs_with_hints(
+                    self.fn,
+                    [Config({}, num_warps=4, num_stages=None if has_mode else 2, num_ctas=1)],
+                    self.config_hints if has_mode else {},
+                )
             else:
                 self.configs = self.gen_configs + expanded_user_configs
         return key
@@ -2988,6 +3020,7 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
 
 _ALL_PARAMS = {
     "num_stages",
+    "multibuffer_mode",
     "unit_flag",
     "multibuffer",
     "limit_auto_multi_buffer_only_for_local_buffer",
@@ -3019,10 +3052,11 @@ _VALID_VALUES = {
     "tile_mix_cube_loop": [2, 4, 8],
 }
 
-_CUBE_PARAMS = {"num_stages", "unit_flag", "limit_auto_multi_buffer_of_local_buffer"}
+_CUBE_PARAMS = {"num_stages", "multibuffer_mode", "unit_flag", "limit_auto_multi_buffer_of_local_buffer"}
 
 _MIXCV_PARAMS = {
     "num_stages",
+    "multibuffer_mode",
     "unit_flag",
     "limit_auto_multi_buffer_only_for_local_buffer",
     "limit_auto_multi_buffer_of_local_buffer",
@@ -3035,6 +3069,7 @@ _MIXCV_PARAMS = {
 
 _VECTOR_PARAMS = {
     "num_stages",
+    "multibuffer_mode",
     "enable_ubuf_saving",
 }
 
@@ -3051,7 +3086,20 @@ def _check_int_in_set(val, valid_set, param_name):
     return isinstance(val, (list, tuple)) and len(val) > 0 and all(isinstance(v, int) and v in valid_set for v in val)
 
 
+def _check_multibuffer_mode_list(values, param_name):
+    if not isinstance(values, (list, tuple)) or not values:
+        return False
+    try:
+        return all(value is not None and _multibuffer_mode_to_tuple(value) is not None for value in values)
+    except TypeError:
+        return False
+
+
 _VALIDATION_RULES = {
+    "multibuffer_mode": {
+        "desc": "must be a non-empty list/tuple of mode dictionaries (or cached pairs) with str keys and int counts",
+        "check": _check_multibuffer_mode_list,
+    },
     "num_stages": {
         "desc": f"must be one or more of: {_VALID_VALUES['num_stages']}", "check":
         lambda val, p: _check_int_in_set(val, _VALID_VALUES['num_stages'], p)
@@ -3117,12 +3165,18 @@ class BaseAutotuner:
         - other parameters: each value will be placed in Config.kwargs
         Returns a list of Config objects.
         """
+        if "multibuffer_mode" in kwargs and "num_stages" in kwargs:
+            raise ValueError("num_stages and multibuffer_mode cannot be specified together")
         if not self.validate_parameters(**kwargs):
             return []
 
         # Collect parameter values, using defaults for missing ones
         param_values = {}
         for p in sorted(self.supported_params):
+            if p == "multibuffer_mode" and p not in kwargs:
+                continue
+            if p == "num_stages" and "multibuffer_mode" in kwargs:
+                continue
             if p in kwargs:
                 param_values[p] = kwargs[p]
             else:
@@ -3143,7 +3197,7 @@ class BaseAutotuner:
                 else:
                     config_kwargs[pname] = val
 
-            configs.append(Config(kwargs=config_kwargs, num_stages=num_stages_val if num_stages_val is not None else 2))
+            configs.append(Config(kwargs=config_kwargs, num_stages=num_stages_val))
         return configs
 
 
@@ -3219,7 +3273,14 @@ def get_max_configs(config, kernel_type="mixcv", **kwargs):
     base_kwargs = config.kwargs
     base_num_stages = config.num_stages
 
+    has_mode = "multibuffer_mode" in kwargs or base_kwargs.get("multibuffer_mode") is not None
+    if has_mode and ("num_stages" in kwargs or base_num_stages is not None):
+        raise ValueError("num_stages and multibuffer_mode cannot be specified together")
     for param in sorted(supported):
+        if param == "multibuffer_mode" and param not in kwargs and param not in base_kwargs:
+            continue
+        if has_mode and param == "num_stages" and param not in kwargs:
+            continue
         if param in kwargs:
             # User-provided list via tuning_params takes precedence
             val_list = kwargs[param]

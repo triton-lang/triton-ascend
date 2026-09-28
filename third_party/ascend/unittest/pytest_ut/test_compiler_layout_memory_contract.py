@@ -17,8 +17,10 @@ The installed Triton package can point at another worktree, so importing
 being changed here.
 """
 
+import ast
 import importlib.util
 import itertools
+import json
 import sys
 import types
 import warnings
@@ -108,6 +110,11 @@ def compiler_module():
         return normalized
 
     utils_stub = types.ModuleType(utils_name)
+    utils_path = compiler_path.with_name("utils.py")
+    utils_tree = ast.parse(utils_path.read_text())
+    mode_helper = next(node for node in utils_tree.body
+                       if isinstance(node, ast.FunctionDef) and node.name == "_multibuffer_mode_to_tuple")
+    exec(compile(ast.Module(body=[mode_helper], type_ignores=[]), str(utils_path), "exec"), utils_stub.__dict__)
     for name in (
             "_check_bishengir_api_change",
             "_check_bishengir_able_save_ir",
@@ -870,3 +877,169 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
     # Legacy spellings remain discoverable while compile_mode controls lowering.
     assert explicit_only.__dict__["force_simt_only"] is False
     assert explicit_template.__dict__["force_simt_template"] is False
+
+
+@pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend910_9391", "Ascend950PR"])
+@pytest.mark.parametrize("mode", [
+    {"gm": 4, "l1": 2, "l0c": 1, "ub": 2},
+    {"future": 0, "gm": -1},
+    {},
+])
+def test_multibuffer_mode_preserves_values_and_metadata(compiler_module, arch, mode):
+    options = _parse_options(compiler_module, arch, {"multibuffer_mode": mode})
+    expected = tuple(sorted(mode.items()))
+    assert options.multibuffer_mode == expected
+    assert options.num_stages is None
+    assert options.multibuffer is True
+    metadata = dict(options.__dict__, multibuffer_mode=json.loads(json.dumps(options.multibuffer_mode)))
+    restored = _parse_options(compiler_module, arch, metadata)
+    assert restored.multibuffer_mode == expected
+    assert restored.hash() == options.hash()
+    assert restored.hash() != _parse_options(compiler_module, arch).hash()
+
+
+@pytest.mark.parametrize("mode", [
+    "[(gm,2)]",
+    True,
+    2,
+    {"gm": "2"},
+    {1: 2},
+    {"gm": 2.0},
+    {"gm": True},
+    ("gm", 2),
+    (("gm", ), ),
+    (("gm", 2, 3), ),
+    ((1, 2), ),
+    (("gm", 2.0), ),
+    (("gm", True), ),
+])
+def test_multibuffer_mode_requires_string_keys_and_integer_counts(compiler_module, mode):
+    with pytest.raises(TypeError, match="multibuffer_mode must be a dict"):
+        compiler_module.NPUOptions(multibuffer_mode=mode)
+
+
+@pytest.mark.parametrize("name,value", [
+    ("limit_auto_multi_buffer_only_for_local_buffer", False),
+    ("limit_auto_multi_buffer_of_local_buffer", "no-l0c"),
+    ("limit_auto_multi_buffer_buffer", "only-vector"),
+])
+@pytest.mark.parametrize("mode", [None, {"ub": 2}])
+def test_multibuffer_legacy_options_are_preserved_without_ta_warnings(compiler_module, name, value, mode):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        options = compiler_module.NPUOptions(multibuffer_mode=mode, **{name: value})
+    assert not caught
+    assert getattr(options, name) == value
+    assert options.multibuffer is True
+
+
+def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derived=None):
+    options = _parse_options(compiler, "Ascend950PR" if is_a5 else "Ascend910B4", requested)
+    metadata = dict(options.__dict__, mix_mode="mix", bitcodes=None, auto_blockify_enabled=False)
+    metadata.update(derived or {})
+    monkeypatch.setattr(compiler, "_parse_linalg_metadata", lambda source, meta: (source, meta))
+    monkeypatch.setattr(compiler, "_finalize_program_launch_policy", lambda *_args: None)
+    monkeypatch.setattr(compiler, "get_common_bishengir_compile_options", lambda _meta: [])
+    monkeypatch.setattr(compiler, "get_auto_bind_sub_block_option", lambda _meta: True)
+    monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/compiler", {}))
+    monkeypatch.setattr(compiler, "NPUUtils",
+                        lambda: SimpleNamespace(has_device_limit=lambda: False, get_arch=lambda: options.target_arch))
+    monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
+
+    class CommandCaptured(BaseException):
+        pass
+
+    commands = []
+
+    def capture(command, **_kwargs):
+        commands.append(command)
+        raise CommandCaptured
+
+    monkeypatch.setattr(compiler.subprocess, "run", capture)
+    compile_fn = (compiler.linalg_to_bin_enable_npu_compile_910_95
+                  if is_a5 else compiler.linalg_to_bin_enable_npu_compile_A2_A3)
+    with pytest.raises(CommandCaptured):
+        compile_fn("module {}", metadata, options)
+    assert len(commands) == 1
+    return commands[0]
+
+
+@pytest.mark.parametrize("is_a5", [False, True])
+@pytest.mark.parametrize("requested,enabled", [({}, True), ({"num_stages": 1}, False), ({"num_stages": 3}, True),
+                                               ({"multibuffer": False}, False)])
+def test_multibuffer_legacy_command_stays_on_old_interface(compiler_module, monkeypatch, is_a5, requested, enabled):
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, requested)
+    assert not any(arg.startswith("--multibuffer-mode=") for arg in command)
+    assert f"--enable-auto-multi-buffer={enabled}" in command
+    assert ("--limit-auto-multi-buffer-of-local-buffer=no-limit" in command) == is_a5
+
+
+@pytest.mark.parametrize("is_a5", [False, True])
+def test_multibuffer_mode_is_forwarded_alongside_existing_defaults(compiler_module, monkeypatch, is_a5):
+    mode = {"ub": 2, "gm": 4, "l0c": 1, "l1": 2}
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, {"multibuffer_mode": mode})
+    assert command.count("--multibuffer-mode=[(gm,4),(l0c,1),(l1,2),(ub,2)]") == 1
+    assert "--enable-auto-multi-buffer=True" in command
+    assert ("--limit-auto-multi-buffer-of-local-buffer=no-limit" in command) == is_a5
+
+
+@pytest.mark.parametrize("is_a5", [False, True])
+@pytest.mark.parametrize("switch", [False, True])
+def test_multibuffer_explicit_old_options_are_still_forwarded(compiler_module, monkeypatch, is_a5, switch):
+    requested = {
+        "multibuffer_mode": {"gm": 4, "l1": 2, "l0c": 2, "ub": 2},
+        "multibuffer": switch,
+        "limit_auto_multi_buffer_only_for_local_buffer": True,
+        "limit_auto_multi_buffer_of_local_buffer": "no-l0c",
+        "limit_auto_multi_buffer_buffer": "only-vector",
+        "set_workspace_multibuffer": 0,
+    }
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, requested)
+    assert "--multibuffer-mode=[(gm,4),(l0c,2),(l1,2),(ub,2)]" in command
+    assert f"--enable-auto-multi-buffer={switch}" in command
+    assert "--limit-auto-multi-buffer-only-for-local-buffer=True" in command
+    assert "--limit-auto-multi-buffer-of-local-buffer=no-l0c" in command
+    assert "--set-workspace-multibuffer=0" in command
+    if is_a5:
+        assert "--limit-auto-multi-buffer-buffer=only-vector" in command
+
+
+def test_multibuffer_keeps_dynamic_cv_workspace_constraint(compiler_module, monkeypatch):
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, True,
+                                           {"multibuffer_mode": {"gm": 4, "l1": 2, "l0c": 1, "ub": 2}},
+                                           derived={"set_workspace_multibuffer": 0})
+    assert "--set-workspace-multibuffer=0" in command
+
+
+@pytest.mark.parametrize("is_a5", [False, True])
+def test_multibuffer_value_semantics_are_left_to_npuir(compiler_module, monkeypatch, is_a5):
+    # Level names and count ranges are vendor decisions; partial modes are forwarded as supplied.
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5,
+                                           {"multibuffer_mode": {"future": 0, "ub": -1}})
+    assert "--multibuffer-mode=[(future,0),(ub,-1)]" in command
+
+
+@pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend910_9391", "Ascend950PR"])
+@pytest.mark.parametrize("stages", [0, 1, 2, 3])
+@pytest.mark.parametrize("mode", [{"gm": 2, "l1": 2, "l0c": 2, "ub": 2}, {}])
+def test_multibuffer_mode_rejects_num_stages_even_when_equivalent(compiler_module, arch, stages, mode):
+    with pytest.raises(ValueError, match="num_stages and multibuffer_mode cannot be specified together"):
+        _parse_options(compiler_module, arch, {"multibuffer_mode": mode, "num_stages": stages})
+
+
+def test_multibuffer_default_num_stages_does_not_conflict(compiler_module):
+    assert compiler_module.NPUOptions().num_stages == 2
+    assert compiler_module.NPUOptions(num_stages=1).num_stages == 1
+    options = compiler_module.NPUOptions(multibuffer_mode={"ub": 2}, num_stages=None)
+    assert options.num_stages is None
+
+
+@pytest.mark.parametrize("arch", ["Ascend910B4", "Ascend950PR"])
+def test_multibuffer_dictionary_order_does_not_change_compiler_hash(compiler_module, arch):
+    mode = {"ub": 2, "gm": 4, "l1": 2}
+    options = _parse_options(compiler_module, arch, {"multibuffer_mode": mode})
+    reordered = _parse_options(compiler_module, arch, {"multibuffer_mode": dict(reversed(list(mode.items())))})
+    assert reordered.multibuffer_mode == options.multibuffer_mode
+    assert reordered.hash() == options.hash()
+    mode["ub"] = 8
+    assert dict(options.multibuffer_mode)["ub"] == 2

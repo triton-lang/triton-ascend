@@ -69,6 +69,8 @@ def _load_autotuner_methods(*method_names):
         "VectorAxes": _load_vector_axes_module().VectorAxes,
         "_InternalNPUOptionInt": ascend_autotuner._InternalNPUOptionInt,
         "_DEFAULT_COMPILE_MODE": ascend_autotuner._DEFAULT_COMPILE_MODE,
+        "_multibuffer_mode_to_tuple": ascend_autotuner._multibuffer_mode_to_tuple,
+        "_normalize_config_hints": ascend_autotuner._normalize_config_hints,
     }
     exec(compile(extracted_module, str(AUTOTUNER_PATH), "exec"), namespace)
     return namespace
@@ -566,6 +568,7 @@ def test_generate_key_and_configs_uses_axis_arg_names_for_kv_dict():
         auto_gen_config=True,
         parser_mode="vector",
         config_hints={},
+        _raw_config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -648,6 +651,7 @@ def test_generate_key_and_configs_preserves_promoted_reduction_axis_identity():
         auto_gen_config=True,
         parser_mode="vector",
         config_hints={},
+        _raw_config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,
@@ -722,6 +726,7 @@ def test_refresh_vector_axes_keeps_base_axis_arg_names_without_reduction_aliases
         auto_gen_config=True,
         parser_mode="vector",
         config_hints={},
+        _raw_config_hints={},
         gen_configs=[],
         user_configs=[],
         is_simt_mode=False,

@@ -6,13 +6,13 @@
 
 A: You can directly use pip to install it.
 
-```Python
+```bash
 pip install triton-ascend
 ```
 
 **Q: Can community Triton and Triton-Ascend coexist?**
 
-A: For Triton-Ascend 3.2.0 and earlier versions, you need to uninstall the community Triton first before installing Triton-Ascend.<br>
+A: For Triton-Ascend 3.2.0 and earlier versions, you need to uninstall the community Triton first before installing Triton-Ascend.
  For Triton-Ascend 3.2.1 and later versions, Triton-Ascend declares Triton as an installation dependency to mitigate the installation overwriting issue. When installing
 Triton-Ascend, the community Triton is installed first,and the Triton-Ascend overwrites the directory with the same name.
 This prevents the installation of triton from overwriting Triton-Ascend when other software packages that depend on Triton are installed.
@@ -22,7 +22,7 @@ Specifically,x86 depends on triton==3.2.0,and arm depends on triton==3.5.0.
 - Note: If you install a third-party software or triton itself that depends on Triton after installing Triton-Ascend,the installed Triton-Ascend directory will be overwritten.
 In this case, you also need to uninstall the community Triton and Triton-Ascend first before installing Triton-Ascend.
 
-```Python
+```bash
 pip uninstall triton
 pip uninstall triton-ascend
 pip install triton-ascend

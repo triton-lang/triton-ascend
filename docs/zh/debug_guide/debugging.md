@@ -12,7 +12,7 @@
 | **2. 编译流程概览** | 介绍 Triton-Ascend 端到端编译链的关键阶段，为后续调试提供上下文基础。 |
 | **3. 临时文件指引** | 详解编译过程中生成的中间文件（如 `.mlir`、`.ll`、`.o` 等）的存储位置与用途，便于人工检查。 |
 | **4. 解释器模式** | 介绍如何通过 `TRITON_INTERPRET=1` 在 CPU 上运行 kernel，作为 NPU 计算结果的精度基准。 |
-| **5. 调试方法** | 提供多种实用调试手段：<br>• 静态/运行时打印<br>• 编译错误调试方法<br> |
+| **5. 调试方法** | 提供多种实用调试手段：静态/运行时打印、编译错误调试方法。 |
 | **附录 A** | 常用环境变量速查表，提升调试效率。 |
 
 建议开发者结合具体问题，按需查阅对应章节，以高效定位并解决 Triton-Ascend 集成中的各类异常。
@@ -23,7 +23,7 @@
 
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
-| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
+| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式；5.1 打印调试方法 |
 | **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2 编译错误调试方法 |
 
 ## 2 Triton-Ascend 编译流程概览
@@ -88,7 +88,7 @@ export TRITON_ALWAYS_COMPILE=1
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
 
-<a id="debug-dump-files"></a>
+(debug-dump-files)=
 
 ### 3.2 调试转储文件（Dump Files）
 
@@ -198,7 +198,7 @@ TTIR 是 Triton 编译器前端生成的中间表示（Intermediate Representati
 
 TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.store` 等），尚未映射到底层硬件的具体内存模型或执行单元，是平台无关的高层次 IR。
 
-#### 3.4.1 TTAdapter IR（Target-Specific Adapter Representation）
+#### 3.4.2 TTAdapter IR（Target-Specific Adapter Representation）
 
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
@@ -257,7 +257,7 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 
 TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 
-<a id="debug-interpreter-mode"></a>
+(debug-interpreter-mode)=
 
 ## 4 解释器模式
 
@@ -290,7 +290,7 @@ export TRITON_INTERPRET=0
 
 ## 5 调试方法
 
-<a id="debug-printing"></a>
+(debug-printing)=
 
 ### 5.1 打印调试方法
 
@@ -410,7 +410,7 @@ TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打�
 
 TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
-<a id="debug-compilation-error"></a>
+(debug-compilation-error)=
 
 ### 5.2 编译错误调试方法
 
@@ -497,7 +497,7 @@ python your_triton_script.py
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
-```bash
+```text
 ## `isel`（Instruction Selection）
 - **作用**：将 LLVM IR 指令转换为目标架构的机器指令（MachineInstr）。
 - **调试内容**：显示 IR → 机器指令的映射过程、模式匹配结果。

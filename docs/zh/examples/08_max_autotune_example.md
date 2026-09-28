@@ -8,7 +8,7 @@
 
 以下示例演示了使用 `max_autotune` 对一个简单的向量加法 kernel 进行自动调优。与社区版 `autotune` 相比，`max_autotune` 还会自动将不同的编译器选项纳入调优空间，无需用户手动指定。
 
-```Python
+```python
 import torch
 import torch_npu
 import triton
@@ -72,9 +72,11 @@ if __name__ == "__main__":
 
 ## 进阶使用：精确控制调优参数
 
-用户可以通过 **tuning_params** 显式指定需要调优的编译器选项及其取值列表；未指定的参数会使用内置默认值。以下示例展示了如何对多个参数进行组合搜索。
+用户可以通过装饰器直接传入 `num_stages` 等参数，显式指定需要调优的编译器选项及其取值列表；未指定的参数会使用内置默认值。以下示例展示了如何对多个参数进行组合搜索。
 
 ```python
+import triton
+import triton.language as tl
 from triton.backends.ascend.runtime import max_autotune
 
 def test_max_autotune():

@@ -16,7 +16,7 @@
 
 2. 用户安装和使用过程需要做好权限控制，建议参考[文件权限参考](#file-permission-reference)进行设置。
 
-<a id="file-permission-reference"></a>
+(file-permission-reference)=
 
 ### 文件权限参考
 
@@ -48,7 +48,7 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖第三方库�
 
 在Triton-Ascend的配置文件和脚本中存在[公网地址](#public-network-addresses)
 
-<a id="public-network-addresses"></a>
+(public-network-addresses)=
 
 ### 公网地址
 
@@ -56,9 +56,9 @@ Triton-Ascend支持源码编译安装，在编译时会下载依赖第三方库�
 |----------|------------------------------------------------------------------------------------------------|-------------------------------------------|------------------------------------------------------------------------------------------------------|-----------------------------------|
 | 开源引入 | <https://github.com/triton-lang/triton.git> | .gitmodules | <https://github.com/triton-lang/triton.git> | Triton源码仓地址 |
 | 开源引入 | <https://gitcode.com/Ascend/AscendNPU-IR.git> | .gitmodules | <https://gitcode.com/Ascend/AscendNPU-IR.git> | AscendNPU IR源码仓地址 |
-| 自研     | 不涉及                                                                                         | docker/devdocker/setup_triton-ascend_dev.sh | <https://github.com/triton-lang/triton-ascend.git>                                                          | Triton-Ascend源码仓地址                 |
-| 自研     | 不涉及                                                                                         | ascend/examples/generalization_cases/run_daily.sh & scripts/prepare_build.sh | <https://gitee.com/shijingchang/triton.git>                                                           | 构建依赖代码仓                 |
-| 自研     | 不涉及                                                                                         | setup.py                                   | <https://github.com/triton-lang/triton-ascend.git/>                                                             | Triton-Ascend源码仓地址 |
+| 自主创新 | 不涉及                                                                                         | docker/devdocker/setup_triton-ascend_dev.sh | <https://github.com/triton-lang/triton-ascend.git>                                                          | Triton-Ascend源码仓地址                 |
+| 自主创新 | 不涉及                                                                                         | ascend/examples/generalization_cases/run_daily.sh & scripts/prepare_build.sh | <https://gitee.com/shijingchang/triton.git>                                                           | 构建依赖代码仓                 |
+| 自主创新 | 不涉及                                                                                         | setup.py                                   | <https://github.com/triton-lang/triton-ascend.git/>                                                             | Triton-Ascend源码仓地址 |
 | 开源引入 | <https://gitclone.com>                                                            | scripts/prepare_build.sh                   | <https://github.com/llvm/llvm-project.git>                                               | 依赖的llvm源码仓    |
 | 开源引入 | <https://repo.huaweicloud.com>                                            | scripts/prepare_build.sh                           | <https://repo.huaweicloud.com/repository/pypi/simple>                                                | 用于配置pybind11下载链接 |
 | 开源引入 | <https://pypi.tuna.tsinghua.edu.cn>                                                                                         | docker/devdocker/triton-ascend_dev.dockerfile | <https://pypi.tuna.tsinghua.edu.cn/simple>                                                             | python pip源配置         |

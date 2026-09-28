@@ -13,7 +13,7 @@ The overall structure contains two core Triton kernels:
 
 The `attention` function is encapsulated as a callable function using PyTorch `autograd.Function` and is verified for precision alignment with `torch_npu.npu_fusion_attention`.
 
-```Python
+```python
 import pytest
 import torch
 import torch_npu
@@ -347,9 +347,9 @@ if __name__ == "__main__":
     test_op(4, 32, 4096, 64, causal=False, dtype=torch.float16, BM=128, BN=128)
 ```
 
-Output:
+Output
 
-```bash
+```text
 [PASSED] Attention shape:(1, 1, 128, 128), BM: 32, BN: 128, dtype: torch.float16
 [PASSED] Attention shape:(1, 1, 128, 128), BM: 64, BN: 128, dtype: torch.bfloat16
 [PASSED] Attention shape:(1, 2, 256, 256), BM: 32, BN: 256, dtype: torch.bfloat16

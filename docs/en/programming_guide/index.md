@@ -183,10 +183,12 @@ You can use the msProf tool to execute the test case to obtain the **PROF_***\**
 
 Description of each metric:
 
-- **aiv_mte2_time(μs)**: Time consumed during the MTE2 (Move Engine 2) transfer stage on the AI Vector (AIV) core, in microseconds (μs), reflecting the overhead of moving data from global memory to on-chip memory (UB).
+- **aiv_mte2_time(μs)**: Time consumed during the MTE2 (Memory Transfer Engine 2) transfer stage on the AI Vector (AIV) core, in microseconds (μs), reflecting the overhead of moving data from global memory to on-chip memory (UB).
 - **aiv_mte2_ratio**: The ratio of MTE2 transfer time to the total operator execution time. A larger value indicates a higher proportion of transfer time, which can be used to evaluate the degree of overlap between transfer and computation.
 
 According to the data in the table, the values of aiv_mte2_time(μs) and aiv_mte2_ratio before and after optimization differ significantly. The optimization solution first transfers most of the data to the UB, reducing the number of times small batches of data are transferred from the L2 to the UB, thereby reducing the total time of transferring data from the L2 to the UB.
+
+> Note: The aiv_mte2_time after optimization is actually higher. This is because the optimized approach bulk-loads a large amount of data to the UB at once (increasing MTE2 time), but eliminates the inefficient path of scattered L2-to-UB transfers, resulting in better overall performance.
 
 ### Parallel Storage and Computation
 
@@ -624,6 +626,9 @@ For two-dimensional matrix multiplication, two-dimensional tiling is typically p
 ```python
 @triton.jit
 def matmul_kernel(a_ptr, b_ptr, c_ptr, M, N, K,
+                  stride_am, stride_ak,
+                  stride_bk, stride_bn,
+                  stride_cm, stride_cn,
                   BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):
     # 1. Task division: compute the coordinates of the current Block in the M and N dimensions.
     pid_m = tl.program_id(0)

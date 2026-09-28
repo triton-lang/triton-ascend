@@ -37,7 +37,7 @@ def test_vector_add(n, dtype):
         tl.store(out_ptr + idx, a + b)
 
     def triton_func(x, y):
-        out = torch.empty_like(x)
+        out = torch.empty_like(x).npu()
         add_kernel[(1,)](x.npu(), y.npu(), out, n=x.numel())
         return out
 
@@ -45,6 +45,9 @@ def test_vector_add(n, dtype):
 
     # 4. 精度对比
     compare_precision(triton_cal.cpu(), torch_ref)
+
+# 5. 运行测试
+test_vector_add(16,torch.float16)
 ```
 
 ## 2. 精度对比函数

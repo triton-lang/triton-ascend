@@ -30,7 +30,7 @@ Note: For more compatibility relationships, refer to the [Release Notes](./relea
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
-<a id="install-from-source"></a>
+(install-from-source)=
 
 ## Source Installation
 
@@ -175,7 +175,7 @@ Note: If you want to compile Triton‑Ascend from source inside this container, 
 
 ### Verify Installation
 
-Run the vector‑add tutorial example to validate your Triton‑Ascend setup. Example file: <a href="https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py" style="text-decoration: none; color: #0066cc;">01-vector-add.py </a>
+Run the vector‑add tutorial example to validate your Triton‑Ascend setup. Example file: [01-vector-add.py](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py)
 
 ```bash
 # Set CANN environment variables (using root user default install path `/usr/local/Ascend` as example)

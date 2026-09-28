@@ -128,7 +128,7 @@ def _check_fixpipe_result(kernel, what):
 
 @pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="only support in A5",
+    reason="only support in Ascend 950",
 )
 def test_alloc_as_fixpipe_dst_on_npu():
     _check_fixpipe_result(alloc_ub_as_fixpipe_dst, "fixpipe into bl.alloc buffer")
@@ -136,7 +136,7 @@ def test_alloc_as_fixpipe_dst_on_npu():
 
 @pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="only support in A5",
+    reason="only support in Ascend 950",
 )
 def test_unique_alloc_as_fixpipe_dst_on_npu():
     _check_fixpipe_result(alloc_unique_ub_as_fixpipe_dst, "fixpipe into mem_unique buffer")

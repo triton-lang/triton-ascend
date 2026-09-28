@@ -51,7 +51,7 @@ def torch_reduce(arg0):
 
 @pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="simt is support on A5",
+    reason="simt is support on Ascend 950",
 )
 @pytest.mark.parametrize(
     "param_list",

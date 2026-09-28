@@ -45,7 +45,7 @@ except Exception:
 # execute a value-only fallback and be mistaken for a 910_95 gate-on result.
 if not is_compile_on_910_95(_target_arch):
     pytest.skip(
-        "requires a detected Ascend 910_95 / 950 toolchain; 910B4 is not a "
+        "requires a detected Ascend 950 toolchain; 910B4 is not a "
         "native gate-on substitute",
         allow_module_level=True,
     )
@@ -372,7 +372,7 @@ def test_chunk_rejects_data_reaching_pid_predicate_91095(monkeypatch):
     assert all("gridY = gridY / 16;" not in launcher for launcher in observer.launcher_sources)
 
 
-@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
+@pytest.mark.skip(reason="The case is not supported on Ascend 950, skipping for now. Will be fixed in future.")
 def test_sls_91095_native_ir_metadata_and_mixed_simt_launcher(monkeypatch):
     """SLS emits the masked indirect-load path and preserves its launch ABI."""
     n = 1024

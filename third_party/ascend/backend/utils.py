@@ -282,7 +282,7 @@ def _warn_deprecated_ascend_env_vars() -> None:
 
 
 def is_compile_on_910_95(arch: str = None) -> bool:
-    """Return whether the compilation target belongs to the A5 generation."""
+    """Return whether the compilation target belongs to the Ascend 950 generation."""
     if arch is not None:
         return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 

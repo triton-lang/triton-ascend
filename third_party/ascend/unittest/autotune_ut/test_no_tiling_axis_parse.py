@@ -91,7 +91,7 @@ def test_permute(shape, dtype):
 
 @pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="only support A5",
+    reason="only support Ascend 950",
 )
 @pytest.mark.parametrize('shape', [(1024, 32)])
 @pytest.mark.parametrize('dtype', ['bfloat16'])

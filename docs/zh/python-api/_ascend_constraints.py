@@ -871,6 +871,101 @@ CONSTRAINTS = {
         "example":
         "triton.language.extra.cann.extension.copy_from_ub_to_l1",
     },
+    "triton.language.extra.cann.extension.custom": {
+        "replace_docstring": [
+            "Connects an existing device function to a Triton JIT kernel by invoking its registered CustomOp or CustomMacro configuration.",
+            "",
+            "Register the configuration class first with ``@al.register_custom_op``, then pass its registration name to ``al.custom``.",
+            "",
+            ":param name: registered CustomOp or CustomMacro name.",
+            ":type name: str",
+            ":param args: positional inputs accepted by the registered configuration class.",
+            ":param kwargs: keyword inputs accepted by the registered configuration class.",
+            ":param out: output placeholder or placeholders whose types and shapes define the results.",
+            ":type out: tl.tensor or sequence of tl.tensor, optional",
+            ":returns: no value when ``out`` is omitted, one tensor for one output, or a tuple for multiple outputs.",
+            "",
+            ".. rubric:: CustomOp configuration",
+            "",
+            "The following enums and helper class describe the registered device function; they are not separate operations.",
+            "Configure them on the class decorated with ``@al.register_custom_op`` to match the device-side implementation.",
+            "",
+            "* ``CORE`` selects the ``core`` type. ``VECTOR`` and ``CUBE`` identify Vector and Cube cores;",
+            "  ``CUBE_OR_VECTOR`` and ``CUBE_AND_VECTOR`` identify either core type or both core types, respectively.",
+            "",
+            "* ``MODE`` selects ``mode``: ``SIMD`` is single instruction, multiple data;",
+            "  ``SIMT`` is single instruction, multiple threads; ``MIX`` is mixed execution.",
+            "  The field is required whenever ``core`` is not exactly ``al.CORE.CUBE``.",
+            "",
+            "* ``PIPE`` identifies the execution pipeline. ``PIPE_S``, ``PIPE_V``, and ``PIPE_M`` denote",
+            "  scalar, vector, and matrix-compute pipelines. ``PIPE_MTE1`` denotes on-chip transfer;",
+            "  ``PIPE_MTE2`` and ``PIPE_MTE3`` typically denote data-in and data-out transfer.",
+            "  ``PIPE_ALL`` denotes all pipelines, and ``PIPE_FIX`` denotes Cube-result output.",
+            "  Set ``pipe`` to one ``al.PIPE`` value for a CustomOp, or a two-element tuple/list for a CustomMacro",
+            "  whose first and second values specify the input and output pipelines. This does not itself move data.",
+            "",
+            "* ``IteratorType`` describes each logical iteration dimension in the optional ``iterator_types`` list.",
+            "  ``Parallel`` and ``Reduction`` describe independent iterations and reduction;",
+            "  ``Broadcast`` and ``Transpose`` describe broadcast and transposed dimensions;",
+            "  ``Interleave`` and ``Deinterleave`` describe interleaving and deinterleaving;",
+            "  ``Inverse``, ``Pad``, and ``Concat`` describe reverse-order, padding, and concatenation;",
+            "  ``Gather`` and ``Cumulative`` describe indexed gathering and accumulation;",
+            "  ``Opaque`` means the dimension is not described by one of these generic roles.",
+            "  List the values in logical iteration order; the length need not equal the output tensor rank.",
+            "  These are descriptions, not executable loops. Omitting the list does not add a default ``Parallel`` list.",
+            "",
+            ".. rubric:: CustomMacro synchronization configuration",
+            "",
+            "A pipeline sets an event to signal completion, and another pipeline waits for that event.",
+            "The following configuration tells the compiler which synchronization the CustomMacro implements.",
+            "",
+            "* ``SyncEventSlot(set_pipe=None, wait_pipe=None, sync=None, event=None)`` describes one entry",
+            "  in a CustomMacro's ``sync_event_slots`` list. It is not supported by an ordinary CustomOp.",
+            "  ``set_pipe`` and ``wait_pipe`` are ``al.PIPE`` values for the signaling and waiting pipelines;",
+            "  they can differ from the CustomMacro's input and output pipelines.",
+            "  Both pipes must be supplied when ``sync`` is ``WAIT`` or ``SET``.",
+            "",
+            "* ``SYNC_HINT`` specifies ``SyncEventSlot.sync``. ``WAIT`` means the device function waits,",
+            "  so the compiler reuses or inserts the matching set before the CustomMacro.",
+            "  ``SET`` means the device function sets the event, with a matching wait after the CustomMacro.",
+            "  ``INTERNAL`` uses an event inside the device function without adding boundary set/wait operations.",
+            "  The Python default is ``WAIT``; specify the hint explicitly to make the intended behavior clear.",
+            "",
+            "* ``EVENT_ID`` provides ``EVENT_ID0`` through ``EVENT_ID7`` for ``SyncEventSlot.event``.",
+            "  Omitting ``event`` leaves the ID unspecified; it is not equivalent to specifying ``EVENT_ID0``.",
+            "  A specified event ID must match the device function and the synchronization pipelines.",
+            "  This enum differs from the integer IDs in [0, 15] used by ``sync_block_all/set/wait``.",
+            "",
+            "The runnable example below registers an ordinary CustomOp and compiles its JIT call to Triton IR without launching an NPU.",
+            "It reuses ``add_rn_fp32`` from Triton-Ascend's bundled device library, so no additional bitcode or C++ files are needed.",
+            "The test checks frontend IR generation, not device linking, numerical results, or CustomMacro synchronization; the bundled implementation targets A5.",
+        ],
+        "dtype_support":
+        """
+            This table describes tensor element types accepted by the CustomOp and
+            CustomMacro frontend, not device execution support.
+
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | 平台         | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +==============+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Ascend A2/A3 |   √   |  √   |   √    |   √   |   √    |   √   |   √    |   √   |  √   |  √   |  √   |  √   |     √      |      √      |  √   |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | Ascend 950   |   √   |  √   |   √    |   √   |   √    |   √   |   √    |   √   |  √   |  √   |  √   |  √   |     √      |      √      |  √   |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+
+            Input and ``out`` types must still match the registered device implementation.
+            """,
+        "constraints": [
+            "Call ``al.custom`` only inside a function decorated with ``@triton.jit``.",
+            "A user-defined ``name`` must identify a CustomOp or CustomMacro registered with ``@al.register_custom_op``.",
+            "The registration class must provide ``core`` and ``pipe`` using the corresponding ``al.CORE`` and ``al.PIPE`` values.",
+            "Its ``symbol`` must name a device function in an existing ``bitcode`` file; configuration and synchronization must match that implementation.",
+            "Arguments must match the registered class constructor when it defines ``__init__``.",
+            "The ``out`` value determines the number and types of returned tensors.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.custom",
+    },
     "triton.language.extra.cann.extension.debug_barrier": {
         "constraints": [
             "sync_mode: must be a SYNC_IN_VF enum value.",
@@ -965,6 +1060,37 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.language.extra.cann.extension.sub_vec_id",
+    },
+    "triton.language.extra.cann.extension.sub_vec_num": {
+        "replace_docstring": [
+            "Returns the compile-time integer quotient of the AIV (AI Vector Core) count divided by the AIC (AI Cube Core) count.",
+            "",
+            "Use this API when a kernel needs the current AIV-to-AIC core ratio instead of assuming a device-specific value.",
+            "In a mixed AIC+AIV kernel, it can be combined with :func:`sub_vec_id` to divide work between Vector Core partitions.",
+            "",
+            ":returns: integer quotient of the AIV Core count divided by the AIC Core count.",
+            ":rtype: tl.constexpr",
+        ],
+        "dtype_support":
+        """
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            | 平台         | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
+            +==============+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
+            | Ascend A2/A3 | ``-`` |``-`` | ``-``  | ``-`` | ``-``  | ``-`` | ``-``  | ``-`` |``-`` |``-`` |``-`` |``-`` |   ``-``    |    ``-``    |``-`` |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+            |  Ascend 950  | ``-`` |``-`` | ``-``  | ``-`` | ``-``  | ``-`` | ``-``  | ``-`` |``-`` |``-`` |``-`` |``-`` |   ``-``    |    ``-``    |``-`` |
+            +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
+
+            ``-`` means that tensor element types are not applicable: this API has
+            no input tensors and returns a Python integer wrapped in ``tl.constexpr``,
+            not a tensor with a fixed element type.
+            """,
+        "constraints": [
+            "Call ``sub_vec_num`` only inside a function decorated with ``@triton.jit``.",
+            "The result depends on the AIV/AIC ratio visible during JIT compilation; do not assume that every device returns 2.",
+        ],
+        "example":
+        "triton.language.extra.cann.extension.sub_vec_num",
     },
     "triton.language.extra.cann.extension.subview": {
         "constraints": [

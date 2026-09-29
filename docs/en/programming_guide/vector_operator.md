@@ -4,7 +4,7 @@ Vector operators are mainly executed by Vector Cores. Typical examples include e
 
 ## Simple Vector Operator Development
 
-For a simple Vector operator, start with the [Vector Addition example](../examples/01_vector_add_example.md) or [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py). The basic pattern is:
+For a simple Vector operator, start with the [Vector Addition example](../examples/01_vector_add_example.md) or [`third_party/ascend/tutorials/01-vector-add.py`](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py). The basic pattern is:
 
 1. Build contiguous offsets for the current tile with `tl.arange`.
 2. Use `mask` to guard the tail block and avoid out-of-bounds load/store.

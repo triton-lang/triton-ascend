@@ -4,7 +4,7 @@ Vector 算子主要由 Vector Core 执行，典型形态包括逐元素计算、
 
 ## Vector 简单算子开发
 
-简单 Vector 算子可以从本仓的 [向量相加样例](../examples/01_vector_add_example.md) 或 [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py) 入手。该类算子的基本步骤如下：
+简单 Vector 算子可以从本仓的 [向量相加样例](../examples/01_vector_add_example.md) 或 [`third_party/ascend/tutorials/01-vector-add.py`](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/01-vector-add.py) 入手。该类算子的基本步骤如下：
 
 1. 用 `tl.arange` 构造当前 tile 的连续偏移。
 2. 用 `mask` 保护尾块，避免越界 load/store。

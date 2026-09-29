@@ -10,6 +10,7 @@ Currently, Triton-Ascend autotune supports block size and multibuffer (a compile
 ## Community Autotune Usage Example
 
 ```python
+```python
 import torch, torch_npu
 import triton
 import triton.language as tl
@@ -316,7 +317,7 @@ def triton_func(input_ptr, output_ptr, ...):
 # Automatically generate the profiling result of the optimal kernel configuration of the current autotune in the `auto_profile_dir` directory, that is, the performance data collected by `torch_npu.profiler.profile`.
 # This takes effect in both the community autotune usage and advanced autotune usage.
 @triton.autotune(
-    auto_profile_dir="./profile_result",
+    auto_prof_dir="./profile_result",
     ...
 )
 ```

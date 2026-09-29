@@ -9,7 +9,8 @@ CONSTRAINTS = {
             "``num_ctas``: Not applicable on Ascend",
             "``maxnreg``: No effect on Ascend",
         ],
-        "example": "triton.Config",
+        "example":
+        "triton.Config",
     },
     "triton.autotune": {
         "constraints": [
@@ -18,21 +19,12 @@ CONSTRAINTS = {
         "example": "triton.autotune",
     },
     "triton.extension.buffer.language.alloc": {
-        "replace_docstring": [
-            "Allocates a region of local memory with the specified shape and type.",
-            "",
-            ":param etype: the element type of the buffer.",
-            ":type etype: tl.dtype",
-            ":param shape: a list of non-negative integers representing the shape of the buffer.",
-            ":type shape: List[tl.constexpr]",
-            ":param _address_space: (optional) backend-specific local memory address space.",
-            ":type _address_space: bl.address_space",
-        ],
         "constraints": [
             "Shape: each element must be a positive integer.",
             "Address space: must fit within the specified address space size limits.",
         ],
-        "dtype_support": """
+        "dtype_support":
+        """
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             | 平台         | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +==============+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -41,47 +33,28 @@ CONSTRAINTS = {
             | Ascend 950   |   √   |  √   |   ×    |   √   |   ×    |   √   |   √    |   √   |  ×   |  √   |  ×   |  √   |     ×      |      ×      |  √   |
             +--------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.extension.buffer.language.alloc",
+        "example":
+        "triton.extension.buffer.language.alloc",
     },
     "triton.extension.buffer.language.fixpipe": {
-        "replace_docstring": [
-            "Directly store a tensor on L0C to a local buffer via fixpipe.",
-            "Fixpipe is a pipeline that performs data movement from L0C to other memory hierarchies.",
-        ],
         "constraints": [
             "DataType: Operates on L0C to UB data movement (Ascend 950PR&950DT products/Ascend hardware specific).",
             "Source must be the result of a dot (matrix multiply) operation.",
             "Destination must be a buffer with UB memory scope.",
         ],
-        "example":         "triton.extension.buffer.language.fixpipe",
+        "example":
+        "triton.extension.buffer.language.fixpipe",
     },
     "triton.extension.buffer.language.to_buffer": {
-        "replace_docstring": [
-            "Convert a tensor to a buffer.",
-            "",
-            ":param tensor: the tensor to convert.",
-            ":type tensor: tl.tensor",
-            ":param space: the address space for the buffer (optional).",
-            ":type space: address_space",
-            ":param bind_buffer: an existing buffer to bind the tensor to (optional).",
-            ":type bind_buffer: buffer",
-        ],
         "constraints": [
             "Address space must be one of UB, L1, L0A, L0B, L0C.",
             "When using bind_buffer, tensor and bind_buffer must have identical shapes and element types.",
             "A tensor cannot be bound to multiple buffers.",
         ],
-        "example":         "triton.extension.buffer.language.to_buffer",
+        "example":
+        "triton.extension.buffer.language.to_buffer",
     },
     "triton.extension.buffer.language.to_tensor": {
-        "replace_docstring": [
-            "Create a tl.tensor from a bl.buffer.",
-            "",
-            ":param memref: the input bl.buffer object.",
-            ":type memref: bl.buffer",
-            ":param writable: if True, the resultant tensor is considered \"writable\" during bufferization.",
-            ":type writable: bool",
-        ],
         "constraints": [
             "Same type support constraints as alloc.",
         ],
@@ -122,7 +95,8 @@ CONSTRAINTS = {
         "example": "triton.heuristics",
     },
     "triton.jit": {
-        "example":         "triton.jit",
+        "example":
+        "triton.jit",
         "replace_docstring": [
             "Decorator for JIT-compiling a function using the Triton compiler.",
             "",
@@ -156,7 +130,8 @@ CONSTRAINTS = {
     },
     "triton.language.add": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -165,7 +140,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.add",
+        "example":
+        "triton.language.add",
         "replace_docstring": [
             "Computes the element-wise sum of x and y.",
             "",
@@ -201,7 +177,8 @@ CONSTRAINTS = {
             "end - start <= 1048576 (TRITON_MAX_TENSOR_NUMEL).",
             "``relaxed_requirement`` (extension parameter): Range=(end-start) is not required to be a power of 2.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -210,7 +187,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | ×      | √     | ×      | ×     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.arange",
+        "example":
+        "triton.language.arange",
     },
     "triton.language.argmax": {
         "constraints": [
@@ -244,7 +222,8 @@ CONSTRAINTS = {
     },
     "triton.language.bitonic_merge": {
         "constraints": [],
-        "dtype_support": """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -253,7 +232,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | ×      | √     | ×      | √     | ×      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example": "triton.language.bitonic_merge",
+        "example":
+        "triton.language.bitonic_merge",
         "replace_docstring": [
             "Merge the values in ``input`` along the given dimension using a bitonic sorting network.",
             "",
@@ -266,7 +246,8 @@ CONSTRAINTS = {
         "constraints": [
             "reverse=True requires alignment when loading data with tl.load, and mask cannot be used to filter redundant data indices",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -275,11 +256,13 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | ×    | ×          | ×           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.associative_scan",
+        "example":
+        "triton.language.associative_scan",
     },
     "triton.language.assume": {
         "constraints": [],
-        "dtype_support": """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -288,7 +271,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | ×      | ×     | ×      | ×     | ×    | ×    | ×    | ×    | ×          | ×           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example": "triton.language.assume",
+        "example":
+        "triton.language.assume",
         "replace_docstring": [
             "Allow the compiler to assume that the given condition is True.",
             "",
@@ -300,7 +284,8 @@ CONSTRAINTS = {
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -309,14 +294,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_add",
+        "example":
+        "triton.language.atomic_add",
     },
     "triton.language.atomic_and": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -325,14 +312,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_and",
+        "example":
+        "triton.language.atomic_and",
     },
     "triton.language.atomic_cas": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -341,14 +330,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_cas",
+        "example":
+        "triton.language.atomic_cas",
     },
     "triton.language.atomic_max": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -357,14 +348,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | √    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_max",
+        "example":
+        "triton.language.atomic_max",
     },
     "triton.language.atomic_min": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -373,14 +366,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | √    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_min",
+        "example":
+        "triton.language.atomic_min",
     },
     "triton.language.atomic_or": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -389,14 +384,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_or",
+        "example":
+        "triton.language.atomic_or",
     },
     "triton.language.atomic_xchg": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -405,14 +402,16 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | √    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_xchg",
+        "example":
+        "triton.language.atomic_xchg",
     },
     "triton.language.atomic_xor": {
         "constraints": [
             "``sem``: \"acquire\",\"release\",\"relaxed\" are not supported",
             "``scope``: \"cta\",\"sys\" are not supported",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -421,7 +420,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | √      | √     | √      | √     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.atomic_xor",
+        "example":
+        "triton.language.atomic_xor",
     },
     "triton.language.broadcast": {
         "constraints": [],
@@ -525,20 +525,23 @@ CONSTRAINTS = {
             "hint_name parameter must be of the string type.",
             "the hint_val of the list type supports only integer arrays and does not support floating-point numbers or mixed types",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+------+-------+-------+-------+--------+--------+--------+-------+------+------+------+------+------+
             |                                     | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
             +=====================================+======+=======+=======+=======+========+========+========+=======+======+======+======+======+======+
             | Atlas A2 products/Atlas A3 products | ✓    | ✓     | ✓     | ×     | ×      | ×      | ×      | ✓     | ✓    | ✓    | ×    | ✓    | ✓    |
             +-------------------------------------+------+-------+-------+-------+--------+--------+--------+-------+------+------+------+------+------+
             """,
-        "example":         "triton.language.compile_hint",
+        "example":
+        "triton.language.compile_hint",
     },
     "triton.language.core.__rshift__": {
         "constraints": [
             "``other``: only scalars are supported;tensor ars not supported(x >> 2 is valid,x >> y[y is tensor] is not currently supported.)",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -565,7 +568,8 @@ CONSTRAINTS = {
         "constraints": [
             "reverse=True requires alignment when loading data with tl.load, and mask cannot be used to filter redundant data indices",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -574,13 +578,15 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.cumprod",
+        "example":
+        "triton.language.cumprod",
     },
     "triton.language.cumsum": {
         "constraints": [
             "reverse=True requires alignment when loading data with tl.load, and mask cannot be used to filter redundant data indices",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -589,7 +595,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.cumsum",
+        "example":
+        "triton.language.cumsum",
     },
     "triton.language.debug_barrier": {
         "constraints": [],
@@ -622,7 +629,8 @@ CONSTRAINTS = {
             "``prefix``: the first argument must be a string prefix; omitting it causes a compilation error.",
             "Set environment variable ``TRITON_DEVICE_PRINT=1`` to enable.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -631,7 +639,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ✓    | ✓    | ×    | ✓    | ✓          | ✓           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.device_print",
+        "example":
+        "triton.language.device_print",
         "replace_docstring": [
             "Print the values at runtime from the device. String formatting does not work for runtime values, so you should",
             "provide the values you want to print as arguments. The first value must be a string, all following values must",
@@ -682,7 +691,8 @@ CONSTRAINTS = {
     },
     "triton.language.dot": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | int4 | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+======+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -713,7 +723,8 @@ CONSTRAINTS = {
             "  Only one of :code:`input_precision` and :code:`allow_tf32` can be",
             "  specified (i.e. at least one must be :code:`None`).",
         ],
-        "example":         "triton.language.dot",
+        "example":
+        "triton.language.dot",
     },
     "triton.language.dot_scaled": {
         "constraints": [
@@ -723,7 +734,8 @@ CONSTRAINTS = {
             "``K``: must be a multiple of 64.",
             "``lhs_scale``/``rhs_scale`` shape: on Ascend 950PR&950DT products with fp8 data types, the scale shape is ``[M, K // 16]`` (``[N, K // 16]`` for rhs_scale).",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+-------------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool | fp4e2(e2m1) |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+=============+
@@ -732,7 +744,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | ×      | ×     | ×      | ×     | √    | ×    | ×    | √    | √          | √           | ×    | √           |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+-------------+
             """,
-        "example":         "triton.language.dot_scaled",
+        "example":
+        "triton.language.dot_scaled",
         "replace_docstring": [
             "Returns the matrix product of two blocks in microscaling format.",
             "",
@@ -765,7 +778,8 @@ CONSTRAINTS = {
     },
     "triton.language.equal": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -848,7 +862,8 @@ CONSTRAINTS = {
             "Out-of-bounds indices are not checked; users must ensure index validity on their own.",
             "The index must be a 1D tensor.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -859,58 +874,29 @@ CONSTRAINTS = {
             """,
     },
     "triton.language.extra.cann.extension.ascend_address_space": {
-        "replace_docstring": [
-            "Ascend hardware address space constants for buffer allocation.",
-            "",
-            "Provides named address space specifiers that map to Ascend NPU memory regions:",
-            "",
-            "- ``UB`` — Unified Buffer (on-chip shared memory)",
-            "- ``L1`` — L1 cache buffer",
-            "- ``L0A`` — L0 buffer A (Cube unit input)",
-            "- ``L0B`` — L0 buffer B (Cube unit input)",
-            "- ``L0C`` — L0 buffer C (Cube unit output)",
-        ],
         "constraints": [
             "Provides UB, L1, L0A, L0B, L0C address space constants for use with bl.alloc.",
         ],
         "example": "triton.language.extra.cann.extension.ascend_address_space",
     },
     "triton.language.extra.cann.extension.copy": {
-        "replace_docstring": [
-            "Copies data from the Unified Buffer (UB) to the Unified Buffer (UB) or L1 Buffer.",
-            "",
-            ":param src: the source data located in the Unified Buffer.",
-            ":param dst: the destination buffer located in the Unified Buffer (UB) or L1 memory.",
-        ],
         "constraints": [
             "Source must be in UB address space. Destination must be L1 or UB address space.",
             "Source and destination must have the same data type and shape.",
         ],
-        "example":         "triton.language.extra.cann.extension.copy",
+        "example":
+        "triton.language.extra.cann.extension.copy",
     },
     "triton.language.extra.cann.extension.copy_from_ub_to_l1": {
-        "replace_docstring": [
-            "Copies data from the Unified Buffer (UB) to the L1 Buffer.",
-            "",
-            ":param src: the source data located in the Unified Buffer.",
-            ":param dst: the destination buffer located in L1 memory.",
-        ],
         "constraints": [
             "Deprecated: use al.copy instead.",
             "Source must be in UB address space. Destination must be in L1 address space.",
             "Source and destination must have the same data type and shape.",
         ],
-        "example":         "triton.language.extra.cann.extension.copy_from_ub_to_l1",
+        "example":
+        "triton.language.extra.cann.extension.copy_from_ub_to_l1",
     },
     "triton.language.extra.cann.extension.debug_barrier": {
-        "replace_docstring": [
-            "Inserts a synchronization barrier between vector/scalar load/store instructions.",
-            "",
-            "Provides fine-grained control over which instruction types are blocked until",
-            "prior instructions complete. Intended for use within an :func:`scope` context.",
-            "",
-            ":param sync_mode: the barrier type specifying which instruction classes to synchronize.",
-        ],
         "constraints": [
             "sync_mode: must be a SYNC_IN_VF enum value.",
             "Intended for use within an al.scope context.",
@@ -977,39 +963,33 @@ CONSTRAINTS = {
             "Memory access (load/store) operations can be executed in parallel.",
             "Compute operations are allowed, but there must be no more than one compute operation. Multiple compute operations would produce intermediate UB buffers, which cannot be accessed in parallel.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+------+-------+-------+-------+--------+--------+--------+-------+------+------+------+------+------+
             |                                     | int8 | int16 | int32 | uint8 | uint16 | uint32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | bool |
             +=====================================+======+=======+=======+=======+========+========+========+=======+======+======+======+======+======+
             | Atlas A2 products/Atlas A3 products | ✓    | ✓     | ✓     | ×     | ×      | ×      | ×      | ✓     | ×    | ×    | ×    | ×    | ×    |
             +-------------------------------------+------+-------+-------+-------+--------+--------+--------+-------+------+------+------+------+------+
             """,
-        "example":         "triton.language.extra.cann.extension.parallel",
+        "example":
+        "triton.language.extra.cann.extension.parallel",
     },
     "triton.language.extra.cann.extension.scope": {
-        "replace_docstring": [
-            "Context manager for entering and exiting a scope, where operations",
-            "within a scope share some common characteristics.",
-            "",
-            ":param core_mode: explicitly specifies which core type should be used for",
-            "    operations within the code block. Either ``\"cube\"`` or ``\"vector\"``.",
-        ],
         "constraints": [
             "core_mode: must be 'vector', 'cube'.",
             "Each kernel supports one cube scope and one vector scope; they execute in parallel.",
             "Explicit synchronization (sync_block_set/sync_block_wait) required for cross-scope data dependencies.",
         ],
-        "example":         "triton.language.extra.cann.extension.scope",
+        "example":
+        "triton.language.extra.cann.extension.scope",
     },
     "triton.language.extra.cann.extension.sub_vec_id": {
-        "replace_docstring": [
-            "Get the Vector Core index on the AI Core.",
-        ],
         "constraints": [
             "Only valid in mixed AIC+AIV scenarios (Cube + Vector cores).",
             "Using it in pure-Cube or pure-Vector kernels will cause a compilation error.",
         ],
-        "example":         "triton.language.extra.cann.extension.sub_vec_id",
+        "example":
+        "triton.language.extra.cann.extension.sub_vec_id",
     },
     "triton.language.extra.cann.extension.subview": {
         "constraints": [
@@ -1018,156 +998,42 @@ CONSTRAINTS = {
             "All stride elements must be 1.",
             "Offset must be 32-byte aligned.",
         ],
-        "example":         "triton.language.extra.cann.extension.subview",
+        "example":
+        "triton.language.extra.cann.extension.subview",
     },
     "triton.language.extra.cann.extension.sync_block_all": {
-        "replace_docstring": [
-            "Performs global synchronization across all cores of a specified type.",
-            "",
-            ":param mode: synchronization scope. One of ``\"all_cube\"``, ``\"all_vector\"``,",
-            "    ``\"all\"``, ``\"all_sub_vector\"``.",
-            ":param event_id: event marker ID in range [0, 15].",
-        ],
         "constraints": [
             "mode: must be one of 'all_cube', 'all_vector', 'all', 'all_sub_vector'.",
             "event_id: must be in range [0, 15].",
         ],
-        "example":         "triton.language.extra.cann.extension.sync_block_all",
+        "example":
+        "triton.language.extra.cann.extension.sync_block_all",
     },
     "triton.language.extra.cann.extension.sync_block_set": {
-        "replace_docstring": [
-            "Sets a cross-core synchronization flag for producer-consumer sync",
-            "between Cube and Vector cores.",
-            "",
-            ":param sender: sending core type, ``\"cube\"`` or ``\"vector\"`` (must differ from receiver).",
-            ":param receiver: receiving core type, ``\"cube\"`` or ``\"vector\"``.",
-            ":param event_id: sync flag identifier in range [0, 15].",
-            ":param sender_pipe: sender-side pipeline type (e.g. PIPE_FIX, PIPE_MTE3).",
-            ":param receiver_pipe: receiver-side pipeline type (defaults to PIPE_MTE2).",
-        ],
         "constraints": [
             "sender/receiver: must be 'cube' or 'vector', and must differ from each other.",
             "event_id: must be in range [0, 15].",
             "Must be used within an al.scope context matching the sender's core type.",
         ],
-        "example":         "triton.language.extra.cann.extension.sync_block_set",
+        "example":
+        "triton.language.extra.cann.extension.sync_block_set",
     },
     "triton.language.extra.cann.extension.sync_block_wait": {
-        "replace_docstring": [
-            "Waits on a cross-core synchronization flag set by :func:`sync_block_set`.",
-            "",
-            ":param sender: sending core type, ``\"cube\"`` or ``\"vector\"``.",
-            ":param receiver: receiving core type, ``\"cube\"`` or ``\"vector\"``.",
-            ":param event_id: must match the ID used by the corresponding sync_block_set.",
-            ":param sender_pipe: sender-side pipeline type.",
-            ":param receiver_pipe: receiver-side pipeline type (defaults to PIPE_MTE2).",
-        ],
         "constraints": [
             "sender/receiver: must be 'cube' or 'vector', and must differ from each other.",
             "event_id: must match the ID used by the corresponding sync_block_set.",
             "Must be used within an al.scope context matching the receiver's core type.",
         ],
-        "example":         "triton.language.extra.cann.extension.sync_block_wait",
+        "example":
+        "triton.language.extra.cann.extension.sync_block_wait",
     },
     "triton.language.extra.cann.extension.sub_vec_num": {
-        "replace_docstring": [
-            "Get the Vector Core number on one AI Core.",
-        ],
         "constraints": [
             "Only valid in mixed AIC+AIV scenarios (Cube + Vector cores).",
             "Using it in pure-Cube or pure-Vector kernels will cause a compilation error.",
         ],
-        "example":         "triton.language.extra.cann.extension.sub_vec_num",
-    },
-    "triton.language.extra.cann.extension.custom": {
-        "replace_docstring": [
-            "Invoke a custom operation with the given name and arguments.",
-            "",
-            ":param name: the name of the registered custom operation.",
-            ":param args: positional arguments forwarded to the custom op.",
-            ":param kwargs: keyword arguments forwarded to the custom op.",
-        ],
-    },
-    "triton.language.extra.cann.extension.custom_semantic": {
-        "replace_docstring": [
-            "Internal semantic handler for custom operations (used by the code generator).",
-            "",
-            "User code should use :func:`custom` instead.",
-            "",
-            ":param name: the name of the registered custom operation.",
-            ":param args: positional arguments forwarded to the custom op.",
-            ":param kwargs: keyword arguments forwarded to the custom op.",
-        ],
-    },
-    "triton.language.extra.cann.extension.register_custom_op": {
-        "replace_docstring": [
-            "Register a custom operation so that it can be invoked via :func:`custom`.",
-            "",
-            "Used as a class decorator. The decorated class must define a ``core`` field",
-            "(a :class:`CORE` value), a ``pipe`` field (a :class:`PIPE` value), and for",
-            "non-CUBE ops a ``mode`` field (a :class:`MODE` value).",
-            "",
-            ":param op: the custom op class to register.",
-        ],
-    },
-    "triton.language.extra.cann.extension.PIPE": {
-        "replace_docstring": [
-            "Enumeration of Ascend pipeline types.",
-            "",
-            "Members: ``PIPE_S``, ``PIPE_V``, ``PIPE_M``, ``PIPE_MTE1``, ``PIPE_MTE2``,",
-            "``PIPE_MTE3``, ``PIPE_ALL``, ``PIPE_FIX``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.MODE": {
-        "replace_docstring": [
-            "Enumeration of Ascend execution modes.",
-            "",
-            "Members: ``SIMD``, ``SIMT``, ``MIX``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.CORE": {
-        "replace_docstring": [
-            "Enumeration of Ascend core types.",
-            "",
-            "Members: ``VECTOR``, ``CUBE``, ``CUBE_OR_VECTOR``, ``CUBE_AND_VECTOR``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.IteratorType": {
-        "replace_docstring": [
-            "Enumeration of Ascend iterator types for affine iteration semantics.",
-            "",
-            "Members: ``Parallel``, ``Broadcast``, ``Transpose``, ``Reduction``,",
-            "``Interleave``, ``Deinterleave``, ``Inverse``, ``Pad``, ``Concat``,",
-            "``Gather``, ``Cumulative``, ``Opaque``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.FixpipeDMAMode": {
-        "replace_docstring": [
-            "Enumeration of fixpipe DMA transfer modes.",
-            "",
-            "Members: ``NZ2DN``, ``NZ2ND``, ``NZ2NZ``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.FixpipeDualDstMode": {
-        "replace_docstring": [
-            "Enumeration of fixpipe dual-destination split modes.",
-            "",
-            "Members: ``NO_DUAL``, ``COLUMN_SPLIT``, ``ROW_SPLIT``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.FixpipePreQuantMode": {
-        "replace_docstring": [
-            "Enumeration of fixpipe pre-quantization modes.",
-            "",
-            "Members: ``NO_QUANT``, ``F322BF16``, ``F322F16``, ``S322I8``.",
-        ],
-    },
-    "triton.language.extra.cann.extension.FixpipePreReluMode": {
-        "replace_docstring": [
-            "Enumeration of fixpipe pre-ReLU modes.",
-            "",
-            "Members: ``LEAKY_RELU``, ``NO_RELU``, ``NORMAL_RELU``, ``P_RELU``.",
-        ],
+        "example":
+        "triton.language.extra.cann.extension.sub_vec_num",
     },
     "triton.language.flip": {
         "constraints": [],
@@ -1249,7 +1115,8 @@ CONSTRAINTS = {
     },
     "triton.language.greater_than": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1261,7 +1128,8 @@ CONSTRAINTS = {
     },
     "triton.language.greater_equal": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1292,7 +1160,8 @@ CONSTRAINTS = {
             "Only the 'l' LLVM constraint is supported.",
             "Only 1-D input tensors are supported; higher-dimensional tensors must be flattened.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1301,7 +1170,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ×      | ✓     | ×    | ✓    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.inline_asm_elementwise",
+        "example":
+        "triton.language.inline_asm_elementwise",
         "replace_docstring": [
             "Execute inline assembly over a tensor. Essentially, this is :code:`map`",
             "where the function is inline assembly.",
@@ -1357,7 +1227,8 @@ CONSTRAINTS = {
     },
     "triton.language.less_equal": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1369,7 +1240,8 @@ CONSTRAINTS = {
     },
     "triton.language.less_than": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1387,7 +1259,8 @@ CONSTRAINTS = {
             "Compatibility issues with branch and loop statements: \
                 Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1396,7 +1269,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.load",
+        "example":
+        "triton.language.load",
         "replace_docstring": [
             "Return a tensor of data whose values are loaded from memory at location defined by `pointer`:",
             "",
@@ -1449,7 +1323,8 @@ CONSTRAINTS = {
         "constraints": [
             "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1458,7 +1333,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.load_tensor_descriptor",
+        "example":
+        "triton.language.load_tensor_descriptor",
     },
     "triton.language.log": {
         "constraints": [],
@@ -1497,7 +1373,8 @@ CONSTRAINTS = {
             "control flow can be vectorized.",
             "`pack` has no semantic effect on NPU backends as the implementation is always vectorized.",
         ],
-        "example":         "triton.language.map_elementwise",
+        "example":
+        "triton.language.map_elementwise",
         "replace_docstring": [
             "Map a scalar function over a tensor.",
             "",
@@ -1537,7 +1414,8 @@ CONSTRAINTS = {
                 Do not reorder strides to achieve transpose.",
             "Compatibility issues may occur when used together with branch and loop statements."
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1546,13 +1424,15 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.make_block_ptr",
+        "example":
+        "triton.language.make_block_ptr",
     },
     "triton.language.make_tensor_descriptor": {
         "constraints": [
             "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1561,7 +1441,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.make_tensor_descriptor",
+        "example":
+        "triton.language.make_tensor_descriptor",
         "replace_docstring": [
             "Make a tensor descriptor object for loading/storing blocks of data from global memory.",
             "",
@@ -1584,7 +1465,8 @@ CONSTRAINTS = {
             "``return_indices``: return_indices=True is not supported when axis=None.",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1593,13 +1475,15 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.max",
+        "example":
+        "triton.language.max",
     },
     "triton.language.max_constancy": {
         "constraints": [
             "``values``: rank must match the rank of ``input`` (e.g. ``[1, 1]`` for a 2-D input).",
         ],
-        "dtype_support": """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1608,7 +1492,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ✓    | ✓    | ×    | ✓    | ✓          | ✓           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example": "triton.language.max_constancy",
+        "example":
+        "triton.language.max_constancy",
         "replace_docstring": [
             "Let the compiler know that the first ``value`` elements in ``input`` are constant.",
             "",
@@ -1623,7 +1508,8 @@ CONSTRAINTS = {
         "constraints": [
             "``values``: rank must match the rank of ``input`` (e.g. ``[1, 1]`` for a 2-D input).",
         ],
-        "dtype_support": """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1632,7 +1518,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ✓    | ✓    | ×    | ✓    | ✓          | ✓           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example": "triton.language.max_contiguous",
+        "example":
+        "triton.language.max_contiguous",
         "replace_docstring": [
             "Let the compiler know that the first ``value`` elements in ``input`` are contiguous.",
             "",
@@ -1658,7 +1545,8 @@ CONSTRAINTS = {
             "``return_indices``: return_indices=True is not supported when axis=None.",
             "``keep_dims=True`` requires more test coverage; currently verified for 3D tensor with dim=2.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1667,7 +1555,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.min",
+        "example":
+        "triton.language.min",
     },
     "triton.language.minimum": {
         "constraints": [],
@@ -1697,7 +1586,8 @@ CONSTRAINTS = {
     },
     "triton.language.mul": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1706,7 +1596,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.mul",
+        "example":
+        "triton.language.mul",
         "replace_docstring": [
             "Computes the element-wise product of x and y.",
             "",
@@ -1726,7 +1617,8 @@ CONSTRAINTS = {
         "constraints": [
             "``values``: describes the divisibility of the first value along each dimension, so its rank must match ``input`` (e.g. ``[1, 1]`` for a 2-D input).",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1735,7 +1627,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ✓    | ✓    | ×    | ✓    | ✓          | ✓           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.multiple_of",
+        "example":
+        "triton.language.multiple_of",
         "replace_docstring": [
             "Let the compiler know that the values in ``input`` are all multiples of ``value``.",
             "",
@@ -1818,7 +1711,8 @@ CONSTRAINTS = {
         "constraints": [
             "``disallow_acc_multi_buffer``, ``flatten``, ``disable_licm``: related functionality is incomplete on Ascend.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1827,7 +1721,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.range",
+        "example":
+        "triton.language.range",
         "replace_docstring": [
             "Iterator that counts upward forever.",
             "",
@@ -1884,7 +1779,8 @@ CONSTRAINTS = {
             "Combine region: it must have exactly ``2K`` block arguments and ``K`` ``tt.reduce.return`` operands. The fallback initializes ``s[i]`` from ``T[i][0]`` and combines elements in order for ``i = 1 ... L - 1``.",
             "Semantics and performance: this path clones the combine region into a sequential ``scf.for``. It can have a different floating-point rounding order from a tree reduction, and it does not guarantee that every multi-input ``reduce`` will pass later lowering or have equivalent performance.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1893,7 +1789,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | ×          | ×           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.reduce",
+        "example":
+        "triton.language.reduce",
     },
     "triton.language.reduce_or": {
         "constraints": [],
@@ -1981,7 +1878,8 @@ CONSTRAINTS = {
         "constraints": [
             "Note: tl.sort may have precision problems in big shape or multidimensional shape, more recommendeded to use triton.language.extra.cann.extension.sort."
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -1990,7 +1888,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | √    | ×      | √     | ×      | √     | ×      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.sort",
+        "example":
+        "triton.language.sort",
         "replace_docstring": [
             "Sorts the values in ``x`` along the given dimension.",
             "",
@@ -2001,7 +1900,8 @@ CONSTRAINTS = {
     },
     "triton.language.topk": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2010,7 +1910,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | √    | ×      | √     | ×      | √     | ×      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.topk",
+        "example":
+        "triton.language.topk",
         "replace_docstring": [
             "Returns the k largest (or smallest) elements of the input tensor along",
             "the specified dimension.",
@@ -2049,7 +1950,8 @@ CONSTRAINTS = {
             "Fractal block_row must be 16; for int8 the right operand requires 32 (zN[N/32, K/32, 32, 32]).",
             "Output dtype: f32 for float inputs, i32 for int8 (cube L0C accumulator dtype).",
         ],
-        "example":         "triton.language.extra.cann.extension.dot",
+        "example":
+        "triton.language.extra.cann.extension.dot",
     },
     "triton.language.split": {
         "constraints": [],
@@ -2092,7 +1994,8 @@ CONSTRAINTS = {
     },
     "triton.language.static_print": {
         "constraints": [],
-        "dtype_support": """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2101,7 +2004,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ✓    | ×      | ✓     | ×      | ✓     | ×      | ✓     | ✓    | ✓    | ×    | ✓    | ×          | ×           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example": "triton.language.static_print",
+        "example":
+        "triton.language.static_print",
         "replace_docstring": [
             "Print the values at compile time.  The parameters are the same as the builtin :code:`print`.",
             "",
@@ -2117,7 +2021,8 @@ CONSTRAINTS = {
         "constraints": [
             "``cond``: must be a compile-time constant (tl.constexpr); a non-constant condition causes a compilation error.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2126,7 +2031,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ×     | ×    | ×      | ×     | ×      | ×     | ×      | ×     | ×    | ×    | ×    | ×    | ×          | ×           | ✓    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.static_assert",
+        "example":
+        "triton.language.static_assert",
         "replace_docstring": [
             "Assert the condition at compile time.  Does not require that the :code:`TRITON_DEBUG`",
             "environment variable is set.",
@@ -2139,7 +2045,8 @@ CONSTRAINTS = {
         "constraints": [
             "``start``, ``end``, ``step`` must be compile-time constants (tl.constexpr).",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2148,7 +2055,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | ✓     | ✓    | ✓      | ✓     | ✓      | ✓     | ✓      | ✓     | ×    | ×    | ×    | ×    | ×          | ×           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.static_range",
+        "example":
+        "triton.language.static_range",
         "replace_docstring": [
             "Iterator that counts upward forever.",
             "",
@@ -2171,7 +2079,8 @@ CONSTRAINTS = {
             "Compatibility issues with branch and loop statements: \
                 Complex pointer and mask calculations involving branches or loops may cause compilation failures.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2180,7 +2089,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.store",
+        "example":
+        "triton.language.store",
         "replace_docstring": [
             "Store a tensor of data into memory locations defined by `pointer`.",
             "",
@@ -2226,7 +2136,8 @@ CONSTRAINTS = {
         "constraints": [
             "`make_tensor_descriptor`, `load_tensor_descriptor` and `store_tensor_descriptor`. Do not mix them with `tl.load()` or `tl.store()`.",
         ],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2235,11 +2146,13 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | ×    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.store_tensor_descriptor",
+        "example":
+        "triton.language.store_tensor_descriptor",
     },
     "triton.language.sub": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2248,7 +2161,8 @@ CONSTRAINTS = {
             | Ascend 950PR&950DT products         | √     | √    | √      | √     | √      | √     | √      | √     | √    | √    | ×    | √    | √          | √           | √    |
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             """,
-        "example":         "triton.language.sub",
+        "example":
+        "triton.language.sub",
         "replace_docstring": [
             "Computes the element-wise difference of x and y.",
             "",
@@ -2323,7 +2237,8 @@ CONSTRAINTS = {
     },
     "triton.language.tensor.logical_and": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2335,7 +2250,8 @@ CONSTRAINTS = {
     },
     "triton.language.tensor.logical_or": {
         "constraints": [],
-        "dtype_support":         """
+        "dtype_support":
+        """
             +-------------------------------------+-------+------+--------+-------+--------+-------+--------+-------+------+------+------+------+------------+-------------+------+
             |                                     | uint8 | int8 | uint16 | int16 | uint32 | int32 | uint64 | int64 | fp16 | fp32 | fp64 | bf16 | fp8e(e4m3) | fp8e5(e5m2) | bool |
             +=====================================+=======+======+========+=======+========+=======+========+=======+======+======+======+======+============+=============+======+
@@ -2682,7 +2598,8 @@ CONSTRAINTS = {
             "``value``: supports 2~5D tensors.",
             "``dim``: must satisfy 0 <= dim < rank(value) - 1.",
         ],
-        "example":         "triton.language.extra.cann.extension.index_put",
+        "example":
+        "triton.language.extra.cann.extension.index_put",
     },
     "triton.language.extra.cann.extension.gather_out_to_ub": {
         "constraints": [
@@ -2695,7 +2612,8 @@ CONSTRAINTS = {
             "For every dimension ``i`` not equal to ``dim``, ``index.size[i]`` <= ``src.size[i]``.",
             "The output shape is the same as ``index.shape``.",
         ],
-        "example":         "triton.language.extra.cann.extension.gather_out_to_ub",
+        "example":
+        "triton.language.extra.cann.extension.gather_out_to_ub",
     },
     "triton.language.extra.cann.extension.scatter_ub_to_out": {
         "constraints": [
@@ -2707,7 +2625,8 @@ CONSTRAINTS = {
             "For every dimension ``i`` not equal to ``dim``, ``index.size[i]`` <= ``ptr.size[i]``.",
             "The output shape is the same as ``index.shape``.",
         ],
-        "example":         "triton.language.extra.cann.extension.scatter_ub_to_out",
+        "example":
+        "triton.language.extra.cann.extension.scatter_ub_to_out",
     },
     "triton.language.extra.cann.libdevice.abs": {
         "constraints": [
@@ -2722,7 +2641,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.acos",
+        "example":
+        "triton.language.extra.cann.libdevice.acos",
     },
     "triton.language.extra.cann.libdevice.acosh": {
         "constraints": [
@@ -2730,7 +2650,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.acosh",
+        "example":
+        "triton.language.extra.cann.libdevice.acosh",
     },
     "triton.language.extra.cann.libdevice.add_rd": {
         "constraints": [
@@ -2766,7 +2687,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.asin",
+        "example":
+        "triton.language.extra.cann.libdevice.asin",
     },
     "triton.language.extra.cann.libdevice.asinh": {
         "constraints": [
@@ -2774,7 +2696,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.asinh",
+        "example":
+        "triton.language.extra.cann.libdevice.asinh",
     },
     "triton.language.extra.cann.libdevice.atan": {
         "constraints": [
@@ -2782,7 +2705,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.atan",
+        "example":
+        "triton.language.extra.cann.libdevice.atan",
     },
     "triton.language.extra.cann.libdevice.atan2": {
         "constraints": [
@@ -2790,7 +2714,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.atan2",
+        "example":
+        "triton.language.extra.cann.libdevice.atan2",
     },
     "triton.language.extra.cann.libdevice.atanh": {
         "constraints": [
@@ -2798,7 +2723,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.atanh",
+        "example":
+        "triton.language.extra.cann.libdevice.atanh",
     },
     "triton.language.extra.cann.libdevice.brev": {
         "constraints": [
@@ -2841,7 +2767,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.copysign",
+        "example":
+        "triton.language.extra.cann.libdevice.copysign",
     },
     "triton.language.extra.cann.libdevice.cos": {
         "constraints": [
@@ -2856,7 +2783,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.cosh",
+        "example":
+        "triton.language.extra.cann.libdevice.cosh",
     },
     "triton.language.extra.cann.libdevice.cospi": {
         "constraints": [
@@ -2871,7 +2799,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.cyl_bessel_i0",
+        "example":
+        "triton.language.extra.cann.libdevice.cyl_bessel_i0",
     },
     "triton.language.extra.cann.libdevice.cyl_bessel_i1": {
         "constraints": [
@@ -2907,7 +2836,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.div_rz",
+        "example":
+        "triton.language.extra.cann.libdevice.div_rz",
     },
     "triton.language.extra.cann.libdevice.erf": {
         "constraints": [
@@ -2943,7 +2873,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.erfinv",
+        "example":
+        "triton.language.extra.cann.libdevice.erfinv",
     },
     "triton.language.extra.cann.libdevice.exp": {
         "constraints": [
@@ -2972,7 +2903,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.expm1",
+        "example":
+        "triton.language.extra.cann.libdevice.expm1",
     },
     "triton.language.extra.cann.libdevice.fast_cosf": {
         "constraints": [
@@ -2987,7 +2919,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.fast_dividef",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_dividef",
     },
     "triton.language.extra.cann.libdevice.fast_exp10f": {
         "constraints": [
@@ -3002,7 +2935,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.fast_expf",
+        "example":
+        "triton.language.extra.cann.libdevice.fast_expf",
     },
     "triton.language.extra.cann.libdevice.fast_log10f": {
         "constraints": [
@@ -3199,7 +3133,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.float_as_int",
+        "example":
+        "triton.language.extra.cann.libdevice.float_as_int",
     },
     "triton.language.extra.cann.libdevice.float_as_uint": {
         "constraints": [
@@ -3256,7 +3191,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.fmod",
+        "example":
+        "triton.language.extra.cann.libdevice.fmod",
     },
     "triton.language.extra.cann.libdevice.gamma": {
         "constraints": [
@@ -3264,7 +3200,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.gamma",
+        "example":
+        "triton.language.extra.cann.libdevice.gamma",
     },
     "triton.language.extra.cann.libdevice.hadd": {
         "constraints": [
@@ -3286,7 +3223,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.hypot",
+        "example":
+        "triton.language.extra.cann.libdevice.hypot",
     },
     "triton.language.extra.cann.libdevice.ilogb": {
         "constraints": [
@@ -3294,7 +3232,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.ilogb",
+        "example":
+        "triton.language.extra.cann.libdevice.ilogb",
     },
     "triton.language.extra.cann.libdevice.int2float_rd": {
         "constraints": [
@@ -3337,7 +3276,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.isinf",
+        "example":
+        "triton.language.extra.cann.libdevice.isinf",
     },
     "triton.language.extra.cann.libdevice.isnan": {
         "constraints": [
@@ -3345,7 +3285,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.isnan",
+        "example":
+        "triton.language.extra.cann.libdevice.isnan",
     },
     "triton.language.extra.cann.libdevice.j0": {
         "constraints": [
@@ -3374,7 +3315,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.ldexp",
+        "example":
+        "triton.language.extra.cann.libdevice.ldexp",
     },
     "triton.language.extra.cann.libdevice.lgamma": {
         "constraints": [
@@ -3382,7 +3324,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.lgamma",
+        "example":
+        "triton.language.extra.cann.libdevice.lgamma",
     },
     "triton.language.extra.cann.libdevice.ll2float_rd": {
         "constraints": [
@@ -3439,7 +3382,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.log10",
+        "example":
+        "triton.language.extra.cann.libdevice.log10",
     },
     "triton.language.extra.cann.libdevice.log1p": {
         "constraints": [
@@ -3447,7 +3391,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.log1p",
+        "example":
+        "triton.language.extra.cann.libdevice.log1p",
     },
     "triton.language.extra.cann.libdevice.log2": {
         "constraints": [
@@ -3532,7 +3477,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.nearbyint",
+        "example":
+        "triton.language.extra.cann.libdevice.nearbyint",
     },
     "triton.language.extra.cann.libdevice.nextafter": {
         "constraints": [
@@ -3540,7 +3486,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.nextafter",
+        "example":
+        "triton.language.extra.cann.libdevice.nextafter",
     },
     "triton.language.extra.cann.libdevice.norm3d": {
         "constraints": [
@@ -3583,7 +3530,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.pow",
+        "example":
+        "triton.language.extra.cann.libdevice.pow",
     },
     "triton.language.extra.cann.libdevice.rcbrt": {
         "constraints": [
@@ -3626,7 +3574,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.reciprocal",
+        "example":
+        "triton.language.extra.cann.libdevice.reciprocal",
     },
     "triton.language.extra.cann.libdevice.relu": {
         "constraints": [
@@ -3634,7 +3583,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.relu",
+        "example":
+        "triton.language.extra.cann.libdevice.relu",
     },
     "triton.language.extra.cann.libdevice.remainder": {
         "constraints": [
@@ -3663,7 +3613,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.rint",
+        "example":
+        "triton.language.extra.cann.libdevice.rint",
     },
     "triton.language.extra.cann.libdevice.rnorm3d": {
         "constraints": [
@@ -3685,7 +3636,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.round",
+        "example":
+        "triton.language.extra.cann.libdevice.round",
     },
     "triton.language.extra.cann.libdevice.rsqrt": {
         "constraints": [
@@ -3728,7 +3680,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.signbit",
+        "example":
+        "triton.language.extra.cann.libdevice.signbit",
     },
     "triton.language.extra.cann.libdevice.sin": {
         "constraints": [
@@ -3743,7 +3696,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.sinh",
+        "example":
+        "triton.language.extra.cann.libdevice.sinh",
     },
     "triton.language.extra.cann.libdevice.sinpi": {
         "constraints": [
@@ -3821,7 +3775,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.tan",
+        "example":
+        "triton.language.extra.cann.libdevice.tan",
     },
     "triton.language.extra.cann.libdevice.tanh": {
         "constraints": [
@@ -3829,7 +3784,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.tanh",
+        "example":
+        "triton.language.extra.cann.libdevice.tanh",
     },
     "triton.language.extra.cann.libdevice.tgamma": {
         "constraints": [
@@ -3844,7 +3800,8 @@ CONSTRAINTS = {
             "- Atlas A2 products/Atlas A3 products supports SIMD.\n"
             "- Ascend 950PR&950DT products supports SIMD, SIMT.",
         ],
-        "example":         "triton.language.extra.cann.libdevice.trunc",
+        "example":
+        "triton.language.extra.cann.libdevice.trunc",
     },
     "triton.language.extra.cann.libdevice.uint2float_rd": {
         "constraints": [

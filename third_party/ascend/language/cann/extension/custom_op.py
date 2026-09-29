@@ -423,7 +423,14 @@ def custom(name: str, *args, _semantic=None, **kwargs):
 
 
 def register_custom_op(op):
-    """Register a custom operation so that we can invoke it using al.custom()."""
+    """Register a custom operation so that it can be invoked via :func:`custom`.
+
+    Used as a class decorator. The decorated class must define a ``core`` field
+    (a :class:`CORE` value), a ``pipe`` field (a :class:`PIPE` value), and for
+    non-CUBE ops a ``mode`` field (a :class:`MODE` value).
+
+    :param op: the custom op class to register.
+    """
     assert inspect.isclass(op), "@register_custom_op should decorate on a class."
     # Use class name if name not set.
     if not hasattr(op, 'name'):

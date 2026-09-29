@@ -26,7 +26,6 @@ import builtins
 import copy
 import functools
 import ast
-import gc
 import inspect
 import math
 import os
@@ -2324,9 +2323,6 @@ class AutoTilingTuner(Autotuner):
             raise
         finally:
             self.nargs = None
-            if did_benchmark and not disk_cache_hit:
-                # workaround for memory leak when some configs fail to compile
-                gc.collect()
 
     def _try_ubtuner(self, *args, config, excp, run_fns, **kwargs):
         if not (self.enable_ubtuner and "ub overflow" in str(excp).lower()):

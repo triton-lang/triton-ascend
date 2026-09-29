@@ -22,7 +22,6 @@ from types import MethodType, SimpleNamespace
 
 import pytest
 import triton
-import triton.backends.ascend.runtime.autotuner as ascend_autotuner
 from triton.runtime.autotuner import Config
 from triton.backends.ascend.runtime.autotuner import AutoTilingTuner
 
@@ -257,7 +256,6 @@ def test_ascend_autotune_decorator_forwards_do_bench(monkeypatch):
 def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch):
     configs = [Config({"BLOCK_SIZE": 16}), Config({"BLOCK_SIZE": 32})]
     tuner, key = _make_run_tuner(configs)
-    gc_calls = []
     profile_calls = []
 
     def check_disk_cache(tuning_key, pruned_configs, benchmark):
@@ -272,17 +270,14 @@ def test_run_skips_gc_on_autotune_disk_cache_hit(monkeypatch):
     tuner._batch_bench = unexpected_batch_bench
     tuner.auto_profile_dir = "profile-output"
     tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
-    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
-    assert gc_calls == []
     assert profile_calls == []
 
 
 def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):
     configs = [Config({"BLOCK_SIZE": 16}), Config({"BLOCK_SIZE": 32})]
     tuner, key = _make_run_tuner(configs)
-    gc_calls = []
     benchmark_calls = []
     profile_calls = []
 
@@ -299,23 +294,19 @@ def test_run_keeps_gc_on_autotune_disk_cache_miss(monkeypatch):
     tuner._batch_bench = batch_bench
     tuner.auto_profile_dir = "profile-output"
     tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
-    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
     assert benchmark_calls == [configs]
-    assert gc_calls == [True]
     assert profile_calls == [configs[0]]
 
     assert tuner.run() == "kernel-result"
     assert benchmark_calls == [configs]
-    assert gc_calls == [True]
     assert profile_calls == [configs[0]]
 
 
 def test_run_caches_single_config_and_skips_gc(monkeypatch):
     config = Config({"BLOCK_SIZE": 16, "compile_mode": "simt_only"})
     tuner, key = _make_run_tuner([config])
-    gc_calls = []
     profile_calls = []
     prune_calls = []
 
@@ -334,21 +325,18 @@ def test_run_caches_single_config_and_skips_gc(monkeypatch):
     tuner._batch_bench = unexpected_batch_bench
     tuner.auto_profile_dir = "profile-output"
     tuner._profile = lambda *args, config, **kwargs: profile_calls.append(config)
-    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
     assert tuner.cache[key] is config
     assert tuner.run() == "kernel-result"
     assert len(prune_calls) == 1
     assert len(tuner.run_kwargs) == 2
-    assert gc_calls == []
     assert profile_calls == []
 
 
 def test_run_does_not_cache_failed_single_config(monkeypatch):
     config = Config({"BLOCK_SIZE": 16})
     tuner, key = _make_run_tuner([config])
-    gc_calls = []
     prune_calls = []
     run_calls = []
 
@@ -372,7 +360,6 @@ def test_run_does_not_cache_failed_single_config(monkeypatch):
     tuner.fn = SimpleNamespace(run=run)
     tuner.check_disk_cache = unexpected_disk_cache
     tuner._batch_bench = unexpected_batch_bench
-    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     with pytest.raises(RuntimeError, match="kernel failed"):
         tuner.run()
@@ -383,13 +370,11 @@ def test_run_does_not_cache_failed_single_config(monkeypatch):
     assert tuner.run() == "kernel-result"
     assert len(prune_calls) == 2
     assert len(run_calls) == 3
-    assert gc_calls == []
 
 
 def test_run_caches_single_config_after_pruning(monkeypatch):
     config = Config({"BLOCK_SIZE": 16})
     tuner, key = _make_run_tuner([config, Config({"BLOCK_SIZE": 32})])
-    gc_calls = []
     prune_calls = []
 
     def prune_configs(kwargs):
@@ -405,10 +390,8 @@ def test_run_caches_single_config_after_pruning(monkeypatch):
     tuner.prune_configs = prune_configs
     tuner.check_disk_cache = unexpected_disk_cache
     tuner._batch_bench = unexpected_batch_bench
-    monkeypatch.setattr(ascend_autotuner.gc, "collect", lambda: gc_calls.append(True))
 
     assert tuner.run() == "kernel-result"
     assert tuner.cache[key] is config
     assert tuner.run() == "kernel-result"
     assert len(prune_calls) == 1
-    assert gc_calls == []

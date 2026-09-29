@@ -25,7 +25,7 @@ GPU 上常见的写法会把 grid 设计为大量逻辑 program，由硬件和�
 
 | 维度 | 核心结构 | 算子类型 |
 |------|----------|----------|
-| 昇腾 NPU (Ascend) | 多个 AI Core，分为 Cube Core（矩阵乘）和 Vector Core（向量计算） | Vector-only 算子 → 并发任务数 = Vector Core 数；含 `tl.dot` 算子 → 并发任务数 = AI Core 数 |
+| 昇腾 NPU (Neural-Network Processing Unit) | 多个 AI Core，分为 Cube Core（矩阵乘）和 Vector Core（向量计算） | Vector-only 算子 → 并发任务数 = Vector Core 数；含 `tl.dot` 算子 → 并发任务数 = AI Core 数 |
 | GPU NVIDIA/AMD | 多个 CUDA Core（标量/向量计算） + Tensor Core（矩阵乘） | GPU 算子一般由编译器和硬件自动决定并发度 |
 
 ### 检查单核数据搬运
@@ -360,7 +360,7 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(12832，128),如果是对齐数据的访存，对应的stride(32,1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4）由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128,1)
+切分不合理,存在过多的非对齐访存或者运算，例如对（64，32）二维数据搬运，对应stride(128, 32),如果是对齐数据的访存，对应的stride(32,1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为（64，32，4）由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128,1)
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
@@ -371,7 +371,7 @@ bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=
 ```
 
 会有输出IR，对比Triton 算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
-观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为simd指令，这会成为性能瓶颈。
+观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为SIMD指令，这会成为性能瓶颈。
 
 问题：离散访存 && scalar低效映射
 b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式 对[1024,32] 中的最低维度32绑定线程块, 再对1024切16，分为[64， 16， 32]，再对64绑定线程块

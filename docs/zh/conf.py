@@ -114,6 +114,21 @@ if _force_mock:
 import triton
 import triton.language.extra as _tl_extra
 
+# Inject do_bench_npu from ascend backend into triton.testing for API docs
+_testing_npu_src = os.path.join(_REPO, "third_party", "ascend", "backend", "testing.py")
+if os.path.exists(_testing_npu_src):
+    _parse_src = _load_module(
+        "docs.zh.python-api._parse_source",
+        os.path.join(_HERE, "python-api", "_parse_source.py"),
+    )
+    _npu_testing_mod = _parse_src._create_source_module(
+        [_testing_npu_src],
+        "triton.backends.ascend.testing",
+        export_filter=["do_bench_npu"],
+    )
+    if hasattr(_npu_testing_mod, "do_bench_npu"):
+        triton.testing.do_bench_npu = _npu_testing_mod.do_bench_npu
+
 # Operator doc stubs — ``tensor`` operator syntax (``x / y``, ``x & y``,
 # ``x >= y``, ...) has no ``tl.``-prefixed functions; attach lightweight
 # stubs so autosummary can render them like add/sub/mul.

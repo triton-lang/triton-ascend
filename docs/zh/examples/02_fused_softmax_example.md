@@ -8,7 +8,7 @@
 
 ## 使用原生 PyTorch 对 X 逐行进行 Softmax 计算
 
-```Python
+```python
 import torch
 import torch_npu
 
@@ -36,7 +36,7 @@ def naive_softmax(x):
 内核融合的目的
 
 当在 PyTorch 中以原生方式实现时，计算`y=naive_softmax(x)`需要从 DRAM 中读取 5MN+2M 个元素，并写回 3MN+2M 个元素。显然这是非常低效的；我们更希望使用一个自定义的“融合”内核，它只需读取一次 x，并在芯片上完成所有必要的计算。
-这样一来只需读取和写回 2MN 个字节，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。
+这样一来只需读取和写回 2MN 个元素，因此我们可以期望理论上的加速比大约为 4 倍（即 (8MN+4M)/2MN）。
 
 `torch.jit.script`旨在自动执行这种“内核融合”，但它仍然远未达到理想状态。
 
@@ -45,7 +45,7 @@ def naive_softmax(x):
 softmax 内核工作原理如下：每个计算单元（program）以程序数量为步长加载输入矩阵X的一组行数据，执行归一化处理后，将结果写入输出矩阵Y。
 注意：Triton 的一个重要限制是每个块必须具有 2 的幂次数的元素，因此，如果我们要处理任意可能的输入形状，需要在内部「填充」每一行，并确保内存操作正确性。
 
-```Python
+```python
 @triton.jit
 def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n_rows, n_cols, BLOCK_SIZE: tl.constexpr):
     # 程序起始行
@@ -75,7 +75,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
 
 我们可以创建一个辅助函数，该函数能够将核函数及其元参数加入执行队列，以处理任意给定的输入张量。
 
-```Python
+```python
 kernels = {}
 
 def softmax(x):
@@ -111,7 +111,7 @@ def softmax(x):
 
 需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用
 
-```Python
+```python
 torch.manual_seed(0)
 x = torch.randn(1823, 781, device='npu')
 y_triton = softmax(x)
@@ -123,9 +123,9 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(y_triton-y_torch))}')
 ```
 
-Out:
+输出结果
 
-```bash
+```text
 tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],
         [0.0001, 0.0004, 0.0006,  ..., 0.0006, 0.0004, 0.0003],
         [0.0007, 0.0002, 0.0006,  ..., 0.0011, 0.0004, 0.0039],

@@ -4,10 +4,10 @@
 
 ## 计算内核
 
-以下 Triton 内核实现了一个带偏置项的批量矩阵乘法（Batched Matrix Multiplication with Bias）：
+以下 Triton 内核实现了一个带偏置项的矩阵乘法（Matrix Multiplication with Bias）：
 计算公式为：
 
-$$ \mathrm{output}[b, i, j] = \sum_{k} x[b, i, k] \cdot y[k, j] + z[b, i, j] $$
+$$ \mathrm{output}[i, j] = \sum_{k} x[i, k] \cdot y[k, j] + z[i, j] $$
 
 其中：
 
@@ -67,7 +67,7 @@ def triton_dot_2_Bias(
 
 以下辅助函数用于支持 Triton 内核的测试与验证，包括 PyTorch 参考实现、数据类型映射、随机张量生成及结果校验。
 
-```Python
+```python
 def torch_dot_Bias(x0, x1, bias):
     """PyTorch 参考实现：执行矩阵乘法并加上偏置项。"""
     res = torch.matmul(x0, x1) + bias
@@ -176,8 +176,8 @@ if __name__ == "__main__":
 
 **输出示例：**
 
-```python
+```text
 Test matmul with dtype=float16, shape=(16,16,16) PASSED!
 ```
 
-上面输出日志表明Triton和Pytorch上的输出结果完全一致。
+上面输出日志表明Triton和PyTorch上的输出结果完全一致。

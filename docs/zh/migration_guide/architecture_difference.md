@@ -1,4 +1,4 @@
-# 昇腾与GPU的开发差异
+# 架构差异分析
 
 本⽂系统性梳理两⼤平台的核⼼架构、编程规则与优化⼿段差异，拆解昇腾NPU Triton专属开发特性与适配要点，帮助开发者快速建⽴昇腾NPU Triton开发思维，精准完成算⼦迁移、代码适配与性能调优⼯作，规避迁移常⻅问题。
 
@@ -27,7 +27,7 @@ triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使�
 
 ### auto-blockify：突破 65,535 逻辑块上限
 
-社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于上节描述的物理核强绑定，可启动的 grid 上限被卡在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。
+社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#多核任务并行策略)中描述的物理核强绑定，可启动的 grid 上限被限制在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。
 
 `auto-blockify`（`SIMTAutoBlockify` 编译期 pass + 配套的运行期 cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
 
@@ -104,10 +104,9 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     tl.store(out_ptr0 + idx_block, ret)
 
 # 调用triton_kernel核函数
-ncore = 32
 x0 = torch.rand(32768, device='npu')
 out1 = torch.empty_like(x0)
-triton_easy_kernel[ncore, 1, 1](x0, out1, x0.numel())
+triton_easy_kernel[1, 1, 1](x0, out1, x0.numel())
 ```
 
 注意事项

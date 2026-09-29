@@ -40,17 +40,42 @@ export LD_LIBRARY_PATH=$HOME/CANN/Install_CANN/Ascend/ascend_toolkit/latest/tool
 msprof op simulator --kernel-name=_layer_norm_fwd_fused --soc-version={soc-version} python3 03-layer-norm.py
 ```
 
-- Note: In the preceding example, `soc-version=Ascend910B3`.
+- Note: In the preceding example, `soc-version=Ascend910B3`. The following table is generated based on the CANN 9.2.0 version.
 
-| Ascend 910 series | Ascend 310 / 310P series | Ascend 310B series |
-| :---: | :---: | :---: |
-|Ascend910A|Ascend310|Ascend310B1|
-|Ascend910B|Ascend310P1|Ascend310B2|
-|Ascend910B1|Ascend310P2|Ascend310B3|
-|Ascend910B2|Ascend310P3|Ascend310B4|
-|Ascend910B2C|Ascend310P4|-|
-|Ascend910B3|Ascend310P5|-|
-|Ascend910B4|Ascend310P7|-|
+| Ascend 910 series | Ascend 310 / 310P series | Ascend 310B series | Ascend 610 series | Ascend 920 series | Ascend 950 series |
+| :---: | :---: | :---: | :---: | :---: | :---: |
+| Ascend910A | Ascend310 | Ascend310B1 | Ascend610 | Ascend920A | Ascend950PR_950x |
+| Ascend910B | Ascend310P1 | Ascend310B2 | Ascend610Lite | - | Ascend950PR_950y |
+| Ascend910B1 | Ascend310P2 | Ascend310B3 | - | - | Ascend950PR_950z |
+| Ascend910B2 | Ascend310P3 | Ascend310B4 | - | - | Ascend950PR_9571 |
+| Ascend910B2C | Ascend310P4 | - | - | - | Ascend950PR_9572 |
+| Ascend910B3 | Ascend310P5 | - | - | - | Ascend950PR_9573 |
+| Ascend910B4 | Ascend310P7 | - | - | - | Ascend950PR_9574 |
+| Ascend910PremiumA | - | - | - | - | Ascend950PR_9575 |
+| Ascend910ProA | - | - | - | - | Ascend950PR_9576 |
+| Ascend910ProB | - | - | - | - | Ascend950PR_9577 |
+| Ascend910_9362 | - | - | - | - | Ascend950PR_9578 |
+| Ascend910_9372 | - | - | - | - | Ascend950PR_957b |
+| Ascend910_9381 | - | - | - | - | Ascend950PR_957c |
+| Ascend910_9382 | - | - | - | - | Ascend950PR_957d |
+| Ascend910_9391 | - | - | - | - | Ascend950PR_9581 |
+| Ascend910_9392 | - | - | - | - | Ascend950PR_9582 |
+| - | - | - | - | - | Ascend950PR_9583 |
+| - | - | - | - | - | Ascend950PR_9584 |
+| - | - | - | - | - | Ascend950PR_9585 |
+| - | - | - | - | - | Ascend950PR_9586 |
+| - | - | - | - | - | Ascend950PR_9587 |
+| - | - | - | - | - | Ascend950PR_9588 |
+| - | - | - | - | - | Ascend950PR_9589 |
+| - | - | - | - | - | Ascend950PR_958a |
+| - | - | - | - | - | Ascend950PR_958b |
+| - | - | - | - | - | Ascend950PR_9591 |
+| - | - | - | - | - | Ascend950PR_9592 |
+| - | - | - | - | - | Ascend950PR_9595 |
+| - | - | - | - | - | Ascend950PR_9596 |
+| - | - | - | - | - | Ascend950PR_9599 |
+| - | - | - | - | - | Ascend950PR_95A1 |
+| - | - | - | - | - | Ascend950PR_95A2 |
 
 The following two files save the obtained performance data:
 
@@ -102,14 +127,14 @@ To verify it took effect: the `[DEBUG] cmd_list:` line in the log should now inc
 
 The theoretical performance is the ideal objective of the actual performance of the operator. Different hardware platforms have different hardware specifications. Theoretical performance helps us understand the potential of hardware and set performance optimization objectives.
 
-- Theoretical time required for transfer-related pipelines (such as MTE1, MTE2, and MTE3) = Data volume (unit: byte)/Theoretical bandwidth. For example, if the peak GM bandwidth of an AI processor is about 1.8 TB/s, the theoretical time required for transferring a float-type matrix of size 4096 x 4096 is `sizeof(float) x 4096 x 4096/1.8 TB/s = 37.28 μs` (calculated based on 1 TB = 10<sup>12</sup> Byte).
+- Theoretical time required for transfer-related pipelines (such as MTE1, MTE2, and MTE3) = Data volume (unit: byte)/Theoretical bandwidth. For example, if the peak GM bandwidth of an AI processor is about 1.8 TB/s, the theoretical time required for transferring a float-type matrix of size 4096 x 4096 is `sizeof(float) x 4096 x 4096/1.8 TB/s = 37.28 μs` (calculated based on 1 TB = 10^12 Byte).
 
 > Note:
 >
 > - If multiple transfer instructions exist at the same time, the bandwidth is shared. Data cannot be moved at a rate close to the theoretical bandwidth. For example, if the MTE2 and MTE3 read and write the GM at the same time, the time consumed by the transfer pipeline is (MTE2 transfer volume + MTE3 transfer volume)/GM bandwidth.
 > - The bandwidth usage (effective bandwidth/theoretical bandwidth) varies according to the size of data blocks to be transferred. If the amount of data transferred each time is small, the actual performance cannot reach the theoretical bandwidth.
 >
-- Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32K float elements is 32K/11.06 TOPS = 0.003 μs (calculated based on 1K = 1000).
+- Theoretical time required for compute-related pipelines (such as Cube, Vector, and Scalar) = Data volume (unit: element)/Theoretical computing power. For example, if the theoretical peak computing power of a certain AI processor for float data type vectors is 11.06 TOPS, the theoretical time required for performing a single instruction computation of 32k float elements is 32k/11.06 TOPS = 3 ns (calculated based on 1k = 1000).
 
 <a id="locating-bottlenecks"></a>
 
@@ -122,8 +147,8 @@ View the **op_summary_\*.csv** file parsed by board profiling to analyze the pip
 ![analyse_data_op_summary](../figures/performance_analysis_analyse_data_op_summary.png)
 
     In ideal cases, the utilization rate of each pipeline should be 100%. Any pipeline falling short of this target represents room for improvement. The preceding figure shows the data obtained from an AI processor. In the first scenario of the Vector operator _layer_norm_fwd_fused, the Vector pipeline utilization **aiv_vec_ratio** is less than 10%, indicating that the computing power is not fully utilized. The Scalar pipeline utilization **aiv_scalar_ratio** is about 60%, indicating that Scalar is the longest pipeline. \
-    When Scalar is the longest pipeline, analyze whether complex operations are performed on scalar values in the operator source code. The SIMD microarchitecture of Ascend is more suitable for multi-data parallel computing. Another possibility is that the Triton software stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. Optimization should involve both pipeline and scalar optimization methods. For details, see method 3 to view the simulation pipeline diagram and method 4 to view the code hotspots for further analysis. \
-    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is `sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 0.055 μs` (calculated based on 1 TB = 10<sup>12</sup> Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
+    When Scalar is the longest pipeline, analyze whether complex operations are performed on scalar values in the operator source code. The SIMD microarchitecture of Ascend is more suitable for multi-data parallel computing. Another possibility is that the Triton stack degrades vector computing to scalar computing because some instructions do not support specific data types on the hardware. Optimization should involve both pipeline and scalar optimization methods. For details, see method 3 to view the simulation pipeline diagram and method 4 to view the code hotspots for further analysis. \
+    For more general cases such as MTE2 data transfer and actual scenarios: The shapes of the three input matrices are (128,128), (128,1), and (128,1), respectively, and the data type is float16. The current algorithm uses the two-pass method. Therefore, X is moved in for three times, and W and B are moved in for one time. The total amount of data to be transferred can be calculated accordingly. The theoretical value calculated based on the method described in the [Theoretical Parameters](#theoretical-parameters) section is `sizeof(float16) *(128* 128 * 3 + 128 + 128)/1.8 TB/s ≈ 55 ns` (calculated based on 1 TB = 10^12 Bytes), which is greatly different from the actual performance data aiv_mte2_time. Analysis shows the total input size is smaller than the Unified Buffer (UB) capacity (192 KB for the A2 model). Therefore, if the MTE2 time is excessive, the basic block obtained through tiling computation may be too small, triggering redundant transfer instructions. In this case, pipeline optimization and tiling optimization are required, you can refer to method 3 to view the simulation pipeline diagram and analyze each pipeline for further analysis.
 
 - Method 2: Use board profiling to analyze the tiling.
 The AI processor used in the previous example has 48 vector cores. The _layer_norm_fwd_fused operator is a pure vector operator. However, in some scenarios, too many blocks (Block Dim > 48) are delivered, causing excessive host scheduling overhead. In this case, the next step is to optimize the tiling.

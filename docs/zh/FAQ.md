@@ -6,13 +6,13 @@
 
 A: 可以直接使用pip 安装
 
-```Python
+```bash
 pip install triton-ascend
 ```
 
 **Q: 社区 Triton 和 Triton-Ascend 能否同时存在？**
 
-A: triton-ascend 3.2.0 及以下不可以。需要先卸载社区 Triton，再安装 Triton-Ascend。<br>
+A: triton-ascend 3.2.0 及以下不可以。需要先卸载社区 Triton，再安装 Triton-Ascend。
 triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。
 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
 x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。
@@ -20,7 +20,7 @@ x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.
 - 注：若安装triton-ascend后，再安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。
 此时需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。
 
-```Python
+```bash
 pip uninstall triton
 pip uninstall triton-ascend
 pip install triton-ascend
@@ -94,7 +94,7 @@ in_out_tensor = torch.randn(shape)
 func[grid](in_out_tensor, in_out_tensor)
 ```
 
-上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。
+上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法启用相关优化。
 
 **Q: 在 `if` / `for` / `while` / `scope` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**
 

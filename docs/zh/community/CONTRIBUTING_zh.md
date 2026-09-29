@@ -12,7 +12,7 @@
 <h2 id="入门.md">入门</h2>
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
-- 阅读[README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md)获取项目信息和构建开发环境。
+- 阅读[README_zh.md](https://github.com/triton-lang/triton-ascend/blob/main/README_zh.md)获取项目信息和构建开发环境。
 
 <h2 id="开发者来源认证.md">开发者来源认证（DCO）</h2>
 
@@ -42,7 +42,7 @@ git commit -s -m "your commit message"
 
 - 单元测试指南
 
-  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。测试用例的设计请参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/custom_op/test_gather_load.py)，[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)
+  请使用Triton Ascend社区统一的单元测试风格，python建议的单元测试风格是[pytest](http://www.pytest.org/en/latest/)，C++建议的单元测试风格是[Googletest Primer](https://github.com/google/googletest/blob/main/docs/primer.md)。测试用例的设计意图应该通过它的注释名称来反映。Python 侧测试用例设计可参考[gather测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/unittest/pytest_ut/test_gather.py)、[layer_norm测试用例](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/tutorials/05-layer-norm.py)；编译器/MLIR 转换（C++ 后端）的测试用例可参考 [lit MLIR 测试目录](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/Conversion) 下的示例。
 
 - 重构指南
 
@@ -140,7 +140,7 @@ git push origin {your_new_branch_name}
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上提出您的想法作为问题。
 - 如果要开发的新功能需要大量设计细节，您还应提交设计方案。
 - 在问题讨论和设计方案审查达成共识后，再进行fork开发并提交PR。
-- 在从Approver那里收到2+LGTM（Looks Good To Me）前不允许任何PR 。请注意审批人不允许在自己的PR上添加LGTM。
+- 在从Approver那里收到2+LGTM（Looks Good To Me）前不允许合并任何PR。请注意审批人不允许在自己的PR上添加LGTM。
 - 在PR被充分讨论后，将根据讨论结果对PR进行合并、拒绝或放弃。
 
 ## 注意事项

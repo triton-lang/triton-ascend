@@ -498,7 +498,7 @@ It can be used together with TRITON_LLVM_DEBUG_ONLY to limit the output scope.
 
 When `TRITON_ENABLE_LLVM_DEBUG=1` is enabled, you can use the `TRITON_LLVM_DEBUG_ONLY` environment variable to specify the module for which the logs will be output. The following is a brief description of the common `DEBUG_TYPE`:
 
-```bash
+```text
 ## `isel` (Instruction Selection)
 - **Function**: Converts LLVM IR instructions into machine instructions (MachineInstr) of the target architecture.
 - **Debugging content**: Displays the mapping process and pattern matching result between IR and machine instructions.

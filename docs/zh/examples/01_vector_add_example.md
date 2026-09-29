@@ -8,7 +8,7 @@
 
 计算内核:
 
-```bash
+```python
 import torch
 import torch_npu
 
@@ -46,7 +46,7 @@ def add_kernel(x_ptr,  # 指向第一个输入向量的指针。
 - 生成 z 张量；
 - 用适当的 grid/block sizes 将上述内核加入队列。
 
-```Python
+```python
 def add(x: torch.Tensor, y: torch.Tensor):
     # 需要预分配输出。
     z = torch.empty_like(x)
@@ -66,7 +66,7 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 使用上述函数计算两个 `torch.tensor` 对象的 element-wise sum，并测试其正确性：
 
-```Python
+```python
 torch.manual_seed(0)
 size = 98432
 x = torch.rand(size, device='npu')
@@ -79,9 +79,9 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(output_torch - output_triton))}')
 ```
 
-Out:
+输出结果
 
-```bash
+```text
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0

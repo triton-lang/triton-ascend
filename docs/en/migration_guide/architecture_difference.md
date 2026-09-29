@@ -1,4 +1,4 @@
-# Development Differences Between Ascend and GPUs
+# Architecture Differences
 
 This article systematically outlines the differences between the two platforms regarding core architecture, programming rules, and optimization techniques. It breaks down the specific development features and adaptation requirements for Ascend NPU Triton, helping developers quickly adopt the appropriate development mindset, accurately execute operator migration, code adaptation, and performance tuning, and avoid common migration pitfalls.
 
@@ -27,7 +27,7 @@ By optimizing the number of cores, you can fully schedule and utilize all comput
 
 ### Auto-Blockify: lifting the 65,535 logical-block limit
 
-Upstream Triton on NVIDIA GPUs treats the grid as a pure logical dimension — `n` logical blocks map 1:1 to `n` hardware blocks, and the runtime expands the work across SMs without any per-block iteration. On Ascend, the strict physical-core binding above caps the launchable grid at 65,535, which is restrictive for kernels with millions of logical work items (autotuned reduce/scan, megablocks-style sparse kernels, etc.).
+Upstream Triton on NVIDIA GPUs treats the grid as a pure logical dimension — `n` logical blocks map 1:1 to `n` hardware blocks, and the runtime expands the work across SMs without any per-block iteration. On Ascend, the strict physical-core binding described in [Multi-Core Task Parallelism Strategy](#multi-core-task-parallelism-strategy) caps the launchable grid at 65,535, which is restrictive for kernels with millions of logical work items (autotuned reduce/scan, megablocks-style sparse kernels, etc.).
 
 `auto-blockify` (the `SIMTAutoBlockify` compiler pass plus a matching runtime cap) removes that limit by treating the grid as logical at compile time and folding it onto the physical cores at launch:
 
@@ -102,10 +102,9 @@ def triton_easy_kernel(in_ptr0, out_ptr0, NUMEL: tl.constexpr):
     tl.store(out_ptr0 + idx_block, ret)
 
 # Call the triton_kernel function.
-ncore = 32
 x0 = torch.rand(32768, device='npu')
 out1 = torch.empty_like(x0)
-triton_easy_kernel[ncore, 1, 1](x0, out1, x0.numel())
+triton_easy_kernel[1, 1, 1](x0, out1, x0.numel())
 
 ```
 

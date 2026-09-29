@@ -1,10 +1,10 @@
 # Layer Normalization
 
-In this section, you will use Triton to write a high-performance layer normalization kernel that runs faster than the PyTorch implementation.
+In this section, you will use Triton to write a high-performance layer normalization (Layer Normalization) kernel. By fusing the mean, variance computation, and normalization into a single kernel, the number of global memory reads and writes is reduced, which can achieve better performance than the PyTorch operation-by-operation implementation.
 
 ## Compute Kernel
 
-```Python
+```python
 import pytest
 import torch
 import triton
@@ -63,7 +63,7 @@ def _layer_norm_fwd_fused(
 
 LayerNorm Implementation Defined by Using Triton
 
-```Python
+```python
 @torch.inference_mode()
 def layer_norm(x, weight, bias, eps=1e-5):
     # Allocate the output tensor with the same shape and data type as the input.
@@ -112,9 +112,9 @@ if __name__ == '__main__':
     _layer_norm(128, 128, torch.float32)
 ```
 
-Result
+Output
 
-```bash
+```text
 y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],
         [ 1.0908,  1.5391,  0.2269,  ...,  1.6846,  1.0996,  0.9614],
         [-0.2974,  0.5918,  0.3225,  ...,  2.2891, -0.8418,  0.6885],

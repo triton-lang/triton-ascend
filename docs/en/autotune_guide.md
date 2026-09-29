@@ -75,6 +75,10 @@ def test_add(size: int):
     output_triton = add_autotune(x, y)
     assert torch.allclose(output_triton, output_torch)
     print(f"Vector Add {size} PASSED!")
+    triton_us = do_bench_npu(lambda: add_autotune(x, y))
+    torch_us = do_bench_npu(lambda: add_torch(x, y))
+    print(f"Triton kernel execution time: {triton_us:.4f} ms")
+    print(f"PyTorch kernel execution time: {torch_us:.4f} ms")
 
 
 if __name__ == "__main__":
@@ -327,6 +331,7 @@ def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
     ...
 
 
+grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * meta["GROUP_SIZE_M"], triton.cdiv(N, meta["BLOCK_N"]))
 matmul_kernel[grid](a, b, M, N, K)
 ```
 

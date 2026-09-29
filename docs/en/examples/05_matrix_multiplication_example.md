@@ -4,10 +4,10 @@ This section describes how to implement a matrix multiplication kernel using Tri
 
 ## Compute Kernel
 
-The following Triton kernel implements batched matrix multiplication with bias:
+The following Triton kernel implements matrix multiplication with bias:
 The formula is as follows:
 
-$$ \mathrm{output}[b, i, j] = \sum_{k} x[b, i, k] \cdot y[k, j] + z[b, i, j] $$
+$$ \mathrm{output}[i, j] = \sum_{k} x[i, k] \cdot y[k, j] + z[i, j] $$
 
 Specifically:
 
@@ -67,7 +67,7 @@ def triton_dot_2_Bias(
 
 The following helper functions are used to support the testing and verification of Triton kernels, including PyTorch reference implementation, data type mapping, random tensor generation, and result verification.
 
-```Python
+```python
 def torch_dot_Bias(x0, x1, bias):
     """PyTorch reference implementation: Perform matrix multiplication and add the bias."""
     res = torch.matmul(x0, x1) + bias
@@ -176,7 +176,7 @@ if __name__ == "__main__":
 
 **Output example:**
 
-```python
+```text
 Test matmul with dtype=float16, shape=(16,16,16) PASSED!
 ```
 

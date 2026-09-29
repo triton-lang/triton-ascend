@@ -8,7 +8,7 @@ In this process, you will learn:
 
 ## Using Native PyTorch to Perform Softmax Operation on X Row by Row
 
-```Python
+```python
 import torch
 import torch_npu
 
@@ -36,7 +36,7 @@ def naive_softmax(x):
 Purpose of kernel fusion
 
 When implemented naively in PyTorch, computing `y = naive_softmax(x)` requires reading 5 × *MN* + 2 × *M* elements from DRAM and writing back 3 *MN* + 2 *M* elements. Obviously, this is very inefficient. A more efficient solution is to use a custom "fused" kernel that reads `x` only once and completes all necessary computations on the chip.
-Doing so requires reading and writing back only 2 × *MN* bytes. Therefore, the theoretical speedup ratio is about 4 times, that is, (8 × *MN* + 4 × *M*) / (2 × *MN*).
+Doing so requires reading and writing back only 2 × *MN* elements. Therefore, the theoretical speedup ratio is about 4 times, that is, (8 × *MN* + 4 × *M*) / (2 × *MN*).
 
 `torch.jit.script` is designed to automatically perform this kind of "kernel fusion", but it is still far from ideal.
 
@@ -45,7 +45,7 @@ Doing so requires reading and writing back only 2 × *MN* bytes. Therefore, the 
 The softmax kernel works as follows: Each compute unit (program) loads a group of data rows of the input matrix **X** stridden by number of programs, normalizes it, and writes back the result to the output matrix **Y**.
 Note: A significant limitation of Triton is that each block must have a power-of-two number of elements. Therefore, to handle any possible input shapes, internally "pad" each row and ensure the correctness of memory operations.
 
-```Python
+```python
 @triton.jit
 def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n_rows, n_cols, BLOCK_SIZE: tl.constexpr):
     # Program start row
@@ -75,7 +75,7 @@ def softmax_kernel(output_ptr, input_ptr, input_row_stride, output_row_stride, n
 
 Create a helper function. This function can add the kernel function and its meta-parameters to the execution queue to process any given input tensor.
 
-```Python
+```python
 kernels = {}
 
 def softmax(x):
@@ -111,7 +111,7 @@ def softmax(x):
 
 The processed kernel needs to be tested on a matrix with irregular numbers of rows and columns. This can verify that the padding mechanism works.
 
-```Python
+```python
 torch.manual_seed(0)
 x = torch.randn(1823, 781, device='npu')
 y_triton = softmax(x)
@@ -123,9 +123,9 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(y_triton-y_torch))}')
 ```
 
-Output:
+Output
 
-```bash
+```text
 tensor([[0.0002, 0.0017, 0.0009,  ..., 0.0009, 0.0013, 0.0073],
         [0.0001, 0.0004, 0.0006,  ..., 0.0006, 0.0004, 0.0003],
         [0.0007, 0.0002, 0.0006,  ..., 0.0011, 0.0004, 0.0039],

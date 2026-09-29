@@ -40,13 +40,34 @@ print(f"Kernel execution time: {ms} ms")
 - `fn` 的语义与社区 `do_bench` 相同，代表要进行基准测试的可调用函数；
 - `do_bench_npu` 在 Triton-Ascend 上的意思是“让 NPU 性能分析工具捕获纯 Device 侧 kernel 执行时间”，从而有效消除 Host 侧开销对测量的影响。
 
+## 参数说明
+
+`do_bench_npu` 的完整参数列表如下（基于源码 `third_party/ascend/backend/testing.py`）：
+
+| 参数名 | 类型 | 默认值 | 说明 |
+|:---|:---|:---|:---|
+| `fn` | Callable 或 List[Callable] | （必填） | 待基准测试的可调用函数或函数列表。传入列表时返回对应的时间列表。 |
+| `warmup` | int | 5 | 预热迭代次数。在实际计时前运行 `fn` 的次数，用于稳定性能。 |
+| `active` | int | 30 | 实际计时的迭代次数。最终结果为这些迭代耗时的平均值。 |
+| `clear_l2_cache` | bool | False | 是否在每次 `fn` 执行前清除 L2 缓存。用于测量最坏情况性能或模拟冷启动场景。 |
+| `prof_dir` | str | None | profiler 结果保存目录。设为非 None 时强制使用 `torch_npu.profiler` 路径。 |
+| `keep_res` | bool | False | 是否保留原始 profiler 输出文件（如 CSV）。设为 True 时强制使用 `torch_npu.profiler` 路径。 |
+| `target_kernel_name` | str | None | 指定要测量的 NPU kernel 名称。设为非 None 时仅测量该 kernel 的执行时间，并强制使用 `torch_npu.profiler` 路径。 |
+
 ## 前提条件
 
 ### 1. 理解 Host 侧和 Device 侧计时的区别
 
-社区 `triton.testing.do_bench` 使用`Event`来测量时间，记录的开始和结束时间会包含 Host 侧启动开销。
+在 NPU 性能基准测试中，理解 Host 侧与 Device 侧计时的区别至关重要：
 
-`do_bench_npu` 利用 NPU 性能分析工具（`MSPTI` 或 `torch_npu.profiler`）,保证返回的时间严格是 Device 侧执行时间。
+- **Host 侧（CPU 侧）**：Python 代码运行和 kernel 启动下发所在的一侧。Host 侧计时会包含 kernel 启动开销、Python 调用开销、驱动层开销等与 kernel 本身计算无关的时间。
+- **Device 侧（NPU 硬件侧）**：kernel 实际在 NPU 硬件上执行计算的一侧。Device 侧计时仅测量 kernel 在硬件上的纯执行时间，不包含 Host 侧的启动和下发开销。
+
+社区 `triton.testing.do_bench` 使用 `Event` 来测量时间，记录的开始和结束时间会包含 Host 侧启动开销。
+
+`do_bench_npu` 利用 NPU 性能分析工具（`MSPTI` 或 `torch_npu.profiler`），保证返回的时间严格是 Device 侧执行时间。
+
+**为什么这很重要**：对于执行时间很短的 kernel，Host 侧的启动开销可能远大于 kernel 本身的执行时间，此时 Host 侧计时会被开销主导，难以准确比较不同 kernel 的真实性能差异。使用 Device 侧计时可以消除这一干扰，获得反映 kernel 真实计算效率的测量结果。
 
 ### 2. 快速路径（`mspti`）的环境要求
 

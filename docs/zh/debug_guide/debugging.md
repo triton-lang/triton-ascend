@@ -497,7 +497,7 @@ python your_triton_script.py
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
-```bash
+```text
 ## `isel`（Instruction Selection）
 - **作用**：将 LLVM IR 指令转换为目标架构的机器指令（MachineInstr）。
 - **调试内容**：显示 IR → 机器指令的映射过程、模式匹配结果。

@@ -8,7 +8,7 @@
 
 The following example demonstrates using `max_autotune` to autotune a simple vector addition kernel. Compared to the community version `autotune`, `max_autotune` also automatically includes different compiler options in the tuning space, without requiring users to manually specify them.
 
-```Python
+```python
 import torch
 import torch_npu
 import triton
@@ -72,9 +72,11 @@ if __name__ == "__main__":
 
 ## Advanced Usage: Precise Control of Tuning Parameters
 
-Users can explicitly specify compiler options to be tuned and their value lists through **tuning_params**; unspecified parameters will use built-in default values. The following example demonstrates how to perform combined search on multiple parameters.
+Users can explicitly specify the compiler options to be tuned and their value lists by passing parameters such as `num_stages` directly to the decorator; unspecified parameters will use built-in default values. The following example demonstrates how to perform combined search on multiple parameters.
 
 ```python
+import triton
+import triton.language as tl
 from triton.backends.ascend.runtime import max_autotune
 
 def test_max_autotune():

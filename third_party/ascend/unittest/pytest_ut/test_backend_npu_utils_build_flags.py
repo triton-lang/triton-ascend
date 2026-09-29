@@ -1,9 +1,12 @@
 import builtins
+import hashlib
 import importlib.util
 import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 
 DEFAULT_UTILS_PATH = (
@@ -168,37 +171,117 @@ def test_get_cc_cmd_npu_utils_resolves_torch_npu_path_without_import(
     assert "torch_npu" not in sys.modules
 
 
-def test_npu_utils_build_rechecks_cache_after_lock(monkeypatch, tmp_path):
+def test_npu_utils_initialization_refreshes_build_path_without_loading(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    producer_cache = tmp_path / "producer"
+    consumer_cache = tmp_path / "consumer"
+    build_calls = []
+
+    def fake_build(npu_utils):
+        cache_root = os.environ["TRITON_CACHE_DIR"]
+        build_calls.append((npu_utils, cache_root))
+        return str(Path(cache_root) / "npu_utils.so")
+
+    monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", fake_build)
+
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(producer_cache))
+    npu_utils = driver.NPUUtils()
+    assert npu_utils._cache_path == str(producer_cache / "npu_utils.so")
+    assert npu_utils.npu_utils_mod is None
+
+    monkeypatch.setenv("TRITON_CACHE_DIR", str(consumer_cache))
+    assert driver.NPUUtils() is npu_utils
+    assert npu_utils._cache_path == str(consumer_cache / "npu_utils.so")
+    assert npu_utils.npu_utils_mod is None
+    assert build_calls == [
+        (npu_utils, str(producer_cache)),
+        (npu_utils, str(consumer_cache)),
+    ]
+
+
+def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, tmp_path):
     driver = _load_driver_module()
     cache_dir = tmp_path / "cache"
     cache_dir.mkdir()
     cached_so = cache_dir / "npu_utils.so"
-    cached_so.write_bytes(b"cached")
+    built_so = tmp_path / "built_npu_utils.so"
+    built_so.write_bytes(b"built")
 
     class FakeCache:
-        lock_path = str(cache_dir / "lock")
-
         def __init__(self):
             self.get_file_calls = 0
+            self.put_calls = 0
 
         def get_file(self, filename):
             self.get_file_calls += 1
-            if self.get_file_calls == 1:
-                return None
-            return str(cached_so)
+            return None
 
         def put(self, data, filename, binary=True):
-            raise AssertionError("unexpected cache put")
+            self.put_calls += 1
+            assert data == b"built"
+            assert filename == "npu_utils.so"
+            assert binary is True
+            cached_so.write_bytes(data)
+            return str(cached_so)
 
     fake_cache = FakeCache()
+    monkeypatch.setattr(driver, "get_cann_version", lambda: (9, 1, 0))
+    monkeypatch.setattr(driver.importlib.metadata, "version", lambda name: "2.7.1")
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: fake_cache)
-    monkeypatch.setattr(
-        driver,
-        "_build_npu_ext",
-        lambda *args, **kwargs: (_ for _ in ()).throw(
-            AssertionError("unexpected npu_utils build")
-        ),
-    )
+    monkeypatch.setattr(driver, "_build_npu_ext", lambda *args, **kwargs: str(built_so))
 
-    assert driver.NPUUtils()._build_or_get_cached_so() == str(cached_so)
-    assert fake_cache.get_file_calls == 2
+    npu_utils = driver.NPUUtils()
+
+    assert npu_utils._cache_path == str(cached_so)
+    assert npu_utils.npu_utils_mod is None
+    assert cached_so.read_bytes() == b"built"
+    assert fake_cache.get_file_calls == 1
+    assert fake_cache.put_calls == 1
+
+
+def test_npu_utils_cache_key_uses_cann_torch_npu_version_and_source(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    _guard_torch_npu_import(monkeypatch)
+    cached_so = tmp_path / "npu_utils.so"
+    cached_so.write_bytes(b"cached")
+    captured_keys = []
+    version_calls = []
+
+    class FakeCache:
+        def get_file(self, filename):
+            assert filename == "npu_utils.so"
+            return str(cached_so)
+
+    monkeypatch.setattr(driver, "get_cann_version", lambda: (9, 1, 0))
+    monkeypatch.setattr(
+        driver.importlib.metadata,
+        "version",
+        lambda name: version_calls.append(name) or "2.7.1.post8",
+    )
+    monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
+
+    npu_utils = driver.NPUUtils()
+    source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()
+    expected_key = hashlib.md5("\0".join(["9.1.0", "2.7.1.post8", source]).encode("utf-8")).hexdigest()
+
+    assert npu_utils.get_so_path() == str(cached_so)
+    assert version_calls == ["torch_npu"]
+    assert captured_keys == [expected_key]
+    assert "torch_npu" not in sys.modules
+
+
+def test_npu_utils_load_binary_requires_explicit_mix_mode(monkeypatch, tmp_path):
+    driver = _load_driver_module()
+    cached_so = tmp_path / "npu_utils.so"
+    monkeypatch.setattr(driver.NPUUtils, "_build_or_get_cached_so", lambda self: str(cached_so))
+
+    calls = []
+    expected = ("module", "function", 0, 0, 1)
+    fake_mod = SimpleNamespace(load_kernel_binary=lambda *args: calls.append(args) or expected)
+    npu_utils = driver.NPUUtils()
+    monkeypatch.setattr(npu_utils, "_load_mod", lambda: fake_mod)
+
+    assert npu_utils.load_binary("vector_add_kernel", b"kernel", 1, 0, "aiv") == expected
+    assert calls == [("vector_add_kernel", b"kernel", 1, 0, "aiv")]
+    with pytest.raises(TypeError, match="missing 1 required positional argument: 'mix_mode'"):
+        npu_utils.load_binary("vector_add_kernel", b"kernel", 1, 0)

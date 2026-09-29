@@ -35,19 +35,19 @@ def debug_barrier_basic(A, B, C, BLOCK_SIZE: tl.constexpr):
     pid = tl.program_id(0)
     offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
 
-    # 阶段1：加载数据
+    # Phase 1: Load data
     a = tl.load(A + offsets)
 
-    # 插入调试屏障，确保所有线程都完成了数据加载
+    # Insert a debug barrier to ensure all threads have finished loading data
     tl.debug_barrier()
 
-    # 阶段2：处理数据
+    # Phase 2: Process data
     b = a * 2
 
-    # 再次插入屏障，确保所有线程都完成了计算
+    # Insert a barrier again to ensure all threads have finished computing
     tl.debug_barrier()
 
-    # 阶段3：存储结果
+    # Phase 3: Store the result
     tl.store(C + offsets, b)
 ```
 

@@ -25,7 +25,7 @@ def triton_kernel(input, output, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr)
 dtype, shape, ncore, xblock, xblock_sub = ['int32', (128, 4096), 512, 1024, 1024]
 input = torch.randn(shape, dtype=eval('torch.' + dtype)).npu()
 output = torch.zeros_like(input)
-# 使用 compile_mode='simt_only' 启用纯 SIMT 编译
+# Use compile_mode='simt_only' to enable pure SIMT compilation
 triton_kernel[ncore, 1, 1](input, output, xblock, xblock_sub, compile_mode='simt_only')
 ```
 

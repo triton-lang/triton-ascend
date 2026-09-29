@@ -59,18 +59,18 @@ import triton.language as tl
 
 @triton.jit
 def reshape_example(out_ptr):
-    # 创建2x3x4的张量
+    # Create a 2x3x4 tensor
     x = tl.zeros([2, 3, 4], dtype=tl.float32)
 
-    # reshape为6x4
+    # Reshape to 6x4
     y = tl.reshape(x, [6, 4])
 
-    # 将结果写回外部张量
+    # Write the result back to the external tensor
     offs = tl.arange(0, 6)[:, None] * 4 + tl.arange(0, 4)[None, :]
     tl.store(out_ptr + offs, y)
 
-## 调用示例
+## Invocation example
 out = torch.empty((6, 4), dtype=torch.float32, device="npu")
 reshape_example[(1,)](out)
-print(out.shape)  # 输出: torch.Size([6, 4])
+print(out.shape)  # Output: torch.Size([6, 4])
 ```

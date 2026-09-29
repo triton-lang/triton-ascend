@@ -71,10 +71,10 @@ print(f"Kernel execution time: {ms} ms")
 您可以传入单个可调用对象，也可以传入可调用对象的列表：
 
 ```python
-# 单个函数: 返回浮点数
+# Single function: returns a float
 time_ms = do_bench_npu(fn_A)
 
-# 多个函数: 返回浮点数列表
+# Multiple functions: returns a list of floats
 times_ms = do_bench_npu([fn_A, fn_B, fn_C])
 ```
 

@@ -5,10 +5,10 @@
 简介：计算两个元素的或运算。
 
 ```python
-# 通过操作符
+# Via the operator
 x | y
 
-# 或直接调用 dunder 方法
+# Or call the dunder method directly
 x.__or__(y)
 ```
 

@@ -39,16 +39,16 @@ Ascend 对比 GPU 缺失uint8、uint16、uint32、uint64、fp64的支持能力�
 ```python
 @triton.jit
 def optimized_kernel(x_ptr, y_ptr, BLOCK_SIZE: tl.constexpr):
-    # 使用static_range进行小规模循环展开，消除循环开销
+    # Use static_range for small-scale loop unrolling to eliminate loop overhead
     for i in tl.static_range(BLOCK_SIZE):
-        # 当BLOCK_SIZE是编译时常量时，整个循环会被展开
+        # When BLOCK_SIZE is a compile-time constant, the entire loop will be unrolled
         x = tl.load(x_ptr + i)
         y = x * x
         tl.store(y_ptr + i, y)
 
-    # 对比：使用range会有循环控制开销
+    # Comparison: using range incurs loop control overhead
     for i in tl.range(BLOCK_SIZE):
-        # 这个循环在运行时会有循环控制逻辑
+        # This loop has loop control logic at runtime
         x = tl.load(x_ptr + i)
         y = x * x
         tl.store(y_ptr + i, y)

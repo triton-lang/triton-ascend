@@ -144,7 +144,7 @@ pip install -e .
 **镜像使用**
 
 ```bash
-# 以 `3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11` 为例
+# Take `3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11` as an example
 docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
@@ -167,7 +167,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 \
 /bin/bash
 
-# 镜像已安装运行算子所需的基础组件（CANN、TorchNPU、Triton-Ascend等），可直接运行样例
+# The image already contains the basic components required to run the operators (CANN, TorchNPU, Triton-Ascend, etc.), so the samples can be run directly
 docker exec -u root -it triton-ascend_container /bin/bash
 ```
 
@@ -180,11 +180,11 @@ docker exec -u root -it triton-ascend_container /bin/bash
 运行tutorials中向量加法示例验证安装**Triton-Ascend**结果。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
 
 ```bash
-# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
+# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（使用源码安装Triton-Ascend的无需重复拉取）
+# Clone the triton-ascend source repository and examples (no need to clone again if you installed Triton-Ascend from source)
 git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials示例
+# Run the tutorials example
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```
 
@@ -201,11 +201,11 @@ The maximum difference between torch and triton is 0.0
 源码仓中提供了单op测试用例，位于`third_party/ascend/unittest/pytest_ut`目录下。
 
 ```bash
-# 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
+# Set the CANN environment variables (using the root user's default installation path `/usr/local/Ascend` as an example)
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 安装pytest工具，如果有则跳过这一步
+# Install pytest (skip this step if it is already installed)
 pip install pytest pytest-xdist
-# 运行单个测试用例（以向量加法测试用例为例）
+# Run a single test case (the vector addition test case is used as an example)
 python -m pytest third_party/ascend/unittest/pytest_ut/test_add.py
 ```
 
@@ -219,13 +219,13 @@ third_party/ascend/unittest/pytest_ut/test_add.py ......
 如需运行全部测试用例以及打印测试过程信息，可参考以下相关命令：
 
 ```bash
-# 串行运行全部用例
+# Run all test cases serially
 python -m pytest third_party/ascend/unittest/pytest_ut
 
-# 并行运行全部用例，加速测试（需安装pytest-xdist）
+# Run all test cases in parallel to speed up the tests (requires pytest-xdist)
 python -m pytest -n 8 third_party/ascend/unittest/pytest_ut
 
-# 打印测试过程详细信息
+# Print detailed test progress information
 python -m pytest -sv -n 8 third_party/ascend/unittest/pytest_ut
 ```
 

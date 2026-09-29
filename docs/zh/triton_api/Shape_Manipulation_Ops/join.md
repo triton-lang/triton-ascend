@@ -59,14 +59,14 @@ import triton.language as tl
 
 @triton.jit
 def join_example(out_ptr):
-    # 创建两个2x3的张量
+    # Create two 2x3 tensors
     x = tl.zeros([2, 3], dtype=tl.float32)
     y = tl.full([2, 3], 1.0, dtype=tl.float32)
 
-    # 连接，变成2x2x3
+    # Join them, turning into 2x2x3
     z = tl.join(x, y)
 
-    # 将结果写回外部张量
+    # Write the result back to the external tensor
     offs = (
         tl.arange(0, 2)[:, None, None] * (2 * 3)
         + tl.arange(0, 2)[None, :, None] * 3
@@ -74,8 +74,8 @@ def join_example(out_ptr):
     )
     tl.store(out_ptr + offs, z)
 
-## 调用示例
+## Invocation example
 out = torch.empty((2, 2, 3), dtype=torch.float32, device="npu")
 join_example[(1,)](out)
-print(out.shape)  # 输出: torch.Size([2, 2, 3])
+print(out.shape)  # Output: torch.Size([2, 2, 3])
 ```

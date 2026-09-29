@@ -47,9 +47,34 @@ myst_fence_as_directive = ['mermaid']
 myst_enable_extensions = ['dollarmath']
 myst_dollar_math = True
 
-# Suppress duplicate autosectionlabel warnings caused by subdirectory
-# index.md headings sharing names with category headings in main index.md.
-suppress_warnings = ["autosectionlabel"]
+# Mock imports for modules that aren't available in the build environment
+autodoc_mock_imports = [
+    'triton',
+    'triton_ascend',
+    'torch',
+    'buffer',
+]
+
+# Community documents whose English build renders the canonical English document
+# instead of the machine-translated output.
+# Mapping: docname (relative to docs/zh/, without extension) -> path relative to
+# the repository root. The first four entries live in the repository root, the
+# last two in the English docs tree.
+# All of them are intentionally NOT translated by translate_md.py
+# (see EXCLUDED_FILE_STEMS there).
+_COMMUNITY_ROOT_DOCS = {
+    "community/CODE_OF_CONDUCT_zh": "CODE_OF_CONDUCT.md",
+    "community/CONTRIBUTING_zh": "CONTRIBUTING.md",
+    "community/GOVERNANCE_zh": "GOVERNANCE.md",
+    "community/SECURITYNOTE_zh": "SECURITYNOTE.md",
+    "community/community_technical_meeting": "docs/en/community/community_technical_meeting.md",
+    "community/roadmap_guide": "docs/en/community/roadmap_guide.md",
+}
+
+_EN_REPLACEMENTS = {
+    "python-api/triton.language.rst": "sources/python-api/triton.language", "python-api/triton.testing.rst":
+    "sources/python-api/triton.testing", "python-api/triton.rst": "sources/python-api/triton"
+}
 
 # Suppress duplicate autosectionlabel warnings caused by subdirectory
 # index.md headings sharing names with category headings in main index.md.
@@ -72,11 +97,81 @@ else:
 _is_zh = _build_lang in ('zh-cn', 'zh') or _build_lang.startswith('zh-')
 language = 'zh_CN' if _is_zh else 'en'
 
+gettext_compact = False
+# Extract code blocks (literal blocks) as translatable units so that Chinese
+# comments inside code blocks are also translated (not skipped).
+gettext_additional_targets = ['literal-block', 'raw', 'image']
+if not _is_zh:
+    locale_dirs = ['../locale/']
+    # English build uses gettext .po translations from locale/en/LC_MESSAGES/
+    autosummary_generate = True
+    # Enable mock stubs for triton C extensions during English build
+    _sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "python"))
+
+    def _load_module(module_name, file_path):
+        import importlib.util as _ilu
+        spec = _ilu.spec_from_file_location(module_name, file_path)
+        if spec is None or spec.loader is None:
+            raise ImportError(f"cannot load {module_name!r} from {file_path!r}")
+        module = _ilu.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    _force_mock = (os.environ.get("TRITON_DOCS_FORCE_MOCK", "").lower() in ("1", "true", "yes")
+                   or os.environ.get("READTHEDOCS") == "True")
+    if not _force_mock:
+        try:
+            import triton  # noqa: F401,E402
+        except Exception as _exc:
+            print(f"import triton failed ({_exc!r}); building docs with mock stubs")
+            _force_mock = True
+
+    if _force_mock:
+        _mock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_mock", "_triton_mock.py")
+        _load_module("docs.zh._mock._triton_mock", _mock_path).install()
+
+    import triton  # noqa: E402
+    import triton.language.extra as _tl_extra  # noqa: E402
+
+    _cann_lang_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "third_party", "ascend",
+                                   "language")
+    if _cann_lang_path not in _tl_extra.__path__:
+        _tl_extra.__path__.append(_cann_lang_path)
+
+    import sphinx.ext.autosummary  # noqa: E402
+    import sphinx.util.inspect  # noqa: E402
+
+    def _unwrap_jit(fn):
+
+        def wrapper(obj, **kwargs):
+            if isinstance(obj, triton.runtime.JITFunction):
+                obj = obj.fn
+            return fn(obj, **kwargs)
+
+        return wrapper
+
+    if hasattr(sphinx.ext.autosummary, "get_documenter"):
+        _orig_get_documenter = sphinx.ext.autosummary.get_documenter
+
+        def _get_documenter(app, obj, parent):
+            if isinstance(obj, triton.runtime.JITFunction):
+                obj = obj.fn
+            return _orig_get_documenter(app, obj, parent)
+
+        sphinx.ext.autosummary.get_documenter = _get_documenter
+
+    sphinx.util.inspect.unwrap_all = _unwrap_jit(sphinx.util.inspect.unwrap_all)
+    sphinx.util.inspect.signature = _unwrap_jit(sphinx.util.inspect.signature)
+    sphinx.util.inspect.object_description = _unwrap_jit(sphinx.util.inspect.object_description)
+
+    def _setup_en(app):
+        _load_module(
+            "docs.zh.python_api._inject_ascend_notes",
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "python-api", "_inject_ascend_notes.py"),
+        ).setup(app)
+
+
 exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
-if _is_zh:
-    exclude_patterns.extend(['../en'])
-else:
-    exclude_patterns.extend(['../zh'])
 
 # python-api RST files require triton import; mock it at build time.
 autodoc_mock_imports = ['triton']
@@ -201,20 +296,38 @@ html_theme_options = {
 }
 
 
+def _on_source_read(app, docname, source):
+    """Replace community docs with their canonical English source (English build).
+
+    During the English build the community documents listed in
+    ``_COMMUNITY_ROOT_DOCS`` are excluded from gettext translation, so no .po
+    files exist for them. This hook reads the canonical English file (repository
+    root, or the English docs tree) and swaps it in before Sphinx parses the
+    source.
+    """
+    if _is_zh:
+        return
+    en_file = _COMMUNITY_ROOT_DOCS.get(docname)
+    if en_file is None:
+        return
+    en_path = os.path.join(_REPO, en_file)
+    try:
+        with open(en_path, encoding='utf-8') as f:
+            source[0] = f.read()
+    except OSError as e:
+        print(f"Warning: could not read English community doc {en_path}: {e}")
+
+
 def setup(app):
-    """Register Pygments lexers and Ascend notes extension."""
+    """Chinese build setup."""
     from sphinx.highlighting import lexers
     from pygments.lexers import get_lexer_by_name
 
     lexers['mlir'] = get_lexer_by_name('text')
     lexers['plaintext'] = get_lexer_by_name('text')
     app.add_css_file('custom.css')
-
-    _load_module(
-        "docs.zh.python_api._inject_ascend_notes",
-        os.path.join(_HERE, "python-api", "_inject_ascend_notes.py"),
-    ).setup(app)
-
+    if not _is_zh:
+        app.connect('source-read', _on_source_read)
     return {'version': '0.1', 'parallel_read_safe': True}
 
 

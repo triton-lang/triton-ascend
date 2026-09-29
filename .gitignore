@@ -93,3 +93,11 @@ docs/sg_execution_times.rst
 
 # macOS
 .DS_Store
+
+# Docs gettext intermediates (translation pipeline output, never committed)
+docs/locale/.doctrees/
+docs/locale/zh/
+# Legacy root-level gettext output directory. Keep the leading slash: a bare
+# `locale/` would also match docs/locale/ and make `git add` refuse the
+# generated docs/locale/en/LC_MESSAGES/*.po files.
+/locale/

@@ -55,8 +55,8 @@ def kernel_rand(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.const
     block_size = XBLOCK if block_offset + XBLOCK <= N else N - block_offset
     for inner_idx in range(block_size):
         global_offset = block_offset + inner_idx
-        rand_vals = tl.rand(5, 10 + global_offset, n_rounds) # 对每个索引生成一个随机数
-        tl.store(x_ptr + global_offset, rand_vals) # 存储随机数
+        rand_vals = tl.rand(5, 10 + global_offset, n_rounds) # Generate a random number for each index
+        tl.store(x_ptr + global_offset, rand_vals) # Store the random number
 
 y_calf = torch.zeros(shape, dtype=eval('torch.float32')).npu()
 numel = y_calf.numel()

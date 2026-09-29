@@ -57,7 +57,7 @@ def triton_compile_hint(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_
         xmask = xindex < xnumel
         x0 = xindex
         tmp0 = tl.load(in_ptr0 + (x0), xmask)
-        # 为 tmp0 设置双缓冲
+        # Set up double buffering for tmp0
         tl.multibuffer(tmp0, 2)
         tmp2 = tmp0
         tl.compile_hint(tmp2, "hint_b", 42)

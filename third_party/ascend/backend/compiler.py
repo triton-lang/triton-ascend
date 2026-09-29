@@ -71,6 +71,7 @@ from triton.backends.ascend.utils import (
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.ascend.program_grid import (
     DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
+    GATHER_OPTIMIZATION_RULE_BIT,
     PROGRAM_GRID_TRANSFORMS_ATTR,
     ProgramGridContractError,
     get_persistent_transform,
@@ -284,10 +285,14 @@ def _graph_optimize_kwargs(opt):
     kwargs = {
         "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
         "compile_mode": opt.compile_mode,
+        "target_arch": opt.target_arch,
     }
     rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
     if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
         kwargs["rule_mask"] = rule_mask
+    # Toggling Gather must not change the existing mapping resource policy.
+    if (rule_mask & ~GATHER_OPTIMIZATION_RULE_BIT) != (DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
+                                                       & ~GATHER_OPTIMIZATION_RULE_BIT):
         kwargs["ub_safety_percent"] = 80
         kwargs["reserved_ub_bytes"] = 0
         kwargs["mapping_ub_capacity_bytes"] = (ub_size_in_kbytes_for_arch(opt.target_arch) * 1024)

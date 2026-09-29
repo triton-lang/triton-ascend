@@ -71,7 +71,7 @@ jobs:
 
       # ── PR labeling (file-path glob match) ──
       - if: github.event_name == 'pull_request_target'
-        uses: actions/labeler@v5
+        uses: actions/labeler@v7
         with:
           configuration-path: .github/actions/labeler.yml
           sync-labels: true

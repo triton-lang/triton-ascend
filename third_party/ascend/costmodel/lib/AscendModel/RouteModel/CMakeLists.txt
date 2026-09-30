@@ -9,6 +9,7 @@ add_mlir_library(AscendModelRouteModel
   ../Analysis/StagePartitioner.cpp
   StageCostModels.cpp
   StageRouteCostModel.cpp
+  TargetSchedule.cpp
   SimdSimtCostModel.cpp
   ../Transforms/SelectSimdSimtCostModel.cpp
   ../Transforms/MaterializeSimtScopes.cpp
@@ -22,6 +23,7 @@ add_mlir_library(AscendModelRouteModel
 
   LINK_LIBS PUBLIC
   AscendModelProfile
+  BiShengIRHACCUtils
   MLIRIR
   MLIRPass
   MLIRSupport

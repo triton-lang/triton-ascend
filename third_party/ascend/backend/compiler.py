@@ -298,6 +298,19 @@ def _publish_route_transform_capability(metadata, opt) -> str:
             physical_vector_cores = int(NPUUtils().get_aivector_core_num())
         except Exception:
             physical_vector_cores = 0
+    # Match NPUIR's custom-device-spec options. Runtime core counts are not
+    # otherwise substitutes for the compilation target's scheduling stride.
+    custom_aic = custom_aiv = ta_vector_cores = 0
+    ta_v1 = bool(getattr(opt, "enable_ta_auto_blockify_v1", False))
+    try:
+        npu_utils = NPUUtils()
+        if npu_utils.has_device_limit():
+            custom_aic = int(npu_utils.get_aicore_num())
+            custom_aiv = int(npu_utils.get_aivector_core_num())
+        if ta_v1:
+            ta_vector_cores = int(npu_utils.get_aivector_core_num())
+    except Exception:
+        custom_aic = custom_aiv = ta_vector_cores = 0
     source_logical_program_count = max(0, int(getattr(opt, "logical_program_count_hint", 0) or 0))
     transformed_logical_program_count = ((source_logical_program_count + coalesce_factor - 1) //
                                          coalesce_factor if source_logical_program_count else 0)
@@ -316,9 +329,14 @@ def _publish_route_transform_capability(metadata, opt) -> str:
         "source_logical_program_count_hint": source_logical_program_count,
         "logical_program_count_hint": transformed_logical_program_count,
         "physical_vector_core_count_hint": physical_vector_cores,
+        "enable_ta_auto_blockify_v1": ta_v1,
+        "ta_physical_vector_core_count": ta_vector_cores,
+        "custom_aic_number": custom_aic,
+        "custom_aiv_number": custom_aiv,
     }
     logical_program_count = capability["logical_program_count_hint"]
     if logical_program_count:
+        capability["superblock_runtime_groups_basis"] = "global_logical_work_before_core_assignment"
         capability["superblock_runtime_groups"] = {
             str(factor): {
                 "full_group_count": logical_program_count // factor,

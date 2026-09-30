@@ -19,7 +19,7 @@ using namespace mlir::ascend;
 namespace {
 
 static double iterations(const LogicalStage &stage) {
-  return static_cast<double>(std::max<int64_t>(1, stage.iterationCount));
+  return static_cast<double>(std::max<int64_t>(0, stage.iterationCount));
 }
 
 static std::vector<std::string>
@@ -251,6 +251,8 @@ static double applySuperBlock(const LogicalStage &stage,
                               const StageImplementation &implementation,
                               const HardwareProfile &profile,
                               double stageCycles) {
+  if (stage.iterationCount == 0)
+    return 0.0;
   if (implementation.mode != StageMode::SIMT ||
       implementation.superblockFactor == 1)
     return stageCycles;
@@ -312,6 +314,8 @@ static double estimateStage(const LogicalStage &stage,
                             const HardwareProfile &profile, StageMode mode,
                             const StageResourceCycles &r) {
   const double count = iterations(stage);
+  if (count == 0.0)
+    return 0.0;
   const double serial = r.setup + count * serialBody(r);
   switch (stage.costModelKind) {
   case StageCostModelKind::AutoBlockifyDispatch:
@@ -585,6 +589,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
   table.operationOwnershipComplete = partition.operationOwnershipComplete;
   table.modeledOperationCount = partition.modeledOperationCount;
   table.profileVersion = profile.profileVersion;
+  table.dependencies = partition.dependencies;
   llvm::StringSet<> stageIds;
 
   for (const LogicalStage &stage : partition.stages) {
@@ -592,7 +597,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Stage ids must be non-empty and unique: '%s'", stage.id.c_str());
-    if (stage.iterationCount <= 0 || !stage.features.isValid() ||
+    if (stage.iterationCount < 0 || !stage.features.isValid() ||
         !stage.workload.isFiniteAndNonNegative())
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -611,6 +616,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.model = stringifyStageCostModel(stage.costModelKind).str();
     logicalCost.schedule = stage.scheduleKind;
     logicalCost.iterationCount = stage.iterationCount;
+    logicalCost.dynamicWorkloadKnown = stage.dynamicWorkloadKnown;
+    logicalCost.unknownLoopTripCount = stage.unknownLoopTripCount;
     logicalCost.features = stage.features;
     logicalCost.workload = stage.workload;
     logicalCost.ownedOperationCount =
@@ -627,6 +634,16 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.localSimtMaterializable = stage.localSimtMaterializable;
     logicalCost.localSuperblockMaterializable =
         stage.localSuperblockMaterializable;
+    logicalCost.perPhysicalProgramSetup =
+        stage.costModelKind == StageCostModelKind::AutoBlockifyDispatch &&
+        !stage.operations.empty() &&
+        llvm::none_of(stage.operations, [](Operation *operation) {
+          for (Operation *parent = operation->getParentOp(); parent;
+               parent = parent->getParentOp())
+            if (parent->hasAttr("ta.auto_blockify_v1.loop"))
+              return true;
+          return false;
+        });
     logicalCost.legalSimtFactors = stage.legalSimtFactors;
     logicalCost.localSimtFactors = stage.localSimtFactors;
 

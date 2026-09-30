@@ -90,6 +90,13 @@ struct SimdSimtCostModelOptions {
   /// logical-program group.
   int64_t logicalProgramCountHint = 0;
   int64_t physicalVectorCoreCountHint = 0;
+  /// TA V1 uses an explicitly supplied runtime Vector count; NPUIR instead
+  /// resolves the compilation target's device spec (including custom limits).
+  bool enableTaAutoBlockifyV1 = false;
+  int64_t taPhysicalVectorCoreCount = 0;
+  int64_t customAICNumber = 0;
+  int64_t customAIVNumber = 0;
+  bool simdAutoBlockifyV1 = false;
 };
 
 struct SimdSimtCostReport {

@@ -183,9 +183,21 @@ struct SelectSimdSimtCostModelPass
         std::max<int64_t>(0, logicalProgramCountHint.getValue());
     if (auto capability =
             llvm::json::parse(routeTransformCapabilityJSON.getValue()))
-      if (auto *object = capability->getAsObject())
+      if (auto *object = capability->getAsObject()) {
         if (auto count = object->getInteger("physical_vector_core_count_hint"))
           options.physicalVectorCoreCountHint = std::max<int64_t>(0, *count);
+        options.enableTaAutoBlockifyV1 =
+            object->getBoolean("enable_ta_auto_blockify_v1").value_or(false);
+        options.taPhysicalVectorCoreCount = std::max<int64_t>(
+            0, object->getInteger("ta_physical_vector_core_count").value_or(0));
+        options.customAICNumber = std::max<int64_t>(
+            0, object->getInteger("custom_aic_number").value_or(0));
+        options.customAIVNumber = std::max<int64_t>(
+            0, object->getInteger("custom_aiv_number").value_or(0));
+        options.simdAutoBlockifyV1 =
+            object->getBoolean("auto_blockify_v1_materializable")
+                .value_or(false);
+      }
 
     SimtAnchorPlan anchorPlan =
         buildMixedSimtAnchorPlan(module, options.compileOn91095);
@@ -324,12 +336,26 @@ struct SelectSimdSimtCostModelPass
     reportJSON["selected_superblock_factor"] = selectedSuperblockFactor;
     reportJSON["logical_program_count_hint"] = options.logicalProgramCountHint;
     if (options.logicalProgramCountHint > 0) {
+      const StageRoutePlan &selectedPlan =
+          recommended == kMixedSimdSimt ? report.stageModel.mixed
+          : recommended == kAllSimtOnly ? report.stageModel.allSimt
+                                       : report.stageModel.allSimd;
       reportJSON["effective_runtime_factor"] = std::min<int64_t>(
           selectedSuperblockFactor, options.logicalProgramCountHint);
-      reportJSON["full_group_count"] =
-          options.logicalProgramCountHint / selectedSuperblockFactor;
-      reportJSON["tail_count"] =
-          options.logicalProgramCountHint % selectedSuperblockFactor;
+      if (selectedPlan.runtimeScheduleKnown) {
+        reportJSON["full_group_count"] =
+            selectedPlan.runtimeTotalFullGroups;
+        reportJSON["tail_count"] = selectedPlan.runtimeTotalTailPrograms;
+        reportJSON["masked_group_count"] =
+            selectedPlan.runtimeTotalMaskedGroups;
+        if (recommended == kMixedSimdSimt &&
+            selectedPlan.runtimeTotalFullGroups == 0)
+          reportJSON["effective_runtime_factor"] = 1;
+      } else {
+        reportJSON["full_group_count"] = nullptr;
+        reportJSON["tail_count"] = nullptr;
+        reportJSON["masked_group_count"] = nullptr;
+      }
     }
     std::string json =
         llvm::formatv("{0}", llvm::json::Value(std::move(reportJSON))).str();

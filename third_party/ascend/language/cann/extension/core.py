@@ -626,7 +626,7 @@ def _dot_operand_is_fractal(name, fmt):
 
 
 @builtin
-def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
+def dot(a: tl.tensor, b: tl.tensor, c=None, format_a="", format_b="", format_c="", _semantic=None) -> tl.tensor:
     """
     Matrix multiply ``D = A * B`` with per-operand layout format.
 
@@ -646,7 +646,7 @@ def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _sema
     :param format_b: layout of B: "fractal" | "nd" | "" (default ND).
     :param format_c: layout of D: "fractal" | "nd" | "" (default ND).
 
-    :return: D = A * B (fractal 4D if ``format_c="fractal"`` else 2D ND).
+    :return: D = A * B( + C) (fractal 4D if ``format_c="fractal"`` else 2D ND).
     :rtype: tensor
     """
     fractal_a = _dot_operand_is_fractal("a", format_a)
@@ -674,7 +674,10 @@ def dot(a: tl.tensor, b: tl.tensor, format_a="", format_b="", format_c="", _sema
     # fractal_c is the L0C accumulator fractal, whose block is 16x16.
     output_shape = [n // 16, m // 16, 16, 16] if fractal_c else [m, n]
 
-    return semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, _semantic=_semantic)
+    ret = semantic.dot(a, b, fractal_a, fractal_b, fractal_c, output_shape, _semantic=_semantic)
+    if c is not None:
+        return _semantic.add(ret, c, True)
+    return ret
 
 
 @builtin

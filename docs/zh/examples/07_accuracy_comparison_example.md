@@ -5,7 +5,7 @@
 
 - Triton 每种数据类型的精度比对方法。
 
-计算内核:
+## 计算内核
 
 ```python
 def test_add(x0, x1):

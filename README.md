@@ -15,7 +15,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://triton-ascend.readthedocs.io/en/latest/programming_guide/index.html"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
 </p>
 
 ---

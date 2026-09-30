@@ -61,7 +61,7 @@ def _layer_norm_fwd_fused(
         tl.store(Y + cols, y, mask=mask)
 ```
 
-LayerNorm Implementation Defined by Using Triton
+## LayerNorm Implementation Defined by Using Triton
 
 ```python
 @torch.inference_mode()
@@ -112,7 +112,7 @@ if __name__ == '__main__':
     _layer_norm(128, 128, torch.float32)
 ```
 
-Output
+## Output
 
 ```text
 y_tri: tensor([[ 0.2512,  0.0647,  0.8389,  ...,  2.3652,  1.5039,  1.1904],

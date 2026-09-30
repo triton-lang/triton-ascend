@@ -15,7 +15,7 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>官方文档</b></a> | <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/programming_guide/index.html"><b>算子开发用户旅程</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>社区例会</b></a> | <a href="https://www.hiascend.com/"><b>关于昇腾</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>官方文档</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>算子开发用户旅程</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>社区例会</b></a> | <a href="https://www.hiascend.com/"><b>关于昇腾</b></a> |
 </p>
 
 ---

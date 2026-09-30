@@ -70,7 +70,7 @@ if __name__ == "__main__":
     print("success: test_max_autotune")
 ```
 
-## Advanced Usage: Precise Control of Tuning Parameters
+## Advanced Usage Example
 
 Users can explicitly specify the compiler options to be tuned and their value lists by passing parameters such as `num_stages` directly to the decorator; unspecified parameters will use built-in default values. The following example demonstrates how to perform combined search on multiple parameters.
 

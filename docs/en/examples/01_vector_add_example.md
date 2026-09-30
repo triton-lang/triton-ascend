@@ -6,7 +6,7 @@ In this process, you will learn:
 - The basic programming model of Triton.
 - The `triton.jit` decorator used to define Triton kernels.
 
-Compute kernel:
+## Compute Kernel
 
 ```python
 import torch
@@ -79,7 +79,7 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(output_torch - output_triton))}')
 ```
 
-Output
+## Output
 
 ```text
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')

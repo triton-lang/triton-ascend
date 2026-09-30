@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import sys
@@ -6,7 +7,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import triton
+import triton.language as tl
 import triton.backends.ascend.compiler as compiler
+from triton._C.libtriton import ir
 from triton.backends.ascend import utils
 from triton.backends.compiler import GPUTarget
 
@@ -158,6 +162,37 @@ def test_active_options_keep_explicit_values(backend):
     assert options.enable_mixed_cv is True
     assert options.enable_dynamic_cv_pipeline is False
     assert options.num_warps == 16
+
+
+@pytest.mark.parametrize("dtype, deprecated", [
+    (tl.float8e5, False),
+    (tl.float8e4nv, False),
+    (tl.float8e4b8, False),
+    (tl.float8e5b16, False),
+    (tl.float8e4b8, True),
+    (tl.float8e5b16, True),
+])
+def test_fp8_dot_frontend_options(backend, dtype, deprecated):
+
+    @triton.jit
+    def kernel(dtype: tl.constexpr):
+        a = tl.full((64, 64), 0.0, dtype)
+        tl.dot(a, a)
+
+    raw = {"deprecated_fp8_dot_operand_dtypes": (str(dtype), )} if deprecated else {}
+    options = backend.parse_options(raw)
+    source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
+    context = ir.context()
+    ir.load_dialects(context)
+    backend.load_dialects(context)
+    warning = pytest.warns(UserWarning, match="upcasted to fp16") if deprecated else contextlib.nullcontext()
+    with warning:
+        module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
+                                backend.get_module_map(), context)
+
+    assert module.verify()
+    dot = next(line for line in str(module).splitlines() if "tt.dot " in line)
+    assert ("tensor<64x64xf16>" in dot) == deprecated
 
 
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -

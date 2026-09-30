@@ -4,6 +4,7 @@
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #include <algorithm>
@@ -75,6 +76,202 @@ static double mixedBaseStageCost(const LogicalStageCost &stage,
   return cost.totalCycles * mixedExecutionMultiplicity(stage, cost, factor);
 }
 
+static int64_t ceilDivPositive(int64_t numerator, int64_t denominator) {
+  return numerator / denominator + (numerator % denominator != 0);
+}
+
+static llvm::StringRef scheduleName(StageProgramScheduleKind kind) {
+  switch (kind) {
+  case StageProgramScheduleKind::FlatGrid:
+    return "flat_grid";
+  case StageProgramScheduleKind::ContiguousChunks:
+    return "contiguous_chunks_masked_group";
+  case StageProgramScheduleKind::GlobalGroupsStrided:
+    return "global_groups_strided";
+  case StageProgramScheduleKind::Strided:
+    return "strided_per_core";
+  case StageProgramScheduleKind::Unknown:
+    return "unknown";
+  }
+  llvm_unreachable("unknown program schedule");
+}
+
+static StageExecutionSchedule getSchedule(const StageCostTable &table,
+                                           StageKernelRouteKind kind) {
+  StageExecutionSchedule schedule =
+      kind == StageKernelRouteKind::AllSIMD ? table.allSimdSchedule
+      : kind == StageKernelRouteKind::AllSIMT ? table.allSimtSchedule
+                                            : table.mixedSchedule;
+  // Preserve the old standalone Vector-only API. A Vector hint never proves
+  // the number of independently scheduled Cube/AIV pairs in a Mixed route.
+  if (schedule.kind == StageProgramScheduleKind::Unknown &&
+      schedule.source.empty() && table.physicalCoreCountHint > 0 &&
+      kind != StageKernelRouteKind::Mixed) {
+    schedule.kind = kind == StageKernelRouteKind::AllSIMT
+                        ? StageProgramScheduleKind::ContiguousChunks
+                        : StageProgramScheduleKind::FlatGrid;
+    schedule.physicalCoreCount = table.physicalCoreCountHint;
+    schedule.source = "legacy_vector_core_hint";
+  }
+  return schedule;
+}
+
+/// NPUIR V1 forms ceil(N/F) global SuperBlock groups before assigning those
+/// groups to cores with a strided physical-block loop. The final partial group
+/// is one masked F-wide invocation, never a per-core remainder.
+static bool applyGlobalGroupSchedule(StageRoutePlan &plan,
+                                     const StageCostTable &table,
+                                     bool scaleCosts) {
+  if (plan.candidate != StageKernelRouteKind::AllSIMT)
+    return false;
+  const int64_t programs = table.logicalProgramCountHint;
+  const int64_t cores = plan.runtimeSchedule.physicalCoreCount;
+  const int64_t factor = plan.routeSuperblockFactor;
+  if (programs <= 0 || cores <= 0 || factor <= 0)
+    return true;
+
+  const int64_t fullGroups = programs / factor;
+  const int64_t remainder = programs % factor;
+  const int64_t maskedGroups = remainder == 0 ? 0 : 1;
+  const int64_t groupCount = fullGroups + maskedGroups;
+  const int64_t criticalGroups = ceilDivPositive(groupCount, cores);
+  plan.runtimeScheduleKnown = true;
+  plan.runtimeActiveCoreCount = std::min(groupCount, cores);
+  plan.runtimePhysicalProgramCount = groupCount;
+  plan.runtimeTotalFullGroups = fullGroups;
+  plan.runtimeTotalMaskedGroups = maskedGroups;
+  plan.runtimeCriticalCoreLogicalPrograms =
+      maskedGroups == 0 ? criticalGroups * factor
+                        : (criticalGroups - 1) * factor + remainder;
+  plan.runtimeFullGroups =
+      maskedGroups == 0 ? criticalGroups : criticalGroups - 1;
+  plan.runtimeMaskedGroups = maskedGroups;
+  plan.runtimeWaveCount = criticalGroups;
+
+  if (!scaleCosts)
+    return true;
+  plan.runtimeCostsScaled = true;
+  plan.totalCycles = 0.0;
+  for (size_t index = 0; index < table.stages.size(); ++index) {
+    const int64_t invocations = table.stages[index].perPhysicalProgramSetup
+                                    ? 1
+                                    : criticalGroups;
+    plan.logicalStageCycles[index] *= static_cast<double>(invocations);
+    plan.entryTransitionCycles[index] *= static_cast<double>(invocations);
+    plan.totalCycles += plan.logicalStageCycles[index];
+  }
+  return true;
+}
+
+/// Price the actual per-core loop, not ceil(global_group_count / Vector cores).
+/// There are at most two nonempty core cohorts, so no O(core count) enumeration
+/// is necessary. Mixed tails use F1; pure-SIMT's final group remains masked F.
+static bool applyRuntimeSchedule(StageRoutePlan &plan,
+                                 const StageCostTable &table,
+                                 const StageTransitionCost &transition,
+                                 bool scaleCosts) {
+  plan.runtimeSchedule = getSchedule(table, plan.candidate);
+  const auto &schedule = plan.runtimeSchedule;
+  const int64_t programs = table.logicalProgramCountHint;
+  const int64_t cores = schedule.physicalCoreCount;
+  if (programs <= 0 || cores <= 0 ||
+      schedule.kind == StageProgramScheduleKind::Unknown)
+    return true;
+  if (schedule.kind == StageProgramScheduleKind::GlobalGroupsStrided)
+    return applyGlobalGroupSchedule(plan, table, scaleCosts);
+
+  const int64_t factor = plan.routeSuperblockFactor;
+  const bool mixed = plan.candidate == StageKernelRouteKind::Mixed;
+  const bool masked = plan.candidate == StageKernelRouteKind::AllSIMT;
+  std::vector<std::pair<int64_t, int64_t>> cohorts;
+  auto append = [&](int64_t tasks, int64_t count) {
+    if (tasks > 0 && count > 0)
+      cohorts.emplace_back(tasks, count);
+  };
+  if (schedule.kind == StageProgramScheduleKind::ContiguousChunks) {
+    const int64_t chunk = ceilDivPositive(programs, cores);
+    append(chunk, programs / chunk);
+    append(programs % chunk, 1);
+  } else {
+    if (programs % cores != 0)
+      append(programs / cores + 1, programs % cores);
+    append(programs / cores, cores - programs % cores);
+  }
+
+  std::vector<double> tailCosts(table.stages.size(), 0.0);
+  std::vector<double> tailTransitions(table.stages.size(), 0.0);
+  const bool hasTails = mixed && llvm::any_of(cohorts, [&](const auto &cohort) {
+    return cohort.first % factor != 0;
+  });
+  if (hasTails) {
+    for (size_t i = 0; i < table.stages.size(); ++i) {
+      const auto &stage = table.stages[i];
+      const auto &selected = plan.implementations[i];
+      auto f1 = llvm::find_if(stage.implementations, [&](const auto &cost) {
+        return cost.implementation.mode == selected.mode &&
+               cost.implementation.localScope == selected.localScope &&
+               cost.implementation.superblockFactor == 1;
+      });
+      if (f1 == stage.implementations.end())
+        return false;
+      tailCosts[i] = mixedEquivalentStageCost(stage, *f1, transition);
+      tailTransitions[i] = tailCosts[i] - f1->totalCycles;
+    }
+  }
+
+  double maximum = -1.0;
+  std::vector<double> criticalCosts, criticalTransitions;
+  for (auto [tasks, count] : cohorts) {
+    const int64_t full = tasks / factor;
+    const int64_t remainder = tasks % factor;
+    const int64_t tail = mixed ? remainder : 0;
+    const int64_t partial = masked && remainder != 0 ? 1 : 0;
+    const int64_t grouped = full + partial;
+    plan.runtimeActiveCoreCount += count;
+    plan.runtimeTotalFullGroups += full * count;
+    plan.runtimeTotalTailPrograms += tail * count;
+    plan.runtimeTotalMaskedGroups += partial * count;
+    double total = 0.0;
+    std::vector<double> costs, transitions;
+    for (size_t i = 0; i < table.stages.size(); ++i) {
+      const bool fixed = table.stages[i].perPhysicalProgramSetup;
+      const double cost = fixed ? plan.logicalStageCycles[i]
+                                : grouped * plan.logicalStageCycles[i] +
+                                      tail * tailCosts[i];
+      costs.push_back(cost);
+      transitions.push_back(fixed ? plan.entryTransitionCycles[i]
+                                  : grouped * plan.entryTransitionCycles[i] +
+                                        tail * tailTransitions[i]);
+      total += cost;
+    }
+    if (!std::isfinite(total))
+      return false;
+    // A core with fewer tasks can be slower: F-1 serial tail invocations may
+    // cost more than one full F group. Compare costs, not just task counts.
+    if (total > maximum) {
+      maximum = total;
+      criticalCosts = std::move(costs);
+      criticalTransitions = std::move(transitions);
+      plan.runtimeCriticalCoreLogicalPrograms = tasks;
+      plan.runtimeFullGroups = full;
+      plan.runtimeTailPrograms = tail;
+      plan.runtimeMaskedGroups = partial;
+      plan.runtimeWaveCount = grouped + tail;
+    }
+  }
+  plan.runtimeScheduleKnown = true;
+  plan.runtimePhysicalProgramCount = plan.runtimeTotalFullGroups +
+                                    plan.runtimeTotalTailPrograms +
+                                    plan.runtimeTotalMaskedGroups;
+  if (scaleCosts) {
+    plan.runtimeCostsScaled = true;
+    plan.logicalStageCycles = std::move(criticalCosts);
+    plan.entryTransitionCycles = std::move(criticalTransitions);
+    plan.totalCycles = maximum;
+  }
+  return true;
+}
+
 /// AutoBlockify V1 is a route-conditional execution schedule.  The analysis
 /// view contains its real dispatch/loop operations so pure-SIMT and Mixed can
 /// pay them, but an all-SIMD executable does not materialize this TA schedule.
@@ -84,7 +281,8 @@ static double mixedBaseStageCost(const LogicalStageCost &stage,
 /// AutoBlockify schedule is not priced by these TA operation counts.
 static void removeAutoBlockifyCostFromAllSIMD(StageRoutePlan &plan,
                                               const StageCostTable &costTable) {
-  if (!plan.legal || plan.logicalStageCycles.size() != costTable.stages.size())
+  if (plan.runtimeSchedule.usesAutoBlockify || !plan.legal ||
+      plan.logicalStageCycles.size() != costTable.stages.size())
     return;
   for (size_t index = 0; index < costTable.stages.size(); ++index) {
     const llvm::StringRef model = costTable.stages[index].model;
@@ -111,6 +309,34 @@ static void removeAutoBlockifyCostFromAllSIMD(StageRoutePlan &plan,
 
 llvm::StringRef mlir::ascend::stringifyStageMode(StageMode mode) {
   return mode == StageMode::SIMD ? "simd" : "simt";
+}
+
+llvm::StringRef
+mlir::ascend::stringifyStageDependencyKind(StageDependencyKind kind) {
+  switch (kind) {
+  case StageDependencyKind::LoopCarriedData:
+    return "loop_carried_data";
+  }
+  llvm_unreachable("unknown Stage dependency kind");
+}
+
+bool StageDependency::isValid() const {
+  return !loopStage.empty() && !sourceStage.empty() && !targetStage.empty() &&
+         iterationDistance > 0 && carriedValueIndex >= 0 &&
+         !carriedValueName.empty() && carriedValueBytes >= 0;
+}
+
+llvm::json::Object StageDependency::toJSON() const {
+  return llvm::json::Object{
+      {"kind", stringifyStageDependencyKind(kind)},
+      {"loop_stage", loopStage},
+      {"source_stage", sourceStage},
+      {"target_stage", targetStage},
+      {"iteration_distance", iterationDistance},
+      {"carried_value_index", carriedValueIndex},
+      {"carried_value_name", carriedValueName},
+      {"carried_value_bytes", carriedValueBytes},
+      {"source_location", sourceLocation}};
 }
 
 static llvm::StringRef stringifyStageKernelRoute(StageKernelRouteKind kind) {
@@ -373,6 +599,10 @@ llvm::json::Object LogicalStageCost::toJSON() const {
   result["model"] = model;
   result["schedule_kind"] = stringifyStageSchedule(schedule);
   result["iteration_count"] = iterationCount;
+  result["dynamic_workload_known"] = dynamicWorkloadKnown;
+  result["unknown_loop_trip_count"] = unknownLoopTripCount;
+  result["loop_workload_status"] =
+      dynamicWorkloadKnown ? "resolved" : "nominal_unknown_trip_count";
   result["features"] = features.toJSON();
   result["workload"] = workload.toJSON();
   result["owned_operation_count"] = ownedOperationCount;
@@ -393,6 +623,7 @@ llvm::json::Object LogicalStageCost::toJSON() const {
   result["simt_anchor_indices"] = std::move(anchorIndices);
   result["local_simt_materializable"] = localSimtMaterializable;
   result["local_superblock_materializable"] = localSuperblockMaterializable;
+  result["per_physical_program_setup"] = perPhysicalProgramSetup;
   llvm::json::Array legalFactors;
   for (int64_t factor : legalSimtFactors)
     legalFactors.push_back(factor);
@@ -441,6 +672,22 @@ llvm::json::Object StageRoutePlan::toJSON() const {
   result["route_superblock_factor"] = routeSuperblockFactor;
   result["runtime_physical_program_count"] = runtimePhysicalProgramCount;
   result["runtime_wave_count"] = runtimeWaveCount;
+  result["runtime_schedule_known"] = runtimeScheduleKnown;
+  result["runtime_cost_basis"] = runtimeCostsScaled
+                                     ? "critical_core_schedule"
+                                     : "single_group_unscaled";
+  result["runtime_schedule_kind"] = scheduleName(runtimeSchedule.kind);
+  result["runtime_core_count"] = runtimeSchedule.physicalCoreCount;
+  result["runtime_core_count_source"] = runtimeSchedule.source;
+  result["runtime_active_core_count"] = runtimeActiveCoreCount;
+  result["runtime_critical_core_logical_programs"] =
+      runtimeCriticalCoreLogicalPrograms;
+  result["runtime_full_groups_on_critical_core"] = runtimeFullGroups;
+  result["runtime_f1_tail_programs_on_critical_core"] = runtimeTailPrograms;
+  result["runtime_masked_groups_on_critical_core"] = runtimeMaskedGroups;
+  result["runtime_total_full_groups"] = runtimeTotalFullGroups;
+  result["runtime_total_f1_tail_programs"] = runtimeTotalTailPrograms;
+  result["runtime_total_masked_groups"] = runtimeTotalMaskedGroups;
   llvm::json::Array stages;
   for (size_t i = 0; i < implementations.size(); ++i) {
     llvm::json::Object stage;
@@ -464,6 +711,10 @@ llvm::json::Object StageCostModelSummary::toJSON() const {
   for (const LogicalStageCost &stage : stages)
     stageArray.push_back(stage.toJSON());
   result["logical_stages"] = std::move(stageArray);
+  llvm::json::Array dependencyArray;
+  for (const StageDependency &dependency : dependencies)
+    dependencyArray.push_back(dependency.toJSON());
+  result["stage_dependencies"] = std::move(dependencyArray);
   result["transition_cost"] = transition.toJSON();
   llvm::json::Object routes;
   routes["all_simd"] = allSimd.toJSON();
@@ -484,6 +735,16 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     return llvm::createStringError(std::errc::invalid_argument,
                                    "stage transition costs must be finite and "
                                    "non-negative");
+  llvm::StringSet<> stageIds;
+  for (const LogicalStageCost &stage : costTable.stages)
+    stageIds.insert(stage.id);
+  for (const StageDependency &dependency : costTable.dependencies)
+    if (!dependency.isValid() || !stageIds.contains(dependency.loopStage) ||
+        !stageIds.contains(dependency.sourceStage) ||
+        !stageIds.contains(dependency.targetStage))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "stage route model received an invalid Stage dependency");
 
   auto findImplementation =
       [](const LogicalStageCost &stage, StageMode mode, int64_t factor,
@@ -496,6 +757,7 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     return nullptr;
   };
 
+  bool scaleRuntimeCosts = true;
   auto buildPlan = [&](StageKernelRouteKind kind,
                        int64_t factor) -> StageRoutePlan {
     StageRoutePlan plan;
@@ -575,6 +837,26 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
               break;
             }
             candidateTotal += mixedChoices[index].simdCycles;
+          }
+          if (candidateLegal) {
+            StageRoutePlan trial;
+            trial.candidate = kind;
+            trial.routeSuperblockFactor = factor;
+            trial.totalCycles = candidateTotal;
+            for (size_t index = 0; index < mixedChoices.size(); ++index) {
+              const MixedChoice &choice = mixedChoices[index];
+              const auto *cost = index == simtIndex ? choice.simt : choice.simd;
+              const double cycles =
+                  index == simtIndex ? choice.simtCycles : choice.simdCycles;
+              trial.implementations.push_back(cost->implementation);
+              trial.logicalStageCycles.push_back(cycles);
+              trial.entryTransitionCycles.push_back(
+                  cycles - mixedBaseStageCost(costTable.stages[index], *cost,
+                                               factor));
+            }
+            candidateLegal = applyRuntimeSchedule(trial, costTable, transition,
+                                                  scaleRuntimeCosts);
+            candidateTotal = trial.totalCycles;
           }
           if (candidateLegal && candidateTotal < bestTotal) {
             bestTotal = candidateTotal;
@@ -659,17 +941,8 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
         return invalid;
       }
     }
-    if (costTable.logicalProgramCountHint > 0) {
-      plan.runtimePhysicalProgramCount =
-          (costTable.logicalProgramCountHint + factor - 1) / factor;
-      if (costTable.physicalCoreCountHint > 0)
-        plan.runtimeWaveCount = (plan.runtimePhysicalProgramCount +
-                                 costTable.physicalCoreCountHint - 1) /
-                                costTable.physicalCoreCountHint;
-      for (double &cycles : plan.logicalStageCycles)
-        cycles *= static_cast<double>(plan.runtimeWaveCount);
-      plan.totalCycles *= static_cast<double>(plan.runtimeWaveCount);
-    }
+    if (!applyRuntimeSchedule(plan, costTable, transition, scaleRuntimeCosts))
+      return plan;
     plan.legal = true;
     return plan;
   };
@@ -692,10 +965,26 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   result.modeledOperationCount = costTable.modeledOperationCount;
   result.profileVersion = costTable.profileVersion;
   result.stages = costTable.stages;
+  result.dependencies = costTable.dependencies;
   result.transition = transition;
   result.allSimd = buildPlan(StageKernelRouteKind::AllSIMD, 1);
   result.allSimt = bestFactoredPlan(StageKernelRouteKind::AllSIMT);
   result.mixed = bestFactoredPlan(StageKernelRouteKind::Mixed);
+  // Never compare a kernel-scaled candidate with an unknown candidate's
+  // single-group score. Keep the historical relative-cost fallback, but
+  // apply it uniformly and disclose the basis on every route. Known geometry
+  // and F1-tail legality are still checked even when prices are unscaled.
+  if (costTable.logicalProgramCountHint > 0 &&
+      llvm::any_of(std::array<const StageRoutePlan *, 3>{
+                       &result.allSimd, &result.allSimt, &result.mixed},
+                   [](const StageRoutePlan *plan) {
+                     return plan->legal && !plan->runtimeScheduleKnown;
+                   })) {
+    scaleRuntimeCosts = false;
+    result.allSimd = buildPlan(StageKernelRouteKind::AllSIMD, 1);
+    result.allSimt = bestFactoredPlan(StageKernelRouteKind::AllSIMT);
+    result.mixed = bestFactoredPlan(StageKernelRouteKind::Mixed);
+  }
   removeAutoBlockifyCostFromAllSIMD(result.allSimd, costTable);
 
   return result;

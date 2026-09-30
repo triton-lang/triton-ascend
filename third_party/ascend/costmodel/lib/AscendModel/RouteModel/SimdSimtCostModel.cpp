@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/TargetSchedule.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -593,7 +594,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     int64_t maximumWholeKernelSuperblockFactor,
     int64_t maximumScopeSuperblockFactor, int64_t logicalProgramCountHint,
     int64_t physicalCoreCountHint, ModuleOp module,
-    const SimtAnchorPlan *anchorPlan) {
+    const SimtAnchorPlan *anchorPlan,
+    const SimdSimtCostModelOptions &scheduleOptions) {
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
   const int64_t warpLimitedFactorUpperBound =
@@ -631,6 +633,43 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     return costTable.takeError();
   costTable->logicalProgramCountHint = logicalProgramCountHint;
   costTable->physicalCoreCountHint = physicalCoreCountHint;
+  // NPUIR schedules MIX on Cube blocks (each owns its AIV SubBlocks), while
+  // AIV-only and pure-SIMT kernels use Vector cores. Query the compiler's
+  // target spec, not the possibly different host device's Vector count.
+  auto counts = resolveTargetCoreCounts(
+      scheduleOptions.actualTarget,
+      scheduleOptions.customAICNumber, scheduleOptions.customAIVNumber);
+  TargetCoreCounts targetCounts;
+  std::string source = "npuir_target_spec";
+  if (counts)
+    targetCounts = *counts;
+  else
+    source = "unknown_target_spec: " + llvm::toString(counts.takeError());
+  const bool hasCube = llvm::any_of(partition->stages, [](const auto &stage) {
+    return stage.features.hasDot;
+  });
+  const int64_t simdCores = hasCube ? targetCounts.cube : targetCounts.vector;
+  const std::string simdSource = source + (hasCube ? ":cube" : ":vector");
+  costTable->allSimdSchedule = {
+      scheduleOptions.simdAutoBlockifyV1 ? StageProgramScheduleKind::Strided
+                                       : StageProgramScheduleKind::FlatGrid,
+      simdCores, simdSource, scheduleOptions.simdAutoBlockifyV1};
+  costTable->mixedSchedule = {StageProgramScheduleKind::Strided, simdCores,
+                             simdSource, true};
+  const bool pureV1 = wholeKernelSuperblockMaterializable ||
+                      features.autoBlockifyV1Applied;
+  const bool taV1 = pureV1 && scheduleOptions.enableTaAutoBlockifyV1;
+  costTable->allSimtSchedule = {
+      taV1 ? StageProgramScheduleKind::ContiguousChunks
+      : pureV1 ? StageProgramScheduleKind::GlobalGroupsStrided
+               : StageProgramScheduleKind::FlatGrid,
+      taV1
+          ? scheduleOptions.taPhysicalVectorCoreCount
+          : targetCounts.vector,
+      taV1 ? "ta_v1_explicit_vector_count"
+           : source + (pureV1 ? ":vector:npuir_v1_global_groups"
+                              : ":vector"),
+      pureV1};
   auto routes = solveStageRoutes(*costTable, hardwareProfile.transition);
   if (!routes)
     return routes.takeError();
@@ -857,10 +896,13 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
       options.scopeSuperblockMaterializable,
       options.maximumWholeKernelSuperblockFactor,
       options.maximumScopeSuperblockFactor, options.logicalProgramCountHint,
-      options.physicalVectorCoreCountHint, module, anchorPlan);
+      options.physicalVectorCoreCountHint, module, anchorPlan, options);
   if (!stageModel)
     return stageModel.takeError();
   report.stageModel = std::move(*stageModel);
+  for (const LogicalStageCost &stage : report.stageModel.stages)
+    if (!stage.dynamicWorkloadKnown)
+      report.unsupported.push_back("unknown_loop_trip_count:" + stage.id);
   report.candidateCosts.allSimd = report.stageModel.allSimd.totalCycles;
   report.candidateCosts.allSimtOnly = report.stageModel.allSimt.totalCycles;
   report.candidateCosts.mixedSimdSimt = report.stageModel.mixed.totalCycles;

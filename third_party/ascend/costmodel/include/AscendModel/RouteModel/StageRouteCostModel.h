@@ -22,6 +22,7 @@ namespace mlir::ascend {
 
 enum class StageMode { SIMD, SIMT };
 enum class StageKernelRouteKind { AllSIMD, AllSIMT, Mixed };
+enum class StageDependencyKind { LoopCarriedData };
 enum class StageScheduleKind {
   StraightLine,
   IndependentPipelined,
@@ -30,6 +31,25 @@ enum class StageScheduleKind {
 };
 
 llvm::StringRef stringifyStageMode(StageMode mode);
+llvm::StringRef stringifyStageDependencyKind(StageDependencyKind kind);
+
+/// One explicit loop-carried dependency between logical Stage instances.
+/// Stage IDs, rather than vector indices, keep reports stable after
+/// StageKindClassifier assigns final semantic names.
+struct StageDependency {
+  std::string loopStage;
+  std::string sourceStage;
+  std::string targetStage;
+  StageDependencyKind kind = StageDependencyKind::LoopCarriedData;
+  int64_t iterationDistance = 1;
+  int64_t carriedValueIndex = 0;
+  std::string carriedValueName;
+  int64_t carriedValueBytes = 0;
+  std::string sourceLocation;
+
+  bool isValid() const;
+  llvm::json::Object toJSON() const;
+};
 
 struct StageImplementation {
   StageMode mode = StageMode::SIMD;
@@ -201,6 +221,10 @@ struct LogicalStageCost {
   std::string model;
   StageScheduleKind schedule = StageScheduleKind::StraightLine;
   int64_t iterationCount = 1;
+  /// False means dynamic loop work contains nominal one-iteration placeholders.
+  /// Such implementation scores are not admissible calibration observations.
+  bool dynamicWorkloadKnown = true;
+  int64_t unknownLoopTripCount = 0;
   StageModelFeatures features;
   StageWorkload workload;
   int64_t ownedOperationCount = 0;
@@ -225,6 +249,9 @@ struct LogicalStageCost {
   std::vector<unsigned> simtAnchorIndices;
   bool localSimtMaterializable = false;
   bool localSuperblockMaterializable = false;
+  /// V1 dispatch outside the logical-program loop runs once per physical
+  /// program, rather than once for every group/tail iteration.
+  bool perPhysicalProgramSetup = false;
   /// Factors legal for a whole-kernel pure-SIMT schedule.
   std::vector<int64_t> legalSimtFactors;
   /// Factors legal when this Stage alone is materialized as a local scope.
@@ -234,13 +261,33 @@ struct LogicalStageCost {
   llvm::json::Object toJSON() const;
 };
 
+enum class StageProgramScheduleKind {
+  Unknown,
+  FlatGrid,
+  ContiguousChunks,
+  GlobalGroupsStrided,
+  Strided,
+};
+
+struct StageExecutionSchedule {
+  StageProgramScheduleKind kind = StageProgramScheduleKind::Unknown;
+  int64_t physicalCoreCount = 0;
+  /// Provenance of the compiler scheduling count, not a throughput parameter.
+  std::string source;
+  bool usesAutoBlockify = false;
+};
+
 struct StageCostTable {
   bool operationOwnershipComplete = false;
   int64_t modeledOperationCount = 0;
   std::string profileVersion;
   int64_t logicalProgramCountHint = 0;
   int64_t physicalCoreCountHint = 0;
+  StageExecutionSchedule allSimdSchedule;
+  StageExecutionSchedule allSimtSchedule;
+  StageExecutionSchedule mixedSchedule;
   std::vector<LogicalStageCost> stages;
+  std::vector<StageDependency> dependencies;
 };
 
 struct StageTransitionCost {
@@ -269,6 +316,17 @@ struct StageRoutePlan {
   int64_t routeSuperblockFactor = 1;
   int64_t runtimePhysicalProgramCount = 0;
   int64_t runtimeWaveCount = 1;
+  bool runtimeScheduleKnown = false;
+  bool runtimeCostsScaled = false;
+  StageExecutionSchedule runtimeSchedule;
+  int64_t runtimeActiveCoreCount = 0;
+  int64_t runtimeCriticalCoreLogicalPrograms = 0;
+  int64_t runtimeFullGroups = 0;
+  int64_t runtimeTailPrograms = 0;
+  int64_t runtimeMaskedGroups = 0;
+  int64_t runtimeTotalFullGroups = 0;
+  int64_t runtimeTotalTailPrograms = 0;
+  int64_t runtimeTotalMaskedGroups = 0;
   double totalCycles = 0.0;
 
   llvm::json::Object toJSON() const;
@@ -280,6 +338,7 @@ struct StageCostModelSummary {
   int64_t modeledOperationCount = 0;
   std::string profileVersion;
   std::vector<LogicalStageCost> stages;
+  std::vector<StageDependency> dependencies;
   StageTransitionCost transition;
   StageRoutePlan allSimd;
   StageRoutePlan allSimt;

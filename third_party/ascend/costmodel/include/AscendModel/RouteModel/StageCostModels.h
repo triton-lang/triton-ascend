@@ -65,6 +65,11 @@ struct LogicalStage {
   StageCostModelKind costModelKind = StageCostModelKind::ScalarIssue;
   StageScheduleKind scheduleKind = StageScheduleKind::StraightLine;
   int64_t iterationCount = 1;
+  /// False when an executable algorithm loop has no exact static trip count.
+  /// Such bodies retain a nominal single execution for structural reporting;
+  /// their numerical workload is not a calibrated dynamic-work estimate.
+  bool dynamicWorkloadKnown = true;
+  int64_t unknownLoopTripCount = 0;
   StageModelFeatures features;
   StageWorkload workload;
   /// Exact TTIR ownership when StagePartition was built from an operation
@@ -105,6 +110,7 @@ struct StagePartition {
   bool operationOwnershipComplete = false;
   int64_t modeledOperationCount = 0;
   std::vector<LogicalStage> stages;
+  std::vector<StageDependency> dependencies;
 };
 
 struct StageOperationRate {

@@ -12,6 +12,7 @@
 using mlir::ascend::HardwareProfile;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
+using mlir::ascend::ReductionWorkload;
 using mlir::ascend::SimdSimtFeatureSummary;
 using mlir::ascend::solveStageRoutes;
 using mlir::ascend::StageCostEvaluator;
@@ -552,6 +553,60 @@ TEST(SimdSimtCostModelTest, PrefixScanUsesModeSpecificDependencyFactor) {
   EXPECT_EQ(implementations[0].implementation.mode, StageMode::SIMD);
   EXPECT_EQ(implementations[1].implementation.mode, StageMode::SIMT);
   EXPECT_GT(implementations[0].totalCycles, implementations[1].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest, UnsupportedReductionFallsBackToLegacyShuffle) {
+  LogicalStage stage =
+      logicalStage("reduce_fallback", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"unknown", "f32", {2, 4, 128}, 2, 1.0});
+
+  auto table = evaluateOneStage(std::move(stage));
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  ASSERT_EQ(table->stages.front().implementations.size(), 2u);
+  for (const auto &implementation : table->stages.front().implementations) {
+    EXPECT_DOUBLE_EQ(implementation.resources.reduction, 0.0);
+    // 2*4*128 lanes * log2(128) / 32 lanes per cycle.
+    EXPECT_DOUBLE_EQ(implementation.resources.shuffle, 224.0);
+    EXPECT_DOUBLE_EQ(implementation.totalCycles, 224.0);
+  }
+}
+
+TEST(SimdSimtCostModelTest, CalibratedTailReductionReplacesOnlyShuffle) {
+  LogicalStage stage =
+      logicalStage("reduce_calibrated", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"sum", "f32", {2, 4, 128}, 2, 1.0});
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.tailAxisReduction.parameters["rn_standard_sum_f32"] = {
+      64.0, 54.7251, 1.75804, 0.554454, 1.10204};
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  ASSERT_EQ(table->stages.front().implementations.size(), 2u);
+
+  const auto &simd = table->stages.front().implementations[0];
+  const double expected = 54.7251 + 1.75804 * 8.0 + 0.554454 * 8.0;
+  EXPECT_NEAR(simd.resources.reduction, expected, 1e-9);
+  EXPECT_DOUBLE_EQ(simd.resources.shuffle, 0.0);
+  EXPECT_NEAR(simd.totalCycles, expected, 1e-9);
+
+  // The SIMT profile has no matching calibrated parameters.  It must use the
+  // complete legacy formula rather than a partial or zero-cost estimate.
+  const auto &simt = table->stages.front().implementations[1];
+  EXPECT_DOUBLE_EQ(simt.resources.reduction, 0.0);
+  EXPECT_DOUBLE_EQ(simt.resources.shuffle, 224.0);
+  EXPECT_DOUBLE_EQ(simt.totalCycles, 224.0);
 }
 
 TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {

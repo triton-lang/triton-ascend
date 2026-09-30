@@ -95,6 +95,36 @@ def test_make_launcher_exposes_triton_launch_kernel(
     _mock_ffts.assert_called_once_with("Ascend910B3")
 
 
+@pytest.mark.parametrize("dtype, expected", [("fp16", 1), ("bf16", 27), ("fp32", 0), ("i32", 3), ("u32", 8),
+                                             ("i1", 12)])
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_make_launcher_reports_const_pointer_dtype(
+    _mock_backend_func_patch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    mock_npu_utils,
+    dtype,
+    expected,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.make_launcher(
+        constants={},
+        signature={0: "i32", 1: f"*k{dtype}", 2: f"*{dtype}"},
+        metadata=_make_metadata(),
+    )
+
+    # Read-only and writable pointers report the same element type; scalar
+    # arguments do not occupy entries in the tensor profiling metadata.
+    assert f"dataTypes[0] = {expected};" in src
+    assert f"dataTypes[1] = {expected};" in src
+    assert "dataTypes[2] =" not in src
+
+
 @patch.object(driver, "NPUUtils")
 @patch.object(driver, "force_disable_ffts", return_value=False)
 @patch.object(driver, "is_ffts_supported", return_value=True)

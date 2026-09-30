@@ -50,3 +50,10 @@ def assign_npu(request, worker_id):
             idx = int(worker_id.replace("gw", ""))
             npu_id = idx % npu_count
         mindspore.set_device("Ascend", npu_id)
+
+
+def pytest_collection_modifyitems(config, items):
+    for item in items:
+        mark_obj = pytest.mark.case_info(level="P0", type="Functional")
+        item.add_marker(mark_obj)
+

@@ -11,6 +11,34 @@ CONSTRAINTS = {
         ],
         "example":
         "triton.Config",
+        "replace_docstring": [
+            """
+            An object that represents a possible kernel configuration for the auto-tuner to try
+            on the Ascend NPU backend.
+
+            :ivar kwargs: a dictionary of meta-parameters and Ascend compile options to pass to
+                        the kernel.
+            :type kwargs: dict[Str, Any]
+            :ivar num_warps: the number of warps used by the kernel. Effective only in pure-SIMT
+                            mode (``compile_mode="simt_only"`` on Ascend 950); ignored on the
+                            default SIMD path.
+            :type num_warps: int
+            :ivar num_stages: the number of pipeline stages. Valid values are 1 and 2 only.
+                            It controls multi-buffering: ``num_stages=1`` disables multi-buffering
+                            (equivalent to ``multibuffer=False``) and ``num_stages=2`` enables it
+                            (equivalent to ``multibuffer=True``). When both ``num_stages`` and
+                            ``multibuffer`` are specified, ``num_stages`` takes precedence.
+            :type num_stages: int
+            :ivar num_ctas: reserved for GPU block clusters. Ignored on Ascend NPU and has no effect.
+            :type num_ctas: int
+            :ivar maxnreg: GPU register limit (ptx ``.maxnreg``). Not supported on Ascend NPU and is ignored.
+            :type maxnreg: Optional[int]
+            :ivar pre_hook: a function that will be called before the kernel is called. Parameters
+                            of this function are args.
+            :ivar ir_override: filename of a user-defined IR. Supported extensions on Ascend are
+                            ``*.ttir``, ``*.ttadapter``, ``*.mlirbc``, ``*.bcmlir``, and ``*.npubin``.
+            """
+        ],
     },
     "triton.autotune": {
         "constraints": [

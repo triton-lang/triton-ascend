@@ -114,7 +114,7 @@ module {
 }
 ```
 
-## Example Output
+## Output
 
 The exact numbers may vary with costmodel parameters, but the output shape should look like this:
 

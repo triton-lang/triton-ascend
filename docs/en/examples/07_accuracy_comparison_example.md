@@ -5,7 +5,7 @@ During this process, you will learn:
 
 - The method of comparing the accuracy of each data type in Triton.
 
-Compute kernel:
+## Compute Kernel
 
 ```python
 def test_add(x0, x1):

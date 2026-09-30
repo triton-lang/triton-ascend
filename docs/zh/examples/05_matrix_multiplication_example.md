@@ -174,7 +174,7 @@ if __name__ == "__main__":
     test_dot_2_Bias("float16", 16, 16, 16)
 ```
 
-**输出示例：**
+## 输出结果
 
 ```text
 Test matmul with dtype=float16, shape=(16,16,16) PASSED!

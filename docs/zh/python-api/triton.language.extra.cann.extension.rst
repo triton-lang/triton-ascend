@@ -51,6 +51,7 @@ Vector Operations
     sub_vec_id
     sub_vec_num
     conv1d
+    conv2d
     dot
 
 Enums

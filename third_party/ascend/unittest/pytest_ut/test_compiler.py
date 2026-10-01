@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -259,3 +260,67 @@ def test_unknown_options_remain_available_for_jit_validation(backend):
 
     assert raw == {"unknown_compile_option": True}
     assert "unknown_compile_option" not in options.__dict__
+
+
+def test_a2_a3_binary_compile_uses_explicit_target_without_npu_probe(monkeypatch):
+    """A2/A3 binary compilation must use GPUTarget.arch without probing hardware."""
+    target = GPUTarget("npu", "Ascend910B2", 0)
+    backend = compiler.AscendBackend(target)
+    opt = backend.parse_options({})
+
+    metadata = {
+        "target": target,
+        **opt.__dict__,
+        "bitcodes": None,
+        "auto_blockify_enabled": False,
+    }
+
+    monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
+    monkeypatch.delenv("TRITON_PRINT_AUTOTUNING", raising=False)
+
+    monkeypatch.setattr(
+        compiler,
+        "_parse_linalg_metadata",
+        lambda linalg, metadata: (linalg, metadata),
+    )
+    monkeypatch.setattr(
+        compiler,
+        "_finalize_program_launch_policy",
+        lambda metadata, opt: None,
+    )
+    monkeypatch.setattr(compiler, "_check_bishengir_api_change", lambda: True)
+    monkeypatch.setattr(compiler, "_check_bishengir_is_regbased", lambda: True)
+    monkeypatch.setattr(
+        compiler,
+        "_get_npucompiler_path",
+        lambda: ("bishengir-compile", {}),
+    )
+
+    class ForbiddenNPUUtils:
+
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("physical NPU must not be queried")
+
+    monkeypatch.setattr(compiler, "NPUUtils", ForbiddenNPUUtils)
+
+    commands = []
+
+    def fake_run(cmd, **kwargs):
+        commands.append(cmd)
+        Path(cmd[-1] + ".o").write_bytes(b"npubin")
+        result = MagicMock()
+        result.stdout = b""
+        result.stderr = b""
+        return result
+
+    monkeypatch.setattr(compiler.subprocess, "run", fake_run)
+
+    result = compiler.linalg_to_bin_enable_npu_compile_A2_A3(
+        "test linalg",
+        metadata,
+        opt,
+    )
+
+    assert result == b"npubin"
+    assert len(commands) == 1
+    assert "--target=Ascend910B2" in commands[0]

@@ -37,7 +37,7 @@ jobs:
       POLL_INTERVAL_SEC: '30'
     steps:
       - name: Monitor RTD build
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           RTD_TOKEN: ${{ secrets.RTD_TOKEN }}
         with:

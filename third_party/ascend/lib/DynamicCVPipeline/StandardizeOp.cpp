@@ -31,6 +31,7 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/ReinterpretCastSinking.h"
 
 using namespace mlir;
 using namespace triton;
@@ -50,7 +51,12 @@ void StandardizeOpPass::runOnOperation() {
   }
 
   LOG_DEBUG("Input mlir:\n" << op);
+
   OpPassManager pm(op.getOperationName());
+
+  // Sink reinterpret_cast ops to their use blocks to eliminate cross-block
+  // memref dependencies.
+  pm.addPass(createReinterpretCastSinkingPass());
   pm.addPass(createPatternMatchRewritePass());
 
   if (llvm::failed(runPipeline(pm, op))) {
@@ -79,6 +85,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass() {
 
 void registerStandardizeOpPasses() {
   registerPass(createStandardizeOpPass);
+  registerPass(createReinterpretCastSinkingPass);
   registerPass(createPatternMatchRewritePass);
 }
 

@@ -5,6 +5,7 @@
 ## 文档组织
 
 - [调试指南](./debugging.md) — Triton-Ascend算子调试方法
+- [Triton msDebug 使用指南](./triton_msdebug_user_guide.md) — 使用 msDebug 调试 Triton Kernel
 - [性能分析](./profiling.md) — 使用性能分析工具定位性能瓶颈
 - [精度分析](./precision.md) — 算子精度问题分析与解决
 - [do_bench_npu使用指南](./do_bench_npu_guide.md) — do_bench_npu使用指南
@@ -14,6 +15,7 @@
 :hidden:
 
 debugging.md
+triton_msdebug_user_guide.md
 profiling.md
 precision.md
 ub_overflow.md

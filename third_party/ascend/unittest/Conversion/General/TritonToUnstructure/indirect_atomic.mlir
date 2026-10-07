@@ -1,8 +1,9 @@
 // RUN: triton-opt '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: tt.func public @structured_discrete_mask_atomic_add_1d
-// CHECK: arith.select {{.*}} : tensor<8xi1>, tensor<8xi32>
-// CHECK: tt.atomic_rmw add, acq_rel, gpu, {{.*}} : (tensor<8x!tt.ptr<i32>>, tensor<8xi32>) -> tensor<8xi32>
+// CHECK-NOT: arith.select {{.*}} : tensor<8xi1>, tensor<8xi32>
+// CHECK: %[[MASK_I8:.*]] = arith.extui {{.*}} : tensor<8xi1> to tensor<8xi8>
+// CHECK: hivm.hir.custom {extra_attr = "operate=add"{{.*}}} "__builtin_indirect_atomic" ins(%arg1, {{.*}}, {{.*}}, %[[MASK_I8]]
 tt.func public @structured_discrete_mask_atomic_add_1d(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
 	%cst = arith.constant dense<2> : tensor<8xi32>
 	%cst_0 = arith.constant dense<8> : tensor<8xi32>
@@ -21,10 +22,10 @@ tt.func public @structured_discrete_mask_atomic_add_1d(%arg0: !tt.ptr<i32>, %arg
 // -----
 
 // CHECK-LABEL: tt.func public @structured_discrete_mask_atomic_add_i16_fallback
-// CHECK: arith.select {{.*}} : tensor<8xi1>, tensor<8xi16>
-// CHECK-NOT: scf.for
-// CHECK-NOT: scf.if
-// CHECK: tt.atomic_rmw add, acq_rel, gpu, {{.*}} : (tensor<8x!tt.ptr<i16>>, tensor<8xi16>) -> tensor<8xi16>
+// CHECK-NOT: arith.select {{.*}} : tensor<8xi1>, tensor<8xi16>
+// CHECK: scf.for
+// CHECK: scf.if
+// CHECK: tt.atomic_rmw add, acq_rel, gpu, {{.*}} {DiscreteMemAccess}
 tt.func public @structured_discrete_mask_atomic_add_i16_fallback(%arg0: !tt.ptr<i16>, %arg1: !tt.ptr<i16>) {
 	%cst = arith.constant dense<2> : tensor<8xi32>
 	%cst_0 = arith.constant dense<8> : tensor<8xi32>

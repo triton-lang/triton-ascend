@@ -107,8 +107,8 @@ struct AtomicWorkload {
   llvm::json::Object toJSON() const;
 };
 
-/// A compact group of tensor operations with the same route-independent
-/// projected lowering signature. Contiguous pointwise axes are merged before
+/// A compact group of tensor operations with matching source geometry and
+/// optional SIMD predicate projection. Contiguous pointwise axes merge before
 /// counting vector instructions; broadcast boundaries retain separate segments.
 /// Equal signatures are aggregated, so
 /// this is diagnostic/cost state rather than an op-level graph.
@@ -118,6 +118,11 @@ struct TensorOperationWorkload {
   double logicalElements = 0.0;
   double segmentCount = 0.0;
   int64_t contiguousElementsPerSegment = 0;
+  /// SIMD-only data width of a closed, dense compare/logic/select island.
+  /// Zero retains the source-width/reference-lane fallback. Keep this
+  /// separate from elementBitWidth: i1 is still the source mask type, and
+  /// SIMT must not consume a projected SIMD grouping width.
+  int64_t simdPredicateBitWidth = 0;
 
   bool isFiniteAndNonNegative() const;
   llvm::json::Object toJSON() const;
@@ -125,6 +130,7 @@ struct TensorOperationWorkload {
 
 /// Mode-independent work owned exactly once by one Stage.  Values are
 /// logical elements/bytes, not mode-specific instructions or cycles.
+/// Tensor descriptors can also carry explicitly mode-specific geometry hints.
 struct StageWorkload {
   llvm::StringMap<double> operationElements;
   std::vector<TensorOperationWorkload> tensorOperationWorkloads;

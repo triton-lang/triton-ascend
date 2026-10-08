@@ -215,6 +215,76 @@ TEST(SimdSimtCostModelTest, SimdMaskFallbackUsesProfileReferenceLanes) {
   EXPECT_DOUBLE_EQ(segmented.issue, 2.0);
 }
 
+TEST(SimdSimtCostModelTest, PredicateWidthProjectionChangesOnlySimdGeometry) {
+  for (int64_t sourceBits : {1, 16, 32})
+    for (int64_t projectedBits : {16, 32}) {
+      if (projectedBits < sourceBits)
+        continue;
+      for (int64_t size : {32, 64, 65, 128, 129, 256}) {
+        auto cost = [&](int64_t projection) {
+          auto stage =
+              logicalStage("predicate", StageCostModelKind::PredicateMask);
+          stage.workload.operationElements.clear();
+          stage.workload.predicateElements = size;
+          stage.workload.operationElements["predicate.select"] = size;
+          stage.workload.issueElements = 2 * size;
+          for (const char *op : {"predicate.cmp", "predicate.select"}) {
+            TensorOperationWorkload tensor;
+            tensor.operation = op;
+            tensor.elementBitWidth = sourceBits;
+            tensor.logicalElements = size;
+            tensor.segmentCount = 1;
+            tensor.contiguousElementsPerSegment = size;
+            tensor.simdPredicateBitWidth = projection;
+            stage.workload.tensorOperationWorkloads.push_back(tensor);
+          }
+          auto profile = hardwareProfile();
+          profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
+          profile.simt.operationRates["predicate.select"] = {1.0, 1.0};
+          return evaluateOneStage(std::move(stage), std::move(profile));
+        };
+        auto original = cost(0), projected = cost(projectedBits);
+        ASSERT_TRUE(static_cast<bool>(original));
+        ASSERT_TRUE(static_cast<bool>(projected));
+        const auto &simd =
+            projected->stages.front().implementations[0].resources;
+        const int64_t lanes = 2048 / projectedBits;
+        const double instructions = (size + lanes - 1) / lanes;
+        EXPECT_DOUBLE_EQ(simd.predicate, instructions);
+        EXPECT_DOUBLE_EQ(simd.compute, instructions);
+        EXPECT_DOUBLE_EQ(simd.issue, instructions / 2.0);
+        const auto &before =
+            original->stages.front().implementations[1].resources;
+        const auto &after =
+            projected->stages.front().implementations[1].resources;
+        EXPECT_DOUBLE_EQ(after.predicate, before.predicate);
+        EXPECT_DOUBLE_EQ(after.compute, before.compute);
+        EXPECT_DOUBLE_EQ(after.issue, before.issue);
+      }
+    }
+}
+
+TEST(SimdSimtCostModelTest, RejectsInvalidPredicateWidthProjection) {
+  TensorOperationWorkload tensor;
+  tensor.operation = "predicate.cmp";
+  tensor.elementBitWidth = 1;
+  tensor.logicalElements = tensor.contiguousElementsPerSegment = 128;
+  tensor.segmentCount = 1;
+  for (int64_t projection : {-1, 8, 64}) {
+    tensor.simdPredicateBitWidth = projection;
+    EXPECT_FALSE(tensor.isFiniteAndNonNegative());
+  }
+  tensor.simdPredicateBitWidth = 16;
+  tensor.elementBitWidth = 32;
+  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Cannot narrow source width.
+  tensor.simdPredicateBitWidth = 32;
+  tensor.elementBitWidth = 8;
+  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Unsupported source type.
+  tensor.elementBitWidth = 32;
+  tensor.operation = "f32.add";
+  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Predicate-only metadata.
+}
+
 TEST(SimdSimtCostModelTest,
      WorkloadDoesNotInferSegmentsOrScalarFallbackFromLogicalRows) {
   mlir::MLIRContext context;

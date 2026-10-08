@@ -234,6 +234,137 @@ static int64_t getPostFlattenPointwiseRun(Operation *operation,
   return run;
 }
 
+// A bounded structural projection of the single-group cases checked with
+// C310 lowering. Do not propagate a global maximum width across shared masks:
+// the backend can split those into different vector groups with transfers.
+// i1 is the source logic type, not the data width used for SIMD batching.
+// Trace comparison operands through logic chains and include the select data
+// width: even an i16 compare can execute in a group with an i32 tile step.
+static int64_t getSimdPredicateBitWidth(Operation *root) {
+  auto isLogic = [](Operation *op) {
+    auto name = op->getName().getStringRef();
+    return name == "arith.andi" || name == "arith.ori" || name == "arith.xori";
+  };
+  auto isCompare = [](Operation *op) {
+    auto name = op->getName().getStringRef();
+    return name == "arith.cmpi" || name == "arith.cmpf";
+  };
+  const bool isSelect = root->getName().getStringRef() == "arith.select";
+  if ((!isSelect && !isLogic(root) && !isCompare(root)) ||
+      root->getNumResults() != 1)
+    return 0;
+  auto shape = dyn_cast<RankedTensorType>(root->getResult(0).getType());
+  if (!shape || !shape.hasStaticShape() || shape.getRank() == 0 ||
+      shape.getNumElements() == 0)
+    return 0;
+  Block *block = root->getBlock();
+  auto sameShape = [&](Value value) {
+    auto type = dyn_cast<RankedTensorType>(value.getType());
+    return type && type.hasStaticShape() && type.getShape() == shape.getShape();
+  };
+  auto isMask = [&](Value value) {
+    return sameShape(value) &&
+           getScalarElementType(value.getType()).isInteger(1);
+  };
+  // Loaded/argument data terminate the local fusion projection. Casts,
+  // arithmetic, broadcasts and reshapes can import wider types or different
+  // segmentation, so they require a separate proof rather than width guessing.
+  auto dataWidth = [&](Value value) -> int64_t {
+    if (!sameShape(value))
+      return 0;
+    Type type = getScalarElementType(value.getType());
+    if (!type.isInteger(16) && !type.isInteger(32) && !type.isF16() &&
+        !type.isF32())
+      return 0;
+    Operation *producer = value.getDefiningOp();
+    if (!producer)
+      return cast<BlockArgument>(value).getOwner() == block
+                 ? getScalarBitWidth(type)
+                 : 0;
+    if (producer->getBlock() != block)
+      return 0;
+    auto name = producer->getName().getStringRef();
+    // An unmasked load is a memory boundary, not part of this predicate group.
+    if (name == "tt.load" && producer->getNumOperands() == 1)
+      return getScalarBitWidth(type);
+    return 0;
+  };
+
+  Operation *select = isSelect ? root : nullptr;
+  SmallVector<Value> pending;
+  llvm::DenseSet<Value> forward;
+  if (!isSelect)
+    pending.push_back(root->getResult(0));
+  while (!pending.empty()) {
+    Value value = pending.pop_back_val();
+    if (!forward.insert(value).second)
+      continue;
+    // Analysis budget only; it is not a hardware group-size limit.
+    if (forward.size() > 256 || !isMask(value) || value.use_empty())
+      return 0;
+    for (OpOperand &use : value.getUses()) {
+      Operation *user = use.getOwner();
+      if (user->getBlock() != block || user->getNumResults() != 1)
+        return 0;
+      if (isLogic(user)) {
+        pending.push_back(user->getResult(0));
+      } else if (user->getName().getStringRef() == "arith.select" &&
+                 use.getOperandNumber() == 0) {
+        if (select && select != user)
+          return 0;
+        select = user;
+      } else {
+        return 0;
+      }
+    }
+  }
+  if (!select || select->getNumOperands() != 3 ||
+      !sameShape(select->getResult(0)) || !select->getResult(0).hasOneUse())
+    return 0;
+  OpOperand &terminal = *select->getResult(0).getUses().begin();
+  auto terminalName = terminal.getOwner()->getName().getStringRef();
+  if (terminal.getOwner()->getBlock() != block ||
+      !((terminalName == "tt.store" && terminal.getOperandNumber() == 1 &&
+         terminal.getOwner()->getNumOperands() == 2) ||
+        terminalName == "func.return" || terminalName == "tt.return"))
+    return 0;
+  int64_t width = dataWidth(select->getOperand(1));
+  if (!width || dataWidth(select->getOperand(2)) != width)
+    return 0;
+
+  llvm::DenseSet<Operation *> members;
+  pending.push_back(select->getOperand(0));
+  while (!pending.empty()) {
+    Value value = pending.pop_back_val();
+    Operation *op = value.getDefiningOp();
+    if (!op || op->getBlock() != block || op->getNumResults() != 1 ||
+        op->getNumOperands() != 2 || !isMask(value))
+      return 0;
+    if (!members.insert(op).second)
+      continue;
+    if (members.size() > 256 || op->getOperand(0) == op->getOperand(1))
+      return 0;
+    if (isLogic(op)) {
+      llvm::append_range(pending, op->getOperands());
+    } else if (isCompare(op)) {
+      int64_t inputWidth = dataWidth(op->getOperand(0));
+      if (!inputWidth || dataWidth(op->getOperand(1)) != inputWidth)
+        return 0;
+      width = std::max(width, inputWidth);
+    } else {
+      return 0;
+    }
+  }
+  if (!isSelect && !members.contains(root))
+    return 0;
+  for (Operation *member : members)
+    for (OpOperand &use : member->getResult(0).getUses())
+      if (!members.contains(use.getOwner()) &&
+          !(use.getOwner() == select && use.getOperandNumber() == 0))
+        return 0;
+  return width;
+}
+
 static void accumulateTensorOperationWorkload(Operation *operation,
                                               llvm::StringRef profileName,
                                               double elements,
@@ -264,6 +395,9 @@ static void accumulateTensorOperationWorkload(Operation *operation,
   // to the legacy per-operation estimate instead of underpricing it.
   if (segments <= 0.0 || segments != std::floor(segments))
     return;
+  const int64_t simdPredicateBits = profileName.starts_with("predicate.")
+                                        ? getSimdPredicateBitWidth(operation)
+                                        : 0;
   // Shape alone does not prove scalar lowering, especially on the register
   // vector backend. Do not infer it from the pre-flatten row stride.
   // TODO: Model scalar fallback only from proven lowered layout information.
@@ -271,6 +405,7 @@ static void accumulateTensorOperationWorkload(Operation *operation,
   for (TensorOperationWorkload &group : work.tensorOperationWorkloads) {
     if (group.operation == profileName &&
         group.elementBitWidth == elementBits &&
+        group.simdPredicateBitWidth == simdPredicateBits &&
         group.contiguousElementsPerSegment == contiguousElements) {
       group.logicalElements += elements;
       group.segmentCount += segments;
@@ -283,6 +418,7 @@ static void accumulateTensorOperationWorkload(Operation *operation,
   group.logicalElements = elements;
   group.segmentCount = segments;
   group.contiguousElementsPerSegment = contiguousElements;
+  group.simdPredicateBitWidth = simdPredicateBits;
   work.tensorOperationWorkloads.push_back(std::move(group));
 }
 
@@ -440,7 +576,7 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
       operation->getNumResults() == 1 &&
       getScalarElementType(operation->getResult(0).getType()).isInteger(1)) {
     // Count the operations present in IR, including NOT expressed as XOR.
-    // Do not assume backend fusion during route-independent work collection.
+    // SIMD width projection does not remove or fuse source operation counts.
     work.predicateElements += elements;
     accumulateTensorOperationWorkload(operation, "predicate.cmp", elements,
                                       work);
@@ -586,14 +722,15 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   into.indirectStoreTransactions += from.indirectStoreTransactions;
   llvm::append_range(into.atomicWorkloads, std::move(from.atomicWorkloads));
   for (TensorOperationWorkload &source : from.tensorOperationWorkloads) {
-    auto destination =
-        llvm::find_if(into.tensorOperationWorkloads,
-                      [&](const TensorOperationWorkload &item) {
-                        return item.operation == source.operation &&
-                               item.elementBitWidth == source.elementBitWidth &&
-                               item.contiguousElementsPerSegment ==
-                                   source.contiguousElementsPerSegment;
-                      });
+    auto destination = llvm::find_if(
+        into.tensorOperationWorkloads,
+        [&](const TensorOperationWorkload &item) {
+          return item.operation == source.operation &&
+                 item.elementBitWidth == source.elementBitWidth &&
+                 item.simdPredicateBitWidth == source.simdPredicateBitWidth &&
+                 item.contiguousElementsPerSegment ==
+                     source.contiguousElementsPerSegment;
+        });
     if (destination == into.tensorOperationWorkloads.end()) {
       into.tensorOperationWorkloads.push_back(std::move(source));
       continue;

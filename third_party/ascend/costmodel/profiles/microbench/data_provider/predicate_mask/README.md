@@ -2,9 +2,9 @@
 
 These probes support the **32-bit reference estimates** in the
 [SIMD/SIMT profile](../../../simd_simt/david_v100_simd_simt_v1.json).
-They do not validate the cost model's mixed-width lane formula, backend fusion
-prediction, or end-to-end
-SIMD/SIMT route accuracy. No profile coefficient is changed by these checks.
+These CCE timing checks do not validate mixed-width grouping or end-to-end
+SIMD/SIMT route accuracy. The separate Triton geometry checks below cover a
+bounded class of compare/logic/select groups. Neither changes profile rates.
 
 Files: `predicate_ops.cce` / `predicate_ops_host.cpp` (SIMD),
 `predicate_ops_simt.cce` / `predicate_ops_simt_host.cpp` (SIMT),
@@ -187,3 +187,39 @@ in this SDK). Repeat for the other modes; SIMT uses `predicate_ops_simt.o`
 and `predicate_ops_simt_host`. Changing SDK or recompiling requires a fresh
 spill check. Simulator ticks are not physical SYS_CNT cycles, and this audit
 does not validate the cost model's reference-lane fallback for other widths.
+
+## SIMD predicate geometry (separate from CCE timing)
+
+For a closed, same-shape compare/AND-OR-XOR/select graph with one numeric
+select sink, SIMD uses the maximum comparison/select data width, not i1.
+Inputs must be i16/i32/f16/f32 arguments or unmasked loads, with the select
+ending at an unmasked store or function return. This follows
+AscendNPU-IR's `HFusion/Transforms/AutoVectorize/FusedNode.cpp`,
+`FusedNode::estimateTileSizeForOp`, for the tested single-group lowering.
+
+The existing `segments * ceil(run * width / vectorWidthBits)` formula uses
+`simd_predicate_bit_width` when nonzero; source `element_bit_width` and SIMT
+costs are unchanged. Source operations are not removed or combined.
+
+On 2026-10-08, full Triton AST/TTIR lowering (`Ascend950PR_9579`) and CANN
+9.1.0 simulation (`Ascend950PR_9578`) checked
+`where((A < B) OP (C < D), X, Y)` with six independent loaded arrays.
+All 22 cases passed readback and matched projected counts: AND/OR/XOR for
+the six type combinations below, plus 64/256-element i16/i32 AND cases.
+Paired native counts from one core/subcore exclude memory/setup instructions;
+no PLDI/PSTI appeared. Twelve saved loaded/shared-mask cases retained fallback.
+
+| 128-element graph | Native VCMP / logic / VSEL | Previous estimate | Projected estimate |
+|---|---|---|---|
+| all i16 or all f16 | 2 / 1 / 1 | 2 / 2 / 1 | 2 / 1 / 1 |
+| all i32 or all f32 | 4 / 2 / 2 | 4 / 2 / 2 | 4 / 2 / 2 |
+| i16 and i32 comparisons, i16 select | 4 / 2 / 2 | 3 / 2 / 1 | 4 / 2 / 2 |
+| two i16 comparisons, i32 select | 4 / 2 / 2 | 2 / 2 / 2 | 4 / 2 / 2 |
+
+These validate geometry, not latency or factor 1 for all widths. Shared masks
+may split groups and require transfers; loaded i1 can use data-vector logic.
+These, casts, broadcasts, arithmetic producers, constants/XOR-NOT, cross-block
+edges and unsupported widths/consumers retain the previous estimate, including
+reference lanes for unresolved i1. The 256-node cap limits analysis work, not
+hardware groups. Full fusion, folding, register pressure and cross-group
+transfers remain unmodeled; this estimate is not a cost bound.

@@ -406,8 +406,9 @@ findMatchingCast(func::FuncOp funcOp, ArrayRef<int64_t> targetShape) {
     unsigned score = 0;
     if (auto blockArg = dyn_cast<BlockArgument>(c.getSource())) {
       unsigned idx = blockArg.getArgNumber();
-      if (auto argDict = funcOp.getArgAttrDict(idx))
-        if (argDict.contains("tt.tensor_kind"))
+      if (auto kind =
+              funcOp.getArgAttrOfType<IntegerAttr>(idx, "tt.tensor_kind"))
+        if (kind.getInt() >= 0)
           score = 1;
     }
     if (score >= bestScore) {

@@ -24,12 +24,14 @@
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "llvm/ADT/SmallPtrSet.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "mark-tensor-kind"
@@ -110,24 +112,37 @@ static void addTensorKindToArguments(OpTy op, TensorKind tensorKind) {
 
   LLVM_DEBUG(llvm::dbgs() << "Processing op: " << *op.getOperation() << "\n";);
 
-  Value cur = ptr;
+  llvm::SmallVector<Value, SET_INIT_SIZE> pending{ptr};
   llvm::SmallPtrSet<Value, SET_INIT_SIZE> visited;
-  while (visited.insert(cur).second) {
+  while (!pending.empty()) {
+    Value cur = pending.pop_back_val();
+    if (!visited.insert(cur).second)
+      continue;
     if (auto blockArg = dyn_cast<BlockArgument>(cur)) {
       if (auto func = dyn_cast_or_null<triton::FuncOp>(
               blockArg.getOwner()->getParentOp())) {
         if (blockArg.getOwner() == &func.getBody().front() &&
             isa<triton::PointerType>(blockArg.getType())) {
           setBlockArgumentAttr(blockArg, func, tensorKind);
-          break;
+          continue;
         }
       }
     }
 
     Operation *defOp = cur.getDefiningOp();
-    if (!defOp || defOp->getNumOperands() == 0)
-      break;
-    cur = defOp->getOperand(0);
+    if (!defOp)
+      continue;
+    if (auto ifOp = dyn_cast<scf::IfOp>(defOp)) {
+      unsigned resultIdx = cast<OpResult>(cur).getResultNumber();
+      for (Region *region : {&ifOp.getThenRegion(), &ifOp.getElseRegion()}) {
+        if (!region->empty())
+          pending.push_back(
+              region->front().getTerminator()->getOperand(resultIdx));
+      }
+      continue;
+    }
+    if (defOp->getNumOperands() > 0)
+      pending.push_back(defOp->getOperand(0));
   }
 }
 
@@ -172,6 +187,19 @@ void MarkTensorKindPass::runOnOperation() {
       &getContext());
 
   (void)applyPatternsGreedily(getOperation(), std::move(patterns));
+
+  // Keep tensor_kinds aligned with the pointer arguments in the launcher.
+  // An unused pointer still occupies a position in the argument list.
+  getOperation().walk([](triton::FuncOp func) {
+    if (!func.isPublic() || func.getBody().empty())
+      return;
+    for (BlockArgument arg : func.getBody().front().getArguments()) {
+      if (!isa<triton::PointerType>(arg.getType()) ||
+          func.getArgAttr(arg.getArgNumber(), "tt.tensor_kind"))
+        continue;
+      setBlockArgumentAttr(arg, func, TensorKind::NONE);
+    }
+  });
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createMarkTensorKindPass() {

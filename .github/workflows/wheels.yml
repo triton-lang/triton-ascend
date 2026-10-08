@@ -287,7 +287,7 @@ jobs:
           import os
           import triton
 
-          backend_dir = os.path.join(os.path.dirname(triton.__file__), "backends", "ascend", "backend", "bishengir")
+          backend_dir = os.path.join(os.path.dirname(triton.__file__), "backends", "ascend", "bishengir")
           print("bundled bishengir dir:", backend_dir)
           print("exists:", os.path.isdir(backend_dir))
           if os.path.isdir(backend_dir):

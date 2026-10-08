@@ -151,13 +151,13 @@ void CircularLayoutParser::parseBlock() {
 }
 
 PreambleException::PreambleException(const std::string &msg)
-    : ParserException(msg, ExceptionSeverity::ERROR) {}
+    : ParserException(msg, ExceptionSeverity::WARNING) {}
 
 ScopeMisMatchException::ScopeMisMatchException(const std::string &msg)
     : ParserException(msg, ExceptionSeverity::WARNING) {}
 
 ClockOverflowException::ClockOverflowException(const std::string &msg)
-    : ParserException(msg, ExceptionSeverity::ERROR) {}
+    : ParserException(msg, ExceptionSeverity::WARNING) {}
 
 namespace {
 Device decodeDevice(const uint32_t dev) {
@@ -169,6 +169,10 @@ Device decodeDevice(const uint32_t dev) {
     break;
   case 2:
     device.type = DeviceType::HIP;
+    device.arch = "";
+    break;
+  case 3:
+    device.type = DeviceType::ASCEND;
     device.arch = "";
     break;
   default:
@@ -249,6 +253,9 @@ uint64_t proton::getTimeShiftCost(const CircularLayoutParserConfig &config) {
     return 7;
   else if (config.device.type == DeviceType::HIP)
     return 36;
+  else if (config.device.type == DeviceType::ASCEND)
+    // GetSysCntOp + PipeBarrier overhead on the in-order AICore pipeline.
+    return 12;
 
   return 0;
 }

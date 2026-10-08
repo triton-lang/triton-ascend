@@ -16,6 +16,7 @@ struct KernelMetadata {
   std::map<int, std::string> scopeName;
   std::string kernelName;
   std::vector<std::string> callStack;
+  double cycleCounterFreqMhz = 1000.0;
 };
 
 using KernelTrace = std::pair<std::shared_ptr<CircularLayoutParserResult>,

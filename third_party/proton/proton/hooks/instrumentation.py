@@ -42,6 +42,30 @@ class CudaAllocator:
         return buffer
 
 
+class NpuAllocator:
+    """Profile scratch allocator for Ascend NPU; torch_npu is imported lazily."""
+
+    def __init__(self, instrumentation_hook):
+        self.instrumentation_hook = instrumentation_hook
+
+    def __call__(self, size: int, alignment: int, stream: Optional[int]):
+        if alignment != self.instrumentation_hook.profile_buffer_alignment:
+            raise RuntimeError(
+                f"Alignment mismatch: {alignment} != {self.instrumentation_hook.profile_buffer_alignment}")
+        aligned_size = (size + alignment - 1) // alignment * alignment
+        # See CudaAllocator for why we take the max with profile_buffer_size.
+        aligned_size = max(aligned_size, self.instrumentation_hook.profile_buffer_size)
+
+        import torch
+        try:
+            import torch_npu  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError("torch_npu is required to allocate the NPU profiling buffer") from e
+        buffer = torch.empty((aligned_size, ), dtype=torch.uint8, device="npu")
+        self.instrumentation_hook.buffer = buffer
+        return buffer
+
+
 class Instrumentation:
 
     def __init__(self, ir_map: Dict[str, Any]):
@@ -59,6 +83,20 @@ class Instrumentation:
 
     def load_dialects(self, ctx):
         triton_proton.load_dialects(ctx)
+
+
+class AscendInstrumentation(Instrumentation):
+    """Ascend instrumentation; also loads the Ascend dialects needed to patch
+    Ascend IR, mirroring NPUBackend.load_dialects()."""
+
+    def load_dialects(self, ctx):
+        super().load_dialects(ctx)
+        from triton._C.libtriton import buffer_ir
+        from triton._C.libtriton import ascend as triton_ascend
+        from triton._C.libtriton.ascend import ir as ascend_ir
+        buffer_ir.load_dialects(ctx)
+        ascend_ir.load_dialects(ctx)
+        triton_ascend.load_dialects(ctx)
 
 
 def _interpret_mode(mode_obj: Union[str, mode.InstrumentationMode]) -> mode.InstrumentationMode:
@@ -121,6 +159,8 @@ def _get_backend_name() -> str:
         return "nvidia"
     elif backend == "hip":
         return "amd"
+    elif backend == "npu":
+        return "ascend"
     else:
         raise RuntimeError(f"Unsupported backend: {backend}")
 
@@ -139,7 +179,9 @@ class InstrumentationHook(Hook):
         # Mapping of function objects to their scope ID pairs
         self.mode: mode.InstrumentationMode = _interpret_mode(mode_obj)
 
-        self.allocator = CudaAllocator(self)
+        # HIP tensors live on the "cuda" device; only Ascend NPU needs a
+        # dedicated allocator.
+        self.allocator = NpuAllocator(self) if _get_backend_name() == "ascend" else CudaAllocator(self)
         self.buffer = None
         self.metadata_path: Dict[Any, Optional[str]] = {}
 
@@ -152,8 +194,14 @@ class InstrumentationHook(Hook):
         flags.instrumentation_on = True
 
         device = triton.runtime.driver.active.get_current_device()
-        max_shared_mem = triton.runtime.driver.active.utils.get_device_properties(device)["max_shared_mem"]
         backend_name = _get_backend_name()
+        device_props = triton.runtime.driver.active.utils.get_device_properties(device)
+        if backend_name == "ascend":
+            # Ascend profiling uses a global scratch buffer, not shared memory;
+            # tolerate drivers that don't report max_shared_mem.
+            max_shared_mem = device_props.get("max_shared_mem", 0)
+        else:
+            max_shared_mem = device_props["max_shared_mem"]
 
         def to_llvmir_passes(pm):
             is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
@@ -181,12 +229,33 @@ class InstrumentationHook(Hook):
                 arch = triton.runtime.driver.active.utils.get_device_properties(device)["arch"].split(":")[0]
                 triton_proton.add_convert_proton_amd_gpu_to_llvm(pm, arch)
 
-        backends[backend_name].compiler.instrumentation = Instrumentation({
-            "ttgpuir_to_llvmir":
-            lambda pm: to_llvmir_passes(pm),
-            "llvmir_to_llvm":
-            lambda pm: to_llvm_passes(pm),
-        })
+        if backend_name == "ascend":
+
+            def ttir_to_linalg_passes(pm):
+                is_long_clk = False if mode.Optimize.CLOCK32 in self.mode.optimizations else True
+                triton_proton.add_convert_proton_to_protongpu(pm, self.mode.metric_type, self.mode.sampling_strategy,
+                                                              self.mode.sampling_options, self.mode.granularity,
+                                                              self.mode.buffer_strategy, self.mode.buffer_type,
+                                                              self.mode.buffer_size, max_shared_mem,
+                                                              self.profile_buffer_size, self.profile_buffer_alignment,
+                                                              is_long_clk)
+                triton_passes.common.add_cse(pm)
+                # ProtonGPU lowering runs inside the Ascend pass pipeline
+                # (AscendNPU-IR); the GPU-specific passes do not apply.
+
+            backends[backend_name].compiler.instrumentation = AscendInstrumentation({
+                # Ascend has no ttgir stage; proton passes run at ttir level
+                # inside ttir_to_linalg.
+                "ttir_to_linalg":
+                lambda pm: ttir_to_linalg_passes(pm),
+            })
+        else:
+            backends[backend_name].compiler.instrumentation = Instrumentation({
+                "ttgpuir_to_llvmir":
+                lambda pm: to_llvmir_passes(pm),
+                "llvmir_to_llvm":
+                lambda pm: to_llvm_passes(pm),
+            })
 
         # Set up the profiling allocator
         set_profile_allocator(self.allocator)
@@ -225,18 +294,29 @@ class InstrumentationHook(Hook):
             return
 
         # Find the IR path in metadata
-        ir_path = next((path for key, path in metadata_group.items() if key.endswith(("ttgir"))), None)
+        backend_name = _get_backend_name()
+        # Ascend has no ttgir stage; scope ids are read from the ttir dump.
+        ir_suffix = "ttir" if backend_name == "ascend" else "ttgir"
+        ir_path = next((path for key, path in metadata_group.items() if key.endswith(ir_suffix)), None)
         metadata_path = next((path for key, path in metadata_group.items() if key.endswith(("json"))), None)
         self.metadata_path[function] = metadata_path
 
         if ir_path:
             context = triton_ir.context()
             triton_ir.load_dialects(context)
-            backend_name = _get_backend_name()
             if backend_name == "nvidia":
                 triton_nvidia.load_dialects(context)
             elif backend_name == "amd":
                 triton_amd.load_dialects(context)
+            elif backend_name == "ascend":
+                # The ttir dump carries Ascend dialect attributes (e.g.
+                # hacc.target); load the same dialects as NPUBackend.
+                from triton._C.libtriton import buffer_ir
+                from triton._C.libtriton import ascend as triton_ascend
+                from triton._C.libtriton.ascend import ir as ascend_ir
+                buffer_ir.load_dialects(context)
+                ascend_ir.load_dialects(context)
+                triton_ascend.load_dialects(context)
             triton_proton.load_dialects(context)
             module = triton_ir.parse_mlir_module(ir_path, context)
             module.context = context
@@ -279,6 +359,9 @@ class InstrumentationHook(Hook):
                     return 1
                 elif target["backend"] == "hip":
                     return 2
+                elif target["backend"] == "npu":
+                    # Matches decodeDevice() case 3 in CircularLayoutParser.cpp.
+                    return 3
                 return 0
 
             alloc_size = 0 if self.buffer is None else self.buffer.element_size() * self.buffer.numel()

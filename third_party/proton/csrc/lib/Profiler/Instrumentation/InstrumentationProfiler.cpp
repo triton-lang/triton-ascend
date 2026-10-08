@@ -4,9 +4,14 @@
 #include "Driver/GPU/CudaApi.h"
 #include "Profiler/Instrumentation/CudaRuntime.h"
 #include "Profiler/Instrumentation/HipRuntime.h"
+#ifdef PROTON_ENABLE_NPU
+#include "Profiler/Instrumentation/AscendRuntime.h"
+#include <acl/acl.h>
+#endif
 #include "Utility/Numeric.h"
 #include "Utility/String.h"
 #include <algorithm>
+#include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -60,7 +65,16 @@ void InstrumentationProfiler::doSetMode(
   } else if (proton::toLower(modeAndOptions[0]) ==
              proton::toLower(DeviceTraits<DeviceType::HIP>::name)) {
     runtime = std::make_unique<HipRuntime>();
-  } else {
+  }
+#ifdef PROTON_ENABLE_NPU
+  else if (proton::toLower(modeAndOptions[0]) == "npu" ||
+           proton::toLower(modeAndOptions[0]) == "ascend" ||
+           proton::toLower(modeAndOptions[0]) ==
+               proton::toLower(DeviceTraits<DeviceType::ASCEND>::name)) {
+    runtime = std::make_unique<AscendRuntime>();
+  }
+#endif
+  else {
     throw std::runtime_error("Unknown device type: " + modeAndOptions[0]);
   }
   for (size_t i = 1; i < modeAndOptions.size(); ++i) {
@@ -137,9 +151,8 @@ void InstrumentationProfiler::initFunctionMetadata(
     const std::vector<std::pair<size_t, size_t>> &scopeIdParentPairs,
     const std::string &metadataPath) {
   if (functionScopeIdNames.count(functionId)) {
-    throw std::runtime_error(
-        "Duplicate function id: " + std::to_string(functionId) +
-        " for function " + functionName);
+    // Idempotent: a duplicate function id can arrive on JIT cache hits.
+    return;
   }
   functionNames[functionId] = functionName;
   for (auto &pair : scopeIdPairs) {
@@ -185,7 +198,8 @@ void InstrumentationProfiler::enterInstrumentedOp(uint64_t streamId,
 
 void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
                                                  uint64_t functionId,
-                                                 uint8_t *buffer, size_t size) {
+                                                 uint8_t *buffer, size_t size,
+                                                 bool isHost) {
   if (!buffer || !hostBuffer)
     return;
 
@@ -232,38 +246,56 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
   }
   auto &scopeIdContexts = functionScopeIdContexts[functionId];
 
-  runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
-  runtime->processHostBuffer(
-      hostBuffer, size, buffer, size, priorityStream,
-      [&](uint8_t *bufferPtr, size_t size) {
-        ByteSpan byteSpan(bufferPtr, size);
-        CircularLayoutParser parser(byteSpan, *circularLayoutConfig);
-        parser.parse();
-        for (auto &blockTrace : parser.getResult()->blockTraces) {
-          for (auto &trace : blockTrace.traces) {
-            for (auto &event : trace.profileEvents) {
-              auto &contexts = scopeIdContexts[event.first->scopeId];
-              auto duration = event.second->cycle - event.first->cycle;
-              auto normalizedDuration = static_cast<double>(duration) /
-                                        (circularLayoutConfig->totalUnits *
-                                         circularLayoutConfig->numBlocks);
-              for (auto *data : dataSet) {
-                auto kernelId = dataScopeIdMap[data];
-                auto scopeId = data->addOp(kernelId, contexts);
-                data->addMetric(
-                    scopeId,
-                    std::make_shared<CycleMetric>(
-                        event.first->cycle, event.second->cycle, duration,
-                        normalizedDuration, kernelId, functionName,
-                        blockTrace.blockId, blockTrace.procId, trace.uid,
-                        device, static_cast<uint64_t>(runtime->getDeviceType()),
-                        timeShiftCost, blockTrace.initTime,
-                        blockTrace.preFinalTime, blockTrace.postFinalTime));
-              }
-            }
+  auto parseBuffer = [&](uint8_t *bufferPtr, size_t bufferSize) {
+    ByteSpan byteSpan(bufferPtr, bufferSize);
+    CircularLayoutParser parser(byteSpan, *circularLayoutConfig);
+    try {
+      parser.parse();
+    } catch (const std::exception &e) {
+      // Degrade parse failures to a warning instead of aborting the session.
+      std::cerr << "Warning: failed to parse instrumented buffer: " << e.what()
+                << std::endl;
+      return;
+    }
+    for (auto &blockTrace : parser.getResult()->blockTraces) {
+      for (auto &trace : blockTrace.traces) {
+        for (auto &event : trace.profileEvents) {
+          auto &contexts = scopeIdContexts[event.first->scopeId];
+          auto duration = event.second->cycle - event.first->cycle;
+          auto normalizedDuration = static_cast<double>(duration) /
+                                    (circularLayoutConfig->totalUnits *
+                                     circularLayoutConfig->numBlocks);
+          for (auto *data : dataSet) {
+            auto kernelId = dataScopeIdMap[data];
+            auto scopeId = data->addOp(kernelId, contexts);
+            data->addMetric(
+                scopeId,
+                std::make_shared<CycleMetric>(
+                    event.first->cycle, event.second->cycle, duration,
+                    normalizedDuration, kernelId, functionName,
+                    blockTrace.blockId, blockTrace.procId, trace.uid, device,
+                    static_cast<uint64_t>(runtime->getDeviceType()),
+                    timeShiftCost, blockTrace.initTime, blockTrace.preFinalTime,
+                    blockTrace.postFinalTime));
           }
         }
-      });
+      }
+    }
+  };
+
+  if (isHost) {
+    // The buffer already lives on the host (Ascend instrumentation path).
+    parseBuffer(buffer, size);
+#ifdef PROTON_ENABLE_NPU
+    aclrtFreeHost(buffer);
+#endif
+  } else {
+    runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
+    runtime->processHostBuffer(hostBuffer, size, buffer, size, priorityStream,
+                               [&](uint8_t *bufferPtr, size_t bufferSize) {
+                                 parseBuffer(bufferPtr, bufferSize);
+                               });
+  }
 
   dataScopeIdMap.clear();
 }

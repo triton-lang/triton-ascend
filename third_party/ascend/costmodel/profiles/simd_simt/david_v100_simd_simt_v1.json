@@ -152,7 +152,7 @@
       "confidence": "low"
     },
     "stage_resources": {
-      "description": "Generic SIMD front-end, spill, indirect-memory, and control-flow rates used by every SIMD StageCostModel. The indirect values are provisional seeds pending the next same-shape CaModel calibration.",
+      "description": "Generic SIMD front-end, spill, indirect-memory, and control-flow rates used by every SIMD StageCostModel. Tensor index range/address/cast work without a dedicated operation rate retains an issue-only reference estimate; scalar index operations retain scalar resource accounting. Folding and materialization are consumer-dependent. The indirect values are provisional seeds pending the next same-shape CaModel calibration.",
       "scalar_operations_per_system_cycle": 1.0,
       "issue_instructions_per_system_cycle": 6.0,
       "spill_transactions_per_system_cycle": 1.0,
@@ -341,7 +341,7 @@
       "confidence": "low"
     },
     "stage_resources": {
-      "description": "Generic SIMT front-end, spill, indirect-memory, and control-flow rates used by every SIMT StageCostModel. The indirect values are provisional seeds pending the next same-shape CaModel calibration.",
+      "description": "Generic SIMT front-end, spill, indirect-memory, and control-flow rates used by every SIMT StageCostModel. Tensor index range/address/cast work without a dedicated operation rate retains an issue-only reference estimate; scalar index operations retain scalar resource accounting. Thread-ID reuse and address folding are not independent per-element instructions. The indirect values are provisional seeds pending the next same-shape CaModel calibration.",
       "scalar_operations_per_system_cycle": 4.0,
       "issue_instructions_per_system_cycle": 4.0,
       "spill_transactions_per_system_cycle": 1.0,

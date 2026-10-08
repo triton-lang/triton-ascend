@@ -17,7 +17,10 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <gtest/gtest.h>
@@ -593,6 +596,65 @@ TEST(CostModelPassesTest, SimdSimtScoresGenericSemanticStages) {
   auto reportReason = reportObject->getString("application_reason");
   ASSERT_TRUE(reportReason);
   EXPECT_EQ(*reportReason, "report_mode");
+}
+
+TEST(CostModelPassesTest, SimdSimtLoadsOptionalIndexRates) {
+  auto buffer =
+      llvm::MemoryBuffer::getFile(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  ASSERT_TRUE(static_cast<bool>(buffer));
+  auto json = llvm::json::parse((*buffer)->getBuffer());
+  ASSERT_TRUE(static_cast<bool>(json));
+  auto *root = json->getAsObject();
+  ASSERT_NE(root, nullptr);
+  // A temporary profile must retain the original microbenchmark catalog path.
+  llvm::SmallString<256> catalog(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  llvm::sys::path::remove_filename(catalog);
+  llvm::sys::path::append(catalog, *root->getString("microbenchmark_profile"));
+  (*root)["microbenchmark_profile"] = catalog.str().str();
+  for (llvm::StringRef mode : {"simd", "simt"}) {
+    auto *ops = root->getObject(mode)->getObject("ops");
+    for (llvm::StringRef key : {"index.range", "index.address", "index.cast"})
+      (*ops)[key] =
+          llvm::json::Object{{"relative_to", "f32.add"}, {"factor", 2.0}};
+  }
+  llvm::SmallString<128> profilePath;
+  int fd = -1;
+  ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("simd_simt_index_profile",
+                                                  "json", fd, profilePath));
+  llvm::FileRemover cleanup(profilePath);
+  {
+    llvm::raw_fd_ostream stream(fd, true);
+    stream << *json;
+  }
+  mlir::ascend::SimdSimtCostModelOptions options;
+  options.actualTarget = "Ascend950PR_9579";
+  options.profilePath = profilePath.str().str();
+  // Check each optional key separately; adjacent index ops can share a Stage.
+  for (const char *operation :
+       {"%r = \"tt.make_range\"() {start = 0 : i32, end = 64 : i32} : "
+        "() -> tensor<64xi32>",
+        "%r = \"tt.addptr\"(%p, %ix) : (tensor<64x!tt.ptr<i32>>, "
+        "tensor<64xi32>) -> tensor<64x!tt.ptr<i32>>",
+        "%r = arith.index_cast %ix : tensor<64xi32> to "
+        "tensor<64xindex>"}) {
+    SCOPED_TRACE(operation);
+    mlir::MLIRContext context;
+    context.allowUnregisteredDialects();
+    auto module = parseModule(
+        context, "module { func.func @kernel(%p: tensor<64x!tt.ptr<i32>>, "
+                 "%ix: tensor<64xi32>) { " +
+                     std::string(operation) + " return } }");
+    ASSERT_TRUE(module);
+    auto report = mlir::ascend::analyzeSimdSimtCandidates(*module, options);
+    if (!report)
+      FAIL() << llvm::toString(report.takeError());
+    ASSERT_EQ(report->stageModel.stages.size(), 1u);
+    const auto &implementations =
+        report->stageModel.stages.front().implementations;
+    ASSERT_EQ(implementations.size(), 2u);
+    for (const auto &implementation : implementations)
+      EXPECT_GT(implementation.resources.compute, 0);
+  }
 }
 
 TEST(CostModelPassesTest, SimdSimtSelectionUsesExternalAnalysisIR) {

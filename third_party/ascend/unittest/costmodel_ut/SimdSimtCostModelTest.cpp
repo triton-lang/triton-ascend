@@ -132,6 +132,142 @@ TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
             StageMode::SIMT);
 }
 
+TEST(SimdSimtCostModelTest, IndexGenerationClassifiesExplicitSourceOperations) {
+  struct Case {
+    const char *operation;
+    const char *key;
+    bool tensor;
+    bool index;
+  };
+  const Case cases[] = {
+      {"%r = \"tt.make_range\"() {start = 0 : i32, end = 64 : i32} : () -> "
+       "tensor<64xi32>",
+       "index.range", true, true},
+      {"%r = \"tt.get_program_id\"() {axis = 0 : i32} : () -> i32", "", false,
+       true},
+      {"%r = \"tt.get_num_programs\"() {axis = 0 : i32} : () -> i32", "", false,
+       true},
+      {"%r = \"tt.addptr\"(%p, %ix) : (tensor<64x!tt.ptr<i32>>, "
+       "tensor<64xi32>) -> tensor<64x!tt.ptr<i32>>",
+       "index.address", true, true},
+      {"%r = \"tt.advance\"(%bp, %s) : (!tt.ptr<tensor<64xi32>>, i32) -> "
+       "!tt.ptr<tensor<64xi32>>",
+       "", false, true},
+      {"%r = arith.index_cast %ix : tensor<64xi32> to tensor<64xindex>",
+       "index.cast", true, true},
+      {"%r = arith.index_castui %idx : tensor<64xindex> to tensor<64xi32>",
+       "index.cast", true, true},
+      {"%r = arith.index_castui %s : i32 to index", "", false, true},
+      {"%r = arith.addi %ix, %ix : tensor<64xi32>", "generic.issue", true,
+       false},
+  };
+  for (const Case &test : cases) {
+    SCOPED_TRACE(test.operation);
+    mlir::MLIRContext context;
+    context.getOrLoadDialect<mlir::arith::ArithDialect>();
+    context.getOrLoadDialect<mlir::func::FuncDialect>();
+    context.allowUnregisteredDialects();
+    const std::string source =
+        "module { func.func @kernel(%p: tensor<64x!tt.ptr<i32>>, "
+        "%bp: !tt.ptr<tensor<64xi32>>, %ix: tensor<64xi32>, "
+        "%idx: tensor<64xindex>, %s: i32) { " +
+        std::string(test.operation) + " return } }";
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+    auto partition = StagePartitioner().partition(
+        *module, mlir::ascend::SimtAnchorPlan{}, StagePartitionerOptions{});
+    if (!partition)
+      FAIL() << llvm::toString(partition.takeError());
+    ASSERT_EQ(partition->stages.size(), 1u);
+    const auto &stage = partition->stages.front();
+    EXPECT_EQ(stage.costModelKind, test.index
+                                       ? StageCostModelKind::IndexGeneration
+                                       : StageCostModelKind::ScalarIssue);
+    EXPECT_DOUBLE_EQ(stage.workload.scalarOperations, test.tensor ? 0 : 1);
+    EXPECT_DOUBLE_EQ(stage.workload.predicateElements, 0);
+    EXPECT_DOUBLE_EQ(stage.workload.issueElements, test.tensor ? 64 : 1);
+    if (test.tensor) {
+      ASSERT_EQ(stage.workload.operationElements.size(), 1u);
+      EXPECT_DOUBLE_EQ(stage.workload.operationElements.lookup(test.key), 64);
+    } else {
+      EXPECT_TRUE(stage.workload.operationElements.empty());
+    }
+  }
+}
+
+TEST(SimdSimtCostModelTest, IndexWorkCountsIRWithoutAssumingHoisting) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  context.allowUnregisteredDialects();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module { func.func @kernel() {
+      %c0 = arith.constant 0 : index
+      %c1 = arith.constant 1 : index
+      %c4 = arith.constant 4 : index
+      %outside = "tt.make_range"() {start = 0 : i32, end = 64 : i32} : () -> tensor<64xi32>
+      scf.for %i = %c0 to %c4 step %c1 {
+        %inside = "tt.make_range"() {start = 0 : i32, end = 64 : i32} : () -> tensor<64xi32>
+      }
+      return
+    } }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+  auto partition = StagePartitioner().partition(
+      *module, mlir::ascend::SimtAnchorPlan{}, StagePartitionerOptions{});
+  if (!partition)
+    FAIL() << llvm::toString(partition.takeError());
+  double elements = 0;
+  for (const LogicalStage &stage : partition->stages)
+    elements += stage.iterationCount *
+                stage.workload.operationElements.lookup("index.range");
+  // Source work only: no assumption that a backend preserves or hoists it.
+  EXPECT_DOUBLE_EQ(elements, 5 * 64);
+}
+
+TEST(SimdSimtCostModelTest, UncalibratedIndexWorkRetainsIssueFallback) {
+  auto cost = [](llvm::StringRef key, bool explicitRate) {
+    auto stage = logicalStage("index", StageCostModelKind::IndexGeneration);
+    stage.workload.operationElements.clear();
+    stage.workload.operationElements[key] = 128;
+    stage.workload.issueElements = 128;
+    TensorOperationWorkload tensor;
+    tensor.operation = key.str();
+    tensor.elementBitWidth = 32;
+    tensor.logicalElements = 128;
+    tensor.segmentCount = 1;
+    tensor.contiguousElementsPerSegment = 128;
+    stage.workload.tensorOperationWorkloads.push_back(tensor);
+    auto profile = hardwareProfile();
+    if (explicitRate) {
+      profile.simd.operationRates[key] = {2.0, 3.0};
+      profile.simt.operationRates[key] = {4.0, 2.0};
+    }
+    return evaluateOneStage(std::move(stage), std::move(profile));
+  };
+  auto generic = cost("generic.issue", false);
+  ASSERT_TRUE(static_cast<bool>(generic));
+  for (llvm::StringRef key : {"index.range", "index.address", "index.cast"}) {
+    auto fallback = cost(key, false);
+    auto explicitRate = cost(key, true);
+    ASSERT_TRUE(static_cast<bool>(fallback));
+    ASSERT_TRUE(static_cast<bool>(explicitRate));
+    for (size_t i = 0; i < 2; ++i) {
+      const auto &old = generic->stages.front().implementations[i];
+      const auto &current = fallback->stages.front().implementations[i];
+      EXPECT_DOUBLE_EQ(current.resources.compute, 0);
+      EXPECT_DOUBLE_EQ(current.resources.issue, old.resources.issue);
+      EXPECT_DOUBLE_EQ(current.totalCycles, old.totalCycles);
+      // Synthetic profile contract, not a measured native instruction count.
+      EXPECT_DOUBLE_EQ(
+          explicitRate->stages.front().implementations[i].resources.compute,
+          i == 0 ? 3.0 : 64.0);
+    }
+  }
+}
+
 TEST(SimdSimtCostModelTest, SimdPricesShortAxesPerSegmentAndElementWidth) {
   auto simdCost = [](int64_t elementBits, int64_t contiguousElements,
                      double segmentCount) {

@@ -151,6 +151,11 @@ static bool hasTensorResult(Operation *operation) {
 static llvm::StringRef getProfileOperationName(Operation *operation) {
   const llvm::StringRef name = operation->getName().getStringRef();
   return llvm::StringSwitch<llvm::StringRef>(name)
+      // Preserve source index semantics without predicting address folding,
+      // range reuse, or integer-cast elimination in a particular backend.
+      .Case("tt.make_range", "index.range")
+      .Cases("tt.addptr", "tt.advance", "index.address")
+      .Cases("arith.index_cast", "arith.index_castui", "index.cast")
       .Cases("arith.addf", "tt.add", "f32.add")
       .Case("arith.subf", "f32.sub")
       .Case("arith.mulf", "f32.mul")
@@ -1001,8 +1006,10 @@ static StageCostModelKind classifySemanticRoot(Operation *root) {
     return StageCostModelKind::ContinuousTileMemory;
   if (operationTreeHasAnyName(root, {"arith.cmpi", "arith.cmpf"}))
     return StageCostModelKind::PredicateMask;
-  if (operationTreeHasAnyName(root, {"tt.get_program_id", "tt.addptr",
-                                     "tt.advance", "arith.index_cast"}))
+  if (operationTreeHasAnyName(root,
+                              {"tt.make_range", "tt.get_program_id",
+                               "tt.get_num_programs", "tt.addptr", "tt.advance",
+                               "arith.index_cast", "arith.index_castui"}))
     return StageCostModelKind::IndexGeneration;
   if (operationTreeHasAnyName(root, {"scf.if", "cf.cond_br"}))
     return StageCostModelKind::ScalarControl;

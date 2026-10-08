@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+
 using mlir::ascend::HardwareProfile;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
@@ -1786,6 +1788,221 @@ TEST(SimdSimtCostModelTest, PointerInductionLoopIsNotADataRecurrence) {
             StageCostModelKind::IndependentPipelinedLoop);
 }
 
+TEST(SimdSimtCostModelTest, RecurrentDotReductionLoopSplitsIntoLeafStages) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  context.allowUnregisteredDialects();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module {
+      func.func @attention_like(%pointer: i64, %limit: index) {
+        %c0 = arith.constant 0 : index
+        %c1 = arith.constant 1 : index
+        %address_step = arith.constant 16 : i64
+        %lhs = "tt.load"(%pointer) : (i64) -> tensor<16x16xf16>
+        %rhs = "tt.load"(%pointer) : (i64) -> tensor<16x16xf16>
+        %init = arith.constant dense<0.0> : tensor<16x16xf32>
+        %result:2 = scf.for %i = %c0 to %limit step %c1
+            iter_args(%state = %init, %address = %pointer)
+            -> (tensor<16x16xf32>, i64) {
+          %value = "tt.load"(%address) : (i64) -> f32
+          %qk = "tt.dot"(%lhs, %rhs, %state)
+              : (tensor<16x16xf16>, tensor<16x16xf16>,
+                 tensor<16x16xf32>) -> tensor<16x16xf32>
+          %row = "tt.reduce"(%qk) {axis = 1 : i32}
+              : (tensor<16x16xf32>) -> tensor<16xf32>
+          %expanded = "tt.expand_dims"(%row) {axis = 1 : i32}
+              : (tensor<16xf32>) -> tensor<16x1xf32>
+          %broadcast = "tt.broadcast"(%expanded)
+              : (tensor<16x1xf32>) -> tensor<16x16xf32>
+          %updated = arith.addf %qk, %broadcast : tensor<16x16xf32>
+          %pv = "tt.dot"(%lhs, %rhs, %updated)
+              : (tensor<16x16xf16>, tensor<16x16xf16>,
+                 tensor<16x16xf32>) -> tensor<16x16xf32>
+          %next_address = arith.addi %address, %address_step : i64
+          scf.yield %pv, %next_address : tensor<16x16xf32>, i64
+        }
+        "tt.store"(%pointer, %result#0)
+            : (i64, tensor<16x16xf32>) -> ()
+        return
+      }
+    }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+
+  mlir::Operation *loop = nullptr;
+  module->walk([&](mlir::scf::ForOp operation) { loop = operation; });
+  ASSERT_NE(loop, nullptr);
+
+  mlir::ascend::SimtAnchorPlan anchorPlan;
+  auto partition = StagePartitioner().partition(*module, anchorPlan,
+                                                StagePartitionerOptions{});
+  if (!partition)
+    FAIL() << llvm::toString(partition.takeError());
+
+  const LogicalStage *shell = nullptr;
+  llvm::SmallVector<const LogicalStage *> orderedDotStages;
+  int64_t reductionStages = 0;
+  for (const LogicalStage &stage : partition->stages) {
+    if (llvm::is_contained(stage.operations, loop))
+      shell = &stage;
+    if (stage.features.hasDot) {
+      orderedDotStages.push_back(&stage);
+      EXPECT_FALSE(stage.features.hasReduction);
+      EXPECT_FALSE(stage.features.hasLoopCarriedDataDependency);
+      EXPECT_EQ(stage.iterationCount, 1);
+    }
+    if (stage.features.hasReduction) {
+      ++reductionStages;
+      EXPECT_FALSE(stage.features.hasDot);
+      EXPECT_EQ(stage.iterationCount, 1);
+    }
+  }
+
+  ASSERT_NE(shell, nullptr);
+  EXPECT_EQ(shell->operations.size(), 1u);
+  EXPECT_EQ(shell->costModelKind, StageCostModelKind::LoopCarriedRecurrence);
+  EXPECT_TRUE(shell->features.hasLoopCarriedDataDependency);
+  EXPECT_FALSE(shell->features.hasDot);
+  EXPECT_FALSE(shell->features.hasReduction);
+  EXPECT_DOUBLE_EQ(shell->workload.dotFlops, 0.0);
+  EXPECT_EQ(orderedDotStages.size(), 2u);
+  EXPECT_EQ(reductionStages, 1);
+
+  ASSERT_EQ(partition->dependencies.size(), 1u);
+  const mlir::ascend::StageDependency &dependency =
+      partition->dependencies.front();
+  EXPECT_EQ(dependency.kind,
+            mlir::ascend::StageDependencyKind::LoopCarriedData);
+  EXPECT_EQ(dependency.loopStage, shell->id);
+  EXPECT_EQ(dependency.sourceStage, orderedDotStages[1]->id);
+  EXPECT_EQ(dependency.targetStage, orderedDotStages[0]->id);
+  EXPECT_EQ(dependency.iterationDistance, 1);
+  EXPECT_EQ(dependency.carriedValueIndex, 0);
+  EXPECT_EQ(dependency.carriedValueName, "iter_arg_0");
+  EXPECT_EQ(dependency.carriedValueBytes, 16 * 16 * 4);
+
+  HardwareProfile profile = hardwareProfile();
+  auto costs = StageCostEvaluator().evaluate(*partition, profile);
+  if (!costs)
+    FAIL() << llvm::toString(costs.takeError());
+  ASSERT_EQ(costs->dependencies.size(), 1u);
+  auto routes = solveStageRoutes(*costs, profile.transition);
+  if (!routes)
+    FAIL() << llvm::toString(routes.takeError());
+  EXPECT_EQ(routes->dependencies.size(), 1u);
+  llvm::json::Object report = routes->toJSON();
+  auto *dependencies = report.getArray("stage_dependencies");
+  ASSERT_NE(dependencies, nullptr);
+  ASSERT_EQ(dependencies->size(), 1u);
+  auto *serialized = (*dependencies)[0].getAsObject();
+  ASSERT_NE(serialized, nullptr);
+  EXPECT_EQ(serialized->getString("kind"), "loop_carried_data");
+  EXPECT_EQ(serialized->getInteger("iteration_distance"), 1);
+  EXPECT_EQ(serialized->getInteger("carried_value_index"), 0);
+  EXPECT_EQ(serialized->getInteger("carried_value_bytes"), 16 * 16 * 4);
+}
+
+TEST(SimdSimtCostModelTest, NestedSplitLoopsMultiplyShellExecutionCounts) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  context.allowUnregisteredDialects();
+
+  for (bool zeroTripOuter : {false, true}) {
+    std::string source = R"mlir(
+      module {
+        func.func @nested(%pointer: i64, %lhs: tensor<16x16xf16>,
+                          %rhs: tensor<16x16xf16>) {
+          %c0 = arith.constant 0 : index
+          %c1 = arith.constant 1 : index
+          %c4 = arith.constant 4 : index
+          %c8 = arith.constant 8 : index
+          %init = arith.constant dense<0.0> : tensor<16x16xf32>
+          %outer = scf.for %i = %c0 to OUTER_UPPER step %c1
+              iter_args(%outer_state = %init) -> tensor<16x16xf32> {
+            %inner = scf.for %j = %c0 to %c8 step %c1
+                iter_args(%inner_state = %outer_state) -> tensor<16x16xf32> {
+              %qk = "tt.dot"(%lhs, %rhs, %inner_state)
+                  : (tensor<16x16xf16>, tensor<16x16xf16>,
+                     tensor<16x16xf32>) -> tensor<16x16xf32>
+              %pv = "tt.dot"(%lhs, %rhs, %qk)
+                  : (tensor<16x16xf16>, tensor<16x16xf16>,
+                     tensor<16x16xf32>) -> tensor<16x16xf32>
+              scf.yield %pv : tensor<16x16xf32>
+            }
+            scf.yield %inner : tensor<16x16xf32>
+          }
+          "tt.store"(%pointer, %outer)
+              : (i64, tensor<16x16xf32>) -> ()
+          return
+        }
+      }
+    )mlir";
+    source.replace(source.find("OUTER_UPPER"), 11,
+                   zeroTripOuter ? "%c0" : "%c4");
+    auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+
+    mlir::Operation *outerLoop = nullptr;
+    mlir::Operation *innerLoop = nullptr;
+    module->walk([&](mlir::scf::ForOp loop) {
+      if (mlir::isa<mlir::scf::ForOp>(loop->getParentOp()))
+        innerLoop = loop;
+      else
+        outerLoop = loop;
+    });
+    ASSERT_NE(outerLoop, nullptr);
+    ASSERT_NE(innerLoop, nullptr);
+
+    mlir::ascend::SimtAnchorPlan anchors;
+    auto partition = StagePartitioner().partition(*module, anchors,
+                                                  StagePartitionerOptions{});
+    if (!partition)
+      FAIL() << llvm::toString(partition.takeError());
+
+    const LogicalStage *outerStage = nullptr;
+    const LogicalStage *innerStage = nullptr;
+    const LogicalStage *dotStage = nullptr;
+    for (const LogicalStage &stage : partition->stages) {
+      if (llvm::is_contained(stage.operations, outerLoop))
+        outerStage = &stage;
+      if (llvm::is_contained(stage.operations, innerLoop))
+        innerStage = &stage;
+      if (stage.features.hasDot)
+        dotStage = &stage;
+    }
+    ASSERT_NE(outerStage, nullptr);
+    ASSERT_NE(innerStage, nullptr);
+    ASSERT_NE(dotStage, nullptr);
+    const int64_t outerCount = zeroTripOuter ? 0 : 4;
+    const int64_t nestedCount = zeroTripOuter ? 0 : 32;
+    EXPECT_EQ(outerStage->iterationCount, outerCount);
+    EXPECT_EQ(innerStage->iterationCount, nestedCount);
+    EXPECT_EQ(dotStage->iterationCount, nestedCount);
+
+    if (zeroTripOuter) {
+      HardwareProfile profile = hardwareProfile();
+      auto costs = StageCostEvaluator().evaluate(*partition, profile);
+      if (!costs)
+        FAIL() << llvm::toString(costs.takeError());
+      for (const std::string &id :
+           {outerStage->id, innerStage->id, dotStage->id}) {
+        auto stage = llvm::find_if(costs->stages, [&](const auto &candidate) {
+          return candidate.id == id;
+        });
+        ASSERT_NE(stage, costs->stages.end());
+        for (const StageImplementationCost &implementation :
+             stage->implementations)
+          EXPECT_DOUBLE_EQ(implementation.totalCycles, 0.0);
+      }
+    }
+  }
+}
+
 TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   StagePartition partition;
   partition.operationOwnershipComplete = true;
@@ -1802,3 +2019,155 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   EXPECT_NE(llvm::toString(std::move(error)).find("requires_split"),
             std::string::npos);
 }
+
+namespace {
+
+class StageWorkloadTest : public ::testing::Test {
+protected:
+  StageWorkloadTest() {
+    context.getOrLoadDialect<mlir::arith::ArithDialect>();
+    context.getOrLoadDialect<mlir::func::FuncDialect>();
+    context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  }
+
+  void analyze(llvm::StringRef body, int64_t normalization = 1) {
+    std::string source = R"mlir(
+      module {
+        func.func @work(%a: tensor<16xf32>, %n: index) {
+          %c0 = arith.constant 0 : index
+          %c1 = arith.constant 1 : index
+          %c3 = arith.constant 3 : index
+          %c4 = arith.constant 4 : index
+          %c14 = arith.constant 14 : index
+    )mlir";
+    source += body.str();
+    source += "return\n }\n }";
+    module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+    ASSERT_TRUE(module);
+    partition = StagePartition{};
+    partition.operationOwnershipComplete = true;
+    LogicalStage stage;
+    stage.id = "work";
+    stage.iterationCount = normalization;
+    auto function = mlir::cast<mlir::func::FuncOp>(&module->getBody()->front());
+    for (mlir::Operation &operation : function.getBody().front())
+      stage.operations.push_back(&operation);
+    partition.stages.push_back(std::move(stage));
+    auto error = StageWorkloadAnalysis().analyze(partition);
+    ASSERT_FALSE(static_cast<bool>(error)) << llvm::toString(std::move(error));
+  }
+
+  double total(llvm::StringRef operation) {
+    const auto &stage = partition.stages.front();
+    auto entry = stage.workload.operationElements.find(operation);
+    return entry == stage.workload.operationElements.end()
+               ? 0.0
+               : entry->second * stage.iterationCount;
+  }
+
+  mlir::MLIRContext context;
+  mlir::OwningOpRef<mlir::ModuleOp> module;
+  StagePartition partition;
+};
+
+TEST_F(StageWorkloadTest, SetupIsNotReplicatedWithLoopBody) {
+  analyze(R"mlir(
+    %setup = arith.mulf %a, %a : tensor<16xf32>
+    scf.for %i = %c0 to %c14 step %c1 {
+      %v = arith.addf %setup, %a : tensor<16xf32>
+    }
+  )mlir",
+          14);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 14.0 * 16);
+  EXPECT_DOUBLE_EQ(total("f32.mul"), 16.0);
+}
+
+TEST_F(StageWorkloadTest, ZeroTripDoesNotExecuteBody) {
+  analyze(R"mlir(
+    scf.for %i = %c0 to %c0 step %c1 {
+      %v = arith.addf %a, %a : tensor<16xf32>
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 0.0);
+}
+
+TEST_F(StageWorkloadTest, ReversedBoundsDoNotExecuteBody) {
+  analyze(R"mlir(
+    scf.for %i = %c14 to %c3 step %c1 {
+      %v = arith.addf %a, %a : tensor<16xf32>
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 0.0);
+}
+
+TEST_F(StageWorkloadTest, PositiveStepUsesCeilingDivision) {
+  analyze(R"mlir(
+    scf.for %i = %c1 to %c14 step %c4 {
+      %v = arith.addf %a, %a : tensor<16xf32>
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 4.0 * 16);
+}
+
+TEST_F(StageWorkloadTest, NestedConstantLoopsMultiplyOnlyBodies) {
+  analyze(R"mlir(
+    scf.for %i = %c0 to %c3 step %c1 {
+      %setup = arith.mulf %a, %a : tensor<16xf32>
+      scf.for %j = %c0 to %c4 step %c1 {
+        %v = arith.addf %setup, %a : tensor<16xf32>
+      }
+    }
+  )mlir",
+          4);
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 3.0 * 4 * 16);
+  EXPECT_DOUBLE_EQ(total("f32.mul"), 3.0 * 16);
+}
+
+TEST_F(StageWorkloadTest, ZeroTripPrunesNestedLoopBody) {
+  analyze(R"mlir(
+    scf.for %i = %c0 to %c0 step %c1 {
+      scf.for %j = %c0 to %n step %c1 {
+        %v = arith.addf %a, %a : tensor<16xf32>
+      }
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 0.0);
+}
+
+TEST_F(StageWorkloadTest, UnrepresentableTripCountUsesFallback) {
+  analyze(R"mlir(
+    %low = arith.constant -9223372036854775808 : index
+    %high = arith.constant 9223372036854775807 : index
+    scf.for %i = %low to %high step %c1 {
+      %v = arith.addf %a, %a : tensor<16xf32>
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 16.0); // Fallback, not a wrapped count.
+}
+
+TEST_F(StageWorkloadTest, UnsignedBoundsUseFallback) {
+  analyze(R"mlir(
+    %minus_one = arith.constant -1 : index
+    scf.for %i = %c0 to %minus_one step %c1 {
+      %v = arith.addf %a, %a : tensor<16xf32>
+    }
+  )mlir");
+  ASSERT_FALSE(HasFatalFailure());
+  EXPECT_DOUBLE_EQ(total("f32.add"), 0.0);
+  module->walk([&](mlir::scf::ForOp loop) {
+    loop->setAttr("unsignedCmp", mlir::UnitAttr::get(&context));
+  });
+  auto error = StageWorkloadAnalysis().analyze(partition);
+  ASSERT_FALSE(static_cast<bool>(error)) << llvm::toString(std::move(error));
+  // Unsupported unsigned trip uses fallback rather than signed bounds.
+  EXPECT_DOUBLE_EQ(total("f32.add"), 16.0);
+}
+
+} // namespace

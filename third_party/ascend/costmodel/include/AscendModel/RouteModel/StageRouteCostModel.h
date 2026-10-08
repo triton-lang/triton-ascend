@@ -22,6 +22,7 @@ namespace mlir::ascend {
 
 enum class StageMode { SIMD, SIMT };
 enum class StageKernelRouteKind { AllSIMD, AllSIMT, Mixed };
+enum class StageDependencyKind { LoopCarriedData };
 enum class StageScheduleKind {
   StraightLine,
   IndependentPipelined,
@@ -30,6 +31,26 @@ enum class StageScheduleKind {
 };
 
 llvm::StringRef stringifyStageMode(StageMode mode);
+
+llvm::StringRef stringifyStageDependencyKind(StageDependencyKind kind);
+
+/// One explicit loop-carried dependency between logical Stage instances.
+/// Stage IDs, rather than vector indices, keep reports stable after
+/// StageKindClassifier assigns final semantic names.
+struct StageDependency {
+  std::string loopStage;
+  std::string sourceStage;
+  std::string targetStage;
+  StageDependencyKind kind = StageDependencyKind::LoopCarriedData;
+  int64_t iterationDistance = 1;
+  int64_t carriedValueIndex = 0;
+  std::string carriedValueName;
+  int64_t carriedValueBytes = 0;
+  std::string sourceLocation;
+
+  bool isValid() const;
+  llvm::json::Object toJSON() const;
+};
 
 struct StageImplementation {
   StageMode mode = StageMode::SIMD;
@@ -241,6 +262,7 @@ struct StageCostTable {
   int64_t logicalProgramCountHint = 0;
   int64_t physicalCoreCountHint = 0;
   std::vector<LogicalStageCost> stages;
+  std::vector<StageDependency> dependencies;
 };
 
 struct StageTransitionCost {
@@ -280,6 +302,7 @@ struct StageCostModelSummary {
   int64_t modeledOperationCount = 0;
   std::string profileVersion;
   std::vector<LogicalStageCost> stages;
+  std::vector<StageDependency> dependencies;
   StageTransitionCost transition;
   StageRoutePlan allSimd;
   StageRoutePlan allSimt;

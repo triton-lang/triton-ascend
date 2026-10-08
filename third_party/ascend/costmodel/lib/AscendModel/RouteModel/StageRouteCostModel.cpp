@@ -4,6 +4,7 @@
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 
 #include <algorithm>
@@ -111,6 +112,33 @@ static void removeAutoBlockifyCostFromAllSIMD(StageRoutePlan &plan,
 
 llvm::StringRef mlir::ascend::stringifyStageMode(StageMode mode) {
   return mode == StageMode::SIMD ? "simd" : "simt";
+}
+
+llvm::StringRef
+mlir::ascend::stringifyStageDependencyKind(StageDependencyKind kind) {
+  switch (kind) {
+  case StageDependencyKind::LoopCarriedData:
+    return "loop_carried_data";
+  }
+  llvm_unreachable("unknown Stage dependency kind");
+}
+
+bool StageDependency::isValid() const {
+  return !loopStage.empty() && !sourceStage.empty() && !targetStage.empty() &&
+         iterationDistance > 0 && carriedValueIndex >= 0 &&
+         !carriedValueName.empty() && carriedValueBytes >= 0;
+}
+
+llvm::json::Object StageDependency::toJSON() const {
+  return llvm::json::Object{{"kind", stringifyStageDependencyKind(kind)},
+                            {"loop_stage", loopStage},
+                            {"source_stage", sourceStage},
+                            {"target_stage", targetStage},
+                            {"iteration_distance", iterationDistance},
+                            {"carried_value_index", carriedValueIndex},
+                            {"carried_value_name", carriedValueName},
+                            {"carried_value_bytes", carriedValueBytes},
+                            {"source_location", sourceLocation}};
 }
 
 static llvm::StringRef stringifyStageKernelRoute(StageKernelRouteKind kind) {
@@ -464,6 +492,10 @@ llvm::json::Object StageCostModelSummary::toJSON() const {
   for (const LogicalStageCost &stage : stages)
     stageArray.push_back(stage.toJSON());
   result["logical_stages"] = std::move(stageArray);
+  llvm::json::Array dependencyArray;
+  for (const StageDependency &dependency : dependencies)
+    dependencyArray.push_back(dependency.toJSON());
+  result["stage_dependencies"] = std::move(dependencyArray);
   result["transition_cost"] = transition.toJSON();
   llvm::json::Object routes;
   routes["all_simd"] = allSimd.toJSON();
@@ -484,6 +516,17 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     return llvm::createStringError(std::errc::invalid_argument,
                                    "stage transition costs must be finite and "
                                    "non-negative");
+
+  llvm::StringSet<> stageIds;
+  for (const LogicalStageCost &stage : costTable.stages)
+    stageIds.insert(stage.id);
+  for (const StageDependency &dependency : costTable.dependencies)
+    if (!dependency.isValid() || !stageIds.contains(dependency.loopStage) ||
+        !stageIds.contains(dependency.sourceStage) ||
+        !stageIds.contains(dependency.targetStage))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "stage route model received an invalid Stage dependency");
 
   auto findImplementation =
       [](const LogicalStageCost &stage, StageMode mode, int64_t factor,
@@ -692,6 +735,7 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   result.modeledOperationCount = costTable.modeledOperationCount;
   result.profileVersion = costTable.profileVersion;
   result.stages = costTable.stages;
+  result.dependencies = costTable.dependencies;
   result.transition = transition;
   result.allSimd = buildPlan(StageKernelRouteKind::AllSIMD, 1);
   result.allSimt = bestFactoredPlan(StageKernelRouteKind::AllSIMT);

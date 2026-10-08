@@ -105,6 +105,7 @@ struct StagePartition {
   bool operationOwnershipComplete = false;
   int64_t modeledOperationCount = 0;
   std::vector<LogicalStage> stages;
+  std::vector<StageDependency> dependencies;
 };
 
 struct StageOperationRate {

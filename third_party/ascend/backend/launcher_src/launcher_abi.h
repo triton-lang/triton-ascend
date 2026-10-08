@@ -42,6 +42,8 @@ enum TritonNpuArgKind {
   TRITON_NPU_U64,
   TRITON_NPU_F32,
   TRITON_NPU_F64,
+  TRITON_NPU_F16,
+  TRITON_NPU_BF16,
 };
 
 enum TritonNpuLaunchFlag {
@@ -102,6 +104,7 @@ typedef struct TritonNpuLaunchPlan TritonNpuLaunchPlan;
  * copies argument VALUES before returning. Device allocations referenced by
  * pointer arguments remain subject to the caller's stream/lifetime contract.
  * An error buffer, when supplied, always receives a null-terminated string.
+ * F16/BF16 C argument buffers contain the encoded 16-bit device value.
  * No C++ exception or Python object crosses this ABI. */
 TritonNpuLaunchPlan *
 triton_npu_create_plan_v1(const TritonNpuLaunchSpecV1 *spec,

@@ -117,19 +117,22 @@ def test_c_api_empty_signature_and_constexpr(native_api, kinds, flags):
         assert error.value == b""
 
 
-@pytest.mark.parametrize("kind,value_type,value", [
-    (launcher.I8, ct.c_int8, -7),
-    (launcher.U8, ct.c_uint8, 250),
-    (launcher.I16, ct.c_int16, -1234),
-    (launcher.U16, ct.c_uint16, 65530),
-    (launcher.I32, ct.c_int32, -34342),
-    (launcher.U32, ct.c_uint32, 2**31 + 5),
-    (launcher.I64, ct.c_int64, -(2**40) + 7),
-    (launcher.U64, ct.c_uint64, 2**48 + 17),
-    (launcher.F32, ct.c_float, 1.25),
-    (launcher.F64, ct.c_double, -3.75),
-    (launcher.POINTER, ct.c_void_p, 0x123456789ABCDEF0),
-], ids=["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64", "pointer"])
+@pytest.mark.parametrize(
+    "kind,value_type,value", [
+        (launcher.I8, ct.c_int8, -7),
+        (launcher.U8, ct.c_uint8, 250),
+        (launcher.I16, ct.c_int16, -1234),
+        (launcher.U16, ct.c_uint16, 65530),
+        (launcher.I32, ct.c_int32, -34342),
+        (launcher.U32, ct.c_uint32, 2**31 + 5),
+        (launcher.I64, ct.c_int64, -(2**40) + 7),
+        (launcher.U64, ct.c_uint64, 2**48 + 17),
+        (launcher.F32, ct.c_float, 1.25),
+        (launcher.F64, ct.c_double, -3.75),
+        (launcher.F16, ct.c_uint16, 0x5140),
+        (launcher.BF16, ct.c_uint16, 0x4228),
+        (launcher.POINTER, ct.c_void_p, 0x123456789ABCDEF0),
+    ], ids=["i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64", "f16", "bf16", "pointer"])
 def test_c_api_checks_argument_count_and_width(native_api, kind, value_type, value):
     with plan(native_api, [kind]) as handle:
         req = request()
@@ -213,6 +216,8 @@ def python_launcher_factory():
     (launcher.U64, 2**64 - 1),
     (launcher.F32, -1.0),
     (launcher.F64, -1.0),
+    (launcher.F16, -1.0),
+    (launcher.BF16, -1.0),
     (launcher.POINTER, 0),
     (launcher.POINTER, 2**64 - 1),
 ])
@@ -235,6 +240,8 @@ def test_python_conversion_accepts_error_sentinel_values(python_launcher_factory
     (launcher.U64, 2**64, OverflowError),
     (launcher.F32, object(), TypeError),
     (launcher.F64, object(), TypeError),
+    (launcher.F16, object(), TypeError),
+    (launcher.BF16, object(), TypeError),
     (launcher.POINTER, -1, OverflowError),
     (launcher.POINTER, 2**64, OverflowError),
 ])
@@ -253,7 +260,7 @@ def test_python_conversion_stops_before_later_arguments(python_launcher_factory,
     assert events == []
 
 
-@pytest.mark.parametrize("kind", [launcher.I64, launcher.F64, launcher.POINTER])
+@pytest.mark.parametrize("kind", [launcher.I64, launcher.F64, launcher.F16, launcher.BF16, launcher.POINTER])
 def test_python_conversion_preserves_custom_exceptions(python_launcher_factory, kind):
 
     class RaisingValue:

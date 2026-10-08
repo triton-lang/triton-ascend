@@ -106,7 +106,7 @@ def test_empty_and_constexpr_arguments():
     assert launcher.argument_types({}) == []
     assert launcher.argument_types({0: "constexpr"}) == [(launcher.CONSTEXPR, -1)]
     assert launcher.argument_types({0: "i1", 1: "u1", 2: "bf16"}) == [(launcher.I32, -1), (launcher.U32, -1),
-                                                                      (launcher.F32, -1)]
+                                                                      (launcher.BF16, -1)]
 
 
 def test_nested_descriptor_and_tuple_expansion():

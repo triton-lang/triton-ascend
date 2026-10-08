@@ -404,6 +404,15 @@ bool convertArgument(PyObject *obj, uint32_t kind, char *out) {
     return storeConverted<float>(out, PyFloat_AsDouble(obj));
   case TRITON_NPU_F64:
     return storeConverted<double>(out, PyFloat_AsDouble(obj));
+  case TRITON_NPU_F16:
+  case TRITON_NPU_BF16: {
+    double value = PyFloat_AsDouble(obj);
+    if (conversionFailed(value))
+      return false;
+    storeValue(out, kind == TRITON_NPU_F16 ? floatToFP16(value)
+                                           : floatToBF16(value));
+    return true;
+  }
   default:
     PyErr_SetString(PyExc_TypeError, "unknown launcher argument kind");
     return false;

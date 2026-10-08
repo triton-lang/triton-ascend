@@ -32,6 +32,37 @@
 
 namespace triton::ascend {
 
+// Encode scalar arguments using round-to-nearest-even, preserving Inf/NaN.
+inline uint16_t floatToFP16(float value) {
+  uint32_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  uint16_t sign = (bits >> 16) & 0x8000;
+  uint32_t magnitude = bits & 0x7fffffff;
+  if (magnitude >= 0x7f800000)
+    return sign | (magnitude > 0x7f800000 ? 0x7e00 : 0x7c00);
+  if (magnitude >= 0x477ff000)
+    return sign | 0x7c00;
+  if (magnitude <= 0x33000000)
+    return sign;
+  if (magnitude < 0x38800000) {
+    uint32_t significand = (magnitude & 0x7fffff) | 0x800000;
+    unsigned shift = 126 - (magnitude >> 23);
+    uint32_t rounding =
+        ((1u << (shift - 1)) - 1) + ((significand >> shift) & 1);
+    return sign | ((significand + rounding) >> shift);
+  }
+  return sign |
+         ((magnitude - 0x38000000 + 0xfff + ((magnitude >> 13) & 1)) >> 13);
+}
+
+inline uint16_t floatToBF16(float value) {
+  uint32_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  if ((bits & 0x7fffffff) > 0x7f800000)
+    return (bits >> 16) | 0x40;
+  return (bits + 0x7fff + ((bits >> 16) & 1)) >> 16;
+}
+
 inline size_t checkedAdd(size_t a, size_t b) {
   if (b > std::numeric_limits<size_t>::max() - a)
     throw std::overflow_error("launcher argument size overflow");
@@ -91,6 +122,8 @@ struct ArgLayout {
         break;
       case TRITON_NPU_I16:
       case TRITON_NPU_U16:
+      case TRITON_NPU_F16:
+      case TRITON_NPU_BF16:
         size = 2;
         break;
       case TRITON_NPU_I32:

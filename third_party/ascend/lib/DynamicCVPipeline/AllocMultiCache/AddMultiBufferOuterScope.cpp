@@ -965,12 +965,23 @@ static Value createPollingCondition(scf::ForOp forOp, OpBuilder &builder,
   auto divOp = builder.create<arith::DivSIOp>(loc, iterVar, step);
   setSsbufferTags(divOp.getOperation(), builder, blockId, tid);
 
-  Type counterType = divOp.getResult().getType();
+  // Normalize an index-typed loop IV to i32: IndexType is not an
+  // IntegerType in MLIR (no bit width), so the parity chain below must
+  // run on an integer type (mirrors InnerScope's counter normalization).
+  Value counter = divOp.getResult();
+  if (counter.getType().isIndex()) {
+    auto castOp = builder.create<arith::IndexCastOp>(loc, builder.getI32Type(),
+                                                     counter);
+    setSsbufferTags(castOp.getOperation(), builder, blockId, tid);
+    counter = castOp.getResult();
+  }
+
+  Type counterType = counter.getType();
   int bitWidth = counterType.getIntOrFloatBitWidth();
   auto c2Val = builder.create<arith::ConstantIntOp>(loc, 2, bitWidth);
   setSsbufferTags(c2Val.getOperation(), builder, blockId, tid);
   auto remOp =
-      builder.create<arith::RemSIOp>(loc, divOp.getResult(), c2Val.getResult());
+      builder.create<arith::RemSIOp>(loc, counter, c2Val.getResult());
   setSsbufferTags(remOp.getOperation(), builder, blockId, tid);
 
   auto c0Val = builder.create<arith::ConstantIntOp>(loc, 0, bitWidth);

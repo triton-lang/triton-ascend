@@ -203,8 +203,9 @@ bool TensorOperationWorkload::isFiniteAndNonNegative() const {
   const bool validPredicateWidth =
       simdPredicateBitWidth == 0 ||
       ((operation == "predicate.cmp" || operation == "predicate.select") &&
-       (simdPredicateBitWidth == 16 || simdPredicateBitWidth == 32) &&
-       (elementBitWidth == 1 || elementBitWidth == 16 ||
+       (simdPredicateBitWidth == 8 || simdPredicateBitWidth == 16 ||
+        simdPredicateBitWidth == 32) &&
+       (elementBitWidth == 1 || elementBitWidth == 8 || elementBitWidth == 16 ||
         elementBitWidth == 32) &&
        simdPredicateBitWidth >= elementBitWidth);
   return !operation.empty() && elementBitWidth > 0 && validPredicateWidth &&

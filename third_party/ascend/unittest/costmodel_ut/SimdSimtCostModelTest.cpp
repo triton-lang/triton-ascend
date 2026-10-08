@@ -216,11 +216,11 @@ TEST(SimdSimtCostModelTest, SimdMaskFallbackUsesProfileReferenceLanes) {
 }
 
 TEST(SimdSimtCostModelTest, PredicateWidthProjectionChangesOnlySimdGeometry) {
-  for (int64_t sourceBits : {1, 16, 32})
-    for (int64_t projectedBits : {16, 32}) {
+  for (int64_t sourceBits : {1, 8, 16, 32})
+    for (int64_t projectedBits : {8, 16, 32}) {
       if (projectedBits < sourceBits)
         continue;
-      for (int64_t size : {32, 64, 65, 128, 129, 256}) {
+      for (int64_t size : {32, 64, 65, 128, 129, 256, 257, 512}) {
         auto cost = [&](int64_t projection) {
           auto stage =
               logicalStage("predicate", StageCostModelKind::PredicateMask);
@@ -270,7 +270,7 @@ TEST(SimdSimtCostModelTest, RejectsInvalidPredicateWidthProjection) {
   tensor.elementBitWidth = 1;
   tensor.logicalElements = tensor.contiguousElementsPerSegment = 128;
   tensor.segmentCount = 1;
-  for (int64_t projection : {-1, 8, 64}) {
+  for (int64_t projection : {-1, 4, 64}) {
     tensor.simdPredicateBitWidth = projection;
     EXPECT_FALSE(tensor.isFiniteAndNonNegative());
   }
@@ -278,8 +278,9 @@ TEST(SimdSimtCostModelTest, RejectsInvalidPredicateWidthProjection) {
   tensor.elementBitWidth = 32;
   EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Cannot narrow source width.
   tensor.simdPredicateBitWidth = 32;
-  tensor.elementBitWidth = 8;
-  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Unsupported source type.
+  tensor.elementBitWidth = 64;
+  EXPECT_FALSE(
+      tensor.isFiniteAndNonNegative()); // Expansion is not a width hint.
   tensor.elementBitWidth = 32;
   tensor.operation = "f32.add";
   EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Predicate-only metadata.

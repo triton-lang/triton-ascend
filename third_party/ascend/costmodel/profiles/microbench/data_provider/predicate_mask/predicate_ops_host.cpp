@@ -156,98 +156,66 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  // CAModel mode: one tiny launch with the same read-back gates as the physical
-  // run.  Usage: ./predicate_ops_host <mode> trace [iterations, default 4].
-  if (argc > 2 && !strcmp(argv[2], "trace")) {
-    int iterations = argc > 3 ? atoi(argv[3]) : 4;
-    if (iterations < 1) {
-      printf("trace iterations must be positive\n");
-      return 2;
-    }
-    long long cycles = runK(stream, deviceOut, deviceGm, 1, iterations, mode);
-    int mismatches = 0, sentinelHits = 0;
-    set<int32_t> distinct;
-    for (int lane = 0; lane < W; ++lane) {
-      int32_t got = readback[640 + lane];
-      int32_t expected = simulate(lane, 1, iterations, mode);
-      if (got != expected)
-        ++mismatches;
-      if ((uint32_t)got == SENTINEL && (uint32_t)expected != SENTINEL)
-        ++sentinelHits;
-      distinct.insert(got);
-    }
-    printf("TRACE mode=%d iterations=%d cycles=%lld mismatch=%d sentinel=%d "
-           "distinct=%zu rterr=%d outsent=%d\n",
-           mode, iterations, cycles, mismatches, sentinelHits, distinct.size(),
-           runtime_errors, output_sentinels);
-    printf("GATE runtime=%s readback=%s nontrivial=%s\n",
-           runtime_errors == 0 && output_sentinels == 0 ? "PASS" : "FAIL",
-           mismatches == 0 && sentinelHits == 0 ? "PASS" : "FAIL",
-           distinct.size() >= 8 ? "PASS" : "FAIL");
-    rtFree(deviceOut);
-    rtFree(deviceGm);
-    rtStreamDestroy(stream);
-    rtDeviceReset(0);
-    aclFinalize();
-    return runtime_errors == 0 && output_sentinels == 0 && mismatches == 0 &&
-                   sentinelHits == 0 && distinct.size() >= 8
-               ? 0
-               : 1;
+  // Trace skips timing; both paths share the same short readback and gates.
+  bool trace = argc > 2 && !strcmp(argv[2], "trace");
+  int verifyIterations = trace && argc > 3 ? atoi(argv[3]) : 4;
+  if (verifyIterations < 1) {
+    printf("trace iterations must be positive\n");
+    return 2;
   }
-
-  runK(stream, deviceOut, deviceGm, 2, 50, mode);
   constexpr int K = 20, I1 = 200, IM = 400, I2 = 600;
   long long c1 = LLONG_MAX, cm = LLONG_MAX, c2 = LLONG_MAX;
-  for (int repeat = 0; repeat < 7; ++repeat) {
-    c1 = min(c1, runK(stream, deviceOut, deviceGm, K, I1, mode));
-    cm = min(cm, runK(stream, deviceOut, deviceGm, K, IM, mode));
-    c2 = min(c2, runK(stream, deviceOut, deviceGm, K, I2, mode));
+  double linearity = 0;
+  if (!trace) {
+    runK(stream, deviceOut, deviceGm, 2, 50, mode);
+    for (int repeat = 0; repeat < 7; ++repeat) {
+      c1 = min(c1, runK(stream, deviceOut, deviceGm, K, I1, mode));
+      cm = min(cm, runK(stream, deviceOut, deviceGm, K, IM, mode));
+      c2 = min(c2, runK(stream, deviceOut, deviceGm, K, I2, mode));
+    }
+    linearity =
+        c2 > c1 ? ((double)cm - 0.5 * (c1 + c2)) / (double)(c2 - c1) : 1e9;
   }
-  double cyclesPerStep = (double)(c2 - c1) / ((double)(I2 - I1) * K * 4.0);
-  double linearity =
-      c2 > c1 ? ((double)cm - 0.5 * (c1 + c2)) / (double)(c2 - c1) : 1e9;
 
-  // Keep read-back short enough that AND does not converge every lane to the
-  // reset value. Timing still uses the long 200/400/600 three-point slope.
-  constexpr int VERIFY_K = 1, VERIFY_I = 4;
-  runK(stream, deviceOut, deviceGm, VERIFY_K, VERIFY_I, mode);
+  // Short readback avoids AND converging every lane to the reset value.
+  long long cycles =
+      runK(stream, deviceOut, deviceGm, 1, verifyIterations, mode);
   int mismatches = 0, sentinelHits = 0;
   set<int32_t> distinct;
   for (int lane = 0; lane < W; ++lane) {
     int32_t got = readback[640 + lane];
-    int32_t expected = simulate(lane, VERIFY_K, VERIFY_I, mode);
+    int32_t expected = simulate(lane, 1, verifyIterations, mode);
     if (got != expected)
       ++mismatches;
     if ((uint32_t)got == SENTINEL && (uint32_t)expected != SENTINEL)
       ++sentinelHits;
     distinct.insert(got);
   }
-  printf("RESULT mode=%d c1=%lld cm=%lld c2=%lld cyc_per_step=%.6f "
-         "lin=%.5f mismatch=%d sentinel=%d distinct=%zu rterr=%d outsent=%d\n",
-         mode, c1, cm, c2, cyclesPerStep, linearity, mismatches, sentinelHits,
-         distinct.size(), runtime_errors, output_sentinels);
-  printf("READBACK got=");
-  for (int lane = 0; lane < 8; ++lane)
-    printf("%d%s", readback[640 + lane], lane == 7 ? "" : ",");
-  printf(" expect=");
-  for (int lane = 0; lane < 8; ++lane)
-    printf("%d%s", simulate(lane, VERIFY_K, VERIFY_I, mode),
-           lane == 7 ? "" : ",");
+  if (trace)
+    printf("TRACE mode=%d iterations=%d cycles=%lld ", mode, verifyIterations,
+           cycles);
+  else
+    printf("RESULT mode=%d c1=%lld cm=%lld c2=%lld cyc_per_step=%.6f lin=%.5f ",
+           mode, c1, cm, c2, (double)(c2 - c1) / ((I2 - I1) * K * 4.0),
+           linearity);
+  printf("mismatch=%d sentinel=%d distinct=%zu rterr=%d outsent=%d\n",
+         mismatches, sentinelHits, distinct.size(), runtime_errors,
+         output_sentinels);
+  bool runtimeOk = runtime_errors == 0 && output_sentinels == 0;
+  bool readbackOk = mismatches == 0 && sentinelHits == 0;
+  bool nontrivial = distinct.size() >= 8;
+  bool linear = fabs(linearity) < 0.03;
+  printf("GATE runtime=%s readback=%s nontrivial=%s",
+         runtimeOk ? "PASS" : "FAIL", readbackOk ? "PASS" : "FAIL",
+         nontrivial ? "PASS" : "FAIL");
+  if (!trace)
+    printf(" linear=%s", linear ? "PASS" : "FAIL");
   printf("\n");
-  printf("GATE runtime=%s readback=%s nontrivial=%s linear=%s\n",
-         runtime_errors == 0 && output_sentinels == 0 ? "PASS" : "FAIL",
-         mismatches == 0 && sentinelHits == 0 ? "PASS" : "FAIL",
-         distinct.size() >= 8 ? "PASS" : "FAIL",
-         fabs(linearity) < 0.03 ? "PASS" : "FAIL");
 
   rtFree(deviceOut);
   rtFree(deviceGm);
   rtStreamDestroy(stream);
   rtDeviceReset(0);
   aclFinalize();
-  return runtime_errors == 0 && output_sentinels == 0 && mismatches == 0 &&
-                 sentinelHits == 0 && distinct.size() >= 8 &&
-                 fabs(linearity) < 0.03
-             ? 0
-             : 1;
+  return runtimeOk && readbackOk && nontrivial && linear ? 0 : 1;
 }

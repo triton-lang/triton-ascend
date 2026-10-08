@@ -161,64 +161,53 @@ int main(int argc, char **argv) {
     return 1;
   }
 
-  if (argc > 2 && !strcmp(argv[2], "trace")) {
-    int iters = argc > 3 ? atoi(argv[3]) : 4;
-    int mismatches = 0, sentinelHits = 0, resetThreads = 0;
-    set<uint32_t> distinct;
-    verify(stream, deviceOut, deviceGm, iters, mode, mismatches, sentinelHits,
-           resetThreads, distinct);
-    printf("TRACE mode=%d iterations=%d mismatch=%d sentinel=%d distinct=%zu "
-           "reset_threads=%d rterr=%d outsent=%d\n",
-           mode, iters, mismatches, sentinelHits, distinct.size(), resetThreads,
-           runtimeErrors, outputSentinels);
-    bool runtimeOk = runtimeErrors == 0 && outputSentinels == 0;
-    bool readbackOk = mismatches == 0 && sentinelHits == 0;
-    bool nontrivial = distinct.size() >= 32;
-    printf("GATE runtime=%s readback=%s nontrivial=%s\n",
-           runtimeOk ? "PASS" : "FAIL", readbackOk ? "PASS" : "FAIL",
-           nontrivial ? "PASS" : "FAIL");
-    rtFree(deviceOut);
-    rtFree(deviceGm);
-    rtStreamDestroy(stream);
-    rtDeviceReset(0);
-    aclFinalize();
-    return runtimeOk && readbackOk && nontrivial ? 0 : 1;
-  }
-
-  runKernel("measure", stream, deviceOut, deviceGm, 2, 30);
+  bool trace = argc > 2 && !strcmp(argv[2], "trace");
+  int verifyIterations = trace && argc > 3 ? atoi(argv[3]) : 4;
   constexpr int I1 = 30, IM = 60, I2 = 90, K = 100;
   long long c1 = LLONG_MAX, cm = LLONG_MAX, c2 = LLONG_MAX;
-  for (int repeat = 0; repeat < 7; ++repeat) {
-    c1 = min(c1, runKernel("measure", stream, deviceOut, deviceGm, K, I1));
-    cm = min(cm, runKernel("measure", stream, deviceOut, deviceGm, K, IM));
-    c2 = min(c2, runKernel("measure", stream, deviceOut, deviceGm, K, I2));
+  double linearity = 0;
+  if (!trace) {
+    runKernel("measure", stream, deviceOut, deviceGm, 2, 30);
+    for (int repeat = 0; repeat < 7; ++repeat) {
+      c1 = min(c1, runKernel("measure", stream, deviceOut, deviceGm, K, I1));
+      cm = min(cm, runKernel("measure", stream, deviceOut, deviceGm, K, IM));
+      c2 = min(c2, runKernel("measure", stream, deviceOut, deviceGm, K, I2));
+    }
+    linearity =
+        c2 > c1 ? ((double)cm - 0.5 * (c1 + c2)) / (double)(c2 - c1) : 1e9;
   }
-  double cyclesPerElement =
-      (double)(c2 - c1) / ((double)(I2 - I1) * K * NT * 8.0);
-  double linearity =
-      c2 > c1 ? ((double)cm - 0.5 * (c1 + c2)) / (double)(c2 - c1) : 1e9;
 
   int mismatches = 0, sentinelHits = 0, resetThreads = 0;
   set<uint32_t> distinct;
   // Iteration 4 keeps XOR nontrivial; iteration 28 checks a longer evolution
   // and exercises reset arms. Both are exact CPU-vs-device comparisons.
-  verify(stream, deviceOut, deviceGm, 4, mode, mismatches, sentinelHits,
-         resetThreads, distinct);
-  verify(stream, deviceOut, deviceGm, 28, mode, mismatches, sentinelHits,
-         resetThreads, distinct);
+  verify(stream, deviceOut, deviceGm, verifyIterations, mode, mismatches,
+         sentinelHits, resetThreads, distinct);
+  if (!trace)
+    verify(stream, deviceOut, deviceGm, 28, mode, mismatches, sentinelHits,
+           resetThreads, distinct);
   bool runtimeOk = runtimeErrors == 0 && outputSentinels == 0;
   bool readbackOk = mismatches == 0 && sentinelHits == 0;
-  bool nontrivial = distinct.size() >= 32 && (mode == 0 || resetThreads >= 16);
+  bool nontrivial =
+      distinct.size() >= 32 && (trace || mode == 0 || resetThreads >= 16);
   bool linear = fabs(linearity) < 0.03;
-  printf("RESULT mode=%d c1=%lld cm=%lld c2=%lld cyc_per_element=%.8f "
-         "lin=%.5f mismatch=%d sentinel=%d distinct=%zu reset_threads=%d "
-         "rterr=%d outsent=%d\n",
-         mode, c1, cm, c2, cyclesPerElement, linearity, mismatches,
-         sentinelHits, distinct.size(), resetThreads, runtimeErrors,
+  if (trace)
+    printf("TRACE mode=%d iterations=%d ", mode, verifyIterations);
+  else
+    printf(
+        "RESULT mode=%d c1=%lld cm=%lld c2=%lld cyc_per_element=%.8f lin=%.5f ",
+        mode, c1, cm, c2, (double)(c2 - c1) / ((I2 - I1) * K * NT * 8.0),
+        linearity);
+  printf("mismatch=%d sentinel=%d distinct=%zu reset_threads=%d rterr=%d "
+         "outsent=%d\n",
+         mismatches, sentinelHits, distinct.size(), resetThreads, runtimeErrors,
          outputSentinels);
-  printf("GATE runtime=%s readback=%s nontrivial=%s linear=%s\n",
+  printf("GATE runtime=%s readback=%s nontrivial=%s",
          runtimeOk ? "PASS" : "FAIL", readbackOk ? "PASS" : "FAIL",
-         nontrivial ? "PASS" : "FAIL", linear ? "PASS" : "FAIL");
+         nontrivial ? "PASS" : "FAIL");
+  if (!trace)
+    printf(" linear=%s", linear ? "PASS" : "FAIL");
+  printf("\n");
   rtFree(deviceOut);
   rtFree(deviceGm);
   rtStreamDestroy(stream);

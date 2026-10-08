@@ -3,7 +3,9 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
@@ -253,6 +255,13 @@ static int64_t getSimdPredicateBitWidth(Operation *root) {
   if ((!isSelect && !isLogic(root) && !isCompare(root)) ||
       root->getNumResults() != 1)
     return 0;
+  // i64 comparisons/selects expand into multiple native instructions. Keep
+  // their source-operation estimate until that expansion is modeled, but let
+  // other members of their group infer the mask processing width below.
+  if ((isCompare(root) && root->getNumOperands() > 0 &&
+       getScalarBitWidth(root->getOperand(0).getType()) == 64) ||
+      (isSelect && getScalarBitWidth(root->getResult(0).getType()) == 64))
+    return 0;
   auto shape = dyn_cast<RankedTensorType>(root->getResult(0).getType());
   if (!shape || !shape.hasStaticShape() || shape.getRank() == 0 ||
       shape.getNumElements() == 0)
@@ -266,27 +275,95 @@ static int64_t getSimdPredicateBitWidth(Operation *root) {
     return sameShape(value) &&
            getScalarElementType(value.getType()).isInteger(1);
   };
+  // The audited memory boundary is a contiguous, zero-filled tail, separate
+  // from the data predicate graph. All masked accesses must share its mask.
+  // This only projects arithmetic geometry: fills and transfer setup are not
+  // folded into the predicate width, and the tensor extent is not reduced to N.
+  Value tailMask;
+  auto isTailAccess = [&](Operation *access, unsigned maskIndex) {
+    Value mask = access->getOperand(maskIndex);
+    auto cmp = mask.getDefiningOp<arith::CmpIOp>();
+    if (!isMask(mask) || shape.getRank() != 1 || !cmp ||
+        cmp->getBlock() != block ||
+        cmp.getPredicate() != arith::CmpIPredicate::slt ||
+        !getScalarElementType(cmp.getLhs().getType()).isInteger(32) ||
+        (tailMask && tailMask != mask))
+      return false;
+    Operation *range = cmp.getLhs().getDefiningOp();
+    Operation *bound = cmp.getRhs().getDefiningOp();
+    if (!range || range->getBlock() != block ||
+        range->getName().getStringRef() != "tt.make_range" || !bound ||
+        bound->getBlock() != block ||
+        bound->getName().getStringRef() != "tt.splat" ||
+        bound->getNumOperands() != 1)
+      return false;
+    auto start = range->getAttrOfType<IntegerAttr>("start");
+    auto end = range->getAttrOfType<IntegerAttr>("end");
+    auto limit = dyn_cast<BlockArgument>(bound->getOperand(0));
+    if (!start || start.getInt() != 0 || !end ||
+        end.getInt() != shape.getNumElements() || !limit ||
+        limit.getOwner() != block || !limit.getType().isInteger(32))
+      return false;
+    Operation *address = access->getOperand(0).getDefiningOp();
+    if (!address || address->getBlock() != block ||
+        address->getName().getStringRef() != "tt.addptr" ||
+        address->getNumOperands() != 2 ||
+        address->getOperand(1) != cmp.getLhs())
+      return false;
+    Operation *base = address->getOperand(0).getDefiningOp();
+    if (!base || base->getBlock() != block ||
+        base->getName().getStringRef() != "tt.splat" ||
+        base->getNumOperands() != 1)
+      return false;
+    auto pointer = dyn_cast<BlockArgument>(base->getOperand(0));
+    if (!pointer || pointer.getOwner() != block ||
+        !isPointerLikeType(pointer.getType()))
+      return false;
+    for (OpOperand &use : mask.getUses()) {
+      Operation *user = use.getOwner();
+      auto name = user->getName().getStringRef();
+      if (user->getBlock() != block ||
+          !((name == "tt.load" && use.getOperandNumber() == 1) ||
+            (name == "tt.store" && use.getOperandNumber() == 2)))
+        return false;
+    }
+    tailMask = mask;
+    return true;
+  };
   // Loaded/argument data terminate the local fusion projection. Casts,
   // arithmetic, broadcasts and reshapes can import wider types or different
   // segmentation, so they require a separate proof rather than width guessing.
-  auto dataWidth = [&](Value value) -> int64_t {
+  auto dataWidth = [&](Value value, bool comparison = false) -> int64_t {
     if (!sameShape(value))
       return 0;
     Type type = getScalarElementType(value.getType());
-    if (!type.isInteger(16) && !type.isInteger(32) && !type.isF16() &&
-        !type.isF32())
+    const bool fp8 = isa<Float8E4M3FNType, Float8E5M2Type>(type);
+    if (!type.isInteger(8) && !type.isInteger(16) && !type.isInteger(32) &&
+        !type.isInteger(64) && !type.isF16() && !type.isF32() &&
+        !type.isBF16() && !fp8)
       return 0;
+    // bf16 compare/select and fp8 comparisons lower through f32; fp8 select
+    // uses byte data. HFusion tiles i64 as 32-bit parts. These are processing
+    // widths only, not the cost of conversions or multi-instruction expansion.
+    const int64_t width =
+        type.isBF16() || type.isInteger(64) || (fp8 && comparison)
+            ? 32
+            : getScalarBitWidth(type);
     Operation *producer = value.getDefiningOp();
     if (!producer)
-      return cast<BlockArgument>(value).getOwner() == block
-                 ? getScalarBitWidth(type)
-                 : 0;
+      return cast<BlockArgument>(value).getOwner() == block ? width : 0;
     if (producer->getBlock() != block)
       return 0;
     auto name = producer->getName().getStringRef();
-    // An unmasked load is a memory boundary, not part of this predicate group.
-    if (name == "tt.load" && producer->getNumOperands() == 1)
-      return getScalarBitWidth(type);
+    // Loads terminate this group; a validated tail adds memory-side work but
+    // does not change the compare/logic/select processing width.
+    if (name == "tt.load" &&
+        (producer->getNumOperands() == 1 ||
+         (producer->getNumOperands() == 3 &&
+          (matchPattern(producer->getOperand(2), m_Zero()) ||
+           matchPattern(producer->getOperand(2), m_PosZeroFloat())) &&
+          isTailAccess(producer, 1))))
+      return width;
     return 0;
   };
 
@@ -325,7 +402,9 @@ static int64_t getSimdPredicateBitWidth(Operation *root) {
   auto terminalName = terminal.getOwner()->getName().getStringRef();
   if (terminal.getOwner()->getBlock() != block ||
       !((terminalName == "tt.store" && terminal.getOperandNumber() == 1 &&
-         terminal.getOwner()->getNumOperands() == 2) ||
+         (terminal.getOwner()->getNumOperands() == 2 ||
+          (terminal.getOwner()->getNumOperands() == 3 &&
+           isTailAccess(terminal.getOwner(), 2)))) ||
         terminalName == "func.return" || terminalName == "tt.return"))
     return 0;
   int64_t width = dataWidth(select->getOperand(1));
@@ -347,8 +426,8 @@ static int64_t getSimdPredicateBitWidth(Operation *root) {
     if (isLogic(op)) {
       llvm::append_range(pending, op->getOperands());
     } else if (isCompare(op)) {
-      int64_t inputWidth = dataWidth(op->getOperand(0));
-      if (!inputWidth || dataWidth(op->getOperand(1)) != inputWidth)
+      int64_t inputWidth = dataWidth(op->getOperand(0), true);
+      if (!inputWidth || dataWidth(op->getOperand(1), true) != inputWidth)
         return 0;
       width = std::max(width, inputWidth);
     } else {

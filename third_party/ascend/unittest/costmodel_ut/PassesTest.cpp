@@ -104,11 +104,13 @@ struct PredicateWork {
   double elements = 0, selects = 0, generic = 0;
   double maskElements = 0, cmp16Elements = 0, cmp32Elements = 0;
   double describedElements = 0;
-  double projected16Elements = 0, projected32Elements = 0;
+  double projected8Elements = 0, projected16Elements = 0,
+         projected32Elements = 0;
 };
 
 bool collectPredicateWork(llvm::StringRef source, PredicateWork &out) {
   mlir::MLIRContext context;
+  context.allowUnregisteredDialects(); // Generic tt.* fixtures need no backend.
   auto module = parseModule(context, source);
   if (!module)
     return false;
@@ -147,6 +149,9 @@ bool collectPredicateWork(llvm::StringRef source, PredicateWork &out) {
       const double projectedElements =
           group->getNumber("logical_elements_per_iteration").value_or(0);
       switch (group->getInteger("simd_predicate_bit_width").value_or(0)) {
+      case 8:
+        out.projected8Elements += projectedElements;
+        break;
       case 16:
         out.projected16Elements += projectedElements;
         break;
@@ -184,6 +189,7 @@ TEST(CostModelPassesTest, PredicateMasksProjectClosedCompareLogicSelectWidths) {
   struct Case {
     const char *first, *second, *selected, *logic;
     int width;
+    int projectedOps = 6;
   };
   // Same/mixed widths, all logic opcodes, multi-hop propagation and unsupported
   // widths share one fixture. Instruction rounding is tested in the cost tests.
@@ -194,12 +200,23 @@ TEST(CostModelPassesTest, PredicateMasksProjectClosedCompareLogicSelectWidths) {
                         Case{"i16", "i32", "i16", "ori", 32},
                         Case{"i16", "i16", "i32", "xori", 32},
                         Case{"f16", "f32", "f16", "andi", 32},
-                        Case{"i8", "i8", "i8", "andi", 0},
-                        Case{"i64", "i64", "i64", "andi", 0}}) {
+                        Case{"i8", "i8", "i8", "andi", 8},
+                        Case{"i8", "i8", "i16", "ori", 16},
+                        Case{"i8", "i8", "i32", "xori", 32},
+                        Case{"bf16", "bf16", "bf16", "andi", 32},
+                        Case{"bf16", "f32", "bf16", "ori", 32},
+                        Case{"f8E4M3FN", "f8E4M3FN", "f8E4M3FN", "andi", 32},
+                        Case{"f8E5M2", "f8E5M2", "f8E5M2", "ori", 32},
+                        Case{"i8", "i8", "f8E4M3FN", "xori", 8},
+                        Case{"i16", "i16", "f8E5M2", "ori", 16},
+                        Case{"i64", "i64", "i64", "andi", 32, 2},
+                        Case{"i64", "i16", "i16", "ori", 32, 4},
+                        Case{"i16", "i16", "i64", "xori", 32, 5},
+                        Case{"f64", "f64", "f64", "andi", 0}}) {
     SCOPED_TRACE(
         llvm::formatv("{0}/{1}/{2}/{3}", c.first, c.second, c.selected, c.logic)
             .str());
-    const char *cmp = c.first[0] == 'f' ? "arith.cmpf olt" : "arith.cmpi slt";
+    const char *cmp = c.first[0] == 'i' ? "arith.cmpi slt" : "arith.cmpf olt";
     const auto source =
         llvm::formatv(R"mlir(
 module {{ func.func @main(%a: tensor<128x{0}>, %b: tensor<128x{0}>,
@@ -225,8 +242,105 @@ module {{ func.func @main(%a: tensor<128x{0}>, %b: tensor<128x{0}>,
                          128);
     EXPECT_DOUBLE_EQ(work.elements, 5 * 128);
     EXPECT_DOUBLE_EQ(work.selects, 128);
-    EXPECT_DOUBLE_EQ(work.projected16Elements, c.width == 16 ? 6 * 128 : 0);
-    EXPECT_DOUBLE_EQ(work.projected32Elements, c.width == 32 ? 6 * 128 : 0);
+    EXPECT_DOUBLE_EQ(work.projected8Elements,
+                     c.width == 8 ? c.projectedOps * 128 : 0);
+    EXPECT_DOUBLE_EQ(work.projected16Elements,
+                     c.width == 16 ? c.projectedOps * 128 : 0);
+    EXPECT_DOUBLE_EQ(work.projected32Elements,
+                     c.width == 32 ? c.projectedOps * 128 : 0);
+  }
+}
+
+TEST(CostModelPassesTest, PredicateMasksProjectOnlyIndependentContiguousTails) {
+  // One fixture covers load/store/both and mixed widths. Mutations retain
+  // fallback for nonzero fills, arbitrary/different masks, gathers and a
+  // validity mask shared with the arithmetic predicate graph.
+  struct Case {
+    int first, second, selected, mode, mutation, width;
+    bool floating = false;
+  };
+  for (const auto &c :
+       {Case{16, 16, 16, 0, 0, 16}, Case{16, 16, 16, 1, 0, 16},
+        Case{16, 16, 16, 2, 0, 16}, Case{16, 16, 16, 3, 0, 16},
+        Case{32, 32, 32, 3, 0, 32}, Case{16, 32, 16, 3, 0, 32},
+        Case{8, 8, 16, 3, 0, 16}, Case{16, 16, 16, 3, 1, 0},
+        Case{16, 16, 16, 3, 2, 0}, Case{16, 16, 16, 3, 3, 0},
+        Case{16, 16, 16, 3, 4, 0}, Case{16, 16, 16, 3, 5, 0},
+        Case{16, 16, 16, 3, 0, 16, true}, Case{32, 32, 32, 3, 1, 0, true}}) {
+    SCOPED_TRACE(llvm::formatv("{0}/{1}/{2} mode={3} mutation={4}", c.first,
+                               c.second, c.selected, c.mode, c.mutation)
+                     .str());
+    std::string args, body;
+    auto type = [&](int bits) {
+      return std::string(c.floating ? "f" : "i") + std::to_string(bits);
+    };
+    const int widths[] = {c.first,  c.first,    c.second,
+                          c.second, c.selected, c.selected};
+    for (int i = 0; i < 6; ++i) {
+      args +=
+          llvm::formatv("%arg{0}: !tt.ptr<{1}>, ", i, type(widths[i])).str();
+      body += llvm::formatv(R"mlir(
+  %base{0} = "tt.splat"(%arg{0}) : (!tt.ptr<{1}>) -> tensor<256x!tt.ptr<{1}>>
+  %addr{0} = "tt.addptr"(%base{0}, {2}) : (tensor<256x!tt.ptr<{1}>>, tensor<256xi32>) -> tensor<256x!tt.ptr<{1}>>
+  %zero{0} = arith.constant dense<{3}> : tensor<256x{1}>
+)mlir",
+                            i, type(widths[i]),
+                            c.mutation == 4 ? "%twice" : "%range",
+                            std::string(c.mutation == 1 ? "1" : "0") +
+                                (c.floating ? ".0" : ""))
+                  .str();
+      std::string mask = c.mutation == 2             ? "%external"
+                         : c.mutation == 3 && i == 0 ? "%other"
+                                                     : "%tail";
+      body +=
+          llvm::formatv(
+              "  %v{0} = \"tt.load\"(%addr{0}{2}) : "
+              "(tensor<256x!tt.ptr<{1}>>{3}) -> tensor<256x{1}>\n",
+              i, type(widths[i]),
+              (c.mode & 1) ? ", " + mask + ", %zero" + std::to_string(i) : "",
+              (c.mode & 1)
+                  ? ", tensor<256xi1>, tensor<256x" + type(widths[i]) + ">"
+                  : "")
+              .str();
+    }
+    const auto source =
+        llvm::formatv(
+            R"mlir(
+module {{ func.func @main({0}%out: !tt.ptr<{3}>, %n: i32, %n2: i32,
+                          %external: tensor<256xi1>) {{
+  %range = "tt.make_range"() {{start = 0 : i32, end = 256 : i32} : () -> tensor<256xi32>
+  %bound = "tt.splat"(%n) : (i32) -> tensor<256xi32>
+  %bound2 = "tt.splat"(%n2) : (i32) -> tensor<256xi32>
+  %tail = arith.cmpi slt, %range, %bound : tensor<256xi32>
+  %other = arith.cmpi slt, %range, %bound2 : tensor<256xi32>
+  %twice = arith.addi %range, %range : tensor<256xi32>
+{4}
+  %p = {9}, %v0, %v1 : tensor<256x{1}>
+  %q = {9}, %v2, %v3 : tensor<256x{2}>
+  %mask = arith.andi %p, %q : tensor<256xi1>
+{5}
+  %selected = arith.select {6}, %v4, %v5 : tensor<256xi1>, tensor<256x{3}>
+  %outbase = "tt.splat"(%out) : (!tt.ptr<{3}>) -> tensor<256x!tt.ptr<{3}>>
+  %outaddr = "tt.addptr"(%outbase, %range) : (tensor<256x!tt.ptr<{3}>>, tensor<256xi32>) -> tensor<256x!tt.ptr<{3}>>
+  "tt.store"(%outaddr, %selected{7}) : (tensor<256x!tt.ptr<{3}>>, tensor<256x{3}>{8}) -> ()
+  return
+} })mlir",
+            args, type(c.first), type(c.second), type(c.selected), body,
+            c.mutation == 5
+                ? "  %shared = arith.andi %mask, %tail : tensor<256xi1>"
+                : "",
+            c.mutation == 5 ? "%shared" : "%mask",
+            (c.mode & 2) ? ", %tail" : "",
+            (c.mode & 2) ? ", tensor<256xi1>" : "",
+            c.floating ? "arith.cmpf olt" : "arith.cmpi slt")
+            .str();
+    PredicateWork work;
+    ASSERT_TRUE(collectPredicateWork(source, work));
+    EXPECT_DOUBLE_EQ(work.selects, 256);
+    EXPECT_DOUBLE_EQ(work.maskElements, (c.mutation == 5 ? 2 : 1) * 256);
+    EXPECT_DOUBLE_EQ(work.projected8Elements, 0);
+    EXPECT_DOUBLE_EQ(work.projected16Elements, c.width == 16 ? 4 * 256 : 0);
+    EXPECT_DOUBLE_EQ(work.projected32Elements, c.width == 32 ? 4 * 256 : 0);
   }
 }
 
@@ -264,6 +378,7 @@ module {
     PredicateWork work;
     ASSERT_TRUE(collectPredicateWork(prefix + tail + " } }", work));
     EXPECT_GT(work.elements, 0);
+    EXPECT_DOUBLE_EQ(work.projected8Elements, 0);
     EXPECT_DOUBLE_EQ(work.projected16Elements, 0);
     EXPECT_DOUBLE_EQ(work.projected32Elements, 0);
   }

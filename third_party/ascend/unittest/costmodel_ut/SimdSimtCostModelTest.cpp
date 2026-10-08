@@ -174,6 +174,47 @@ TEST(SimdSimtCostModelTest, SimdPricesShortAxesPerSegmentAndElementWidth) {
   EXPECT_DOUBLE_EQ(fp16Rows.compute, 2.0);
 }
 
+TEST(SimdSimtCostModelTest, SimdMaskFallbackUsesProfileReferenceLanes) {
+  auto maskCost = [](int64_t contiguousElements, double segmentCount) {
+    LogicalStage stage =
+        logicalStage("mask-segments", StageCostModelKind::PredicateMask);
+    stage.workload.operationElements.clear();
+    const double elements = contiguousElements * segmentCount;
+    stage.workload.predicateElements = elements;
+    stage.workload.operationElements["predicate.select"] = elements;
+    stage.workload.issueElements = 2.0 * elements;
+    for (const char *operation : {"predicate.cmp", "predicate.select"}) {
+      TensorOperationWorkload tensor;
+      tensor.operation = operation;
+      tensor.elementBitWidth = 1;
+      tensor.logicalElements = elements;
+      tensor.segmentCount = segmentCount;
+      tensor.contiguousElementsPerSegment = contiguousElements;
+      stage.workload.tensorOperationWorkloads.push_back(std::move(tensor));
+    }
+    auto profile = hardwareProfile();
+    profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
+    auto table = evaluateOneStage(std::move(stage), std::move(profile));
+    if (!table) {
+      ADD_FAILURE() << llvm::toString(table.takeError());
+      return mlir::ascend::StageResourceCycles{};
+    }
+    return table->stages.front().implementations.front().resources;
+  };
+
+  // Policy regression: use the profile's 64 reference lanes per supplied
+  // segment, not packed i1 width. These synthetic descriptors do not validate
+  // backend fusion-group geometry or measured cycles.
+  const auto dense = maskCost(128, 1.0);
+  EXPECT_DOUBLE_EQ(dense.predicate, 2.0);
+  EXPECT_DOUBLE_EQ(dense.compute, 2.0);
+  EXPECT_DOUBLE_EQ(dense.issue, 1.0);
+  const auto segmented = maskCost(32, 4.0);
+  EXPECT_DOUBLE_EQ(segmented.predicate, 4.0);
+  EXPECT_DOUBLE_EQ(segmented.compute, 4.0);
+  EXPECT_DOUBLE_EQ(segmented.issue, 2.0);
+}
+
 TEST(SimdSimtCostModelTest,
      WorkloadDoesNotInferSegmentsOrScalarFallbackFromLogicalRows) {
   mlir::MLIRContext context;

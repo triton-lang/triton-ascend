@@ -633,7 +633,6 @@ extern unsigned long int MsprofSysCycleTime();
 extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
 static unsigned int __MsprofFlagL0 = 0;
 static unsigned int __MsprofFlagL1 = 0;
-static std::vector<int> tensorKinds;
 
 int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
   if ((CtrlData == nullptr) || (DataLen == 0U)) {
@@ -1518,6 +1517,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   PyObject *launch_enter_hook = nullptr;
   PyObject *launch_exit_hook = nullptr;
   std::vector<std::vector<int64_t>> tensorShapes;
+  std::vector<int> tensorKinds;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
   // METH_FASTCALL fast path: avoid per-call tuple allocation (METH_VARARGS) and
@@ -1565,8 +1565,8 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
     return nullptr;
   }}
   const char* kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  // get tensor_kinds (use interned key, cache result in tensorKinds)
-  if (tensorKinds.empty()) {{
+  // Read tensor kinds for this profiling invocation.
+  if (__MsprofFlagL1) {{
     static PyObject* key_tensor_kinds = PyUnicode_InternFromString("tensor_kinds");
     PyObject* tensorKindList = PyDict_GetItemWithError(packedMetadata, key_tensor_kinds);
     if (tensorKindList) {{

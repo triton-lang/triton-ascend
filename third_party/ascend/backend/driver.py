@@ -633,7 +633,6 @@ extern unsigned long int MsprofSysCycleTime();
 extern int MsprofRegisterCallback(unsigned int moduleId, callback handle);
 static unsigned int __MsprofFlagL0 = 0;
 static unsigned int __MsprofFlagL1 = 0;
-static std::vector<int> tensorKinds;
 
 int ProfCtrlHandle(unsigned int CtrlType, void* CtrlData, unsigned int DataLen) {
   if ((CtrlData == nullptr) || (DataLen == 0U)) {
@@ -1191,7 +1190,6 @@ static void release_npu_tensor_handle(void* handle) {{
       }}
 
       // Report tensor info
-      int max_tensors_num = tensorShapes.size() < MSPROF_GE_TENSOR_DATA_NUM ? tensorShapes.size() : MSPROF_GE_TENSOR_DATA_NUM;
       MsprofAdditionalInfo tensorInfo;
       tensorInfo.level = MSPROF_REPORT_NODE_LEVEL;
       tensorInfo.type = MSPROF_REPORT_NODE_TENSOR_INFO_TYPE;
@@ -1200,17 +1198,14 @@ static void release_npu_tensor_handle(void* handle) {{
       auto profTensorData = reinterpret_cast<MsprofTensorInfo *>(tensorInfo.data);
       profTensorData->opName = opNameHashID;
       int tensorCount = 0;
-      int dataTypes[MSPROF_GE_TENSOR_DATA_NUM];
-      if (tensorShapes.size() > 0) {{
-        {LINE_CHANGE_CHAR.join(
-          f'dataTypes[{idx}] = {convert_sigtype_to_int(ty[1:])};'
-          for idx, (_, ty) in enumerate(
-            (k, v) for k, v in signature.items() if v.startswith("*")
-          )
-          if idx < 5
-        )}
-      }}
-      for (int i = 0; i < tensorShapes.size() && tensorCount < MSPROF_GE_TENSOR_DATA_NUM; i++) {{
+      std::vector<int> dataTypes = {{{', '.join(
+        str(convert_sigtype_to_int(ty[1:]))
+        for ty in signature.values() if ty.startswith("*")
+      )}}};
+      for (size_t i = 0; i < tensorShapes.size() && i < dataTypes.size() &&
+                         tensorCount < MSPROF_GE_TENSOR_DATA_NUM; ++i) {{
+        if (tensorShapes[i].empty())
+          continue;
         auto fillTensorData = [&](int index, int tensorType) {{
           profTensorData->tensorData[index].tensorType = tensorType;
           profTensorData->tensorData[index].format = 2; // GeDataFormat: ND = 2
@@ -1518,6 +1513,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   PyObject *launch_enter_hook = nullptr;
   PyObject *launch_exit_hook = nullptr;
   std::vector<std::vector<int64_t>> tensorShapes;
+  std::vector<int> tensorKinds;
 
   {newline.join([f"{_extracted_type(ty)} _arg{i};" for i, ty in signature.items()])}
   // METH_FASTCALL fast path: avoid per-call tuple allocation (METH_VARARGS) and
@@ -1543,7 +1539,7 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
   if (__MsprofFlagL1) {{
     {
       LINE_CHANGE_CHAR.join(
-        f"{{ auto tmp = _get_tensor_shape(_arg{i}); if (!tmp.empty()) tensorShapes.push_back(tmp); }}"
+        f"tensorShapes.push_back(_get_tensor_shape(_arg{i}));"
         for i, ty in signature.items() if ty[0] == "*"
       )
     }
@@ -1565,18 +1561,27 @@ static PyObject* launch(PyObject* self, PyObject* const* args, Py_ssize_t nargs)
     return nullptr;
   }}
   const char* kernelName = PyUnicode_AsUTF8(kernelNameObj);
-  // get tensor_kinds (use interned key, cache result in tensorKinds)
-  if (tensorKinds.empty()) {{
+  // Read the kinds of this kernel invocation, even when its list is empty.
+  if (__MsprofFlagL1) {{
     static PyObject* key_tensor_kinds = PyUnicode_InternFromString("tensor_kinds");
+    if (!key_tensor_kinds)
+      return nullptr;
     PyObject* tensorKindList = PyDict_GetItemWithError(packedMetadata, key_tensor_kinds);
     if (tensorKindList) {{
-      Py_ssize_t size = PySequence_Size(tensorKindList);
-      for (Py_ssize_t i = 0; i < size; ++i) {{
-        PyObject* kind = PySequence_GetItem(tensorKindList, i);
-        tensorKinds.push_back(PyLong_AsLong(kind));
-        Py_DECREF(kind);
+      if (!PyList_Check(tensorKindList)) {{
+        PyErr_SetString(PyExc_TypeError, "tensor_kinds must be a list");
+        return nullptr;
       }}
-    }}
+      Py_ssize_t size = PyList_GET_SIZE(tensorKindList);
+      tensorKinds.reserve(size);
+      for (Py_ssize_t i = 0; i < size; ++i) {{
+        int kind = PyLong_AsLong(PyList_GET_ITEM(tensorKindList, i));
+        if (PyErr_Occurred())
+          return nullptr;
+        tensorKinds.push_back(kind);
+      }}
+    }} else if (PyErr_Occurred())
+      return nullptr;
   }}
 
   // raise exception asap

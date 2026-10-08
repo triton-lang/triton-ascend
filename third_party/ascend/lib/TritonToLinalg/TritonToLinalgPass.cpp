@@ -1730,7 +1730,16 @@ TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
   patterns.add<CannonicalizerConverter::SplatCmpConverter>(
       patterns.getContext());
 
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
+  // Seed only pattern roots. New and modified operations remain eligible via
+  // the rewriter's worklist, without repeatedly rescanning the whole module.
+  SmallVector<Operation *> roots;
+  moduleOp.walk([&](Operation *op) {
+    if (isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+            triton::AtomicCASOp, arith::CmpIOp>(op))
+      roots.push_back(op);
+  });
+  FrozenRewritePatternSet frozenPatterns(std::move(patterns));
+  if (failed(applyOpPatternsGreedily(roots, frozenPatterns))) {
     LLVM_DEBUG({ llvm::dbgs() << "ImplicitPermute: rewrite MemOp failed\n"; });
   }
 

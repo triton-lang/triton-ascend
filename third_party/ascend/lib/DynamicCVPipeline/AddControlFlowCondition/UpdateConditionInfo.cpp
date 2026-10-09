@@ -44,6 +44,7 @@
 #include "mlir/IR/ValueRange.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
@@ -1151,8 +1152,7 @@ int UpdateConditionInfoPass::setFlowOptCondition(scf::IfOp currentIfOp,
   // Check if flowOpt condition is needed based on buffer counts
   // - Cross-core buffer count > CROSS_CORE_BUFFER_COUNT_THRESHOLD
   // - Intra-core buffer count > INTRA_CORE_BUFFER_COUNT_THRESHOLD
-  if (info->crossCoreBufferCount <= CROSS_CORE_BUFFER_COUNT_THRESHOLD ||
-      info->intraCoreBufferCount <= INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
+  if (!isFlowOptEnabled(info)) {
     flowOptCond = nullptr;
     return UPDATE_CONDITION_INFO_SUCCESS;
   }

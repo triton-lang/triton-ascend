@@ -60,7 +60,6 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createBroadcastUBOptPass());
   pm.addPass(createPosMaskPatternPass());
   pm.addPass(createMergeSameSourceAxisPass());
-  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
@@ -73,7 +72,6 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
   pm.addPass(createExpSubfPatternPass());
-  pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 

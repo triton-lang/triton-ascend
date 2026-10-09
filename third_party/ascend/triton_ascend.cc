@@ -130,8 +130,11 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createNormalizeDebugLineLocationsPass());
   });
 
-  m.def("add_bubble_up_operation", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createBubbleUpOperationPass());
+  m.def("add_bubble_up_operation", [](mlir::PassManager &pm,
+                                      bool compileOn91095) {
+    BubbleUpOperationOptions opts;
+    opts.compileOn91095 = compileOn91095;
+    pm.addPass(mlir::triton::createBubbleUpOperationPass(opts));
   });
 
   m.def("add_dynamic_cv_pipeline",

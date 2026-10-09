@@ -31,9 +31,11 @@
 
 template <typename ExtractOpTy>
 BubbleUpExtract<ExtractOpTy>::BubbleUpExtract(MLIRContext *context,
-                                              bool enableAggressiveMode)
+                                              bool enableAggressiveMode,
+                                              bool compileOn91095)
     : OpRewritePattern<ExtractOpTy>(context),
-      enableAggressiveMode(enableAggressiveMode) {}
+      enableAggressiveMode(enableAggressiveMode),
+      compileOn91095(compileOn91095) {}
 
 template <typename ExtractOpTy>
 LogicalResult
@@ -107,6 +109,13 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
   } else if (auto truncFOp = dyn_cast<arith::TruncFOp>(parentOp)) {
     bubbleUpOperation(op, truncFOp, loc, rewriter);
   } else if (auto extFOp = dyn_cast<arith::ExtFOp>(parentOp)) {
+    // On non-A5 targets, the vector cast (vcast) that arith.extf lowers to
+    // requires the source address to be 32-byte aligned. Bubbling the slice
+    // above the extf on a bf16 source (2 bytes/element) can turn an aligned
+    // f32 slice into a misaligned bf16 slice, so keep the cast first in that
+    // case.
+    if (!compileOn91095 && isBf16ExtSliceMisaligned(op, extFOp))
+      return failure();
     bubbleUpOperation(op, extFOp, loc, rewriter);
   } else if (auto fpTosiOp = dyn_cast<arith::FPToSIOp>(parentOp)) {
     bubbleUpOperation(op, fpTosiOp, loc, rewriter);
@@ -192,6 +201,38 @@ Value BubbleUpExtract<tensor::ExtractSliceOp>::createExtractOp(
   extractedOp->setAttr(ConverterUtils::discreteAttrName,
                        UnitAttr::get(rewriter.getContext()));
   return extractedOp;
+}
+
+template <typename ExtractOpTy>
+bool BubbleUpExtract<ExtractOpTy>::isBf16ExtSliceMisaligned(
+    ExtractOpTy op, arith::ExtFOp parentOp) const {
+  // Only slice bubbling is affected; a scalar tensor.extract has no buffer
+  // alignment requirement on the cast that follows it.
+  if constexpr (!std::is_same_v<ExtractOpTy, tensor::ExtractSliceOp>) {
+    return false;
+  } else {
+    auto srcType = dyn_cast<RankedTensorType>(parentOp.getIn().getType());
+    if (!srcType || !srcType.getElementType().isBF16())
+      return false;
+    auto shape = srcType.getShape();
+    auto offsets = op.getMixedOffsets();
+    if (shape.size() != offsets.size())
+      return true;
+    // Row-major linear element offset of the slice start within the source.
+    int64_t linearOffset = 0;
+    int64_t stride = 1;
+    for (int64_t i = shape.size() - 1; i >= 0; --i) {
+      auto offset = getConstantIntValue(offsets[i]);
+      // A dynamic offset cannot be proven 16-aligned at compile time; be
+      // conservative and skip the rewrite.
+      if (!offset)
+        return true;
+      linearOffset += *offset * stride;
+      stride *= shape[i];
+    }
+    // bf16 is 2 bytes/element: 32-byte aligned iff linearOffset % 16 == 0.
+    return linearOffset % 16 != 0;
+  }
 }
 
 template <typename ExtractOpTy>
@@ -543,7 +584,8 @@ void BubbleUpOperationPass::runOnOperation() {
   RewritePatternSet patterns(ctx);
   patterns.add<BubbleUpExtract<tensor::ExtractOp>,
                BubbleUpExtract<tensor::ExtractSliceOp>>(ctx,
-                                                        enableAggressiveMode);
+                                                        enableAggressiveMode,
+                                                        compileOn91095);
 
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply Patterns");

@@ -22,7 +22,7 @@ jobs:
     steps:
       # ── Ensure all expected labels exist in the repo ──
       - name: Ensure labels
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const DESIRED = {

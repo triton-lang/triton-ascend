@@ -506,6 +506,15 @@ static bool isEmptyFillPattern(Value depVal)
     return true;
 }
 
+// Check if depVal is a `bufferization.alloc_tensor` 
+static bool isBareAllocTensorPattern(Value depVal)
+{
+    Operation *defOp = depVal.getDefiningOp();
+    if (!defOp)
+        return false;
+    return isa<bufferization::AllocTensorOp>(defOp);
+}
+
 SmallVector<Value> collectBufferValues(DenseMap<Value, SmallVector<Value>> &depValueMap)
 {
     SmallVector<Value> valueList;
@@ -1629,6 +1638,103 @@ static int cloneEmptyFillsInBlocks(scf::ForOp mainLoopForOp, DenseMap<Value, Inn
     return 0;
 }
 
+// Special handling for bare tensor allocation ops
+static int cloneAllocTensorToConsumers(Value depVal, int producerId,
+                                       DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+                                       OpBuilder &builder)
+{
+    Operation *origAlloc = depVal.getDefiningOp();
+    if (!origAlloc)
+        return 0;
+
+    auto userIt = depUserMap.find(depVal);
+    if (userIt == depUserMap.end())
+        return 0;
+
+    // Group users by their consumer block_id.
+    DenseMap<int, SmallVector<Operation *>> opsByBlockId;
+    for (Operation *user : userIt->second) {
+        auto userBlockId = getOpBlockId(user);
+        if (!userBlockId.has_value() || *userBlockId == producerId)
+            continue;
+        bool stillUses = false;
+        for (OpOperand &opnd : user->getOpOperands()) {
+            if (opnd.get() == depVal) {
+                stillUses = true;
+                break;
+            }
+        }
+        if (!stillUses)
+            continue;
+        opsByBlockId[*userBlockId].push_back(user);
+    }
+
+    for (auto &p : opsByBlockId) {
+        int userBlockId = p.first;
+        auto &users = p.second;
+        if (users.empty())
+            continue;
+
+        Operation *firstUser = users.front();
+        builder.setInsertionPoint(firstUser);
+
+        // Clone the bare alloc op (alloc_tensor / tensor.empty) and tag with the consumer's block_id. 
+        Operation *newAlloc = builder.clone(*origAlloc);
+        newAlloc->setAttr(kBlockId, builder.getI32IntegerAttr(userBlockId));
+
+        Value newResult = newAlloc->getResult(0);
+        for (Operation *user : users) {
+            user->replaceUsesOfWith(depVal, newResult);
+        }
+    }
+
+    return 0;
+}
+
+// First pass for bare alloc_tensor / bare tensor.empty deps
+static int cloneAllocTensorsInBlocks(scf::ForOp mainLoopForOp, DenseMap<Value, InnerBlockInfo> &blocks,
+                                     DenseMap<Value, SmallVector<Value>> &depValueMap,
+                                     DenseMap<Value, SmallVector<Operation *>> &depUserMap,
+                                     OpBuilder &globalBuilder)
+{
+    SmallVector<Operation *> seenOps;
+
+    for (auto &blockPair : blocks) {
+        auto depIt = depValueMap.find(blockPair.first);
+        if (depIt == depValueMap.end())
+            continue;
+
+        for (Value depVal : depIt->second) {
+            Operation *defOp = depVal.getDefiningOp();
+            if (!defOp || llvm::is_contained(seenOps, defOp))
+                continue;
+
+            if (!isBareAllocTensorPattern(depVal))
+                continue;
+
+            // Skip if parentOp is not the main_loop forOp (clone logic
+            // currently expects the alloc to be inside main_loop).
+            if (defOp->getParentOp() != mainLoopForOp.getOperation())
+                continue;
+
+            // The empty+fill pattern is handled by cloneEmptyFillsInBlocks
+            // (which clones both ops together to preserve fill semantics).
+            // Skip any remaining occurrences here.
+            if (isEmptyFillPattern(depVal))
+                continue;
+
+            auto producerId = getOpBlockId(defOp);
+            if (!producerId.has_value())
+                continue;
+
+            seenOps.push_back(defOp);
+            if (cloneAllocTensorToConsumers(depVal, *producerId, depUserMap, globalBuilder) != 0)
+                return -1;
+        }
+    }
+    return 0;
+}
+
 // Process cross-block tensor dependencies for double buffering
 static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Value, InnerBlockInfo> &blocks,
                                      DenseMap<Value, SmallVector<Value>> &depValueMap,
@@ -1657,6 +1763,10 @@ static int processTensorDependencies(mlir::scf::ForOp mainLoopForOp, DenseMap<Va
 
             // Skip tensor::EmptyOp - it should only get dep_mark, not buffer allocation
             if (isa<tensor::EmptyOp>(depVal.getDefiningOp()))
+                continue;
+
+            // Skip bufferization.alloc_tensor
+            if (isa<bufferization::AllocTensorOp>(depVal.getDefiningOp()))
                 continue;
 
             // Check if definingOp's parentOp is the main_loop forOp
@@ -1789,6 +1899,10 @@ static int addInnerMultiBuffer(mlir::scf::ForOp mainLoopForOp, OpBuilder &builde
     // consumer-block users; the cloned fills will rewrite those users' uses.
     DenseMap<Value, SmallVector<Operation *>> initialDepUserMap = buildDepUserMap(blocks, allOps, depValueMap);
     if (cloneEmptyFillsInBlocks(mainLoopForOp, blocks, depValueMap, initialDepUserMap, globalBuilder) != 0)
+        return -1;
+
+    // Phase 1 (cont.): clone bare alloc_tensor / bare tensor::EmptyOp deps into each consumer's block. 
+    if (cloneAllocTensorsInBlocks(mainLoopForOp, blocks, depValueMap, initialDepUserMap, globalBuilder) != 0)
         return -1;
 
     // Break tensor-rooted cross-block scalar dependencies AFTER the empty+fill

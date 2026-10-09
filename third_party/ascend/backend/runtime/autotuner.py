@@ -2305,7 +2305,6 @@ class AutoTilingTuner(Autotuner):
                 for name, value in zip(key_names, key)
             )
             print(f"Triton autotuning for function {self.base_fn.__name__},\n"
-                  f"with key as {key!r},\n"
                   f"with key fields as {key_fields},\n"
                   f"finished after {self.bench_time:.2f}s; best config selected: {self.best_config};")
             self._print_benchmark_results(self.configs_timings)

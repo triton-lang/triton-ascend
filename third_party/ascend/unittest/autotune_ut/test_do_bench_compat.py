@@ -233,7 +233,7 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
 
     assert tuner.run() == "kernel-result"
     output = capsys.readouterr().out
-    assert "with key as ('disk-cache-key', 'torch.float32', ('compile_mode', 'simd'), ('multibuffer_mode', (2, 3)))," in output
+    assert "with key as " not in output
     assert ("with key fields as cache_key='disk-cache-key', input.dtype='torch.float32', "
             "compile_mode='simd', multibuffer_mode=(2, 3),") in output
     assert "Triton autotuning benchmark results for function _dummy_kernel:" in output

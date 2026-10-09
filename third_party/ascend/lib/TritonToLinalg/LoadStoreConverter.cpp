@@ -895,7 +895,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-    return rewriter.create<bufferization::ToBufferOp>(loc, ptrType, inputVal);
+    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());
@@ -977,7 +977,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       MemRefType maskTypeM =
           MemRefType::get(maskTypeT.getShape(), maskTypeT.getElementType());
       memrefMask =
-          rewriter.create<bufferization::ToBufferOp>(loc, maskTypeM, mask);
+          rewriter.create<bufferization::ToMemrefOp>(loc, maskTypeM, mask);
     }
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
@@ -1067,10 +1067,10 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   MemRefType dstType =
       MemRefType::get(dstOriType.getShape(), dstOriType.getElementType());
   Value inputMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, val);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, val);
 
   Value cmpMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, cmp);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, cmp);
 
   // create element-wise map
   int64_t rank = type.getRank();

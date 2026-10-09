@@ -214,9 +214,70 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   }
   resources.predicate =
       predicateInstructions / profile.predicateOperationsPerCycle;
-  resources.shuffle = work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
-  resources.scanShuffle =
-      work.scanShuffleLaneSteps / profile.shuffleLanesPerCycle;
+  // The scan pool is recorded in the unit each mode is priced in.  SIMD prices
+  // the 1D scans by their regime features (element count for extent <= 64,
+  // Sklansky element-rounds above it - exactly the bucket fields below) and the
+  // multi-dim part by its column-parallel count S = extent * ceil(columns /
+  // BpE), BpE being the dtype's vector lane count (256 / element size; 64 for
+  // f32); the shared workload holds that sum.  SIMT prices the multi-dim part
+  // by the total element count N = extent * columns (per-thread lane work) and
+  // the 1D part by its element count (its warp segment table is keyed on N), so
+  // it swaps in the element-unit totals instead.  StagePartitioner records both
+  // views; the refund terms below back out exactly the units charged here.
+  double scanSteps = work.scanShuffleLaneSteps;
+  if (!simd)
+    scanSteps =
+        work.scanShuffleLaneSteps1d + work.scanShuffleLaneStepsSimtMulti;
+  // Tree reductions are priced by their element-rounds, the unit the SIMD
+  // Sklansky network is shaped by (shuffleLaneSteps minus the scan pool).
+  const double reduceSteps = work.shuffleLaneSteps - work.scanShuffleLaneSteps;
+  resources.shuffle = (reduceSteps + scanSteps) / profile.shuffleLanesPerCycle;
+  resources.scanShuffle = scanSteps / profile.shuffleLanesPerCycle;
+  resources.scanShuffle1d =
+      work.scanShuffleLaneSteps1d / profile.shuffleLanesPerCycle;
+  resources.scanShuffle1dSmall =
+      work.scanShuffleLaneSteps1dSmall / profile.shuffleLanesPerCycle;
+  resources.scanShuffle1dMidWork =
+      work.scanShuffleLaneSteps1dMidWork / profile.shuffleLanesPerCycle;
+  resources.scanShuffle1dTiledWork =
+      work.scanShuffleLaneSteps1dTiledWork / profile.shuffleLanesPerCycle;
+  resources.scanShuffleMultiTail =
+      work.scanShuffleLaneStepsMultiTail / profile.shuffleLanesPerCycle;
+  // Non-leading-axis multi-dim scans pay two transposes (Cumsum.cpp).  Each
+  // body has its own fixed part plus byte rate; the fixed part is charged once
+  // per present transpose kind, mirroring the per-stage startup above.  A
+  // profile with no transpose rate charges nothing and keeps its previous
+  // price.
+  auto transposeCycles = [](double bytes, double fixed, double rate) {
+    return rate > 0.0 ? fixed + bytes / rate : 0.0;
+  };
+  const double rank2Bytes = work.scanTransposeBytesRank2;
+  const double rank3Bytes = work.scanTransposeBytes - rank2Bytes;
+  if (rank3Bytes > 0.0)
+    resources.scanTranspose +=
+        transposeCycles(rank3Bytes, profile.prefixScanTransposeDim01FixedCycles,
+                        profile.prefixScanTransposeDim01BytesPerCycle);
+  if (rank2Bytes > 0.0)
+    resources.scanTranspose +=
+        transposeCycles(rank2Bytes, profile.prefixScanTransposeAr2raFixedCycles,
+                        profile.prefixScanTransposeAr2raBytesPerCycle);
+  // Fixed per-scan-execution cost (thread barrier, fixed launch shape, UB
+  // round-trip, library-call setup), charged once per present scan segment.
+  // The two 1D regimes each carry their own: the scalar-register segment
+  // (extent <= 64) and the rvec segment (extent > 64), the latter shared by
+  // both rvec buckets through the block-invocation setup.  The multi-dim
+  // segment has its own too: SIMT pays a barrier and a UB round-trip, and the
+  // SIMD 2D library template (Cumsum.cpp, column parallel) pays a fixed
+  // issue/setup cost.  Profiles that provide no such value keep 0 and the
+  // segments stay proportional.
+  if (work.scanShuffleLaneSteps1dSmall > 0.0)
+    resources.scanStartup += profile.prefixScanStartupCycles1dSmall;
+  if (work.scanShuffleLaneSteps1dMidWork +
+          work.scanShuffleLaneSteps1dTiledWork >
+      0.0)
+    resources.scanStartup += profile.prefixScanStartupCycles1d;
+  if (work.scanShuffleLaneStepsSimtMulti > 0.0)
+    resources.scanStartup += profile.prefixScanStartupCycles;
   if (work.dotFlops > 0.0) {
     resources.setup += profile.dotSetupCycles;
     resources.dot = work.dotFlops / profile.dotFlopsPerCycle;
@@ -244,6 +305,75 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
     resources.criticalPath =
         resources.compute + resources.predicate + resources.shuffle;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
+}
+
+// v3.1 warp-shape-aware SIMT 1D scan cost.  The ScanOpToLLVM lowering has
+// three structural regimes (single-warp fast path / cross-warp Sklansky merge
+// / general path) keyed off N and the kernel warp count; the segment cost
+// replaces the legacy factor * laneSteps pricing for the whole 1D pool,
+// including its startups.
+static double simtPrefixScan1dSegmentCost(const StageModeProfile &simt,
+                                          int64_t numWarps, double n) {
+  const auto &segments = simt.prefixScan1dWarpSegments;
+  auto it = segments.lower_bound(
+      static_cast<unsigned>(std::max<int64_t>(1, numWarps)));
+  if (it == segments.end())
+    it = std::prev(segments.end());
+  const auto &segment = it->second;
+  const double warps = static_cast<double>(it->first);
+  const double threads = 32.0 * warps;
+  if (n <= 32.0)
+    return segment.cLocal;
+  // warpsPerCTA[axis] = ceil(N/32), capped by the kernel warp count.
+  const double chainWarps = std::min(warps, std::ceil(n / 32.0));
+  // Cross-warp Sklansky merge.  Both gates mirror canUseMultiWarpSklansky:
+  // one element per thread (N <= 32*w) and at most warpSize axis warps
+  // (k <= 32, i.e. N <= 1024).  A kernel with more warps than that
+  // (num_warps = 64) drops to the general path already at N = 2048 although
+  // every thread still owns one element, so pricing it as Sklansky would
+  // under-predict it.  ceil(log2 k) is the trip count of the Sklansky
+  // `for (h = 1; h < k; h <<= 1)` loop, so the pricing tracks the real round
+  // count instead of a linear proxy.
+  if (n <= threads && chainWarps <= 32.0) {
+    const double rounds = std::ceil(std::log2(std::max(1.0, chainWarps)));
+    return segment.cFixed + segment.cRound * rounds;
+  }
+  // General path.  The per-element serial slope is charged from N = 0; the
+  // 32*w anchor of the (N - 32*w) form is folded into cGen, so cGen is not
+  // directly comparable with the cross-warp segment constant.
+  return segment.cGen + segment.serialRate * n;
+}
+
+// v3.2 warp-shape-aware SIMT multi-dim (2D) scan cost.  The generic scan
+// lowering (AddPartialReduce) distributes the scan across warps with a serial
+// UB load chain whose cost is additive in the total element count N, plus a
+// per-thread-element hinge that prices register pressure beyond r0.  E is the
+// aggregate scan extent (exact for a single multi-dim scan per Stage) and
+// determines k = warpsPerCTA[axis], the UB chain length.  Extents below one
+// warp (E < 32) take the separate linear regime described inline below.
+static double simtPrefixScan2dSegmentCost(const StageModeProfile &simt,
+                                          int64_t numWarps, double extentSum,
+                                          double n) {
+  const auto &segments = simt.prefixScan2dWarpSegments;
+  auto it = segments.lower_bound(
+      static_cast<unsigned>(std::max<int64_t>(1, numWarps)));
+  if (it == segments.end())
+    it = std::prev(segments.end());
+  const auto &segment = it->second;
+  const double extent = std::max(1.0, extentSum);
+  // Sub-warp extent: the warp owning the axis holds fewer than 32 valid lanes,
+  // so the axis warp never needs a cross-warp chain (k = 1) and the cost
+  // collapses onto a single linear-in-N regime.  Layout-coalesced small scans
+  // (e.g. a 16-element cumsum promoted to an (8,16,16) scan) land here.
+  if (extent < 32.0 && (segment.aSubwarp > 0.0 || segment.bSubwarp > 0.0))
+    return segment.aSubwarp + segment.bSubwarp * n;
+  const double threads = 32.0 * static_cast<double>(it->first);
+  // warpsPerCTA[axis]: warps holding unique data along the scan axis.
+  const double chainWarps =
+      std::min(static_cast<double>(it->first), std::ceil(extent / 32.0));
+  const double chainLoads = n * std::max(1.0, chainWarps) / threads;
+  const double hinge = std::max(0.0, n / threads - segment.r0);
+  return segment.a + segment.b * n + segment.c * chainLoads + segment.d * hinge;
 }
 
 static double applySuperBlock(const LogicalStage &stage,
@@ -310,9 +440,18 @@ static double applySuperBlock(const LogicalStage &stage,
 
 static double estimateStage(const LogicalStage &stage,
                             const HardwareProfile &profile, StageMode mode,
-                            const StageResourceCycles &r) {
+                            StageResourceCycles &r) {
   const double count = iterations(stage);
   const double serial = r.setup + count * serialBody(r);
+  // Per-pipe split for diagnostics (see StageResourceCycles::pipe*): load/
+  // store/atomic execute on MTE, scalar/control/spill on SI, and compute/
+  // predicate/shuffle/dot on VEC.  A loop-carried recurrence is one dependency
+  // chain whose body cannot be split across pipes, so its pipe terms are
+  // cleared and its body is reported as pipeSerial instead.
+  r.pipeMte = r.load + r.store + r.atomic;
+  r.pipeSi = r.scalar + controlBody(r) + r.spill;
+  r.pipeVec = r.compute + r.predicate + r.shuffle + r.dot;
+  r.pipeSerial = 0.0;
   switch (stage.costModelKind) {
   case StageCostModelKind::AutoBlockifyDispatch:
   case StageCostModelKind::AutoBlockifyLoop: {
@@ -360,9 +499,46 @@ static double estimateStage(const LogicalStage &stage,
       const double dependencyFactor =
           mode == StageMode::SIMD ? profile.simd.prefixScanDependencyFactor
                                   : profile.simt.prefixScanDependencyFactor;
+      const double dependencyFactor1d =
+          mode == StageMode::SIMD ? profile.simd.prefixScanDependencyFactor1d
+                                  : profile.simt.prefixScanDependencyFactor1d;
+      const double dependencyFactor1dSmall =
+          mode == StageMode::SIMD
+              ? profile.simd.prefixScanDependencyFactor1dSmall
+              : profile.simt.prefixScanDependencyFactor1dSmall;
+      // Back out the 1D portion of the base charge in the units that base
+      // charge used.  SIMD stores the 1D contribution to r.scanShuffle in the
+      // per-regime features StagePartitioner recorded - element count for the
+      // extent <= 64 scalar-register segment, Sklansky element-rounds
+      // (N * log2(N), shared by the two rvec segments) above it - so it refunds
+      // the same three buckets.  SIMT's scan total was swapped for the
+      // element-unit 1D + multi-dim counts, so it keeps the element-unit
+      // refund.
+      double oneDimRefund = 0.0;
+      double multiTailPremium = 0.0;
+      if (mode == StageMode::SIMD) {
+        oneDimRefund = (dependencyFactor - dependencyFactor1dSmall) *
+                           r.scanShuffle1dSmall +
+                       (dependencyFactor -
+                        profile.simd.prefixScanDependencyFactor1dMidWork) *
+                           r.scanShuffle1dMidWork +
+                       (dependencyFactor -
+                        profile.simd.prefixScanDependencyFactor1dTiledWork) *
+                           r.scanShuffle1dTiledWork;
+        // Same multi-dim hinge as the standalone PrefixScan model.
+        multiTailPremium = r.scanShuffleMultiTail *
+                           profile.simd.prefixScanDependencyFactorMultiTail;
+      } else {
+        oneDimRefund =
+            (dependencyFactor - dependencyFactor1d) *
+                (r.scanShuffle1d - r.scanShuffle1dSmall) +
+            (dependencyFactor - dependencyFactor1dSmall) * r.scanShuffle1dSmall;
+      }
       critical =
           std::max(r.criticalPath + (dependencyFactor - 1.0) * r.scanShuffle +
-                       r.load + r.store + r.atomic + controlBody(r) + r.spill,
+                       r.scanStartup + r.scanTranspose - oneDimRefund +
+                       multiTailPremium + r.load + r.store + r.atomic +
+                       controlBody(r) + r.spill,
                    r.issue);
     }
     if (mode == StageMode::SIMD) {
@@ -375,11 +551,19 @@ static double estimateStage(const LogicalStage &stage,
       const double persistentState =
           static_cast<double>(stage.liveOutBytes) /
           profile.superblockPersistentStateBytesPerCycle;
+      r.pipeSerial = critical;
+      r.pipeVec = 0.0;
+      r.pipeMte = 0.0;
+      r.pipeSi = 0.0;
       return r.setup + count * critical + persistentState;
     }
     const int64_t groups = std::max<int64_t>(
         1, std::min(stage.features.parallelRecurrenceGroupCount,
                     profile.logicalWarpGroupCount));
+    r.pipeSerial = critical;
+    r.pipeVec = 0.0;
+    r.pipeMte = 0.0;
+    r.pipeSi = 0.0;
     return r.setup +
            std::max(std::ceil(count / static_cast<double>(groups)) * critical,
                     count * r.issue);
@@ -390,11 +574,108 @@ static double estimateStage(const LogicalStage &stage,
                                 r.criticalPath + controlBody(r) + r.spill,
                             r.issue);
   case StageCostModelKind::PrefixScan: {
-    const double scanCritical =
-        r.compute + r.predicate +
-        r.shuffle * (mode == StageMode::SIMD
-                         ? profile.simd.prefixScanDependencyFactor
-                         : profile.simt.prefixScanDependencyFactor);
+    const double dependencyFactor =
+        mode == StageMode::SIMD ? profile.simd.prefixScanDependencyFactor
+                                : profile.simt.prefixScanDependencyFactor;
+    const double dependencyFactor1d =
+        mode == StageMode::SIMD ? profile.simd.prefixScanDependencyFactor1d
+                                : profile.simt.prefixScanDependencyFactor1d;
+    const double dependencyFactor1dSmall =
+        mode == StageMode::SIMD
+            ? profile.simd.prefixScanDependencyFactor1dSmall
+            : profile.simt.prefixScanDependencyFactor1dSmall;
+    // Charge the multi-dim factor on all scan shuffle, then refund the 1D
+    // portion at the regime factors.  Each mode backs out exactly the cost unit
+    // its base charge used:
+    //   SIMD - the per-regime features StagePartitioner recorded (element count
+    //          for the extent <= 64 scalar-register regime, Sklansky
+    //          element-rounds for the two rvec regimes), because the 1D
+    //          contribution to the scan pool is stored in those units;
+    //   SIMT - the element count, because mapWorkload swapped the scan total
+    //          for the element-unit 1D + multi-dim counts.  Its 1D price is
+    //          then replaced wholesale by the warp segment table below, so the
+    //          refund only has to cancel this same expression.
+    const double scanShuffle1dLarge = r.scanShuffle1d - r.scanShuffle1dSmall;
+    double scanCritical = r.compute + r.predicate +
+                          r.shuffle * dependencyFactor + r.scanStartup +
+                          r.scanTranspose;
+    if (mode == StageMode::SIMD) {
+      scanCritical -=
+          r.scanShuffle1dSmall * (dependencyFactor - dependencyFactor1dSmall) +
+          r.scanShuffle1dMidWork *
+              (dependencyFactor -
+               profile.simd.prefixScanDependencyFactor1dMidWork) +
+          r.scanShuffle1dTiledWork *
+              (dependencyFactor -
+               profile.simd.prefixScanDependencyFactor1dTiledWork);
+      // Multi-dim hinge: the column-parallel steps above S = 256 cost more per
+      // step than the ones below it, so the shared base factor above is not
+      // enough for them.  They are already part of r.scanShuffle at
+      // dependencyFactor, so only the extra factor is added here.  SIMT has
+      // no such term: its multi-dim price is replaced by the warp segment
+      // table below.
+      scanCritical += r.scanShuffleMultiTail *
+                      profile.simd.prefixScanDependencyFactorMultiTail;
+    } else {
+      scanCritical -=
+          scanShuffle1dLarge * (dependencyFactor - dependencyFactor1d) +
+          r.scanShuffle1dSmall * (dependencyFactor - dependencyFactor1dSmall);
+    }
+    if (mode == StageMode::SIMT && r.scanShuffle1d > 0.0 &&
+        !profile.simt.prefixScan1dWarpSegments.empty()) {
+      // v3.1: the SIMT 1D scan cost is set by the ScanOpToLLVM lowering's
+      // structural regime (single-warp fast path / cross-warp Sklansky /
+      // general path), keyed off N and the kernel warp count.  Replace the
+      // legacy 1D factor pricing and its startups with the segment cost;
+      // multi-dim and non-scan shuffle keep the factor formula.  N is the 1D
+      // scan element count (S_1d = N, and
+      // scanShuffle1d = N / shuffleLanesPerCycle).
+      const double n = r.scanShuffle1d * profile.simt.shuffleLanesPerCycle;
+      const double segmentCost = simtPrefixScan1dSegmentCost(
+          profile.simt, profile.logicalWarpGroupCount, n);
+      const double legacy1d = scanShuffle1dLarge * dependencyFactor1d +
+                              r.scanShuffle1dSmall * dependencyFactor1dSmall;
+      // Match mapWorkload's startup conditions exactly (scalar-register bucket
+      // present; either rvec bucket present) so the replacement cancels the
+      // charge it is replacing.
+      const double legacy1dStartup =
+          (r.scanShuffle1dSmall > 0.0
+               ? profile.simt.prefixScanStartupCycles1dSmall
+               : 0.0) +
+          (r.scanShuffle1dMidWork + r.scanShuffle1dTiledWork > 0.0
+               ? profile.simt.prefixScanStartupCycles1d
+               : 0.0);
+      scanCritical += segmentCost - legacy1d - legacy1dStartup;
+    }
+    if (mode == StageMode::SIMT &&
+        stage.workload.scanShuffleLaneStepsSimtMulti > 0.0 &&
+        !profile.simt.prefixScan2dWarpSegments.empty()) {
+      // v3.2: the SIMT multi-dim scan cost is a warp-shape-aware additive
+      // formula in N (total elements) and k (UB chain length), with a
+      // per-thread-element hinge (register pressure).  Replace the legacy
+      // multi-dim factor pricing and its startup; the 1D pool and non-scan
+      // shuffle keep their formulas.  The multi-dim total N is the
+      // per-iteration workload count (the same value mapWorkload swapped
+      // into r.scanShuffle), and the legacy price is that count's share of
+      // r.scanShuffle at the factor rate.
+      const double lanes = profile.simt.shuffleLanesPerCycle;
+      const double multiN = stage.workload.scanShuffleLaneStepsSimtMulti;
+      const double segmentCost = simtPrefixScan2dSegmentCost(
+          profile.simt, profile.logicalWarpGroupCount,
+          stage.workload.scanSimtMultiExtentSum, multiN);
+      const double legacyMulti = multiN / lanes * dependencyFactor;
+      const double legacyMultiStartup = profile.simt.prefixScanStartupCycles;
+      scanCritical += segmentCost - legacyMulti - legacyMultiStartup;
+    }
+    // The base charge records the un-amplified scan step count; the price the
+    // model actually charges multiplies it by the dependency factor and, for
+    // SIMT, replaces the 1D and multi-dim pools with the warp segment tables.
+    // Report the priced value as the scan's VEC load so the dumped resources
+    // match the charged cost and route aggregation sees the scan's real VEC
+    // occupancy instead of the un-amplified base.
+    r.pipeVec = scanCritical;
+    r.pipeMte = r.load + r.store + r.atomic;
+    r.pipeSi = r.scalar + controlBody(r) + r.spill;
     return r.setup +
            count * std::max(r.scalar + r.load + r.store + r.atomic +
                                 scanCritical + controlBody(r) + r.spill,
@@ -519,7 +800,7 @@ bool StageAtomicRate::isValid() const {
 }
 
 bool StageModeProfile::isValid(StageMode mode) const {
-  const std::array<double, 14> common = {setupCycles,
+  const std::array<double, 18> common = {setupCycles,
                                          predicateOperationsPerCycle,
                                          shuffleLanesPerCycle,
                                          dotSetupCycles,
@@ -530,6 +811,10 @@ bool StageModeProfile::isValid(StageMode mode) const {
                                          indirectLoadTransactionsPerCycle,
                                          indirectStoreTransactionsPerCycle,
                                          prefixScanDependencyFactor,
+                                         prefixScanDependencyFactor1d,
+                                         prefixScanDependencyFactor1dSmall,
+                                         prefixScanDependencyFactor1dMidWork,
+                                         prefixScanDependencyFactor1dTiledWork,
                                          static_cast<double>(vectorWidthBits),
                                          static_cast<double>(vectorWidth),
                                          static_cast<double>(issueWidth)};
@@ -538,6 +823,8 @@ bool StageModeProfile::isValid(StageMode mode) const {
           [](double value) { return std::isfinite(value) && value > 0.0; }) ||
       !std::isfinite(indirectDependencyLatencyCycles) ||
       indirectDependencyLatencyCycles < 0.0 ||
+      !std::isfinite(prefixScanDependencyFactorMultiTail) ||
+      prefixScanDependencyFactorMultiTail < 0.0 ||
       !controlFlow.isFiniteAndNonNegative())
     return false;
   if (mode == StageMode::SIMD) {
@@ -649,12 +936,15 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           stage,
           implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
           implementation.mode);
+      // estimateStage also records the per-pipe split of the priced body, so it
+      // must run before the resources are copied into the result.
+      const double stageCycles =
+          estimateStage(stage, profile, implementation.mode, resources);
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;
-      cost.totalCycles = applySuperBlock(
-          stage, resources, implementation, profile,
-          estimateStage(stage, profile, implementation.mode, resources));
+      cost.totalCycles = applySuperBlock(stage, resources, implementation,
+                                         profile, stageCycles);
       if (!cost.isValid())
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' produced an invalid cost",

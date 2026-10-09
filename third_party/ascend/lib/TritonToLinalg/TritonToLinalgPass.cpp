@@ -230,9 +230,15 @@ static bool isSIMTOp(Operation *op) {
 
   // tt.scan: only a 1-D cumsum is treated as a SIMT op (drives the kernel
   // parallel_mode -> mix_simd_simt -> enable_simt). Everything else stays SIMD.
+  // Unlike gather/histogram above, this classification describes the lowered
+  // *product*: a 1-D cumsum always routes to the SIMT (Sklansky) template, so
+  // its launch contract (enable_simt -> localMemorySize) must hold even when
+  // the cost model selects all_simd. Directing it with directSimtEnabled here
+  // made an all_simd decision silently drop the SIMT launch contract and
+  // trigger AIV UB overrun (errcode 341 / 507035) on 910_95.
   if (compileOn91095Flag) {
     if (auto scan = dyn_cast<triton::ScanOp>(op)) {
-      return directSimtEnabled && isSimt1DCumsum(scan);
+      return isSimt1DCumsum(scan);
     }
   }
 

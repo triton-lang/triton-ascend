@@ -517,7 +517,161 @@
           "properties": {
             "dependency_factor": {
               "type": "number",
-              "exclusiveMinimum": 0
+              "exclusiveMinimum": 0,
+              "description": "Base dependency factor of the multi-dim (2D) scan in column-parallel steps S = extent * ceil(columns/BpE); unit cost = factor / 64 cycles per step."
+            },
+            "dependency_factor_multi_tail": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Optional extra factor charged on the multi-dim steps above the SIMD hinge S = 256, on top of dependency_factor. Absent or 0 keeps a single-slope multi-dim price. SIMD only; the SIMT multi-dim price comes from simt_2d_warp_segments."
+            },
+            "transpose_dim01_bytes_per_system_cycle": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Optional byte rate for the rank >= 3 body of the two transposes a non-leading-axis multi-dim SIMD scan pays (2 * elementCount * sizeof(T) bytes). Absent or 0 charges no transpose. SIMD only."
+            },
+            "transpose_dim01_fixed_system_cycles": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Optional fixed per-call part for the rank >= 3 transpose: cycles = this + bytes / transpose_dim01_bytes_per_system_cycle. Absent or 0 keeps the pure-rate form."
+            },
+            "transpose_ar2ra_bytes_per_system_cycle": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Asymptotic byte rate for the rank-2 transpose body (transpose_ar2ra, a gather/scatter implementation); small tiles run below this asymptote and the fixed part absorbs the difference. Only the rank-2 subset of the transpose bytes is priced here."
+            },
+            "transpose_ar2ra_fixed_system_cycles": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Fixed per-call part for the rank-2 transpose: cycles = this + bytes / transpose_ar2ra_bytes_per_system_cycle. Absent or 0 keeps the pure-rate form."
+            },
+            "dependency_factor_1d": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Element-unit dependency factor for 1D tt.scan (unit cost = factor / 64 cycles per element). SIMT legacy 1D factor and fallback root of dependency_factor_1d_small; required for profiles that omit the work factors."
+            },
+            "dependency_factor_1d_small": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Dependency factor for the extent <= 64 1D tt.scan segment (sklansky_regbuf_16, O(N)). Unit cost = factor / 64 cycles per element; dtype independent. Falls back to dependency_factor_1d when absent."
+            },
+            "dependency_factor_1d_work": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Dependency factor for the 64 < extent <= 1024 1D tt.scan regime, in Sklansky element-rounds (priced feature sum(N * log2(N))). Unit cost = factor / 64 cycles per element-round. Falls back to dependency_factor when absent."
+            },
+            "dependency_factor_1d_tiled_work": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "description": "Same as dependency_factor_1d_work for the extent > 1024 tiled 1D regime, in Sklansky element-rounds. Falls back to dependency_factor when absent."
+            },
+            "startup_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "startup_system_cycles_1d": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Fixed per-scan cost charged once per Stage when either rvec 1D regime (64 < extent) is present; the intercept shared by both regimes' Sklansky-work slopes."
+            },
+            "startup_system_cycles_1d_small": {
+              "type": "number",
+              "minimum": 0,
+              "description": "Fixed per-scan cost charged once per Stage when the extent <= 64 1D segment is present."
+            },
+            "simt_1d_warp_segments": {
+              "type": "object",
+              "description": "Optional warp-shape-aware three-segment pricing table for SIMT 1D scans, keyed by warp bucket (4/8/16/32/64); absent table keeps the factor formula. Boundaries: N = 32 (axisNumWarps > 1), N = min(32*w, 1024), and N = 32*w. A '2' bucket is deliberately absent (num_warps = 2 reuses '4' through lower_bound).",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "c_local",
+                  "c_fixed",
+                  "c_round",
+                  "c_gen",
+                  "serial_rate"
+                ],
+                "properties": {
+                  "c_local": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "N<=32 single-warp fast-path cost in SYS_CNT cycles."
+                  },
+                  "c_fixed": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Warp-count-independent part of the 32 < N <= min(32*w, 1024) cross-warp Sklansky merge in SYS_CNT cycles; the cost at the segment's left edge, unlike c_gen."
+                  },
+                  "c_round": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Per-round slope of the cross-warp merge, multiplied by ceil(log2 k) with k = min(w, ceil(N/32))."
+                  },
+                  "c_gen": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Intercept of the N > min(32*w, 1024) general path in SYS_CNT cycles. The slope is charged from N = 0, so this already absorbs -serial_rate*N_at_breakpoint and is not comparable with c_fixed."
+                  },
+                  "serial_rate": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Per-element slope of the general path (in-thread serial adds). Charged from N = 0; the path-switch anchor is folded into c_gen."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "simt_2d_warp_segments": {
+              "type": "object",
+              "description": "Optional warp-shape-aware additive pricing table for SIMT multi-dim scans, keyed by warp bucket (4/8/16/32). cost = a + b*N + c*(N*k)/T + d*max(0, N/T - r0), with N = extent*columns, T = 32*w, and k = min(w, ceil(extent/32)). Absent table keeps the factor formula.",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "a",
+                  "b",
+                  "c",
+                  "d",
+                  "r0"
+                ],
+                "properties": {
+                  "a": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Intercept in SYS_CNT cycles. The fit is constrained so every coefficient is >= 0, keeping the cost monotone in N and in the UB chain length."
+                  },
+                  "b": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Slope on total element count N (per-element serial add)."
+                  },
+                  "c": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Slope on per-thread dependent UB partial loads (N*k)/T."
+                  },
+                  "d": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Per-thread-element hinge slope beyond r0 (register pressure)."
+                  },
+                  "r0": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Elements-per-thread hinge threshold."
+                  },
+                  "a_subwarp": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Intercept of the sub-warp regime (scan extent < 32) in SYS_CNT cycles, priced as a_subwarp + b_subwarp*N (no cross-warp chain or hinge is exercised). Absent or 0 keeps the warp-aligned formula."
+                  },
+                  "b_subwarp": {
+                    "type": "number",
+                    "minimum": 0,
+                    "description": "Slope on total element count N for the sub-warp regime (scan extent < 32). See a_subwarp."
+                  }
+                },
+                "additionalProperties": false
+              }
             },
             "description": {
               "type": "string",

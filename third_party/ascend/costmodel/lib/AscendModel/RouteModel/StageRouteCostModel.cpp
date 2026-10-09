@@ -218,7 +218,7 @@ llvm::json::Object TensorOperationWorkload::toJSON() const {
 }
 
 bool StageWorkload::isFiniteAndNonNegative() const {
-  const std::array<double, 17> values = {scalarOperations,
+  const std::array<double, 26> values = {scalarOperations,
                                          loadBytes,
                                          storeBytes,
                                          loadWarpInstructions,
@@ -230,6 +230,15 @@ bool StageWorkload::isFiniteAndNonNegative() const {
                                          predicateElements,
                                          shuffleLaneSteps,
                                          scanShuffleLaneSteps,
+                                         scanShuffleLaneSteps1d,
+                                         scanShuffleLaneSteps1dSmall,
+                                         scanShuffleLaneSteps1dMidWork,
+                                         scanShuffleLaneSteps1dTiledWork,
+                                         scanShuffleLaneStepsSimtMulti,
+                                         scanSimtMultiExtentSum,
+                                         scanShuffleLaneStepsMultiTail,
+                                         scanTransposeBytes,
+                                         scanTransposeBytesRank2,
                                          dotFlops,
                                          issueElements,
                                          estimatedSpillTransactions,
@@ -241,8 +250,19 @@ bool StageWorkload::isFiniteAndNonNegative() const {
       indirectLoadBytes > loadBytes || indirectStoreBytes > storeBytes ||
       indirectLoadTransactions > loadWarpInstructions ||
       indirectStoreTransactions > storeWarpInstructions ||
-      scanShuffleLaneSteps > shuffleLaneSteps)
+      scanShuffleLaneSteps > shuffleLaneSteps ||
+      scanShuffleLaneSteps1d > scanShuffleLaneSteps ||
+      scanShuffleLaneSteps1dSmall > scanShuffleLaneSteps1d ||
+      scanShuffleLaneStepsMultiTail > scanShuffleLaneSteps ||
+      scanTransposeBytesRank2 > scanTransposeBytes)
     return false;
+  // Each 1D bucket is recorded in the unit its regime is priced in, so only the
+  // element-unit bucket (extent <= 64) can be checked as a subset of the
+  // element-unit 1D total.  The two rvec buckets hold Sklansky element-rounds
+  // (N * log2(N), which is >= N for every extent above 64), so comparing them
+  // with the element counts would be a unit error; they are validated for
+  // finiteness/non-negativity by the value array alone.  There is no width-unit
+  // view to exempt any more: the 1D lowering has no vector-width packing.
   return llvm::all_of(operationElements,
                       [](const auto &entry) {
                         return std::isfinite(entry.second) &&
@@ -290,6 +310,20 @@ llvm::json::Object StageWorkload::toJSON() const {
   result["predicate_elements_per_iteration"] = predicateElements;
   result["shuffle_lane_steps_per_iteration"] = shuffleLaneSteps;
   result["scan_shuffle_lane_steps_per_iteration"] = scanShuffleLaneSteps;
+  result["scan_shuffle_lane_steps_1d_per_iteration"] = scanShuffleLaneSteps1d;
+  result["scan_shuffle_lane_steps_1d_small_per_iteration"] =
+      scanShuffleLaneSteps1dSmall;
+  result["scan_shuffle_lane_steps_1d_mid_work_per_iteration"] =
+      scanShuffleLaneSteps1dMidWork;
+  result["scan_shuffle_lane_steps_1d_tiled_work_per_iteration"] =
+      scanShuffleLaneSteps1dTiledWork;
+  result["scan_shuffle_lane_steps_simt_multi_per_iteration"] =
+      scanShuffleLaneStepsSimtMulti;
+  result["scan_simt_multi_extent_sum_per_iteration"] = scanSimtMultiExtentSum;
+  result["scan_shuffle_lane_steps_multi_tail_per_iteration"] =
+      scanShuffleLaneStepsMultiTail;
+  result["scan_transpose_bytes_per_iteration"] = scanTransposeBytes;
+  result["scan_transpose_bytes_rank2_per_iteration"] = scanTransposeBytesRank2;
   result["dot_flops_per_iteration"] = dotFlops;
   result["issue_elements_per_iteration"] = issueElements;
   result["estimated_spill_transactions_per_iteration"] =
@@ -324,11 +358,34 @@ llvm::json::Object StageModelFeatures::toJSON() const {
 }
 
 bool StageResourceCycles::isFiniteAndNonNegative() const {
-  const std::array<double, 17> values = {
-      setup,       scalar,        load,       store,           atomic,
-      compute,     predicate,     shuffle,    scanShuffle,     dot,
-      loopControl, branchControl, divergence, synchronization, spill,
-      issue,       criticalPath};
+  const std::array<double, 28> values = {setup,
+                                         scalar,
+                                         load,
+                                         store,
+                                         atomic,
+                                         compute,
+                                         predicate,
+                                         shuffle,
+                                         scanShuffle,
+                                         scanShuffle1d,
+                                         scanShuffle1dSmall,
+                                         scanShuffle1dMidWork,
+                                         scanShuffle1dTiledWork,
+                                         scanShuffleMultiTail,
+                                         scanTranspose,
+                                         scanStartup,
+                                         dot,
+                                         loopControl,
+                                         branchControl,
+                                         divergence,
+                                         synchronization,
+                                         spill,
+                                         issue,
+                                         criticalPath,
+                                         pipeVec,
+                                         pipeMte,
+                                         pipeSi,
+                                         pipeSerial};
   return std::all_of(values.begin(), values.end(), [](double value) {
     return std::isfinite(value) && value >= 0.0;
   });
@@ -345,6 +402,12 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   result["predicate_per_iteration"] = predicate;
   result["shuffle_per_iteration"] = shuffle;
   result["scan_shuffle_per_iteration"] = scanShuffle;
+  result["scan_shuffle_1d_small_per_iteration"] = scanShuffle1dSmall;
+  result["scan_shuffle_1d_mid_work_per_iteration"] = scanShuffle1dMidWork;
+  result["scan_shuffle_1d_tiled_work_per_iteration"] = scanShuffle1dTiledWork;
+  result["scan_shuffle_multi_tail_per_iteration"] = scanShuffleMultiTail;
+  result["scan_transpose_per_iteration"] = scanTranspose;
+  result["scan_startup_per_iteration"] = scanStartup;
   result["dot_per_iteration"] = dot;
   result["loop_control_per_iteration"] = loopControl;
   result["branch_control_per_iteration"] = branchControl;
@@ -353,6 +416,10 @@ llvm::json::Object StageResourceCycles::toJSON() const {
   result["spill_per_iteration"] = spill;
   result["issue_per_iteration"] = issue;
   result["critical_path_per_iteration"] = criticalPath;
+  result["pipe_vec_per_iteration"] = pipeVec;
+  result["pipe_mte_per_iteration"] = pipeMte;
+  result["pipe_si_per_iteration"] = pipeSi;
+  result["pipe_serial_per_iteration"] = pipeSerial;
   return result;
 }
 
@@ -496,6 +563,14 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
     return nullptr;
   };
 
+  // Route-level aggregation: a candidate's cycles are the sum of its Stage
+  // bodies.  The per-pipe split the cost model records (StageResourceCycles::
+  // pipe*) is emitted in the report for diagnostics but is deliberately NOT
+  // folded into the total.  Overlapping the pipes across Stages is real on the
+  // hardware, but the per-stage pricing errors the model cannot see (SIMD
+  // store/load bandwidth on small tiles, SIMT visit-not-on-MTE) dominate the
+  // overlap term, so folding it in mis-scores the routes.
+
   auto buildPlan = [&](StageKernelRouteKind kind,
                        int64_t factor) -> StageRoutePlan {
     StageRoutePlan plan;
@@ -545,7 +620,6 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
       plan.implementations.push_back(selected->implementation);
       plan.entryTransitionCycles.push_back(transitionCycles);
       plan.logicalStageCycles.push_back(stageCycles);
-      plan.totalCycles += stageCycles;
     }
     if (kind == StageKernelRouteKind::Mixed) {
       if (factor > 1) {
@@ -590,7 +664,6 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
         plan.implementations.clear();
         plan.entryTransitionCycles.clear();
         plan.logicalStageCycles.clear();
-        plan.totalCycles = 0.0;
         for (size_t index = 0; index < mixedChoices.size(); ++index) {
           const MixedChoice &choice = mixedChoices[index];
           const StageImplementationCost *selected =
@@ -602,7 +675,6 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
               selectedCycles -
               mixedBaseStageCost(costTable.stages[index], *selected, factor));
           plan.logicalStageCycles.push_back(selectedCycles);
-          plan.totalCycles += selectedCycles;
         }
       }
 
@@ -637,8 +709,6 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
             required == StageMode::SIMD ? choice.simd : choice.simt;
         const double replacementCycles =
             required == StageMode::SIMD ? choice.simdCycles : choice.simtCycles;
-        plan.totalCycles +=
-            replacementCycles - plan.logicalStageCycles[bestIndex];
         plan.implementations[bestIndex] = replacement->implementation;
         plan.logicalStageCycles[bestIndex] = replacementCycles;
         plan.entryTransitionCycles[bestIndex] =
@@ -659,6 +729,9 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
         return invalid;
       }
     }
+    plan.totalCycles = 0.0;
+    for (double cycles : plan.logicalStageCycles)
+      plan.totalCycles += cycles;
     if (costTable.logicalProgramCountHint > 0) {
       plan.runtimePhysicalProgramCount =
           (costTable.logicalProgramCountHint + factor - 1) / factor;

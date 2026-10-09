@@ -21,6 +21,7 @@ using mlir::ascend::StageFeatureAnalysis;
 using mlir::ascend::StageImplementationCost;
 using mlir::ascend::StageMode;
 using mlir::ascend::StageModeLegalityAnalysis;
+using mlir::ascend::StageModeProfile;
 using mlir::ascend::StagePartition;
 using mlir::ascend::StagePartitioner;
 using mlir::ascend::StagePartitionerOptions;
@@ -552,6 +553,858 @@ TEST(SimdSimtCostModelTest, PrefixScanUsesModeSpecificDependencyFactor) {
   EXPECT_EQ(implementations[0].implementation.mode, StageMode::SIMD);
   EXPECT_EQ(implementations[1].implementation.mode, StageMode::SIMT);
   EXPECT_GT(implementations[0].totalCycles, implementations[1].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanUsesSeparateOneDimDependencyFactor) {
+  // A 1D mid-regime scan (N = 256) is priced by its Sklansky work,
+  // N * log2(N) = 2048 element-rounds, at its own dependency factor while the
+  // multi-dim part keeps the multi-dim factor.  The bucket fields are stored in
+  // element-round units, so here they are the 1D share of the scan pool.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 2304.0; // 256 multi + 2048 1D work
+  stage.workload.scanShuffleLaneSteps = 2304.0;
+  stage.workload.scanShuffleLaneSteps1d = 256.0; // N elements
+  stage.workload.scanShuffleLaneSteps1dMidWork = 2048.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactor1dMidWork = 2.0;
+  profile.simt.prefixScanDependencyFactor = 1.0;
+  profile.simt.prefixScanDependencyFactor1d = 1.0;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  // SIMD scan critical: 2304/32 * 10 - 2048/32 * (10 - 2) = 720 - 512 = 208.
+  // The 1D work is priced at its own factor (2) instead of the multi-dim
+  // factor (10); shuffleLanesPerCycle is 32 in the unit-test profile.
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 208.0);
+
+  // A fully-1D scan must consume only the 1D factor: 2048/32 * 2 = 128.
+  LogicalStage all1d = logicalStage("scan", StageCostModelKind::PrefixScan);
+  all1d.features.hasReduction = true;
+  all1d.features.hasPrefixScan = true;
+  all1d.workload.operationElements.clear();
+  all1d.workload.scalarOperations = 0.0;
+  all1d.workload.issueElements = 64.0;
+  all1d.workload.shuffleLaneSteps = 2048.0;
+  all1d.workload.scanShuffleLaneSteps = 2048.0;
+  all1d.workload.scanShuffleLaneSteps1d = 256.0;
+  all1d.workload.scanShuffleLaneSteps1dMidWork = 2048.0;
+  auto all1dTable = evaluateOneStage(std::move(all1d), profile);
+  if (!all1dTable)
+    FAIL() << llvm::toString(all1dTable.takeError());
+  EXPECT_DOUBLE_EQ(all1dTable->stages.front().implementations[0].totalCycles,
+                   10.0 + 128.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanPricesMixedOneDimAndMultiDimShapes) {
+  // One stage mixes a 1D scan (N = 256, Sklansky work 256 * log2(256) = 2048
+  // element-rounds) with a multi-dim scan (S = BT * ceil(BK/64) = 544).
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 2592.0; // 544 multi + 2048 1D work
+  stage.workload.scanShuffleLaneSteps = 2592.0;
+  stage.workload.scanShuffleLaneSteps1d = 256.0;
+  stage.workload.scanShuffleLaneSteps1dMidWork = 2048.0;
+  stage.workload.scanShuffleLaneStepsSimtMulti = 544.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactor1dMidWork = 2.0;
+  profile.simt.prefixScanDependencyFactor = 1.0;
+  profile.simt.prefixScanDependencyFactor1d = 1.0;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  // SIMD critical = (2592/32)*10 - (2048/32)*(10-2) = 810 - 512 = 298.
+  // Charging the whole pool at the multi-dim factor would give 810, so the 1D
+  // refund is 512 cycles.  SIMT prices the element-unit pool, 256 + 544 = 800
+  // steps, at identity factors: 800/32 = 25.
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 298.0);
+  EXPECT_DOUBLE_EQ(implementations[1].totalCycles, 10.0 + 25.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanPricesEachOneDimSegmentAtOwnFactor) {
+  // Three 1D scans, one per regime of the 1D library lowering: N = 64 (64
+  // element units), N = 128 (128 * log2(128) = 896 element-rounds) and
+  // N = 2048 (2048 * log2(2048) = 22528 element-rounds).  Each consumes its own
+  // dependency factor, and the two rvec regimes share one startup (they come
+  // from a single joint fit); the scalar-register regime charges its own.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 23808.0; // 320 multi + 23488 1D
+  stage.workload.scanShuffleLaneSteps = 23808.0;
+  stage.workload.scanShuffleLaneSteps1d = 2240.0; // 64 + 128 + 2048 elements
+  stage.workload.scanShuffleLaneSteps1dSmall = 64.0;
+  stage.workload.scanShuffleLaneSteps1dMidWork = 896.0;
+  stage.workload.scanShuffleLaneSteps1dTiledWork = 22528.0;
+  stage.workload.scanShuffleLaneStepsSimtMulti = 320.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactor1dSmall = 5.0;
+  profile.simd.prefixScanDependencyFactor1dMidWork = 2.0;
+  profile.simd.prefixScanDependencyFactor1dTiledWork = 3.0;
+  profile.simd.prefixScanStartupCycles1d = 20.0;
+  profile.simd.prefixScanStartupCycles1dSmall = 7.0;
+  profile.simt.prefixScanDependencyFactor = 1.0;
+  profile.simt.prefixScanDependencyFactor1d = 1.0;
+  profile.simt.prefixScanDependencyFactor1dSmall = 1.0;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  // SIMD, shuffle-lanesPerCycle = 32: 23808/32*10 - 64/32*(10-5)
+  //   - 896/32*(10-2) - 22528/32*(10-3) + (20+7)
+  // = 7440 - 10 - 224 - 4928 + 27 = 2305.
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 2305.0);
+  // SIMT has no warp segment table here, so it keeps the legacy factor pricing
+  // on the element-unit pool it swaps in, 2240 + 320 = 2560 steps, at identity
+  // factors: 2560/32 = 80.
+  EXPECT_DOUBLE_EQ(implementations[1].totalCycles, 10.0 + 80.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanChargesRvecStartupOnlyForRvecRegimes) {
+  // The two rvec regimes share one block-invocation intercept (they come from a
+  // single joint fit), so a tiled-only and a mid-only workload charge the same
+  // startup, exactly once; the scalar-register regime charges only its own.
+  auto buildStage = [](double work) {
+    LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+    stage.features.hasReduction = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    stage.workload.shuffleLaneSteps = work;
+    stage.workload.scanShuffleLaneSteps = work;
+    stage.workload.scanShuffleLaneSteps1d = 2048.0;
+    return stage;
+  };
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactor1dSmall = 1.0;
+  profile.simd.prefixScanDependencyFactor1dMidWork = 3.0;
+  profile.simd.prefixScanDependencyFactor1dTiledWork = 3.0;
+  profile.simd.prefixScanStartupCycles1d = 20.0;
+  profile.simd.prefixScanStartupCycles1dSmall = 7.0;
+
+  // Scalar-register regime only: 64/32*10 - 64/32*(10-1) + 7 = 20 - 18 + 7 = 9.
+  LogicalStage small = buildStage(64.0);
+  small.workload.scanShuffleLaneSteps1d = 64.0;
+  small.workload.scanShuffleLaneSteps1dSmall = 64.0;
+  auto smallTable = evaluateOneStage(std::move(small), profile);
+  if (!smallTable)
+    FAIL() << llvm::toString(smallTable.takeError());
+  EXPECT_DOUBLE_EQ(smallTable->stages.front().implementations[0].totalCycles,
+                   10.0 + 9.0);
+
+  // Tiled regime only: 2048/32*10 - 2048/32*(10-3) + 20 = 640 - 448 + 20 = 212.
+  LogicalStage tiled = buildStage(2048.0);
+  tiled.workload.scanShuffleLaneSteps1dTiledWork = 2048.0;
+  auto tiledTable = evaluateOneStage(std::move(tiled), profile);
+  if (!tiledTable)
+    FAIL() << llvm::toString(tiledTable.takeError());
+  EXPECT_DOUBLE_EQ(tiledTable->stages.front().implementations[0].totalCycles,
+                   10.0 + 212.0);
+
+  // Mid regime only: the same 212, i.e. the shared intercept is charged once.
+  LogicalStage mid = buildStage(2048.0);
+  mid.workload.scanShuffleLaneSteps1dMidWork = 2048.0;
+  auto midTable = evaluateOneStage(std::move(mid), profile);
+  if (!midTable)
+    FAIL() << llvm::toString(midTable.takeError());
+  EXPECT_DOUBLE_EQ(midTable->stages.front().implementations[0].totalCycles,
+                   10.0 + 212.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanPricesSimtMultiDimAtTotalElementCount) {
+  // Multi-dim scan (e.g. 64x64 f32): the shared workload keeps the SIMD
+  // column-parallel count S = 64*ceil(64/64) = 64 in scanShuffleLaneSteps and
+  // records the SIMT total-element count N = 64*64 = 4096 separately.  SIMD
+  // must keep pricing on S while SIMT prices the S=N structure.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 64.0;
+  stage.workload.scanShuffleLaneSteps = 64.0;
+  stage.workload.scanShuffleLaneStepsSimtMulti = 4096.0;
+
+  HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simt.prefixScanDependencyFactor = 2.0;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  // SIMD critical = (64/32)*10 = 20; SIMT critical = (4096/32)*2 = 256.
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 20.0);
+  EXPECT_DOUBLE_EQ(implementations[1].totalCycles, 10.0 + 256.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanPricesSimtMultiDimByWarpSegmentTable) {
+  // v3.2: with simt_2d_warp_segments present, the SIMT multi-dim scan is
+  // priced by the warp-bucket formula a + b*N + c*(N*k)/T +
+  // d*max(0, N/T - r0) instead of the legacy factor * N/lanes.  The
+  // 64x64 scan on the w4 bucket: N=4096, extent=64, threads=128,
+  // k = min(4, ceil(64/32)) = 2.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 64.0;
+  stage.workload.scanShuffleLaneSteps = 64.0;
+  stage.workload.scanShuffleLaneStepsSimtMulti = 4096.0;
+  stage.workload.scanSimtMultiExtentSum = 64.0;
+
+  HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simt.prefixScanDependencyFactor = 2.0;
+  profile.simt.prefixScanStartupCycles = 0.0;
+  StageModeProfile::PrefixScan2dWarpSegment segment;
+  segment.a = 100.0;
+  segment.b = 0.5;
+  segment.c = 1.0;
+  segment.d = 10.0;
+  segment.r0 = 8.0;
+  profile.simt.prefixScan2dWarpSegments[4] = segment;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  // SIMD stays on the legacy column-parallel factor: (64/32)*10 = 20.
+  // SIMT segment cost = 100 + 0.5*4096 + 1.0*(4096*2)/128
+  //                     + 10*max(0, 4096/128 - 8) = 2452,
+  // replacing the legacy (4096/32)*2 = 256.
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 20.0);
+  EXPECT_DOUBLE_EQ(implementations[1].totalCycles, 10.0 + 2452.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanSplitsSubWarpExtentIntoLinearRegime) {
+  // A scan extent below one warp (extent < 32) is priced by the separate
+  // a_subwarp + b_subwarp*N regime: the axis warp holds fewer than 32 valid
+  // lanes, so the cross-warp UB chain (c) and the per-thread hinge (d) are
+  // never exercised.  This is the shape a layout-coalesced 16-element cumsum
+  // lands on (e.g. (8,16,16) in the dacs_segsum kernel).
+  auto buildStage = [](double extent, double multiN) {
+    LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+    stage.features.hasReduction = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    stage.workload.shuffleLaneSteps = 64.0;
+    stage.workload.scanShuffleLaneSteps = 64.0;
+    stage.workload.scanShuffleLaneStepsSimtMulti = multiN;
+    stage.workload.scanSimtMultiExtentSum = extent;
+    return stage;
+  };
+
+  HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simt.prefixScanDependencyFactor = 2.0;
+  profile.simt.prefixScanStartupCycles = 0.0;
+  StageModeProfile::PrefixScan2dWarpSegment segment;
+  segment.a = 100.0;
+  segment.b = 0.5;
+  segment.c = 1.0;
+  segment.d = 10.0;
+  segment.r0 = 8.0;
+  segment.aSubwarp = 206.7097;
+  segment.bSubwarp = 0.716093;
+  profile.simt.prefixScan2dWarpSegments[4] = segment;
+
+  // extent 16 -> sub-warp regime: 206.7097 + 0.716093*2048 = 1673.268164, and
+  // the legacy multi-dim factor charge (2048/32)*2 = 128 is refunded, leaving
+  // the segment cost as the whole SIMT scan critical path.
+  auto subWarp = evaluateOneStage(buildStage(16.0, 2048.0), profile);
+  if (!subWarp)
+    FAIL() << llvm::toString(subWarp.takeError());
+  const auto &subWarpImpl = subWarp->stages.front().implementations;
+  ASSERT_EQ(subWarpImpl.size(), 2u);
+  EXPECT_DOUBLE_EQ(subWarpImpl[1].totalCycles, 10.0 + 1673.268164);
+
+  // extent 32 is warp-aligned (k = ceil(32/32) = 1) and keeps the
+  // a + b*N + c*(N*k)/T + d*max(0, N/T - r0) form:
+  // 100 + 0.5*2048 + 1*(2048*1)/128 + 10*max(0, 2048/128 - 8) = 1220.
+  auto aligned = evaluateOneStage(buildStage(32.0, 2048.0), profile);
+  if (!aligned)
+    FAIL() << llvm::toString(aligned.takeError());
+  const auto &alignedImpl = aligned->stages.front().implementations;
+  ASSERT_EQ(alignedImpl.size(), 2u);
+  EXPECT_DOUBLE_EQ(alignedImpl[1].totalCycles, 10.0 + 1220.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanChargesMultiDimHingeOnSimd) {
+  // 2D SIMD is piecewise linear in the column-parallel step count
+  // S = E*ceil(C/BpE): the tail steps above S = 256 pay the base dependency
+  // factor plus an extra factor.  With the unit-test profile (32 lanes, base
+  // factor 10, tail extra 8, per-scan startup 5):
+  //   S = 256            -> 5 + 256/32*10                =  85
+  //   S = 320, tail 64   -> 5 + 320/32*10 + 64/32*8      = 121
+  auto buildStage = [](double steps, double tail) {
+    LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+    stage.features.hasReduction = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    stage.workload.shuffleLaneSteps = steps;
+    stage.workload.scanShuffleLaneSteps = steps;
+    stage.workload.scanShuffleLaneStepsSimtMulti = steps * 64.0;
+    stage.workload.scanShuffleLaneStepsMultiTail = tail;
+    return stage;
+  };
+
+  HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactorMultiTail = 8.0;
+  profile.simd.prefixScanStartupCycles = 5.0;
+
+  auto atHinge = evaluateOneStage(buildStage(256.0, 0.0), profile);
+  if (!atHinge)
+    FAIL() << llvm::toString(atHinge.takeError());
+  EXPECT_DOUBLE_EQ(atHinge->stages.front().implementations[0].totalCycles,
+                   10.0 + 85.0);
+
+  auto aboveHinge = evaluateOneStage(buildStage(320.0, 64.0), profile);
+  if (!aboveHinge)
+    FAIL() << llvm::toString(aboveHinge.takeError());
+  EXPECT_DOUBLE_EQ(aboveHinge->stages.front().implementations[0].totalCycles,
+                   10.0 + 121.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanChargesNonLeadingAxisTransposeOnSimd) {
+  // A multi-dim scan whose axis is not the leading axis is transposed into
+  // position 0 and back by the SIMD cumsum template, moving the whole tensor
+  // twice.  The body is transpose_dim_01 for rank >= 3 and transpose_ar2ra for
+  // rank 2; each is priced as `fixed + bytes / rate`, the fixed part covering
+  // the per-call overhead that a pure byte rate under-predicts on small tiles.
+  // With the unit-test profile (32 lanes, base factor 10) the base scan price
+  // is 64/32*10 = 20, and only the transpose is added:
+  //   axis 0                 -> 10 + 20
+  //   rank 3, 16 KB          -> 10 + 20 + 0    + 16384/46.7
+  //   rank 2, 32 KB          -> 10 + 20 + 323  + 32768/4.2
+  //   rank 2 + rank 3, 48 KB -> 10 + 20 + 323  + 16384/46.7 + 32768/4.2
+  auto buildStage = [](double transposeBytes, double rank2Bytes) {
+    LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+    stage.features.hasReduction = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    stage.workload.shuffleLaneSteps = 64.0;
+    stage.workload.scanShuffleLaneSteps = 64.0;
+    stage.workload.scanShuffleLaneStepsSimtMulti = 4096.0;
+    stage.workload.scanSimtMultiExtentSum = 64.0;
+    stage.workload.scanTransposeBytes = transposeBytes;
+    stage.workload.scanTransposeBytesRank2 = rank2Bytes;
+    return stage;
+  };
+
+  HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanTransposeDim01BytesPerCycle = 46.7;
+  profile.simd.prefixScanTransposeAr2raFixedCycles = 323.0;
+  profile.simd.prefixScanTransposeAr2raBytesPerCycle = 4.2;
+
+  // The fixed part is charged only for a transpose kind that is actually
+  // present, so a leading-axis scan stays at the bare scan price.
+  auto leadingAxis = evaluateOneStage(buildStage(0.0, 0.0), profile);
+  if (!leadingAxis)
+    FAIL() << llvm::toString(leadingAxis.takeError());
+  EXPECT_DOUBLE_EQ(leadingAxis->stages.front().implementations[0].totalCycles,
+                   30.0);
+
+  auto rank3 = evaluateOneStage(buildStage(16384.0, 0.0), profile);
+  if (!rank3)
+    FAIL() << llvm::toString(rank3.takeError());
+  EXPECT_NEAR(rank3->stages.front().implementations[0].totalCycles,
+              30.0 + 350.8351178, 1e-6);
+
+  auto rank2 = evaluateOneStage(buildStage(32768.0, 32768.0), profile);
+  if (!rank2)
+    FAIL() << llvm::toString(rank2.takeError());
+  EXPECT_NEAR(rank2->stages.front().implementations[0].totalCycles,
+              30.0 + 8124.9047619, 1e-6);
+
+  auto mixed = evaluateOneStage(buildStage(49152.0, 32768.0), profile);
+  if (!mixed)
+    FAIL() << llvm::toString(mixed.takeError());
+  EXPECT_NEAR(mixed->stages.front().implementations[0].totalCycles,
+              30.0 + 8475.7398797, 1e-6);
+
+  // A profile with no transpose rate charges none, so a profile without the
+  // keys keeps its previous price and SIMT (which never goes through the
+  // template) is unaffected.
+  HardwareProfile uncalibrated = hardwareProfile();
+  uncalibrated.simd.prefixScanDependencyFactor = 10.0;
+  auto legacy = evaluateOneStage(buildStage(49152.0, 32768.0), uncalibrated);
+  if (!legacy)
+    FAIL() << llvm::toString(legacy.takeError());
+  EXPECT_DOUBLE_EQ(legacy->stages.front().implementations[0].totalCycles, 30.0);
+}
+
+TEST(SimdSimtCostModelTest, PrefixScanSimtOneDimHonorsSklanskyWarpLimit) {
+  // The cross-warp Sklansky merge is gated by k <= warpSize in addition to
+  // one element per thread, so with num_warps = 64 the 1D Sklansky regime ends
+  // at min(32*w, 1024) = 1024 rather than at 32*w = 2048.  Both sides are
+  // checked on the "64" bucket: N = 1024 still merges (k = 32), N = 2048 falls
+  // to the general path (k = 64) even though every thread still owns exactly
+  // one element.
+  auto expectSimtCycles = [&](int64_t n, double expected) {
+    LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+    stage.features.hasReduction = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    stage.workload.shuffleLaneSteps = static_cast<double>(n);
+    stage.workload.scanShuffleLaneSteps = static_cast<double>(n);
+    stage.workload.scanShuffleLaneSteps1d = static_cast<double>(n);
+
+    HardwareProfile profile = hardwareProfile(); // shuffleLanesPerCycle = 32
+    // SIMT identity 1D factor: the legacy 1D pool price and its refund cancel,
+    // leaving the segment cost as the whole scan critical path.
+    profile.simt.prefixScanDependencyFactor = 2.0;
+    profile.simt.prefixScanDependencyFactor1d = 1.0;
+    profile.simt.prefixScanStartupCycles = 0.0;
+    profile.logicalWarpGroupCount = 64;
+    StageModeProfile::PrefixScan1dWarpSegment segment;
+    segment.cLocal = 314.1;
+    segment.cFixed = 648.84;
+    segment.cRound = 105.83;
+    segment.cGen = 13294.4;
+    segment.serialRate = 0.2204;
+    profile.simt.prefixScan1dWarpSegments[64] = segment;
+
+    auto table = evaluateOneStage(std::move(stage), profile);
+    if (!table)
+      FAIL() << llvm::toString(table.takeError());
+    const auto &implementations = table->stages.front().implementations;
+    ASSERT_EQ(implementations.size(), 2u);
+    EXPECT_EQ(implementations[1].implementation.mode, StageMode::SIMT);
+    EXPECT_NEAR(implementations[1].totalCycles, expected, 1e-6);
+  };
+  // N = 1024: k = min(64, ceil(1024/32)) = 32 <= warpSize ->
+  // cFixed + cRound*ceil(log2 32).
+  expectSimtCycles(1024, 10.0 + (648.84 + 105.83 * 5.0));
+  // N = 2048: k = 64 > warpSize -> cGen + serialRate*N.
+  expectSimtCycles(2048, 10.0 + (13294.4 + 0.2204 * 2048.0));
+}
+
+TEST(SimdSimtCostModelTest, WorkloadRecordsSimtMultiDimTotalElementCount) {
+  auto analyzeScan = [&](llvm::ArrayRef<int64_t> shape,
+                         int64_t axis) -> llvm::Expected<LogicalStage> {
+    mlir::MLIRContext context;
+    context.getOrLoadDialect<mlir::arith::ArithDialect>();
+    context.getOrLoadDialect<mlir::func::FuncDialect>();
+    context.allowUnregisteredDialects();
+    std::string shapeText;
+    for (int64_t dim : shape)
+      shapeText += std::to_string(dim) + "x";
+    llvm::SmallString<256> ir;
+    llvm::raw_svector_ostream stream(ir);
+    stream << "module {\n";
+    stream << "  func.func @main(%input: tensor<" << shapeText << "f32>)\n";
+    stream << "      -> tensor<" << shapeText << "f32> {\n";
+    stream << "    %cumsum = \"tt.scan\"(%input) ({\n";
+    stream << "    ^bb0(%lhs: f32, %rhs: f32):\n";
+    stream << "      %sum = arith.addf %lhs, %rhs : f32\n";
+    stream << "      \"tt.scan.return\"(%sum) : (f32) -> ()\n";
+    stream << "    }) {axis = " << axis << " : i32}\n";
+    stream << "      : (tensor<" << shapeText << "f32>) -> tensor<" << shapeText
+           << "f32>\n";
+    stream << "    return %cumsum : tensor<" << shapeText << "f32>\n";
+    stream << "  }\n";
+    stream << "}\n";
+    auto module =
+        mlir::parseSourceString<mlir::ModuleOp>(stream.str(), &context);
+    if (!module)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "failed to parse scan module");
+    StagePartition partition;
+    partition.operationOwnershipComplete = true;
+    LogicalStage stage =
+        logicalStage("scan_workload", StageCostModelKind::PrefixScan);
+    auto function = module->lookupSymbol<mlir::func::FuncOp>("main");
+    if (!function)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "missing scan func");
+    mlir::Block &body = function.getBody().front();
+    for (mlir::Operation &operation : body.without_terminator())
+      stage.operations.push_back(&operation);
+    partition.stages.push_back(std::move(stage));
+    if (llvm::Error error = StageFeatureAnalysis().analyze(partition))
+      return std::move(error);
+    if (llvm::Error error = StageWorkloadAnalysis().analyze(partition))
+      return std::move(error);
+    return partition.stages.front();
+  };
+  auto analyzeScan2d = [&](int64_t bt, int64_t bk, int64_t axis = 0) {
+    return analyzeScan({bt, bk}, axis);
+  };
+
+  // 64x64: SIMD colpar S = 64*ceil(64/64) = 64, SIMT total N = 64*64 = 4096.
+  auto dim64 = analyzeScan2d(64, 64);
+  if (!dim64)
+    FAIL() << llvm::toString(dim64.takeError());
+  EXPECT_DOUBLE_EQ(dim64->workload.scanShuffleLaneSteps, 64.0);
+  EXPECT_DOUBLE_EQ(dim64->workload.scanShuffleLaneSteps1d, 0.0);
+  EXPECT_DOUBLE_EQ(dim64->workload.scanShuffleLaneStepsSimtMulti, 4096.0);
+  EXPECT_DOUBLE_EQ(dim64->workload.scanSimtMultiExtentSum, 64.0);
+  EXPECT_DOUBLE_EQ(dim64->workload.scanShuffleLaneStepsMultiTail, 0.0);
+
+  // 64x128: SIMD colpar S = 64*ceil(128/64) = 128, SIMT total N = 8192.
+  auto dim128 = analyzeScan2d(64, 128);
+  if (!dim128)
+    FAIL() << llvm::toString(dim128.takeError());
+  EXPECT_DOUBLE_EQ(dim128->workload.scanShuffleLaneSteps, 128.0);
+  EXPECT_DOUBLE_EQ(dim128->workload.scanShuffleLaneSteps1d, 0.0);
+  EXPECT_DOUBLE_EQ(dim128->workload.scanShuffleLaneStepsSimtMulti, 8192.0);
+  EXPECT_DOUBLE_EQ(dim128->workload.scanSimtMultiExtentSum, 64.0);
+  EXPECT_DOUBLE_EQ(dim128->workload.scanShuffleLaneStepsMultiTail, 0.0);
+
+  // The multi-dim hinge is on the column-parallel step count S, not on the
+  // scan extent: 128x128 f32 (S = 128*2 = 256) sits exactly on the hinge, so
+  // it contributes no tail, while 160x128 (S = 320) contributes 64 steps.
+  auto atHinge = analyzeScan2d(128, 128);
+  if (!atHinge)
+    FAIL() << llvm::toString(atHinge.takeError());
+  EXPECT_DOUBLE_EQ(atHinge->workload.scanShuffleLaneSteps, 256.0);
+  EXPECT_DOUBLE_EQ(atHinge->workload.scanShuffleLaneStepsMultiTail, 0.0);
+
+  auto aboveHinge = analyzeScan2d(160, 128);
+  if (!aboveHinge)
+    FAIL() << llvm::toString(aboveHinge.takeError());
+  EXPECT_DOUBLE_EQ(aboveHinge->workload.scanShuffleLaneSteps, 320.0);
+  EXPECT_DOUBLE_EQ(aboveHinge->workload.scanShuffleLaneStepsMultiTail, 64.0);
+  // Same total S = 320 reached with a single column block: extent 320, BK 64.
+  auto wide = analyzeScan2d(320, 64);
+  if (!wide)
+    FAIL() << llvm::toString(wide.takeError());
+  EXPECT_DOUBLE_EQ(wide->workload.scanShuffleLaneSteps, 320.0);
+  EXPECT_DOUBLE_EQ(wide->workload.scanShuffleLaneStepsMultiTail, 64.0);
+
+  // The degenerate [N,1] shape is treated as 1-D: the Sklansky work is
+  // 256*log2(256) = 2048 element-rounds, and the SIMT multi step count is zero.
+  auto dim1 = analyzeScan2d(256, 1);
+  if (!dim1)
+    FAIL() << llvm::toString(dim1.takeError());
+  EXPECT_DOUBLE_EQ(dim1->workload.scanShuffleLaneSteps, 2048.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanShuffleLaneSteps1d, 256.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanShuffleLaneSteps1dMidWork, 2048.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanShuffleLaneStepsSimtMulti, 0.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanSimtMultiExtentSum, 0.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanShuffleLaneStepsMultiTail, 0.0);
+
+  // Transpose pool: only multi-dimensional scans on a non-leading axis have the
+  // two transposes (Cumsum.cpp moves the scan axis to axis 0 and back), for a
+  // total of 2 * N * sizeof(f32) bytes. Leading-axis scans (all the axis = 0
+  // cases above) are zero.
+  EXPECT_DOUBLE_EQ(dim64->workload.scanTransposeBytes, 0.0);
+  EXPECT_DOUBLE_EQ(dim64->workload.scanTransposeBytesRank2, 0.0);
+  EXPECT_DOUBLE_EQ(dim1->workload.scanTransposeBytes, 0.0);
+
+  // rank 2, axis 1 (64x64, 4096 elements) -> 2*4096*4 = 32768 bytes, all going
+  // through the transpose_ar2ra subset.
+  auto rank2Axis1 = analyzeScan2d(64, 64, 1);
+  if (!rank2Axis1)
+    FAIL() << llvm::toString(rank2Axis1.takeError());
+  EXPECT_DOUBLE_EQ(rank2Axis1->workload.scanTransposeBytes, 32768.0);
+  EXPECT_DOUBLE_EQ(rank2Axis1->workload.scanTransposeBytesRank2, 32768.0);
+  EXPECT_DOUBLE_EQ(rank2Axis1->workload.scanShuffleLaneSteps, 64.0);
+
+  // rank 3, axis 1 (8x16x16, 2048 elements) -> 16384 bytes, going through
+  // transpose_dim_01 and not counted in the rank-2 subset; the column-parallel
+  // S = 16*ceil(128/64) = 32.
+  auto rank3Axis1 = analyzeScan({8, 16, 16}, 1);
+  if (!rank3Axis1)
+    FAIL() << llvm::toString(rank3Axis1.takeError());
+  EXPECT_DOUBLE_EQ(rank3Axis1->workload.scanTransposeBytes, 16384.0);
+  EXPECT_DOUBLE_EQ(rank3Axis1->workload.scanTransposeBytesRank2, 0.0);
+  EXPECT_DOUBLE_EQ(rank3Axis1->workload.scanShuffleLaneSteps, 32.0);
+
+  // rank 3, axis 0 needs no transpose.
+  auto rank3Axis0 = analyzeScan({8, 16, 16}, 0);
+  if (!rank3Axis0)
+    FAIL() << llvm::toString(rank3Axis0.takeError());
+  EXPECT_DOUBLE_EQ(rank3Axis0->workload.scanTransposeBytes, 0.0);
+}
+
+TEST(SimdSimtCostModelTest,
+     WorkloadRejectsSmallOneDimStepsLargerThanOneDimSteps) {
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.scanShuffleLaneSteps = 320.0;
+  stage.workload.scanShuffleLaneSteps1d = 256.0;
+  stage.workload.scanShuffleLaneSteps1dSmall = 512.0; // subset invariant broken
+  auto table = evaluateOneStage(std::move(stage), hardwareProfile());
+  ASSERT_FALSE(table);
+  llvm::Error error = table.takeError();
+  ASSERT_TRUE(static_cast<bool>(error));
+  llvm::consumeError(std::move(error));
+}
+
+TEST(SimdSimtCostModelTest, WorkloadAcceptsSklanskyWorkAboveElementCount) {
+  // The two rvec buckets hold Sklansky element-rounds, so for any extent above
+  // 64 their value exceeds the element count of the same scans by the log2(N)
+  // factor.  That is the intended unit, not an overlapping-subset violation:
+  // only the element-unit scalar-register bucket is a subset of the
+  // element-unit 1D total.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.shuffleLaneSteps = 4096.0;
+  stage.workload.scanShuffleLaneSteps = 4096.0;
+  stage.workload.scanShuffleLaneSteps1d = 256.0;
+  stage.workload.scanShuffleLaneSteps1dMidWork = 4096.0;
+  auto table = evaluateOneStage(std::move(stage), hardwareProfile());
+  ASSERT_TRUE(static_cast<bool>(table));
+}
+
+TEST(SimdSimtCostModelTest, StageWorkloadSplitsOneDimScanIntoThreeRegimes) {
+  auto analyzeScan =
+      [&](int64_t extent,
+          llvm::StringRef elementType) -> llvm::Expected<LogicalStage> {
+    mlir::MLIRContext context;
+    context.getOrLoadDialect<mlir::arith::ArithDialect>();
+    context.getOrLoadDialect<mlir::func::FuncDialect>();
+    context.allowUnregisteredDialects();
+    llvm::SmallString<256> ir;
+    llvm::raw_svector_ostream stream(ir);
+    stream << "module {\n";
+    stream << "  func.func @main(%input: tensor<" << extent << "x"
+           << elementType << ">)\n";
+    stream << "      -> tensor<" << extent << "x" << elementType << "> {\n";
+    stream << "    %cumsum = \"tt.scan\"(%input) ({\n";
+    stream << "    ^bb0(%lhs: " << elementType << ", %rhs: " << elementType
+           << "):\n";
+    stream << "      %sum = arith.addf %lhs, %rhs : " << elementType << "\n";
+    stream << "      \"tt.scan.return\"(%sum) : (" << elementType
+           << ") -> ()\n";
+    stream << "    }) {axis = 0 : i32}\n";
+    stream << "      : (tensor<" << extent << "x" << elementType
+           << ">) -> tensor<" << extent << "x" << elementType << ">\n";
+    stream << "    return %cumsum : tensor<" << extent << "x" << elementType
+           << ">\n";
+    stream << "  }\n";
+    stream << "}\n";
+    auto module =
+        mlir::parseSourceString<mlir::ModuleOp>(stream.str(), &context);
+    if (!module)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "failed to parse scan module");
+    StagePartition partition;
+    partition.operationOwnershipComplete = true;
+    LogicalStage stage =
+        logicalStage("scan_workload", StageCostModelKind::PrefixScan);
+    auto function = module->lookupSymbol<mlir::func::FuncOp>("main");
+    if (!function)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "missing scan func");
+    mlir::Block &body = function.getBody().front();
+    for (mlir::Operation &operation : body.without_terminator())
+      stage.operations.push_back(&operation);
+    partition.stages.push_back(std::move(stage));
+    if (llvm::Error error = StageFeatureAnalysis().analyze(partition))
+      return std::move(error);
+    if (llvm::Error error = StageWorkloadAnalysis().analyze(partition))
+      return std::move(error);
+    return partition.stages.front();
+  };
+
+  // N=64 is the last extent of the scalar-register segment, so the whole 1D
+  // scan lands in the small bucket and its work is the element count (O(N)).
+  auto small = analyzeScan(64, "f32");
+  if (!small)
+    FAIL() << llvm::toString(small.takeError());
+  EXPECT_DOUBLE_EQ(small->workload.scanShuffleLaneSteps, 64.0);
+  EXPECT_DOUBLE_EQ(small->workload.scanShuffleLaneSteps1d, 64.0);
+  EXPECT_DOUBLE_EQ(small->workload.scanShuffleLaneSteps1dSmall, 64.0);
+  EXPECT_DOUBLE_EQ(small->workload.scanShuffleLaneSteps1dMidWork, 0.0);
+  EXPECT_DOUBLE_EQ(small->workload.scanShuffleLaneSteps1dTiledWork, 0.0);
+
+  // 64 < N <= 1024 is the single warp/block segment: its bucket holds the
+  // Sklansky work 256 * log2(256) = 2048 element-rounds, while the element-unit
+  // 1D total stays 256.
+  auto mid = analyzeScan(256, "f32");
+  if (!mid)
+    FAIL() << llvm::toString(mid.takeError());
+  EXPECT_DOUBLE_EQ(mid->workload.scanShuffleLaneSteps, 2048.0);
+  EXPECT_DOUBLE_EQ(mid->workload.scanShuffleLaneSteps1d, 256.0);
+  EXPECT_DOUBLE_EQ(mid->workload.scanShuffleLaneSteps1dSmall, 0.0);
+  EXPECT_DOUBLE_EQ(mid->workload.scanShuffleLaneSteps1dMidWork, 2048.0);
+  EXPECT_DOUBLE_EQ(mid->workload.scanShuffleLaneSteps1dTiledWork, 0.0);
+
+  // N=1024 is exactly one 1024-element block (still the middle regime);
+  // N=2048 crosses into the tiled segment.
+  auto atBlock = analyzeScan(1024, "f32");
+  if (!atBlock)
+    FAIL() << llvm::toString(atBlock.takeError());
+  EXPECT_DOUBLE_EQ(atBlock->workload.scanShuffleLaneSteps1dMidWork, 10240.0);
+  EXPECT_DOUBLE_EQ(atBlock->workload.scanShuffleLaneSteps1dTiledWork, 0.0);
+
+  auto tiled = analyzeScan(2048, "f32");
+  if (!tiled)
+    FAIL() << llvm::toString(tiled.takeError());
+  EXPECT_DOUBLE_EQ(tiled->workload.scanShuffleLaneSteps, 22528.0);
+  EXPECT_DOUBLE_EQ(tiled->workload.scanShuffleLaneSteps1d, 2048.0);
+  EXPECT_DOUBLE_EQ(tiled->workload.scanShuffleLaneSteps1dSmall, 0.0);
+  EXPECT_DOUBLE_EQ(tiled->workload.scanShuffleLaneSteps1dMidWork, 0.0);
+  EXPECT_DOUBLE_EQ(tiled->workload.scanShuffleLaneSteps1dTiledWork, 22528.0);
+
+  // The three regimes are keyed on element counts, so the dtype neither moves
+  // the boundaries nor rescales the steps: the 1D lowering packs no element
+  // into a vector lane, and the former SIMD width view is gone.
+  auto f16Small = analyzeScan(64, "f16");
+  if (!f16Small)
+    FAIL() << llvm::toString(f16Small.takeError());
+  EXPECT_DOUBLE_EQ(f16Small->workload.scanShuffleLaneSteps1d, 64.0);
+  EXPECT_DOUBLE_EQ(f16Small->workload.scanShuffleLaneSteps1dSmall, 64.0);
+
+  auto f16Tiled = analyzeScan(2048, "f16");
+  if (!f16Tiled)
+    FAIL() << llvm::toString(f16Tiled.takeError());
+  EXPECT_DOUBLE_EQ(f16Tiled->workload.scanShuffleLaneSteps1d, 2048.0);
+  EXPECT_DOUBLE_EQ(f16Tiled->workload.scanShuffleLaneSteps1dSmall, 0.0);
+  EXPECT_DOUBLE_EQ(f16Tiled->workload.scanShuffleLaneSteps1dTiledWork, 22528.0);
+}
+
+TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceSplitsOneDimScanFactor) {
+  auto buildStage = [] {
+    LogicalStage stage = logicalStage(
+        "recurrence_scan", StageCostModelKind::LoopCarriedRecurrence,
+        StageScheduleKind::LoopCarriedSerial, /*iterations=*/4);
+    stage.features.hasLoop = true;
+    stage.features.hasLoopCarriedDataDependency = true;
+    stage.features.hasPrefixScan = true;
+    stage.workload.operationElements.clear();
+    stage.workload.scalarOperations = 0.0;
+    stage.workload.issueElements = 64.0;
+    // 1408 shuffle pool: 320 non-scan steps plus a scan pool of 192 multi-dim
+    // steps and a 1D scan of N = 128 (Sklansky work 128 * log2(128) = 896
+    // element-rounds).
+    stage.workload.shuffleLaneSteps = 1408.0;
+    stage.workload.scanShuffleLaneSteps = 1088.0;
+    stage.workload.scanShuffleLaneSteps1d = 128.0;
+    stage.workload.scanShuffleLaneSteps1dMidWork = 896.0;
+    stage.workload.scanShuffleLaneStepsSimtMulti = 192.0;
+    return stage;
+  };
+
+  HardwareProfile baselineProfile = hardwareProfile();
+  baselineProfile.simd.prefixScanDependencyFactor = 1.0;
+  baselineProfile.simd.prefixScanDependencyFactor1dMidWork = 1.0;
+  baselineProfile.simt.prefixScanDependencyFactor = 1.0;
+  baselineProfile.simt.prefixScanDependencyFactor1d = 1.0;
+  auto baseline = evaluateOneStage(buildStage(), baselineProfile);
+  if (!baseline)
+    FAIL() << llvm::toString(baseline.takeError());
+
+  HardwareProfile splitProfile = baselineProfile;
+  splitProfile.simd.prefixScanDependencyFactor = 2.5;
+  splitProfile.simd.prefixScanDependencyFactor1dMidWork = 1.5;
+  auto split = evaluateOneStage(buildStage(), splitProfile);
+  if (!split)
+    FAIL() << llvm::toString(split.takeError());
+
+  // SIMD scan-shuffle extra per iteration: the whole pool at the raised
+  // multi-dim factor, (2.5 - 1.0) * 1088/32 = 51, minus the 1D refund
+  // (2.5 - 1.5) * 896/32 = 28, i.e. 23; over 4 iterations that is 92.
+  EXPECT_DOUBLE_EQ(split->stages.front().implementations[0].totalCycles,
+                   baseline->stages.front().implementations[0].totalCycles +
+                       92.0);
+  // SIMT keeps identity factors and must not move.
+  EXPECT_DOUBLE_EQ(split->stages.front().implementations[1].totalCycles,
+                   baseline->stages.front().implementations[1].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest,
+     PrefixScanRefundsOneDimFactorOnMixedReduceAndScanPool) {
+  // 1472 shuffle pool: 320 reduce units plus a scan pool of 256 multi-dim steps
+  // and a 1D scan of N = 128 (Sklansky work 896 element-rounds).  The multi-dim
+  // factor prices reduce + multi-dim scan; only the 1D work is refunded to its
+  // own factor.
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.operationElements.clear();
+  stage.workload.scalarOperations = 0.0;
+  stage.workload.issueElements = 64.0;
+  stage.workload.shuffleLaneSteps = 1472.0;
+  stage.workload.scanShuffleLaneSteps = 1152.0;
+  stage.workload.scanShuffleLaneSteps1d = 128.0;
+  stage.workload.scanShuffleLaneSteps1dMidWork = 896.0;
+  stage.workload.scanShuffleLaneStepsSimtMulti = 256.0;
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.prefixScanDependencyFactor = 10.0;
+  profile.simd.prefixScanDependencyFactor1dMidWork = 2.0;
+  profile.simt.prefixScanDependencyFactor = 1.0;
+  profile.simt.prefixScanDependencyFactor1d = 1.0;
+
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+
+  // SIMD critical = 1472/32*10 - 896/32*(10 - 2) = 460 - 224 = 236, i.e. reduce
+  // 320/32*10 = 100 + multi-dim scan 256/32*10 = 80 + 1D work 896/32*2 = 56.
+  // SIMT prices its element-unit pool, 128 + 256 = 384 steps, plus the 320
+  // reduce steps: 704/32 = 22.
+  const auto &implementations = table->stages.front().implementations;
+  ASSERT_EQ(implementations.size(), 2u);
+  EXPECT_DOUBLE_EQ(implementations[0].totalCycles, 10.0 + 236.0);
+  EXPECT_DOUBLE_EQ(implementations[1].totalCycles, 10.0 + 22.0);
+}
+
+TEST(SimdSimtCostModelTest, WorkloadRejectsOneDimScanStepsLargerThanScanSteps) {
+  LogicalStage stage = logicalStage("scan", StageCostModelKind::PrefixScan);
+  stage.features.hasReduction = true;
+  stage.features.hasPrefixScan = true;
+  stage.workload.scanShuffleLaneSteps = 320.0;
+  stage.workload.scanShuffleLaneSteps1d = 1024.0; // subset invariant broken
+  auto table = evaluateOneStage(std::move(stage), hardwareProfile());
+  ASSERT_FALSE(table);
+  llvm::Error error = table.takeError();
+  ASSERT_TRUE(static_cast<bool>(error));
+  llvm::consumeError(std::move(error));
 }
 
 TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {

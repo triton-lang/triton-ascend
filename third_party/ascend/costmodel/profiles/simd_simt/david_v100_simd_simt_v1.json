@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 12,
-  "profile_version": "david-v100-simd-simt-20260918-v27-segmented-issue-fixed-transition",
+  "profile_version": "v24",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -157,8 +157,18 @@
       "issue_instructions_per_system_cycle": 6.0,
       "spill_transactions_per_system_cycle": 1.0,
       "prefix_scan": {
-        "dependency_factor": 42.45581534582609,
-        "description": "Normalize the recorded A5 batch-8, extent-16 identity-subtracted scan ratio by base shuffle rates: factor_SIMD = (143.398 / 8.267) * 64 / (32 * 0.817124) * factor_SIMT. The model charges lane_steps / lane_rate * factor, so the measured time ratio is not itself the factor. This effective calibration includes lowering effects, not intrinsic latency or forward/reverse asymmetry. Recalibrate if base rates or lowering change."
+        "dependency_factor": 573.6,
+        "dependency_factor_multi_tail": 1347.7,
+        "startup_system_cycles": 202.5,
+        "dependency_factor_1d_small": 227.3,
+        "dependency_factor_1d_work": 4.6015,
+        "dependency_factor_1d_tiled_work": 5.5717,
+        "startup_system_cycles_1d": 252.4,
+        "startup_system_cycles_1d_small": 26.4,
+        "transpose_dim01_bytes_per_system_cycle": 46.7,
+        "transpose_ar2ra_fixed_system_cycles": 323.0,
+        "transpose_ar2ra_bytes_per_system_cycle": 4.2,
+        "description": "SIMD tt.scan pricing. Multi-dim scans are piecewise linear in the column-parallel step count S = extent * ceil(columns/BpE): dependency_factor is the base slope, dependency_factor_multi_tail the extra slope above the hinge, startup_system_cycles charged once. 1D scans follow the CumsumSimtSklansky.cpp template, dispatching on element count: dependency_factor_1d_small (extent <= 64) and the Sklansky element-round factors dependency_factor_1d_work / dependency_factor_1d_tiled_work above it, with startup_system_cycles_1d / startup_system_cycles_1d_small charged once. A non-leading-axis multi-dim scan also pays a transpose: transpose_dim01_bytes_per_system_cycle for rank >= 3, transpose_ar2ra_bytes_per_system_cycle plus transpose_ar2ra_fixed_system_cycles for rank 2. dependency_factor_1d is only the SIMT legacy / fallback factor."
       },
       "indirect_memory": {
         "load_transactions_per_system_cycle": 0.125,
@@ -346,8 +356,88 @@
       "issue_instructions_per_system_cycle": 4.0,
       "spill_transactions_per_system_cycle": 1.0,
       "prefix_scan": {
-        "dependency_factor": 1.0,
-        "description": "SIMT shuffle throughput already represents the lane dependency chain measured by the A5 scan sweep."
+        "dependency_factor": 21.2,
+        "dependency_factor_1d": 5.2,
+        "dependency_factor_1d_small": 25.4,
+        "startup_system_cycles": 0.0,
+        "startup_system_cycles_1d": 135.4,
+        "startup_system_cycles_1d_small": 72.7,
+        "simt_1d_warp_segments": {
+          "4": {
+            "c_local": 96.8,
+            "c_fixed": 144.8,
+            "c_round": 25.5,
+            "c_gen": 181.427,
+            "serial_rate": 0.1425
+          },
+          "8": {
+            "c_local": 86.8,
+            "c_fixed": 149.0492,
+            "c_round": 30.9855,
+            "c_gen": 34.854,
+            "serial_rate": 0.2279
+          },
+          "16": {
+            "c_local": 92.5,
+            "c_fixed": 160.8892,
+            "c_round": 53.047,
+            "c_gen": 89.707,
+            "serial_rate": 0.2413
+          },
+          "32": {
+            "c_local": 169.1,
+            "c_fixed": 364.1852,
+            "c_round": 36.7119,
+            "c_gen": 1269.748,
+            "serial_rate": 0.0534
+          },
+          "64": {
+            "c_local": 314.1,
+            "c_fixed": 648.84,
+            "c_round": 105.83,
+            "c_gen": 13294.4,
+            "serial_rate": 0.2204
+          }
+        },
+        "simt_2d_warp_segments": {
+          "4": {
+            "a": 412.9181,
+            "b": 0.0,
+            "c": 10.4793,
+            "d": 40.6469,
+            "r0": 64.0,
+            "a_subwarp": 190.4707,
+            "b_subwarp": 0.04753
+          },
+          "8": {
+            "a": 220.2847,
+            "b": 0.316416,
+            "c": 3.6899,
+            "d": 0.0,
+            "r0": 0.0,
+            "a_subwarp": 42.9957,
+            "b_subwarp": 0.306092
+          },
+          "16": {
+            "a": 0.0,
+            "b": 0.693772,
+            "c": 9.0219,
+            "d": 443.6812,
+            "r0": 6.75,
+            "a_subwarp": 74.8124,
+            "b_subwarp": 0.650225
+          },
+          "32": {
+            "a": 234.7568,
+            "b": 0.835238,
+            "c": 2.9625,
+            "d": 4571.3513,
+            "r0": 1.0,
+            "a_subwarp": 206.7097,
+            "b_subwarp": 0.716093
+          }
+        },
+        "description": "SIMT tt.scan pricing. Multi-dim scans use the warp-shape-aware additive table simt_2d_warp_segments (cost = a + b*N + c*(N*k)/T + d*max(0, N/T - r0), with a_subwarp / b_subwarp for extent < 32); 1D scans use the three-segment table simt_1d_warp_segments. dependency_factor and dependency_factor_1d remain the fallback when a table is absent and for the LoopCarriedRecurrence scan path."
       },
       "indirect_memory": {
         "load_transactions_per_system_cycle": 0.5,

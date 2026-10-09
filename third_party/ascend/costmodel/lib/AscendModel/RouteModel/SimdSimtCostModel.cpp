@@ -245,9 +245,130 @@ static void readStageResources(ProfileJSONReader &reader,
       reader.number(*resources, "issue_instructions_per_system_cycle", prefix);
   profile.spillTransactionsPerCycle =
       reader.number(*resources, "spill_transactions_per_system_cycle", prefix);
-  if (const auto *scan = resources->getObject("prefix_scan"))
+  if (const auto *scan = resources->getObject("prefix_scan")) {
     profile.prefixScanDependencyFactor =
         reader.number(*scan, "dependency_factor", prefix + ".prefix_scan");
+    // Optional 1D factor for 1D tt.scan (S = N).  Falls back to the
+    // multi-dim factor when the profile omits it.
+    if (const auto value = scan->getNumber("dependency_factor_1d"))
+      profile.prefixScanDependencyFactor1d = *value;
+    else
+      profile.prefixScanDependencyFactor1d = profile.prefixScanDependencyFactor;
+    // Optional small-extent (N <= 64, sklansky_regbuf_16 scalar-register) 1D
+    // factor.  Falls back to the ordinary 1D factor when the profile omits it.
+    if (const auto value = scan->getNumber("dependency_factor_1d_small"))
+      profile.prefixScanDependencyFactor1dSmall = *value;
+    else
+      profile.prefixScanDependencyFactor1dSmall =
+          profile.prefixScanDependencyFactor1d;
+    // Optional rvec-regime 1D factors, in Sklansky element-rounds (the priced
+    // feature is sum(N * log2(N)) for extents above 64).  Falling back to the
+    // multi-dim factor keeps the rvec 1D pool priced as multi-dim scan work
+    // when a profile omits them (conservative: over- rather than under-prices
+    // SIMD 1D scans).
+    if (const auto value = scan->getNumber("dependency_factor_1d_work"))
+      profile.prefixScanDependencyFactor1dMidWork = *value;
+    else
+      profile.prefixScanDependencyFactor1dMidWork =
+          profile.prefixScanDependencyFactor;
+    if (const auto value = scan->getNumber("dependency_factor_1d_tiled_work"))
+      profile.prefixScanDependencyFactor1dTiledWork = *value;
+    else
+      profile.prefixScanDependencyFactor1dTiledWork =
+          profile.prefixScanDependencyFactor;
+    // Optional extra factor for the multi-dim column-parallel steps above the
+    // SIMD hinge (S = 256).  Absent key keeps 0, i.e. a single-slope multi-dim
+    // price.  SIMD only (SIMT uses its warp segment table).
+    if (const auto value = scan->getNumber("dependency_factor_multi_tail"))
+      profile.prefixScanDependencyFactorMultiTail = *value;
+    // Optional transpose cost for non-leading-axis multi-dim scans:
+    // cycles = fixed + bytes / rate.  Absent keys keep 0, i.e. no transpose.
+    if (const auto value =
+            scan->getNumber("transpose_dim01_bytes_per_system_cycle"))
+      profile.prefixScanTransposeDim01BytesPerCycle = *value;
+    if (const auto value =
+            scan->getNumber("transpose_dim01_fixed_system_cycles"))
+      profile.prefixScanTransposeDim01FixedCycles = *value;
+    if (const auto value =
+            scan->getNumber("transpose_ar2ra_bytes_per_system_cycle"))
+      profile.prefixScanTransposeAr2raBytesPerCycle = *value;
+    if (const auto value =
+            scan->getNumber("transpose_ar2ra_fixed_system_cycles"))
+      profile.prefixScanTransposeAr2raFixedCycles = *value;
+    // Optional fixed per-scan-execution startups (SIMT thread barrier +
+    // fixed launch shape + UB round-trip).  Default 0 keeps SIMD unchanged.
+    if (const auto value = scan->getNumber("startup_system_cycles"))
+      profile.prefixScanStartupCycles = *value;
+    if (const auto value = scan->getNumber("startup_system_cycles_1d"))
+      profile.prefixScanStartupCycles1d = *value;
+    if (const auto value = scan->getNumber("startup_system_cycles_1d_small"))
+      profile.prefixScanStartupCycles1dSmall = *value;
+    // Optional warp-shape-aware three-segment table for SIMT 1D scans.
+    // Key = warp bucket ("4"/"8"/"16"/"32").  Absent table keeps the legacy
+    // factor pricing.  The cross-warp Sklansky merge is a single code path,
+    // so its cost is one segment priced by the real Sklansky round count.
+    if (const auto *segments = scan->getObject("simt_1d_warp_segments")) {
+      for (const auto &entry : *segments) {
+        const llvm::StringRef bucket = entry.first;
+        unsigned warps = 0;
+        if (bucket.getAsInteger(10, warps) || warps == 0) {
+          reader.setError("invalid warp bucket key '" + bucket + "' in " +
+                          prefix + ".prefix_scan.simt_1d_warp_segments");
+          continue;
+        }
+        const auto *seg = entry.second.getAsObject();
+        if (!seg) {
+          reader.setError("warp bucket '" + bucket + "' in " + prefix +
+                          ".prefix_scan.simt_1d_warp_segments"
+                          " must be an object");
+          continue;
+        }
+        const std::string segPath =
+            prefix + ".prefix_scan.simt_1d_warp_segments." + bucket.str();
+        StageModeProfile::PrefixScan1dWarpSegment segment;
+        segment.cLocal = reader.number(*seg, "c_local", segPath);
+        segment.cFixed = reader.number(*seg, "c_fixed", segPath);
+        segment.cRound = reader.number(*seg, "c_round", segPath);
+        segment.cGen = reader.number(*seg, "c_gen", segPath);
+        segment.serialRate = reader.number(*seg, "serial_rate", segPath);
+        profile.prefixScan1dWarpSegments[warps] = segment;
+      }
+    }
+    // Optional warp-shape-aware linear pricing table for SIMT multi-dim
+    // (2D) scans.  Key = warp bucket ("4"/"8"/"16"/"32").  Absent table keeps
+    // the legacy multi-dim factor pricing.
+    if (const auto *segments = scan->getObject("simt_2d_warp_segments")) {
+      for (const auto &entry : *segments) {
+        const llvm::StringRef bucket = entry.first;
+        unsigned warps = 0;
+        if (bucket.getAsInteger(10, warps) || warps == 0) {
+          reader.setError("invalid warp bucket key '" + bucket + "' in " +
+                          prefix + ".prefix_scan.simt_2d_warp_segments");
+          continue;
+        }
+        const auto *seg = entry.second.getAsObject();
+        if (!seg) {
+          reader.setError("warp bucket '" + bucket + "' in " + prefix +
+                          ".prefix_scan.simt_2d_warp_segments"
+                          " must be an object");
+          continue;
+        }
+        const std::string segPath =
+            prefix + ".prefix_scan.simt_2d_warp_segments." + bucket.str();
+        StageModeProfile::PrefixScan2dWarpSegment segment;
+        segment.a = reader.number(*seg, "a", segPath);
+        segment.b = reader.number(*seg, "b", segPath);
+        segment.c = reader.number(*seg, "c", segPath);
+        segment.d = reader.number(*seg, "d", segPath);
+        segment.r0 = reader.number(*seg, "r0", segPath);
+        // Optional sub-warp (extent < 32) linear regime; absent keys keep the
+        // warp-aligned formula for every extent.
+        segment.aSubwarp = reader.optionalNumber(*seg, "a_subwarp", 0.0);
+        segment.bSubwarp = reader.optionalNumber(*seg, "b_subwarp", 0.0);
+        profile.prefixScan2dWarpSegments[warps] = segment;
+      }
+    }
+  }
   if (const auto *scalar = reader.object(*resources, "scalar_memory", prefix)) {
     const std::string path = prefix + ".scalar_memory";
     profile.mainScalarLoadPrepCycles =

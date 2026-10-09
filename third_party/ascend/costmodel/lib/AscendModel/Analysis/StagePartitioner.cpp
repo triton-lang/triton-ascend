@@ -317,11 +317,112 @@ static void accumulateReductionWorkload(Operation *operation,
   const int64_t extent = input.getShape()[dimension];
   if (extent <= 1)
     return;
+
+  // tt.reduce keeps tree-reduction billing: the active lanes halve per level,
+  // so the elementCount*log2(extent) lane-steps already carry the per-level
+  // inefficiency margin (see the PrefixScan notes in StageCostModels).
   const double depth = std::ceil(std::log2(static_cast<double>(extent)));
-  const double steps = getTypeElementCount(input) * depth;
-  work.shuffleLaneSteps += steps;
-  if (isScan)
-    work.scanShuffleLaneSteps += steps;
+  const double treeSteps = getTypeElementCount(input) * depth;
+  if (!isScan) {
+    work.shuffleLaneSteps += treeSteps;
+    return;
+  }
+
+  // tt.scan is split into cases following the bishengir templates
+  // (Template/lib/RegBase/Vector):
+  // - 1-D (elementCount == extent, including degenerate [N,1] shapes): the
+  //     library symbol _mlir_ciface_cumsum_1d_<dtype>_dim0 is owned solely by
+  //     CumsumSimtSklansky.cpp (Cumsum.cpp only registers dim 2/3, with no dim
+  //     1 registration). It dispatches on the *element count* into three
+  //     regimes:
+  //       N <= 64          sklansky_regbuf_16: 16 elements packed into 16
+  //                        scalar registers, done entirely on the SCALAR pipe
+  //                        (3 adds/element, no vector instructions at all).
+  //                        The network is capped at 16 elements and blocks are
+  //                        chained by a serial carry, so this segment's work is
+  //                        O(N) (not the full-length Sklansky O(N log N)).
+  //       64 < N <= 1024 async_invoke<simt_sklansky_scan_1d_block_unroll_p2>:
+  //                        32 lanes x ceil(N/32) warps, rvec engine, single
+  //                        block
+  //       N > 1024         blocked into 1024-element tiles + serial cross-block
+  //                        carry
+  //     The latter two segments are full-length Sklansky networks: rounds per
+  //     element = log2(N) (5 rounds within a warp + ceil(log2 k) cross-warp
+  //     rounds, k = ceil(N/32)), so we count the Sklansky work N*log2(N)
+  //     (element-rounds) instead of N. All three segments are "one element per
+  //     lane" with no vector-width packing, so the unit cost is independent of
+  //     dtype.
+  constexpr double kOneDimScalarLimit = 64.0;
+  constexpr double kOneDimBlockLimit = 1024.0;
+  // Column-parallel step-counting hinge for multi-dimensional SIMD: the
+  // per-step cost is constant while S = extent*ceil(columns/BpE) <= 256 and
+  // rises above it (see the PrefixScan notes in StageCostModels.cpp). The
+  // hinge is on S, not on the extent.
+  constexpr double kMultiDimHingeSteps = 256.0;
+  const int64_t elementCount = input.getNumElements();
+  const bool oneDimScan = elementCount == extent;
+  const int64_t elementBits = getScalarBitWidth(input.getElementType());
+  // Sub-byte dtypes (elementBits < 8) would give a byte count of 0 and cannot
+  // take part in the division; such shapes are outside this backend's scan
+  // support, so fall back to the f32 default.
+  const double bpE =
+      elementBits >= 8 ? 256.0 / static_cast<double>(elementBits / 8) : 64.0;
+  double scanSteps;
+  double scanStepsSimtMulti = 0.0;
+  if (oneDimScan) {
+    const double extentF = static_cast<double>(extent);
+    scanSteps =
+        extentF <= kOneDimScalarLimit ? extentF : extentF * std::log2(extentF);
+  } else {
+    const int64_t columns = elementCount / extent;
+    scanSteps = static_cast<double>(extent) *
+                std::ceil(static_cast<double>(columns) / bpE);
+    // The part above the hinge: each scan is counted independently (each scan
+    // has its own network and round count).
+    work.scanShuffleLaneStepsMultiTail +=
+        std::max(0.0, scanSteps - kMultiDimHingeSteps);
+    // StagePartitioner is mode-neutral, so both paths are recorded:
+    // scanShuffleLaneSteps keeps the SIMD column-parallel S, while
+    // scanShuffleLaneStepsSimtMulti records the SIMT total element count N and
+    // is swapped in by the SIMT resource computation (mapWorkload).
+    // scanSimtMultiExtentSum records the sum of scan-axis lengths: the SIMT
+    // segment table prices by the UB chain length k=min(w,ceil(E/32)), and
+    // E cannot be recovered from N.
+    scanStepsSimtMulti = static_cast<double>(extent) * columns;
+    work.scanSimtMultiExtentSum += extent;
+    // Non-leading-axis scans: on the SIMD side the cumsum template (Cumsum.cpp
+    // vector_cumsum_2d/3d) moves the scan axis to axis 0, scans, then moves it
+    // back, each transpose moving the whole tensor for a total of
+    // 2*N*sizeof(T) bytes; the leading axis (dimension == 0) is scanned in
+    // place and has no transpose in the template. SIMT goes through
+    // ScanOpToLLVM and never touches that template, so only the SIMD price
+    // consumes this pool. The template body comes in two flavours: rank >= 3
+    // uses transpose_dim_01, rank == 2 uses transpose_ar2ra (a gather/scatter
+    // implementation), so the pool is split into a total plus a rank-2 subset.
+    if (dimension != 0 && elementBits >= 8) {
+      const double transposeBytes = 2.0 * static_cast<double>(elementCount) *
+                                    static_cast<double>(elementBits / 8);
+      work.scanTransposeBytes += transposeBytes;
+      if (input.getRank() == 2)
+        work.scanTransposeBytesRank2 += transposeBytes;
+    }
+  }
+  work.shuffleLaneSteps += scanSteps;
+  work.scanShuffleLaneSteps += scanSteps;
+  work.scanShuffleLaneStepsSimtMulti += scanStepsSimtMulti;
+  if (oneDimScan) {
+    const double extentF = static_cast<double>(extent);
+    // 1-D total in element terms: the SIMT segment table indexes by the raw N
+    // and its unit cost is independent of the vector width.
+    work.scanShuffleLaneSteps1d += extentF;
+    if (extentF <= kOneDimScalarLimit) {
+      work.scanShuffleLaneSteps1dSmall += extentF;
+    } else if (extentF <= kOneDimBlockLimit) {
+      work.scanShuffleLaneSteps1dMidWork += scanSteps;
+    } else {
+      work.scanShuffleLaneSteps1dTiledWork += scanSteps;
+    }
+  }
 }
 
 static std::string getAtomicEnumName(Operation *operation,
@@ -463,6 +564,15 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   work.predicateElements *= scale;
   work.shuffleLaneSteps *= scale;
   work.scanShuffleLaneSteps *= scale;
+  work.scanShuffleLaneSteps1d *= scale;
+  work.scanShuffleLaneSteps1dSmall *= scale;
+  work.scanShuffleLaneSteps1dMidWork *= scale;
+  work.scanShuffleLaneSteps1dTiledWork *= scale;
+  work.scanShuffleLaneStepsSimtMulti *= scale;
+  work.scanShuffleLaneStepsMultiTail *= scale;
+  work.scanTransposeBytes *= scale;
+  work.scanTransposeBytesRank2 *= scale;
+  work.scanSimtMultiExtentSum *= scale;
   work.dotFlops *= scale;
   work.estimatedSpillTransactions *= scale;
   work.scalarLoadCount *= scale;
@@ -593,6 +703,15 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   into.predicateElements += from.predicateElements;
   into.shuffleLaneSteps += from.shuffleLaneSteps;
   into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;
+  into.scanShuffleLaneSteps1d += from.scanShuffleLaneSteps1d;
+  into.scanShuffleLaneSteps1dSmall += from.scanShuffleLaneSteps1dSmall;
+  into.scanShuffleLaneSteps1dMidWork += from.scanShuffleLaneSteps1dMidWork;
+  into.scanShuffleLaneSteps1dTiledWork += from.scanShuffleLaneSteps1dTiledWork;
+  into.scanShuffleLaneStepsSimtMulti += from.scanShuffleLaneStepsSimtMulti;
+  into.scanShuffleLaneStepsMultiTail += from.scanShuffleLaneStepsMultiTail;
+  into.scanTransposeBytes += from.scanTransposeBytes;
+  into.scanTransposeBytesRank2 += from.scanTransposeBytesRank2;
+  into.scanSimtMultiExtentSum += from.scanSimtMultiExtentSum;
   into.dotFlops += from.dotFlops;
   into.estimatedSpillTransactions += from.estimatedSpillTransactions;
   into.scalarLoadCount += from.scalarLoadCount;

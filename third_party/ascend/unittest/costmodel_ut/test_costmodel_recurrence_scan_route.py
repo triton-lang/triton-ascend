@@ -30,13 +30,10 @@ import triton.language as tl
 
 from triton.backends.ascend.utils import is_compile_on_910_95
 
-# Routes whose fast path is SIMT (all SIMT, or SIMD host with a SIMT scope).
-SIMT_ROUTES = {"all_simt_only", "mixed_simd_simt"}
-
 # The launch options below are passed explicitly, but these environment
 # variables still leak in from the caller's shell: TRITON_ASCEND_COMPILE_MODE
 # *overrides* the explicit compile_mode option, and TRITON_ASCEND_AUTO_SIMT_PROFILE
-# replaces the calibrated cost profile (the scope mode/dump env vars are only
+# replaces the cost profile (the scope mode/dump env vars are only
 # fallbacks, cleared here for symmetry).  Removing them keeps the route decision
 # deterministic no matter how the caller configured the shell.
 ISOLATED_ENV = (
@@ -53,12 +50,10 @@ def _recurrence_scan_kernel(s_ptr, o_ptr, T, BT: tl.constexpr, H: tl.constexpr):
 
     Mirrors the structure of fla ``chunk_global_cumsum_scalar_kernel``: the
     carried scalar ``b_z`` accumulates the running total across chunks while
-    ``tl.cumsum`` scans the chunk.  Guard target: "[sim_costmodel](fix)
-    LoopCarriedRecurrence applies prefixScanDependencyFactor to nested scans".
-    Before that fix the scan shuffle nested in the recurrence was billed at the
-    ideal SIMD rate, under-estimating the SIMD cost and routing the kernel to
-    ``all_simd``; the scan-contributed shuffle must now consume the prefix-scan
-    dependency factor, which makes SIMT the cheaper candidate.
+    ``tl.cumsum`` scans the chunk.  Guard targets: "[sim_costmodel](fix)
+    LoopCarriedRecurrence applies prefixScanDependencyFactor to nested scans"
+    (the scan shuffle nested in the recurrence must not be billed at the ideal
+    SIMD rate) and the route the cost model picks for it.
     """
     i_nh = tl.program_id(0)
     i_n, i_h = i_nh // H, i_nh % H
@@ -88,7 +83,7 @@ class CostmodelRecurrenceScanRouteTest(unittest.TestCase):
             else:
                 os.environ[name] = value
 
-    def test_recurrence_scan_routes_to_simt(self):
+    def test_recurrence_scan_prices_nested_scan_at_one_dim_factor(self):
         if not is_compile_on_910_95():
             self.skipTest("SIMD/SIMT cost model only supports 910_95")
 
@@ -122,10 +117,24 @@ class CostmodelRecurrenceScanRouteTest(unittest.TestCase):
             self.assertTrue(reports, "costmodel route report is empty")
             report = reports[-1]
             self.assertTrue(report["stage_model"]["applied"])
-            self.assertIn(
-                report["effective_decision_kind"], SIMT_ROUTES,
-                f"expected a SIMT route, got {report['effective_decision_kind']} "
-                f"with candidate costs {report['candidate_costs']}")
+            self.assertEqual(
+                report["effective_decision_kind"], "all_simd", f"expected the all-SIMD route, got "
+                f"{report['effective_decision_kind']} with candidate costs "
+                f"{report['candidate_costs']}")
+            # Anti-under-pricing guard: the nested 1D scan must still consume its
+            # own dependency factor instead of the ideal SIMD rate.  At the
+            # ideal rate this 256-step scan would cost 256/64 = 4 cycles, two
+            # orders of magnitude below the 1D price, so a generous floor keeps
+            # the guard meaningful.
+            scan_stages = [
+                stage for stage in report["stage_model"]["logical_stages"]
+                if stage["workload"].get("scan_shuffle_lane_steps_1d_per_iteration")
+            ]
+            self.assertEqual(len(scan_stages), 1, "expected exactly one 1D scan stage")
+            simd_implementation = scan_stages[0]["implementations"][0]
+            self.assertEqual(simd_implementation["implementation"]["mode"], "simd")
+            self.assertGreater(simd_implementation["total_system_cycles"], 100.0,
+                               "the nested 1D scan looks priced at the ideal SIMD rate")
 
 
 if __name__ == "__main__":

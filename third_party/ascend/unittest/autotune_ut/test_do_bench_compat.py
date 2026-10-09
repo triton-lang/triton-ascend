@@ -220,6 +220,12 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
     tuner.cache_results = False
     tuner.print_autotuning = True
     tuner.base_fn = _dummy_kernel
+    tuner.arg_names = ["cache_key", "input"]
+    tuner.keys = ["cache_key"]
+    tuner.nargs = {"cache_key": "disk-cache-key", "input": SimpleNamespace(dtype="torch.float32")}
+    tuner.user_specified_multibuffer_mode = (2, 3)
+    tuner.generate_key_and_configs = lambda *args, **kwargs: ("disk-cache-key", "torch.float32",
+                                                              ("compile_mode", "simd"), ("multibuffer_mode", (2, 3)))
     tuner._batch_bench = lambda *args, configs, **kwargs: {
         selected: (1.0, 0.9, 1.1),
         other: (2.0, 1.8, 2.2),
@@ -227,6 +233,9 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
 
     assert tuner.run() == "kernel-result"
     output = capsys.readouterr().out
+    assert "with key as " not in output
+    assert ("with key fields as cache_key='disk-cache-key', input.dtype='torch.float32', "
+            "compile_mode='simd', multibuffer_mode=(2, 3),") in output
     assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
     assert "p50=1.0000 ms, p20=0.9000 ms, p80=1.1000 ms [selected]" in output
 

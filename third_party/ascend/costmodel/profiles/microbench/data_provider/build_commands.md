@@ -90,11 +90,3 @@ Files:
 |---|---|
 | CAModel experiment plan | `camodel/camodel_experiment_matrix.json` |
 | CAModel count-to-SYS_CNT parser | `camodel/extract_camodel_system_cycle_profile.py` |
-
-## Predicate-mask CCE reference checks
-
-The [predicate mask test directory](predicate_mask/README.md) contains the
-SIMD/SIMT CCE probes, reproduction commands, compact historical results, and
-no-spill checks supporting the 32-bit reference estimates. It also documents
-the limits of those measurements; generated objects and full traces stay
-outside the repository.

@@ -200,15 +200,7 @@ llvm::json::Object AtomicWorkload::toJSON() const {
 
 bool TensorOperationWorkload::isFiniteAndNonNegative() const {
   const std::array<double, 2> values = {logicalElements, segmentCount};
-  const bool validPredicateWidth =
-      simdPredicateBitWidth == 0 ||
-      ((operation == "predicate.cmp" || operation == "predicate.select") &&
-       (simdPredicateBitWidth == 8 || simdPredicateBitWidth == 16 ||
-        simdPredicateBitWidth == 32) &&
-       (elementBitWidth == 1 || elementBitWidth == 8 || elementBitWidth == 16 ||
-        elementBitWidth == 32) &&
-       simdPredicateBitWidth >= elementBitWidth);
-  return !operation.empty() && elementBitWidth > 0 && validPredicateWidth &&
+  return !operation.empty() && elementBitWidth > 0 &&
          contiguousElementsPerSegment > 0 &&
          std::all_of(values.begin(), values.end(), [](double value) {
            return std::isfinite(value) && value >= 0.0;
@@ -219,7 +211,6 @@ llvm::json::Object TensorOperationWorkload::toJSON() const {
   return llvm::json::Object{
       {"operation", operation},
       {"element_bit_width", elementBitWidth},
-      {"simd_predicate_bit_width", simdPredicateBitWidth},
       {"logical_elements_per_iteration", logicalElements},
       {"segment_count_per_iteration", segmentCount},
       {"contiguous_elements_per_segment", contiguousElementsPerSegment},

@@ -111,13 +111,13 @@
         "confidence": "low"
       },
       "predicate.cmp": {
-        "description": "Reference comparison and i1 mask-logic cost relative to f32.add. Factor 1 retained based on C310 CCE no-spill differential checks with 32-bit data; not a calibration of all data widths or lowering patterns.",
+        "description": "Estimated SIMD comparison and i1 mask-logic cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "medium"
       },
       "predicate.select": {
-        "description": "Reference predicate-select cost relative to f32.add. Factor 1 retained based on C310 CCE no-spill differential checks with 32-bit data; not a calibration of all data widths or lowering patterns.",
+        "description": "Estimated SIMD predicate-select cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "low"
@@ -280,13 +280,13 @@
         "confidence": "low"
       },
       "predicate.cmp": {
-        "description": "Reference comparison and i1 mask-logic cost relative to f32.add. Factor 1 retained based on C310 CCE no-spill differential checks with 32-bit data; not a calibration of all data widths or lowering patterns.",
+        "description": "Estimated SIMT comparison and i1 mask-logic cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "medium"
       },
       "predicate.select": {
-        "description": "Reference predicate-select cost relative to f32.add. Factor 1 retained based on C310 CCE no-spill differential checks with 32-bit data; not a calibration of all data widths or lowering patterns.",
+        "description": "Estimated SIMT predicate-select cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "low"

@@ -17,7 +17,6 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
-#include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -101,16 +100,11 @@ int64_t getI64Attr(Operation *op, llvm::StringRef name) {
 }
 
 struct PredicateWork {
-  double elements = 0, selects = 0, generic = 0;
-  double maskElements = 0, cmp16Elements = 0, cmp32Elements = 0;
-  double describedElements = 0;
-  double projected8Elements = 0, projected16Elements = 0,
-         projected32Elements = 0;
+  double predicates = 0, selects = 0, generic = 0, scalar = 0;
 };
 
 bool collectPredicateWork(llvm::StringRef source, PredicateWork &out) {
   mlir::MLIRContext context;
-  context.allowUnregisteredDialects(); // Generic tt.* fixtures need no backend.
   auto module = parseModule(context, source);
   if (!module)
     return false;
@@ -137,407 +131,91 @@ bool collectPredicateWork(llvm::StringRef source, PredicateWork &out) {
   if (!stages)
     return false;
   for (const auto &value : *stages) {
-    const auto *stage = value.getAsObject();
-    const auto *work = stage->getObject("workload");
-    out.elements +=
+    const auto *work = value.getAsObject()->getObject("workload");
+    out.predicates +=
         work->getNumber("predicate_elements_per_iteration").value_or(0);
+    out.scalar +=
+        work->getNumber("scalar_operations_per_iteration").value_or(0);
     const auto *ops = work->getObject("operation_elements_per_iteration");
     out.selects += ops->getNumber("predicate.select").value_or(0);
     out.generic += ops->getNumber("generic.issue").value_or(0);
-    for (const auto &tensor : *work->getArray("tensor_operation_workloads")) {
-      const auto *group = tensor.getAsObject();
-      const double projectedElements =
-          group->getNumber("logical_elements_per_iteration").value_or(0);
-      switch (group->getInteger("simd_predicate_bit_width").value_or(0)) {
-      case 8:
-        out.projected8Elements += projectedElements;
-        break;
-      case 16:
-        out.projected16Elements += projectedElements;
-        break;
-      case 32:
-        out.projected32Elements += projectedElements;
-        break;
-      }
-      if (group->getString("operation")
-              .value_or("")
-              .starts_with("predicate.") &&
-          group->getString("operation") != "predicate.select") {
-        const double elements =
-            group->getNumber("logical_elements_per_iteration").value_or(0);
-        out.describedElements += elements;
-        switch (group->getInteger("element_bit_width").value_or(0)) {
-        case 1:
-          out.maskElements += elements;
-          break;
-        case 16:
-          out.cmp16Elements += elements;
-          break;
-        case 32:
-          out.cmp32Elements += elements;
-          break;
-        }
-      }
-    }
   }
   return true;
 }
 
 } // namespace
 
-TEST(CostModelPassesTest, PredicateMasksProjectClosedCompareLogicSelectWidths) {
-  struct Case {
-    const char *first, *second, *selected, *logic;
-    int width;
-    int projectedOps = 6;
-  };
-  // Same/mixed widths, all logic opcodes, multi-hop propagation and unsupported
-  // widths share one fixture. Instruction rounding is tested in the cost tests.
-  for (const auto &c : {Case{"i16", "i16", "i16", "andi", 16},
-                        Case{"i32", "i32", "i32", "ori", 32},
-                        Case{"f16", "f16", "f16", "xori", 16},
-                        Case{"f32", "f32", "f32", "andi", 32},
-                        Case{"i16", "i32", "i16", "ori", 32},
-                        Case{"i16", "i16", "i32", "xori", 32},
-                        Case{"f16", "f32", "f16", "andi", 32},
-                        Case{"i8", "i8", "i8", "andi", 8},
-                        Case{"i8", "i8", "i16", "ori", 16},
-                        Case{"i8", "i8", "i32", "xori", 32},
-                        Case{"bf16", "bf16", "bf16", "andi", 32},
-                        Case{"bf16", "f32", "bf16", "ori", 32},
-                        Case{"f8E4M3FN", "f8E4M3FN", "f8E4M3FN", "andi", 32},
-                        Case{"f8E5M2", "f8E5M2", "f8E5M2", "ori", 32},
-                        Case{"i8", "i8", "f8E4M3FN", "xori", 8},
-                        Case{"i16", "i16", "f8E5M2", "ori", 16},
-                        Case{"i64", "i64", "i64", "andi", 32, 2},
-                        Case{"i64", "i16", "i16", "ori", 32, 4},
-                        Case{"i16", "i16", "i64", "xori", 32, 5},
-                        Case{"f64", "f64", "f64", "andi", 0}}) {
-    SCOPED_TRACE(
-        llvm::formatv("{0}/{1}/{2}/{3}", c.first, c.second, c.selected, c.logic)
-            .str());
-    const char *cmp = c.first[0] == 'i' ? "arith.cmpi slt" : "arith.cmpf olt";
-    const auto source =
-        llvm::formatv(R"mlir(
-module {{ func.func @main(%a: tensor<128x{0}>, %b: tensor<128x{0}>,
-    %c: tensor<128x{1}>, %d: tensor<128x{1}>,
-    %e: tensor<128x{0}>, %f: tensor<128x{0}>,
-    %x: tensor<128x{2}>, %y: tensor<128x{2}>) -> tensor<128x{2}> {{
-  %p = {3}, %a, %b : tensor<128x{0}>
-  %q = {3}, %c, %d : tensor<128x{1}>
-  %r = {3}, %e, %f : tensor<128x{0}>
-  %m = arith.{4} %p, %q : tensor<128xi1>
-  %n = arith.xori %m, %r : tensor<128xi1>
-  %s = arith.select %n, %x, %y : tensor<128xi1>, tensor<128x{2}>
-  return %s : tensor<128x{2}>
-} })mlir",
-                      c.first, c.second, c.selected, cmp, c.logic)
-            .str();
-    PredicateWork work;
-    ASSERT_TRUE(collectPredicateWork(source, work));
-    EXPECT_DOUBLE_EQ(work.maskElements, 2 * 128);
-    EXPECT_DOUBLE_EQ(work.cmp16Elements,
-                     (2 * llvm::StringRef(c.first).ends_with("16") +
-                      llvm::StringRef(c.second).ends_with("16")) *
-                         128);
-    EXPECT_DOUBLE_EQ(work.elements, 5 * 128);
-    EXPECT_DOUBLE_EQ(work.selects, 128);
-    EXPECT_DOUBLE_EQ(work.projected8Elements,
-                     c.width == 8 ? c.projectedOps * 128 : 0);
-    EXPECT_DOUBLE_EQ(work.projected16Elements,
-                     c.width == 16 ? c.projectedOps * 128 : 0);
-    EXPECT_DOUBLE_EQ(work.projected32Elements,
-                     c.width == 32 ? c.projectedOps * 128 : 0);
-  }
-}
-
-TEST(CostModelPassesTest, PredicateMasksProjectOnlyIndependentContiguousTails) {
-  // One fixture covers load/store/both and mixed widths. Mutations retain
-  // fallback for nonzero fills, arbitrary/different masks, gathers and a
-  // validity mask shared with the arithmetic predicate graph.
-  struct Case {
-    int first, second, selected, mode, mutation, width;
-    bool floating = false;
-  };
-  for (const auto &c :
-       {Case{16, 16, 16, 0, 0, 16}, Case{16, 16, 16, 1, 0, 16},
-        Case{16, 16, 16, 2, 0, 16}, Case{16, 16, 16, 3, 0, 16},
-        Case{32, 32, 32, 3, 0, 32}, Case{16, 32, 16, 3, 0, 32},
-        Case{8, 8, 16, 3, 0, 16}, Case{16, 16, 16, 3, 1, 0},
-        Case{16, 16, 16, 3, 2, 0}, Case{16, 16, 16, 3, 3, 0},
-        Case{16, 16, 16, 3, 4, 0}, Case{16, 16, 16, 3, 5, 0},
-        Case{16, 16, 16, 3, 0, 16, true}, Case{32, 32, 32, 3, 1, 0, true}}) {
-    SCOPED_TRACE(llvm::formatv("{0}/{1}/{2} mode={3} mutation={4}", c.first,
-                               c.second, c.selected, c.mode, c.mutation)
-                     .str());
-    std::string args, body;
-    auto type = [&](int bits) {
-      return std::string(c.floating ? "f" : "i") + std::to_string(bits);
-    };
-    const int widths[] = {c.first,  c.first,    c.second,
-                          c.second, c.selected, c.selected};
-    for (int i = 0; i < 6; ++i) {
-      args +=
-          llvm::formatv("%arg{0}: !tt.ptr<{1}>, ", i, type(widths[i])).str();
-      body += llvm::formatv(R"mlir(
-  %base{0} = "tt.splat"(%arg{0}) : (!tt.ptr<{1}>) -> tensor<256x!tt.ptr<{1}>>
-  %addr{0} = "tt.addptr"(%base{0}, {2}) : (tensor<256x!tt.ptr<{1}>>, tensor<256xi32>) -> tensor<256x!tt.ptr<{1}>>
-  %zero{0} = arith.constant dense<{3}> : tensor<256x{1}>
-)mlir",
-                            i, type(widths[i]),
-                            c.mutation == 4 ? "%twice" : "%range",
-                            std::string(c.mutation == 1 ? "1" : "0") +
-                                (c.floating ? ".0" : ""))
-                  .str();
-      std::string mask = c.mutation == 2             ? "%external"
-                         : c.mutation == 3 && i == 0 ? "%other"
-                                                     : "%tail";
-      body +=
-          llvm::formatv(
-              "  %v{0} = \"tt.load\"(%addr{0}{2}) : "
-              "(tensor<256x!tt.ptr<{1}>>{3}) -> tensor<256x{1}>\n",
-              i, type(widths[i]),
-              (c.mode & 1) ? ", " + mask + ", %zero" + std::to_string(i) : "",
-              (c.mode & 1)
-                  ? ", tensor<256xi1>, tensor<256x" + type(widths[i]) + ">"
-                  : "")
-              .str();
+TEST(CostModelPassesTest, OnlyTensorI1BitwiseOperationsCountAsPredicates) {
+  for (bool tensor : {false, true})
+    for (int bits : {1, 8, 16, 32, 64}) {
+      const std::string element = "i" + std::to_string(bits);
+      const std::string type = tensor ? "tensor<64x" + element + ">" : element;
+      SCOPED_TRACE(type);
+      PredicateWork work;
+      ASSERT_TRUE(collectPredicateWork(
+          "module { func.func @main(%a: " + type + ", %b: " + type + ") -> (" +
+              type + ", " + type + ", " + type +
+              ") {\n"
+              " %and = arith.andi %a, %b : " +
+              type +
+              "\n"
+              " %or = arith.ori %a, %b : " +
+              type +
+              "\n"
+              " %xor = arith.xori %a, %b : " +
+              type +
+              "\n"
+              " return %and, %or, %xor : " +
+              type + ", " + type + ", " + type + "\n} }",
+          work));
+      EXPECT_DOUBLE_EQ(work.predicates, tensor && bits == 1 ? 3 * 64 : 0);
+      EXPECT_DOUBLE_EQ(work.generic, tensor && bits != 1 ? 3 * 64 : 0);
+      EXPECT_DOUBLE_EQ(work.scalar, tensor ? 0 : 3);
+      EXPECT_DOUBLE_EQ(work.selects, 0);
     }
-    const auto source =
-        llvm::formatv(
-            R"mlir(
-module {{ func.func @main({0}%out: !tt.ptr<{3}>, %n: i32, %n2: i32,
-                          %external: tensor<256xi1>) {{
-  %range = "tt.make_range"() {{start = 0 : i32, end = 256 : i32} : () -> tensor<256xi32>
-  %bound = "tt.splat"(%n) : (i32) -> tensor<256xi32>
-  %bound2 = "tt.splat"(%n2) : (i32) -> tensor<256xi32>
-  %tail = arith.cmpi slt, %range, %bound : tensor<256xi32>
-  %other = arith.cmpi slt, %range, %bound2 : tensor<256xi32>
-  %twice = arith.addi %range, %range : tensor<256xi32>
-{4}
-  %p = {9}, %v0, %v1 : tensor<256x{1}>
-  %q = {9}, %v2, %v3 : tensor<256x{2}>
-  %mask = arith.andi %p, %q : tensor<256xi1>
-{5}
-  %selected = arith.select {6}, %v4, %v5 : tensor<256xi1>, tensor<256x{3}>
-  %outbase = "tt.splat"(%out) : (!tt.ptr<{3}>) -> tensor<256x!tt.ptr<{3}>>
-  %outaddr = "tt.addptr"(%outbase, %range) : (tensor<256x!tt.ptr<{3}>>, tensor<256xi32>) -> tensor<256x!tt.ptr<{3}>>
-  "tt.store"(%outaddr, %selected{7}) : (tensor<256x!tt.ptr<{3}>>, tensor<256x{3}>{8}) -> ()
-  return
-} })mlir",
-            args, type(c.first), type(c.second), type(c.selected), body,
-            c.mutation == 5
-                ? "  %shared = arith.andi %mask, %tail : tensor<256xi1>"
-                : "",
-            c.mutation == 5 ? "%shared" : "%mask",
-            (c.mode & 2) ? ", %tail" : "",
-            (c.mode & 2) ? ", tensor<256xi1>" : "",
-            c.floating ? "arith.cmpf olt" : "arith.cmpi slt")
-            .str();
-    PredicateWork work;
-    ASSERT_TRUE(collectPredicateWork(source, work));
-    EXPECT_DOUBLE_EQ(work.selects, 256);
-    EXPECT_DOUBLE_EQ(work.maskElements, (c.mutation == 5 ? 2 : 1) * 256);
-    EXPECT_DOUBLE_EQ(work.projected8Elements, 0);
-    EXPECT_DOUBLE_EQ(work.projected16Elements, c.width == 16 ? 4 * 256 : 0);
-    EXPECT_DOUBLE_EQ(work.projected32Elements, c.width == 32 ? 4 * 256 : 0);
-  }
 }
 
-TEST(CostModelPassesTest, PredicateMasksKeepUnsupportedGroupsUnprojected) {
-  const std::string prefix = R"mlir(
-module {
-  func.func private @consume(tensor<128xi32>)
-  func.func @main(%a: tensor<128xi16>, %b: tensor<128xi16>,
-                  %x: tensor<128xi32>, %y: tensor<128xi32>,
-                  %loaded: tensor<128xi1>) -> tensor<128xi16> {
-    %p = arith.cmpi slt, %a, %b : tensor<128xi16>
-    %q = arith.cmpi eq, %a, %b : tensor<128xi16>
-    %mask = arith.andi %p, %q : tensor<128xi1>
-)mlir";
-  for (const char *tail :
-       {// A shared mask can cross two backend groups, with transfer costs.
-        R"mlir(
-    %s = arith.select %mask, %a, %b : tensor<128xi1>, tensor<128xi16>
-    %t = arith.select %mask, %x, %y : tensor<128xi1>, tensor<128xi32>
-    func.call @consume(%t) : (tensor<128xi32>) -> ()
-    return %s : tensor<128xi16>
-)mlir",
-        // Data arithmetic can import a larger fusion group.
-        R"mlir(
-    %sum = arith.addi %a, %b : tensor<128xi16>
-    %s = arith.select %mask, %a, %sum : tensor<128xi1>, tensor<128xi16>
-    return %s : tensor<128xi16>
-)mlir",
-        // Loaded/argument masks need not use predicate-register logic.
-        R"mlir(
-    %m = arith.ori %mask, %loaded : tensor<128xi1>
-    %s = arith.select %m, %a, %b : tensor<128xi1>, tensor<128xi16>
-    return %s : tensor<128xi16>
-)mlir"}) {
-    PredicateWork work;
-    ASSERT_TRUE(collectPredicateWork(prefix + tail + " } }", work));
-    EXPECT_GT(work.elements, 0);
-    EXPECT_DOUBLE_EQ(work.projected8Elements, 0);
-    EXPECT_DOUBLE_EQ(work.projected16Elements, 0);
-    EXPECT_DOUBLE_EQ(work.projected32Elements, 0);
-  }
+TEST(CostModelPassesTest, TensorSelectUsesDedicatedKeyAndScalarIsUnchanged) {
+  for (bool tensor : {false, true})
+    for (const char *element : {"i1", "i32", "f32"}) {
+      const std::string type =
+          tensor ? "tensor<64x" + std::string(element) + ">" : element;
+      const std::string mask = tensor ? "tensor<64xi1>" : "i1";
+      SCOPED_TRACE(type);
+      PredicateWork work;
+      ASSERT_TRUE(collectPredicateWork("module { func.func @main(%p: " + mask +
+                                           ", %a: " + type + ", %b: " + type +
+                                           ") -> " + type +
+                                           " {\n"
+                                           " %s = arith.select %p, %a, %b : " +
+                                           mask + ", " + type +
+                                           "\n"
+                                           " return %s : " +
+                                           type + "\n} }",
+                                       work));
+      EXPECT_DOUBLE_EQ(work.selects, tensor ? 64 : 0);
+      EXPECT_DOUBLE_EQ(work.scalar, tensor ? 0 : 1);
+      EXPECT_DOUBLE_EQ(work.predicates, 0);
+      EXPECT_DOUBLE_EQ(work.generic, 0);
+    }
 }
 
-TEST(CostModelPassesTest, PredicateMasksKeepDifferentProjectedGroupsSeparate) {
+TEST(CostModelPassesTest, PredicateNotCountsSourceXorWithoutAssumingFusion) {
   PredicateWork work;
   ASSERT_TRUE(collectPredicateWork(R"mlir(
 module {
-  func.func @main(%a: tensor<128xi16>, %b: tensor<128xi16>,
-                  %x: tensor<128xi32>, %y: tensor<128xi32>)
-      -> (tensor<128xi16>, tensor<128xi32>) {
-    %p = arith.cmpi slt, %a, %b : tensor<128xi16>
-    %q = arith.cmpi eq, %a, %b : tensor<128xi16>
-    %m = arith.andi %p, %q : tensor<128xi1>
-    %s = arith.select %m, %a, %b : tensor<128xi1>, tensor<128xi16>
-    %p2 = arith.cmpi sgt, %a, %b : tensor<128xi16>
-    %q2 = arith.cmpi ne, %a, %b : tensor<128xi16>
-    %m2 = arith.andi %p2, %q2 : tensor<128xi1>
-    %s2 = arith.select %m2, %x, %y : tensor<128xi1>, tensor<128xi32>
-    return %s, %s2 : tensor<128xi16>, tensor<128xi32>
+  func.func @main(%a: tensor<64xf32>, %b: tensor<64xf32>)
+      -> (tensor<64xi1>, tensor<64xf32>) {
+    %true = arith.constant dense<true> : tensor<64xi1>
+    %p = arith.cmpf olt, %a, %b : tensor<64xf32>
+    %not = arith.xori %p, %true : tensor<64xi1>
+    %s = arith.select %not, %a, %b : tensor<64xi1>, tensor<64xf32>
+    return %not, %s : tensor<64xi1>, tensor<64xf32>
   }
 })mlir",
                                    work));
-  EXPECT_DOUBLE_EQ(work.maskElements, 256);
-  EXPECT_DOUBLE_EQ(work.cmp16Elements, 512);
-  EXPECT_DOUBLE_EQ(work.projected16Elements, 512);
-  EXPECT_DOUBLE_EQ(work.projected32Elements, 512);
-}
-
-TEST(CostModelPassesTest, PredicateMasksCountI1LogicAndSelectSeparately) {
-  PredicateWork work;
-  ASSERT_TRUE(collectPredicateWork(R"mlir(
-module {
-  func.func @main(%a: tensor<64xi32>, %b: tensor<64xi32>)
-      -> (tensor<64xi1>, tensor<64xi1>, tensor<64xi32>) {
-    %p = arith.cmpi slt, %a, %b : tensor<64xi32>
-    %q = arith.cmpi eq, %a, %b : tensor<64xi32>
-    %and = arith.andi %p, %q : tensor<64xi1>
-    %or = arith.ori %p, %q : tensor<64xi1>
-    %xor = arith.xori %p, %q : tensor<64xi1>
-    %sel = arith.select %xor, %a, %b : tensor<64xi1>, tensor<64xi32>
-    return %and, %or, %sel : tensor<64xi1>, tensor<64xi1>, tensor<64xi32>
-  }
-})mlir",
-                                   work));
-  EXPECT_DOUBLE_EQ(work.elements, 5 * 64);
-  EXPECT_DOUBLE_EQ(work.describedElements, work.elements);
+  EXPECT_DOUBLE_EQ(work.predicates, 2 * 64);
   EXPECT_DOUBLE_EQ(work.selects, 64);
-  EXPECT_DOUBLE_EQ(work.generic, 0);
-}
-
-TEST(CostModelPassesTest, PredicateMasksDoNotChargeIntegerBitwiseAsPredicates) {
-  PredicateWork work;
-  ASSERT_TRUE(collectPredicateWork(R"mlir(
-module {
-  func.func @main(%a: tensor<64xi32>, %b: tensor<64xi32>)
-      -> (tensor<64xi32>, tensor<64xi32>, tensor<64xi32>) {
-    %and = arith.andi %a, %b : tensor<64xi32>
-    %or = arith.ori %a, %b : tensor<64xi32>
-    %xor = arith.xori %a, %b : tensor<64xi32>
-    return %and, %or, %xor : tensor<64xi32>, tensor<64xi32>, tensor<64xi32>
-  }
-})mlir",
-                                   work));
-  EXPECT_DOUBLE_EQ(work.elements, 0);
-  EXPECT_DOUBLE_EQ(work.describedElements, 0);
-}
-
-TEST(CostModelPassesTest, PredicateMasksCountXorWithoutAssumingFusion) {
-  for (bool floating : {false, true})
-    for (bool invert : {false, true})
-      for (bool commute : {false, true})
-        for (int sharing : {0, 1, 2}) {
-          SCOPED_TRACE(floating);
-          SCOPED_TRACE(invert);
-          SCOPED_TRACE(commute);
-          SCOPED_TRACE(sharing); // single NOT, shared compare, shared NOT.
-          const std::string data =
-              floating ? "tensor<64xf32>" : "tensor<64xi32>";
-          const std::string types = sharing ? data + ", " + data : data;
-          const std::string extra =
-              sharing ? " %s2 = arith.select " +
-                            std::string(sharing == 1 ? "%p" : "%n") +
-                            ", %b, %a : tensor<64xi1>, " + data + "\n"
-                      : "";
-          PredicateWork work;
-          ASSERT_TRUE(collectPredicateWork(
-              "module { func.func @main(%a: " + data + ", %b: " + data +
-                  ") -> (" + types +
-                  ") {\n"
-                  " %c = arith.constant dense<" +
-                  (invert ? "true" : "false") +
-                  "> : tensor<64xi1>\n"
-                  " %p = " +
-                  (floating ? "arith.cmpf olt, " : "arith.cmpi slt, ") +
-                  "%a, %b : " + data +
-                  "\n"
-                  " %n = arith.xori " +
-                  (commute ? "%c, %p" : "%p, %c") +
-                  " : tensor<64xi1>\n"
-                  " %s = arith.select %n, %a, %b : tensor<64xi1>, " +
-                  data + "\n" + extra + " return " +
-                  (sharing ? "%s, %s2" : "%s") + " : " + types + "\n} }",
-              work));
-          // The IR contains a compare and an XOR regardless of constants,
-          // sharing or whether a backend could absorb XOR into the select.
-          EXPECT_DOUBLE_EQ(work.elements, 2 * 64);
-          EXPECT_DOUBLE_EQ(work.describedElements, work.elements);
-          EXPECT_DOUBLE_EQ(work.selects, (sharing ? 2 : 1) * 64);
-          EXPECT_DOUBLE_EQ(work.projected16Elements, 0);
-          EXPECT_DOUBLE_EQ(work.projected32Elements, 0);
-        }
-  // Returning the mask uses the same accounting as a select consumer.
-  PredicateWork returnedMask;
-  ASSERT_TRUE(collectPredicateWork(R"mlir(
-module { func.func @main(%a: tensor<64xi32>, %b: tensor<64xi32>) -> tensor<64xi1> {
-  %c = arith.constant dense<true> : tensor<64xi1>
-  %p = arith.cmpi slt, %a, %b : tensor<64xi32>
-  %n = arith.xori %p, %c : tensor<64xi1>
-  return %n : tensor<64xi1>
-} })mlir",
-                                   returnedMask));
-  EXPECT_DOUBLE_EQ(returnedMask.elements, 2 * 64);
-  EXPECT_DOUBLE_EQ(returnedMask.describedElements, returnedMask.elements);
-  EXPECT_DOUBLE_EQ(returnedMask.selects, 0);
-}
-
-TEST(CostModelPassesTest, PredicateMasksPreserveSourceWidthsInWorkload) {
-  PredicateWork work;
-  ASSERT_TRUE(collectPredicateWork(R"mlir(
-module {
-  func.func @main(%a: tensor<128xi32>, %b: tensor<128xi32>,
-                  %h: tensor<128xi16>, %k: tensor<128xi16>) -> tensor<128xi32> {
-    %c0 = arith.constant 0 : index
-    %c4 = arith.constant 4 : index
-    %c1 = arith.constant 1 : index
-    %result = scf.for %i = %c0 to %c4 step %c1 iter_args(%state = %a) -> tensor<128xi32> {
-      %p = arith.cmpi slt, %state, %b : tensor<128xi32>
-      %q = arith.cmpi slt, %h, %k : tensor<128xi16>
-      %m = arith.andi %p, %q : tensor<128xi1>
-      %s = arith.select %m, %state, %b : tensor<128xi1>, tensor<128xi32>
-      scf.yield %s : tensor<128xi32>
-    }
-    return %result : tensor<128xi32>
-  }
-})mlir",
-                                   work));
-  EXPECT_DOUBLE_EQ(work.elements, 3 * 128);
-  EXPECT_DOUBLE_EQ(work.describedElements, work.elements);
-  // These are source IR widths, not backend fusion-group lane counts.
-  // A fused i16 comparison can use the i32 consumer's narrower lane count.
-  EXPECT_DOUBLE_EQ(work.cmp32Elements, 128);
-  EXPECT_DOUBLE_EQ(work.cmp16Elements, 128);
-  EXPECT_DOUBLE_EQ(work.maskElements, 128);
-  EXPECT_DOUBLE_EQ(work.selects, 128);
-  // Loop-carried masks and data cross the closed-island boundary.
-  EXPECT_DOUBLE_EQ(work.projected16Elements, 0);
-  EXPECT_DOUBLE_EQ(work.projected32Elements, 0);
 }
 
 TEST(CostModelPassesTest, AssignOpIDsPassAnnotatesAscendOpsOnly) {

@@ -120,6 +120,31 @@ evaluateOneStage(LogicalStage stage,
 
 } // namespace
 
+TEST(SimdSimtCostModelTest, PredicateSelectUsesConfiguredRateInBothModes) {
+  auto stage = logicalStage("select", StageCostModelKind::PredicateMask);
+  stage.workload.operationElements.clear();
+  stage.workload.operationElements["predicate.select"] = 64;
+  stage.workload.issueElements = 64;
+  auto profile = hardwareProfile();
+  profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
+  profile.simt.operationRates["predicate.select"] = {1.0, 1.0};
+  auto baseline = evaluateOneStage(stage, profile);
+  profile.simd.operationRates["predicate.select"].throughput = 0.25;
+  profile.simt.operationRates["predicate.select"].throughput = 0.25;
+  auto slower = evaluateOneStage(stage, profile);
+  ASSERT_TRUE(static_cast<bool>(baseline));
+  ASSERT_TRUE(static_cast<bool>(slower));
+  ASSERT_EQ(slower->stages.front().implementations.size(), 2u);
+  for (unsigned i = 0; i < 2; ++i) {
+    const auto &before = baseline->stages.front().implementations[i].resources;
+    const auto &after = slower->stages.front().implementations[i].resources;
+    EXPECT_GT(before.compute, 0);
+    EXPECT_DOUBLE_EQ(after.compute, 4 * before.compute);
+    EXPECT_DOUBLE_EQ(after.predicate, before.predicate);
+    EXPECT_DOUBLE_EQ(after.issue, before.issue);
+  }
+}
+
 TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
   LogicalStage stage = logicalStage("scalar", StageCostModelKind::ScalarIssue);
   auto table = evaluateOneStage(std::move(stage));
@@ -172,118 +197,6 @@ TEST(SimdSimtCostModelTest, SimdPricesShortAxesPerSegmentAndElementWidth) {
   // silently inherited from the old FP32-only vectorWidth field.
   auto fp16Rows = simdCost(16, 128, 2.0);
   EXPECT_DOUBLE_EQ(fp16Rows.compute, 2.0);
-}
-
-TEST(SimdSimtCostModelTest, SimdMaskFallbackUsesProfileReferenceLanes) {
-  auto maskCost = [](int64_t contiguousElements, double segmentCount) {
-    LogicalStage stage =
-        logicalStage("mask-segments", StageCostModelKind::PredicateMask);
-    stage.workload.operationElements.clear();
-    const double elements = contiguousElements * segmentCount;
-    stage.workload.predicateElements = elements;
-    stage.workload.operationElements["predicate.select"] = elements;
-    stage.workload.issueElements = 2.0 * elements;
-    for (const char *operation : {"predicate.cmp", "predicate.select"}) {
-      TensorOperationWorkload tensor;
-      tensor.operation = operation;
-      tensor.elementBitWidth = 1;
-      tensor.logicalElements = elements;
-      tensor.segmentCount = segmentCount;
-      tensor.contiguousElementsPerSegment = contiguousElements;
-      stage.workload.tensorOperationWorkloads.push_back(std::move(tensor));
-    }
-    auto profile = hardwareProfile();
-    profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
-    auto table = evaluateOneStage(std::move(stage), std::move(profile));
-    if (!table) {
-      ADD_FAILURE() << llvm::toString(table.takeError());
-      return mlir::ascend::StageResourceCycles{};
-    }
-    return table->stages.front().implementations.front().resources;
-  };
-
-  // Policy regression: use the profile's 64 reference lanes per supplied
-  // segment, not packed i1 width. These synthetic descriptors do not validate
-  // backend fusion-group geometry or measured cycles.
-  const auto dense = maskCost(128, 1.0);
-  EXPECT_DOUBLE_EQ(dense.predicate, 2.0);
-  EXPECT_DOUBLE_EQ(dense.compute, 2.0);
-  EXPECT_DOUBLE_EQ(dense.issue, 1.0);
-  const auto segmented = maskCost(32, 4.0);
-  EXPECT_DOUBLE_EQ(segmented.predicate, 4.0);
-  EXPECT_DOUBLE_EQ(segmented.compute, 4.0);
-  EXPECT_DOUBLE_EQ(segmented.issue, 2.0);
-}
-
-TEST(SimdSimtCostModelTest, PredicateWidthProjectionChangesOnlySimdGeometry) {
-  for (int64_t sourceBits : {1, 8, 16, 32})
-    for (int64_t projectedBits : {8, 16, 32}) {
-      if (projectedBits < sourceBits)
-        continue;
-      for (int64_t size : {32, 64, 65, 128, 129, 256, 257, 512}) {
-        auto cost = [&](int64_t projection) {
-          auto stage =
-              logicalStage("predicate", StageCostModelKind::PredicateMask);
-          stage.workload.operationElements.clear();
-          stage.workload.predicateElements = size;
-          stage.workload.operationElements["predicate.select"] = size;
-          stage.workload.issueElements = 2 * size;
-          for (const char *op : {"predicate.cmp", "predicate.select"}) {
-            TensorOperationWorkload tensor;
-            tensor.operation = op;
-            tensor.elementBitWidth = sourceBits;
-            tensor.logicalElements = size;
-            tensor.segmentCount = 1;
-            tensor.contiguousElementsPerSegment = size;
-            tensor.simdPredicateBitWidth = projection;
-            stage.workload.tensorOperationWorkloads.push_back(tensor);
-          }
-          auto profile = hardwareProfile();
-          profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
-          profile.simt.operationRates["predicate.select"] = {1.0, 1.0};
-          return evaluateOneStage(std::move(stage), std::move(profile));
-        };
-        auto original = cost(0), projected = cost(projectedBits);
-        ASSERT_TRUE(static_cast<bool>(original));
-        ASSERT_TRUE(static_cast<bool>(projected));
-        const auto &simd =
-            projected->stages.front().implementations[0].resources;
-        const int64_t lanes = 2048 / projectedBits;
-        const double instructions = (size + lanes - 1) / lanes;
-        EXPECT_DOUBLE_EQ(simd.predicate, instructions);
-        EXPECT_DOUBLE_EQ(simd.compute, instructions);
-        EXPECT_DOUBLE_EQ(simd.issue, instructions / 2.0);
-        const auto &before =
-            original->stages.front().implementations[1].resources;
-        const auto &after =
-            projected->stages.front().implementations[1].resources;
-        EXPECT_DOUBLE_EQ(after.predicate, before.predicate);
-        EXPECT_DOUBLE_EQ(after.compute, before.compute);
-        EXPECT_DOUBLE_EQ(after.issue, before.issue);
-      }
-    }
-}
-
-TEST(SimdSimtCostModelTest, RejectsInvalidPredicateWidthProjection) {
-  TensorOperationWorkload tensor;
-  tensor.operation = "predicate.cmp";
-  tensor.elementBitWidth = 1;
-  tensor.logicalElements = tensor.contiguousElementsPerSegment = 128;
-  tensor.segmentCount = 1;
-  for (int64_t projection : {-1, 4, 64}) {
-    tensor.simdPredicateBitWidth = projection;
-    EXPECT_FALSE(tensor.isFiniteAndNonNegative());
-  }
-  tensor.simdPredicateBitWidth = 16;
-  tensor.elementBitWidth = 32;
-  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Cannot narrow source width.
-  tensor.simdPredicateBitWidth = 32;
-  tensor.elementBitWidth = 64;
-  EXPECT_FALSE(
-      tensor.isFiniteAndNonNegative()); // Expansion is not a width hint.
-  tensor.elementBitWidth = 32;
-  tensor.operation = "f32.add";
-  EXPECT_FALSE(tensor.isFiniteAndNonNegative()); // Predicate-only metadata.
 }
 
 TEST(SimdSimtCostModelTest,

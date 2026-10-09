@@ -123,29 +123,12 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
          work.tensorOperationWorkloads) {
       describedElements[tensor.operation] += tensor.logicalElements;
       describedIssueElements += tensor.logicalElements;
-      const int64_t effectiveBits = tensor.simdPredicateBitWidth > 0
-                                        ? tensor.simdPredicateBitWidth
-                                        : tensor.elementBitWidth;
       const double segmentBits =
           static_cast<double>(tensor.contiguousElementsPerSegment) *
-          static_cast<double>(effectiveBits);
-      // Closed predicate islands carry a separately projected SIMD data width.
-      // For unresolved i1 predicates, use reference lanes as a fallback,
-      // not a physical mask width or packed i1 data-vector capacity. Other
-      // descriptors retain their source widths. Actual fusion can change
-      // widths and segment boundaries; cross-group transfers are not modeled.
-      // This estimate can over- or under-count instructions, not bound them.
-      const bool useReferenceMaskFallback =
-          effectiveBits == 1 && (tensor.operation == "predicate.cmp" ||
-                                 tensor.operation == "predicate.select");
+          static_cast<double>(tensor.elementBitWidth);
       const double vectorInstructions =
           tensor.segmentCount *
-          (useReferenceMaskFallback
-               ? std::ceil(
-                     static_cast<double>(tensor.contiguousElementsPerSegment) /
-                     static_cast<double>(profile.vectorWidth))
-               : std::ceil(segmentBits /
-                           static_cast<double>(profile.vectorWidthBits)));
+          std::ceil(segmentBits / static_cast<double>(profile.vectorWidthBits));
       describedVectorInstructions[tensor.operation] += vectorInstructions;
       describedIssueInstructions += vectorInstructions;
     }

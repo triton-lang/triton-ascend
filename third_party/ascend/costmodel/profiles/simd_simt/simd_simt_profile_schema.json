@@ -14,6 +14,7 @@
     "compatible_targets",
     "score_unit",
     "selection_calibration",
+    "histogram",
     "simd",
     "simt"
   ],
@@ -23,8 +24,8 @@
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
     },
     "schema_version": {
-      "const": 12,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 retains the legacy SIMT logical-tensor capacity field and represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values."
+      "const": 13,
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 11 adds independent atomic-RMW rates and an explicit unknown-contention policy. Version 12 represents local scope fixed overhead as one measured SIMD-to-SIMT-to-SIMD pair instead of two synthetic directional values. Version 13 moves the calibrated tt.histogram coefficient table out of the C++ model into a target-owned histogram section."
     },
     "profile_version": {
       "type": "string",
@@ -63,6 +64,9 @@
     },
     "selection_calibration": {
       "$ref": "#/definitions/selection_calibration"
+    },
+    "histogram": {
+      "$ref": "#/definitions/histogram_model"
     },
     "simd": {
       "$ref": "#/definitions/simd_model"
@@ -760,6 +764,131 @@
             }
           },
           "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "histogram_model": {
+      "type": "object",
+      "description": "Calibrated tt.histogram cost rows. The op's cost lives inside the lowering (dhistv2 instructions or a SIMT atomicAdd loop) and never appears in TTIR, so it is priced by this table instead of an operation rate. Row selection mirrors the lowering gates; no shape or workload name is stored here.",
+      "required": [
+        "description",
+        "structure",
+        "simd_template",
+        "simt_template",
+        "simt_only",
+        "source",
+        "confidence"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "structure": {
+          "$ref": "#/definitions/histogram_structure"
+        },
+        "simd_template": {
+          "$ref": "#/definitions/histogram_row_group"
+        },
+        "simt_template": {
+          "$ref": "#/definitions/histogram_row_group"
+        },
+        "simt_only": {
+          "$ref": "#/definitions/histogram_row_group"
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "$ref": "#/definitions/confidence"
+        }
+      },
+      "additionalProperties": false
+    },
+    "histogram_structure": {
+      "type": "object",
+      "description": "Template constants that select which coefficient row a shape is billed against; versioned with the coefficients because a different template or unified-buffer size changes them.",
+      "required": [
+        "chunk_lanes",
+        "threads_per_warp",
+        "max_segments_u16",
+        "max_segments_u32",
+        "self_amortised_segments",
+        "chunks_per_segment",
+        "flush_chunks",
+        "atomic_window_bytes"
+      ],
+      "properties": {
+        "chunk_lanes": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Lanes per dhistv2 instruction; the chunk count is ceil(n / chunk_lanes)."
+        },
+        "threads_per_warp": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Lanes per SIMT warp; simt_only threads = threads_per_warp * num_warps."
+        },
+        "max_segments_u16": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest segment count the u16 dhistv2 path accepts."
+        },
+        "max_segments_u32": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Largest segment count the u32 dhistv2 path accepts."
+        },
+        "self_amortised_segments": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Segment count the single pass amortises unconditionally."
+        },
+        "chunks_per_segment": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Chunks each further segment must supply for the dhistv2 gate."
+        },
+        "flush_chunks": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Full chunks a dhistv2 accumulator holds before flushing; bounds the u32 small-bins n."
+        },
+        "atomic_window_bytes": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Per-thread footprint beyond which simt_only leaves its single-pass window, priced by per_kink."
+        }
+      },
+      "additionalProperties": false
+    },
+    "histogram_row": {
+      "type": "object",
+      "description": "One calibrated row: every numeric field is a coefficient, and a row carries only the coefficients its formula uses. Known sets: chunk (intercept, per_chunk), chunk_knee (+per_chunk_beyond_knee, knee_chunks), chunk_segment (intercept, per_chunk_per_segment, per_segment), simt_template (intercept, scan_per_elem, count_per_elem), simt_only (intercept, per_elem, per_iter, per_bin, per_thread, per_kink).",
+      "minProperties": 2,
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "histogram_row_group": {
+      "type": "object",
+      "description": "One named group of calibrated rows. Row names are the shapes that select them (dtype, bin range relative to the 256-lane segment, mask presence); the exact required row set is enforced by the C++ loader, so this schema only constrains the shape.",
+      "required": [
+        "description",
+        "rows"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rows": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/histogram_row"
+          }
         }
       },
       "additionalProperties": false

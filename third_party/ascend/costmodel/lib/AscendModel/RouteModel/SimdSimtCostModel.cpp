@@ -11,6 +11,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/StageHistogramCosts.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -45,7 +46,7 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
-constexpr int64_t kSupportedProfileSchemaVersion = 12;
+constexpr int64_t kSupportedProfileSchemaVersion = 13;
 
 struct StructuralProfile {
   int64_t tinyDotFlopsMax = 0;
@@ -411,6 +412,11 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
       profile.structural.tinyDotFlopsMax =
           reader.integer(*structural, "tiny_dot_flops_max", "structural");
     }
+  }
+
+  if (const auto *histogram = reader.object(*root, "histogram", "profile")) {
+    if (llvm::Error error = readHistogramRates(*histogram, hardware.histogram))
+      reader.setError(llvm::toString(std::move(error)));
   }
 
   const auto *simd = reader.object(*root, "simd", "profile");

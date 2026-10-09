@@ -2,7 +2,11 @@
 
 #include "AscendModel/RouteModel/StageCostModels.h"
 
+#include "mlir/IR/BuiltinTypes.h"
+
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -11,6 +15,7 @@
 #include <array>
 #include <cmath>
 #include <initializer_list>
+#include <string>
 #include <system_error>
 
 using namespace mlir;
@@ -414,6 +419,27 @@ static double estimateStage(const LogicalStage &stage,
                                 std::max({r.scalar + r.compute, r.load, r.store,
                                           r.atomic, r.issue}));
     return serial;
+  case StageCostModelKind::Histogram: {
+    // tt.histogram's body (template-internal vlds/vsts/atomicAdd) never
+    // appears in TTIR, so mapWorkload maps a pure histogram Stage to zero
+    // resources; the calibrated perCall replaces exactly that hidden body.
+    // It is fitted load-free, so it does NOT include GM<->UB movement and
+    // composes with sibling r.load/r.store/r.compute/r.atomic like any
+    // compute resource: overlapped under SIMD pipelining, summed otherwise.
+    double perCall = 0.0;
+    if (!estimateHistogramStageCost(stage, mode, perCall,
+                                    profile.logicalWarpGroupCount,
+                                    profile.histogram))
+      return serial;
+    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
+      return r.setup +
+             count * (r.scalar + r.predicate + controlBody(r) + r.spill +
+                      std::max({r.load, r.store, r.atomic, perCall, r.issue}));
+    const double execution = r.scalar + r.predicate + r.load + r.store +
+                             r.atomic + r.compute + r.dot + r.shuffle +
+                             controlBody(r) + r.spill + perCall;
+    return r.setup + count * std::max(execution, r.issue);
+  }
   default:
     if (mode == StageMode::SIMD)
       return r.setup +
@@ -480,6 +506,8 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "indirect_gather_memory";
   case StageCostModelKind::AtomicMemory:
     return "atomic_memory";
+  case StageCostModelKind::Histogram:
+    return "histogram";
   case StageCostModelKind::IndependentPipelinedLoop:
     return "independent_pipelined_loop";
   case StageCostModelKind::LoopCarriedRecurrence:
@@ -568,7 +596,7 @@ bool HardwareProfile::isValid() const {
          std::isfinite(superblockPersistentStateBytesPerCycle) &&
          superblockPersistentStateBytesPerCycle > 0.0 &&
          simd.isValid(StageMode::SIMD) && simt.isValid(StageMode::SIMT) &&
-         transition.isValid();
+         transition.isValid() && histogram.isValid();
 }
 
 llvm::Expected<StageCostTable>

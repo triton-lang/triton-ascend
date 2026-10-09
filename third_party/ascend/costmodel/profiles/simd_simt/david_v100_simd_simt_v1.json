@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
-  "schema_version": 12,
-  "profile_version": "david-v100-simd-simt-20260918-v27-segmented-issue-fixed-transition",
+  "schema_version": 13,
+  "profile_version": "david-v100-simd-simt-20260924-v24",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -32,6 +32,151 @@
       "tiny_dot": 0.06,
       "tiny_dot_flops_max": 16384
     }
+  },
+  "histogram": {
+    "description": "Calibrated tt.histogram rows in AIV system cycles per histogram call. tt.histogram is priced here instead of through an operation rate because its cost lives inside the lowering (dhistv2 template instructions, or the simt_only atomicAdd loop) and never appears in TTIR. Row selection mirrors the lowering gates and lives in the C++ model; this section only supplies structure constants and coefficients.",
+    "structure": {
+      "chunk_lanes": 256,
+      "threads_per_warp": 32,
+      "max_segments_u16": 16,
+      "max_segments_u32": 8,
+      "self_amortised_segments": 4,
+      "chunks_per_segment": 2,
+      "flush_chunks": 255,
+      "atomic_window_bytes": 65536.0
+    },
+    "simd_template": {
+      "description": "dhistv2 SIMD template rows, used by every compile mode except simt_only. Rows are keyed by the shape that selects them: dtype, whether num_bins fits one 256-lane segment (bins_lt_256 or bins_256) or spans several segments (bins_gt_256), and whether a mask is present. u8/s8, u16/s16, and u32/s32 share a row per shape because the lowering generates byte-identical signless-integer code. u8 has one row because a u8 value can never reach bins >= 256, and u64 only has the bins <= 256 shapes because that is all the u64 gate admits.",
+      "rows": {
+        "u8": {
+          "intercept": 38.4,
+          "per_chunk": 7.26
+        },
+        "u16_bins_lt_256": {
+          "intercept": 54.5,
+          "per_chunk": 7.49
+        },
+        "u16_bins_256_unmasked": {
+          "intercept": 48.5,
+          "per_chunk": 7.78
+        },
+        "u16_bins_256_masked": {
+          "intercept": 146.7,
+          "per_chunk": 5.81,
+          "per_chunk_beyond_knee": 7.37,
+          "knee_chunks": 32.0
+        },
+        "u16_bins_gt_256": {
+          "intercept": 90.2,
+          "per_chunk_per_segment": 7.17,
+          "per_segment": 51.7
+        },
+        "u32_bins_lt_256_unmasked": {
+          "intercept": 61.0,
+          "per_chunk": 9.42
+        },
+        "u32_bins_lt_256_masked": {
+          "intercept": 144.2,
+          "per_chunk": 9.39
+        },
+        "u32_bins_256_unmasked": {
+          "intercept": 133.1,
+          "per_chunk": 13.35
+        },
+        "u32_bins_256_masked": {
+          "intercept": 183.6,
+          "per_chunk": 13.68
+        },
+        "u32_bins_gt_256": {
+          "intercept": 64.2,
+          "per_chunk_per_segment": 13.48,
+          "per_segment": 86.3
+        },
+        "u32_small_bins_park": {
+          "intercept": 46.8,
+          "per_chunk": 9.43
+        },
+        "u32_small_bins_pred_mask": {
+          "intercept": 46.4,
+          "per_chunk": 11.63
+        },
+        "u64_bins_lt_256_unmasked": {
+          "intercept": 64.2,
+          "per_chunk": 11.1
+        },
+        "u64_bins_lt_256_masked": {
+          "intercept": 72.8,
+          "per_chunk": 10.98
+        },
+        "u64_bins_256_unmasked": {
+          "intercept": 62.6,
+          "per_chunk": 15.33
+        },
+        "u64_bins_256_masked": {
+          "intercept": 69.0,
+          "per_chunk": 16.39
+        }
+      }
+    },
+    "simt_template": {
+      "description": "Template SIMT atomicAdd fallback rows, queued when the dhistv2 gate fails. per_elem is the sum of a scan and an in-range count part; the count part charges the data-dependent n_counted at its worst case n.",
+      "rows": {
+        "u8": {
+          "intercept": 215.3,
+          "scan_per_elem": 0.27,
+          "count_per_elem": 0.64
+        },
+        "u16": {
+          "intercept": 164.2,
+          "scan_per_elem": 0.35,
+          "count_per_elem": 0.54
+        },
+        "u32": {
+          "intercept": 197.8,
+          "scan_per_elem": 0.28,
+          "count_per_elem": 0.65
+        }
+      }
+    },
+    "simt_only": {
+      "description": "simt_only IR-lowering rows (HistogramOpToLLVM.cpp). The atomicAdd is emitted for every element, so there is no n_counted term and masked calls reuse the unmasked coefficients. Fitted on 322 in-domain cases over 8 dtypes and num_warps 1..64, limited to a per-thread footprint of at most 128 elements and below 1024 bytes; larger footprints either degrade 1.5-1.8x or fault the device.",
+      "rows": {
+        "u8": {
+          "intercept": -15.7,
+          "per_elem": 0.9334,
+          "per_iter": 16.4778,
+          "per_bin": 33.0609,
+          "per_thread": 0.296,
+          "per_kink": 0.0
+        },
+        "u16": {
+          "intercept": -51.6,
+          "per_elem": 0.9468,
+          "per_iter": 19.5045,
+          "per_bin": 34.1936,
+          "per_thread": 0.3257,
+          "per_kink": 0.0
+        },
+        "u32": {
+          "intercept": 62.1,
+          "per_elem": 0.97,
+          "per_iter": 6.5809,
+          "per_bin": 14.4873,
+          "per_thread": 0.2424,
+          "per_kink": 0.0
+        },
+        "u64": {
+          "intercept": 60.5,
+          "per_elem": 1.0115,
+          "per_iter": 27.2619,
+          "per_bin": 30.0098,
+          "per_thread": 0.3157,
+          "per_kink": 0.165
+        }
+      }
+    },
+    "source": "Device-side sweep on dav-c310 (950PR), dual-binary A/B (dhistv2 template vs SIMT-only baseline), per-path least squares with a 20% pre-registration holdout: derivation median APE <= 3.7% and holdout median APE <= 5.5% per dhistv2 path, dhistv2-vs-SIMT route agreement 98.4%. The u16/u32/u64 dhistv2 rows were re-measured on the restructured template (246-case sweep). The simt_only rows come from a separate R-stepped sweep of the IR lowering (322 in-domain cases, 5-fold cross-validation worst-width median APE 4.7%). Coefficients are target-specific and must be re-fitted when the lowering template, the unified-buffer size, or the target changes; see costmodel/profiles/microbench/data_provider/camodel/histogram_costmodel_notes.md.",
+    "confidence": "medium"
   },
   "simd": {
     "description": "Inputs used to estimate the all-SIMD candidate: SIMD width, setup, operation, memory, and dot costs.",

@@ -10,6 +10,10 @@
 #include <gtest/gtest.h>
 
 using mlir::ascend::HardwareProfile;
+using mlir::ascend::HistogramRateRow;
+using mlir::ascend::kHistogramSimdTemplateKeys;
+using mlir::ascend::kHistogramSimtOnlyKeys;
+using mlir::ascend::kHistogramSimtTemplateKeys;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
 using mlir::ascend::SimdSimtFeatureSummary;
@@ -18,6 +22,7 @@ using mlir::ascend::StageCostEvaluator;
 using mlir::ascend::StageCostModelKind;
 using mlir::ascend::StageCostTable;
 using mlir::ascend::StageFeatureAnalysis;
+using mlir::ascend::StageHistogramRates;
 using mlir::ascend::StageImplementationCost;
 using mlir::ascend::StageMode;
 using mlir::ascend::StageModeLegalityAnalysis;
@@ -88,6 +93,44 @@ HardwareProfile hardwareProfile(StageTransitionCost transition = {}) {
   profile.simt.vectorWidth = 1;
   profile.simt.vectorWidthBits = 1;
   profile.simt.issueWidth = 32;
+  // The histogram table has no compiled-in fallback, so the fixture must pass
+  // isValid() even though no test here exercises a histogram Stage.
+  StageHistogramRates &histogram = profile.histogram;
+  histogram.structure = {256, 32, 16, 8, 4, 2, 255, 65536.0};
+  auto fillRow =
+      [](HistogramRateRow &row,
+         std::initializer_list<std::pair<llvm::StringRef, double>> c) {
+        row.coefficients.clear();
+        for (const auto &kv : c)
+          row.coefficients[kv.first] = kv.second;
+      };
+  for (llvm::StringLiteral key : kHistogramSimdTemplateKeys)
+    fillRow(histogram.simdTemplate[key],
+            {{"intercept", 100.0}, {"per_chunk", 10.0}});
+  fillRow(histogram.simdTemplate["u16_bins_256_masked"],
+          {{"intercept", 100.0},
+           {"per_chunk", 5.0},
+           {"per_chunk_beyond_knee", 7.0},
+           {"knee_chunks", 32.0}});
+  fillRow(histogram.simdTemplate["u16_bins_gt_256"],
+          {{"intercept", 100.0},
+           {"per_chunk_per_segment", 7.0},
+           {"per_segment", 50.0}});
+  fillRow(histogram.simdTemplate["u32_bins_gt_256"],
+          {{"intercept", 100.0},
+           {"per_chunk_per_segment", 13.0},
+           {"per_segment", 86.0}});
+  for (llvm::StringLiteral key : kHistogramSimtTemplateKeys)
+    fillRow(histogram.simtTemplate[key], {{"intercept", 100.0},
+                                          {"scan_per_elem", 1.0},
+                                          {"count_per_elem", 1.0}});
+  for (llvm::StringLiteral key : kHistogramSimtOnlyKeys)
+    fillRow(histogram.simtOnly[key], {{"intercept", 100.0},
+                                      {"per_elem", 1.0},
+                                      {"per_iter", 1.0},
+                                      {"per_bin", 1.0},
+                                      {"per_thread", 1.0},
+                                      {"per_kink", 0.0}});
   profile.transition = std::move(transition);
   return profile;
 }

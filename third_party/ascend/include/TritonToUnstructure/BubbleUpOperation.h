@@ -53,7 +53,8 @@ class BubbleUpExtract : public OpRewritePattern<ExtractOpTy> {
 public:
   using OpRewritePattern<ExtractOpTy>::OpRewritePattern;
 
-  explicit BubbleUpExtract(MLIRContext *context, bool enableAggressiveMode);
+  explicit BubbleUpExtract(MLIRContext *context, bool enableAggressiveMode,
+                           bool compileOn91095);
 
   LogicalResult matchAndRewrite(ExtractOpTy op,
                                 PatternRewriter &rewriter) const override;
@@ -61,6 +62,15 @@ public:
 private:
   Value createExtractOp(ExtractOpTy op, Value value, Location loc,
                         PatternRewriter &rewriter) const;
+  // On non-A5 targets the vector cast (vcast) instruction requires the source
+  // address to be 32-byte aligned. For bf16 (2 bytes/element), bubbling an
+  // extract_slice above an arith.extf lands at a byte offset of
+  // 2 * linearElementOffset, which is 32-byte aligned only when the linear
+  // element offset is a multiple of 16. Returns true when the rewrite would
+  // produce a non-32-byte-aligned bf16 slice (or the offset cannot be proven
+  // aligned statically).
+  bool isBf16ExtSliceMisaligned(ExtractOpTy op,
+                                arith::ExtFOp parentOp) const;
   template <typename BinOpTy>
   void bubbleUpIntBinaryOp(ExtractOpTy op, BinOpTy binOp, Location loc,
                            PatternRewriter &rewriter) const;
@@ -107,6 +117,7 @@ private:
                          Location loc, PatternRewriter &rewriter) const;
 
   bool enableAggressiveMode;
+  bool compileOn91095;
 };
 
 class BubbleUpOperationPass

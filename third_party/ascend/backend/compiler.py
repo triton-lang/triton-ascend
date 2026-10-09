@@ -383,7 +383,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
-        ascend.passes.ttir.add_bubble_up_operation(pm)
+        ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)

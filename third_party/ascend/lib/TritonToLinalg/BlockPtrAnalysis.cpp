@@ -81,7 +81,8 @@ hivm::PointerCastOp createScalarPointerCast(OpBuilder &builder, Location loc,
 // as a memref carrier. The parse site still requires BaseMemRefType, so merely
 // appearing in this list never makes an unconverted pointer an opaque source.
 static bool isScalarPointerTransport(Operation *op) {
-  return op && isa<scf::IfOp, scf::ForOp, scf::WhileOp, arith::SelectOp>(op);
+  return op && isa<scf::IfOp, scf::ForOp, scf::WhileOp, arith::SelectOp,
+                   triton::CallOp>(op);
 }
 
 // Returns true only for sources known to carry a complete scalar integer

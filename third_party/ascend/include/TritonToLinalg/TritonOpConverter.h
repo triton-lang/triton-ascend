@@ -582,6 +582,11 @@ public:
 bool hasScalarPointerResult(scf::IfOp op);
 bool isScalarPointerSelect(arith::SelectOp op);
 
+// Include the descriptor's element offset when passing a complete pointer
+// address across control-flow or function boundaries.
+FailureOr<Value> materializePointerAddress(Value value, Location loc,
+                                           ConversionPatternRewriter &rewriter);
+
 // Marks an scf.if temporarily rebuilt by IfConverter. Its scalar-pointer
 // results are represented as complete i64 addresses, so only its own yields
 // require the matching pointer-to-address conversion.

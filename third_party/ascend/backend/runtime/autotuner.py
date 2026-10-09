@@ -2136,26 +2136,21 @@ class AutoTilingTuner(Autotuner):
         # generate key
         all_args = {**self.nargs, **kwargs}
         _args = {k: v for (k, v) in all_args.items() if k in self.arg_names}
-        key_names = [arg_name for arg_name in self.keys if arg_name in _args]
-        key = [_args[arg_name] for arg_name in key_names]
+        key = [_args[arg_name] for arg_name in self.keys if arg_name in _args]
 
         # Currently, we use the dtype with maximum byte length
         dtype = None
-        for arg_name, arg in _args.items():
+        for _, arg in _args.items():
             if hasattr(arg, "dtype"):
                 key.append(str(arg.dtype))
-                key_names.append(f"{arg_name}.dtype")
                 dtype = (arg.dtype if get_byte_per_numel(arg.dtype) >= get_byte_per_numel(dtype) else dtype)
         if dtype is None:
             raise NotImplementedError("Not support for non-Tensor inputs")
         key.append(("compile_mode", compile_mode))
-        key_names.append("compile_mode")
         if self.user_specified_multibuffer_mode is not None:
             key.append(("multibuffer_mode", self.user_specified_multibuffer_mode))
-            key_names.append("multibuffer_mode")
 
         key = tuple(key)
-        self.key_names = tuple(key_names)
         if key not in self.cache:
             if self.auto_gen_config:
                 self.cv_parse_result = self._autoparse_axis_params(all_args)
@@ -2297,10 +2292,17 @@ class AutoTilingTuner(Autotuner):
         self.best_config = config
 
         if self.print_autotuning and did_benchmark:
+            all_args = {**self.nargs, **kwargs}
+            key_args = {name: arg for name, arg in all_args.items() if name in self.arg_names}
+            key_names = [name for name in self.keys if name in key_args]
+            key_names.extend(f"{name}.dtype" for name, arg in key_args.items() if hasattr(arg, "dtype"))
+            key_names.append("compile_mode")
+            if self.user_specified_multibuffer_mode is not None:
+                key_names.append("multibuffer_mode")
             key_fields = ", ".join(
                 f"{name}={value[1]!r}" if isinstance(value, tuple) and len(value) == 2 and value[0] == name
                 else f"{name}={value!r}"
-                for name, value in zip(self.key_names, key)
+                for name, value in zip(key_names, key)
             )
             print(f"Triton autotuning for function {self.base_fn.__name__},\n"
                   f"with key as {key!r},\n"

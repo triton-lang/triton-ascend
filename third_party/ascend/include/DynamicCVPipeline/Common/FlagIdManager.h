@@ -33,9 +33,12 @@ namespace triton {
 // Purpose: Globally scan and allocate unique flag_id for synchronization
 class FlagIdManager {
 public:
-  // Maximum flag count (hardware limitation)
+  // Hardware provides flag ids 0..15; 15 is reserved for pipe sync, so the
+  // usable ids are 0..MAX_FLAG_ID (15 flags).
   static constexpr int MAX_FLAG_ID = 14;
-  static constexpr int MULTI_MAX_FLAG_ID = 7;
+  // Multi-buffering allocates one more flag per transfer on top of the
+  // existing ones, so at most 7 flags (0..6) fit next to their copies (7..13).
+  static constexpr int MULTI_MAX_FLAG_ID = 6;
   static constexpr int INVALID_FLAG_ID = -1;
 
   // Constructor: initialize with Module for scanning
@@ -55,8 +58,9 @@ private:
   // allocation
   void scanExistingFlags(ModuleOp module);
 
-  // Currently allocated maximum ID
-  int64_t currentMaxId = 0;
+  // Currently allocated maximum ID; INVALID_FLAG_ID while none is allocated,
+  // so the first acquired ID is 0.
+  int64_t currentMaxId = INVALID_FLAG_ID;
 
   // Save module for reuse analysis
   ModuleOp module;

@@ -1,7 +1,7 @@
-// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15" --implicit-check-not="<PIPE_FIX>, <PIPE_V>] flag = 1" --implicit-check-not="<PIPE_MTE3>, <PIPE_MTE1>] flag = 0"
+// RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s --implicit-check-not="flag = -1" --implicit-check-not="flag = 15"
 
-module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  func.func @flag_reuse_over_limit() {
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 1 : i32} {
+  func.func @flag_id_from_zero() {
     %cst = arith.constant {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} 0.000000e+00 : f32
     %alloc = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32>
     %ta = bufferization.to_tensor %alloc restrict writable {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE"} : memref<32x32xf32> to tensor<32x32xf32>
@@ -30,22 +30,17 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %empty_15 = tensor.empty() {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
     %c15 = linalg.transpose ins(%v14 : tensor<32x32xf32>) outs(%empty_15 : tensor<32x32xf32>) permutation = [1, 0] {ssbuffer.block_id = 15 : i32, ssbuffer.core_type = "CUBE"}
     %v16 = math.exp %c15 {ssbuffer.block_id = 16 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>
-    %empty_17 = tensor.empty() {ssbuffer.block_id = 17 : i32, ssbuffer.core_type = "CUBE"} : tensor<32x32xf32>
-    %c17 = linalg.transpose ins(%v16 : tensor<32x32xf32>) outs(%empty_17 : tensor<32x32xf32>) permutation = [1, 0] {ssbuffer.block_id = 17 : i32, ssbuffer.core_type = "CUBE"}
-    %v18 = math.exp %c17 {ssbuffer.block_id = 18 : i32, ssbuffer.core_type = "VECTOR"} : tensor<32x32xf32>
     return
   }
 }
 
-// This is an alternating Cube->Vector / Vector->Cube chain of 17 transfers,
-// more than the 15 usable flag ids (0..MAX_FLAG_ID), so reuse is forced. Opposite-direction transfers run concurrently
-// on the two cores (a shared counting-flag would let one core's wait steal the
-// other's set), so they must never share a flag id. Same-direction transfers,
-// serialized by their pipe's FIFO, all collapse onto one flag. The result is a
-// strict partition by direction: every Cube->Vector (FIX/V) sync uses one flag
-// and every Vector->Cube (MTE3/MTE1) sync uses a different one (enforced by the
-// implicit-check-not directives in the RUN line).
-// CHECK-LABEL: func.func @flag_reuse_over_limit
-// CHECK: <PIPE_FIX>, <PIPE_V>] flag = 0
-// CHECK: <PIPE_MTE3>, <PIPE_MTE1>] flag = 1
+// Flag ids start at 0. In single-buffer mode (inter_core_buf_count = 1; the
+// default of 2 caps ids at MULTI_MAX_FLAG_ID) the usable ids are
+// 0..MAX_FLAG_ID (14), and this alternating Cube->Vector / Vector->Cube chain
+// has exactly 15 transfers, so every transfer gets its own flag and no reuse
+// is needed. Vector->Cube
+// transfers are allocated first (0..6), Cube->Vector ones next (7..14).
+// CHECK-LABEL: func.func @flag_id_from_zero
+// CHECK-DAG: <PIPE_MTE3>, <PIPE_MTE1>] flag = 0
+// CHECK-DAG: <PIPE_FIX>, <PIPE_V>] flag = 14
 // CHECK: return

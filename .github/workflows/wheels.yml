@@ -28,23 +28,30 @@ jobs:
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      # PYTHON must live under container.env (not job env) so ARC maps it into
+      # the job container's pod-spec env, where the runner pod's postStart hook
+      # (buildkitd node pinning) can read it. Same pattern as vllm-ascend's SOC.
+      env:
+        PYTHON: ${{matrix.python}}
     timeout-minutes: 360
-
     strategy:
       fail-fast: false
       # Limit parallelism: wheel builds compile hundreds of C++ files on
       # memory-constrained workers; too many at once causes OOM kills and
       # buildkitd/SWR auth timeouts.
-      max-parallel: 6
+      max-parallel: 8
       matrix:
         config:
         - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
         - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
-        - {ref: 'main', tag: 'main', local: 'dev'}
-        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release'}
+        # npuir: ON builds the BishengIR payload in-image via build_npuir.py
+        # (requires the TRITON_BUILD_NPUIR handling in third_party/ascend/build
+        # on that branch); OFF uses the prebuilt payload from npuir-build.yml.
+        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
+        # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
 
     permissions:
       id-token: write
@@ -76,15 +83,108 @@ jobs:
           # push/workflow_dispatch/schedule: use the matrix branch ref.
           ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
 
+      - name: Restore npuir payload from local cache
+        id: npuir-cache
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+        shell: bash
+        run: |
+          set -eu
+          # The checkout dir is owned by the runner UID, not the job container
+          # user, so git would fail with "dubious ownership" on git ls-tree.
+          git config --global --add safe.directory "*"
+          # The payload is the BishengIR compiler built from the AscendNPU-IR
+          # submodule; key the cache on that submodule's pinned gitlink SHA so
+          # it invalidates only when the payload actually changes (not on every
+          # commit). Cached on the shared-volume PVC (/root/.cache).
+          NPUIR_SHA=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print $3}')
+          CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"
+          echo "cache_dir=${CACHE_DIR}" >> "$GITHUB_OUTPUT"
+          if [ -x "${CACHE_DIR}/bin/bishengir-compile" ]; then
+            echo "npuir payload cache hit: ${CACHE_DIR}"
+            rm -rf .npuir-payload
+            mkdir -p .npuir-payload
+            cp -a "${CACHE_DIR}/bin" .npuir-payload/
+            cp -a "${CACHE_DIR}/lib" .npuir-payload/
+            chmod -R a+x .npuir-payload/bin
+            echo "cache_hit=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "npuir payload cache miss (npuir sha=${NPUIR_SHA})"
+            echo "cache_hit=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Download npuir payload from PR build
+        id: payload-pr
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true'
+        # Pull this PR's npuir-build artifact first (pre-merge testing); for
+        # fork PRs the run lives on the fork, so allow_forks is required.
+        # push/schedule use the matrix branch's payload.
+        uses: dawidd6/action-download-artifact@v9
+        continue-on-error: true
+        with:
+          workflow: npuir-build.yml
+          workflow_conclusion: success
+          allow_forks: true
+          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
+          name: npuir-payload-manylinux-${{ matrix.config.arch }}
+          path: npuir-artifacts
+
+      - name: Prepare npuir payload
+        id: prepare-payload
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF'
+        shell: bash
+        run: |
+          set -eu
+          # Cache hit already populated .npuir-payload in the restore step.
+          if [ "${{ steps.npuir-cache.outputs.cache_hit }}" = "true" ]; then
+            echo "Using locally cached npuir payload."
+            echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
+          # wheels.Dockerfile. Sourced from the npuir-build GitHub artifact
+          # downloaded above; when it is missing (fresh branch, expired
+          # artifact) fall back to compiling the payload in-image so the build
+          # still produces a correct wheel instead of failing.
+          BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
+          if [ -z "${BIN}" ]; then
+            echo "No npuir-payload artifact for ${{ matrix.config.arch }}; falling back to in-image build (slow)."
+            echo "build_npuir=ON" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+          echo "Using npuir-build payload at ${PAYLOAD_DIR}"
+          rm -rf .npuir-payload
+          mkdir -p .npuir-payload
+          cp -a "${PAYLOAD_DIR}/bin" .npuir-payload/
+          cp -a "${PAYLOAD_DIR}/lib" .npuir-payload/
+          # GitHub artifact zips carry no unix permission bits (upload-artifact
+          # zips without setUnixMode) and action-download-artifact extracts
+          # via adm-zip as 0644, so restore the exec bit explicitly.
+          chmod -R a+x .npuir-payload/bin
+          # Seed the shared-volume PVC cache atomically (write a per-process
+          # temp dir, then mv) so the next run skips the slow download and the
+          # concurrent same-arch jobs (same key, identical content) never
+          # clobber each other's temp or expose a half-written dir.
+          CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
+          TMP_DIR="${CACHE_DIR}.tmp.$$"
+          rm -rf "${TMP_DIR}"
+          mkdir -p "${TMP_DIR}"
+          cp -a .npuir-payload/bin "${TMP_DIR}/"
+          cp -a .npuir-payload/lib "${TMP_DIR}/"
+          chmod -R a+x "${TMP_DIR}/bin"
+          rm -rf "${CACHE_DIR}"
+          mv "${TMP_DIR}" "${CACHE_DIR}"
+          echo "Saved npuir payload to local cache ${CACHE_DIR}"
+          ls -la .npuir-payload/bin
+          echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
+
       - name: Compute build variables
         id: vars
         shell: bash
         run: |
-          NUM_PROCS=$(( $(nproc) / 6 ))
-          if [ "$NUM_PROCS" -lt 1 ]; then NUM_PROCS=1; fi
-          # Hard-cap at 8 to avoid OOM on memory-constrained buildkitd workers.
-          if [ "$NUM_PROCS" -gt 8 ]; then NUM_PROCS=8; fi
-          echo "max_jobs=${NUM_PROCS}" >> $GITHUB_OUTPUT
+          # Parallelism is decided inside the Docker build (the job pod's
+          # cgroup here is tiny and unrelated to the shared buildkitd the
+          # compile actually runs on; see wheels.Dockerfile).
           BUILD_DATE=$(date -u +%Y%m%d)
           echo "build_date=${BUILD_DATE}" >> $GITHUB_OUTPUT
 
@@ -95,21 +195,152 @@ jobs:
           context: .
           file: .github/workflows/build/wheels.Dockerfile
           build-args: |
-            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
+            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
             PYTHON_VERSION=${{ matrix.python }}
-            MAX_JOBS=${{ steps.vars.outputs.max_jobs }}
+            TRITON_BUILD_NPUIR=${{ steps.prepare-payload.outputs.build_npuir || matrix.branch.npuir }}
             TRITON_WHEEL_VERSION_SUFFIX=+${{ matrix.branch.local }}
             BUILD_DATE=${{ steps.vars.outputs.build_date }}
+          # Same registry-cache pattern as build-docker-image.yml: the dnf and
+          # pip layers of wheels.Dockerfile (kept before the COPY of the
+          # workspace) hit the cache across runs; the source-dependent wheel
+          # build layer still rebuilds, but skips the dependency setup.
+          # cache-from only (no cache-to): the cache is warmed from a single
+          # cache-to run and then read-only, avoiding the expensive mode=max
+          # export on every build.
+          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
           outputs: type=local,dest=./wheelhouse
 
       - uses: actions/upload-artifact@v4
+        # Consumed by the Test-Wheels NPU job below (and manually during PR
+        # review), so it must run on every event that builds.
         if: github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false'
         with:
-          name: cibw-wheels-manylinux_2_28_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: ./wheelhouse/*.whl
+          # Wheels are already zip-compressed; skip the re-compress pass.
+          compression-level: 0
+
+  # Installs the built wheels on real NPU pods and runs a representative
+  # subset of the Ascend unit tests (vector add / softmax / matmul / layer
+  # norm / attention / grouped gemm / argmax / cumsum / add / dot). This
+  # exercises the wheel's bundled BishengIR compiler end to end: nothing on
+  # PATH provides bisheng binaries, so the backend must use the wheel copy.
+  # The job reports status only; Build-Wheels uploads to OBS independently.
+  Test-Wheels:
+    name: Test wheels on NPU (${{ matrix.config.chip_type }})
+    needs: Build-Wheels
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      # Same image as integration-tests-ascend.yml (proven to pull on these
+      # pods): region cn-southwest-2, tag = cann_version-chip_type-os-pyX.
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
+    timeout-minutes: 120
+    env:
+      PYTHON: python3
+      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
+      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
+      PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          # a3 pods carry py3.10/3.11 images -> cp311 wheel; a5 (950) -> cp312.
+          - {runs_on: ['linux-aarch64-a3-800i-4', 'cn12-001'], chip_type: 'a3', arch: 'aarch64', cann_version: '8.5.0', os: 'ubuntu22.04', python_version: '3.11', python: 'cp311'}
+          - {runs_on: ['linux-amd64-a5-2'], chip_type: '950', arch: 'x86_64', cann_version: '9.1.0', os: 'ubuntu22.04', python_version: '3.12', python: 'cp312'}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
+          submodules: "true"
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "*"
+
+      - name: Download built wheel
+        id: download
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.config.python }}-main-wheels-upload
+          path: wheelhouse
+
+      - name: Test wheel on NPU
+        shell: bash
+        run: |
+          set -eu
+          WHL=$(ls wheelhouse/*.whl 2>/dev/null | head -1 || true)
+          if [ -z "${WHL}" ]; then
+            echo "No wheel artifact (commit already published or build skipped); skipping tests"
+            exit 0
+          fi
+          echo "Testing ${WHL}"
+          source /usr/local/Ascend/cann/set_env.sh || true
+          # Install the wheel itself; do NOT put any external bisheng
+          # install on PATH, so the backend must use the bundled copy.
+          python3 -m pip install --force-reinstall --no-deps "${WHL}"
+          npu-smi info || true
+          # Verify the wheel actually carries the bundled BishengIR payload
+          # (backend/utils.py prefers this dir; without it the backend falls
+          # back to the system bishengir whose MLIR version mismatches).
+          python3 - <<'PYEOF'
+          import os
+          import triton
+
+          backend_dir = os.path.join(os.path.dirname(triton.__file__), "backends", "ascend", "bishengir")
+          print("bundled bishengir dir:", backend_dir)
+          print("exists:", os.path.isdir(backend_dir))
+          if os.path.isdir(backend_dir):
+              print("contents:", sorted(os.listdir(backend_dir)))
+              bin_dir = os.path.join(backend_dir, "bin")
+              print("bin:", sorted(os.listdir(bin_dir)) if os.path.isdir(bin_dir) else "<no bin/>")
+          PYEOF
+          python3 -m pip install pytest pytest-xdist 2>/dev/null || true
+          python3 -m pytest -s -v -n 4 --dist=loadfile \
+            third_party/ascend/unittest/pytest_ut/test_01_vector_add.py \
+            third_party/ascend/unittest/pytest_ut/test_02_fused_softmax.py \
+            third_party/ascend/unittest/pytest_ut/test_03_matrix_multiplication.py \
+            third_party/ascend/unittest/pytest_ut/test_05_layer_norm.py \
+            third_party/ascend/unittest/pytest_ut/test_06_fused_attention.py \
+            third_party/ascend/unittest/pytest_ut/test_08_grouped_gemm.py \
+            third_party/ascend/unittest/pytest_ut/test_argmax.py \
+            third_party/ascend/unittest/pytest_ut/test_cumsum.py \
+            third_party/ascend/unittest/pytest_ut/test_add.py \
+            third_party/ascend/unittest/pytest_ut/test_dot.py
+
+  # Publishes the wheels to the OBS nightly pypi repo, gated on the NPU
+  # tests: if Test-Wheels fails, this job never starts, so a broken wheel
+  # is never published. Matrix mirrors Build-Wheels so each combination
+  # publishes its own artifact.
+  Publish-Wheels:
+    name: Publish wheels (${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }})
+    needs: [Build-Wheels, Test-Wheels]
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      env:
+        PYTHON: ${{matrix.python}}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
+        python: ["cp310", "cp311", "cp312", "cp313"]
+        branch:
+        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
+    steps:
+      - name: Download built wheel
+        id: download
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
+          path: wheelhouse
 
       - name: Setup obsutil and upload to OBS
-        if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')
         shell: bash
         env:
           AK: ${{ secrets.NIGHTLY_OBS_AK }}
@@ -117,6 +348,11 @@ jobs:
           ARCH: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
         run: |
           set -eu
+          WHL_COUNT=$(ls wheelhouse/*.whl 2>/dev/null | wc -l)
+          if [ "${WHL_COUNT}" -eq 0 ]; then
+            echo "No wheel artifact (commit already published or build skipped); skipping publish"
+            exit 0
+          fi
           if [ -z "${AK}" ] || [ -z "${SK}" ]; then
             echo "OBS credentials are empty."
             exit 1

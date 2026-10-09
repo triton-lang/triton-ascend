@@ -224,8 +224,8 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
     tuner.keys = ["cache_key"]
     tuner.nargs = {"cache_key": "disk-cache-key", "input": SimpleNamespace(dtype="torch.float32")}
     tuner.user_specified_multibuffer_mode = (2, 3)
-    tuner.generate_key_and_configs = lambda *args, **kwargs: (
-        "disk-cache-key", "torch.float32", ("compile_mode", "simd"), ("multibuffer_mode", (2, 3)))
+    tuner.generate_key_and_configs = lambda *args, **kwargs: ("disk-cache-key", "torch.float32",
+                                                              ("compile_mode", "simd"), ("multibuffer_mode", (2, 3)))
     tuner._batch_bench = lambda *args, configs, **kwargs: {
         selected: (1.0, 0.9, 1.1),
         other: (2.0, 1.8, 2.2),

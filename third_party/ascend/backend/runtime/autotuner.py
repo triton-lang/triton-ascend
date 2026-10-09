@@ -2299,11 +2299,8 @@ class AutoTilingTuner(Autotuner):
             key_names.append("compile_mode")
             if self.user_specified_multibuffer_mode is not None:
                 key_names.append("multibuffer_mode")
-            key_fields = ", ".join(
-                f"{name}={value[1]!r}" if isinstance(value, tuple) and len(value) == 2 and value[0] == name
-                else f"{name}={value!r}"
-                for name, value in zip(key_names, key)
-            )
+            key_fields = ", ".join(f"{name}={value[1]!r}" if isinstance(value, tuple) and len(value) == 2
+                                   and value[0] == name else f"{name}={value!r}" for name, value in zip(key_names, key))
             print(f"Triton autotuning for function {self.base_fn.__name__},\n"
                   f"with key fields as {key_fields},\n"
                   f"finished after {self.bench_time:.2f}s; best config selected: {self.best_config};")

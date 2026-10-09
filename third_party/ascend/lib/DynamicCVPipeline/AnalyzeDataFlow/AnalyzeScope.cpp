@@ -136,15 +136,16 @@ static bool checkVecScopeMainLoop(ModuleOp module) {
 }
 
 // For every main_loop id, gather all for/while ops sharing that id and count
-// the hivm.hir.copy and hivm.hir.fixpipe ops within them. Only when ALL
-// main_loop ids have either count equal to zero (every id has only copy or
-// only fixpipe, none has both), the dynamic CV pipeline cannot be applied and
-// we fall back to the original workflow.
+// the hivm.hir.copy and hivm.hir.fixpipe ops within them. Only when no id has
+// either of them -- no main loop exchanges anything across cores -- there is
+// nothing to overlap and we fall back to the original workflow.
 //   - hivm::CopyOp    typically appears in VECTOR scope main_loops
 //   - hivm::FixpipeOp typically appears in CUBE scope main_loops
+// A loop that sends one way only is still worth pipelining: the producer
+// prepares the next tile while the consumer works on the current one.
 // Nested regions inside the main_loop op are also walked, and scf.yield
 // terminators are skipped.
-static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
+static bool isMainLoopWithoutCrossCoreOp(ModuleOp module) {
   // main_loop id -> (countCopy, countFixpipe)
   llvm::DenseMap<int, std::pair<int, int>> idToCounts;
 
@@ -180,15 +181,14 @@ static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
     return WalkResult::advance();
   });
 
-  // Only trigger fallback when EVERY main_loop id has only copy or only
-  // fixpipe (one count is zero). If at least one id has both copy and
-  // fixpipe ops, the dynamic CV pipeline still be applicable.
+  // Only trigger fallback when EVERY main_loop id has both counts at zero.
+  // A single copy or fixpipe is enough for the pipeline to be applicable.
   if (idToCounts.empty()) {
     return false;
   }
 
   for (const auto &entry : idToCounts) {
-    if (entry.second.first != 0 && entry.second.second != 0) {
+    if (entry.second.first != 0 || entry.second.second != 0) {
       return false;
     }
   }
@@ -217,8 +217,8 @@ static LogicalResult verifyMainLoop(ModuleOp module) {
     return failure();
   };
 
-  if (isMainLoopOnlyCopyOrFixpipe(module)) {
-    LDBG("[INFO]: One-way CV interaction for fallback.");
+  if (isMainLoopWithoutCrossCoreOp(module)) {
+    LDBG("[INFO]: No CV interaction in the main loop, falling back.");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
     return failure();
   }

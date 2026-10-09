@@ -111,7 +111,7 @@
         "confidence": "low"
       },
       "predicate.cmp": {
-        "description": "Estimated SIMD predicate-comparison cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "description": "Estimated SIMD comparison and i1 mask-logic cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "medium"
@@ -280,7 +280,7 @@
         "confidence": "low"
       },
       "predicate.cmp": {
-        "description": "Estimated SIMT predicate-comparison cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "description": "Estimated SIMT comparison and i1 mask-logic cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
         "factor": 1.0,
         "confidence": "medium"

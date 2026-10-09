@@ -120,6 +120,31 @@ evaluateOneStage(LogicalStage stage,
 
 } // namespace
 
+TEST(SimdSimtCostModelTest, PredicateSelectUsesConfiguredRateInBothModes) {
+  auto stage = logicalStage("select", StageCostModelKind::PredicateMask);
+  stage.workload.operationElements.clear();
+  stage.workload.operationElements["predicate.select"] = 64;
+  stage.workload.issueElements = 64;
+  auto profile = hardwareProfile();
+  profile.simd.operationRates["predicate.select"] = {1.0, 1.0};
+  profile.simt.operationRates["predicate.select"] = {1.0, 1.0};
+  auto baseline = evaluateOneStage(stage, profile);
+  profile.simd.operationRates["predicate.select"].throughput = 0.25;
+  profile.simt.operationRates["predicate.select"].throughput = 0.25;
+  auto slower = evaluateOneStage(stage, profile);
+  ASSERT_TRUE(static_cast<bool>(baseline));
+  ASSERT_TRUE(static_cast<bool>(slower));
+  ASSERT_EQ(slower->stages.front().implementations.size(), 2u);
+  for (unsigned i = 0; i < 2; ++i) {
+    const auto &before = baseline->stages.front().implementations[i].resources;
+    const auto &after = slower->stages.front().implementations[i].resources;
+    EXPECT_GT(before.compute, 0);
+    EXPECT_DOUBLE_EQ(after.compute, 4 * before.compute);
+    EXPECT_DOUBLE_EQ(after.predicate, before.predicate);
+    EXPECT_DOUBLE_EQ(after.issue, before.issue);
+  }
+}
+
 TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
   LogicalStage stage = logicalStage("scalar", StageCostModelKind::ScalarIssue);
   auto table = evaluateOneStage(std::move(stage));

@@ -161,6 +161,7 @@ static llvm::StringRef getProfileOperationName(Operation *operation) {
       .Cases("math.log", "tt.log", "f32.log")
       .Cases("math.sin", "tt.sin", "f32.sin")
       .Cases("math.cos", "tt.cos", "f32.cos")
+      .Case("arith.select", "predicate.select")
       .Cases("tt.trans", "linalg.transpose", "f32.trans")
       .Cases("arith.extf", "arith.truncf", "arith.sitofp", "arith.uitofp",
              "convert.cast")
@@ -248,7 +249,7 @@ static void accumulateTensorOperationWorkload(Operation *operation,
   // TTIR rank is not physical vector geometry: Auto Flatten can collapse
   // dense pointwise operations, including rows shorter than a data block.
   // Geometry follows operation semantics, not the profile's lookup key.
-  // Integer arithmetic/select may use generic.issue but are still pointwise.
+  // Integer arithmetic may use generic.issue but is still pointwise.
   // Non-pointwise operations retain their original segment estimate.
   const bool knownPointwise = operation->hasTrait<OpTrait::Elementwise>();
   const int64_t contiguousElements =
@@ -433,6 +434,15 @@ static void accumulateOneOperation(Operation *operation, StageWorkload &work) {
 
   if (!hasTensorResult(operation)) {
     work.scalarOperations += 1.0;
+    return;
+  }
+  if ((name == "arith.andi" || name == "arith.ori" || name == "arith.xori") &&
+      operation->getNumResults() == 1 &&
+      getScalarElementType(operation->getResult(0).getType()).isInteger(1)) {
+    // Count source operations, including NOT expressed as XOR.
+    work.predicateElements += elements;
+    accumulateTensorOperationWorkload(operation, "predicate.cmp", elements,
+                                      work);
     return;
   }
   const llvm::StringRef profileName = getProfileOperationName(operation);

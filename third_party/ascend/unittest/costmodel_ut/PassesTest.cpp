@@ -99,7 +99,124 @@ int64_t getI64Attr(Operation *op, llvm::StringRef name) {
   return attr ? attr.getInt() : -1;
 }
 
+struct PredicateWork {
+  double predicates = 0, selects = 0, generic = 0, scalar = 0;
+};
+
+bool collectPredicateWork(llvm::StringRef source, PredicateWork &out) {
+  mlir::MLIRContext context;
+  auto module = parseModule(context, source);
+  if (!module)
+    return false;
+  SelectSimdSimtCostModelPassOptions options;
+  options.mode = "report";
+  options.profilePath = TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH;
+  options.actualTarget = "Ascend950PR_9579";
+  options.numWarps = 4;
+  options.compileOn91095 = true;
+  if (!runPasses(*module, createSelectSimdSimtCostModelPass(options)))
+    return false;
+  auto report =
+      (*module)->getAttrOfType<StringAttr>("ascend.simt_costmodel.report_json");
+  if (!report)
+    return false;
+  auto parsed = llvm::json::parse(report.getValue());
+  if (!parsed) {
+    llvm::consumeError(parsed.takeError());
+    return false;
+  }
+  auto *root = parsed->getAsObject();
+  auto *model = root ? root->getObject("stage_model") : nullptr;
+  auto *stages = model ? model->getArray("logical_stages") : nullptr;
+  if (!stages)
+    return false;
+  for (const auto &value : *stages) {
+    const auto *work = value.getAsObject()->getObject("workload");
+    out.predicates +=
+        work->getNumber("predicate_elements_per_iteration").value_or(0);
+    out.scalar +=
+        work->getNumber("scalar_operations_per_iteration").value_or(0);
+    const auto *ops = work->getObject("operation_elements_per_iteration");
+    out.selects += ops->getNumber("predicate.select").value_or(0);
+    out.generic += ops->getNumber("generic.issue").value_or(0);
+  }
+  return true;
+}
+
 } // namespace
+
+TEST(CostModelPassesTest, OnlyTensorI1BitwiseOperationsCountAsPredicates) {
+  for (bool tensor : {false, true})
+    for (int bits : {1, 8, 16, 32, 64}) {
+      const std::string element = "i" + std::to_string(bits);
+      const std::string type = tensor ? "tensor<64x" + element + ">" : element;
+      SCOPED_TRACE(type);
+      PredicateWork work;
+      ASSERT_TRUE(collectPredicateWork(
+          "module { func.func @main(%a: " + type + ", %b: " + type + ") -> (" +
+              type + ", " + type + ", " + type +
+              ") {\n"
+              " %and = arith.andi %a, %b : " +
+              type +
+              "\n"
+              " %or = arith.ori %a, %b : " +
+              type +
+              "\n"
+              " %xor = arith.xori %a, %b : " +
+              type +
+              "\n"
+              " return %and, %or, %xor : " +
+              type + ", " + type + ", " + type + "\n} }",
+          work));
+      EXPECT_DOUBLE_EQ(work.predicates, tensor && bits == 1 ? 3 * 64 : 0);
+      EXPECT_DOUBLE_EQ(work.generic, tensor && bits != 1 ? 3 * 64 : 0);
+      EXPECT_DOUBLE_EQ(work.scalar, tensor ? 0 : 3);
+      EXPECT_DOUBLE_EQ(work.selects, 0);
+    }
+}
+
+TEST(CostModelPassesTest, TensorSelectUsesDedicatedKeyAndScalarIsUnchanged) {
+  for (bool tensor : {false, true})
+    for (const char *element : {"i1", "i32", "f32"}) {
+      const std::string type =
+          tensor ? "tensor<64x" + std::string(element) + ">" : element;
+      const std::string mask = tensor ? "tensor<64xi1>" : "i1";
+      SCOPED_TRACE(type);
+      PredicateWork work;
+      ASSERT_TRUE(collectPredicateWork("module { func.func @main(%p: " + mask +
+                                           ", %a: " + type + ", %b: " + type +
+                                           ") -> " + type +
+                                           " {\n"
+                                           " %s = arith.select %p, %a, %b : " +
+                                           mask + ", " + type +
+                                           "\n"
+                                           " return %s : " +
+                                           type + "\n} }",
+                                       work));
+      EXPECT_DOUBLE_EQ(work.selects, tensor ? 64 : 0);
+      EXPECT_DOUBLE_EQ(work.scalar, tensor ? 0 : 1);
+      EXPECT_DOUBLE_EQ(work.predicates, 0);
+      EXPECT_DOUBLE_EQ(work.generic, 0);
+    }
+}
+
+TEST(CostModelPassesTest, PredicateNotCountsSourceXorWithoutAssumingFusion) {
+  PredicateWork work;
+  ASSERT_TRUE(collectPredicateWork(R"mlir(
+module {
+  func.func @main(%a: tensor<64xf32>, %b: tensor<64xf32>)
+      -> (tensor<64xi1>, tensor<64xf32>) {
+    %true = arith.constant dense<true> : tensor<64xi1>
+    %p = arith.cmpf olt, %a, %b : tensor<64xf32>
+    %not = arith.xori %p, %true : tensor<64xi1>
+    %s = arith.select %not, %a, %b : tensor<64xi1>, tensor<64xf32>
+    return %not, %s : tensor<64xi1>, tensor<64xf32>
+  }
+})mlir",
+                                   work));
+  EXPECT_DOUBLE_EQ(work.predicates, 2 * 64);
+  EXPECT_DOUBLE_EQ(work.selects, 64);
+}
 
 TEST(CostModelPassesTest, AssignOpIDsPassAnnotatesAscendOpsOnly) {
   mlir::MLIRContext context;

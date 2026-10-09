@@ -1,4 +1,4 @@
-# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+﻿# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -273,7 +273,7 @@ def sad(arg0, arg1, arg2, _builder=None):
         core.static_assert(False)
     return core.extern_elementwise(
         "", "", [arg0, arg1, arg2], {
-            (core.dtype("int32"), core.dtype("int32"), core.dtype("int32")): ("__hmf_sad_i32", core.dtype("int32")),
+            (core.dtype("int32"), core.dtype("int32"), core.dtype("uint32")): ("__hmf_sad_i32", core.dtype("int32")),
         }, is_pure=True, _builder=_builder)
 
 @core.extern

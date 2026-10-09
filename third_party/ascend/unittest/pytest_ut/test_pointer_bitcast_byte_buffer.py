@@ -117,7 +117,7 @@ def test_pointer_bitcast_paged_scale_tensor_offset():
     block_table = [2, 0]
     values = [100 + index for index in range(n_positions)]
 
-    host = torch.zeros(3 * stride_kvblk, dtype=torch.uint8)
+    host = torch.zeros(3 * stride_kvblk, dtype=torch.uint8, device="cpu")
     byte_offsets = []
     for position in range(n_positions):
         logical_block = position // cache_block_size
@@ -127,7 +127,7 @@ def test_pointer_bitcast_paged_scale_tensor_offset():
     _write_u32_le(host, byte_offsets, values)
 
     src = host.npu()
-    block_tables = torch.tensor(block_table, dtype=torch.int32).npu()
+    block_tables = torch.tensor(block_table, dtype=torch.int32, device="cpu").npu()
     out = torch.empty((n_positions, ), dtype=torch.int32, device="npu")
     _paged_scale_load[(1, )](
         src,
@@ -142,7 +142,7 @@ def test_pointer_bitcast_paged_scale_tensor_offset():
         BLOCK=n_positions,
     )
 
-    torch.testing.assert_close(out.cpu(), torch.tensor(values, dtype=torch.int32), rtol=0, atol=0)
+    torch.testing.assert_close(out.cpu(), torch.tensor(values, dtype=torch.int32, device="cpu"), rtol=0, atol=0)
 
 
 def test_pointer_bitcast_scalar_multi_addptr_store():
@@ -154,10 +154,10 @@ def test_pointer_bitcast_scalar_multi_addptr_store():
     values = [float(index + 1) for index in range(16)]
     byte_offset = (block_idx * block_stride + token_pos * token_bytes + bf16_offset)
 
-    expected = torch.zeros(byte_offset + len(values) * 2 + 64, dtype=torch.uint8)
+    expected = torch.zeros(byte_offset + len(values) * 2 + 64, dtype=torch.uint8, device="cpu")
     _write_bf16_le(expected, byte_offset, values)
     cache = torch.zeros_like(expected).npu()
-    source = torch.tensor(values, dtype=torch.float32).to(torch.bfloat16).npu()
+    source = torch.tensor(values, dtype=torch.float32, device="cpu").to(torch.bfloat16).npu()
     _multi_addptr_bf16_store[(1, )](
         source,
         cache,
@@ -179,7 +179,7 @@ def test_pointer_bitcast_inside_dynamic_loop():
     rope_dim = 8
     token_bytes = 576
     num_workers = 2
-    host = torch.zeros(token_count * token_bytes, dtype=torch.uint8)
+    host = torch.zeros(token_count * token_bytes, dtype=torch.uint8, device="cpu")
     expected_values = []
     for token_idx in range(token_count):
         values = [float(token_idx * rope_dim + index + 1) for index in range(rope_dim)]
@@ -199,5 +199,5 @@ def test_pointer_bitcast_inside_dynamic_loop():
         NUM_WORKERS=num_workers,
     )
 
-    expected = torch.tensor(expected_values, dtype=torch.float32).to(torch.bfloat16)
+    expected = torch.tensor(expected_values, dtype=torch.float32, device="cpu").to(torch.bfloat16)
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)

@@ -526,19 +526,19 @@ def generate_npu_wrapper_src(constants, signature, metadata):
       lockInitData[lockOffset] =
           static_cast<int64_t>(syncBlockLockParticipantNum);
     }}
-    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize,
+    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize,
                    reinterpret_cast<void *>(lockInitData.data()),
-                   syncBlockLockSize, RT_MEMCPY_HOST_TO_DEVICE);"""
+                   syncBlockLockSize, CANN_MEMCPY_HOST_TO_DEVICE);"""
     elif lock_init_value == 0:
         lock_init_stmt = (
-            "ret = rtMemsetAsync(syncBlockLock_ptr, syncBlockLockSize, 0, "
+            "ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
             "syncBlockLockSize, stream);")
     else:
         lock_init_stmt = (
             f"std::vector<int64_t> lockInitData({syncBlockLockI64Count}, {lock_init_value});\n"
-            "    ret = rtMemcpy(syncBlockLock_ptr, syncBlockLockSize, "
+            "    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize, "
             "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-            "RT_MEMCPY_HOST_TO_DEVICE);")
+            "CANN_MEMCPY_HOST_TO_DEVICE);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95

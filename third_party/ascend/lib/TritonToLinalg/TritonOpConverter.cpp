@@ -2626,14 +2626,6 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
     triton::AssertOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
   auto msgAttr = op.getMessageAttr();
-  // The frontend marks only sanitize_overflow assertions.  A user may choose
-  // the same text for tl.device_assert, so message matching is not a safe
-  // provenance test here or in the graph rewrite.
-  if (op->hasAttr("tt.auto_overflow_assert")) {
-    rewriter.eraseOp(op);
-    return success();
-  }
-
   auto moduleOp = op->getParentOfType<ModuleOp>();
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));

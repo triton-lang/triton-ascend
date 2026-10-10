@@ -304,7 +304,7 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     auto ptr = op.getPtr();
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit = ptrType && ptrType.getShape().size() <= 5;
-    if (!useSyncBlockLockFlag && compileOn91095Flag && forceSimtTemplateFlag &&
+    if (compileOn91095Flag && forceSimtTemplateFlag &&
         rankWithinIndirectFastPathLimit) {
       return failure();
     }

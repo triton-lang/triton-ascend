@@ -171,6 +171,11 @@ jobs:
         -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache
         -DCMAKE_INSTALL_PREFIX="${LLVM_INSTALL_DIR}"
         -DCMAKE_LINKER=lld
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+        -DCMAKE_C_FLAGS="-fstack-protector-strong"
+        -DCMAKE_CXX_FLAGS="-fstack-protector-strong"
+        -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,relro,-z,now -pie -s"
+        -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,relro,-z,now -s"
         -DLLVM_BUILD_UTILS=ON
         -DLLVM_BUILD_TOOLS=ON
         -DLLVM_ENABLE_ASSERTIONS=ON

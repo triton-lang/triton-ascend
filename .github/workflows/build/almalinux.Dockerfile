@@ -27,8 +27,12 @@ RUN cmake -GNinja -Bbuild \
   -DCMAKE_C_COMPILER=clang \
   -DCMAKE_CXX_COMPILER=clang++ \
   -DCMAKE_ASM_COMPILER=clang \
-  -DCMAKE_CXX_FLAGS="-Wno-everything" \
+  -DCMAKE_CXX_FLAGS="-Wno-everything -fstack-protector-strong" \
   -DCMAKE_LINKER=lld \
+  -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+  -DCMAKE_C_FLAGS="-fstack-protector-strong" \
+  -DCMAKE_EXE_LINKER_FLAGS="-Wl,-z,relro,-z,now -pie -s" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-Wl,-z,relro,-z,now -s" \
   -DCMAKE_INSTALL_PREFIX="/install" \
   -Dnanobind_DIR="/usr/local/lib/python3.9/site-packages/nanobind/cmake" \
   -DPython3_EXECUTABLE=/usr/bin/python3.9 \

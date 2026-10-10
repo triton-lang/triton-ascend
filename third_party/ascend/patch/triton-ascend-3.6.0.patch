@@ -91,19 +91,7 @@ index cab58801f..406ed4634 100644
    if (TRITON_BUILD_PROTON)
      add_subdirectory(third_party/proton)
    endif()
-@@ -306,11 +355,6 @@ if(TRITON_BUILD_PYTHON_MODULE)
-       message(FATAL_ERROR "TRITON_WHEEL_DIR must be set.")
-   endif()
-
--  configure_file(
--    "${LLVM_SYSPATH}/bin/FileCheck"
--    "${TRITON_WHEEL_DIR}/FileCheck"
--    COPYONLY)
--
- endif()
-
- if (UNIX AND NOT APPLE)
-@@ -338,6 +387,12 @@ endif()
+@@ -338,6 +392,12 @@ endif()
  find_package(Threads REQUIRED)
  
  add_subdirectory(third_party/f2reduce)

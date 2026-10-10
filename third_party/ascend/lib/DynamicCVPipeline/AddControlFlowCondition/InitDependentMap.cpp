@@ -629,6 +629,8 @@ static int collectFlowOptIfOpPairs(ModuleOp module,
   }
 
   // Step 3: Identify start nodes (in-degree 0).
+  // allNodes is a DenseSet<IfOp>. Its iteration order follows the pointer
+  // hash, so the set of starts is stable but their order is not.
   llvm::SmallVector<scf::IfOp> startNodes;
   for (auto node : allNodes) {
     if (inDegree.lookup(node) == 0) {
@@ -636,11 +638,27 @@ static int collectFlowOptIfOpPairs(ModuleOp module,
     }
   }
 
+  // Several starts can reach the same depth-3 if. The loop below used to let
+  // the last start overwrite flowOptIfOpPairs, so the source if (and the
+  // counter iter arg used in the sge/ori condition) changed every run.
+  // Earliest if in the module wins.
+  llvm::DenseMap<Operation *, int> ifOrdinal;
+  int nextIfOrdinal = 0;
+  module.walk([&](Operation *op) {
+    if (isa<scf::IfOp>(op))
+      ifOrdinal[op] = nextIfOrdinal++;
+  });
+  llvm::sort(startNodes, [&](scf::IfOp lhs, scf::IfOp rhs) {
+    return ifOrdinal.lookup(lhs.getOperation()) <
+           ifOrdinal.lookup(rhs.getOperation());
+  });
+
   LDBG("Number of start nodes (depth=1): " << startNodes.size());
 
   // Step 4: For each start node, run a per-source DFS to compute each
   // reachable node's depth (max over all paths from this start). Every node
-  // with depth = 3 becomes a flowOpt pair keyed on this start.
+  // with depth = 3 becomes a flowOpt pair keyed on this start. A target
+  // already paired with an earlier start is left unchanged.
   constexpr int targetDepth = 3;
   for (scf::IfOp start : startNodes) {
     llvm::DenseMap<scf::IfOp, int> depth;
@@ -668,7 +686,8 @@ static int collectFlowOptIfOpPairs(ModuleOp module,
     }
 
     for (auto &entry : depth) {
-      if (entry.second == targetDepth) {
+      if (entry.second == targetDepth &&
+          !info->flowOptIfOpPairs.count(entry.first)) {
         info->flowOptIfOpPairs[entry.first] = start;
       }
     }

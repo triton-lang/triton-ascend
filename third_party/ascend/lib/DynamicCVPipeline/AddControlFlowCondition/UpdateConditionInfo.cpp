@@ -21,6 +21,7 @@
  */
 
 #include <functional>
+#include <limits>
 #include <optional>
 #include <string>
 #include <type_traits>
@@ -94,6 +95,31 @@ static void logOutputGroupValues(llvm::StringRef label,
   }
   os << "\n";
   LDBG(os.str());
+}
+
+// DenseSet/DenseMap bucket order is not insertion order. Integer keys are
+// stable, but sorting makes condition order follow group index explicitly.
+static void sortGroupIndices(SmallVector<int> &indices) { llvm::sort(indices); }
+
+// Value/Operation* hashes follow the pointer address, so iterating a DenseSet
+// of them changes across processes. Keep the first-seen order instead.
+static void recordUsedControlVar(Value var, DenseSet<Value> &usedVarsSet,
+                                 SmallVector<Value> &usedVarsInOrder) {
+  if (usedVarsSet.insert(var).second)
+    usedVarsInOrder.push_back(var);
+}
+
+// Block-arg number is stable. Pointer order of the Value is not.
+static void sortValuesByBlockArg(SmallVector<Value> &vars) {
+  llvm::sort(vars, [](Value lhs, Value rhs) {
+    auto argLhs = dyn_cast<BlockArgument>(lhs);
+    auto argRhs = dyn_cast<BlockArgument>(rhs);
+    unsigned numLhs = argLhs ? argLhs.getArgNumber()
+                             : std::numeric_limits<unsigned>::max();
+    unsigned numRhs = argRhs ? argRhs.getArgNumber()
+                             : std::numeric_limits<unsigned>::max();
+    return numLhs < numRhs;
+  });
 }
 
 // Read block id from ssbuffer.if on ifOp. Missing attr is unexpected.
@@ -310,19 +336,39 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
     return WalkResult::advance();
   });
 
-  // Collect intraCoreBuffers for all main_loop for/while ops
+  // IR appearance order. Used to number intra-core groups and to canonicalize
+  // producer lists so group merging does not depend on vector order.
+  DenseMap<Operation *, int> opOrdinal;
+  int nextOrdinal = 0;
+  module.walk([&](Operation *op) { opOrdinal[op] = nextOrdinal++; });
+  auto canonicalizeProducers = [&](SmallVector<Operation *> producers) {
+    llvm::sort(producers, [&](Operation *lhs, Operation *rhs) {
+      return opOrdinal.lookup(lhs) < opOrdinal.lookup(rhs);
+    });
+    return producers;
+  };
+
+  // Collect intraCoreBuffers for all main_loop for/while ops.
+  // intraCoreDependentMap is keyed by Operation*; iterating it assigns a
+  // different group index (and therefore a different iter arg) every run.
+  // Walk the IR instead so index 0 is the first consumer in the module.
   for (Operation *loopOp : mainLoopOps) {
-    if (info->intraCoreDependentMap.count(loopOp)) {
-      auto &loopDeps = info->intraCoreDependentMap[loopOp];
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          intraCoreBuffers;
-      int intraCoreIdx = 0;
-      for (auto &entry : loopDeps) {
-        intraCoreBuffers[intraCoreIdx][entry.first] = entry.second;
-        intraCoreIdx++;
-      }
-      intraCoreBuffersMap[loopOp] = intraCoreBuffers;
-    }
+    auto depsIt = info->intraCoreDependentMap.find(loopOp);
+    if (depsIt == info->intraCoreDependentMap.end())
+      continue;
+    auto &loopDeps = depsIt->second;
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        intraCoreBuffers;
+    int intraCoreIdx = 0;
+    module.walk([&](Operation *op) {
+      auto entryIt = loopDeps.find(op);
+      if (entryIt == loopDeps.end())
+        return;
+      intraCoreBuffers[intraCoreIdx][entryIt->first] =
+          canonicalizeProducers(entryIt->second);
+      intraCoreIdx++;
+    });
+    intraCoreBuffersMap[loopOp] = std::move(intraCoreBuffers);
   }
 }
 
@@ -372,9 +418,15 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  for (const auto &entry : intraCoreBuffers) {
-    int idx = entry.first;
+  // Zip groups with iter args in index order. DenseMap<int> iteration is
+  // bucket order, not 0, 1, 2, ...
+  SmallVector<int> groupIndices;
+  groupIndices.reserve(intraCoreBuffers.size());
+  for (const auto &entry : intraCoreBuffers)
+    groupIndices.push_back(entry.first);
+  sortGroupIndices(groupIndices);
 
+  for (int idx : groupIndices) {
     int argIdx = innerDepIndices[varIdx];
     if (argIdx < 0 || argIdx >= iterArgNum) {
       LDBG("Invalid inner dependency arg index: "
@@ -512,6 +564,11 @@ int UpdateConditionInfoPass::getInputOutputValues(
                               intraCoreInputSet.end());
   intraCoreOutputValues.assign(intraCoreOutputSet.begin(),
                                intraCoreOutputSet.end());
+  // DenseSet iteration follows the hash bucket, not insertion order.
+  sortGroupIndices(crossCoreInputValues);
+  sortGroupIndices(crossCoreOutputValues);
+  sortGroupIndices(intraCoreInputValues);
+  sortGroupIndices(intraCoreOutputValues);
 
   LDBG("==== Cross Core & Intra Core Values ====" << "\n");
   LLVM_DEBUG(
@@ -886,7 +943,7 @@ void UpdateConditionInfoPass::collectIntraCoreInputConditions(
     Value cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt,
                                                varToUse, zeroConst);
     conditions.push_back(cond);
-    usedVarsSet.insert(var);
+    recordUsedControlVar(var, usedVarsSet, currentUsedVars);
     varUpdateTypes[var] = VarUpdateType::DEC;
     LDBG("Add intraCore input condition for group " << idx << "." << "\n");
   }
@@ -927,7 +984,7 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
       Value cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
                                                  varToUse, limitVal);
       conditions.push_back(cond);
-      usedVarsSet.insert(var);
+      recordUsedControlVar(var, usedVarsSet, currentUsedVars);
       varUpdateTypes[var] = VarUpdateType::INC;
       LDBG("Add intraCore output condition with producer limit " << size << "."
                                                                  << "\n");
@@ -1003,19 +1060,20 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
     }
   }
 
-  // Convert the temporary data structure to tensorIfOpVarMap
+  // Convert the temporary data structure to tensorIfOpVarMap.
+  // DenseSet<Value> iteration follows pointer hash; sort by block-arg number.
   for (auto &[producer, vars] : producerVars) {
     auto &ifOpVars = tensorIterArgIfOpVars[producer];
-    for (Value var : vars) {
-      ifOpVars.producerVars.push_back(var);
-    }
+    SmallVector<Value> sortedVars(vars.begin(), vars.end());
+    sortValuesByBlockArg(sortedVars);
+    ifOpVars.producerVars.append(sortedVars.begin(), sortedVars.end());
   }
 
   for (auto &[consumer, vars] : consumerVars) {
     auto &ifOpVars = tensorIterArgIfOpVars[consumer];
-    for (Value var : vars) {
-      ifOpVars.consumerVars.push_back(var);
-    }
+    SmallVector<Value> sortedVars(vars.begin(), vars.end());
+    sortValuesByBlockArg(sortedVars);
+    ifOpVars.consumerVars.append(sortedVars.begin(), sortedVars.end());
   }
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
@@ -1042,7 +1100,7 @@ void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
     Value cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                varToUse, oneConst);
     conditions.push_back(cond);
-    usedVarsSet.insert(var);
+    recordUsedControlVar(var, usedVarsSet, currentUsedVars);
     varUpdateTypes[var] = VarUpdateType::DEC;
     LDBG("Add tensor iter arg consumer condition for var.\n");
   }
@@ -1070,7 +1128,7 @@ void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
     Value cond = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq,
                                                varToUse, zeroConst);
     conditions.push_back(cond);
-    usedVarsSet.insert(var);
+    recordUsedControlVar(var, usedVarsSet, currentUsedVars);
     varUpdateTypes[var] = VarUpdateType::INC;
     LDBG("Add tensor iter arg producer condition (var == 0) and +1 update for "
          "var.\n");
@@ -1093,6 +1151,9 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
 
   SmallVector<Value> conditions;
   DenseSet<Value> usedVarsSet;
+  // Filled in condition order by recordUsedControlVar. DenseSet iteration
+  // would reshuffle addi/yield operands every run.
+  currentUsedVars.clear();
   LDBG("Collect intraCore conditions: inputs "
        << intraCoreInputValues.size() << ", outputs "
        << intraCoreOutputValues.size() << "\n");
@@ -1120,10 +1181,6 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
     }
   }
 
-  currentUsedVars.clear();
-  for (Value var : usedVarsSet) {
-    currentUsedVars.push_back(var);
-  }
   LDBG("Built " << conditions.size() << " intraCore conditions using "
                 << currentUsedVars.size() << " control variables." << "\n");
 

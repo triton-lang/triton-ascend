@@ -45,7 +45,7 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
-constexpr int64_t kSupportedProfileSchemaVersion = 12;
+constexpr int64_t kSupportedProfileSchemaVersion = 14;
 
 struct StructuralProfile {
   int64_t tinyDotFlopsMax = 0;
@@ -239,6 +239,36 @@ static void readStageResources(ProfileJSONReader &reader,
   if (!resources)
     return;
   const std::string prefix = (context + ".stage_resources").str();
+  if (const auto *reduction =
+          reader.object(*resources, "tail_axis_reduction", prefix)) {
+    for (const auto &[key, value] : *reduction) {
+      const auto *array = value.getAsArray();
+      if (!array || array->empty()) {
+        reader.setError(prefix + ".tail_axis_reduction." + key.str() +
+                        " must be a non-empty numeric array");
+        return;
+      }
+      std::vector<double> parameters;
+      parameters.reserve(array->size());
+      for (const llvm::json::Value &entry : *array) {
+        auto number = entry.getAsNumber();
+        if (!number || !std::isfinite(*number)) {
+          reader.setError(prefix + ".tail_axis_reduction." + key.str() +
+                          " must contain only finite numbers");
+          return;
+        }
+        parameters.push_back(*number);
+      }
+      if (llvm::StringRef(key).starts_with("rn_candidate_") &&
+          (parameters.size() != 18 || parameters[0] <= 0.0 ||
+           parameters[1] < 0.0)) {
+        reader.setError(prefix + ".tail_axis_reduction." + key.str() +
+                        " must have 18 parameters with Q > 0 and N0 >= 0");
+        return;
+      }
+      profile.tailAxisReduction.parameters[key] = std::move(parameters);
+    }
+  }
   profile.scalarOperationsPerCycle =
       reader.number(*resources, "scalar_operations_per_system_cycle", prefix);
   profile.issueOperationsPerCycle =

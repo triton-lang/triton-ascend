@@ -8,10 +8,12 @@
 #include "mlir/Parser/Parser.h"
 
 #include <gtest/gtest.h>
+#include <limits>
 
 using mlir::ascend::HardwareProfile;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
+using mlir::ascend::ReductionWorkload;
 using mlir::ascend::SimdSimtFeatureSummary;
 using mlir::ascend::solveStageRoutes;
 using mlir::ascend::StageCostEvaluator;
@@ -552,6 +554,153 @@ TEST(SimdSimtCostModelTest, PrefixScanUsesModeSpecificDependencyFactor) {
   EXPECT_EQ(implementations[0].implementation.mode, StageMode::SIMD);
   EXPECT_EQ(implementations[1].implementation.mode, StageMode::SIMT);
   EXPECT_GT(implementations[0].totalCycles, implementations[1].totalCycles);
+}
+
+TEST(SimdSimtCostModelTest, UnsupportedReductionFallsBackToLegacyShuffle) {
+  LogicalStage stage =
+      logicalStage("reduce_fallback", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"unknown", "f32", {2, 4, 128}, 2, 1.0});
+
+  auto table = evaluateOneStage(std::move(stage));
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  ASSERT_EQ(table->stages.front().implementations.size(), 2u);
+  for (const auto &implementation : table->stages.front().implementations) {
+    EXPECT_DOUBLE_EQ(implementation.resources.reduction, 0.0);
+    // 2*4*128 lanes * log2(128) / 32 lanes per cycle.
+    EXPECT_DOUBLE_EQ(implementation.resources.shuffle, 224.0);
+    EXPECT_DOUBLE_EQ(implementation.totalCycles, 224.0);
+  }
+}
+
+TEST(SimdSimtCostModelTest, CalibratedTailReductionReplacesOnlyShuffle) {
+  LogicalStage stage =
+      logicalStage("reduce_calibrated", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"sum", "f32", {2, 4, 128}, 2, 1.0});
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.tailAxisReduction.parameters["rn_standard_sum_f32"] = {
+      64.0, 54.7251, 1.75804, 0.554454, 1.10204};
+  auto table = evaluateOneStage(std::move(stage), profile);
+  if (!table)
+    FAIL() << llvm::toString(table.takeError());
+  ASSERT_EQ(table->stages.front().implementations.size(), 2u);
+
+  const auto &simd = table->stages.front().implementations[0];
+  const double expected = 54.7251 + 1.75804 * 8.0 + 0.554454 * 8.0;
+  EXPECT_NEAR(simd.resources.reduction, expected, 1e-9);
+  EXPECT_DOUBLE_EQ(simd.resources.shuffle, 0.0);
+  EXPECT_NEAR(simd.totalCycles, expected, 1e-9);
+
+  // The SIMT profile has no matching calibrated parameters.  It must use the
+  // complete legacy formula rather than a partial or zero-cost estimate.
+  const auto &simt = table->stages.front().implementations[1];
+  EXPECT_DOUBLE_EQ(simt.resources.reduction, 0.0);
+  EXPECT_DOUBLE_EQ(simt.resources.shuffle, 224.0);
+  EXPECT_DOUBLE_EQ(simt.totalCycles, 224.0);
+}
+
+TEST(SimdSimtCostModelTest, SimdScalarReductionPaysShortPathFloor) {
+  LogicalStage stage =
+      logicalStage("scalar_floor", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"and", "i32", {1, 2}, 1, 1.0});
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.tailAxisReduction.parameters["rn_linear_and_i32"] = {24.0, 12.0};
+  auto table = evaluateOneStage(std::move(stage), profile);
+  ASSERT_TRUE(static_cast<bool>(table));
+  EXPECT_DOUBLE_EQ(table->stages.front().implementations[0].resources.reduction,
+                   24.0);
+  EXPECT_DOUBLE_EQ(table->stages.front().implementations[0].resources.shuffle,
+                   0.0);
+}
+
+TEST(SimdSimtCostModelTest, SimtCandidateReductionPricesAllFeatureTerms) {
+  LogicalStage stage =
+      logicalStage("candidate_terms", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(
+      ReductionWorkload{"sum", "f32", {2, 128}, 1, 1.0});
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 4;
+  profile.simt.tailAxisReduction.parameters["rn_candidate_sum_f32"] = {
+      32, 64, 10, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15};
+  profile.simt.tailAxisReduction.parameters["rn_alias_sum_f32"] = {1.5};
+  profile.simt.tailAxisReduction.parameters["rn_w_sum_f32_4"] = {0.75};
+  auto table = evaluateOneStage(std::move(stage), profile);
+  ASSERT_TRUE(static_cast<bool>(table));
+  const auto &simt = table->stages.front().implementations[1];
+  EXPECT_NEAR(simt.resources.reduction, 741.1069244840099, 1e-9);
+  EXPECT_DOUBLE_EQ(simt.resources.shuffle, 0.0);
+}
+
+TEST(SimdSimtCostModelTest, InvalidCandidateUsesCompleteLegacyShuffle) {
+  for (int scenario = 0; scenario < 3; ++scenario) {
+    LogicalStage stage = logicalStage("candidate_fallback",
+                                      StageCostModelKind::RowwiseReduction);
+    stage.features.hasReduction = true;
+    stage.workload.operationElements.clear();
+    stage.workload.issueElements = 0.0;
+    stage.workload.paysKernelSetup = false;
+    stage.workload.reductionWorkloads.push_back(
+        ReductionWorkload{"sum", "f32", {2, 128}, 1, 1.0});
+    HardwareProfile profile = hardwareProfile();
+    profile.logicalWarpGroupCount = 4;
+    auto &parameters = profile.simt.tailAxisReduction.parameters;
+    parameters["rn_candidate_sum_f32"] = std::vector<double>(18, 0.0);
+    parameters["rn_candidate_sum_f32"][0] = 32;
+    parameters["rn_candidate_sum_f32"][2] = scenario == 0 ? -1.0 : 10.0;
+    parameters["rn_alias_sum_f32"] = {1.0};
+    parameters["rn_w_sum_f32_4"] = {1.0};
+    parameters["rn_base_sum_f32"] = {32, 64, 7, 0, 0, 0, 0, 0};
+    if (scenario == 1)
+      parameters["rn_candidate_sum_f32"].pop_back();
+    if (scenario == 2)
+      parameters.erase("rn_w_sum_f32_4");
+    auto table = evaluateOneStage(std::move(stage), profile);
+    ASSERT_TRUE(static_cast<bool>(table));
+    const auto &simt = table->stages.front().implementations[1];
+    EXPECT_DOUBLE_EQ(simt.resources.reduction, 0.0);
+    EXPECT_DOUBLE_EQ(simt.resources.shuffle, 56.0);
+  }
+}
+
+TEST(SimdSimtCostModelTest, RankOnePaddingOverflowFallsBack) {
+  LogicalStage stage =
+      logicalStage("padding_overflow", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.operationElements.clear();
+  stage.workload.issueElements = 0.0;
+  stage.workload.paysKernelSetup = false;
+  stage.workload.reductionWorkloads.push_back(ReductionWorkload{
+      "and", "i64", {std::numeric_limits<int64_t>::max()}, 0, 1.0});
+  HardwareProfile profile = hardwareProfile();
+  profile.logicalWarpGroupCount = 4;
+  profile.simt.tailAxisReduction.parameters["r1_base_i64"] = {0, 1, 0, 0};
+  profile.simt.tailAxisReduction.parameters["r1_w_i64_4"] =
+      std::vector<double>(12, 1.0);
+  auto table = evaluateOneStage(std::move(stage), profile);
+  ASSERT_TRUE(static_cast<bool>(table));
+  const auto &simt = table->stages.front().implementations[1];
+  EXPECT_DOUBLE_EQ(simt.resources.reduction, 0.0);
+  EXPECT_GT(simt.resources.shuffle, 0.0);
 }
 
 TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {

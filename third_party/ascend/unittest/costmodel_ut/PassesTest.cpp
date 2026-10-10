@@ -15,9 +15,13 @@
 #include "mlir/Pass/PassManager.h"
 
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/JSON.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include <gtest/gtest.h>
@@ -854,4 +858,193 @@ module attributes {
   EXPECT_FALSE(mlir::ascend::simt_selection::isModelControlled(addOp));
   EXPECT_TRUE(mlir::ascend::simt_selection::shouldUseSimtTemplate(
       addOp, /*legacyForceSimt=*/true));
+}
+
+namespace {
+
+llvm::Expected<llvm::SmallString<128>> writeSyntheticRemainderProfile(
+    llvm::function_ref<void(llvm::json::Object &)> update) {
+  auto buffer =
+      llvm::MemoryBuffer::getFile(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  if (!buffer)
+    return llvm::errorCodeToError(buffer.getError());
+  auto parsed = llvm::json::parse((*buffer)->getBuffer());
+  if (!parsed)
+    return parsed.takeError();
+  auto *root = parsed->getAsObject();
+  if (!root)
+    return llvm::createStringError("test profile must be an object");
+  // The fixture lives in a temporary directory; its shared profile must not
+  // be resolved relative to that directory.
+  llvm::SmallString<256> shared(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  llvm::sys::path::remove_filename(shared);
+  llvm::sys::path::append(shared, *root->getString("microbenchmark_profile"));
+  (*root)["microbenchmark_profile"] = shared.str().str();
+  update(*root);
+  int fd = -1;
+  llvm::SmallString<128> path;
+  if (std::error_code error =
+          llvm::sys::fs::createTemporaryFile("i32-rem-test", "json", fd, path))
+    return llvm::errorCodeToError(error);
+  llvm::raw_fd_ostream file(fd, true);
+  file << *parsed;
+  file.close();
+  return path;
+}
+
+void addSyntheticRemainderRates(llvm::json::Object &root) {
+  // Deliberately synthetic and unequal, not measured production rates.
+  auto *simd = root.getObject("simd")->getObject("ops");
+  auto *simt = root.getObject("simt")->getObject("ops");
+  (*simd)["srem"] = llvm::json::Object{
+      {"description", "synthetic signed i32 test rate"},
+      {"throughput_vector_instructions_per_system_cycle", 4.0},
+      {"factor", 3.0}};
+  (*simd)["urem"] = llvm::json::Object{
+      {"description", "synthetic unsigned i32 test rate"},
+      {"throughput_vector_instructions_per_system_cycle", 8.0}};
+  (*simt)["srem"] =
+      llvm::json::Object{{"description", "synthetic signed i32 test rate"},
+                         {"throughput_scalar_ops_per_system_cycle", 16.0},
+                         {"factor", 3.0}};
+  (*simt)["urem"] =
+      llvm::json::Object{{"description", "synthetic unsigned i32 test rate"},
+                         {"throughput_scalar_ops_per_system_cycle", 32.0}};
+}
+
+} // namespace
+
+TEST(CostModelPassesTest, OptionalRemainderRatesDriveRealStageCompute) {
+  auto fixture = writeSyntheticRemainderProfile(addSyntheticRemainderRates);
+  if (!fixture)
+    FAIL() << llvm::toString(fixture.takeError());
+  llvm::FileRemover removeFixture(*fixture);
+  struct Case {
+    const char *type;
+    double elements;
+    double vectors;
+  };
+  // Scalar operations retain their scalar fallback, not a vector rate.
+  // All tensor widths use the generic signedness rate. Natural vector lane
+  // counts still follow element width; scalar operations retain fallback.
+  const Case cases[] = {{"i32", 0.0, 0.0},
+                        {"tensor<65xi32>", 65.0, 2.0},
+                        {"tensor<65xi16>", 65.0, 1.0},
+                        {"tensor<65xi64>", 65.0, 3.0}};
+  for (const auto &entry : cases)
+    for (bool isSigned : {true, false}) {
+      SCOPED_TRACE(entry.type);
+      SCOPED_TRACE(isSigned);
+      mlir::MLIRContext context;
+      std::string type = entry.type;
+      std::string source =
+          "module { func.func @main(%a: " + type + ", %b: " + type + ") -> " +
+          type + " { %r = arith." + (isSigned ? "remsi" : "remui") +
+          " %a, %b : " + type + " return %r : " + type + " } }";
+      auto module = parseModule(context, source);
+      ASSERT_TRUE(module);
+      mlir::ascend::SimdSimtCostModelOptions options;
+      options.profilePath = fixture->str().str();
+      options.actualTarget = "Ascend950PR_9579";
+      options.compileOn91095 = true;
+      auto report = mlir::ascend::analyzeSimdSimtCandidates(*module, options);
+      if (!report)
+        FAIL() << llvm::toString(report.takeError());
+      double simdCompute = 0.0, simtCompute = 0.0;
+      for (const auto &stage : report->stageModel.stages)
+        for (const auto &impl : stage.implementations) {
+          if (impl.implementation.mode == mlir::ascend::StageMode::SIMD)
+            simdCompute += impl.resources.compute;
+          else if (impl.implementation.superblockFactor == 1)
+            simtCompute += impl.resources.compute;
+        }
+      EXPECT_NEAR(simdCompute, entry.vectors * (isSigned ? 3.0 / 4 : 1.0 / 8),
+                  1e-9);
+      EXPECT_NEAR(simtCompute,
+                  entry.elements * (isSigned ? 3.0 / 16 : 1.0 / 32), 1e-9);
+    }
+}
+
+TEST(CostModelPassesTest, RemainderProfileRejectsWrongSharedMeasurementUnit) {
+  auto fixture = writeSyntheticRemainderProfile([](llvm::json::Object &root) {
+    auto *ops = root.getObject("simd")->getObject("ops");
+    (*ops)["srem"] = llvm::json::Object{
+        {"description", "deliberately incorrect scalar rate in SIMD fixture"},
+        {"throughput_measurement", "simt.f32.add.throughput"}};
+  });
+  if (!fixture)
+    FAIL() << llvm::toString(fixture.takeError());
+  llvm::FileRemover removeFixture(*fixture);
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+    module {
+      func.func @main(%a: i32, %b: i32) -> i32 {
+        %r = arith.remsi %a, %b : i32
+        return %r : i32
+      }
+    }
+  )mlir");
+  ASSERT_TRUE(module);
+  mlir::ascend::SimdSimtCostModelOptions options;
+  options.profilePath = fixture->str().str();
+  options.actualTarget = "Ascend950PR_9579";
+  auto report = mlir::ascend::analyzeSimdSimtCandidates(*module, options);
+  ASSERT_FALSE(report);
+  EXPECT_NE(llvm::toString(report.takeError()).find("unit"), std::string::npos);
+}
+
+TEST(CostModelPassesTest, MissingRemainderRatesKeepIssueOnlyFallback) {
+  auto fixture = writeSyntheticRemainderProfile([](llvm::json::Object &root) {
+    for (llvm::StringRef mode : {"simd", "simt"}) {
+      auto *ops = root.getObject(mode)->getObject("ops");
+      ops->erase("srem");
+      ops->erase("urem");
+    }
+  });
+  if (!fixture)
+    FAIL() << llvm::toString(fixture.takeError());
+  llvm::FileRemover removeFixture(*fixture);
+  mlir::MLIRContext context;
+  auto module = parseModule(context, R"mlir(
+    module {
+      func.func @main(%a: tensor<65xi32>, %b: tensor<65xi32>) {
+        %signed = arith.remsi %a, %b : tensor<65xi32>
+        %unsigned = arith.remui %a, %b : tensor<65xi32>
+        return
+      }
+    }
+  )mlir");
+  ASSERT_TRUE(module);
+  mlir::ascend::SimdSimtCostModelOptions options;
+  options.profilePath = fixture->str().str();
+  options.actualTarget = "Ascend950PR_9579";
+  options.compileOn91095 = true;
+  auto report = mlir::ascend::analyzeSimdSimtCandidates(*module, options);
+  if (!report)
+    FAIL() << llvm::toString(report.takeError());
+  for (const auto &stage : report->stageModel.stages)
+    for (const auto &impl : stage.implementations) {
+      EXPECT_DOUBLE_EQ(impl.resources.compute, 0.0);
+      EXPECT_GT(impl.resources.issue, 0.0);
+    }
+}
+
+TEST(CostModelPassesTest, RemainderProfileRejectsNonpositiveRate) {
+  auto fixture = writeSyntheticRemainderProfile([](llvm::json::Object &root) {
+    addSyntheticRemainderRates(root);
+    (*root.getObject("simt")->getObject("ops")->getObject(
+        "urem"))["throughput_scalar_ops_per_system_cycle"] = 0.0;
+  });
+  if (!fixture)
+    FAIL() << llvm::toString(fixture.takeError());
+  llvm::FileRemover removeFixture(*fixture);
+  mlir::MLIRContext context;
+  auto module = parseModule(context, kOutOfSimdSimtCoverageModule);
+  ASSERT_TRUE(module);
+  mlir::ascend::SimdSimtCostModelOptions options;
+  options.profilePath = fixture->str().str();
+  options.actualTarget = "Ascend950PR_9579";
+  auto report = mlir::ascend::analyzeSimdSimtCandidates(*module, options);
+  ASSERT_FALSE(report);
+  llvm::consumeError(report.takeError());
 }

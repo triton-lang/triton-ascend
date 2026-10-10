@@ -150,6 +150,11 @@ static bool hasTensorResult(Operation *operation) {
 
 static llvm::StringRef getProfileOperationName(Operation *operation) {
   const llvm::StringRef name = operation->getName().getStringRef();
+  if (name == "arith.remsi" || name == "arith.remui") {
+    // The profile keeps one rate per signedness across integer widths.
+    // Current measured rates cover i32; other widths reuse that estimate.
+    return name == "arith.remsi" ? "srem" : "urem";
+  }
   return llvm::StringSwitch<llvm::StringRef>(name)
       .Cases("arith.addf", "tt.add", "f32.add")
       .Case("arith.subf", "f32.sub")

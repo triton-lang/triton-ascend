@@ -18,6 +18,37 @@
     "simt"
   ],
   "properties": {
+    "simt_indirect_store_model": {
+      "enum": [
+        "random_f32_store_fill_ab_20261007",
+        "random_store_no_fill_first_20261008",
+        "random_store_no_fill_reuse_20261008"
+      ],
+      "description": "Optional Ascend950PR random SIMT store A/B increment in SYS_CNT cycles. The 20261008 models use no target fill, grouped storage widths and ranks 1-8; reuse requires explicit workload evidence. The 20261007 F32 target-fill model remains reproducible. Unsupported workloads retain legacy rates."
+    },
+    "simd_indirect_store_model": {
+      "enum": [
+        "random_f32_store_no_fill_first_20261007",
+        "random_f32_store_no_fill_reuse_20261007",
+        "random_store_no_fill_first_20261008",
+        "random_store_no_fill_reuse_20261008"
+      ],
+      "description": "Optional no-extra-fill SIMD store A/B increment in SYS_CNT cycles. The 20261008 models cover grouped storage widths and ranks 1-8; the 20261007 F32 models remain reproducible. First has unresolved outliers; reuse requires explicit evidence that identical targets were written twice. Profile selection alone is not a cache-state proof. Unsupported workloads retain legacy rates."
+    },
+    "simd_indirect_load_model": {
+      "enum": [
+        "random_f32_matched_ab_20261007",
+        "random_dtype_matched_ab_20261008"
+      ],
+      "description": "Optional Ascend950PR SIMD random-address scalar load effective increment from matched-address A/B measurements, in SYS_CNT cycles. The 20261008 model extends validated integer/floating-point types and ranks 1-5 with two per-element rates; the 20261007 FP32 model remains reproducible. Unsupported workloads retain legacy pricing."
+    },
+    "simt_indirect_load_model": {
+      "enum": [
+        "random_i32_six_term_20261007",
+        "random_dtype_six_term_20261008"
+      ],
+      "description": "Optional Ascend950PR/dav-c310 random-address matched-ALU SIMT load fit in SYS_CNT cycles. The 20261008 model shares coefficients by 1/2/4/8-byte storage width, ranks 1-5, W=1-64, q=1/2/4, H<=2, and admits address helpers alongside one target load. The 20261007 INT32 model is explicit historical compatibility only. Unsupported workloads retain legacy pricing; does not change SIMD."
+    },
     "$schema": {
       "type": "string",
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."

@@ -1,6 +1,7 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -109,7 +110,9 @@ materializeControlFlow(const LogicalStage &stage, StageMode mode,
 
 static StageResourceCycles mapWorkload(const LogicalStage &stage,
                                        const StageModeProfile &profile,
-                                       StageMode mode) {
+                                       StageMode mode,
+                                       std::optional<double> fittedLoad,
+                                       std::optional<double> fittedStore) {
   StageResourceCycles resources;
   const StageWorkload &work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
@@ -165,15 +168,19 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
     resources.store =
         directStoreInstructions / profile.storeWarpInstructionsPerCycle;
   }
-  resources.load +=
-      work.indirectLoadTransactions / profile.indirectLoadTransactionsPerCycle;
-  resources.store += work.indirectStoreTransactions /
-                     profile.indirectStoreTransactionsPerCycle;
+  resources.load += fittedLoad.value_or(
+      work.indirectLoadTransactions / profile.indirectLoadTransactionsPerCycle);
+  resources.store +=
+      fittedStore.value_or(work.indirectStoreTransactions /
+                           profile.indirectStoreTransactionsPerCycle);
   // Preserve one uncovered loaded-index dependency latency per Stage
   // iteration, but charge it only when an actual indirect access exists.
-  if (work.indirectLoadTransactions > 0.0)
-    resources.load += profile.indirectDependencyLatencyCycles;
-  else if (work.indirectStoreTransactions > 0.0)
+  if (work.indirectLoadTransactions > 0.0) {
+    // Matched-load difference already includes the induced index wait.
+    if (!fittedLoad)
+      resources.load += profile.indirectDependencyLatencyCycles;
+  } else if (work.indirectStoreTransactions > 0.0 && !fittedStore)
+    // The matched-store increment replaces the legacy write/wait estimate.
     resources.store += profile.indirectDependencyLatencyCycles;
 
   for (const AtomicWorkload &atomic : work.atomicWorkloads) {
@@ -322,6 +329,10 @@ static double estimateStage(const LogicalStage &stage,
     return r.setup +
            dispatchCount * std::max(r.scalar + controlBody(r), r.issue);
   }
+  case StageCostModelKind::PartialContinuousTileMemory:
+    // Slices expanded along unstructured axes are billed serially. Structured
+    // axes may have nonunit strides; they do not imply contiguous addresses.
+    return serial;
   case StageCostModelKind::ContinuousTileMemory:
   case StageCostModelKind::ContinuousTileStore:
   case StageCostModelKind::ContinuousShortLoad:
@@ -468,6 +479,8 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "loop_predicate";
   case StageCostModelKind::ContinuousTileMemory:
     return "continuous_tile_memory";
+  case StageCostModelKind::PartialContinuousTileMemory:
+    return "partial_continuous_tile_memory";
   case StageCostModelKind::ContinuousTileStore:
     return "continuous_tile_store";
   case StageCostModelKind::ContinuousShortLoad:
@@ -561,6 +574,27 @@ bool StageModeProfile::isValid(StageMode mode) const {
 
 bool HardwareProfile::isValid() const {
   return !profileVersion.empty() && !target.empty() &&
+         (simtIndirectLoadModel.empty() ||
+          ((simtIndirectLoadModel == "random_i32_six_term_20261007" ||
+            simtIndirectLoadModel == "random_dtype_six_term_20261008") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simdIndirectLoadModel.empty() ||
+          ((simdIndirectLoadModel == "random_f32_matched_ab_20261007" ||
+            simdIndirectLoadModel == "random_dtype_matched_ab_20261008") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simtIndirectStoreModel.empty() ||
+          ((simtIndirectStoreModel == "random_f32_store_fill_ab_20261007" ||
+            simtIndirectStoreModel == "random_store_no_fill_first_20261008" ||
+            simtIndirectStoreModel == "random_store_no_fill_reuse_20261008") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simdIndirectStoreModel.empty() ||
+          ((simdIndirectStoreModel ==
+                "random_f32_store_no_fill_first_20261007" ||
+            simdIndirectStoreModel ==
+                "random_f32_store_no_fill_reuse_20261007" ||
+            simdIndirectStoreModel == "random_store_no_fill_first_20261008" ||
+            simdIndirectStoreModel == "random_store_no_fill_reuse_20261008") &&
+           target == "Ascend950PR/dav-c310")) &&
          logicalWarpGroupCount > 0 && superblockUsefulFactorLimit > 0 &&
          superblockPersistentStatePressureFreeFactor > 0 &&
          superblockPersistentStatePressureFreeFactor <=
@@ -645,12 +679,23 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         return llvm::createStringError(std::errc::invalid_argument,
                                        "Stage '%s' has an illegal candidate",
                                        stage.id.c_str());
+      const auto fitted =
+          IndirectGatherMemoryCostModel().cost(stage, profile, implementation);
+      // Fits already describe the full W-warp increment; do not divide by W.
       StageResourceCycles resources = mapWorkload(
           stage,
           implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
+          implementation.mode, fitted.load, fitted.store);
       StageImplementationCost cost;
       cost.implementation = implementation;
+      if (fitted.load)
+        cost.indirectLoadPricing = implementation.mode == StageMode::SIMD
+                                       ? profile.simdIndirectLoadModel
+                                       : profile.simtIndirectLoadModel;
+      if (fitted.store)
+        cost.indirectStorePricing = implementation.mode == StageMode::SIMD
+                                        ? profile.simdIndirectStoreModel
+                                        : profile.simtIndirectStoreModel;
       cost.resources = resources;
       cost.totalCycles = applySuperBlock(
           stage, resources, implementation, profile,

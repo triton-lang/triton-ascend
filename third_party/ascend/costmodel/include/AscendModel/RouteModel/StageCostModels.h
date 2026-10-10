@@ -34,6 +34,7 @@ enum class StageCostModelKind {
   PredicateMask,
   LoopPredicate,
   ContinuousTileMemory,
+  PartialContinuousTileMemory,
   ContinuousTileStore,
   ContinuousShortLoad,
   CachePolicyStore,
@@ -173,6 +174,17 @@ struct StageModeProfile {
 struct HardwareProfile {
   std::string profileVersion;
   std::string target;
+  /// Explicit opt-in to a target-specific random-address, matched-ALU fit.
+  /// The dtype model selects by storage width, not integer/floating names;
+  /// the INT32-only identifier is retained for old-profile reproducibility.
+  /// Empty retains the legacy transaction model.
+  std::string simtIndirectLoadModel;
+  /// FP32 scalar-loop matched-address differential, random-address prior.
+  std::string simdIndirectLoadModel;
+  /// Random store A/B fits. Empty retains legacy transactions. Store state is
+  /// an explicit profile prior; reuse additionally requires workload evidence.
+  std::string simtIndirectStoreModel;
+  std::string simdIndirectStoreModel;
   /// Logical warp groups available to one SIMT program.  This is a compile
   /// option, not a hardware constant, and bounds cross-group interleaving in
   /// recurrence Stage models.

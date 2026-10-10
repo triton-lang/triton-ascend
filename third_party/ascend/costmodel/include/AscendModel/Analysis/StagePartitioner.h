@@ -14,6 +14,8 @@
 
 namespace mlir::ascend {
 
+class StageMemoryPatternAnalysis;
+
 struct StagePartitionerOptions {
   int64_t tinyDotFlopsMax = 16384;
   int64_t maximumSuperblockFactor = 1;
@@ -41,15 +43,17 @@ public:
 class StageBoundaryAnalysis {
 public:
   llvm::Expected<StagePartition>
-  analyze(const ProgramStructure &structure,
-          const SimtAnchorPlan &anchorPlan) const;
+  analyze(const ProgramStructure &structure, const SimtAnchorPlan &anchorPlan,
+          const StageMemoryPatternAnalysis *memoryPatterns = nullptr) const;
 };
 
 /// Derives structural facts for every already-owned Stage.  It never chooses
 /// a route and never reads a hardware throughput profile.
 class StageFeatureAnalysis {
 public:
-  llvm::Error analyze(StagePartition &partition) const;
+  llvm::Error
+  analyze(StagePartition &partition,
+          const StageMemoryPatternAnalysis *memoryPatterns = nullptr) const;
 };
 
 /// Verifies/classifies the one dominant resource semantics of every Stage.
@@ -66,7 +70,9 @@ public:
 /// using per-kind weights.
 class StageWorkloadAnalysis {
 public:
-  llvm::Error analyze(StagePartition &partition) const;
+  llvm::Error
+  analyze(StagePartition &partition,
+          const StageMemoryPatternAnalysis *memoryPatterns = nullptr) const;
 };
 
 /// Derives legal SIMD/SIMT implementations from structural Stage facts.

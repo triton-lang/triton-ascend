@@ -132,6 +132,48 @@ TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
             StageMode::SIMT);
 }
 
+TEST(SimdSimtCostModelTest,
+     RemainderWorkloadDistinguishesSignednessAcrossWidths) {
+  for (llvm::StringRef type :
+       {"i32", "tensor<65xi32>", "tensor<65xi16>", "tensor<65xi64>"})
+    for (bool isSigned : {true, false}) {
+      SCOPED_TRACE(type.str());
+      SCOPED_TRACE(isSigned);
+      mlir::MLIRContext context;
+      context.getOrLoadDialect<mlir::arith::ArithDialect>();
+      context.getOrLoadDialect<mlir::func::FuncDialect>();
+      const std::string ty = type.str();
+      const std::string source = "module { func.func @kernel(%a: " + ty +
+                                 ", %b: " + ty + ") { %r = arith." +
+                                 (isSigned ? "remsi" : "remui") +
+                                 " %a, %b : " + ty + " return } }";
+      auto module = mlir::parseSourceString<mlir::ModuleOp>(source, &context);
+      ASSERT_TRUE(module);
+      auto function = module->lookupSymbol<mlir::func::FuncOp>("kernel");
+      ASSERT_TRUE(function);
+      StagePartition partition;
+      partition.operationOwnershipComplete = true;
+      LogicalStage stage =
+          logicalStage("remainder", StageCostModelKind::ScalarMath);
+      for (mlir::Operation &operation :
+           function.getBody().front().without_terminator())
+        stage.operations.push_back(&operation);
+      partition.stages.push_back(std::move(stage));
+      if (llvm::Error error = StageWorkloadAnalysis().analyze(partition))
+        FAIL() << llvm::toString(std::move(error));
+      const auto &work = partition.stages.front().workload;
+      const double elements = type == "i32" ? 1.0 : 65.0;
+      const bool tensor = type != "i32";
+      EXPECT_DOUBLE_EQ(work.operationElements.lookup("srem"),
+                       tensor && isSigned ? elements : 0.0);
+      EXPECT_DOUBLE_EQ(work.operationElements.lookup("urem"),
+                       tensor && !isSigned ? elements : 0.0);
+      EXPECT_DOUBLE_EQ(work.operationElements.lookup("generic.issue"), 0.0);
+      EXPECT_DOUBLE_EQ(work.scalarOperations, type == "i32" ? 1.0 : 0.0);
+      EXPECT_DOUBLE_EQ(work.issueElements, elements);
+    }
+}
+
 TEST(SimdSimtCostModelTest, SimdPricesShortAxesPerSegmentAndElementWidth) {
   auto simdCost = [](int64_t elementBits, int64_t contiguousElements,
                      double segmentCount) {

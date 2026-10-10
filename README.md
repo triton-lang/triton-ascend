@@ -101,6 +101,26 @@ git checkout main
 pip install -e .
 ```
 
+The prebuilt Ascend images (for example
+`quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11`) already
+contain every build dependency declared in `pyproject.toml` (`setuptools`, `cmake`, `ninja`,
+`pybind11`). Build isolation would download them again into a temporary environment, so add
+`--no-build-isolation` to reuse the installed versions:
+
+```bash
+pip install -e . --no-build-isolation
+```
+
+#### Verify the Installation
+
+```bash
+python3 -c "import triton.backends.ascend; print('ascend backend OK')"
+```
+
+If `triton.backends.ascend` cannot be imported after a source install, check whether a PyPI `triton`
+distribution is shadowing the editable install (`pip show triton`) and uninstall it
+(`pip uninstall -y triton`) before retrying.
+
 #### Custom LLVM Build (Optional)
 
 ```bash

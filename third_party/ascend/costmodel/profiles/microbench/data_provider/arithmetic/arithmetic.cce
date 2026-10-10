@@ -1,0 +1,145 @@
+// Fixed arithmetic auxiliary probes. OP: div/exp/log/srem/urem/add = 0/1/2/3/4/5.
+#include "RegBase/VecUtils.h"
+#include "Vector/VecUtils.h"
+#include "Utils.h"
+#ifndef ARITH_ROUTE
+#define ARITH_ROUTE 0
+#endif
+#ifndef ARITH_OP
+#define ARITH_OP 0
+#endif
+static_assert(ARITH_ROUTE == 0 || ARITH_ROUTE == 1, "route must be SIMD or SIMT");
+static_assert(ARITH_OP >= 0 && ARITH_OP <= 5, "unsupported operation");
+#if ARITH_OP != 3 && ARITH_OP != 4
+using Element = float;
+constexpr int NT = 1024, C = 8;
+#define CHAINS(F) F(0) F(1) F(2) F(3) F(4) F(5) F(6) F(7)
+#else
+#if ARITH_OP == 3
+using Element = int32_t;
+#else
+using Element = uint32_t;
+#endif
+constexpr int NT = 512, C = 4;
+#define CHAINS(F) F(0) F(1) F(2) F(3)
+#endif
+
+__simt_vf__ LAUNCH_BOUND(NT) __aiv__ static void
+initialize(__gm__ uint32_t *gm, __ubuf__ Element *input) {
+  int t = threadIdx.y * 32 + threadIdx.x;
+  auto typed = reinterpret_cast<__gm__ Element *>(gm);
+  for (int c = 0; c < 2 * C; ++c) input[c * NT + t] = typed[c * NT + t];
+}
+
+#if ARITH_ROUTE == 1
+__simt_vf__ LAUNCH_BOUND(NT) __aiv__ static void
+work(__ubuf__ Element *input, __ubuf__ Element *dst, int iterations) {
+  int t = threadIdx.y * 32 + threadIdx.x;
+#if ARITH_OP == 5
+  // Retain the measured eight-chain low-expansion add core: common runtime
+  // base/increment, 0.01 offsets, and fixed left-associated result sum.
+  float base = input[t], increment = input[C * NT + t];
+#define OFFSET_0 0.0f
+#define OFFSET_1 0.01f
+#define OFFSET_2 0.02f
+#define OFFSET_3 0.03f
+#define OFFSET_4 0.04f
+#define OFFSET_5 0.05f
+#define OFFSET_6 0.06f
+#define OFFSET_7 0.07f
+#define LOAD(I) Element x##I = base + OFFSET_##I;
+#else
+#define LOAD(I) Element x##I = input[I * NT + t], d##I = input[(C + I) * NT + t];
+#endif
+  CHAINS(LOAD)
+#undef LOAD
+#if ARITH_OP == 0
+#define STEP(I) x##I = x##I / d##I;
+#elif ARITH_OP == 1
+#define STEP(I) x##I = __expf(x##I);
+#elif ARITH_OP == 2
+#define STEP(I) x##I = __logf(x##I);
+#elif ARITH_OP == 5
+#define STEP(I) x##I += increment;
+#else
+#define STEP(I) x##I %= d##I;
+#endif
+  // One source target per chain per iteration; compiler default expansion.
+  // Runtime tripcount and loaded recurrence inputs prevent constant hoisting.
+  for (int r = 0; r < iterations; ++r) { CHAINS(STEP) }
+#undef STEP
+#if ARITH_OP == 5
+  dst[t] = x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7;
+#else
+#define SAVE(I) dst[I * NT + t] = x##I;
+  CHAINS(SAVE)
+#undef SAVE
+#endif
+}
+#else
+__aiv__ __attribute__((always_inline)) static void
+work(__ubuf__ Element *input, __ubuf__ Element *dst, int iterations) {
+  __VEC_SCOPE__ {
+    vector_bool mask; uint32_t lanes = 64;
+    CREATE_MASK_BY_SIZE(mask, Element, lanes);
+#define LOAD(I) VectorReg<Element> x##I, d##I; \
+  vlds(x##I, input + I * NT, 0, NORM); \
+  vlds(d##I, input + (C + I) * NT, 0, NORM);
+    CHAINS(LOAD)
+#undef LOAD
+#if ARITH_OP == 0
+#define STEP(I) vdiv(x##I, x##I, d##I, mask);
+#elif ARITH_OP == 1
+#define STEP(I) vexp(x##I, x##I, mask);
+#elif ARITH_OP == 2
+#define STEP(I) vln(x##I, x##I, mask);
+#elif ARITH_OP == 5
+#define STEP(I) vadd(x##I, x##I, d##I, mask);
+#else
+#define STEP(I) vmod<DivisionMode::DIV_TRUNCATE>(x##I, x##I, d##I, mask);
+#endif
+    for (uint16_t r = 0; r < static_cast<uint16_t>(iterations); ++r) {
+      CHAINS(STEP)
+    }
+#undef STEP
+#define SAVE(I) vsts(x##I, dst + I * NT, 0, NORM_B32, mask);
+    CHAINS(SAVE)
+#undef SAVE
+  }
+}
+#endif
+
+__simt_vf__ LAUNCH_BOUND(NT) __aiv__ static void
+readback(__ubuf__ Element *dst, __gm__ uint32_t *gm) {
+  int t = threadIdx.y * 32 + threadIdx.x;
+  constexpr int active = ARITH_ROUTE ? NT : 64;
+  auto typed = reinterpret_cast<__gm__ Element *>(gm);
+  if (t < active) {
+#if ARITH_OP == 5 && ARITH_ROUTE == 1
+    typed[2 * C * NT + t] = dst[t];
+#else
+    for (int c = 0; c < C; ++c) typed[(2 * C + c) * NT + t] = dst[c * NT + t];
+#endif
+  }
+}
+
+extern "C" __global__ [aicore] void
+measure(__gm__ long long *out, __gm__ uint32_t *gm, int K, int iterations) {
+  auto input = reinterpret_cast<__ubuf__ Element *>(0);
+  auto dst = reinterpret_cast<__ubuf__ Element *>(65536);
+  cce::async_invoke<initialize>(cce::dim3{32, NT / 32, 1}, gm, input);
+  pipe_barrier(PIPE_ALL);
+  long long start = get_sys_cnt();
+  for (int k = 0; k < K; ++k) {
+    // Re-read the unchanged seeds at each VF, especially for finite EXP/LOG.
+#if ARITH_ROUTE == 1
+    cce::async_invoke<work>(cce::dim3{32, NT / 32, 1}, input, dst, iterations);
+#else
+    work(input, dst, iterations);
+#endif
+    pipe_barrier(PIPE_ALL);
+  }
+  out[0] = get_sys_cnt() - start;
+  cce::async_invoke<readback>(cce::dim3{32, NT / 32, 1}, dst, gm);
+  pipe_barrier(PIPE_ALL);
+}

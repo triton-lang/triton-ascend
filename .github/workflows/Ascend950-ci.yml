@@ -190,7 +190,7 @@ jobs:
           } >> "$GITHUB_ENV"
 
       - name: Download wheel artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           name: cibw-wheels-manylinux_2_28_x86_64-wheels-upload
           path: wheelhouse

@@ -19,6 +19,8 @@
 # THE SOFTWARE.
 
 import os
+from unittest.mock import Mock
+
 import pytest
 import triton
 import torch
@@ -58,6 +60,52 @@ def compile_kernel(kernel, signature, constants):
     module = ast_to_ttir(kernel, src, context, Options(), {"create_address_space": al.semantic.create_address_space},
                          {})
     return str(module)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("kernel_size, dilation, padding, expected_padding, output_length", [
+    (1, 1, "same", (0, 0), 8),
+    (3, 1, "same", (1, 1), 8),
+    (4, 1, "same", (1, 2), 8),
+    (3, 2, "same", (2, 2), 8),
+    (4, 2, "same", (3, 3), 8),
+    (4, 3, "same", (4, 5), 8),
+    (3, 1, 0, 0, 6),
+    (3, 1, 1, 1, 8),
+    (4, 1, (1, 2), (1, 2), 8),
+    (3, 1, "valid", 0, 6),
+])
+def test_conv1d_padding_frontend(monkeypatch, batched, kernel_size, dilation, padding, expected_padding, output_length):
+    # Exercise the real frontend with constexpr tensor shapes, stopping before
+    # IR construction so padding normalization is checked independently.
+    input_shape = [2, 2, 8] if batched else [2, 8]
+    input_tensor = tl.tensor(None, tl.block_type(tl.float16, input_shape))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, kernel_size]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+    semantic = object()
+
+    al.conv1d(input_tensor, weight, padding=padding, dilation=dilation, _semantic=semantic)
+
+    output_shape = [2, 4, output_length] if batched else [4, output_length]
+    semantic_conv1d.assert_called_once_with(input_tensor, weight, None, 1, expected_padding, dilation, 1, output_shape,
+                                            semantic)
+    actual_padding = semantic_conv1d.call_args.args[4]
+    padding_values = actual_padding if isinstance(actual_padding, tuple) else (actual_padding, )
+    assert all(type(value) is int for value in padding_values)
+    assert type(semantic_conv1d.call_args.args[7][-1]) is int
+
+
+def test_conv1d_same_rejects_strided_convolution(monkeypatch):
+    input_tensor = tl.tensor(None, tl.block_type(tl.float16, [2, 8]))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, 3]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+
+    with pytest.raises(ValueError, match="padding='same' is only supported when stride=1"):
+        al.conv1d(input_tensor, weight, padding="same", stride=2, _semantic=object())
+
+    semantic_conv1d.assert_not_called()
 
 
 # Test cases for core.py

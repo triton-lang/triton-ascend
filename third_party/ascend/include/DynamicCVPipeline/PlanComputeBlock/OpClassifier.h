@@ -155,6 +155,12 @@ private:
   OpCoreType getCoreType(Operation *op) const;
   OpCoreType getForInitCoreType(OpOperand *operand) const;
 
+  // Classify a loop iter_arg based on its body-side compute consumers.
+  // Skips scf::YieldOp (pass-through). Returns OP_UNDETERMINED when no
+  // compute consumer exists, so the caller can fall back to the yielded-def
+  // classification.
+  OpCoreType classifyIterArgFromBody(BlockArgument iterArg) const;
+
   // Set the core type of an operation
   void setCoreType(Operation *op, OpCoreType coreType);
 

@@ -1050,6 +1050,21 @@ int OpClassifierPass::propagateVectorUpstream() {
     llvm::SmallVector<Operation *> upstreamOps;
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
+    // Collect the iter_args init defining ops of the current loop op (if cur
+    // is one). The CUBE/VECTOR classification of an iter_args init must match
+    // what consumes the iter_arg inside the loop body — propagating VECTOR
+    // from the loop's external consumers onto the init would create a
+    // CUBE_AND_VECTOR classification that, once split, routes the init to the
+    // VECTOR clone while the body needs the CUBE original (which then becomes
+    // dead code).
+    llvm::SmallPtrSet<Operation *, 4> skipIterArgInits;
+    if (isa<scf::ForOp, scf::WhileOp>(cur)) {
+      for (Value init : CVPipeline::getLoopInitValues(cur)) {
+        if (Operation *defOp = init.getDefiningOp())
+          skipIterArgInits.insert(defOp);
+      }
+    }
+
     for (Operation *def : upstreamOps) {
       if (!def || vecVisited.count(def))
         continue;
@@ -1060,6 +1075,14 @@ int OpClassifierPass::propagateVectorUpstream() {
           isa<scf::SCFDialect>(def->getDialect())) {
         LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
                           << ": should not be marked VECTOR\n");
+        continue;
+      }
+
+      // Skip iter_args init defs — see comment above the SmallPtrSet.
+      if (skipIterArgInits.count(def)) {
+        LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
+                          << ": iter_args init (classification driven by body "
+                             "consumers)\n");
         continue;
       }
 
@@ -1552,14 +1575,50 @@ int OpClassifierPass::handleSCFYield() {
   return 0;
 }
 
+OpCoreType OpClassifierPass::classifyIterArgFromBody(BlockArgument iterArg) const {
+  // Priority:
+  //   any CUBE_ONLY consumer        -> CUBE_ONLY
+  //   any CUBE_AND_VECTOR consumer  -> CUBE_AND_VECTOR
+  //   only VECTOR_ONLY consumers    -> VECTOR_ONLY
+  //   no compute consumer (yield only) -> UNDETERMINED
+  OpCoreType seenVector = OP_UNDETERMINED;
+  for (Operation *user : iterArg.getUsers()) {
+    // Yield ops are pass-through, not compute consumers — skip them.
+    if (isa<scf::YieldOp>(user))
+      continue;
+    OpCoreType userCT = getCoreType(user);
+    if (userCT == OP_CUBE_ONLY)
+      return OP_CUBE_ONLY;
+    if (userCT == OP_CUBE_AND_VECTOR)
+      return OP_CUBE_AND_VECTOR;
+    if (userCT == OP_VECTOR_ONLY)
+      seenVector = OP_VECTOR_ONLY;
+  }
+  if (seenVector == OP_VECTOR_ONLY)
+    return OP_VECTOR_ONLY;
+  return OP_UNDETERMINED;
+}
+
 OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
-  // Unified handling for scf.for and scf.while using the tied loop interface
+  // The iter_args init value's classification must mirror the body-side
+  // consumers (the iteration carries this value forward; the CUBE/VECTOR
+  // type of the value has to match what consumes it inside the loop body).
+  //
+  // Looking only at the for-loop's yielded value's defining op is incorrect
+  // when that def is a region container (e.g. scf.if) that itself got
+  // classified as VECTOR by the default sweep, even though the body is CUBE.
+  // In that case the init would be mis-routed to a VECTOR clone while the
+  // body needs a CUBE value — the CUBE value becomes dead.
   Operation *owner = operand->getOwner();
 
   if (auto forOp = dyn_cast<scf::ForOp>(owner)) {
     auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
+    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
+        fromBody != OP_UNDETERMINED)
+      return fromBody;
+    // No compute consumer (pure pass-through): fall back to existing logic.
     auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;
@@ -1573,6 +1632,9 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
     auto iterArg = whileOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
+    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
+        fromBody != OP_UNDETERMINED)
+      return fromBody;
     auto sourceOperand = whileOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;

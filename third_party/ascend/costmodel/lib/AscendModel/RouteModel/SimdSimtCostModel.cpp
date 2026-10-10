@@ -440,6 +440,13 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
         hardware.simd.operationRates[op] = resolveOpProfile(
             *ops, op, "throughput_vector_instructions_per_system_cycle",
             "vector_instruction/system_cycle", microbench, reader);
+      // Optional calibrated integer operations. Existing profiles without
+      // these entries retain issue-only pricing; do not borrow FP32 rates.
+      for (llvm::StringRef op : {"srem", "urem"})
+        if (ops->get(op))
+          hardware.simd.operationRates[op] = resolveOpProfile(
+              *ops, op, "throughput_vector_instructions_per_system_cycle",
+              "vector_instruction/system_cycle", microbench, reader);
     }
     if (const auto *memory = reader.object(*simd, "memory", "simd")) {
       hardware.simd.loadBytesPerCycle = reader.number(
@@ -486,6 +493,11 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
         hardware.simt.operationRates[op] =
             resolveOpProfile(*ops, op, "throughput_scalar_ops_per_system_cycle",
                              "scalar_op/system_cycle", microbench, reader);
+      for (llvm::StringRef op : {"srem", "urem"})
+        if (ops->get(op))
+          hardware.simt.operationRates[op] = resolveOpProfile(
+              *ops, op, "throughput_scalar_ops_per_system_cycle",
+              "scalar_op/system_cycle", microbench, reader);
     }
     if (const auto *dot = reader.object(*simt, "dot", "simt")) {
       hardware.simt.dotSetupCycles =

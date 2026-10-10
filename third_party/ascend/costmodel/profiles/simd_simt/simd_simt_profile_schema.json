@@ -384,6 +384,16 @@
       "type": "object",
       "minProperties": 1,
       "description": "Map from semantic operation name to either a shared throughput measurement or a cycle multiplier relative to another operation.",
+      "properties": {
+        "srem": {
+          "$ref": "#/definitions/op_profile",
+          "description": "Optional generic signed truncating tensor remainder cost across integer widths; scalar operations retain their scalar fallback. Current measured rates cover tensor i32 only; other widths reuse them as unvalidated estimates. SIMD operation counts retain the existing element-width vector-lane model; SIMT rates count scalar lane operations. Absence retains issue-only pricing."
+        },
+        "urem": {
+          "$ref": "#/definitions/op_profile",
+          "description": "Optional generic unsigned tensor remainder cost across integer widths; scalar operations retain their scalar fallback. Current measured rates cover tensor i32 only; other widths reuse them as unvalidated estimates. SIMD operation counts retain the existing element-width vector-lane model; SIMT rates count scalar lane operations. Absence retains issue-only pricing."
+        }
+      },
       "additionalProperties": {
         "$ref": "#/definitions/op_profile"
       }

@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 12,
-  "profile_version": "david-v100-simd-simt-20260918-v27-segmented-issue-fixed-transition",
+  "profile_version": "david-v100-simd-simt-20261010-v36-verified-four-arithmetic",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -63,10 +63,10 @@
         "confidence": "medium"
       },
       "f32.div": {
-        "description": "Estimated FP32 SIMD divide cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "description": "Measured FP32 SIMD div cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
-        "factor": 12.0,
-        "confidence": "low"
+        "factor": 4.0,
+        "confidence": "medium"
       },
       "f32.max": {
         "description": "Estimated FP32 SIMD maximum cost relative to f32.add; factor multiplies the base cycle estimate.",
@@ -81,16 +81,16 @@
         "confidence": "medium"
       },
       "f32.exp": {
-        "description": "Estimated FP32 SIMD exponential cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "description": "Measured FP32 SIMD exp cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
-        "factor": 9.0,
-        "confidence": "low"
+        "factor": 4.0,
+        "confidence": "medium"
       },
       "f32.log": {
-        "description": "Estimated FP32 SIMD logarithm cost relative to f32.add; factor multiplies the base cycle estimate.",
+        "description": "Measured FP32 SIMD log cost relative to f32.add; factor multiplies the base cycle estimate.",
         "relative_to": "f32.add",
-        "factor": 12.0,
-        "confidence": "low"
+        "factor": 4.0,
+        "confidence": "medium"
       },
       "f32.sin": {
         "description": "Triton end-to-end measured FP32 SIMD sine cost relative to f32.add; reflects AscendNPU-IR Taylor expansion.",
@@ -133,6 +133,18 @@
         "relative_to": "f32.add",
         "factor": 2.0,
         "confidence": "low"
+      },
+      "srem": {
+        "description": "Effective signed tensor remainder cost relative to f32.add. Measured with i32 and reused across integer widths.",
+        "relative_to": "f32.add",
+        "factor": 83.7911572265625,
+        "confidence": "medium"
+      },
+      "urem": {
+        "description": "Effective unsigned tensor remainder cost relative to f32.add. Measured with i32 and reused across integer widths.",
+        "relative_to": "f32.add",
+        "factor": 70.40209472656251,
+        "confidence": "medium"
       }
     },
     "memory": {
@@ -232,10 +244,9 @@
         "confidence": "medium"
       },
       "f32.div": {
-        "description": "Estimated FP32 SIMT divide cost relative to f32.add; factor multiplies the base cycle estimate.",
-        "relative_to": "f32.add",
-        "factor": 12.0,
-        "confidence": "low"
+        "description": "Measured FP32 SIMT div effective throughput in scalar operations per SYS_CNT tick.",
+        "throughput_scalar_ops_per_system_cycle": 51.992582,
+        "confidence": "medium"
       },
       "f32.max": {
         "description": "Estimated FP32 SIMT maximum cost relative to f32.add; factor multiplies the base cycle estimate.",
@@ -250,16 +261,14 @@
         "confidence": "medium"
       },
       "f32.exp": {
-        "description": "Estimated FP32 SIMT exponential cost relative to f32.add; factor multiplies the base cycle estimate.",
-        "relative_to": "f32.add",
-        "factor": 9.0,
-        "confidence": "low"
+        "description": "Measured FP32 SIMT exp effective throughput in scalar operations per SYS_CNT tick.",
+        "throughput_scalar_ops_per_system_cycle": 52.49263103934384,
+        "confidence": "medium"
       },
       "f32.log": {
-        "description": "Estimated FP32 SIMT logarithm cost relative to f32.add; factor multiplies the base cycle estimate.",
-        "relative_to": "f32.add",
-        "factor": 12.0,
-        "confidence": "low"
+        "description": "Measured FP32 SIMT log effective throughput in scalar operations per SYS_CNT tick.",
+        "throughput_scalar_ops_per_system_cycle": 52.75291390302016,
+        "confidence": "medium"
       },
       "f32.sin": {
         "description": "Marginally measured FP32 SIMT sine cost relative to f32.add at the CCE SIMT baseline condition (per-thread ILP=8).",
@@ -302,6 +311,16 @@
         "relative_to": "f32.add",
         "factor": 2.0,
         "confidence": "low"
+      },
+      "srem": {
+        "description": "Effective signed tensor remainder throughput. Measured with i32 and reused across integer widths.",
+        "throughput_scalar_ops_per_system_cycle": 6.3289741588134465,
+        "confidence": "medium"
+      },
+      "urem": {
+        "description": "Effective unsigned tensor remainder throughput. Measured with i32 and reused across integer widths.",
+        "throughput_scalar_ops_per_system_cycle": 8.276332378464732,
+        "confidence": "medium"
       }
     },
     "dot": {

@@ -1,0 +1,196 @@
+# SOME DESCRIPTIVE TITLE.
+# Copyright (C) 2026, Huawei
+# This file is distributed under the same license as the Triton Ascend package.
+# FIRST AUTHOR <EMAIL@ADDRESS>, YEAR.
+#
+#, fuzzy
+msgid ""
+msgstr ""
+"Project-Id-Version: Triton Ascend\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-09 19:09+0800\n"
+"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
+"Language-Team: LANGUAGE <LL@li.org>\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"X-Source-Commit: 6d7ed3d44e0c51f8ccb19119496ceec061d709ef\n"
+
+#: ../../zh/index.rst:19
+msgid "版本说明"
+msgstr "Release Notes"
+
+#: ../../zh/index.rst:19
+msgid "快速入门"
+msgstr "Quick Start"
+
+#: ../../zh/index.rst:19
+msgid "安装指南"
+msgstr "Installation Guide"
+
+#: ../../zh/index.rst:19
+msgid "从这里开始"
+msgstr "Getting Started"
+
+#: ../../zh/index.rst:28
+msgid "Vector算子开发"
+msgstr "Vector Operator Development"
+
+#: ../../zh/index.rst:28
+msgid "Cube算子开发"
+msgstr "Cube Operator Development"
+
+#: ../../zh/index.rst:28
+msgid "融合算子开发"
+msgstr "Fusion Operator Development"
+
+#: ../../zh/index.rst:28
+msgid "Triton-Ascend autotune"
+msgstr "Triton-Ascend autotune"
+
+#: ../../zh/index.rst:28
+msgid "典型算子样例"
+msgstr "Typical Operator Samples"
+
+#: ../../zh/index.rst:28
+msgid "教程与样例"
+msgstr "Tutorials and Samples"
+
+#: ../../zh/index.rst:39
+msgid "Triton-Ascend算子开发"
+msgstr "Triton-Ascend Operator Development"
+
+#: ../../zh/index.rst:39
+msgid "Triton-Ascend算子迁移"
+msgstr "Triton-Ascend Operator Migration"
+
+#: ../../zh/index.rst:39
+msgid "Triton-Ascend算子调试与调优"
+msgstr "Triton-Ascend Operator Debugging and Tuning"
+
+#: ../../zh/index.rst:39
+msgid "环境变量与编译选项"
+msgstr "Environment Variables and Compiler Options"
+
+#: ../../zh/index.rst:39
+msgid "开发指南"
+msgstr "Development Guide"
+
+#: ../../zh/index.rst:49
+msgid "triton"
+msgstr "triton"
+
+#: ../../zh/index.rst:49
+msgid "triton.language"
+msgstr "triton.language"
+
+#: ../../zh/index.rst:49
+msgid "triton.testing"
+msgstr "triton.testing"
+
+#: ../../zh/index.rst:49
+msgid "triton.language.extra.cann.extension"
+msgstr "triton.language.extra.cann.extension"
+
+#: ../../zh/index.rst:49
+msgid "triton.language.extra.cann.libdevice"
+msgstr "triton.language.extra.cann.libdevice"
+
+#: ../../zh/index.rst:49
+msgid "triton.extension.buffer.language"
+msgstr "triton.extension.buffer.language"
+
+#: ../../zh/index.rst:49
+msgid "API参考"
+msgstr "API Reference"
+
+#: ../../zh/index.rst:62
+msgid "架构设计与核心特性"
+msgstr "Architecture Design and Core Features"
+
+#: ../../zh/index.rst:62
+msgid "特性说明"
+msgstr "Feature Description"
+
+#: ../../zh/index.rst:69
+msgid "Triton-Ascend FAQ"
+msgstr "Triton-Ascend FAQ"
+
+#: ../../zh/index.rst:69
+msgid "常见问题"
+msgstr "FAQ"
+
+#: ../../zh/index.rst:76
+msgid "贡献指南"
+msgstr "Contribution Guide"
+
+#: ../../zh/index.rst:76
+msgid "贡献者公约"
+msgstr "Contributor Covenant"
+
+#: ../../zh/index.rst:76
+msgid "治理机制"
+msgstr "Governance"
+
+#: ../../zh/index.rst:76
+msgid "技术例会"
+msgstr "Technical Meeting"
+
+#: ../../zh/index.rst:76
+msgid "Maintainers"
+msgstr "Maintainers"
+
+#: ../../zh/index.rst:76
+msgid "Contributors"
+msgstr "Contributors"
+
+#: ../../zh/index.rst:76
+msgid "安全声明"
+msgstr "Security Statement"
+
+#: ../../zh/index.rst:76
+msgid "社区"
+msgstr "Community"
+
+#: ../../zh/index.rst:2
+msgid "Triton Ascend"
+msgstr "Triton Ascend"
+
+#: ../../zh/index.rst:4
+msgid ""
+"<p style=\"text-align:center\">\n"
+"<script async defer src=\"https://buttons.github.io/buttons.js\"></script>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend\" data-show-count=\"true\" data-size=\"large\" aria-label=\"Star triton-lang/triton-ascend on GitHub\">Star</a>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend/subscription\" data-icon=\"octicon-eye\" data-size=\"large\" aria-label=\"Watch triton-lang/triton-ascend on GitHub\">Watch</a>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend/fork\" data-icon=\"octicon-repo-forked\" data-size=\"large\" aria-label=\"Fork triton-lang/triton-ascend on GitHub\">Fork</a>\n"
+"</p>\n"
+"\n"
+"<p style=\"text-align:center; margin-top: 4px;\">\n"
+"<a href=\"https://deepwiki.com/triton-lang/triton-ascend\"><img src=\"https://deepwiki.com/badge.svg\" alt=\"Ask DeepWiki\"></a>\n"
+"</p>"
+msgstr ""
+"<p style=\"text-align:center\">\n"
+"<script async defer src=\"https://buttons.github.io/buttons.js\"></script>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend\" data-show-count=\"true\" data-size=\"large\" aria-label=\"Star triton-lang/triton-ascend on GitHub\">Star</a>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend/subscription\" data-icon=\"octicon-eye\" data-size=\"large\" aria-label=\"Watch triton-lang/triton-ascend on GitHub\">Watch</a>\n"
+"<a class=\"github-button\" href=\"https://github.com/triton-lang/triton-ascend/fork\" data-icon=\"octicon-repo-forked\" data-size=\"large\" aria-label=\"Fork triton-lang/triton-ascend on GitHub\">Fork</a>\n"
+"</p>\n"
+"\n"
+"<p style=\"text-align:center; margin-top: 4px;\">\n"
+"<a href=\"https://deepwiki.com/triton-lang/triton-ascend\"><img src=\"https://deepwiki.com/badge.svg\" alt=\"Ask DeepWiki\"></a>\n"
+"</p>"
+
+#: ../../zh/index.rst:17
+msgid ""
+"**Triton-Ascend** "
+"是适配华为Ascend处理器的Triton优化版本，主要用于提供高效的核函数自动调优、算子编译及部署能力，支持Ascend Atlas "
+"A2/A3/950系列产品，兼容Triton核心语法的同时，针对昇腾NPU特性进行了深度优化，包括自动解析核函数参数、优化内存访问逻辑、完善安全部署机制等。"
+msgstr ""
+"**Triton-Ascend** is an optimized version of Triton adapted for Huawei "
+"Ascend processors. It provides efficient kernel autotuning, operator "
+"compilation, and deployment capabilities. It supports Ascend Atlas A2/A3/950"
+" series products. While remaining compatible with core Triton syntax, it is "
+"deeply optimized for Ascend NPU features, including automatically parsing "
+"kernel parameters, optimizing memory access logic, and improving secure "
+"deployment mechanisms."

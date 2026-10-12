@@ -2,16 +2,21 @@ name: NPUIR Payload Build
 
 on:
   workflow_dispatch:
+  # The payload tracks the AscendNPU-IR stable branch (no longer the pinned
+  # submodule gitlink), so this daily schedule is what picks up new upstream
+  # commits. It must stay ahead of wheels.yml's 08:00 UTC cron so the nightly
+  # wheel build finds a fresh payload. Note GitHub only fires schedules from
+  # the workflow file on the default branch.
+  schedule:
+    - cron: "17 2 * * *"
   push:
     paths:
-      - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
-      - .github/workflows/build/patch-npuir-templates.py
+      - .github/workflows/build/fetch-npuir-stable.sh
   pull_request:
     paths:
-      - third_party/ascend/AscendNPU-IR
       - .github/workflows/npuir-build.yml
-      - .github/workflows/build/patch-npuir-templates.py
+      - .github/workflows/build/fetch-npuir-stable.sh
 
 concurrency:
   group: npuir-build-${{ github.ref }}
@@ -47,44 +52,27 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
-        with:
-          # One level only: the AscendNPU-IR pin. "recursive" would also
-          # dig into torch-mlir's own externals (github.com llvm-project and
-          # stablehlo), which the build does not need and which stall on the
-          # pods' github connectivity. The nested submodules (llvm-project /
-          # torch-mlir / shmem) are fetched by the next step via direct
-          # depth-1 SHA pulls (gitcode branch fetches are unreliable here).
-          submodules: "true"
+        # No submodules: the build no longer uses the pinned AscendNPU-IR
+        # gitlink. The next step fetches the upstream stable branch HEAD
+        # (plus the nested llvm-project / torch-mlir / shmem submodules)
+        # via direct depth-1 SHA pulls — gitcode branch clones are
+        # unreliable from the pods, `want <sha>` fetches are fine.
 
       - name: Add git safe directory
         run: git config --global --add safe.directory "*"
 
-      - name: Initialize nested submodules directly
+      - name: Fetch AscendNPU-IR stable
+        id: fetch-npuir
         shell: bash
-        env:
-          # Abort stalled gitcode transfers instead of hanging the job.
-          GIT_HTTP_LOW_SPEED_LIMIT: 1000
-          GIT_HTTP_LOW_SPEED_TIME: 30
         run: |
-          set -eu -o pipefail
-          NPUIR=third_party/ascend/AscendNPU-IR
-          # Depth-1 SHA fetches from gitcode: `want <sha>` requests work from
-          # the self-hosted pods where branch clones fail. The checkout above
-          # is intentionally single-level, so these nested submodules are
-          # always fetched here.
-          git -C "$NPUIR" ls-tree HEAD third-party/ | while read -r _ _ sha path; do
-            name=$(basename "$path")
-            url=$(git -C "$NPUIR" config -f .gitmodules --get "submodule.$path.url")
-            echo "Fetching ${path} @ ${sha} from ${url}"
-            rm -rf "/tmp/${name}"
-            git init -q "/tmp/${name}"
-            git -C "/tmp/${name}" remote add origin "$url"
-            git -C "/tmp/${name}" fetch --depth 1 origin "$sha"
-            git -C "/tmp/${name}" checkout -q FETCH_HEAD
-            rm -rf "$NPUIR/$path"
-            mv "/tmp/${name}" "$NPUIR/$path"
-            echo "Initialized ${path} @ ${sha}"
-          done
+          set -eu
+          # Resolves stable -> SHA via ls-remote, fetches it and the nested
+          # submodules into the path the build steps expect. Logs go to
+          # stderr; stdout is just the resolved SHA (used for cache keys
+          # and recorded in the payload artifact for traceability).
+          NPUIR_SHA=$(bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR)
+          echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
+          echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Install build tools
         env:
@@ -117,7 +105,9 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .ccache
-          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          # Keyed on the fetched stable HEAD: cache identity follows the
+          # actual npuir source, not the triton-ascend commit.
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ steps.fetch-npuir.outputs.npuir_sha }}
           restore-keys: |
             npuir-ccache-ml-2_34-${{ matrix.config.arch }}-
 
@@ -188,7 +178,15 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .ccache
-          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ hashFiles('third_party/ascend/AscendNPU-IR/.gitmodules') }}-${{ github.sha }}
+          key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ steps.fetch-npuir.outputs.npuir_sha }}
+
+      - name: Record source SHA in payload
+        run: |
+          set -eu
+          # Traceability: which AscendNPU-IR stable commit this payload was
+          # built from (wheels.yml's prepare step only copies bin/ and lib/,
+          # so this file stays out of the wheel).
+          echo "${{ steps.fetch-npuir.outputs.npuir_sha }}" > npuir-payload/npuir-sha.txt
 
       - name: Upload npuir payload
         uses: actions/upload-artifact@v4

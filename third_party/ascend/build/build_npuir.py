@@ -17,10 +17,6 @@ def _log(msg):
     print(f"[build_npuir] {msg}", flush=True)
 
 
-def _is_git_repo(dir_path):
-    return (Path(dir_path) / ".git").is_dir()
-
-
 def _check_disk_space(min_free_gb=_MIN_FREE_DISK_GB):
     """Check that the disk hosting the repo has at least ``min_free_gb`` free.
 
@@ -72,7 +68,7 @@ def _is_submodule_initialized(dir_path):
 
 
 def _nested_submodule_gitlinks(npuir_dir):
-    """Map {relative_path: sha} for the nested submodules the npuir pin records."""
+    """Map {relative_path: sha} for the nested submodules the fetched npuir tree records."""
     out = subprocess.check_output(
         ["git", "ls-tree", "HEAD", "third-party/"],
         cwd=str(npuir_dir),
@@ -112,7 +108,7 @@ def _init_nested_submodule_sources(npuir_dir):
     """
     links = _nested_submodule_gitlinks(npuir_dir)
     if not links:
-        raise RuntimeError("No nested submodules recorded in the AscendNPU-IR pin.")
+        raise RuntimeError("No nested submodules recorded in the fetched AscendNPU-IR tree.")
     for path, sha in links.items():
         dest = npuir_dir / path
         if _is_submodule_initialized(dest):
@@ -123,32 +119,24 @@ def _init_nested_submodule_sources(npuir_dir):
 
 
 def _init_npuir_repo():
-    """Initialize the AscendNPU-IR submodule and its nested submodule sources.
+    """Fetch the AscendNPU-IR stable branch and its nested submodule sources.
 
-    AscendNPU-IR depends on LLVM and Torch-MLIR. The recursive gitcode clone
-    is not reliable from the CI network, so the nested sources are fetched
-    with direct depth-1 SHA pulls from the gitcode remotes.
+    No longer uses the pinned gitlink submodule: the payload tracks the
+    upstream stable branch. The shared workflow script resolves stable -> SHA
+    via ls-remote and fetches that exact SHA depth-1 (gitcode branch clones
+    are unreliable from the CI network, `want <sha>` fetches are fine); the
+    nested sources (llvm-project / torch-mlir / shmem) are then fetched here
+    in Python so they keep their dedicated retry handling.
     """
-    _log("Initializing AscendNPU-IR repository ...")
-    if not _is_git_repo(_REPO_ROOT):
-        raise RuntimeError(f"{_REPO_ROOT} is not a git repository; cannot initialize the "
-                           f"Triton-Ascend submodule.")
-
-    # First initialize the AscendNPU-IR submodule itself from the root repo.
-    _run_with_retry([
-        "git",
-        "submodule",
-        "update",
-        "--init",
-        "--depth",
-        "1",
-        "--",
-        "third_party/ascend/AscendNPU-IR",
-    ], cwd=_REPO_ROOT)
+    _log("Fetching AscendNPU-IR stable branch ...")
+    script = _REPO_ROOT / ".github" / "workflows" / "build" / "fetch-npuir-stable.sh"
+    if not script.is_file():
+        raise RuntimeError(f"npuir fetch script not found: {script}")
+    _run_with_retry(["bash", str(script), str(_NPUIR_DIR), "--skip-nested"])
 
     if not _is_submodule_initialized(_NPUIR_DIR):
-        raise RuntimeError(f"AscendNPU-IR submodule initialization failed: {_NPUIR_DIR} is not git repository.")
-    _log("AscendNPU-IR repository initialized.")
+        raise RuntimeError(f"AscendNPU-IR fetch failed: {_NPUIR_DIR} has no source tree.")
+    _log("AscendNPU-IR stable HEAD checked out.")
 
     _init_nested_submodule_sources(_NPUIR_DIR)
     _log("Nested submodule sources ready.")

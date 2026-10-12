@@ -47,11 +47,14 @@ jobs:
         - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
         branch:
-        # npuir: ON builds the BishengIR payload in-image via build_npuir.py
-        # (requires the TRITON_BUILD_NPUIR handling in third_party/ascend/build
-        # on that branch); OFF uses the prebuilt payload from npuir-build.yml.
+        # npuir: OFF uses the prebuilt payload from npuir-build.yml, which
+        # tracks the AscendNPU-IR stable branch and is branch-independent (all
+        # matrix branches share the same payload); ON (only as the fallback
+        # when no artifact is available) builds the payload in-image via
+        # build_npuir.py, also from stable.
         - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
-        # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
+        - {ref: 'main-dev', tag: 'main-dev', local: 'dev', npuir: 'OFF'}
+        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
 
     permissions:
       id-token: write
@@ -89,14 +92,23 @@ jobs:
         shell: bash
         run: |
           set -eu
-          # The checkout dir is owned by the runner UID, not the job container
-          # user, so git would fail with "dubious ownership" on git ls-tree.
-          git config --global --add safe.directory "*"
-          # The payload is the BishengIR compiler built from the AscendNPU-IR
-          # submodule; key the cache on that submodule's pinned gitlink SHA so
-          # it invalidates only when the payload actually changes (not on every
-          # commit). Cached on the shared-volume PVC (/root/.cache).
-          NPUIR_SHA=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print $3}')
+          # The payload is the BishengIR compiler built by npuir-build.yml from
+          # the AscendNPU-IR stable branch (no longer the pinned submodule
+          # gitlink); key the cache on stable's HEAD SHA so it invalidates only
+          # when the upstream source actually moves, and is shared across all
+          # matrix branches (the payload no longer depends on the triton-ascend
+          # branch). Cached on the shared-volume PVC (/root/.cache).
+          NPUIR_SHA=""
+          for attempt in 1 2 3; do
+            NPUIR_SHA=$(git ls-remote https://gitcode.com/Ascend/AscendNPU-IR.git refs/heads/stable | awk '{print $1}') && [ -n "$NPUIR_SHA" ] && break || true
+            echo "ls-remote attempt ${attempt}/3 failed; retrying in 10s..."
+            sleep 10
+          done
+          if [ -z "$NPUIR_SHA" ]; then
+            echo "::error::cannot resolve AscendNPU-IR stable HEAD from gitcode"
+            exit 1
+          fi
+          echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
           CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"
           echo "cache_dir=${CACHE_DIR}" >> "$GITHUB_OUTPUT"
           if [ -x "${CACHE_DIR}/bin/bishengir-compile" ]; then
@@ -112,19 +124,37 @@ jobs:
             echo "cache_hit=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Download npuir payload from PR build
-        id: payload-pr
-        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true'
-        # Pull this PR's npuir-build artifact first (pre-merge testing); for
-        # fork PRs the run lives on the fork, so allow_forks is required.
-        # push/schedule use the matrix branch's payload.
+      - name: Download npuir payload from this PR's npuir-build run
+        id: payload-head
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true' && github.event_name == 'pull_request'
+        # Pre-merge testing only: a PR that changes npuir-build.yml or the
+        # fetch script gets its own npuir-build run on the PR head branch;
+        # for fork PRs that run lives on the fork, so allow_forks is required.
+        # Ordinary PRs have no such run — the next step falls back to main.
         uses: dawidd6/action-download-artifact@v9
         continue-on-error: true
         with:
           workflow: npuir-build.yml
           workflow_conclusion: success
           allow_forks: true
-          branch: ${{ github.event_name == 'pull_request' && github.head_ref || matrix.branch.ref }}
+          branch: ${{ github.head_ref }}
+          name: npuir-payload-manylinux-${{ matrix.config.arch }}
+          path: npuir-artifacts
+
+      - name: Download npuir payload from main
+        id: payload-main
+        if: (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false') && matrix.branch.npuir == 'OFF' && steps.npuir-cache.outputs.cache_hit != 'true' && steps.payload-head.outcome != 'success'
+        # Canonical source for every event and branch: the payload tracks
+        # AscendNPU-IR stable and is produced by npuir-build.yml's daily
+        # schedule on main, so main-dev/release branches consume main's
+        # payload too (they never run npuir-build themselves). Skipped only
+        # when the PR-head step above already found this PR's own payload.
+        uses: dawidd6/action-download-artifact@v9
+        continue-on-error: true
+        with:
+          workflow: npuir-build.yml
+          workflow_conclusion: success
+          branch: main
           name: npuir-payload-manylinux-${{ matrix.config.arch }}
           path: npuir-artifacts
 
@@ -142,9 +172,10 @@ jobs:
           fi
           # Bundled into the wheel via TRITON_ASCEND_BISHENGIR_PATH in
           # wheels.Dockerfile. Sourced from the npuir-build GitHub artifact
-          # downloaded above; when it is missing (fresh branch, expired
-          # artifact) fall back to compiling the payload in-image so the build
-          # still produces a correct wheel instead of failing.
+          # downloaded above; when it is missing (expired artifact, no
+          # successful npuir-build run on main yet) fall back to compiling
+          # the payload in-image (also from stable) so the build still
+          # produces a correct wheel instead of failing.
           BIN=$(find npuir-artifacts -name bishengir-compile -type f 2>/dev/null | head -1 || true)
           if [ -z "${BIN}" ]; then
             echo "No npuir-payload artifact for ${{ matrix.config.arch }}; falling back to in-image build (slow)."

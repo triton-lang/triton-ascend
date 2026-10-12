@@ -103,6 +103,8 @@ struct SimdSimtCostReport {
   std::string microbenchmarkProfileVersion;
   std::string microbenchmarkProfileTarget;
   std::string microbenchmarkProfileContentSha256;
+  std::string reductionProfileContentSha256;
+  std::string reductionProfileStatus;
   std::string scoreUnit;
   SimdSimtCandidateScores candidateCosts;
   bool allSimdCandidateLegal = true;

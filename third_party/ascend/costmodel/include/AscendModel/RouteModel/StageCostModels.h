@@ -9,6 +9,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
+#include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
 #include "mlir/IR/Operation.h"
@@ -165,6 +166,7 @@ struct StageModeProfile {
   double indirectStoreTransactionsPerCycle = 0.0;
   double indirectDependencyLatencyCycles = 0.0;
   llvm::StringMap<StageAtomicRate> atomicRates;
+  ReductionCostProfile tailAxisReduction;
   StageControlFlowRates controlFlow;
 
   bool isValid(StageMode mode) const;

@@ -45,7 +45,7 @@ namespace {
 constexpr llvm::StringLiteral kAllSimd = "all_simd";
 constexpr llvm::StringLiteral kAllSimtOnly = "all_simt_only";
 constexpr llvm::StringLiteral kMixedSimdSimt = "mixed_simd_simt";
-constexpr int64_t kSupportedProfileSchemaVersion = 12;
+constexpr int64_t kSupportedProfileSchemaVersion = 14;
 
 struct StructuralProfile {
   int64_t tinyDotFlopsMax = 0;
@@ -59,6 +59,8 @@ struct CandidateProfile {
   std::string microbenchmarkProfileVersion;
   std::string microbenchmarkProfileTarget;
   std::string microbenchmarkContentSha256;
+  std::string reductionContentSha256;
+  std::string reductionStatus = "legacy_inline";
   StructuralProfile structural;
 };
 
@@ -239,6 +241,16 @@ static void readStageResources(ProfileJSONReader &reader,
   if (!resources)
     return;
   const std::string prefix = (context + ".stage_resources").str();
+  if (const auto *reduction = resources->getObject("tail_axis_reduction")) {
+    auto parsed = parseReductionParameters(*reduction);
+    if (!parsed) {
+      reader.setError(prefix + ".tail_axis_reduction: " +
+                      llvm::toString(parsed.takeError()));
+      return;
+    }
+    profile.tailAxisReduction = std::move(*parsed);
+  }
+
   profile.scalarOperationsPerCycle =
       reader.number(*resources, "scalar_operations_per_system_cycle", prefix);
   profile.issueOperationsPerCycle =
@@ -544,6 +556,26 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
     hardware.transition.simtWarpSize = hardware.simt.issueWidth;
   }
 
+  if (auto reference = root->getString("reduction_profile")) {
+    // Unavailable calibration never partially mixes new coefficients with old
+    // ones. Empty mode parameters select the complete legacy shuffle formula.
+    hardware.simd.tailAxisReduction = {};
+    hardware.simt.tailAxisReduction = {};
+    profile.reductionStatus = "target_mismatch";
+    auto loaded = ReductionProfile::loadFromFile(
+        resolveProfileReference(path, *reference));
+    if (loaded && loaded->getTarget() == hardware.target) {
+      hardware.simd.tailAxisReduction =
+          loaded->getModeProfile(ReductionMode::SIMD);
+      hardware.simt.tailAxisReduction =
+          loaded->getModeProfile(ReductionMode::SIMT);
+      profile.reductionContentSha256 = loaded->getContentHash().str();
+      profile.reductionStatus = "loaded";
+    } else if (!loaded) {
+      profile.reductionStatus =
+          "unavailable: " + llvm::toString(loaded.takeError());
+    }
+  }
   if (reader.failed())
     return llvm::createStringError(
         std::errc::invalid_argument, "invalid SIMD/SIMT profile '%s': %s",
@@ -574,8 +606,9 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
   profile.contentSha256 = profile.selectionContentSha256;
   if (!profile.microbenchmarkContentSha256.empty()) {
     std::string combinedAssets =
-        canonicalProfile +
-        "\nshared_microbenchmark_sha256=" + profile.microbenchmarkContentSha256;
+        canonicalProfile + "\nshared_microbenchmark_sha256=" +
+        profile.microbenchmarkContentSha256 +
+        "\nreduction_sha256=" + profile.reductionContentSha256;
     llvm::ArrayRef<uint8_t> combinedBytes(
         reinterpret_cast<const uint8_t *>(combinedAssets.data()),
         combinedAssets.size());
@@ -738,6 +771,9 @@ llvm::json::Object SimdSimtCostReport::toJSON() const {
   sharedEvidence["target"] = microbenchmarkProfileTarget;
   sharedEvidence["content_sha256"] = microbenchmarkProfileContentSha256;
   result["shared_microbenchmark_profile"] = std::move(sharedEvidence);
+  result["reduction_profile"] =
+      llvm::json::Object{{"status", reductionProfileStatus},
+                         {"content_sha256", reductionProfileContentSha256}};
   result["unit"] = scoreUnit;
   result["candidate_costs"] = candidateCosts.toJSON();
   result["decision_kind"] = stringifySimdSimtCandidate(decision);
@@ -836,6 +872,8 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   report.microbenchmarkProfileTarget = profile.microbenchmarkProfileTarget;
   report.microbenchmarkProfileContentSha256 =
       profile.microbenchmarkContentSha256;
+  report.reductionProfileContentSha256 = profile.reductionContentSha256;
+  report.reductionProfileStatus = profile.reductionStatus;
   report.scoreUnit = profile.scoreUnit;
   report.features = features;
   report.allSimdCandidateLegal =

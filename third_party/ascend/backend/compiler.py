@@ -971,6 +971,7 @@ def _auto_simt_asset_hash(path: str, default_name: str) -> str:
         shared_ref = (profile.get("microbenchmark_profile") if isinstance(profile, dict) else None)
     except (TypeError, ValueError, UnicodeError):
         shared_ref = None
+        profile = None
     if shared_ref is not None and not isinstance(shared_ref, str):
         digest.update(b"\0invalid-shared-microbenchmark-reference\0")
         digest.update(repr(shared_ref).encode())
@@ -984,6 +985,19 @@ def _auto_simt_asset_hash(path: str, default_name: str) -> str:
             digest.update(shared_asset.read_bytes())
         except OSError:
             digest.update(f"missing:{shared_asset}".encode())
+    reduction_ref = profile.get("reduction_profile") if isinstance(profile, dict) else None
+    if reduction_ref:
+        digest.update(b"\0reduction-profile\0")
+        if not isinstance(reduction_ref, str):
+            digest.update(repr(reduction_ref).encode())
+        else:
+            reduction_asset = Path(reduction_ref)
+            if not reduction_asset.is_absolute():
+                reduction_asset = asset.parent / reduction_asset
+            try:
+                digest.update(reduction_asset.read_bytes())
+            except OSError:
+                digest.update(f"missing:{reduction_asset}".encode())
     return digest.hexdigest()
 
 

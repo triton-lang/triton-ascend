@@ -1,6 +1,7 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -11,6 +12,8 @@
 #include <array>
 #include <cmath>
 #include <initializer_list>
+#include <limits>
+#include <optional>
 #include <system_error>
 
 using namespace mlir;
@@ -44,10 +47,11 @@ static double controlBody(const StageResourceCycles &resources) {
 }
 
 static double serialBody(const StageResourceCycles &resources) {
-  const double execution =
-      resources.scalar + resources.load + resources.store + resources.atomic +
-      resources.compute + resources.predicate + resources.shuffle +
-      resources.dot + controlBody(resources) + resources.spill;
+  const double execution = resources.scalar + resources.load + resources.store +
+                           resources.atomic + resources.compute +
+                           resources.predicate + resources.shuffle +
+                           resources.reduction + resources.dot +
+                           controlBody(resources) + resources.spill;
   // Issue is a shared front-end throughput bound, not an extra instruction
   // stream.  Adding it to execution double-counts every instruction.
   return std::max(execution, resources.issue);
@@ -109,7 +113,7 @@ materializeControlFlow(const LogicalStage &stage, StageMode mode,
 
 static StageResourceCycles mapWorkload(const LogicalStage &stage,
                                        const StageModeProfile &profile,
-                                       StageMode mode) {
+                                       StageMode mode, int64_t numWarps) {
   StageResourceCycles resources;
   const StageWorkload &work = stage.workload;
   const bool simd = mode == StageMode::SIMD;
@@ -215,6 +219,17 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   resources.predicate =
       predicateInstructions / profile.predicateOperationsPerCycle;
   resources.shuffle = work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
+  for (const ReductionWorkload &reduction : work.reductionWorkloads) {
+    auto cycles = estimateTailAxisReductionCycles(
+        reduction, profile.tailAxisReduction,
+        mode == StageMode::SIMD ? ReductionMode::SIMD : ReductionMode::SIMT,
+        numWarps);
+    if (cycles)
+      resources.reduction += reduction.instances * *cycles;
+    else
+      resources.shuffle +=
+          legacyReductionShuffleCycles(reduction, profile.shuffleLanesPerCycle);
+  }
   resources.scanShuffle =
       work.scanShuffleLaneSteps / profile.shuffleLanesPerCycle;
   if (work.dotFlops > 0.0) {
@@ -239,10 +254,10 @@ static StageResourceCycles mapWorkload(const LogicalStage &stage,
   if (stage.features.hasLoopCarriedDataDependency)
     resources.criticalPath = resources.scalar + resources.compute +
                              resources.predicate + resources.shuffle +
-                             resources.dot;
+                             resources.reduction + resources.dot;
   else if (stage.features.hasReduction)
-    resources.criticalPath =
-        resources.compute + resources.predicate + resources.shuffle;
+    resources.criticalPath = resources.compute + resources.predicate +
+                             resources.shuffle + resources.reduction;
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 
@@ -260,7 +275,7 @@ static double applySuperBlock(const LogicalStage &stage,
       factor, static_cast<double>(profile.superblockUsefulFactorLimit));
   const double latencySensitivePerIteration =
       resources.load + resources.store + resources.atomic + resources.shuffle +
-      resources.divergence;
+      resources.reduction + resources.divergence;
   const double latencySensitive =
       iterations(stage) * latencySensitivePerIteration;
   // SuperBlock creates `factor` independent logical-program groups on one
@@ -337,7 +352,7 @@ static double estimateStage(const LogicalStage &stage,
       return r.setup +
              count *
                  (std::max({r.load, r.store, r.atomic,
-                            r.compute + r.dot + r.shuffle,
+                            r.compute + r.dot + r.shuffle + r.reduction,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
     return serial;
@@ -391,7 +406,7 @@ static double estimateStage(const LogicalStage &stage,
                             r.issue);
   case StageCostModelKind::PrefixScan: {
     const double scanCritical =
-        r.compute + r.predicate +
+        r.compute + r.predicate + r.reduction +
         r.shuffle * (mode == StageMode::SIMD
                          ? profile.simd.prefixScanDependencyFactor
                          : profile.simt.prefixScanDependencyFactor);
@@ -404,7 +419,7 @@ static double estimateStage(const LogicalStage &stage,
   case StageCostModelKind::TinyCubeRoofline:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
       return r.setup + count * (r.scalar + r.predicate + controlBody(r) +
-                                r.shuffle + r.spill +
+                                r.shuffle + r.reduction + r.spill +
                                 std::max({r.load, r.compute + r.dot, r.store,
                                           r.atomic, r.issue}));
     return serial;
@@ -419,7 +434,7 @@ static double estimateStage(const LogicalStage &stage,
       return r.setup +
              count *
                  (std::max({r.load, r.store, r.atomic,
-                            r.compute + r.dot + r.shuffle,
+                            r.compute + r.dot + r.shuffle + r.reduction,
                             r.scalar + r.predicate + controlBody(r), r.issue}) +
                   r.spill);
     return serial;
@@ -554,7 +569,7 @@ bool StageModeProfile::isValid(StageMode mode) const {
                                std::isfinite(entry.second.factor) &&
                                entry.second.factor > 0.0;
                       }) &&
-         atomicRates.contains("default") &&
+         atomicRates.contains("default") && tailAxisReduction.isValid() &&
          llvm::all_of(atomicRates,
                       [](const auto &entry) { return entry.second.isValid(); });
 }
@@ -648,7 +663,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       StageResourceCycles resources = mapWorkload(
           stage,
           implementation.mode == StageMode::SIMD ? profile.simd : profile.simt,
-          implementation.mode);
+          implementation.mode, profile.logicalWarpGroupCount);
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = resources;

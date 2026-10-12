@@ -1,6 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "AscendModel/RouteModel/Reduction/ReductionAnalysis.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinTypes.h"
@@ -319,9 +320,14 @@ static void accumulateReductionWorkload(Operation *operation,
     return;
   const double depth = std::ceil(std::log2(static_cast<double>(extent)));
   const double steps = getTypeElementCount(input) * depth;
-  work.shuffleLaneSteps += steps;
-  if (isScan)
+  if (isScan) {
+    work.shuffleLaneSteps += steps;
     work.scanShuffleLaneSteps += steps;
+    return;
+  }
+
+  if (auto reduction = analyzeReduction(operation))
+    work.reductionWorkloads.push_back(std::move(*reduction));
 }
 
 static std::string getAtomicEnumName(Operation *operation,
@@ -460,6 +466,8 @@ static void scaleWorkload(StageWorkload &work, double scale) {
     tensor.logicalElements *= scale;
     tensor.segmentCount *= scale;
   }
+  for (ReductionWorkload &reduction : work.reductionWorkloads)
+    reduction.instances *= scale;
   work.predicateElements *= scale;
   work.shuffleLaneSteps *= scale;
   work.scanShuffleLaneSteps *= scale;
@@ -590,6 +598,8 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
     destination->logicalElements += source.logicalElements;
     destination->segmentCount += source.segmentCount;
   }
+  llvm::append_range(into.reductionWorkloads,
+                     std::move(from.reductionWorkloads));
   into.predicateElements += from.predicateElements;
   into.shuffleLaneSteps += from.shuffleLaneSteps;
   into.scanShuffleLaneSteps += from.scanShuffleLaneSteps;

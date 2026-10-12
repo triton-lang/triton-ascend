@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
-  "schema_version": 12,
-  "profile_version": "david-v100-simd-simt-20260918-v27-segmented-issue-fixed-transition",
+  "schema_version": 14,
+  "profile_version": "david-v100-simd-simt-20261009-v29-tail-axis-refit",
   "target": "Ascend950PR/dav-c310",
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
@@ -432,5 +432,6 @@
       "confidence": "low",
       "note": "These values are mode1(empty SIMT plus tail barrier) minus mode6(barrier only) in a branch-heavy harness. They contain no SIMD Stage and are used only as conservative setup fallbacks. Directional SIMD-to-SIMT, SIMT-to-SIMD, and dependent UB hand-off costs remain unmeasured."
     }
-  }
+  },
+  "reduction_profile": "../reduction/david_v100_reduction_v1.json"
 }

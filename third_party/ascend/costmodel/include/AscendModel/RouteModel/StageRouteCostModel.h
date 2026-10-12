@@ -8,6 +8,7 @@
 
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGEROUTECOSTMODEL_H
 #define ASCENDMODEL_ROUTEMODEL_STAGEROUTECOSTMODEL_H
+#include "AscendModel/RouteModel/Reduction/ReductionWorkload.h"
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -142,11 +143,13 @@ struct StageWorkload {
   double indirectLoadTransactions = 0.0;
   double indirectStoreTransactions = 0.0;
   std::vector<AtomicWorkload> atomicWorkloads;
+  std::vector<ReductionWorkload> reductionWorkloads;
   double predicateElements = 0.0;
   double shuffleLaneSteps = 0.0;
   /// Portion of shuffleLaneSteps contributed by tt.scan (prefix-scan class).
-  /// The remainder is contributed by tt.reduce.  Only the scan portion
-  /// consumes the prefix-scan dependency factor inside recurrence stages.
+  /// Calibrated tt.reduce work is represented by reductionWorkloads.  An
+  /// unsupported reduction is converted back to legacy shuffle work by the
+  /// mode-specific evaluator.
   double scanShuffleLaneSteps = 0.0;
   double dotFlops = 0.0;
   double issueElements = 0.0;
@@ -172,6 +175,7 @@ struct StageResourceCycles {
   double compute = 0.0;
   double predicate = 0.0;
   double shuffle = 0.0;
+  double reduction = 0.0;
   /// Cycles for the tt.scan-contributed portion of shuffle at the ideal rate.
   double scanShuffle = 0.0;
   double dot = 0.0;

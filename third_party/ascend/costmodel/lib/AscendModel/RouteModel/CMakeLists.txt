@@ -7,6 +7,10 @@ add_compile_definitions(
 add_mlir_library(AscendModelRouteModel
   ../Analysis/SimtAnchorAnalysis.cpp
   ../Analysis/StagePartitioner.cpp
+  Reduction/ReductionWorkload.cpp
+  Reduction/ReductionAnalysis.cpp
+  Reduction/ReductionProfile.cpp
+  Reduction/ReductionCostModel.cpp
   StageCostModels.cpp
   StageRouteCostModel.cpp
   SimdSimtCostModel.cpp

@@ -37,7 +37,9 @@ add_triton_ut(
 
 add_triton_ut(
   NAME SimdSimtCostModel
-  SRCS SimdSimtCostModelTest.cpp
+  SRCS SimdSimtCostModelTest.cpp ReductionProfileTest.cpp
+  DEFS
+    TRITON_ASCEND_REDUCTION_TEST_PROFILE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../costmodel/profiles/reduction/david_v100_reduction_v1.json"
   DEFS
     TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../costmodel/profiles/simd_simt/david_v100_simd_simt_v1.json"
   LIBS

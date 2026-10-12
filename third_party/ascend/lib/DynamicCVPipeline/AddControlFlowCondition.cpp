@@ -135,6 +135,11 @@ void AddControlFlowConditionPass::runOnOperation() {
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
+  // Step7: Wrap ssbuffer.if with its unique splitted_if cond (for only), when
+  // real tensor compute sits only in that splitted_if then. Inner then is
+  // spliced in; else ++ counter.
+  pm.addPass(createWrapSplittedIfPass(&info));
+
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");
     if (!CVPipeline::hasFallbackAttr(module)) {

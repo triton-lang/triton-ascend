@@ -231,10 +231,10 @@ DenseMap<int, int> FlagIdReuseManager::colorInterferenceGraph() {
     rawColor[flagId] = color;
   }
 
-  // Compact renumber: walk flags in program order, assign 1,2,3,... to colors
+  // Compact renumber: walk flags in program order, assign 0,1,2,... to colors
   // on first use, so output flag ids are minimal and stably ordered.
   DenseMap<int, int> colorToCompact;
-  int nextCompact = 1;
+  int nextCompact = 0;
   DenseMap<int, int> remapResult;
   for (int flagId : flagIds) {
     int color = rawColor[flagId];

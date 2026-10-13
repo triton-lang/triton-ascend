@@ -301,9 +301,10 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                           return computeOpCnt > kPriviledgedMaxComputeOpCnt;
                         });
   ready.append(startingVectorBlocks);
+  unsigned head = 0;
 
-  while (!ready.empty()) {
-    auto cur = ready.pop_back_val();
+  while (head < ready.size()) {
+    auto cur = ready[head++];
 
     result.push_back(groupIds[cur]);
 
@@ -313,6 +314,8 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
       }
     }
   }
+
+  ready.clear();
 
   LLVM_DEBUG({
     LOG_DEBUG("Group order: ");

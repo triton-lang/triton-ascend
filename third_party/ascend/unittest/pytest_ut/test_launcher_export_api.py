@@ -74,6 +74,36 @@ def test_generate_npu_wrapper_src_exposes_triton_launch_kernel(
 @patch.object(driver, "is_ffts_supported", return_value=True)
 @patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
 @patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
+def test_generate_npu_wrapper_src_parses_signed_int8(
+    _mock_backend_func_patch,
+    _mock_arch,
+    _mock_ffts,
+    _mock_disable_ffts,
+    _mock_auto_map,
+    mock_npu_utils,
+):
+    mock_npu_utils.return_value.get_aivector_core_num.return_value = 40
+    mock_npu_utils.return_value.get_aicore_num.return_value = 20
+
+    src = driver.generate_npu_wrapper_src(
+        constants={},
+        signature={0: "i8", 1: "i16"},
+        metadata=_make_metadata(),
+    )
+
+    assert 'args, "iiiKKOOOOO&h",' in src
+    assert "_parse_int8, &_arg0, &_arg1" in src
+    assert "int8_t _arg0;" in src
+    assert "value < std::numeric_limits<int8_t>::min()" in src
+    assert "value > std::numeric_limits<int8_t>::max()" in src
+
+
+@patch.object(driver, "NPUUtils")
+@patch.object(driver, "_is_auto_map_parallel_blocks_enabled", return_value=False)
+@patch.object(driver, "force_disable_ffts", return_value=False)
+@patch.object(driver, "is_ffts_supported", return_value=True)
+@patch.object(driver, "get_ascend_arch_from_env", return_value="Ascend910B")
+@patch.object(driver, "get_backend_func", side_effect=_mock_backend_func)
 def test_generate_npu_wrapper_src_shrinks_coalesced_grid_for_both_launch_paths(
     _mock_backend_func_patch,
     _mock_arch,

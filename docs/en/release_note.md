@@ -6,11 +6,13 @@ Triton-Ascend releases provide a stable snapshot of the codebase, packaged as bi
 
 The following is the release compatibility matrix for Triton-Ascend versions:
 
-| Triton-Ascend Version | Python Version | Manylinux Version | Hardware Platform | Hardware Product |
-| --- | --- | --- | --- | --- |
-| 3.2.2 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
-| 3.2.1 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
-| 3.2.0 | >=3.9, <=3.11 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3|
+| Triton-Ascend Version | Manylinux Version | Hardware Platform | Hardware Product |
+| --- | --- | --- | --- |
+| 3.6.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2 series, Atlas A3 series, Ascend 950PR&950DT series products|
+| 3.2.2.post1 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2 series, Atlas A3 series, Ascend 950PR&950DT series products|
+| 3.2.2 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2 series, Atlas A3 series, Ascend 950PR&950DT series products|
+| 3.2.1 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2 series, Atlas A3 series, Ascend 950PR&950DT series products|
+| 3.2.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2 series, Atlas A3 series|
 
 ## Release Schedule
 
@@ -107,14 +109,73 @@ Maintenance branch statuses include:
 | 2025-11-12 | Release preview version `3.2.0rc3` |
 | 2025-05-26 | Release preview version `3.2.0rc2` |
 
-## Version Compatibility Matrix
+<a id="version-compatibility-matrix"></a>
 
-| Triton-Ascend | Triton | Python              | CANN    | PyTorch | LLVM commit hash | LLVM Patch |
-|---------------| ------ | ------------------- |---------| ------- | ---------------- | --------- |
-| `main`        | `3.6.0` | `3.9~3.13`          | `9.1.0` | `2.10.0`  | `f6ded0b`        | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
-| `3.2.2`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.1.0` | `2.7.1`   | `b5cc222`        | -         |
-| `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -         |
-| `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |
-| `3.2.0rc4`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |
-| `3.2.0rc3`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `86b69c3`        | -         |
-| `3.2.0rc2`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `86b69c3`        | -         |
+## Version Requirements
+
+| Triton-Ascend | Triton  | PyTorch  | TorchNPU Package | CANN    | LLVM commit hash | Python              | LLVM Patch |
+|---------------|---------|----------|------------------|---------|------------------|---------------------|------------|
+| `main`        | `3.6.0` | `2.10.0` | `2.10.0.post7`   | `9.2.0` | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
+| `3.6.0`       | `3.6.0` | `2.10.0` | `2.10.0.post7`   | `9.2.0` | `f6ded0b`        | `3.10~3.13`         | - |
+| `3.2.2.post1` | `3.2.0` | `2.7.1`  | `2.7.1.post11`   | `9.1.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -          |
+| `3.2.2`       | `3.2.0` | `2.7.1`  | `2.7.1.post8`    | `9.1.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -          |
+| `3.2.1`       | `3.2.0` | `2.7.1`  | `2.7.1.post8`    | `9.0.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -          |
+| `3.2.0`       | `3.2.0` | `2.6.0`  | `2.6.0`          | `8.5.0` | `b5cc222`        | `3.9-3.11`          | -          |
+
+## Version Compatibility Notes
+
+> In the following tables, "/" means not compatible, and "Y" means compatible.
+
+**Table 1** Triton-Ascend and TorchNPU Package Version Compatibility
+
+<table class="table">
+  <thead>
+    <tr>
+      <th rowspan="2">Triton-Ascend</th>
+      <th colspan="8" style="text-align:left">TorchNPU Package Version</th>
+    </tr>
+    <tr>
+      <td>2.6.0</td>
+      <td>2.7.1.post8</td>
+      <td>2.7.1.post11</td>
+      <td>2.9.0.post6</td>
+      <td>2.9.0.post9</td>
+      <td>2.10.0.post4</td>
+      <td>2.10.0.post7</td>
+      <td>2.13.0</td>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2.post1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+  </tbody>
+</table>
+
+**Table 2** Triton-Ascend and CANN Version Compatibility
+
+<table class="table">
+  <thead>
+    <tr>
+      <th rowspan="2">Triton-Ascend</th>
+      <th colspan="4" style="text-align:left">CANN Version</th>
+    </tr>
+    <tr>
+      <td>8.5.0</td>
+      <td>9.0.0</td>
+      <td>9.1.0</td>
+      <td>9.2.0</td>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.1</td><td>Y</td><td>Y</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2</td><td>Y</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.2.2.post1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+  </tbody>
+</table>
+
+Note: **Ascend 950PR&950DT products** do not support CANN 8.5.0.

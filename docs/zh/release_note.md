@@ -6,11 +6,13 @@ Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以
 
 以下是 Triton-Ascend 版本的发布兼容性矩阵：
 
-| Triton-Ascend 版本 | Python 版本 | Manylinux 版本 | 硬件平台 | 硬件产品 |
-| --- | --- | --- | --- | --- |
-| 3.2.2 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
-| 3.2.1 | >=3.9, <=3.13 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3/950|
-| 3.2.0 | >=3.9, <=3.11 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2/A3|
+| Triton-Ascend 版本  | Manylinux 版本 | 硬件平台 | 硬件产品 |
+| --- | --- | --- | --- |
+| 3.6.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
+| 3.2.2.post1 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
+| 3.2.2 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
+| 3.2.1 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
+| 3.2.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品|
 
 ## 发布计划
 
@@ -109,14 +111,71 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 
 <a id="version-compatibility-matrix"></a>
 
-## 版本兼容性矩阵
+## 版本配套说明
 
-| Triton-Ascend | Triton | Python              | CANN    | PyTorch | LLVM commit hash | LLVM 补丁 |
-|---------------| ------ | ------------------- |---------| ------- | ---------------- | --------- |
-| `main`        | `3.6.0` | `3.9~3.13`          | `9.1.0` | `2.10.0`  | `f6ded0b`        | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
-| `3.2.2`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.1.0` | `2.7.1`   | `b5cc222`        | -         |
-| `3.2.1`       | `3.2.0` | `3.9`(x86), `3.10-3.13` | `9.0.0` | `2.7.1`   | `b5cc222`        | -         |
-| `3.2.0`       | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |
-| `3.2.0rc4`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `b5cc222`        | -         |
-| `3.2.0rc3`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `86b69c3`        | -         |
-| `3.2.0rc2`    | `3.2.0` | `3.9-3.11`          | `8.5.0` | `2.6.0`   | `86b69c3`        | -         |
+| Triton-Ascend | Triton  | PyTorch  | TorchNPU安装包 | CANN    | LLVM commit hash | Python              | LLVM 补丁 |
+|---------------|---------|----------|----------|---------|------------------|---------------------|-----------|
+| `main`        | `3.6.0` | `2.10.0` | `2.10.0.post7` | `9.2.0` | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
+| `3.6.0`       | `3.6.0` | `2.10.0` | `2.10.0.post7` | `9.2.0` | `f6ded0b`        | `3.10~3.13`          | - |
+| `3.2.2.post1`       | `3.2.0` | `2.7.1`  | `2.7.1.post11` | `9.1.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
+| `3.2.2`       | `3.2.0` | `2.7.1`  | `2.7.1.post8` | `9.1.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
+| `3.2.1`       | `3.2.0` | `2.7.1`  | `2.7.1.post8` | `9.0.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
+| `3.2.0`       | `3.2.0` | `2.6.0`  | `2.6.0` | `8.5.0` | `b5cc222`        | `3.9-3.11`          | -         |
+
+## 版本兼容性说明
+
+> 本节表格中“/”表示不可配套，“Y”表示可配套。
+
+**表1** Triton-Ascend与TorchNPU安装包版本兼容
+
+<table class="table">
+  <thead>
+    <tr>
+      <th rowspan="2">Triton-Ascend</th>
+      <th colspan="8" style="text-align:left">TorchNPU安装包版本</th>
+    </tr>
+    <tr>
+      <td>2.6.0</td>
+      <td>2.7.1.post8</td>
+      <td>2.7.1.post11</td>
+      <td>2.9.0.post6</td>
+      <td>2.9.0.post9</td>
+      <td>2.10.0.post4</td>
+      <td>2.10.0.post7</td>
+      <td>2.13.0</td>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2.post1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+  </tbody>
+</table>
+
+**表2** Triton-Ascend与CANN版本兼容
+
+<table class="table">
+  <thead>
+    <tr>
+      <th rowspan="2">Triton-Ascend</th>
+      <th colspan="4" style="text-align:left">CANN版本</th>
+    </tr>
+    <tr>
+      <td>8.5.0</td>
+      <td>9.0.0</td>
+      <td>9.1.0</td>
+      <td>9.2.0</td>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.1</td><td>Y</td><td>Y</td><td>/</td><td>/</td></tr>
+    <tr><td>3.2.2</td><td>Y</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.2.2.post1</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+    <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td></tr>
+  </tbody>
+</table>
+
+注：**Ascend 950PR&950DT products**硬件产品不支持CANN 8.5.0版本。

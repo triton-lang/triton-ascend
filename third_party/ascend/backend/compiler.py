@@ -1291,6 +1291,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
+    disable_vf_operand_substitution: bool = False
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None
     buf_slot_num_of_veccore: int = None

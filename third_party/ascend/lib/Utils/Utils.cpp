@@ -897,13 +897,31 @@ void traverseBackwardUpdateOperandChainIf(
                                        builder, handledOperation);
 }
 
-void traverseForwardUpdateUserChainIf(
-    Operation *op, std::function<bool(Operation *)> conditionFn,
-    std::function<bool(Operation *)> stopFn,
-    std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
-    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
+namespace {
+// Recursive worker for the forward walks below.
+//
+// `visited` is what keeps this walk linear. A forward walk follows *users*, so
+// with reconvergent fan-out the same op is reachable along many paths and the
+// naive recursion re-expanded it once per path -- the work is O(paths), which
+// is exponential in the DAG size. The fully unrolled body of a
+// `tl.static_range` loop has exactly that shape (each value feeds several later
+// values which feed each other), so an unrolled Sinkhorn loop turned this walk
+// into an effective hang. The backward walk already guards with
+// `handledOperation`; the forward walk was simply missing the guard.
+void traverseForwardUpdateUserChainIfImpl(
+    Operation *op, const std::function<bool(Operation *)> &conditionFn,
+    const std::function<bool(Operation *)> &stopFn,
+    const std::function<void(OpBuilder &, Operation *)> &actionFn,
+    OpBuilder &builder, llvm::SmallPtrSet<Operation *, 16> &stopOps,
+    DenseSet<Operation *> &visited) {
 
   if (!op) {
+    return;
+  }
+
+  // Already expanded: a later path adds nothing (stopOps is a set and the
+  // actions are idempotent), so stop instead of re-walking the whole cone.
+  if (!visited.insert(op).second) {
     return;
   }
 
@@ -918,10 +936,22 @@ void traverseForwardUpdateUserChainIf(
 
   for (auto res : op->getResults()) {
     for (auto userOp : res.getUsers()) {
-      traverseForwardUpdateUserChainIf(userOp, conditionFn, stopFn, actionFn,
-                                       builder, stopOps);
+      traverseForwardUpdateUserChainIfImpl(userOp, conditionFn, stopFn,
+                                           actionFn, builder, stopOps, visited);
     }
   }
+}
+} // namespace
+
+void traverseForwardUpdateUserChainIf(
+    Operation *op, std::function<bool(Operation *)> conditionFn,
+    std::function<bool(Operation *)> stopFn,
+    std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
+    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
+
+  DenseSet<Operation *> visited;
+  traverseForwardUpdateUserChainIfImpl(op, conditionFn, stopFn, actionFn,
+                                       builder, stopOps, visited);
 }
 
 // Note: rootOp will also be processed.
@@ -933,8 +963,9 @@ void traverseForwardUpdateUserChainIf(
 
   OpBuilder builder(rootOp->getContext());
 
-  traverseForwardUpdateUserChainIf(rootOp, conditionFn, stopFn, actionFn,
-                                   builder, stopOps);
+  DenseSet<Operation *> visited;
+  traverseForwardUpdateUserChainIfImpl(rootOp, conditionFn, stopFn, actionFn,
+                                       builder, stopOps, visited);
 }
 
 bool isMetaUse(Operation *op) { return op->hasAttr("MetaUse"); }

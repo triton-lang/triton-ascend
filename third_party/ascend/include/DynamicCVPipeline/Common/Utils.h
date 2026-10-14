@@ -266,6 +266,9 @@ bool allResultHasOneUser(Operation *op);
 
 int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
+/// Returns the carried-argument index within the given loop block.
+/// For scf.for, excludes the induction variable. For scf.while, indexes the
+/// before or after argument list independently. Returns -1 for other values.
 int getLoopCarriedArgIndex(Value operand, Block *block);
 
 // Returns the index of `v` in `iterArgs` when `v` is a tensor-type iter_arg,
@@ -287,23 +290,23 @@ inline llvm::StringRef coreTypeToString(CoreType ct) {
 }
 
 CoreType getValueCoreType(Value value);
+std::optional<Block *> getFirstLoopBlock(Block *block);
 
-inline OpOperand *getTiedYieldOperand(Value value, Block *block) {
-  int argIdx = getLoopCarriedArgIndex(value, block);
-  if (argIdx == -1) {
-    return nullptr;
-  }
-  auto *terminator = block->getTerminator();
-  return &terminator->getOpOperand(argIdx);
-}
+/// Returns the operand supplying the updated value of a loop-carried argument.
+/// For scf.for arguments and scf.while before-region arguments, returns the
+/// corresponding scf.yield operand. For scf.while after-region arguments,
+/// returns the corresponding scf.condition forwarded operand.
+/// @param value A carried block argument owned by loopBlock.
+/// @param loopBlock The for body or while before/after block owning value.
+/// @return The update operand, or nullptr for an unsupported argument/mapping.
+OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock);
 
-inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
-  auto *yieldOperand = getTiedYieldOperand(value, block);
-  if (yieldOperand && yieldOperand->get()) {
-    return yieldOperand->get().getDefiningOp();
-  }
-  return nullptr;
-}
+/// Finds the producer of a loop-carried argument through nested SCF forwarding.
+/// @param value A carried block argument of the nearest enclosing loop.
+/// @param block The target block in which the returned operation must reside.
+/// @return The producer (or the nearest common ancestor of multiple producers),
+///         lifted into block; nullptr if no producer can be represented there.
+Operation *getLoopCarriedDefOp(Value value, Block *block);
 
 inline bool isTensorComputeOp(Operation *op) {
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {

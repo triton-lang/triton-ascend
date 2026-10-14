@@ -317,6 +317,7 @@ collectAllDependenciesInFuseGroup(Operation *op,
   });
 }
 
+
 static SmallVector<Operation *>
 extractWholeFuseGroup(Block *block,
                       const SmallVector<Operation *> &nowFuseGroup,
@@ -330,11 +331,10 @@ extractWholeFuseGroup(Block *block,
 
   SetVector<Operation *> toRemove;
   auto *terminator = block->getTerminator();
-  if (llvm::isa_and_present<scf::YieldOp>(terminator) &&
-      isa<scf::ForOp, scf::WhileOp>(block->getParentOp())) {
+  if (llvm::isa_and_present<scf::YieldOp>(terminator)) {
     for (auto *op : nowFuseGroup) {
       auto walkResult = op->walk(
-          [block, terminator, &bm, &nowFuseGroup](Operation *nestedOp) {
+          [&](Operation *nestedOp) {
             for (auto operand : nestedOp->getOperands()) {
               auto *defOp = getLoopCarriedDefOp(operand, block);
               if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
@@ -349,6 +349,7 @@ extractWholeFuseGroup(Block *block,
       }
     }
   }
+
 
   for (auto op : toRemove) {
     LOG_DEBUG("Removing op when refining: " << *op << "\n");

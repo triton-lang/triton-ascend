@@ -18,9 +18,9 @@
 
 确定CANN、Python和TorchNPU软件版本并安装。如需具体安装步骤，请参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
 
-- CANN版本：9.1.0
+- CANN版本：9.2.0
 - Python版本：3.11
-- TorchNPU版本：2.7.1.post8
+- TorchNPU版本：2.10.0.post7
 
 注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。
 
@@ -121,6 +121,20 @@ pip install -e .
   | `MAX_JOBS`                    | 2 × CPU core  | 编译并行任务数。内存紧张时可调小，例如 `export MAX_JOBS=8`。                                                                                                     |
   | `TRITON_PARALLEL_LINK_JOBS`   | None          | 并行链接任务数。链接阶段占用内存较大，内存不足时可设为 `1`。                                                                                                             |
   | `IS_MANYLINUX`                | OFF           | 设为 `ON` 后构建生成的 wheel 包为 manylinux 兼容格式，用于在不同 Linux 发行版上安装。                                                                                   |
+
+4. **(可选)Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
+
+4.1 获取源码：
+
+```bash
+    git clone https://gitcode.com/cann/shmem.git
+    cd shmem
+    git checkout v1.7.0
+```
+
+4.2 源码编译：
+
+参见 [shmem项目](https://gitcode.com/cann/shmem) README.md中 "安装"->"方式三： 源码编译" 章节。
 
 ## 镜像安装
 

@@ -18,9 +18,9 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Ascend community website.
 
-- CANN version: 9.1.0
+- CANN version: 9.2.0
 - Python version: 3.11
-- TorchNPU version: 2.7.1.post8
+- TorchNPU version: 2.10.0.post7
 
 Note: For more compatibility relationships, refer to the [Release Notes](./release_note.md#version-compatibility-matrix).
 
@@ -119,6 +119,20 @@ If you need to customize the LLVM build process, follow the steps below to compi
   | `MAX_JOBS`                    | 2 × number of CPU cores | Number of parallel compile jobs. Lower it when memory is tight, e.g. `export MAX_JOBS=8`.                                                                                                                                                                                            |
   | `TRITON_PARALLEL_LINK_JOBS`   | None                    | Number of parallel link jobs. Linking is memory intensive; set to `1` when memory is insufficient.                                                                                                                                                                                   |
   | `IS_MANYLINUX`                | OFF                     | When set to `ON`, the generated wheel package is built in the manylinux-compatible format, so it can be installed across different Linux distributions.                                                                                                                              |
+
+4. **(Optional)Triton-distributed-ascend**: If you use the features of [Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend), you need to compile the shmem v1.7.0 component from source.
+
+4.1 Obtain the source code:
+
+```bash
+    git clone https://gitcode.com/cann/shmem.git
+    cd shmem
+    git checkout v1.7.0
+```
+
+4.2 Compile from source:
+
+Refer to the **'Installation' -> 'Method 3: Source Code Compilation'** section in the README.md of the [shmem project](https://gitcode.com/cann/shmem).
 
 ## Container Image Installation
 

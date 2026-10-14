@@ -80,17 +80,6 @@ static scf::IfOp getUniqueFirstLevelSplittedIf(scf::IfOp ssbufIf) {
   return found;
 }
 
-static bool regionHasRealTensorCompute(Region &region) {
-  if (region.empty())
-    return false;
-  return region
-      .walk([&](Operation *op) {
-        return isRealTensorComputeOp(op) ? WalkResult::interrupt()
-                                         : WalkResult::advance();
-      })
-      .wasInterrupted();
-}
-
 // `splitIf` is the only ssbuffer.splitted_if anywhere under `ssbufIf`.
 // getUniqueFirstLevelSplittedIf only looks at the then block's first level.
 static bool isOnlySplittedIf(scf::IfOp ssbufIf, scf::IfOp splitIf) {
@@ -106,13 +95,23 @@ static bool isOnlySplittedIf(scf::IfOp ssbufIf, scf::IfOp splitIf) {
   return !extra;
 }
 
+// True when \p op lives in splitIf's then block, or is nested under an op there.
+// The check runs before the condition swap, so that block is still the
+// original splitted_if then.
+static bool opIsInSplitThen(Operation *op, scf::IfOp splitIf) {
+  Block *thenBlock = splitIf.thenBlock();
+  if (!thenBlock)
+    return false;
+  return thenBlock->findAncestorOpInBlock(*op) != nullptr;
+}
+
 // Real tensor compute is allowed only in splitIf's then. The else is dropped
 // by the wrap, and every other op in ssbufIf moves under the split cond.
+// Walk from ssbufIf and ignore splitIf's then block. Do not skip the whole
+// splitIf: its else, and ops after it, still have to be checked.
 static bool computeOnlyInSplitThen(scf::IfOp ssbufIf, scf::IfOp splitIf) {
-  if (regionHasRealTensorCompute(splitIf.getElseRegion()))
-    return false;
   WalkResult walk = ssbufIf->walk([&](Operation *op) {
-    if (op == splitIf.getOperation())
+    if (opIsInSplitThen(op, splitIf))
       return WalkResult::skip();
     if (isRealTensorComputeOp(op))
       return WalkResult::interrupt();

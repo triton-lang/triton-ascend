@@ -27,6 +27,7 @@
 
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -94,6 +95,202 @@ static void logOutputGroupValues(llvm::StringRef label,
   }
   os << "\n";
   LDBG(os.str());
+}
+
+/// Assign this ssbuffer.if's for-loop counter iter arg (same mapping later
+/// used by UpdateLoopIterTimes to rewrite induction-var uses).
+static int getOrAssignForIfCounter(scf::ForOp forOp, scf::IfOp ifOp,
+                                   ControlFlowConditionInfo *info,
+                                   size_t &usedCounterNum, Value &counter) {
+  if (!info->blockCounters.count(forOp)) {
+    LDBG("Missing block counters for forOp=" << forOp << ", ifOp=" << ifOp
+                                             << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  SmallVector<int> &counterIndices = info->blockCounters[forOp];
+
+  if (info->cntArgs.count(ifOp)) {
+    counter = info->cntArgs[ifOp];
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
+
+  if (usedCounterNum >= counterIndices.size()) {
+    LDBG("Not enough counters for ssbuffer if ops: used "
+         << usedCounterNum << ", counters " << counterIndices.size()
+         << ", forOp=" << forOp << ", ifOp=" << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  int argIdx = counterIndices[usedCounterNum];
+  int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
+  if (argIdx < 0 || argIdx >= iterArgNum) {
+    LDBG("Invalid counter arg index: " << argIdx << ", iter args "
+                                       << iterArgNum << ", forOp=" << forOp
+                                       << ", ifOp=" << ifOp << "\n");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  counter = forOp.getRegionIterArgs()[argIdx];
+  info->cntArgs[ifOp] = counter;
+  usedCounterNum++;
+  LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op."
+                                        << "\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+static Value latestCounterValue(
+    Value counter,
+    const llvm::DenseMap<Value, Value> &controlVarToLatestValue) {
+  auto latestIt = controlVarToLatestValue.find(counter);
+  if (latestIt != controlVarToLatestValue.end())
+    return latestIt->second;
+  return counter;
+}
+
+/// UpdateLoopIterTimes only rewrites induction-var uses inside ssbuffer.if.
+/// Hoisted splitted_if cond ops sit above the if, so rewrite them here.
+static void replaceInductionVarUses(ArrayRef<Operation *> ops, Value indVar,
+                                    Value counter) {
+  if (!indVar || !counter || indVar == counter)
+    return;
+  for (Operation *op : ops) {
+    for (OpOperand &operand : op->getOpOperands()) {
+      if (operand.get() == indVar)
+        operand.set(counter);
+    }
+  }
+}
+
+// First-level scf.if in then. Nested ifs inside those are ignored.
+static void collectFirstLevelSplittedIfs(scf::IfOp ssbufIf,
+                                         SmallVector<scf::IfOp> &ifs) {
+  if (!ssbufIf || !ssbufIf.thenBlock())
+    return;
+  for (Operation &op : *ssbufIf.thenBlock()) {
+    auto innerIf = dyn_cast<scf::IfOp>(&op);
+    if (innerIf && innerIf->hasAttr(kSplittedIf))
+      ifs.push_back(innerIf);
+  }
+}
+
+static int collectConditionDefOpsInside(Value value, scf::IfOp ssbufIf,
+                                        DenseSet<Operation *> &ops) {
+  if (!value)
+    return UPDATE_CONDITION_INFO_SUCCESS;
+
+  Operation *defOp = value.getDefiningOp();
+  if (!defOp)
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  if (!ssbufIf->isProperAncestor(defOp))
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  if (!ops.insert(defOp).second)
+    return UPDATE_CONDITION_INFO_SUCCESS;
+
+  for (Value operand : defOp->getOperands()) {
+    if (collectConditionDefOpsInside(operand, ssbufIf, ops) ==
+        UPDATE_CONDITION_INFO_FAILED)
+      return UPDATE_CONDITION_INFO_FAILED;
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+static bool canHoistConditionOps(scf::IfOp ssbufIf,
+                                 const DenseSet<Operation *> &ops) {
+  for (Operation *op : ops) {
+    for (Value operand : op->getOperands()) {
+      Operation *def = operand.getDefiningOp();
+      if (!def)
+        continue;
+      if (ssbufIf->isProperAncestor(def) && !ops.contains(def))
+        return false;
+    }
+  }
+  return true;
+}
+
+// Move the def-chain of splitted_if's condition (e.g. %169) to just above
+// ssbufIf (e.g. %137) so it can be and-ed with the outer predicate (%136).
+// forIndVar / forCounter rewrite loop IV uses the later pass would have
+// rewritten inside ssbuffer.if.
+static int hoistSplittedIfCondition(scf::IfOp ssbufIf, scf::IfOp splittedIf,
+                                    Value &outCond, Value forIndVar,
+                                    Value forCounter) {
+  outCond = Value();
+  if (!ssbufIf || !splittedIf)
+    return UPDATE_CONDITION_INFO_FAILED;
+
+  Value cond = splittedIf.getCondition();
+  DenseSet<Operation *> condOps;
+  if (collectConditionDefOpsInside(cond, ssbufIf, condOps) ==
+      UPDATE_CONDITION_INFO_FAILED)
+    return UPDATE_CONDITION_INFO_FAILED;
+
+  if (!condOps.empty()) {
+    if (!canHoistConditionOps(ssbufIf, condOps)) {
+      LDBG("Skip hoisting splitted_if condition: def-chain depends on ops "
+           "that stay inside ssbuffer.if.\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    SmallVector<Operation *> sorted;
+    Block *thenBlock = ssbufIf.thenBlock();
+    if (!thenBlock)
+      return UPDATE_CONDITION_INFO_FAILED;
+    for (Operation &op : *thenBlock) {
+      if (condOps.contains(&op))
+        sorted.push_back(&op);
+    }
+    if (sorted.size() != condOps.size()) {
+      LDBG("Skip hoisting splitted_if condition: not all def-chain ops are "
+           "first-level then-block ops.\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    for (Operation *op : sorted)
+      op->moveBefore(ssbufIf);
+    replaceInductionVarUses(sorted, forIndVar, forCounter);
+    LDBG("Hoisted " << sorted.size()
+                    << " splitted_if condition ops above ssbuffer.if.\n");
+  }
+
+  if (cond == forIndVar && forCounter) {
+    splittedIf.getConditionMutable().assign(forCounter);
+    outCond = forCounter;
+  } else {
+    outCond = cond;
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Hoist every first-level ssbuffer.splitted_if condition and and them
+// together. Missing or unhoistable entries are skipped.
+static int hoistAllFirstLevelSplittedIfConds(scf::IfOp ssbufIf, Value &outCond,
+                                             Value forIndVar,
+                                             Value forCounter) {
+  outCond = Value();
+  SmallVector<scf::IfOp> splittedIfs;
+  collectFirstLevelSplittedIfs(ssbufIf, splittedIfs);
+  if (splittedIfs.empty())
+    return UPDATE_CONDITION_INFO_SUCCESS;
+
+  OpBuilder builder(ssbufIf);
+  for (scf::IfOp innerIf : splittedIfs) {
+    Value oneCond;
+    if (hoistSplittedIfCondition(ssbufIf, innerIf, oneCond, forIndVar,
+                                 forCounter) == UPDATE_CONDITION_INFO_FAILED) {
+      LDBG("Skip one ssbuffer.splitted_if; condition not and-ed into "
+           "ssbuffer.if.\n");
+      continue;
+    }
+    if (!oneCond)
+      continue;
+    if (outCond)
+      outCond = builder.create<arith::AndIOp>(ssbufIf.getLoc(), outCond,
+                                             oneCond);
+    else
+      outCond = oneCond;
+  }
+  return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
 // Read block id from ssbuffer.if on ifOp. Missing attr is unexpected.
@@ -1543,11 +1740,9 @@ void UpdateConditionInfoPass::populateNewThenBlock(
   thenBuilder.create<scf::YieldOp>(loc, thenYieldOperands);
 }
 
-void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp,
-                                                   scf::IfOp oldIfOp,
-                                                   bool oldHasElse,
-                                                   bool hasCounter,
-                                                   Value counter) {
+void UpdateConditionInfoPass::populateNewElseBlock(
+    scf::IfOp newIfOp, scf::IfOp oldIfOp, bool oldHasElse, bool hasCounter,
+    Value counter, Value step, Value ssbufCondBeforeSplitted) {
   Location loc = newIfOp.getLoc();
   Block &newElseBlock = newIfOp.getElseRegion().front();
   SmallVector<Value> oldElseYieldOperands;
@@ -1591,6 +1786,13 @@ void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp,
     if (it != controlVarToLatestValue.end()) {
       counterToUse = it->second;
     }
+    // When splitted_if cond was and-ed onto the outer predicate, else must
+    // still +step if the original ssbuffer cond (%136) is true.
+    if (ssbufCondBeforeSplitted && step) {
+      Value inc = elseBuilder.create<arith::AddIOp>(loc, counterToUse, step);
+      counterToUse = elseBuilder.create<arith::SelectOp>(
+          loc, ssbufCondBeforeSplitted, inc, counterToUse);
+    }
     elseYieldOperands.push_back(counterToUse);
   }
 
@@ -1606,7 +1808,7 @@ void UpdateConditionInfoPass::populateNewElseBlock(scf::IfOp newIfOp,
 scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
     scf::IfOp oldIfOp, Value combinedCond,
     DenseMap<Value, VarUpdateType> &varUpdateTypes, bool hasCounter,
-    Value counter, Value step) {
+    Value counter, Value step, Value ssbufCondBeforeSplitted) {
   Location loc = oldIfOp.getLoc();
   OpBuilder builder(oldIfOp);
 
@@ -1637,7 +1839,8 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   populateNewThenBlock(newIfOp, oldThenBlock, oldThenYieldOp, oldYieldOperands,
                        varUpdateTypes, hasCounter, counter, step);
   if (withElse) {
-    populateNewElseBlock(newIfOp, oldIfOp, oldHasElse, hasCounter, counter);
+    populateNewElseBlock(newIfOp, oldIfOp, oldHasElse, hasCounter, counter,
+                         step, ssbufCondBeforeSplitted);
   }
 
   for (size_t i = 0; i < oldIfOp.getNumResults(); ++i) {
@@ -1648,11 +1851,11 @@ scf::IfOp UpdateConditionInfoPass::createNewIfOpWithBlocks(
   return newIfOp;
 }
 
-// Combine the conditions: crossCore condition + intraCore condition + counter
-// condition + flowOpt condition
+// Combine: crossCore + intraCore + counter + flowOpt, then first-level
+// splitted_if conditions (andi with the combined outer predicate).
 int UpdateConditionInfoPass::combineConditions(
     ModuleOp module, Value crossCoreCond, Value intraCoreCond,
-    Value flowOptCond, scf::IfOp ifOp, Operation *loopOp,
+    Value flowOptCond, Value splittedIfCond, scf::IfOp ifOp, Operation *loopOp,
     size_t &usedCounterNum, DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   Location loc = ifOp.getLoc();
   SmallVector<Value> validConditions;
@@ -1675,49 +1878,15 @@ int UpdateConditionInfoPass::combineConditions(
   OpBuilder condBuilder(ifOp);
 
   if (forOp) {
-    if (!info->blockCounters.count(forOp)) {
-      LDBG("Missing block counters for forOp=" << forOp << ", ifOp=" << ifOp
-                                               << "\n");
+    if (getOrAssignForIfCounter(forOp, ifOp, info, usedCounterNum, counter) ==
+        UPDATE_CONDITION_INFO_FAILED)
       return UPDATE_CONDITION_INFO_FAILED;
-    }
-
-    SmallVector<int> &counterIndices = info->blockCounters[forOp];
-
-    if (info->cntArgs.count(ifOp)) {
-      counter = info->cntArgs[ifOp];
-      updateCounterArg = true;
-    } else {
-      if (usedCounterNum >= counterIndices.size()) {
-        LDBG("Not enough counters for ssbuffer if ops: used "
-             << usedCounterNum << ", counters " << counterIndices.size()
-             << ", forOp=" << forOp << ", ifOp=" << ifOp << "\n");
-        return UPDATE_CONDITION_INFO_FAILED;
-      }
-
-      int argIdx = counterIndices[usedCounterNum];
-      int iterArgNum = static_cast<int>(forOp.getNumRegionIterArgs());
-      if (argIdx < 0 || argIdx >= iterArgNum) {
-        LDBG("Invalid counter arg index: " << argIdx << ", iter args "
-                                           << iterArgNum << ", forOp=" << forOp
-                                           << ", ifOp=" << ifOp << "\n");
-        return UPDATE_CONDITION_INFO_FAILED;
-      }
-
-      counter = forOp.getRegionIterArgs()[argIdx];
-      updateCounterArg = true;
-      info->cntArgs[ifOp] = counter;
-      usedCounterNum++;
-      LDBG("Assign counter iter arg index " << argIdx << " to ssbuffer if op."
-                                            << "\n");
-    }
+    updateCounterArg = true;
 
     LDBG("this ifop used counter is: " << counter << "\n");
     Value upperBound = forOp.getUpperBound();
-    Value counterToUse = counter;
-    auto latestIt = controlVarToLatestValue.find(counter);
-    if (latestIt != controlVarToLatestValue.end()) {
-      counterToUse = latestIt->second;
-    }
+    Value counterToUse =
+        latestCounterValue(counter, controlVarToLatestValue);
     Value counterCond = condBuilder.create<arith::CmpIOp>(
         loc, arith::CmpIPredicate::slt, counterToUse, upperBound);
     validConditions.push_back(counterCond);
@@ -1749,10 +1918,20 @@ int UpdateConditionInfoPass::combineConditions(
     combinedCond =
         builder.create<arith::AndIOp>(loc, combinedCond, validConditions[i]);
   }
+  // Keep the pre-splitted predicate (%136) so else can still +step the
+  // counter when only the hoisted splitted_if cond (%169) is false.
+  Value ssbufCondBeforeSplitted;
+  if (splittedIfCond) {
+    ssbufCondBeforeSplitted = combinedCond;
+    combinedCond =
+        builder.create<arith::AndIOp>(loc, combinedCond, splittedIfCond);
+    LDBG("And-ed ssbuffer.splitted_if condition into ssbuffer.if.\n");
+  }
 
   Value step = updateCounterArg ? forOp.getStep() : Value();
   scf::IfOp newIfOp = createNewIfOpWithBlocks(
-      ifOp, combinedCond, varUpdateTypes, updateCounterArg, counter, step);
+      ifOp, combinedCond, varUpdateTypes, updateCounterArg, counter, step,
+      ssbufCondBeforeSplitted);
 
   // Update DAG nodes
   updateDAGAfterIfOpReplacement(ifOp, newIfOp);
@@ -1900,10 +2079,34 @@ int UpdateConditionInfoPass::updateIfConds(
           UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      // Step6:Combine the conditions: crossCore + intraCore + counter +
-      // flowOpt
+      // Assign this if's for-loop counter before hoisting so splitted_if
+      // cond ops that use the induction var can be rewritten here.
+      // UpdateLoopIterTimes only walks inside ssbuffer.if.
+      Value forIndVar;
+      Value forCounter;
+      if (auto forOp = dyn_cast<scf::ForOp>(loopOp)) {
+        Value counter;
+        if (getOrAssignForIfCounter(forOp, ifOp, info, usedCounterNum,
+                                    counter) == UPDATE_CONDITION_INFO_FAILED)
+          return UPDATE_CONDITION_INFO_FAILED;
+        forIndVar = forOp.getInductionVar();
+        forCounter = latestCounterValue(counter, controlVarToLatestValue);
+      }
+
+      Value splittedIfCond;
+      if (hoistAllFirstLevelSplittedIfConds(ifOp, splittedIfCond, forIndVar,
+                                            forCounter) ==
+          UPDATE_CONDITION_INFO_FAILED) {
+        LDBG("Keep original splitted_if conditions; not and-ed into "
+             "ssbuffer.if, ifOp="
+             << ifOp << "\n");
+        splittedIfCond = Value();
+      }
+
+      // Step6:Combine: crossCore + intraCore + counter + flowOpt, then
+      // first-level splitted_if conds
       if (combineConditions(module, crossCoreCond, intraCoreCond, flowOptCond,
-                            ifOp, loopOp, usedCounterNum,
+                            splittedIfCond, ifOp, loopOp, usedCounterNum,
                             varUpdateTypes) == UPDATE_CONDITION_INFO_FAILED) {
         return UPDATE_CONDITION_INFO_FAILED;
       }

@@ -2432,28 +2432,35 @@ void TritonToLinalgPass::runOnOperation() {
                                    1)); // 64: 64位整型
   }
 
-  // Fix the Location info
-  moduleOp.walk([&](Operation *op) {
-    auto loc = op->getLoc();
-    if (isa<UnknownLoc>(loc)) {
-      llvm::SmallPtrSet<Operation *, 16> stopOps;
-      traverseForwardUpdateUserChainIf(
-          op,
-          /*conditionFn*/
-          [](Operation *curOp) { return false; },
-          /*stopFn*/
-          [](Operation *curOp) { return !isa<UnknownLoc>(curOp->getLoc()); },
-          /*actionFn*/
-          nullptr, stopOps);
-      if (stopOps.empty()) {
-        op->emitWarning() << *op << " and its users all have no location!";
-      } else {
-        Operation *goodOp = *stopOps.begin();
-        op->setLoc(goodOp->getLoc());
-      }
+  // Fix the Location info.
+  //
+  // Every op whose location is unknown adopts the location of an op reachable
+  // through its users that does have one, so converted ops inherit the source
+  // location again. Resolve this in one reverse walk (users before defs, which
+  // a reversed walk gives): a def then simply reuses the location its users
+  // already resolved. The previous formulation ran a separate forward walk per
+  // unknown-loc op, i.e. one walk per unrolled `static_range` statement, which
+  // made this O(unknown ops x forward cone).
+  llvm::SmallVector<Operation *> allOps;
+  moduleOp.walk([&](Operation *op) { allOps.push_back(op); });
+  for (Operation *op : llvm::reverse(allOps)) {
+    if (!isa<UnknownLoc>(op->getLoc()))
+      continue;
+
+    Operation *locatedUser = nullptr;
+    for (Operation *user : op->getUsers()) {
+      if (isa<UnknownLoc>(user->getLoc()))
+        continue;
+      locatedUser = user;
+      break;
     }
-    return WalkResult::advance();
-  });
+
+    if (!locatedUser) {
+      op->emitWarning() << *op << " and its users all have no location!";
+      continue;
+    }
+    op->setLoc(locatedUser->getLoc());
+  }
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

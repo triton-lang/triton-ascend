@@ -1,0 +1,613 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-10-09 19:09+0800\n"
+"PO-Revision-Date: 2026-09-14 19:25+0800\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"X-Skill-Version: 2.0.0\\nLast-Translator: Auto Translation (DeepSeek)\n"
+"X-Source-Commit: 80146977e444df34a98348e014fd34957d7f5111\n"
+
+#: ../../zh/release_note.md:1
+msgid "Triton-Ascend 版本发布"
+msgstr "Triton-Ascend Release Notes"
+
+#: ../../zh/release_note.md:3
+msgid ""
+"Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以通过 PyPI "
+"轻松安装的二进制包。此外，版本发布代表着开发团队可以向社区正式宣布新功能的可用性、已完成的改进以及可能影响用户的变化（例如破坏性变更）。"
+msgstr ""
+"Triton-Ascend releases provide a stable snapshot of the codebase, packaged "
+"as binary distributions that can be easily installed via PyPI. Additionally,"
+" a release marks the point at which the development team can formally "
+"announce to the community the availability of new features, completed "
+"improvements, and changes that may impact users (e.g., breaking changes)."
+
+#: ../../zh/release_note.md:5
+msgid "发布兼容性矩阵"
+msgstr "Release Compatibility Matrix"
+
+#: ../../zh/release_note.md:7
+msgid "以下是 Triton-Ascend 版本的发布兼容性矩阵："
+msgstr ""
+"The following is the release compatibility matrix for the Triton-Ascend "
+"version:"
+
+#: ../../zh/release_note.md:0
+msgid "Triton-Ascend 版本"
+msgstr "Triton-Ascend Version"
+
+#: ../../zh/release_note.md:0
+msgid "Python 版本"
+msgstr "Python version"
+
+#: ../../zh/release_note.md:0
+msgid "Manylinux 版本"
+msgstr "Manylinux version"
+
+#: ../../zh/release_note.md:0
+msgid "硬件平台"
+msgstr "Hardware Platform"
+
+#: ../../zh/release_note.md:0
+msgid "硬件产品"
+msgstr "Hardware Products"
+
+#: ../../zh/release_note.md:0
+msgid "3.2.2"
+msgstr "3.2.2"
+
+#: ../../zh/release_note.md:0
+msgid ">=3.9, <=3.13"
+msgstr ">=3.9, <=3.13"
+
+#: ../../zh/release_note.md:0
+msgid "glibc 2.27+, x86-64, aarch64"
+msgstr "glibc 2.27+, x86-64, aarch64"
+
+#: ../../zh/release_note.md:0
+msgid "Ascend NPU"
+msgstr "Ascend NPU"
+
+#: ../../zh/release_note.md:0
+msgid "Atlas A2/A3/950"
+msgstr "Atlas A2/A3/950"
+
+#: ../../zh/release_note.md:0
+msgid "3.2.1"
+msgstr "3.2.1"
+
+#: ../../zh/release_note.md:0
+msgid "3.2.0"
+msgstr "3.2.0"
+
+#: ../../zh/release_note.md:0
+msgid ">=3.9, <=3.11"
+msgstr ">=3.9, <=3.11"
+
+#: ../../zh/release_note.md:0
+msgid "Atlas A2/A3"
+msgstr "Atlas A2/A3"
+
+#: ../../zh/release_note.md:15
+msgid "发布计划"
+msgstr "Release Plan"
+
+#: ../../zh/release_note.md:17
+msgid "以下是 Triton-Ascend 的发布计划。请注意：补丁版本是可选的。"
+msgstr ""
+"The following is the release plan for Triton-Ascend. Please note: patch "
+"versions are optional."
+
+#: ../../zh/release_note.md:0
+msgid "主版本"
+msgstr "Major version"
+
+#: ../../zh/release_note.md:0
+msgid "发布分支切出时间"
+msgstr "Release branch cut time"
+
+#: ../../zh/release_note.md:0
+msgid "发布日期"
+msgstr "Release Date"
+
+#: ../../zh/release_note.md:0
+msgid "补丁发布日期"
+msgstr "Patch release date"
+
+#: ../../zh/release_note.md:0
+msgid "3.6.0"
+msgstr "3.6.0"
+
+#: ../../zh/release_note.md:0
+msgid "TBD"
+msgstr "TBD"
+
+#: ../../zh/release_note.md:0
+msgid "---"
+msgstr "---"
+
+#: ../../zh/release_note.md:0
+msgid "2025年12月08日"
+msgstr "December 08, 2025"
+
+#: ../../zh/release_note.md:0
+msgid "2026年1月"
+msgstr "January 2026"
+
+#: ../../zh/release_note.md:24
+msgid "版本亮点"
+msgstr "Version Highlights"
+
+#: ../../zh/release_note.md:26
+msgid "Triton-Ascend 3.2.0"
+msgstr "Triton-Ascend 3.2.0"
+
+#: ../../zh/release_note.md:28
+msgid "**首次发布：Ascend NPU 支持**"
+msgstr "**First Release: Ascend NPU Support**"
+
+#: ../../zh/release_note.md:30
+msgid ""
+"Triton-Ascend 3.2.0 是第一个正式支持华为 Ascend NPU 的 Triton 版本。此版本基于 Triton 3.2.0 "
+"社区版本，专门适配 Ascend NPU 硬件架构。"
+msgstr ""
+"Triton-Ascend 3.2.0 is the first Triton release to officially support Huawei"
+" Ascend NPU. This version is based on the Triton 3.2.0 community release and"
+" is specifically adapted to the Ascend NPU hardware architecture."
+
+#: ../../zh/release_note.md:32
+msgid "主要特性"
+msgstr "Key Features"
+
+#: ../../zh/release_note.md:34
+msgid "**Ascend NPU 全栈支持**"
+msgstr "**Full-Stack Support for Ascend NPU**"
+
+#: ../../zh/release_note.md:35
+msgid "完整的 Triton IR 到 NPU 指令集编译流水线"
+msgstr "Complete Triton IR to NPU instruction set compilation pipeline"
+
+#: ../../zh/release_note.md:36
+msgid "支持全部 Triton Ops"
+msgstr "Supports all Triton Ops."
+
+#: ../../zh/release_note.md:38
+msgid "**性能优化**"
+msgstr "**Performance Optimization**"
+
+#: ../../zh/release_note.md:39
+msgid "NPU 特定内核优化"
+msgstr "NPU-specific kernel optimization"
+
+#: ../../zh/release_note.md:40
+msgid "CV 计算优化"
+msgstr "CV computation optimization"
+
+#: ../../zh/release_note.md:42
+msgid "**开发者工具**"
+msgstr "**Developer Tools**"
+
+#: ../../zh/release_note.md:43
+msgid "支持全面的调试输出"
+msgstr "Supports comprehensive debug output."
+
+#: ../../zh/release_note.md:44
+msgid "编译中间产物转储"
+msgstr "Compilation intermediate artifact dump"
+
+#: ../../zh/release_note.md:46
+msgid "已知限制"
+msgstr "Known Limitations"
+
+#: ../../zh/release_note.md:48
+msgid "**数据类型**: 部分数据类型支持仍在完善中"
+msgstr "**Data Types**: Support for some data types is still being refined."
+
+#: ../../zh/release_note.md:49
+msgid "**算子覆盖**: 正在持续扩展支持的算子集合"
+msgstr ""
+"**Operator Coverage**: The set of supported operators is continuously "
+"expanding."
+
+#: ../../zh/release_note.md:51
+msgid "迁移指南"
+msgstr "Migration Guide"
+
+#: ../../zh/release_note.md:53
+msgid ""
+"对于现有 Triton GPU 用户迁移到 Ascend NPU，详见 [GPU "
+"Triton算子迁移](./migration_guide/migrate_from_gpu.md)"
+msgstr ""
+"For existing Triton GPU users migrating to Ascend NPU, see [GPU Triton "
+"Operator Migration](./migration_guide/migrate_from_gpu.md) for details."
+
+#: ../../zh/release_note.md:55
+msgid "版本发布策略"
+msgstr "Release Versioning Strategy"
+
+#: ../../zh/release_note.md:57
+msgid "版本编号"
+msgstr "Version number"
+
+#: ../../zh/release_note.md:59
+msgid ""
+"Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范，版本号与上游 "
+"Triton 对齐：`vMAJOR.MINOR.PATCH[rcN][.postN]`"
+msgstr ""
+"Triton-Ascend follows the [PEP 440](https://peps.python.org/pep-0440/) "
+"version specification, with version numbers aligned with upstream Triton: "
+"`vMAJOR.MINOR.PATCH[rcN][.postN]`"
+
+#: ../../zh/release_note.md:61
+msgid ""
+"**MAJOR.MINOR**：与上游 Triton 版本一一对应，例如 Triton-Ascend `3.2` 基于 Triton `3.2`"
+msgstr ""
+"**MAJOR.MINOR**: Corresponds one-to-one with the upstream Triton version. "
+"For example, Triton-Ascend `3.2` is based on Triton `3.2`."
+
+#: ../../zh/release_note.md:62
+msgid ""
+"**PATCH**：Triton-Ascend 的 `PATCH` 版本可能高于上游 Triton，用于 `MAJOR.MINOR` "
+"级别的问题修复或改进，例如 Triton-Ascend `3.2.0` 和 `3.2.1` 均基于 Triton `3.2.0`"
+msgstr ""
+"**PATCH**: The `PATCH` version of Triton-Ascend may be higher than the "
+"upstream Triton, used for issue fixes or improvements at the `MAJOR.MINOR` "
+"level. For example, both Triton-Ascend `3.2.0` and `3.2.1` are based on "
+"Triton `3.2.0`."
+
+#: ../../zh/release_note.md:63
+msgid "**rcN**：发布候选版本，根据需要发布以供社区早期测试和反馈"
+msgstr ""
+"**rcN**: Release candidate version, released as needed for early community "
+"testing and feedback."
+
+#: ../../zh/release_note.md:64
+msgid "**postN**：已发布版本的后续补丁，根据需要发布以修复稳定版本中的问题"
+msgstr ""
+"**postN**: A subsequent patch to a released version, issued as needed to fix"
+" issues in the stable release."
+
+#: ../../zh/release_note.md:66
+msgid "分支策略"
+msgstr "Branching strategy"
+
+#: ../../zh/release_note.md:68
+msgid "`main` 分支为最新开发分支，跟踪最新上游 Triton 版本"
+msgstr ""
+"`main` branch is the latest development branch, tracking the latest upstream"
+" Triton version."
+
+#: ../../zh/release_note.md:69
+msgid "每个发布版本创建对应的发布开发分支（如 `release/3.2.x`），与社区发布具有相同的 commit id"
+msgstr ""
+"Each release version creates a corresponding release development branch "
+"(e.g., `release/3.2.x`), which shares the same commit ID as the community "
+"release."
+
+#: ../../zh/release_note.md:70
+msgid "功能开发应在 fork 仓库中进行，通过 `PR` 合入 Triton-Ascend 仓库"
+msgstr ""
+"Feature development should be carried out in a forked repository and merged "
+"into the Triton-Ascend repository via a `PR`."
+
+#: ../../zh/release_note.md:72
+msgid "**`main` 分支映射：**"
+msgstr "**`main` branch mapping:**"
+
+#: ../../zh/release_note.md:0
+msgid "Triton-Ascend"
+msgstr "Triton-Ascend"
+
+#: ../../zh/release_note.md:0
+msgid "Triton commit hash"
+msgstr "Triton commit hash"
+
+#: ../../zh/release_note.md:0
+msgid "Python"
+msgstr "Python"
+
+#: ../../zh/release_note.md:0
+msgid "CANN"
+msgstr "CANN"
+
+#: ../../zh/release_note.md:0
+msgid "PyTorch"
+msgstr "PyTorch"
+
+#: ../../zh/release_note.md:0
+msgid "LLVM commit hash"
+msgstr "LLVM commit hash"
+
+#: ../../zh/release_note.md:0
+msgid "补丁"
+msgstr "Patch"
+
+#: ../../zh/release_note.md:0
+msgid "`main`"
+msgstr "main"
+
+#: ../../zh/release_note.md:0
+msgid "[85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8)"
+msgstr ""
+"[85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8)"
+
+#: ../../zh/release_note.md:0
+msgid "`3.9~3.13`"
+msgstr "`3.9~3.13`"
+
+#: ../../zh/release_note.md:0
+msgid "`9.1.0`"
+msgstr "9.1.0"
+
+#: ../../zh/release_note.md:0
+msgid "`2.10.0`"
+msgstr "2.10.0"
+
+#: ../../zh/release_note.md:0
+msgid "[f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b)"
+msgstr "[f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b)"
+
+#: ../../zh/release_note.md:0
+msgid ""
+"[llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-"
+"ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch)"
+msgstr ""
+"[llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-"
+"ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch)"
+
+#: ../../zh/release_note.md:78
+msgid "维护分支与生命周期"
+msgstr "Maintenance branches and lifecycle."
+
+#: ../../zh/release_note.md:80
+msgid "维护分支状态包括："
+msgstr "Maintaining branch status includes:"
+
+#: ../../zh/release_note.md:82
+msgid "**活跃（Active）**：持续接受缺陷修复、功能改进和安全补丁；将继续演进功能或发布新版本"
+msgstr ""
+"**Active**: Continuously receives bug fixes, feature improvements, and "
+"security patches; will continue to evolve features or release new versions."
+
+#: ../../zh/release_note.md:83
+msgid "**维护（Maintenance）**：仅接受关键缺陷修复和安全补丁；不再发布功能改进"
+msgstr ""
+"**Maintenance**: Only critical bug fixes and security patches are accepted; "
+"no feature improvements will be released."
+
+#: ../../zh/release_note.md:84
+msgid "**停止维护（End of Life）**：不再接受任何修复；分支维护已停止"
+msgstr ""
+"**End of Life**: No further fixes will be accepted; branch maintenance has "
+"ceased."
+
+#: ../../zh/release_note.md:0
+msgid "分支"
+msgstr "branch"
+
+#: ../../zh/release_note.md:0
+msgid "状态"
+msgstr "Status"
+
+#: ../../zh/release_note.md:0
+msgid "Triton 版本"
+msgstr "Triton version"
+
+#: ../../zh/release_note.md:0
+msgid "Triton-Ascend 发布"
+msgstr "Triton-Ascend Release"
+
+#: ../../zh/release_note.md:0
+msgid "维护截止"
+msgstr "Maintenance deadline"
+
+#: ../../zh/release_note.md:0
+msgid "`活跃`"
+msgstr "active"
+
+#: ../../zh/release_note.md:0
+msgid "`3.6.0`"
+msgstr "3.6.0"
+
+#: ../../zh/release_note.md:0
+msgid "/"
+msgstr "/"
+
+#: ../../zh/release_note.md:0
+msgid "`release/3.2.2`"
+msgstr "`release/3.2.2`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.0`"
+msgstr "3.2.0"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.2`"
+msgstr "3.2.2"
+
+#: ../../zh/release_note.md:0
+msgid "`release/3.2.1`"
+msgstr "`release/3.2.1`"
+
+#: ../../zh/release_note.md:0
+msgid "`维护`"
+msgstr "`Maintenance`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.1`"
+msgstr "3.2.1"
+
+#: ../../zh/release_note.md:0
+msgid "`release/3.2.x`"
+msgstr "`release/3.2.x`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0`"
+msgstr "`3.2.0rc2`, `3.2.0rc3`, `3.2.0rc4`, `3.2.0`"
+
+#: ../../zh/release_note.md:93
+msgid "发布周期"
+msgstr "Release cycle"
+
+#: ../../zh/release_note.md:95
+msgid "**稳定版本**：按照项目版本节奏发布，并非每个上游 Triton 版本都会有对应的稳定发布"
+msgstr ""
+"**Stable Version**: Released according to the project's version cadence; not"
+" every upstream Triton version will have a corresponding stable release."
+
+#: ../../zh/release_note.md:96
+msgid "**rc 版本**：与上游 Triton 版本节奏同步发布，供用户早期测试"
+msgstr ""
+"**RC version**: Released in sync with the upstream Triton version cadence "
+"for early user testing."
+
+#: ../../zh/release_note.md:97
+msgid "**post 版本**：根据需要发布，用于修复现有稳定版本中的问题"
+msgstr ""
+"**Post Version**: Released as needed, used to fix issues in existing stable "
+"versions."
+
+#: ../../zh/release_note.md:99
+msgid "发布时间线"
+msgstr "Release timeline"
+
+#: ../../zh/release_note.md:0
+msgid "日期"
+msgstr "Date"
+
+#: ../../zh/release_note.md:0
+msgid "事件"
+msgstr "Event"
+
+#: ../../zh/release_note.md:0
+msgid "2026-07-31"
+msgstr "2026-07-31"
+
+#: ../../zh/release_note.md:0
+msgid "发布稳定版本 `3.2.2`"
+msgstr "Released stable version `3.2.2`"
+
+#: ../../zh/release_note.md:0
+msgid "2026-05-06"
+msgstr "2026-05-06"
+
+#: ../../zh/release_note.md:0
+msgid "发布稳定版本 `3.2.1`"
+msgstr "Releasing stable version `3.2.1`"
+
+#: ../../zh/release_note.md:0
+msgid "2026-01-21"
+msgstr "2026-01-21"
+
+#: ../../zh/release_note.md:0
+msgid "发布稳定版本 `3.2.0`"
+msgstr "Released stable version `3.2.0`"
+
+#: ../../zh/release_note.md:0
+msgid "2025-11-14"
+msgstr "November 14, 2025"
+
+#: ../../zh/release_note.md:0
+msgid "发布预览版本 `3.2.0rc4`"
+msgstr "Release preview version `3.2.0rc4`"
+
+#: ../../zh/release_note.md:0
+msgid "2025-11-12"
+msgstr "2025-11-12"
+
+#: ../../zh/release_note.md:0
+msgid "发布预览版本 `3.2.0rc3`"
+msgstr "Release preview version `3.2.0rc3`"
+
+#: ../../zh/release_note.md:0
+msgid "2025-05-26"
+msgstr "2025-05-26"
+
+#: ../../zh/release_note.md:0
+msgid "发布预览版本 `3.2.0rc2`"
+msgstr "Release preview version `3.2.0rc2`"
+
+#: ../../zh/release_note.md:110
+msgid "<a id=\"version-compatibility-matrix\"></a>"
+msgstr "<a id=\"version-compatibility-matrix\"></a>"
+
+#: ../../zh/release_note.md:110
+msgid "<a id=\"version-compatibility-matrix\">"
+msgstr "<a id=\"version-compatibility-matrix\">"
+
+#: ../../zh/release_note.md:110
+msgid "</a>"
+msgstr "</a>"
+
+#: ../../zh/release_note.md:112
+msgid "版本兼容性矩阵"
+msgstr "Version Compatibility Matrix"
+
+#: ../../zh/release_note.md:0
+msgid "Triton"
+msgstr "Triton"
+
+#: ../../zh/release_note.md:0
+msgid "LLVM 补丁"
+msgstr "LLVM patch"
+
+#: ../../zh/release_note.md:0
+msgid "`f6ded0b`"
+msgstr "`f6ded0b`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.9`(x86), `3.10-3.13`"
+msgstr "`3.9` (x86), `3.10-3.13`"
+
+#: ../../zh/release_note.md:0
+msgid "`2.7.1`"
+msgstr "2.7.1"
+
+#: ../../zh/release_note.md:0
+msgid "`b5cc222`"
+msgstr "`b5cc222`"
+
+#: ../../zh/release_note.md:0
+msgid "-"
+msgstr "-"
+
+#: ../../zh/release_note.md:0
+msgid "`9.0.0`"
+msgstr "9.0.0"
+
+#: ../../zh/release_note.md:0
+msgid "`3.9-3.11`"
+msgstr "3.9-3.11"
+
+#: ../../zh/release_note.md:0
+msgid "`8.5.0`"
+msgstr "8.5.0"
+
+#: ../../zh/release_note.md:0
+msgid "`2.6.0`"
+msgstr "2.6.0"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.0rc4`"
+msgstr "`3.2.0rc4`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.0rc3`"
+msgstr "3.2.0rc3"
+
+#: ../../zh/release_note.md:0
+msgid "`86b69c3`"
+msgstr "`86b69c3`"
+
+#: ../../zh/release_note.md:0
+msgid "`3.2.0rc2`"
+msgstr "3.2.0rc2"

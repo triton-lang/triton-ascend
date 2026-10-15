@@ -1,0 +1,447 @@
+#
+# Copyright (c) 2025 Huawei Technologies Co., Ltd. All Rights Reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+# This file is a part of the triton-ascend project.
+#
+# Deployment model
+# ================
+# The pipeline is executed by the repository that owns the documentation (for
+# triton-ascend that is triton-lang/triton-ascend). Everything that decides
+# whether and how it runs is repository-scoped configuration, so the very same
+# file can be copied to another component without editing the workflow:
+#
+#   DOC_TRANSLATE_ENABLED      repository variable; the job only runs where it
+#                              equals 'true'. Forks or copies of this file
+#                              without the variable are inert.
+#   DOC_TRANSLATE_BRANCH_REPO  optional repository variable; repository that
+#                              receives the per-run CI branch.
+#                              unset -> this repository (same-repository mode,
+#                                       no extra token needed)
+#                              set   -> a fork (cross-repository mode, needs
+#                                       FORK_PUSH_TOKEN; keeps this repository's
+#                                       branch namespace clean)
+#
+#   * every run creates a timestamped CI branch whose commit is a child of the
+#     base branch of this repository, so the branch tree matches the repository
+#     and the pull request diff contains the documentation layer only;
+#   * the pull request of this repository is always opened with the workflow's
+#     own GITHUB_TOKEN (`permissions: pull-requests: write`), also in
+#     cross-repository mode - no personal token with this repository's
+#     permissions is required.
+#
+# Required secrets:
+#   TRANSLATION_ASCEND default LLM API key (Volcengine glm-5.2)
+#   LLM_API_KEY        optional, used when api_base/model are overridden
+#   FORK_PUSH_TOKEN    only when DOC_TRANSLATE_BRANCH_REPO differs from this
+#                      repository: a token that may write that repository
+#                      (fine-grained: Contents + Workflows read/write on it;
+#                       classic: repo + workflow scopes)
+
+name: Auto Doc Translate
+
+on:
+  schedule:
+    - cron: '0 0 */3 * *'
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: 'Target branch of the upstream repository (base of the PR)'
+        required: false
+        default: 'main'
+        type: string
+      full_translate:
+        description: 'Full translation: translate ALL docs (excluding python-api,triton_api,triton_api_extension,libdevice)'
+        required: false
+        default: false
+        type: boolean
+      api_base:
+        description: 'LLM API base URL. Leave empty to use the default (Volcengine glm-5.2). When set, LLM_API_KEY secret is used instead of TRANSLATION_ASCEND.'
+        required: false
+        default: ''
+        type: string
+      model:
+        description: 'LLM model name. Leave empty to use the default (glm-5.2). When set, LLM_API_KEY secret is used instead of TRANSLATION_ASCEND.'
+        required: false
+        default: ''
+        type: string
+
+concurrency:
+  group: translation-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  translate:
+    runs-on: ubuntu-latest
+    # Enablement is repository-scoped: only repositories that define the
+    # variable DOC_TRANSLATE_ENABLED=true run the pipeline, so this file can be
+    # copied to another component without editing it.
+    if: vars.DOC_TRANSLATE_ENABLED == 'true' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule')
+    permissions:
+      contents: write         # same-repository mode pushes the CI branch with GITHUB_TOKEN
+      pull-requests: write    # the pull request of this repository uses GITHUB_TOKEN
+    env:
+      TARGET_BRANCH: ${{ inputs.target_branch || 'main' }}
+      # Repository that receives the per-run CI branch. Defaults to this
+      # repository; set DOC_TRANSLATE_BRANCH_REPO to a fork to keep this
+      # repository's branch namespace clean (that mode needs FORK_PUSH_TOKEN).
+      BRANCH_REPO: ${{ vars.DOC_TRANSLATE_BRANCH_REPO || github.repository }}
+    steps:
+      # Decide where the CI branch goes and which token pushes it:
+      #   same repository    -> the workflow's own GITHUB_TOKEN (contents: write)
+      #   another repository -> FORK_PUSH_TOKEN (Contents + Workflows read/write
+      #                         on that repository only)
+      - name: Resolve CI branch repository and push token
+        id: branch_token
+        env:
+          FORK_PUSH_TOKEN: ${{ secrets.FORK_PUSH_TOKEN }}
+          WORKFLOW_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH_OWNER="${BRANCH_REPO%%/*}"
+          if [ "${BRANCH_REPO}" = "${GITHUB_REPOSITORY}" ]; then
+            PUSH_MODE="same-repository"
+            PUSH_TOKEN="${WORKFLOW_TOKEN}"
+          else
+            PUSH_MODE="cross-repository"
+            PUSH_TOKEN="${FORK_PUSH_TOKEN}"
+            if [ -z "${PUSH_TOKEN}" ]; then
+              echo "::error::DOC_TRANSLATE_BRANCH_REPO=${BRANCH_REPO} differs from this repository, so FORK_PUSH_TOKEN is required (fine-grained: Contents + Workflows read/write on ${BRANCH_REPO}; classic: repo + workflow scopes)."
+              exit 1
+            fi
+            # Fail fast (before spending LLM tokens) when the token cannot reach that repository.
+            if ! git ls-remote --heads "https://x-access-token:${PUSH_TOKEN}@github.com/${BRANCH_REPO}.git" >/dev/null 2>&1; then
+              echo "::error::FORK_PUSH_TOKEN cannot read ${BRANCH_REPO}. Check the token's repository access and scopes."
+              exit 1
+            fi
+          fi
+          {
+            echo "BRANCH_OWNER=${BRANCH_OWNER}"
+            echo "PUSH_MODE=${PUSH_MODE}"
+          } >> "$GITHUB_ENV"
+          echo "token=${PUSH_TOKEN}" >> "$GITHUB_OUTPUT"
+          echo "CI branches are pushed to ${BRANCH_REPO} (${PUSH_MODE} mode)"
+
+      # The upstream repository is the base of every CI branch, so the branch
+      # tree always matches the upstream repository and the pull request diff
+      # only contains the documentation layer.
+      - name: Checkout ${{ github.repository }} (${{ env.TARGET_BRANCH }})
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install openai -r docs/zh/requirement.txt
+
+      - name: Clean stale locale files for full translation
+        if: inputs.full_translate
+        run: |
+          echo "Cleaning old locale files to force full retranslation..."
+          rm -rf docs/locale/
+          rm -rf locale/
+          echo "Cleaned."
+
+      - name: Detect whether to translate
+        id: detect
+        run: |
+          # Determine mode: full translation or incremental
+          if [ "${{ inputs.full_translate }}" = "true" ]; then
+            echo "Full translation mode"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=true" >> $GITHUB_OUTPUT
+          elif { [ -d "docs/locale/en/LC_MESSAGES" ] && [ "$(find docs/locale/en/LC_MESSAGES/ -name '*.po' 2>/dev/null | wc -l)" -gt 0 ]; } || \
+               { [ -d "locale/en/LC_MESSAGES" ] && [ "$(find locale/en/LC_MESSAGES/ -name '*.po' 2>/dev/null | wc -l)" -gt 0 ]; }; then
+            echo "Incremental mode: will detect changes via sphinx-build -b gettext"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=false" >> $GITHUB_OUTPUT
+          else
+            echo "No existing .po files — performing full translation"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "full_translate=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Translate via LLM API
+        if: steps.detect.outputs.has_changes == 'true'
+        env:
+          # TRANSLATION_ASCEND stores the Volcengine glm-5.2 API key (default provider).
+          # LLM_API_KEY is used when api_base/model are overridden via the Actions UI.
+          TRANSLATION_ASCEND: ${{ secrets.TRANSLATION_ASCEND }}
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_API_BASE: ${{ inputs.api_base }}
+          LLM_MODEL: ${{ inputs.model }}
+        run: |
+          # Key selection:
+          #   - Default path (no manual override): use TRANSLATION_ASCEND (Volcengine glm-5.2).
+          #   - Override path (api_base/model set in Actions UI): use LLM_API_KEY.
+          if [ -z "${LLM_API_BASE}" ] && [ -z "${LLM_MODEL}" ]; then
+            API_KEY="${TRANSLATION_ASCEND}"
+            echo "Using default provider (Volcengine glm-5.2) with TRANSLATION_ASCEND key"
+          else
+            API_KEY="${LLM_API_KEY}"
+            echo "Using override provider (api_base=${LLM_API_BASE}, model=${LLM_MODEL}) with LLM_API_KEY"
+          fi
+
+          if [ -z "${API_KEY}" ]; then
+            echo "::error::No LLM API key available. Set TRANSLATION_ASCEND (default) or LLM_API_KEY (override) in repo secrets."
+            exit 1
+          fi
+
+          if [ "${{ steps.detect.outputs.full_translate }}" = "true" ]; then
+            python .github/workflows/scripts/translate_md.py \
+              --api-key "${API_KEY}" \
+              --first-time \
+              --output-json /tmp/translation_results.json
+          else
+            python .github/workflows/scripts/translate_md.py \
+              --api-key "${API_KEY}" \
+              --all \
+              --output-json /tmp/translation_results.json
+          fi
+
+      - name: Process translated files
+        if: steps.detect.outputs.has_changes == 'true'
+        id: results
+        run: |
+          if [ ! -f /tmp/translation_results.json ]; then
+            echo "No translation results found"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          success_files=$(python3 -c "
+          import json
+          with open('/tmp/translation_results.json') as f:
+              data = json.load(f)
+          for p in data.get('success_files', []):
+              print(p)
+          ")
+
+          if [ -z "$success_files" ]; then
+            echo "No files were successfully translated - nothing to commit"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          count=0
+          file_list=""
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            if [ -f "$file" ]; then
+              count=$((count + 1))
+              file_list="${file_list}- <code>${file}</code>"$'\n'
+              # -f: the generated .po catalogues are the deliverable and must be
+              # staged even if a broad .gitignore pattern happens to match
+              # docs/locale. Anything that should not be committed is rejected
+              # later by the assertions of the "Push CI branch" step.
+              git add -f "$file"
+            fi
+          done <<< "$success_files"
+
+          [ $count -eq 0 ] && echo "No files to commit" && echo "has_changes=false" >> $GITHUB_OUTPUT && exit 0
+          echo "Staged $count translated .po file(s)"
+          {
+            echo "has_changes=true"
+            echo "file_count=$count"
+            echo "file_list<<EOF"
+            echo "$file_list"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      # The CI branch is a child commit of the checked-out base branch, so the
+      # branch tree matches this repository and the pull request diff only
+      # contains the documentation layer. Intermediate gettext artifacts must
+      # never be committed.
+      - name: Push CI branch
+        id: ci_branch
+        env:
+          PUSH_TOKEN: ${{ steps.branch_token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          # Drop the intermediate gettext artifacts produced by this run:
+          # docs/locale/.doctrees/** (binary Sphinx doctrees) and
+          # docs/locale/zh/LC_MESSAGES/**.pot are regenerated by every run and
+          # are not part of the deliverable.
+          rm -rf docs/locale/.doctrees docs/locale/zh
+
+          # Safety net 1: nothing outside the documentation layer may be staged.
+          leaked=$(git diff --cached --name-only | grep -vE '^(docs/|\.github/workflows/scripts/readthedocs_checkout\.sh$)' || true)
+          if [ -n "${leaked}" ]; then
+            echo "::error::Unexpected path(s) staged for the pull request: ${leaked}"
+            exit 1
+          fi
+
+          # Safety net 2: no gettext build artifacts may be staged.
+          junk=$(git diff --cached --name-only | grep -E '\.doctree$|/\.doctrees/|\.pot$' || true)
+          if [ -n "${junk}" ]; then
+            echo "::error::Build artifact(s) staged for the pull request: ${junk}"
+            exit 1
+          fi
+
+          if git diff --cached --quiet; then
+            echo "No documentation changes to deliver"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          git config user.name  'triton-ascend-doc-bot'
+          git config user.email 'triton-ascend-doc-bot@users.noreply.github.com'
+
+          CI_BRANCH="auto-pr/doc-translate-$(date +%Y%m%d%H%M%S)"
+          echo "CI_BRANCH=${CI_BRANCH}" >> "$GITHUB_ENV"
+          file_count=$(git diff --cached --name-only | wc -l)
+          file_list=$(git diff --cached --name-only | while IFS= read -r f; do printf -- '- <code>%s</code>\n' "${f}"; done)
+
+          # Commit on top of the base branch and push that commit as a new
+          # branch of BRANCH_REPO.
+          git commit -s -m "[doc](feat) Add English translations for Chinese docs (${file_count} files)"
+          git remote add branchrepo "https://x-access-token:${PUSH_TOKEN}@github.com/${BRANCH_REPO}.git"
+          git push branchrepo "HEAD:refs/heads/${CI_BRANCH}"
+
+          {
+            echo "pushed=true"
+            echo "file_count=${file_count}"
+            echo "file_list<<EOF"
+            echo "${file_list}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create Pull Request in this repository
+        if: steps.ci_branch.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE_LIST: ${{ steps.ci_branch.outputs.file_list }}
+          FILE_COUNT: ${{ steps.ci_branch.outputs.file_count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+
+          # PR title must match: [<component>](<type>) <subject>
+          # Allowed types: feat | fix | NFC | style | test | chore | revert
+          # Max length: 72 chars
+          TITLE="[doc](feat) add English translations for Chinese docs ($(date +%Y-%m-%d))"
+
+          # The body is written from a quoted heredoc (no expansion), so
+          # backticks, quotes and ${...} stay literal; the dynamic values are
+          # substituted afterwards.
+          cat <<'BODYEOF' > /tmp/pr_body.md
+          # Introducing AI-powered automatic translation for Chinese documentation
+
+          ## Background
+
+          Previously, when Chinese documentation changed, maintainers had to:
+
+          - Manually update the corresponding English documentation;
+          - Manually create and submit a pull request for the English changes.
+
+          This workflow was:
+
+          - __Time-consuming__ — every change required manual English editing;
+          - __Error-prone__ — Chinese and English documentation could easily drift out of sync;
+          - __Inefficient__ — the same content had to be maintained twice.
+
+          With this change the process is automated:
+
+          - Chinese stays the __single source of truth__;
+          - Changed Chinese documents are __translated automatically__ into English;
+          - A pull request with the updated English catalogues is __created automatically__ for review;
+          - After the pull request is merged, the English site is __updated automatically__.
+
+          ---
+
+          ## Summary of Changes
+
+          ### 1. English gettext catalogues — `docs/locale/en/LC_MESSAGES/**.po`
+
+          Sphinx gettext catalogues that mirror the `docs/zh/` layout. `docs/zh/`
+          stays the single source of truth; the catalogues only carry the English
+          strings.
+
+          ### 2. English build configuration — `docs/zh/conf.py`
+
+          `docs/zh/conf.py` serves both language projects. For the English build it
+          points `locale_dirs` at `../locale/`, so Sphinx applies the `.po`
+          catalogues, generates the API summary pages and mocks the modules that
+          are unavailable during the documentation build.
+
+          ### 3. Read the Docs language mapping — `.github/workflows/scripts/readthedocs_checkout.sh`
+
+          `READTHEDOCS_LANGUAGE=en` maps to the `docs/zh/` source tree, so the
+          English project renders the Chinese sources through the gettext
+          catalogues.
+
+          ### 4. English comments in code blocks — `docs/zh/**`
+
+          Code samples are rendered verbatim, therefore the comments inside fenced
+          code blocks are maintained in English directly in the Chinese sources.
+
+          ---
+
+          ## Files in this pull request
+
+          Translated **__FILE_COUNT__** file(s):
+
+          __FILE_LIST__
+
+          ---
+
+          [Workflow run](__RUN_URL__)
+
+          > This pull request was generated automatically by the scheduled
+          > documentation translation workflow. The translation tooling
+          > (`schedule_doc_translate.yaml`, `translate_md.py`,
+          > `.agents/skills/translate/skill.md`) lives in this repository; the
+          > pull request only carries the documentation layer.
+          BODYEOF
+
+          python3 - <<'PYEOF'
+          import os
+          import pathlib
+
+          body = pathlib.Path('/tmp/pr_body.md').read_text(encoding='utf-8')
+          for key in ('FILE_COUNT', 'FILE_LIST', 'RUN_URL'):
+              body = body.replace('__%s__' % key, os.environ.get(key, ''))
+          pathlib.Path('/tmp/pr_body.md').write_text(body, encoding='utf-8')
+          PYEOF
+
+          # Same-repository mode: the branch lives in this repository, so the
+          # head is just the branch name. Cross-repository mode: owner:branch.
+          if [ "${PUSH_MODE}" = "same-repository" ]; then
+            HEAD_REF="${CI_BRANCH}"
+          else
+            HEAD_REF="${BRANCH_OWNER}:${CI_BRANCH}"
+          fi
+
+          echo "Creating PR ${HEAD_REF} -> ${GITHUB_REPOSITORY}:${TARGET_BRANCH}"
+          if pr_out=$(gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base "${TARGET_BRANCH}" \
+            --head "${HEAD_REF}" \
+            --title "${TITLE}" \
+            --body-file /tmp/pr_body.md 2>&1); then
+            echo "${pr_out}"
+            echo "Pull request created successfully"
+          else
+            # The CI branch is already pushed, so the pull request can also be
+            # opened manually from ${HEAD_REF}.
+            echo "${pr_out}"
+            echo "::error::gh pr create failed for ${HEAD_REF} -> ${GITHUB_REPOSITORY}:${TARGET_BRANCH}. This step authenticates with GITHUB_TOKEN and needs 'permissions: pull-requests: write' on this repository."
+          fi

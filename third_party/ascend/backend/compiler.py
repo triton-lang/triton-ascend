@@ -781,7 +781,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
+        # CANN 9.1's bishengir-compile does not recognize this option at all.
+        # Omitting it is different from passing "false" on that toolchain.
+        if is_cann_version_at_least(9, 2, 0):
+            _compile_option_list += ["--enable-optimized-metaop=true"]
 
         npu_utils = NPUUtils()
         if npu_utils.has_device_limit():
@@ -1025,7 +1028,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop=false"]
+        if is_cann_version_at_least(9, 2, 0):
+            _compile_option_list += ["--enable-optimized-metaop=false"]
 
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]

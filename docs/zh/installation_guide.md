@@ -115,6 +115,7 @@ pip install -e .
   | `TRITON_BUILD_PROTON`         | OFF           | 是否构建 Proton 性能分析器（profiler）。需要时设为 `ON`。                                                                                                      |
   | `TRITON_BUILD_TD`             | OFF           | 是否构建 TD（Triton-distributed-ascend）相关组件，默认关闭。                                                                                                 |
   | `TRITON_BUILD_NPUIR`          | OFF           | 是否在安装过程中同步编译 AscendNPU-IR。设为 `ON` 时会触发 `build_npuir.py` 流程；AscendNPU-IR编译依赖CANN，需source /usr/local/Ascend/ascend-toolkit/set_env.sh（以root用户默认安装路径为例）且可用磁盘大于30GB。 |
+  | `TRITON_NPUIR_REBUILD` | ON | 与 `TRITON_BUILD_NPUIR=ON` 配合使用，设为 `OFF` 可保留 NPU-IR 构建目录进行增量构建。默认 `ON` 保持完整重建；更改编译器或 CMake 参数后应使用完整重建以重新配置。 |
   | `TRITON_WHEEL_NAME`           | triton_ascend | 生成的 wheel 包名称，一般无需修改。                                                                                                                        |
   | `TRITON_APPEND_CMAKE_ARGS`    | None          | 追加透传给 CMake 的参数，多个参数用空格分隔。例如追加 `-DTRITON_BUILD_UT=OFF` 可关闭单元测试构建。                                                                             |
   | `TRITON_OFFLINE_BUILD`        | OFF           | 设为 `ON` 后禁止构建过程中访问网络下载依赖（会自动关闭需联网拉取 googletest 的单元测试构建），用于离线环境。                                                                              |

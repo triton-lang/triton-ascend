@@ -119,7 +119,7 @@ def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Rele
         raise RuntimeError(f"Build script not found: {build_script}")
     max_jobs = min(os.cpu_count() // 8, 32)
     build_path = repo_dir / "build"
-    if build_path.exists():
+    if rebuild and build_path.exists():
         shutil.rmtree(str(build_path))
     build_path.mkdir(parents=True, exist_ok=True)
     cmd = [
@@ -193,7 +193,7 @@ def build_npuir():
         _NPUIR_DIR,
         bisheng_compiler_path=bisheng_compiler_path,
         build_type="Release",
-        rebuild=True,
+        rebuild=os.getenv("TRITON_NPUIR_REBUILD", "ON").upper() in ("ON", "1", "YES", "TRUE", "Y"),
     )
 
     _log("Step 5/5: copying artifacts ...")

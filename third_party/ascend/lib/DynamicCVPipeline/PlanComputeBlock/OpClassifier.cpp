@@ -691,6 +691,35 @@ findIterArgUpstreamOps(Value def,
   }
 }
 
+// Find all memref::CopyOp ops that write to `memref` directly, or write to
+// any ViewLikeOpInterface op (subview, reinterpret_cast, cast, expand_shape,
+// collapse_shape, ...) derived from it. Replaces
+// CVPipeline::MemoryDependenceGraph::getMemDefs() for the narrow
+// "find memref.copy writers" query used by both CUBE upstream BFS and
+// yield-side propagation.
+//
+// View traversal is bounded: in practice (see cwy.mlir) the chain is at most
+// alloc -> subview -> copy. A `visited` set guards against pathological
+// cycles; each Value is processed at most once.
+static void collectMemrefCopyProducers(
+    Value memref, llvm::SmallVectorImpl<Operation *> &out) {
+  llvm::SmallVector<Value, 4> worklist{memref};
+  llvm::DenseSet<Value> visited{memref};
+  while (!worklist.empty()) {
+    Value cur = worklist.pop_back_val();
+    for (Operation *user : cur.getUsers()) {
+      if (isa<memref::CopyOp>(user) && user->getOperand(1) == cur) {
+        out.push_back(user);
+      } else if (isa<ViewLikeOpInterface>(user)) {
+        // ViewLikeOpInterface ops each return exactly one memref result.
+        Value viewResult = user->getResult(0);
+        if (visited.insert(viewResult).second)
+          worklist.push_back(viewResult);
+      }
+    }
+  }
+}
+
 // Helper function to get upstream operations based on both SSA and memory
 // dependencies
 void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
@@ -712,16 +741,19 @@ void OpClassifierPass::getUpstreamOpsWithMemoryDeps(
     // as to_tensor already has SSA deps to its memref source
     return;
   }
-  // Collect memory dependencies
-  if (memDepGraph) {
-    // Get operations that define memory used by current op
-    for (Operation *memDef : memDepGraph->getMemDefs(cur)) {
-      LLVM_DEBUG(DBGS() << "memDef: cur " << *cur << " -> memDef " << *memDef
+  // Memref.copy writers of the to_tensor's source memref, including copies
+  // that write to subviews/view/reinterpret_cast derived from it. These are
+  // not visible through SSA def-use (copy has no defining op for the memref
+  // it writes). Helper walks through ViewLikeOpInterface subgraphs to find
+  // them — see cwy.mlir L89-92 / L151-167 / L261-281 for the shape.
+  if (auto toTensor = dyn_cast<bufferization::ToTensorOp>(cur)) {
+    llvm::SmallVector<Operation *> copyProducers;
+    collectMemrefCopyProducers(toTensor.getBuffer(), copyProducers);
+    for (Operation *copy : copyProducers) {
+      LLVM_DEBUG(DBGS() << "memDef: cur " << *cur << " -> memDef " << *copy
                         << "\n");
-      if (isa<memref::CopyOp>(memDef)) {
-        LLVM_DEBUG(DBGS() << "push op: " << *memDef << "\n");
-        upstreamOps.push_back(memDef);
-      }
+      LLVM_DEBUG(DBGS() << "push op: " << *copy << "\n");
+      upstreamOps.push_back(copy);
     }
   }
 }
@@ -1331,12 +1363,16 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(
       }
     }
 
-    // Also propagate to memory dependencies
-    if (memDepGraph) {
-      for (Operation *memDef : memDepGraph->getMemDefs(cur)) {
-        if (!visited.count(memDef) && memDef != cur) {
-          visited.insert(memDef);
-          queue.push(memDef);
+    // Also propagate to memref.copy writers of the to_tensor's source
+    // memref (with view-chain traversal). Block-bound is enforced by the
+    // outer `cur->getBlock() != regionBlock` check above.
+    if (auto toTensor = dyn_cast<bufferization::ToTensorOp>(cur)) {
+      llvm::SmallVector<Operation *> copyProducers;
+      collectMemrefCopyProducers(toTensor.getBuffer(), copyProducers);
+      for (Operation *copy : copyProducers) {
+        if (!visited.count(copy) && copy != cur) {
+          visited.insert(copy);
+          queue.push(copy);
         }
       }
     }
@@ -1887,11 +1923,6 @@ void OpClassifierPass::runOnOperation() {
   LLVM_DEBUG(DBGS() << module << "\n");
 
   LLVM_DEBUG(DBGS() << "\n--- Running OpClassifierPass --->\n");
-
-  // Initialize memory dependence graph for tracking memory side effects
-  aliasAnalysis = std::make_shared<AliasAnalysis>(module);
-  memDepGraph = std::make_shared<CVPipeline::MemoryDependenceGraph>(
-      module, *aliasAnalysis);
 
   // Initialize the pass
   initializePass(module);

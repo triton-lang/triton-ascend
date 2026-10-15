@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 
 #include "llvm/ADT/ArrayRef.h"
@@ -33,6 +34,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -49,6 +51,7 @@
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
@@ -1708,6 +1711,184 @@ public:
 
 } // namespace
 
+/// 辅助函数：判断一个 Value 是否定义在 ifOp 内部
+static bool isInternalValue(Value val, scf::IfOp ifOp) {
+  if (!val) {
+    return false;
+  }
+
+  // 1. 由 if 内部的 Operation 产出
+  if (Operation *defOp = val.getDefiningOp()) {
+    return ifOp->isAncestor(defOp);
+  }
+  // 2. 属于 if 内部 Region 的 BlockArgument
+  Region *parentRegion = val.getParentRegion();
+  return parentRegion && ifOp->isAncestor(parentRegion->getParentOp());
+}
+
+static void hoistAndUnifyRedirectedOutput(scf::IfOp ifOp) {
+  if (ifOp.getElseRegion().empty()) {
+    return;
+  }
+
+  auto thenYield = ifOp.thenYield();
+  auto elseYield = ifOp.elseYield();
+  if (!thenYield || !elseYield) {
+    return;
+  }
+
+  mlir::IRRewriter rewriter(ifOp.getContext());
+  Location loc = ifOp.getLoc();
+  size_t numResults = ifOp.getNumResults();
+
+  struct OutputStatus {
+    bool isHoisted = false;
+    Value replacement = nullptr;
+  };
+
+  SmallVector<OutputStatus> statuses(numResults);
+
+  SmallVector<Type> newResultTypes;
+  SmallVector<Value> keptThenYieldOperands;
+  SmallVector<Value> keptElseYieldOperands;
+
+  size_t hoistedCount = 0;
+
+  // =========================================================================
+  // 第一步：分析每个 output
+  // =========================================================================
+  for (size_t i = 0; i < numResults; ++i) {
+    Value thenVal = thenYield.getOperand(i);
+    Value elseVal = elseYield.getOperand(i);
+
+    if (isInternalValue(thenVal, ifOp)) {
+      // 场景 1：elseVal 是内部值 (Placeholder) -> 直接 redirect 成 thenValue
+      statuses[i].isHoisted = false;
+      statuses[i].replacement = nullptr;
+      newResultTypes.push_back(thenVal.getType());
+      keptThenYieldOperands.push_back(thenVal);
+      keptElseYieldOperands.push_back(elseVal);
+      continue;
+    }
+
+    if (isInternalValue(elseVal, ifOp)) {
+      // 场景 1：elseVal 是内部值 (Placeholder) -> 直接 redirect 成 thenValue
+      statuses[i].isHoisted = true;
+      statuses[i].replacement = thenVal;
+      hoistedCount++;
+    } else {
+      // 场景 2：elseVal 是外部值 -> thenValue 上游是 ifOp
+      // 【安全获取】：使用 getDefiningOp() 替代
+      // dyn_cast<OpResult>，避免断言崩溃
+      Operation *defOp = thenVal ? thenVal.getDefiningOp() : nullptr;
+      auto upstreamIfOp = llvm::dyn_cast_or_null<scf::IfOp>(defOp);
+
+      // 确保 upstreamIfOp 位于当前 ifOp 外层且具备 else 分支
+      if (upstreamIfOp && !ifOp->isAncestor(upstreamIfOp) &&
+          !upstreamIfOp.getElseRegion().empty()) {
+        auto upElseYield = upstreamIfOp.elseYield();
+        // 此时已确保 thenVal 必定是 upstreamIfOp 的 OpResult
+        unsigned upResIdx = llvm::cast<OpResult>(thenVal).getResultNumber();
+
+        if (upElseYield && upResIdx < upElseYield.getNumOperands()) {
+          // 原位替换上游 ifOp 的 else 占位符
+          rewriter.startOpModification(upElseYield);
+          upElseYield.setOperand(upResIdx, elseVal);
+          rewriter.finalizeOpModification(upElseYield);
+        }
+
+        statuses[i].isHoisted = true;
+        statuses[i].replacement = thenVal;
+        hoistedCount++;
+      } else {
+        // 无法提升，作为内部计算保留
+        statuses[i].isHoisted = false;
+        newResultTypes.push_back(ifOp.getResult(i).getType());
+        keptThenYieldOperands.push_back(thenVal);
+        keptElseYieldOperands.push_back(elseVal);
+      }
+    }
+  }
+
+  // =========================================================================
+  // 第二步：分支判断
+  // =========================================================================
+
+  // 情况 A：全为正常内部值（hoistedCount == 0），无需任何修改
+  if (hoistedCount == 0) {
+    return;
+  }
+
+  // 情况 B：全部被提升（hoistedCount == numResults），直接全量替换
+  if (hoistedCount == numResults) {
+    SmallVector<Value> finalReplacements;
+    for (const auto &status : statuses) {
+      finalReplacements.push_back(status.replacement);
+    }
+    rewriter.replaceOp(ifOp, finalReplacements);
+    return;
+  }
+
+  // 情况 C：部分提升，部分保留 -> 创建新的 IfOp
+  rewriter.setInsertionPoint(ifOp);
+  auto newIfOp = rewriter.create<scf::IfOp>(
+      loc, newResultTypes, ifOp.getCondition(), /*withElseRegion=*/true);
+  
+  newIfOp->setAttrs(ifOp->getAttrs());
+
+  if (!newIfOp.getThenRegion().empty()) {
+    rewriter.eraseBlock(&newIfOp.getThenRegion().front());
+  }
+  if (!newIfOp.getElseRegion().empty()) {
+    rewriter.eraseBlock(&newIfOp.getElseRegion().front());
+  }
+
+  // 1. 将原 ifOp 的 Body 直接 inline 到 newIfOp（无损保留内部所有计算节点）
+  rewriter.inlineRegionBefore(ifOp.getThenRegion(), newIfOp.getThenRegion(),
+                              newIfOp.getThenRegion().end());
+  rewriter.inlineRegionBefore(ifOp.getElseRegion(), newIfOp.getElseRegion(),
+                              newIfOp.getElseRegion().end());
+
+  // 2. 更新 newIfOp 两个分支的 yield 操作数
+  auto newThenYield = newIfOp.thenYield();
+  rewriter.startOpModification(newThenYield);
+  newThenYield->setOperands(keptThenYieldOperands);
+  rewriter.finalizeOpModification(newThenYield);
+
+  auto newElseYield = newIfOp.elseYield();
+  rewriter.startOpModification(newElseYield);
+  newElseYield->setOperands(keptElseYieldOperands);
+  rewriter.finalizeOpModification(newElseYield);
+
+  // 3. 构造旧 IfOp 结果的混合映射
+  SmallVector<Value> finalReplacements;
+  unsigned newIfResultIdx = 0;
+  for (size_t i = 0; i < numResults; ++i) {
+    if (statuses[i].isHoisted) {
+      finalReplacements.push_back(statuses[i].replacement);
+    } else {
+      finalReplacements.push_back(newIfOp.getResult(newIfResultIdx++));
+    }
+  }
+  std::string joinedAttr =
+      llvm::join(llvm::map_range(newThenYield.getOperands(),
+                                 [](Value value) {
+                                   CVPipeline::CoreType ct =
+                                       CVPipeline::getValueCoreType(value);
+                                   return CVPipeline::coreTypeToString(ct);
+                                 }),
+                 ", ");
+  for (auto *op : std::initializer_list<Operation *>{
+           ifOp.getOperation(), newThenYield, newElseYield}) {
+    op->setAttr(kCoreType, rewriter.getStringAttr(joinedAttr));
+  }
+
+  // 4. 替换原算子
+  rewriter.replaceOp(ifOp, finalReplacements);
+
+
+}
+
 void SplitIfByBlockIdPass::runOnOperation() {
   SplittedIfTagGenerator tagGen;
   ModuleOp module = getOperation();
@@ -1757,11 +1938,16 @@ void SplitIfByBlockIdPass::runOnOperation() {
 
   auto &aa = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memGraph{module, aa};
+  SmallVector<scf::IfOp> splittedIfs;
   module->walk([&](scf::IfOp ifOp) {
     if (ifOp->hasAttr(CVPipeline::kSplittedIf)) {
-      rearrangeIfOp(ifOp, memGraph);
+      splittedIfs.push_back(ifOp);
     }
   });
+  for (auto ifOp : splittedIfs) {
+    rearrangeIfOp(ifOp, memGraph);
+    hoistAndUnifyRedirectedOutput(ifOp);
+  }
 
   LDBG("After: \n" << module << "\n----------");
 }

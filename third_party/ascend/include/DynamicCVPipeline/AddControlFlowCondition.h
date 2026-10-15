@@ -132,17 +132,6 @@ public:
 
 std::unique_ptr<OperationPass<ModuleOp>> createAddControlFlowConditionPass();
 
-// After UpdateLoopIterTimes: unique ssbuffer.splitted_if directly in the
-// ssbuffer.if then (scf.for and scf.while main loops). Each main loop may
-// contain only one splitted_if id. Real tensor compute may live only in
-// that splitted_if then; its else and the rest of the ssbuffer.if must not
-// have any. Then wrap ssbuffer.if with a new outer
-// splitted_if and splice the inner then into ssbuffer.if. Split cond is
-// hoisted; ssbuf cond moves into the wrapper. The wrapper else advances the
-// for block counter, or clones the while ssbuffer.while_arg update chain.
-std::unique_ptr<OperationPass<ModuleOp>>
-createWrapSplittedIfPass(ControlFlowConditionInfo *info);
-
 void registerAddControlFlowConditionPasses();
 } // namespace triton
 } // namespace mlir

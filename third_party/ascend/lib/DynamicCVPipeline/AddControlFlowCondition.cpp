@@ -135,8 +135,9 @@ void AddControlFlowConditionPass::runOnOperation() {
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
 
-  // Step7: Wrap ssbuffer.if with its unique splitted_if cond (for and while),
-  // when real tensor compute sits only in that splitted_if then. Inner then
+  // Step7: Wrap ssbuffer.if with its unique splitted_if cond (for and while).
+  // Each main loop must have a single splitted_if id, and real tensor compute
+  // sits only in that splitted_if then. Inner then
   // is spliced in. For else ++ counter; while else clones the while_arg chain.
   pm.addPass(createWrapSplittedIfPass(&info));
 

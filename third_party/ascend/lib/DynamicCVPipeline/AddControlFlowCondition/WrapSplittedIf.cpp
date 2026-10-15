@@ -379,6 +379,28 @@ static Operation *getEnclosingMainLoop(Operation *op) {
   return nullptr;
 }
 
+// False when this main loop has more than one kind of splitted_if.
+// Kind is the ssbuffer.splitted_if id. A nested main loop is not included.
+static bool onlyOneSplittedIfKind(Operation *mainLoop) {
+  IntegerAttr firstSplittedIfId;
+  WalkResult walk = mainLoop->walk([&](scf::IfOp ifOp) {
+    if (getEnclosingMainLoop(ifOp) != mainLoop)
+      return WalkResult::advance();
+    auto splittedIfId = ifOp->getAttrOfType<IntegerAttr>(kSplittedIf);
+    if (!splittedIfId)
+      return WalkResult::advance();
+    if (!firstSplittedIfId) {
+      firstSplittedIfId = splittedIfId;
+      return WalkResult::advance();
+    }
+    if (firstSplittedIfId.getInt() == splittedIfId.getInt())
+      return WalkResult::advance();
+    LDBG("Skip wrap: main loop has more than one splitted_if id.\n");
+    return WalkResult::interrupt();
+  });
+  return !walk.wasInterrupted();
+}
+
 // ssbuffer.while_arg ops are the per-block update of scf.condition args.
 // A copy in the wrapper else is valid when every in-if operand is itself
 // part of that chain. A value produced by the splitted compute has no def
@@ -671,6 +693,9 @@ void WrapSplittedIfPass::runOnOperation() {
 
   WalkResult walkResult = module.walk([&](Operation *loopOp) -> WalkResult {
     if (!isMainLoopOp(loopOp))
+      return WalkResult::advance();
+
+    if (!onlyOneSplittedIfKind(loopOp))
       return WalkResult::advance();
 
     SmallVector<scf::IfOp> ssbufIfs;

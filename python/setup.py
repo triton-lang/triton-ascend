@@ -959,7 +959,7 @@ def get_default_version():
     version_file = Path(__file__).parent / "version.txt"
     if version_file.exists():
         return version_file.read_text().strip()
-    return "3.2.2"
+    return "3.2.2.post2"
 
 
 def get_version():

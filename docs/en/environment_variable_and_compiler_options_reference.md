@@ -1,201 +1,236 @@
 # Environment Variables and Compiler Options
 
-This document summarizes Triton-Ascend behavior controls that developers can set explicitly, including environment variables configured before running a program and NPU compiler options passed through `triton.Config` or kernel launch meta-parameters.
+This page is a configuration reference for Triton-Ascend kernel developers. It lists settings for compilation, execution, debugging, and autotuning, with their purpose, defaults, and support on A2/A3 and 950. Environment variables configure compilation and runtime behavior within a process; compiler options configure individual kernels. Migration advice for existing configurations appears under [Compiler Option Cleanup and Compatibility](#compiler-option-cleanup-and-compatibility).
 
 ## Environment Variables
 
 ### Environment Variable Usage Example
 
-Set environment variables before starting the Python program. Example:
+Use `export` to set environment variables before starting the Python program. For example, set `TRITON_DEBUG=1` to enable debugging:
 
 ```bash
 export TRITON_DEBUG=1
-python run_kernel.py
+python3 run_kernel.py
+```
+
+Programs subsequently launched from the current terminal inherit variables set with `export`. To set a variable for a single invocation, place the assignment before the command:
+
+```bash
+TRITON_DEBUG=1 python3 run_kernel.py
 ```
 
 ### Environment Variable Reference Table
 
-The following table describes how to set environment variables.
+The 950 column covers Ascend 950PR/950DT; "—" means not applicable. Compilation mode restrictions are defined before the [compiler option table](#compiler-options-reference). Unless noted otherwise, boolean environment variables accept `1` to enable them.
 
-| Category| Environment Variable| Default Value| Function Description| Setting Description| Change Description|
-|------|----------|------|----------|----------|----------|
-| **Debugging and logging**| TRITON_DEBUG | **0** or not set| Specifies whether to enable the debugging output function of Triton to print detailed debugging information during running. This is useful for troubleshooting problems in the compilation or execution phase. When this parameter is set to **1**, Triton outputs more information about the compilation, kernel generation, and execution. Some implementations may support more fine-grained debugging levels (such as 2 and 3), depending on the Triton version and implementation.| **0**: The debugging is disabled; **1**: The debugging is enabled.| |
-| **Debugging and logging**| MLIR_ENABLE_DUMP | **0** or not set| Specifies whether to dump the intermediate representation (IR) of all kernels before each MLIR optimization. You can set `MLIR_ENABLE_DUMP` to `kernelName` to dump the IR of a specific kernel.| **0**: Do not dump; **1**: Dump the IR of all kernels; *kernelName*: Dump the IR of a specific kernel.| The Triton cache may interfere with the dump. If `MLIR_ENABLE_DUMP=1` does not take effect, you can run `rm -r ~/.triton/cache` to clear the Triton cache.|
-| **Debugging and logging**| LLVM_IR_ENABLE_DUMP | **0** or not set| Specifies whether to dump the IR before each LLVM IR optimization.| **0**: Do not dump; **1**: Dump IRs.| |
-| **Debugging and logging**| TRITON_REPRODUCER_PATH | Not set| Generates the MLIR reproduction file before each MLIR compilation phase. If a phase fails, `<reproducer_path>` saves the MLIR status before the failure.| `<reproducer_path>`: save path.| |
-| **Debugging and logging**| TRITON_INTERPRET | **0** or not set| Specifies whether to use the Triton interpreter instead of the GPU for running and support inserting Python breakpoints in kernel function code.| **0**: Breakpoints are not supported; **1**: Breakpoints are supported.| |
-| **Debugging and logging**| TRITON_ENABLE_LLVM_DEBUG | **0** or not set| Specifies whether to pass the`-debug` parameter to LLVM and outputs a large amount of debugging information. If there is too much information, you can use `TRITON_LLVM_DEBUG_ONLY` to limit the output scope.| **0**: Do not pass; **1**: Pass.| Another method to reduce output interference is as follows: Set the running program by setting `LLVM_IR_ENABLE_DUMP` to `1`, extract the IR before the target LLVM optimization channel, and run the `opt` tool of the LLVM separately. In this case, you can add `-debug-only=foo` to the command line to limit the debugging range.|
-| **Debugging and logging**| TRITON_LLVM_DEBUG_ONLY | Not set| Equivalent to the `-debug-only` command line option of LLVM. This parameter can be used to limit the LLVM debugging output to a specific optimization channel or component name (defined by the `#define DEBUG_TYPE` macro in LLVM and Triton), thereby effectively reducing redundant debugging output. You can specify one or more comma-separated values, for example, `TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions"` or `TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions,regalloc"`.| Comma-separated values: channel or component name| |
-| **Debugging and logging**| USE_IR_LOC | **0** or not set| Specifies whether to include location information (such as file names and line numbers) in the generated IR. This information is helpful for debugging, but may increase the size of the generated IR. If this parameter is set to **1**, the IR is re-parsed, and the location information is mapped to the line number of the IR file with a specific extension (not the line number of the Python source file). This enables a direct mapping from the IR to the LLVM IR/PTX. When used with the performance analysis tool, this parameter can be used to implement fine-grained performance analysis on IR instructions.| **0**: No location information is included; **1**: The location information is included.| |
-| **Debugging and logging**| TRITON_DISABLE_LINE_INFO | **true**| Specifies whether to append `--enable-debug-info=true` to the `bishengir-compile` command, that is, whether debugging information such as line numbers is included in the generated kernel executable file. **Note**: The default value of Triton-Ascend is `true` (line number information is **disabled** by default, which is the opposite of community Triton, where it is enabled by default). Line number information can be used to locate accuracy/performance issues and for profiling analysis, but it increases the size of the compiled artifact.| **0/false**: Line number information is enabled; **1/true**: Line number information is disabled.| When used with performance analysis, see [Operator Performance Tuning Method](./debug_guide/profiling.md).|
-| **Debugging and logging**| TRITON_PRINT_AUTOTUNING | **0** or not set| After the automatic optimization is complete, the optimal configuration and total time of each kernel are output.| **0**: Do not output; **1**: Output.| |
-| **Debugging and logging**| MLIR_ENABLE_REMARK | **0** or not set| Specifies whether to enable the output of remarks during MLIR compilation, including performance warnings in remarks.| **0**: Disabled; **1**: Enabled.| |
-| **Debugging and logging**| TRITON_KERNEL_DUMP | **0** or not set| Specifies whether to enable the dump function of the Triton kernel. When this function is enabled, Triton saves the generated kernel code (IR of each compilation phase and the final NPU compilation artifact) to the specified directory.| **0**: Disabled; **1**: Enabled.| |
-| **Debugging and logging**| TRITON_DUMP_DIR | ~/.triton/dump | Specifies the directory for storing the Triton kernel dump file, which is the directory for saving the IR and PTX when `TRITON_KERNEL_DUMP` is set to `1`.| **"path"**: save path.| |
-| **Debugging and logging**| TRITON_DEVICE_PRINT | **0** or not set| If this parameter is set to `1` or `true` (`TRUE` is converted to `true`), the function of `tl.device_print` is enabled. Note: This function uses the GM buffer (the pointer of which is passed to the kernel).| **0**: Disabled; **1**: The functionality of `tl.device_print` is enabled.| The maximum size of the GM buffer for each thread is 16 KB. If the buffer size exceeds 16 KB, the excess content will be discarded. The value is fixed currently and will be adjusted through an environment variable.|
-| **Debugging and logging**| TRITON_MEMORY_DISPLAY | **0** or not set| Specifies whether to generate a JSON file for memory usage. When `TRITON_MEMORY_DISPLAY` is set to `1`, the memory_info_aic/aiv.json files are saved to the current directory.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| TRITON_ALWAYS_COMPILE | **0** or not set| Specifies whether Triton forcibly recompiles the kernel each time it runs, instead of using the existing cached version. By default, Triton caches the compiled kernels (based on parameters and configurations) to improve performance. If this parameter is set to **1**, Triton ignores the cache and recompiles the kernel each time it runs, which is useful for debugging or testing new compiler features.| **0**: Disabled; **1**: All kernels are recompiled during each running.| |
-| **Compilation control**| DISABLE_LLVM_OPT | **0** or not set| If this parameter is set to **1**, the optimization steps (LLVM optimization of **make_llir** and **make_ptx**) during LLVM compilation can be disabled. If this parameter is set to a character string, the LLVM optimization flags to be disabled are parsed. For example, if `DISABLE_LLVM_OPT` is set to `"disable-lsr"`, the loop strength optimization is disabled (this optimization may cause a performance fluctuation of up to 10% in some kernels with register pressure).| **0**: The LLVM optimization is enabled; **1**: The optimization steps (LLVM optimization of make_llir and make_ptx) during LLVM compilation are disabled. <list>:"disable-lsr": Disables loop strength optimization </list>| |
-| **Compilation control**| MLIR_ENABLE_TIMING | **0** or not set| Specifies whether to enable the time statistics function during MLIR compilation.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| LLVM_ENABLE_TIMING | **0** or not set| Specifies whether to enable the time statistics function during LLVM compilation.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| TRITON_DEFAULT_FP_FUSION | **1** (enabled)| Specifies whether to enable the floating-point operation fusion optimization by default. The default floating-point operation fusion behavior (for example, **mul+add->fma**) is overwritten.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| TRITON_KERNEL_OVERRIDE | **0** or not set| Specifies whether to enable the Triton kernel override function. You can use the user-specified external file (such as IR/NPU compilation artifact) to override the default generated kernel code at the beginning of each compilation phase.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| TRITON_OVERRIDE_DIR | ~/.triton/override | Specifies the directory for searching the Triton kernel override file. Directory for loading the IR/PTX file when `TRITON_KERNEL_OVERRIDE` is set to `1`.| **"path"**: save path.| |
-| **Compilation control**| TRITON_COMPILE_ONLY | **0** or not set| Specifies whether to perform only compilation without execution. This parameter is used when **remote_launch** is used.| **0**: Disabled; **1**: Enabled.| |
-| **Compilation control**| TRITON_DISABLE_PRECOMPILE | **0** or not set| Specifies whether to disable precompilation.| **0**: Precompilation is enabled; **1**: Precompilation is disabled.| |
-| **Running and scheduling**| TRITON_ENABLE_TASKQUEUE | **1**| Specifies whether to enable **task_queue**.| **0**: Disabled; **1**: Enabled.| |
-| **Running and scheduling**| TRITON_ENABLE_SANITIZER | **0** or not set| Specifies whether to enable SANITIZER.| **0**: Disabled; **1**: Enabled.| |
-| **Running and scheduling**| ENABLE_PRINT_UB_BITS | **0** or not set| After this parameter is enabled, the current UB usage can be obtained for the inductor.| **0**: Disabled; **1**: Enabled.| |
-| **Running and scheduling** | NPU_DEVICE_LIMIT | Not set | Users can set the maximum number of ai cores and vector cores for operator runtime. Format: numbers separated by commas.Example:14,28.| No default value | |
-| **Others**| TRITON_BENCH_METHOD | Not set| When the Ascend NPU is used, change `do_bench` in `testing.py` to `do_bench_npu`. (This parameter is used when `INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE` is set to `1`.) If this parameter is set to `default`, the original `do_bench` function is still called even if the NPU is available.| **"npu"**: Switch to `do_bench_npu`.| |
-| **Others**| TRITON_REMOTE_RUN_CONFIG_PATH | path | Specifies the configuration path for remote running.| Specify the path directly.| |
+| Category | Environment variable | Description | Default | A2/A3 | 950 |
+|----------|----------------------|-------------|---------|-------|-----|
+| Debugging | `TRITON_DEBUG` | Enables JIT debugging and device assertions and saves TTIR; the normal path also logs compilation and saves backend IR and binaries. | Off | Yes | Yes |
+| Debugging | `USE_IR_LOC` | Rebuilds locations from an IR file. For AST compilation, `ttir` supports this; IR inputs also support source-file location snapshots. | Unset | Yes | Yes |
+| Debugging | `TRITON_FRONT_END_DEBUGGING` | Preserves the original Python traceback for frontend errors. | Off | Yes | Yes |
+| Debugging | `TRITON_KERNEL_DUMP` | Saves compilation artifacts and the final `npubin` when a compilation runs. | Off | Yes | Yes |
+| Debugging | `TRITON_DUMP_DIR` | Sets the output directory for `TRITON_KERNEL_DUMP`. | `$TRITON_HOME/.triton/dump` | Yes | Yes |
+| Debugging | `TRITON_DISABLE_LINE_INFO` | `true/1` omits line information from the BiSheng request; `false/0` enables it. | `true` | Yes | Normal path |
+| Debugging | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | Requests debug-variable information from the BiSheng compiler. | Off | Yes | Normal path |
+| Debugging | `TRITON_DEVICE_PRINT` | Enables the device GM buffer used by `tl.device_print`. | Off | Yes | Yes |
+| Debugging | `TRITON_MEMORY_DISPLAY` | Requests compiler memory-usage output. | Off | Yes | — |
+| Debugging | `ENABLE_PRINT_UB_BITS` | Requests the number of occupied UB bits from the compiler. | Off | Yes | Normal path |
+| Debugging | `TRITON_INTERPRET` | Runs supported Triton operations in the CPU interpreter for Python breakpoint debugging. | Off | Yes | Yes |
+| Debugging | `TRITON_ENABLE_SANITIZER` | Passes the sanitizer switch to the Ascend NPU compiler. | Off | Yes | Normal path |
+| Compilation | `TRITON_ALWAYS_COMPILE` | Ignores compilation cache hits and recompiles kernels. | Off | Yes | Yes |
+| Compilation | `TRITON_KERNEL_OVERRIDE` | Loads an external IR or binary with a matching stage filename. | Off | Yes | Yes |
+| Compilation | `TRITON_OVERRIDE_DIR` | Sets the directory containing override files. | `$TRITON_HOME/.triton/override` | Yes | Yes |
+| Compilation | `TRITON_F32_DEFAULT` | Sets the default F32 input precision for `tl.dot`; Ascend uses `ieee` or `hf32`, and maps compatibility input `tf32` to `hf32`. | Unset; backend uses `ieee` | Yes | Yes |
+| Compilation | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | Allows non-`constexpr` globals in the JIT frontend. | Off | Yes | Yes |
+| Compilation | `TRITON_ENABLE_LIBDEVICE` | Adds a libdevice link on the A2/A3 compiler path. Any nonempty value, including `"0"`, enables it. | Unset | Yes | — |
+| Compilation | `TRITON_ENABLE_LIBDEVICE_SIMT` | Selects SIMT libdevice extern symbols on Ascend 950. Any nonempty value, including `"0"`, enables it. | Unset | — | Yes |
+| Cache and autotuning | `TRITON_HOME` | Sets the base for cache, dump, and override directories. | User home | Yes | Yes |
+| Cache and autotuning | `TRITON_CACHE_DIR` | Sets the compilation cache directory. | `$TRITON_HOME/.triton/cache` | Yes | Yes |
+| Cache and autotuning | `TRITON_CACHE_AUTOTUNING` | Caches autotune selections. | Off | Yes | Yes |
+| Cache and autotuning | `TRITON_PRINT_AUTOTUNING` | Set to `1` to print autotune results and normal-path compiler commands. | Off | Yes | Yes |
+| Cache and autotuning | `TRITON_CACHE_MANAGER` | Selects a compilation cache manager with `MODULE:CLASS`; use `triton.runtime.cache:RemoteCacheManager` for remote caching. | Local cache manager | Yes | Yes |
+| Cache and autotuning | `TRITON_REMOTE_CACHE_BACKEND` | Selects the remote cache storage backend with `MODULE:CLASS`; requires the remote cache manager. | Unset | Yes | Yes |
+| Cache and autotuning | `TRITON_ENABLE_UBTUNER` | Selects the UB tuning mode, `compile` or `run`. | Unset | Yes | Normal path |
+| Cache and autotuning | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | Controls parallel compilation in Ascend autotune; `0` disables it. | `1` | Yes | Yes |
+| Cache and autotuning | `TRITON_BENCH_METHOD` | `npu` selects Ascend's `do_bench_npu`; `default` uses the shared benchmark path. | `default` | Yes | Yes |
+| Runtime | `TRITON_COMPILE_ONLY` | Set to `1/true` to skip kernel launches; compilation and launcher extension loading still run. | Off | Yes | Yes |
+| Runtime | `TRITON_ENABLE_TASKQUEUE` | Controls the Ascend launcher's task queue. | On | Yes | Yes |
+| Runtime | `TRITON_GRID_WARN_PRINT` | Prints Ascend launcher warnings about grid size. | Off | Yes | Yes |
+| Runtime | `NPU_DEVICE_LIMIT` | Caps AI Core and Vector Core counts with `AIcores,VectorCores`, for example `14,28`; the device ratio must be valid. | Unset; device counts | Yes | Yes |
+| Toolchain selection | `CC` | Sets the C/C++ compiler for the CPU launcher extension. | Unset; system default compiler | Yes | Yes |
+| Toolchain selection | `TRITON_NPU_COMPILER_PATH` | Supplies a fallback NPU compiler tool directory when packaged tools and `PATH` lookup fail. | Unset | Yes | Yes |
+| Toolchain selection | `TRITON_BUILD_DIR` | Searches this directory's `bin/` for `triton-opt` and `triton-mlir-opt`, after packaged tools and before `PATH`. | Unset | Yes | Yes |
 
 ## Compiler Options
 
-Compiler options control the compilation strategy for a single Triton kernel and can be passed through `triton.Config`, autotune parameters, or kernel launch meta-parameters.
-
 ### Compiler Option Usage Example
 
-For example, pass `multibuffer` directly during kernel launch:
+Pass compiler options directly to `kernel[grid](...)`, or use `triton.Config` to define autotuning candidates. Use the separate `triton.Config` constructor parameters for `num_warps`, `num_stages`, and `ir_override`; put other supported compiler options in `kwargs`.
+
+In this example, `BLOCK_SIZE` is a kernel-defined `tl.constexpr` parameter; `compile_mode` and `num_stages` are compiler options:
 
 ```python
-import torch
-import torch_npu
 import triton
-import triton.language as tl
 
-@triton.jit
-def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(0)
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    tl.store(out_ptr + offsets, x + y, mask=mask)
+kernel[grid](*args, BLOCK_SIZE=1024, compile_mode="simd", num_stages=1)
 
-def add(x, y):
-    out = torch.empty_like(x)
-    n_elements = out.numel()
-    grid = (triton.cdiv(n_elements, 1024),)
-    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=True)
-    return out
-
-if __name__ == "__main__":
-    torch.manual_seed(0)
-    x = torch.randn((4096,), device="npu", dtype=torch.float32)
-    y = torch.randn((4096,), device="npu", dtype=torch.float32)
-    out = add(x, y)
-    torch.npu.synchronize()
-    print(out[:4])
+configs = [
+    triton.Config({"BLOCK_SIZE": 1024, "compile_mode": "simd"}, num_stages=1),
+    triton.Config({"BLOCK_SIZE": 1024, "compile_mode": "simd"}, num_stages=2),
+]
 ```
+
+See the [Autotune Guide](./autotune_guide.md) for how to use the candidate configurations.
 
 <a id="compiler-options-reference"></a>
 
 ### Compiler Option Reference Table
 
-The following table describes the options.
+The table lists Ascend backend defaults and notes any different `triton.Config` defaults. `None` usually leaves the decision to the backend or toolchain.
 
-| Category | Compiler Option | Default/Values | Function Description | Setting Description |
-|----------|-----------------|----------------|----------------------|--------------------|
-| **General pipeline** | `multibuffer` | `True` (default), `False` | Enables or disables ping-pong/double-buffer pipelines. Enabled by default. | `triton.Config` or launch meta-parameter |
-| **Graph optimization** | `enable_graph_optimize` | `True` (default), `False` | Enables or disables TTIR Graph Optimization. The backend owns the individual rules, rewrite limit, and UB budget. | `triton.Config` or launch meta-parameter |
-| **BiSheng compiler** | `bisheng_options` | Backend default string or a user-provided string | Forwards additional arguments to BiSheng compilation paths that support this option. | `triton.Config` or launch meta-parameter |
-| **CV fusion** | `enable_auto_bind_sub_block` | `None`, `True`, `False` | Enables or disables automatic sub-block binding. | `triton.Config` or launch meta-parameter |
-| **CV fusion** | `enable_hivm_auto_cv_balance` | `None`, `True`, `False` | Enables or disables automatic CV balance. | `triton.Config` or autotune parameter |
-| **CV fusion** | `enable_cube_block_merge` | `False` (default), `True` | Controls Cube block merging in the DynamicCV pipeline. | `triton.Config` or launch meta-parameter |
-| **VF fusion** | `vf_fusion_mode` | `None` (default; uses the BiShengIR default of `"max-parallel"`), `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | Selects the VF fusion strategy during BiShengIR compilation on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
-| **VF fusion** | `enable_vf_fusion` | `None` (default; uses the BiShengIR default of `True`), `True`, `False` | Controls whether VF fusion is enabled during BiShengIR compilation on Ascend 950PR&950DT products. This option is the VF fusion master switch; `vf_fusion_mode` only selects the fusion strategy. | `triton.Config` or launch meta-parameter |
-| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False` (default), `True` | Controls multiple-consumer fusion during BiShengIR compilation on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
-| **CV fusion/sync** | `sync_solver` | `None`, `True`, `False` | Enables or disables the HIVM synchronization solver. | `triton.Config` or launch meta-parameter |
-| **Synchronization** | `unit_flag` | `None`, `True`, `False` | Cube-output synchronization option. | `triton.Config` or autotune parameter |
-| **Synchronization** | `inject_barrier_all` | `None`, `True`, `False` | Enables or disables automatic barrier synchronization injection. | `triton.Config` or launch meta-parameter |
-| **Synchronization** | `inject_block_all` | `None`, `True`, `False` | Enables or disables automatic block synchronization injection. | `triton.Config` or launch meta-parameter |
-| **Multibuffer scope** | `limit_auto_multi_buffer_only_for_local_buffer` | `None`, `True`, `False` | Restricts automatic multi-buffering to local buffers. | `triton.Config` or autotune parameter |
-| **Multibuffer scope** | `limit_auto_multi_buffer_of_local_buffer` | `None`, `"no-limit"`, `"no-l0c"` | Configures the local-buffer automatic multi-buffering scope. | `triton.Config` or autotune parameter |
-| **Workspace** | `set_workspace_multibuffer` | `None`, `2`, `4` | Configures workspace multi-buffering. | `triton.Config` or autotune parameter |
-| **CV fusion tiling** | `tile_mix_vector_loop` | `None`, `2`, `4`, `8` | Configures the Vector loop split count. | `triton.Config` or autotune parameter |
-| **CV fusion tiling** | `tile_mix_cube_loop` | `None`, `2`, `4`, `8` | Configures the Cube loop split count. | `triton.Config` or autotune parameter |
-| **DynamicCV buffering** | `buf_slot_num_of_veccore` | `None` (default) or an integer | Configures the number of vector-core-local buffer slots. | `triton.Config` or launch meta-parameter |
-| **DynamicCV buffering** | `buf_slot_num_of_crosscore` | `None` (default) or an integer | Configures the number of cross-core buffer slots. | `triton.Config` or launch meta-parameter |
-| **DynamicCV buffering** | `buf_slot_num_of_gm` | `None` (default) or an integer | Configures the number of GM load buffer slots. | `triton.Config` or launch meta-parameter |
-| **Compilation mode** | `compile_mode` | `"simd_simt_template"` (default), `"simd"`, `"simt_only"` | Controls SIMD / SIMT compilation. `"simd"`: pure SIMD; `"simd_simt_template"`: the standard SIMD pipeline with template-SIMT subpaths enabled on Ascend 950PR&950DT products; `"simt_only"`: the pure-SIMT path (`ttir→npubin`), supported only on Ascend 950PR&950DT products. | `triton.Config` or launch meta-parameter |
+- **Normal path**: `compile_mode="simd"` or `"simd_simt_template"`.
+- **Pure SIMT only**: `compile_mode="simt_only"`, available only on 950.
+- **Requires active DynamicCV**: the compiler has successfully applied [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline), meaning `enable_dynamic_cv_pipeline=True` is enabled on the 950 normal path and no fallback has occurred.
+
+| Category | Compiler option | Description | Default / values | A2/A3 | 950 |
+|----------|-----------------|-------------|------------------|-------|-----|
+| Shared Triton | `debug` | Enables device assertions and compilation debugging. Under JIT, enabling either this option or `TRITON_DEBUG` enables debugging. | `False`; boolean | Yes | Yes |
+| Shared Triton | `sanitize_overflow` | Enables integer-overflow checks implemented with device assertions; also requires `debug`. | `True`; boolean | Yes | Yes |
+| Shared Triton | `num_stages` | Setting `1` disables automatic multi-buffering; other values use automatic mode without specifying a buffer count per level. | When `multibuffer_mode` is unset: backend `2`, `triton.Config` `3`; integer | Yes | Normal path |
+| Shared Triton | `num_warps` | Sets the warp count for pure-SIMT compilation. | Backend `32`; `triton.Config` `4`; positive integer | — | Pure SIMT only |
+| Shared Triton | `ir_override` | Replaces a compilation-stage artifact with a file of the same extension. | `None`; file path | Yes | Yes |
+| Compilation mode and graph optimization | `compile_mode` | `simd` uses SIMD; `simd_simt_template` uses SIMD on A2/A3 and enables template-SIMT subpaths on 950; `simt_only` uses pure SIMT. | `"simd_simt_template"`; also `"simd"`, `"simt_only"` | First two | All three |
+| Compilation mode and graph optimization | `enable_graph_optimize` | Controls TTIR Graph Optimization. | `True`; boolean | Yes | Yes |
+| Multibuffering | `multibuffer` | Controls the automatic multi-buffering master switch; `num_stages=1` also turns it off. | `True`; boolean | Yes | Normal path |
+| Multibuffering | `multibuffer_mode` | Sets multi-buffer slot counts for `gm`, `l1`, `l0c`, and `ub`; `1` disables multi-buffering at that level, and values greater than `1` specify the slot count. Controlled by `multibuffer`; cannot be explicitly combined with `num_stages`. | `None`; a dictionary containing all four levels, with positive signed 32-bit integer values | Yes | Normal path |
+| Multibuffering | `set_workspace_multibuffer` | Sets workspace multi-buffering level. With explicit `multibuffer_mode` and `gm>1`, NPU IR overrides this value with the GM slot count. | `None`; compiler-defined integer | Yes | Normal path |
+| Synchronization | `sync_solver` | Controls the HIVM graph sync solver. | `None`; boolean | Yes | Normal path |
+| Synchronization | `unit_flag` | Controls HIVM unit-flag synchronization. | `None`; boolean | Yes | Normal path |
+| Synchronization | `inject_barrier_all` | Controls automatic barrier injection. | `None`; boolean | Yes | Normal path |
+| Synchronization | `inject_block_all` | Controls automatic block synchronization injection. | `None`; boolean | Yes | Normal path |
+| Synchronization | `disable_auto_inject_block_sync` | Disables automatic inter-core synchronization insertion. Set `disable_auto_inject_block_sync=True` when using any of the Ascend affinity APIs [`sync_block_all`](./triton_api_extension/al/sync_block_all.md), [`sync_block_set`](./triton_api_extension/al/sync_block_set.md), or [`sync_block_wait`](./triton_api_extension/al/sync_block_wait.md). | `None`; boolean | Yes | Normal path |
+| Scheduling and pipelines | `enable_auto_bind_sub_block` | Overrides backend-derived automatic sub-block binding. | `None`; boolean | Yes | Normal path |
+| Scheduling and pipelines | `enable_hivm_auto_cv_balance` | Controls automatic HIVM CV balancing. | `None`; boolean | Yes | Normal path |
+| Scheduling and pipelines | `tile_mix_vector_loop` | Sets the Vector loop split count. | `None`; integer | Yes | — |
+| Scheduling and pipelines | `tile_mix_cube_loop` | Sets the Cube loop split count. | `None`; integer | Yes | — |
+| Scheduling and pipelines | `enable_mixed_cv` | Controls the NPU compiler's mixed-CV path. | `None`; boolean | — | Normal path |
+| Scheduling and pipelines | `enable_dynamic_cv_pipeline` | Enables [DynamicCV pipelining](./architecture_design_and_core_features.md#dynamic-cv-pipeline) on 950. When applied, it sets `set_workspace_multibuffer=0`, `enable_mixed_cv=True`, and `disable_auto_inject_block_sync=True`. If the optimization cannot be applied, the compiler restores these options to their original values and continues compilation. | `None`, resolved by target: A2/A3 `False`, 950 `True`; boolean | — | Normal path |
+| Scheduling and pipelines | `buf_slot_num_of_veccore` | Sets Vector-core-local buffer slots. | `None`; integer | — | Requires active DynamicCV |
+| Scheduling and pipelines | `buf_slot_num_of_crosscore` | Sets cross-core buffer slots. | `None`; integer | — | Requires active DynamicCV |
+| Scheduling and pipelines | `buf_slot_num_of_gm` | Sets GM load buffer slots. | `None`; integer | — | Requires active DynamicCV |
+| Memory optimization | `enable_ubuf_saving` | Controls UB saving. | `None`; boolean | Yes | — |
+| Memory optimization | `disable_size_align_for_cast` | Controls cast size alignment. | `None`; boolean | Yes | — |
+| Memory optimization | `disable_tightly_coupled_buffer_reuse` | Disables tightly coupled buffer reuse in the NPU compiler. | `False`; boolean | — | Normal path |
+| Memory optimization | `plan_memory_strategy` | Selects a memory-planning strategy. | `None`; `"default"`, `"largest-first"` | — | Normal path |
+| Operator optimization | `enable_preload` | Controls NPU compiler preload optimization. | `None`; boolean | Yes | Normal path |
+| Operator optimization | `enable_flatten` | Controls the NPU compiler flatten pass. | `None`; boolean | Yes | Normal path |
+| Operator optimization | `enable_auto_vectorize_v2` | Controls NPU compiler AutoVectorizeV2. | `None`; boolean | Yes | Normal path |
+| Operator optimization | `vf_fusion_mode` | Selects the VF fusion strategy. | `None`, switch omitted; `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | — | Normal path |
+| Operator optimization | `hfusion_enable_multiple_consumer_fusion` | Controls multiple-consumer HFusion. | `None`; boolean | — | Normal path |
+| Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
+| Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the AutoVectorizeV2 fused-op limit. | `None`; integer | — | Normal path |
+| Operator optimization | `prevec_max_fused_ops_num` | Sets the pre-vectorization fused-op limit. | `None`; integer | — | Normal path |
+| Pure SIMT | `simt_optimization_mode` | Sets the pure-SIMT multi-digit optimization mode. Explicit values on A2/A3 or the 950 normal path emit a `UserWarning` and are ignored. | `0`; toolchain-defined integer | — | Pure SIMT only |
+| Pure SIMT | `shared_mem_dynamic_size` | Sets pure-SIMT dynamic shared memory size. | `122880` bytes; integer byte count | — | Pure SIMT only |
+| Pure SIMT | `disable_fma` | Disables FMA optimization on the pure-SIMT path. | `False`; boolean | — | Pure SIMT only |
+| Pure SIMT | `superblock_factor` | Sets the pure-SIMT superblock factor when automatic block mapping is active and row coalescing has not applied. | `1`; passed when greater than `1` | — | Pure SIMT only |
 
 <a id="compiler-option-cleanup-and-compatibility"></a>
 
-### Compiler Option Cleanup and Compatibility
+## Compiler Option Cleanup and Compatibility
 
-The environment-variable and compiler-option reference tables list only active public controls. Environment variables and compiler options that have been removed or moved under backend ownership are no longer listed. As a temporary compatibility measure, using one of those deprecated controls currently emits a `FutureWarning`; its value is ignored and the backend-managed or default behavior is used. These deprecated controls are scheduled for complete removal in a future release. After a deprecated compiler option is removed, continuing to pass it will be treated as an unsupported option and cause compilation to fail. Users should migrate away from deprecated controls during the compatibility period.
+The legacy compiler options listed below are accepted only during the compatibility period. **Once these options are fully removed in a future release, passing them through kernel launch arguments or `triton.Config` will cause an error.** Migrate or remove them as described below before upgrading.
 
-#### Renamed Compiler Options
+Renamed and deprecated settings handled by Triton-Ascend emit a `FutureWarning`, once per name per process. NPU IR emits the deprecation diagnostics for legacy multibuffer options.
 
-The following deprecated names remain accepted during the compatibility period and are routed to their canonical replacements. New code should use the canonical forms directly:
+### Migrating Legacy Multibuffer Options
+
+NPU IR deprecates the following three options. Their legacy behavior remains effective during the compatibility period; when `multibuffer_mode` is also set, their values are ignored. Use the equivalent configuration suggested by the compiler and specify all four levels in the dictionary:
+
+| Legacy option | Corresponding setting in `multibuffer_mode` |
+|---------------|--------------------------------------------|
+| `limit_auto_multi_buffer_only_for_local_buffer` | `True` corresponds to `gm=1`, disabling GM multi-buffering. |
+| `limit_auto_multi_buffer_of_local_buffer` | `"no-l0c"` corresponds to `l0c=1`; `"no-limit"` corresponds to `l0c>1`. |
+| `limit_auto_multi_buffer_buffer` | On the 950 normal path: `"only-cube"` corresponds to `ub=1`; `"only-vector"` corresponds to `l1=1` and `l0c=1`; `"no-limit"` corresponds to `l1>1` and `ub>1`. |
+
+For example, to enable double-buffering only for L1:
+
+```python
+triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
+```
+
+### Renamed Compiler Options
+
+Replace the following old names with the corresponding names or values:
 
 | Deprecated name | Canonical name or value | Compatibility behavior |
 |-----------------|-------------------------|------------------------|
-| `force_simt_only` | `compile_mode="simt_only"` | Any explicit use emits a `FutureWarning`; `True` routes and overrides an existing `compile_mode`, while `False` leaves the current mode unchanged. |
-| `force_simt_template` | `compile_mode="simd_simt_template"` | Any explicit use emits a `FutureWarning`; `True` routes and overrides an existing `compile_mode`, while `False` leaves the current mode unchanged. |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | Emits a `FutureWarning` and preserves the value; the canonical name wins when both names are supplied. |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | Emits a `FutureWarning` and preserves the value; the canonical name wins when both names are supplied. |
-| `load_cache_num` | `buf_slot_num_of_gm` | Emits a `FutureWarning` and preserves the value; the canonical name wins when both names are supplied. |
+| `force_simt_only` | `compile_mode="simt_only"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. This option takes precedence when both legacy force switches are `True`. |
+| `force_simt_template` | `compile_mode="simd_simt_template"` | `True` overrides an existing `compile_mode`; `False` leaves the mode unchanged. |
+| `intra_cache_num` | `buf_slot_num_of_veccore` | Preserves the value; the new name wins when both names are supplied. |
+| `inter_cache_num` | `buf_slot_num_of_crosscore` | Preserves the value; the new name wins when both names are supplied. |
+| `load_cache_num` | `buf_slot_num_of_gm` | Preserves the value; the new name wins when both names are supplied. |
+| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | Preserves the value; the new name wins when both names are supplied. Effective only on the 950 pure-SIMT path. |
 
-`compile_mode="unstructured_in_simt"` is currently accepted as an equivalent compatibility spelling of `compile_mode="simd_simt_template"` and is normalized to the canonical value; it does not currently emit a `FutureWarning`. New code should use `simd_simt_template`.
+The compatibility value `compile_mode="unstructured_in_simt"` is equivalent to `compile_mode="simd_simt_template"` and remains accepted without a `FutureWarning`. Use `simd_simt_template` in new code.
 
-#### Compiler Options to Remove from User Configuration
+### Deprecated Compiler Options
 
-The following deprecated options no longer have an effective public control with the same name. When explicitly supplied during the compatibility period, they emit a `FutureWarning` and the user value is ignored. Remove them from `triton.Config`, autotune configurations, and kernel launch meta-parameters as described below.
+Remove the following options from kernel launch arguments and `triton.Config`; the compiler ignores their values.
 
-| Deprecated option | Migration and current backend behavior |
+| Deprecated option | Replacement or current behavior |
 |-------------------|----------------------------------------|
-| `add_auto_scheduling` | Remove it; the DAG auto-scheduling switch has been removed and has no replacement. |
-| `allow_fp8e4nv` | Remove it; the field had no effective consumer and has no replacement. |
-| `arch` | Remove it; the target architecture is provided by the compilation target's `GPUTarget.arch`. |
-| `auto_blockify_size` | Remove it; the field had no effective consumer and has no replacement. |
-| `auto_tile_and_bind_subblock` | Remove it; tiling and sub-block binding are derived from Linalg IR and lock semantics. |
-| `code_motion` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `compile_on_910_95` | Remove it; the target product is detected from the compilation target. |
-| `disable_auto_inject_block_sync` | Remove it; block synchronization injection is managed by NPU IR. |
-| `disable_size_align_for_cast` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `enable_auto_blockify` | Remove it; automatic block mapping and its safety analysis are backend-managed. |
-| `enable_buffer_insert_optimization` | Remove it; DynamicCV keeps buffer insertion optimization enabled internally. |
-| `enable_cce_vf_auto_sync` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `enable_cce_vf_remove_membar` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `enable_cross_if_fusion` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `enable_drop_unit_dims` | Remove it; use `enable_flatten` instead when flattening is intended. |
-| `enable_linearize` | Remove it; the field had no effective consumer and has no replacement. |
-| `enable_mask_fallback_conversion` | Remove it; the backend fixes mask fallback conversion to disabled. |
-| `enable_nd2nz_on_vector` | Remove it; the backend fixes Vector ND2NZ conversion to disabled. |
-| `enable_select_analysis` | Remove it; the backend fixes select analysis to enabled. |
-| `enable_sync_block_lock` | Remove it; the field had no effective consumer and has no replacement. |
-| `enable_ub_refine_opt` | Remove it; the backend fixes UB refine optimization to disabled. |
-| `graph_optimize_emit_remarks` | Remove it; Graph Optimization remarks are fixed to disabled by the backend. |
-| `graph_optimize_max_rewrites_per_function` | Remove it; the maximum rewrites per function is fixed to 64 by the backend. |
-| `graph_optimize_rule_mask` | Remove it; the Graph Optimization rule mask is fixed to 511 by the backend. |
-| `graph_optimize_ub_capacity_bytes` | Remove it; the Graph Optimization UB budget is derived from the target product. |
-| `grid_num_tiles` | Remove it; the backend injects this value automatically from a static grid. |
-| `has_auto_blockify_blacklist_op` | Remove it; the compiler derives the safety marker by scanning TTIR. |
-| `kernel_name` | Remove it; the kernel name is derived from TTIR. |
-| `llvm_version` | Remove it; the field had no effective consumer and has no replacement. |
-| `mix_mode` | Remove it; mix mode is derived from Linalg IR as internal metadata. |
-| `ops_reorder` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `optimize_dynamic_offset` | Remove it; the backend fixes dynamic-offset optimization to disabled. |
-| `parallel_mode` | Remove it; parallel mode is derived from `compile_mode` and Linalg IR. |
-| `storage_align` | Remove it; the former vendor compiler control has been removed and has no replacement. |
-| `stream` | Remove it; launch streams are managed by the runtime and driver. |
-| `use_bytecode` | Remove it; the bytecode pipeline is always enabled by the backend. |
-| `vf_merge_level` | Remove it; the backend default VF merge level is used. |
-| `warp_size` | Remove it; the Ascend backend fixes the warp size to 32. |
+| `add_auto_scheduling` | The DAG auto-scheduling switch has been removed and has no replacement. |
+| `allow_fp8e4nv` | No replacement. |
+| `arch` | The target architecture is provided by the compilation target's `GPUTarget.arch`. |
+| `auto_blockify_size` | No replacement. |
+| `auto_tile_and_bind_subblock` | The compiler determines tiling and sub-block binding automatically. |
+| `bisheng_options` | User values are ignored. |
+| `code_motion` | No replacement. |
+| `compile_on_910_95` | The target product is detected from the compilation target. |
+| `enable_auto_blockify` | The compiler manages automatic block mapping and its safety analysis. |
+| `enable_buffer_insert_optimization` | The DynamicCV pipeline enables buffer insertion optimization automatically. |
+| `enable_cce_vf_auto_sync` | No replacement. |
+| `enable_cce_vf_remove_membar` | No replacement. |
+| `enable_cross_if_fusion` | No replacement. |
+| `enable_drop_unit_dims` | Use `enable_flatten` instead when flattening is intended. |
+| `enable_linearize` | No replacement. |
+| `enable_simt_reorder_instruction` | Use `simt_optimization_mode`. |
+| `enable_vf_fusion` | This switch is no longer forwarded to the NPU compiler. |
+| `enable_mask_fallback_conversion` | The backend fixes mask fallback conversion to disabled. |
+| `enable_nd2nz_on_vector` | The backend fixes Vector ND2NZ conversion to disabled. |
+| `enable_select_analysis` | The backend fixes select analysis to enabled. |
+| `enable_sync_block_lock` | No replacement. |
+| `enable_ub_refine_opt` | The backend fixes UB refine optimization to disabled. |
+| `graph_optimize_emit_remarks` | Graph Optimization remarks are fixed to disabled by the backend. |
+| `graph_optimize_max_rewrites_per_function` | The maximum rewrites per function is fixed to 64 by the backend. |
+| `graph_optimize_rule_mask` | The old field is ignored. |
+| `graph_optimize_ub_capacity_bytes` | The Graph Optimization UB budget is derived from the target product. |
+| `grid_num_tiles` | The backend injects this value automatically from a static grid. |
+| `has_auto_blockify_blacklist_op` | The compiler derives the safety marker by scanning TTIR. |
+| `kernel_name` | The kernel name is derived from TTIR. |
+| `llvm_version` | No replacement. |
+| `mix_mode` | Derived automatically by the compiler. |
+| `ops_reorder` | No replacement. |
+| `optimize_dynamic_offset` | The backend fixes dynamic-offset optimization to disabled. |
+| `parallel_mode` | Parallel mode is derived from `compile_mode` and Linalg IR. |
+| `storage_align` | No replacement. |
+| `stream` | Execution streams are managed by the runtime and driver. |
+| `use_bytecode` | The bytecode pipeline is always enabled by the backend. |
+| `vf_merge_level` | The backend default VF merge level is used. |
+| `warp_size` | The Ascend backend fixes the warp size to 32. |
 
-#### Deprecated Environment Variables
+### Deprecated Environment Variables
 
-The following environment variables emit a `FutureWarning` when detected during the compatibility period, but their values no longer affect backend behavior. Unset them:
+Remove the following variables from launch scripts or the runtime environment; the compiler ignores their values.
 
-| Deprecated environment variable | Migration and current backend behavior |
+| Deprecated environment variable | Replacement or current behavior |
 |---------------------------------|----------------------------------------|
-| `LLVM_ROOT` | Unset it; set `CC` to select the CPU launcher compiler when needed. |
-| `MLIR_ROOT` | Unset it; use packaged MLIR tools or tools discoverable through `PATH`. |
-| `TRITON_ALL_BLOCKS_PARALLEL` | Unset it; automatic block mapping is managed by backend policy. |
-| `TRITON_ASCEND_ARCH` | Unset it; the target architecture is provided by the explicit compilation target's `GPUTarget.arch`. |
-| `TRITON_ASCEND_COMPILE_SPEED_OPT` | Unset it; the variable had no effective consumer and has no replacement. |
-| `TRITON_BACKEND` | Unset it; the Ascend backend policy is no longer selected by this environment variable. |
-| `TRITON_DISABLE_FFTS` | Unset it; FFTS policy is derived from the explicit compilation target. |
-| `TRITON_REGISTER_TENSOR_MSPROF` | Unset it; tensor-shape msprof registration is no longer controlled by an environment variable. |
+| `LLVM_ROOT` | Set `CC` to select the CPU launcher compiler when needed. |
+| `MLIR_ROOT` | Use packaged MLIR tools or tools discoverable through `PATH`. |
+| `TRITON_ALL_BLOCKS_PARALLEL` | Automatic block mapping is managed by backend policy. |
+| `TRITON_ASCEND_ARCH` | The target architecture is provided by the explicit compilation target's `GPUTarget.arch`. |
+| `TRITON_ASCEND_COMPILE_SPEED_OPT` | No replacement. |
+| `TRITON_BACKEND` | The variable no longer selects Ascend backend policy. |
+| `TRITON_DISABLE_FFTS` | The compilation target determines FFTS policy. |
+| `TRITON_REGISTER_TENSOR_MSPROF` | Environment variables no longer control tensor-shape registration with msprof. |

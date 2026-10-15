@@ -24,9 +24,6 @@ def BubbleUpOperation : Pass<"bubble-up-operation", "mlir::ModuleOp"> {
     let options = [
         Option<"enableAggressiveMode", "enable-aggressive-mode", "bool", "true", 
            "Enable aggressive bubble up operation.">,
-        Option<"compileOn91095", "compile-on-910-95",
-            "bool", /*default*/"false",
-            "compile on 910_95">,
     ];
 }
 

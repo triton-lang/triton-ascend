@@ -28,6 +28,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/WrapSplittedIf.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
@@ -134,6 +135,15 @@ void AddControlFlowConditionPass::runOnOperation() {
       new UpdateLoopIterTimesPass());
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
+
+  // Step7: Wrap ssbuffer.if with its unique splitted_if cond (for and while).
+  // Each main loop must have a single splitted_if id, and real tensor compute
+  // sits only in that splitted_if then. Inner then
+  // is spliced in. For else ++ counter; while else clones the while_arg chain.
+  std::unique_ptr<WrapSplittedIfPass> wrapSplittedIfPass(
+      new WrapSplittedIfPass());
+  wrapSplittedIfPass->setConditionInfo(&info);
+  pm.addPass(std::move(wrapSplittedIfPass));
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");

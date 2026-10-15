@@ -305,6 +305,10 @@ LogicalResult triton::runUseAnalysis(triton::FuncOp &funcOp) {
   // Walk the func op, convert tags on operands to tags on operations
   funcOp.walk([&](Operation *op) {
     LLVM_DEBUG({ os << "[UseAnalysis] op is " << *op << "\n"; });
+    // Calls may return multiple metadata values and have side effects. Keep
+    // the call intact instead of erasing or cloning it as metadata arithmetic.
+    if (isa<triton::CallOp>(op))
+      return;
     UseType useType = UseType::Undefined;
     for (auto result : op->getResults()) {
       LLVM_DEBUG({ os << "[UseAnalysis] ===> result is " << result << "\n"; });

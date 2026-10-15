@@ -314,7 +314,7 @@ static Value unwrapPointerDescriptorMaterialization(Value value) {
 // that descriptor. extract_aligned_pointer_as_index yields the aligned buffer
 // pointer; the descriptor's element offset must therefore be converted to
 // bytes and added explicitly before the address crosses control flow.
-static FailureOr<Value>
+FailureOr<Value>
 materializePointerAddress(Value value, Location loc,
                           ConversionPatternRewriter &rewriter) {
   value = unwrapPointerDescriptorMaterialization(value);

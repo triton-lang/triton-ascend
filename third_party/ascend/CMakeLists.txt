@@ -31,6 +31,23 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
 
+# AscendNPU-IR selects these with add_definitions(), which only reaches its own
+# directory tree. The targets below include its headers, and some of those headers
+# are version-conditional: bishengir/Interfaces/CopyOpInterface.h only declares
+# mlir::CopyOpInterface when __LLVM_MAJOR_VERSION_22_COMPATIBLE__ is set, because
+# LLVM 22 removed MLIR's own copy while the generated HIVM op classes still name
+# it. Without the define here, anything including HIVM.h fails to compile against
+# an LLVM 22 toolchain. Kept in step with AscendNPU-IR/CMakeLists.txt.
+if(LLVM_MAJOR_VERSION_20_COMPATIBLE)
+  add_compile_definitions(__LLVM_MAJOR_VERSION_20_COMPATIBLE__)
+endif()
+if(LLVM_MAJOR_VERSION_21_COMPATIBLE OR LLVM_MAJOR_VERSION_22_COMPATIBLE)
+  add_compile_definitions(__LLVM_MAJOR_VERSION_21_COMPATIBLE__)
+endif()
+if(LLVM_MAJOR_VERSION_22_COMPATIBLE)
+  add_compile_definitions(__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
+endif()
+
 add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)

@@ -89,12 +89,20 @@ void init_buffer_ir(py::module &&m) {
              return memref->getResult(0);
            })
       .def("to_tensor",
-           [](BufferOpBuilder &self, Value &src, bool writable) -> Value {
+           [](BufferOpBuilder &self, Value &src, bool writable,
+              bool keepAddressSpace) -> Value {
              const auto &memrefType = mlir::cast<MemRefType>(src.getType());
              auto tensorType = mlir::RankedTensorType::get(
                  memrefType.getShape(), memrefType.getElementType());
+             // A tensor type carries no address space, so the default is to
+             // cast it away. That loses the only record of where the data
+             // lives, and every consumer downstream then assumes the local
+             // default (UB, on the vector core). Keeping the space lets an
+             // operand that is already staged in L1 reach the cube -- an mmad
+             // reading a gathered L1 tile, say -- instead of being treated as
+             // vector data and tiled or transferred as such.
              auto hasAddressSpace = memrefType.getMemorySpace();
-             if (hasAddressSpace) {
+             if (hasAddressSpace && !keepAddressSpace) {
                MemRefType targetType = MemRefType::get(
                    memrefType.getShape(), memrefType.getElementType(),
                    memrefType.getLayout());
@@ -108,7 +116,9 @@ void init_buffer_ir(py::module &&m) {
                  tensorType, src,
                  true ? mlir::UnitAttr::get(self.getContext()) : nullptr,
                  writable ? mlir::UnitAttr::get(self.getContext()) : nullptr);
-           })
+           },
+           py::arg("src"), py::arg("writable"),
+           py::arg("keep_address_space") = false)
       .def("subview",
            [](BufferOpBuilder &self, Value source, std::vector<Value> &offsets,
               const std::vector<int64_t> &sizes,

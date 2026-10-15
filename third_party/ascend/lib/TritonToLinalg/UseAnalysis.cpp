@@ -165,8 +165,18 @@ void triton::UseAnalysis::visitOperation(Operation *op,
       .Case<hivm::CopyOp>(
           [&](auto copyOp) { propagateUse(operands[0], UseType::DataUse); })
       .Case<hivm::CustomOp, hivm::CustomMacroOp>([&](auto customOp) {
-        for (auto operand : operands) {
-          propagateUse(operand, UseType::MixUse);
+        // Inputs can feed address computation as well as data, so they stay
+        // MixUse. An output is pure data: the op writes into it. Calling it
+        // MixUse splits the buffer into a meta copy and a data copy, and the
+        // annotation mark -- hence the memory plan -- follows the meta copy
+        // while the op writes the other, so a custom op that writes an
+        // allocated buffer (a gather into L1, say) ends up writing a buffer
+        // with no planned address.
+        auto numInputs = customOp.getInputs().size();
+        auto numOutputs = customOp.getOutputs().size();
+        for (auto [idx, operand] : llvm::enumerate(operands)) {
+          bool isOutput = idx >= numInputs && idx < numInputs + numOutputs;
+          propagateUse(operand, isOutput ? UseType::DataUse : UseType::MixUse);
         }
       })
       .Default([&](Operation *op) {

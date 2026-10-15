@@ -179,9 +179,10 @@ class buffer(tl.base_value):
         return subview(self, offsets, sizes, strides, _semantic=_semantic)
 
     @builtin
-    def to_tensor(self, writable=True, target_shape=None, _semantic=None):
+    def to_tensor(self, writable=True, target_shape=None, keep_address_space=False, _semantic=None):
         """Convert this buffer to a tl.tensor"""
-        return to_tensor(self, writable=writable, target_shape=target_shape, _semantic=_semantic)
+        return to_tensor(self, writable=writable, target_shape=target_shape,
+                         keep_address_space=keep_address_space, _semantic=_semantic)
 
 
 semantic = importlib.import_module(".semantic", package=__package__)
@@ -217,7 +218,8 @@ def to_buffer(tensor: tl.tensor, space: address_space = None, bind_buffer: buffe
 
 
 @builtin
-def to_tensor(memref: buffer, writable: bool = True, target_shape=None, _semantic=None) -> tl.tensor:
+def to_tensor(memref: buffer, writable: bool = True, target_shape=None, keep_address_space: bool = False,
+              _semantic=None) -> tl.tensor:
     """
     Create a tl.tensor from a bl.buffer.
 
@@ -225,8 +227,14 @@ def to_tensor(memref: buffer, writable: bool = True, target_shape=None, _semanti
     :memref type: bl.buffer
     :param writable: If set true, the resultant tensor is considered "writable" during bufferization.
     :type writable: bool
+    :param keep_address_space: Keep the buffer's address space on the underlying memref instead of
+        casting it away. A tensor type cannot express an address space, so by default the space is
+        dropped and consumers fall back to assuming the local default (UB, on the vector core). Set
+        this when the data must stay where it is -- an L1 operand consumed by the cube, say.
+    :type keep_address_space: bool
     """
-    return semantic.to_tensor(memref, writable, _semantic.builder, target_shape=target_shape)
+    return semantic.to_tensor(memref, writable, _semantic.builder, target_shape=target_shape,
+                              keep_address_space=keep_address_space)
 
 
 def check_subview(src, offsets, sizes, strides):

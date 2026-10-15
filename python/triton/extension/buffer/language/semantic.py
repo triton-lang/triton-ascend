@@ -69,7 +69,8 @@ def to_buffer(
     return bl.buffer(handle, buffer_ty)
 
 
-def to_tensor(memref: bl.buffer, writable: bool, builder: ir.builder, target_shape=None) -> tl.tensor:
+def to_tensor(memref: bl.buffer, writable: bool, builder: ir.builder, target_shape=None,
+              keep_address_space: bool = False) -> tl.tensor:
     if not isinstance(memref, bl.buffer):
         raise TypeError("memref must be bl.buffer")
 
@@ -92,7 +93,7 @@ def to_tensor(memref: bl.buffer, writable: bool, builder: ir.builder, target_sha
         )
         memref_value = builder.create_convert_layout(memref_value, buffer_ty.to_ir(builder))
 
-    return tl.tensor(builder.to_tensor(memref_value, writable), tensor_type)
+    return tl.tensor(builder.to_tensor(memref_value, writable, keep_address_space), tensor_type)
 
 
 def subview(src: bl.buffer, offsets: List[tl.tensor], sizes: List[tl.constexpr], strides: List[tl.constexpr],

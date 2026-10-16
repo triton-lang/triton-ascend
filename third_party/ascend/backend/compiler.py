@@ -946,9 +946,10 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             metadata["required_ub_bits"] = int(match.group(1))
 
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
 
         if opt.debug:
@@ -1156,9 +1157,10 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             metadata["required_ub_bits"] = int(match.group(1))
 
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8') if ret.stderr else ''
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
 
         if opt.debug:
@@ -1518,9 +1520,10 @@ def ttir_to_npubin(mod, metadata, opt):
         cmd_list = ([npu_compiler_path, src_path] + _compile_option_list + ["-o", bin_file])
         ret = subprocess.run(cmd_list, env=env, capture_output=True, check=True)
         if not Path(bin_path).exists():
-            error_msg = ret.stderr.decode('utf-8')
-            print(f"[DEBUG] {bin_path} is not found")
-            print(f"[DEBUG] Stderr:\n{error_msg}")
+            if opt.debug:
+                error_msg = ret.stderr.decode('utf-8')
+                print(f"[DEBUG] {bin_path} is not found")
+                print(f"[DEBUG] Stderr:\n{error_msg}")
             raise subprocess.CalledProcessError(ret.returncode, cmd_list, ret.stdout, ret.stderr)
         return Path(bin_path).read_bytes()
 

@@ -1740,10 +1740,6 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
       argTypes.push_back(rewriter.getI1Type());
     }
     auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
-    // Unique the name before creating the op: building a SymbolTable over a
-    // module that already holds a symbol of this name -- a kernel named
-    // "triton_cumsum", say -- trips SymbolTable's "uniquely named symbol
-    // operations" assertion before any renaming can happen.
     auto uniqueName = generateUniqueFuncName(moduleOp, funcName);
     auto funcOp =
         rewriter.create<func::FuncOp>(loc, uniqueName.str(), libFnType);

@@ -73,8 +73,8 @@ module {
 // CHECK: %[[TENSOR_F32_MAX:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC_F32_MAX]] restrict writable : memref<2x29x4xf32>
 
 // CHECK: %[[F8_TO_F32:[A-Za-z0-9_]+]] = arith.extf %[[TENSOR_F8]] {round_mode = #hfusion.round_mode<rint>} : tensor<2x29x4xf8E4M3FN> to tensor<2x29x4xf32>
-// CHECK: %[[CLAMP_MAX:[A-Za-z0-9_]+]] = arith.minnumf %[[F8_TO_F32]], %[[TENSOR_F32_MAX]] : tensor<2x29x4xf32>
-// CHECK: %[[CLAMP_RESULT:[A-Za-z0-9_]+]] = arith.maxnumf %[[TENSOR_F32_MIN]], %[[CLAMP_MAX]] : tensor<2x29x4xf32>
+// CHECK: %[[CLAMP_MAX:[A-Za-z0-9_]+]] = arith.maxnumf %[[F8_TO_F32]], %[[TENSOR_F32_MIN]] : tensor<2x29x4xf32>
+// CHECK: %[[CLAMP_RESULT:[A-Za-z0-9_]+]] = arith.minnumf %[[CLAMP_MAX]], %[[TENSOR_F32_MAX]] : tensor<2x29x4xf32>
 
 // CHECK: %[[CAST_OUTPUT:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg3 to offset: [%9], sizes: [2, 29, 4], strides: [116, 4, 1] : memref<?xf8E4M3FN> to memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>>
 // CHECK: %[[F32_TO_F8:[A-Za-z0-9_]+]] = arith.truncf %[[CLAMP_RESULT]] {round_mode = #hfusion.round_mode<rint>} : tensor<2x29x4xf32> to tensor<2x29x4xf8E4M3FN>

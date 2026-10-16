@@ -736,6 +736,11 @@ static std::vector<int64_t> _get_tensor_shape(PyObject* tensor) {
 # the template is from triton-adapter HEAD. Wrapping the generated kernel binary into a python module
 def make_launcher(constants, signature, metadata):
     import os
+    const_scalar_idxs = {k[0]
+                         for k in constants
+                         if isinstance(k, tuple) and len(k) == 1} | {k
+                                                                     for k in constants
+                                                                     if isinstance(k, int)}
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
     lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
@@ -1488,7 +1493,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {'void* ffts_addr __attribute__((aligned(8)));' if target_support_ffts else ''}
       {'void* syncBlockLock __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
       {'void* workspace_addr __attribute__((aligned(8)));' if not metadata.is_pure_simt else ''}
-      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr")}
+      {' '.join(f'{ty_to_cpp(ty)} arg{i} __attribute__((aligned({4 if ty[0] != "*" and ty[-2:] != "64" else 8})));' for i, ty in signature.items() if ty != "constexpr" and i not in const_scalar_idxs)}
 {original_grid_struct_fields}      {' '.join(f'{ty_to_cpp(ty)} grid{mark} __attribute__((aligned(4)));' for mark, ty in grid_info.items())}
       {'void* global_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
       {'void* profile_scratch __attribute__((aligned(8)));' if metadata.is_pure_simt else ''}
@@ -1498,7 +1503,7 @@ static void _launch(const char* kernelName, cann_func_handle func, cann_stream s
       {('static_cast<void*>(syncBlockLock_ptr),' if has_sync_block_lock else 'nullptr,') if not metadata.is_pure_simt else ''}
       {('static_cast<void*>(workspace_addr_ptr),' if workspace_size > 0 else 'nullptr,') if not metadata.is_pure_simt else ''}
       {(lambda _rt: (', '.join(_rt) + ',') if _rt else '')(
-        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr"]
+        [f'static_cast<{ty_to_cpp(ty)}>(arg{i})' for i, ty in signature.items() if ty != "constexpr" and i not in const_scalar_idxs]
       )}
 {original_grid_struct_values}      {', '.join(f'static_cast<{ty_to_cpp(ty)}>(grid{mark})' for mark, ty in grid_info.items())}
       {', static_cast<void*>(nullptr)' if metadata.is_pure_simt else ''}

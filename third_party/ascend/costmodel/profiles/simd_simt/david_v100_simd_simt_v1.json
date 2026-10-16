@@ -1,5 +1,10 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
+  "partial_structured_memory_model": "ttir_q1_short_formula_20261014",
+  "simt_indirect_store_model": "random_store_no_fill_first_20261008",
+  "simd_indirect_store_model": "random_store_no_fill_first_20261008",
+  "simt_indirect_load_model": "random_dtype_six_term_20261008",
+  "simd_indirect_load_model": "random_dtype_matched_ab_20261008",
   "compatible_targets": [
     "Ascend950*",
     "Ascend910_95*",

@@ -1,5 +1,6 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
+#include "AscendModel/RouteModel/Reduction/ReductionAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
@@ -732,6 +733,8 @@ static void accumulateReductionWorkload(Operation *operation,
       effectiveExtent > 1
           ? std::ceil(std::log2(static_cast<double>(effectiveExtent)))
           : 0.0;
+  if (auto reduction = analyzeReduction(operation))
+    work.reductionWorkloads.push_back(std::move(*reduction));
   work.reductionOperations += 1.0;
   if (operation->getName().getStringRef() == "tt.reduce")
     work.reductionCombineClassCounts[classifyReductionCombine(operation)] +=
@@ -1196,6 +1199,8 @@ template <typename Map> static void mergeCounts(Map &into, const Map &from) {
 }
 
 static void scaleWorkload(StageWorkload &work, double scale) {
+  for (auto &reduction : work.reductionWorkloads)
+    reduction.instances *= scale;
   for (auto field : workloadScalarFields)
     work.*field *= scale;
   for (auto &access : work.memoryAccesses)
@@ -1963,7 +1968,8 @@ static bool hasKnownAtMostOneIteration(Operation *operation) {
 static void accumulateDynamicOperationTree(
     Operation *operation, StageWorkload &work, double multiplicity,
     int64_t fallbackLoopTripCount, StageModelFeatures &estimates,
-    int64_t logicalProgramCountHint, RankedTensorType mappedTensor = {}) {
+    int64_t logicalProgramCountHint, RankedTensorType mappedTensor = {},
+    bool skipReductionBodies = false) {
   if (!operation)
     return;
   StageWorkload local;
@@ -1984,7 +1990,7 @@ static void accumulateDynamicOperationTree(
   scaleWorkload(local, multiplicity);
   mergeWorkload(work, std::move(local));
 
-  if (schedulingLoop)
+  if (schedulingLoop || (skipReductionBodies && name == "tt.reduce"))
     return;
   // A split independent-loop shell owns only control overhead. Its body
   // operations are separate semantic roots and must not be double-counted.
@@ -1999,7 +2005,7 @@ static void accumulateDynamicOperationTree(
       for (Operation &nested : block.getOperations())
         accumulateDynamicOperationTree(
             &nested, work, childMultiplicity, fallbackLoopTripCount, estimates,
-            logicalProgramCountHint, childMappedTensor);
+            logicalProgramCountHint, childMappedTensor, skipReductionBodies);
 }
 
 static int64_t countAlgorithmLoops(const LogicalStage &stage) {
@@ -2038,6 +2044,7 @@ inferRuntimeGridStrideIterations(const LogicalStage &stage,
 }
 
 static void mergeWorkload(StageWorkload &into, StageWorkload from) {
+  llvm::append_range(into.reductionWorkloads, std::move(from.reductionWorkloads));
   for (auto field : workloadScalarFields)
     into.*field += from.*field;
   into.memoryAccesses.insert(into.memoryAccesses.end(),
@@ -3280,6 +3287,15 @@ StageWorkloadAnalysis::analyze(StagePartition &partition,
       accumulateDynamicOperationTree(
           root, work, semanticRootEntryMultiplicity(root),
           fallbackLoopTripCount, stage.features, logicalProgramCountHint);
+    StageWorkload external;
+    external.paysKernelSetup = work.paysKernelSetup;
+    auto ignoredFeatures = stage.features;
+    for (Operation *root : stage.operations)
+      accumulateDynamicOperationTree(
+          root, external, semanticRootEntryMultiplicity(root),
+          fallbackLoopTripCount, ignoredFeatures, logicalProgramCountHint, {}, true);
+    scaleWorkload(external, 1.0 / std::max<int64_t>(1, stage.iterationCount));
+    stage.reductionExternalWorkload = std::move(external);
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);

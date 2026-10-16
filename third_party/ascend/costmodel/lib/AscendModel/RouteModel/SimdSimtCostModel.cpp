@@ -2069,7 +2069,8 @@ static void readSetupCycleCurve(ProfileJSONReader &reader,
 
 static llvm::Expected<CandidateProfile>
 loadCandidateProfileUncached(llvm::StringRef pathRef,
-                             std::string *microbenchmarkPath) {
+                             std::string *microbenchmarkPath,
+                             std::string *reductionPath) {
   std::string path = pathRef.str();
   auto buffer = llvm::MemoryBuffer::getFile(path);
   if (!buffer)
@@ -2121,6 +2122,23 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
   HardwareProfile &hardware = profile.hardware;
   hardware.profileVersion = reader.string(*root, "profile_version", "profile");
   hardware.target = reader.string(*root, "target", "profile");
+  if (const auto *value = root->get("reduction_profile")) {
+    auto reference = value->getAsString();
+    if (!reference || reference->empty())
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "reduction_profile must be a nonempty path");
+    const std::string resolved = resolveProfileReference(path, *reference);
+    if (reductionPath)
+      *reductionPath = resolved;
+    auto loaded = ReductionProfile::loadFromFile(resolved);
+    if (!loaded)
+      return loaded.takeError();
+    if (loaded->getTarget() != hardware.target)
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "reduction profile target mismatch");
+    hardware.reductionProfile = std::move(*loaded);
+  }
+
   if (const auto *targets = root->getArray("compatible_targets")) {
     for (const llvm::json::Value &target : *targets) {
       auto pattern = target.getAsString();
@@ -2891,6 +2909,13 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     profile.contentSha256 =
         llvm::toHex(llvm::ArrayRef<uint8_t>(combinedHash), true);
   }
+  if (hardware.reductionProfile) {
+    std::string assets = profile.contentSha256 + "\nreduction=" +
+                         hardware.reductionProfile->getContentHash().str();
+    profile.contentSha256 = llvm::toHex(llvm::SHA256::hash(
+        llvm::ArrayRef<uint8_t>(reinterpret_cast<const uint8_t *>(assets.data()),
+                                assets.size())), true);
+  }
   return profile;
 }
 
@@ -2914,6 +2939,8 @@ struct CachedCandidateProfile {
   ProfileFileStamp selectionStamp;
   std::string microbenchmarkPath;
   ProfileFileStamp microbenchmarkStamp;
+  std::string reductionPath;
+  std::optional<ProfileFileStamp> reductionStamp;
   std::shared_ptr<const CandidateProfile> profile;
 };
 
@@ -2936,21 +2963,33 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
         cached->second.selectionStamp == *selectionStamp) {
       const auto microbenchmarkStamp =
           profileFileStamp(cached->second.microbenchmarkPath);
+      const auto reductionStamp =
+          profileFileStamp(cached->second.reductionPath);
+      const bool reductionUnchanged =
+          cached->second.reductionPath.empty() ||
+          (reductionStamp && cached->second.reductionStamp &&
+           *cached->second.reductionStamp == *reductionStamp);
       if (microbenchmarkStamp &&
-          cached->second.microbenchmarkStamp == *microbenchmarkStamp)
+          cached->second.microbenchmarkStamp == *microbenchmarkStamp &&
+          reductionUnchanged)
         return cached->second.profile;
     }
   }
 
   std::string microbenchmarkPath;
-  auto loaded = loadCandidateProfileUncached(path, &microbenchmarkPath);
+  std::string reductionPath;
+  auto loaded =
+      loadCandidateProfileUncached(path, &microbenchmarkPath, &reductionPath);
   if (!loaded)
     return loaded.takeError();
   auto profile = std::make_shared<const CandidateProfile>(std::move(*loaded));
   const auto microbenchmarkStamp = profileFileStamp(microbenchmarkPath);
-  if (selectionStamp && microbenchmarkStamp)
-    cache[path] = CachedCandidateProfile{*selectionStamp, microbenchmarkPath,
-                                         *microbenchmarkStamp, profile};
+  const auto reductionStamp = profileFileStamp(reductionPath);
+  if (selectionStamp && microbenchmarkStamp &&
+      (reductionPath.empty() || reductionStamp))
+    cache[path] = CachedCandidateProfile{
+        *selectionStamp, microbenchmarkPath, *microbenchmarkStamp,
+        reductionPath, reductionStamp, profile};
   return profile;
 }
 

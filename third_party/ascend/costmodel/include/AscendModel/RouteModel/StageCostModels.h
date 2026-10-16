@@ -9,6 +9,7 @@
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
+#include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
 
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/StringMap.h"
@@ -69,6 +70,8 @@ struct LogicalStage {
   int64_t iterationCount = 1;
   StageModelFeatures features;
   StageWorkload workload;
+  /// Same traversal excluding reduce combine bodies; preserves external work.
+  std::optional<StageWorkload> reductionExternalWorkload;
   /// Exact TTIR ownership when StagePartition was built from an operation
   /// graph.
   std::vector<Operation *> operations;
@@ -526,6 +529,7 @@ struct StageModeProfile {
 };
 
 struct HardwareProfile {
+  std::optional<ReductionProfile> reductionProfile;
   std::string profileVersion;
   std::string target;
   /// Base warp count of one logical SIMT program.

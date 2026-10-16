@@ -1809,3 +1809,126 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
   EXPECT_NE(llvm::toString(std::move(error)).find("requires_split"),
             std::string::npos);
 }
+
+// Ordinary tail reduction calibration must not replace measured Stage bodies.
+#include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
+
+namespace {
+HardwareProfile tailMigrationProfile() {
+  auto profile = hardwareProfile();
+  auto path = std::string(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  path = path.substr(0, path.find_last_of('/')) +
+         "/../reduction/david_v100_reduction_v1.json";
+  auto reduction = mlir::ascend::ReductionProfile::loadFromFile(path);
+  if (!reduction) {
+    ADD_FAILURE() << llvm::toString(reduction.takeError());
+    return profile;
+  }
+  profile.reductionProfile = std::move(*reduction);
+  return profile;
+}
+LogicalStage ordinaryTailStage() {
+  auto stage = logicalStage("ordinary_tail", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  stage.workload.reductionOperations = 1;
+  stage.workload.shuffleLaneSteps = 64 * 6;
+  stage.workload.reductionGeometryCounts[{1, 64, 32}] = 1;
+  stage.workload.reductionWorkloads.push_back({"sum", "f32", {64}, 0, 1});
+  mlir::ascend::StageMemoryAccess input;
+  input.shape = {64};
+  input.strides = {1};
+  input.elementBits = 32;
+  stage.workload.memoryAccesses.push_back(input);
+  stage.reductionExternalWorkload = stage.workload;
+  return stage;
+}
+} // namespace
+
+TEST(SimdSimtCostModelTest, OrdinaryTailUsesFrozenFormulaAndRecomputesPath) {
+  auto profile = tailMigrationProfile();
+  auto stage = ordinaryTailStage();
+  auto expected = mlir::ascend::estimateTailAxisReductionCycles(
+      stage.workload.reductionWorkloads.front(),
+      profile.reductionProfile->getModeProfile(mlir::ascend::ReductionMode::SIMD),
+      mlir::ascend::ReductionMode::SIMD, 4);
+  ASSERT_TRUE(expected);
+  auto table = evaluateOneStage(stage, profile);
+  ASSERT_TRUE(static_cast<bool>(table)) << (table ? "" : llvm::toString(table.takeError()));
+  bool found = false;
+  for (const auto &cost : table->stages.front().implementations) {
+    if (cost.implementation.mode != StageMode::SIMD)
+      continue;
+    found = true;
+    EXPECT_TRUE(cost.calibratedTailReduction);
+    EXPECT_DOUBLE_EQ(cost.resources.reduction, *expected);
+    EXPECT_DOUBLE_EQ(cost.resources.criticalPath,
+                     cost.resources.compute + cost.resources.predicate +
+                         cost.resources.reduction + cost.resources.shuffle);
+  }
+  EXPECT_TRUE(found);
+}
+
+TEST(SimdSimtCostModelTest, TailCalibrationPreservesCandidateExecutionDomain) {
+  auto profile = tailMigrationProfile();
+  auto stage = ordinaryTailStage();
+  stage.legalSimtFactors = {1, 2, 4};
+  stage.localSimtMaterializable = true;
+  stage.localSuperblockMaterializable = true;
+  stage.localSimtFactors = {1, 2, 4};
+  auto expected = mlir::ascend::estimateTailAxisReductionCycles(
+      stage.workload.reductionWorkloads.front(),
+      profile.reductionProfile->getModeProfile(mlir::ascend::ReductionMode::SIMT),
+      mlir::ascend::ReductionMode::SIMT, profile.baseSimtWarpCount);
+  ASSERT_TRUE(expected);
+  auto table = evaluateOneStage(stage, profile);
+  ASSERT_TRUE(static_cast<bool>(table));
+  unsigned whole = 0, local = 0;
+  for (const auto &cost : table->stages.front().implementations) {
+    if (cost.implementation.mode != StageMode::SIMT)
+      continue;
+    EXPECT_TRUE(cost.calibratedTailReduction);
+    // The window is per logical program: F is composed later, not folded
+    // into the formula's numWarps or multiplied into reduction twice.
+    EXPECT_DOUBLE_EQ(cost.resources.reduction, *expected);
+    EXPECT_GT(cost.totalCycles, 0.0);
+    if (cost.implementation.localScope)
+      ++local;
+    else
+      ++whole;
+  }
+  EXPECT_EQ(whole, 3u);
+  EXPECT_EQ(local, 3u);
+}
+
+TEST(SimdSimtCostModelTest, TailUnsupportedOrSpecialLayoutPreservesLegacy) {
+  for (bool unsupported : {false, true}) {
+    auto stage = ordinaryTailStage();
+    if (unsupported)
+      stage.workload.reductionWorkloads.front().kind = "custom";
+    else
+      stage.workload.memoryAccesses.front().strides = {2};
+    auto profile = tailMigrationProfile();
+    auto changed = evaluateOneStage(stage, profile);
+    profile.reductionProfile.reset();
+    auto baseline = evaluateOneStage(stage, profile);
+    ASSERT_TRUE(static_cast<bool>(changed));
+    ASSERT_TRUE(static_cast<bool>(baseline));
+    ASSERT_EQ(changed->stages.front().implementations.size(),
+              baseline->stages.front().implementations.size());
+    for (size_t i = 0; i < changed->stages.front().implementations.size(); ++i) {
+      EXPECT_FALSE(changed->stages.front().implementations[i].calibratedTailReduction);
+      EXPECT_DOUBLE_EQ(changed->stages.front().implementations[i].totalCycles,
+                       baseline->stages.front().implementations[i].totalCycles);
+    }
+  }
+}
+
+TEST(SimdSimtCostModelTest, TailPartialSupportFallsBackForWholeCandidate) {
+  auto stage = ordinaryTailStage();
+  stage.workload.reductionWorkloads.push_back({"custom", "f32", {64}, 0, 1});
+  stage.workload.reductionOperations = 2;
+  auto table = evaluateOneStage(stage, tailMigrationProfile());
+  ASSERT_TRUE(static_cast<bool>(table));
+  for (const auto &cost : table->stages.front().implementations)
+    EXPECT_FALSE(cost.calibratedTailReduction);
+}

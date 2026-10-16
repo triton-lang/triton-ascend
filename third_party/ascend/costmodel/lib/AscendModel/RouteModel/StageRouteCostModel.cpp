@@ -1163,6 +1163,7 @@ llvm::json::Object StageImplementationCost::toJSON() const {
       {"total_system_cycles", totalCycles},
       {"local_scope_completion_inclusive", localScopeCompletionInclusive},
       {"formula_evidence", formulaEvidence},
+      {"calibrated_tail_reduction", calibratedTailReduction},
       {"resource_system_cycles", resources.toJSON()}};
   if (perAivWorkload)
     result["per_aiv_workload_before_superblock"] = perAivWorkload->toJSON();

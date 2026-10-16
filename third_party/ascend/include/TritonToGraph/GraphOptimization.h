@@ -66,11 +66,13 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   IntermediatePrecisionBoundaryElision = 8192,
   StoreCoveragePlanning = 16384,
   ContiguousBlockAccessFormation = 32768,
+  AtomicMaskCanonicalization = 65536,
 };
 
 enum class GraphOptimizationRulePhase : uint8_t {
   DiagonalMaskRemoval,
   ConvertModuloToMask,
+  AtomicMaskCanonicalization,
   ProgramMapping,
   PersistentTaskMapping,
   LoadStoreTranspose,
@@ -117,6 +119,8 @@ getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
     return "StoreCoveragePlanningRule";
   case GraphOptimizationRuleId::ContiguousBlockAccessFormation:
     return "ContiguousBlockAccessFormationRule";
+  case GraphOptimizationRuleId::AtomicMaskCanonicalization:
+    return "AtomicMaskCanonicalization";
   }
   return "Unknown";
 }
@@ -157,11 +161,13 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   case GraphOptimizationRuleId::ChunkCoalescing:
   case GraphOptimizationRuleId::StridedLoadStoreRewrite:
     return GraphOptimizationRulePhase::Compatibility;
+  case GraphOptimizationRuleId::AtomicMaskCanonicalization:
+    return GraphOptimizationRulePhase::AtomicMaskCanonicalization;
   }
   return GraphOptimizationRulePhase::Compatibility;
 }
 
-constexpr std::array<GraphOptimizationRuleId, 15>
+constexpr std::array<GraphOptimizationRuleId, 16>
     kGraphOptimizationRuleRegistry = {
         GraphOptimizationRuleId::LoadStoreTranspose,
         GraphOptimizationRuleId::TransposePointwiseReorder,
@@ -178,6 +184,7 @@ constexpr std::array<GraphOptimizationRuleId, 15>
         GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision,
         GraphOptimizationRuleId::StoreCoveragePlanning,
         GraphOptimizationRuleId::ContiguousBlockAccessFormation,
+        GraphOptimizationRuleId::AtomicMaskCanonicalization,
 };
 
 constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
@@ -227,7 +234,9 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StoreCoveragePlanning) |
     getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::ContiguousBlockAccessFormation);
+        GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::AtomicMaskCanonicalization);
 
 constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
     kLegacyGraphOptimizationRuleMask |
@@ -244,7 +253,9 @@ constexpr GraphOptimizationRuleMask kFixedDefaultOffGraphOptimizationRuleMask =
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::StoreCoveragePlanning) |
     getGraphOptimizationRuleMask(
-        GraphOptimizationRuleId::ContiguousBlockAccessFormation);
+        GraphOptimizationRuleId::ContiguousBlockAccessFormation) |
+    getGraphOptimizationRuleMask(
+        GraphOptimizationRuleId::AtomicMaskCanonicalization);
 
 constexpr GraphOptimizationRuleMask kDefaultGraphOptimizationRuleMask =
     kDefaultEligibleGraphOptimizationRuleMask;

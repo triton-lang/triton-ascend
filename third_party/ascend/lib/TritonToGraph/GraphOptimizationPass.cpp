@@ -59,7 +59,7 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
     GraphOptimizationRulePhase::ProgramMapping,
@@ -71,6 +71,7 @@ constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
     GraphOptimizationRulePhase::StoreCoveragePlanning,
     GraphOptimizationRulePhase::StoreCoalescing,
     GraphOptimizationRulePhase::ContiguousBlockAccessFormation,
+    GraphOptimizationRulePhase::AtomicMaskCanonicalization,
 };
 
 using ProgramOrderMap = llvm::DenseMap<Operation *, unsigned>;
@@ -560,6 +561,10 @@ void populateBuiltinGraphOptimizationRules(
                                    GraphOptimizationRuleId::RowCoalescing)) {
     rules.push_back(createRowCoalescingRule(
         *compileMode == triton::ascend::CompileMode::SimtOnly));
+  }
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::AtomicMaskCanonicalization)) {
+    rules.push_back(createAtomicMaskCanonicalizationRule());
   }
 }
 

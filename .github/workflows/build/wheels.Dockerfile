@@ -2,7 +2,7 @@
 # Used by wheels.yml via docker/build-push-action@v7 — no Docker daemon needed
 # on the runner; buildx talks to remote buildkitd.
 
-ARG MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_arrch64:latest
+ARG MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_aarch64:latest
 FROM ${MANYLINUX_IMAGE} AS builder
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 import builtins
 import hashlib
+import importlib.metadata
 import importlib.util
+import json
 import os
 import sys
 from pathlib import Path
@@ -234,8 +236,12 @@ def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, t
     assert fake_cache.put_calls == 1
 
 
-def test_npu_utils_cache_key_uses_cann_torch_npu_version_and_source(monkeypatch, tmp_path):
+def test_npu_utils_cache_key_uses_build_fingerprint_and_source(monkeypatch, tmp_path):
     driver = _load_driver_module()
+    # Use fresh fingerprint caches so other tests cannot supply package versions.
+    utils = _load_utils_module()
+    monkeypatch.setattr(driver, "_ascend_utils", utils)
+    monkeypatch.setattr(utils, "backend_policy", "torch_npu")
     _guard_torch_npu_import(monkeypatch)
     cached_so = tmp_path / "npu_utils.so"
     cached_so.write_bytes(b"cached")
@@ -248,21 +254,38 @@ def test_npu_utils_cache_key_uses_cann_torch_npu_version_and_source(monkeypatch,
             assert filename == "npu_utils.so"
             return str(cached_so)
 
-    monkeypatch.setattr(driver, "get_cann_version", lambda: (9, 0, 0))
+    compiler = tmp_path / "c++"
+    compiler.write_text("test compiler")
+    command = [str(compiler), "/__triton_build__/source.cpp", "-D_GLIBCXX_USE_CXX11_ABI=1"]
+    versions = {"torch": "2.7.1", "torch_npu": "2.7.1.post5.dev20260622"}
+    monkeypatch.setattr(utils, "_npu_ext_build_command", lambda *args, **kwargs: (command, "unused.so"))
+    monkeypatch.setattr(utils, "_npu_compiler_version", lambda *args: "test compiler version")
+    monkeypatch.setattr(utils, "get_cann_version", lambda: (9, 0, 0))
     monkeypatch.setattr(
-        driver.importlib.metadata,
+        importlib.metadata,
         "version",
-        lambda name: version_calls.append(name) or "2.7.1.post5.dev20260622",
+        lambda name: version_calls.append(name) or versions[name],
     )
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
 
     npu_utils = driver.NPUUtils()
     source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()
-    expected_key = hashlib.md5("\0".join(["9.0.0", "2.7.1.post5.dev20260622", source]).encode("utf-8")).hexdigest()
+    fingerprint = {
+        "command": command,
+        "compiler": str(compiler),
+        "compiler_version": "test compiler version",
+        "cann": (9, 0, 0),
+        "packages": versions,
+        "python_abi": utils.sysconfig.get_config_var("SOABI"),
+    }
+    expected_key = hashlib.sha256(json.dumps([source, fingerprint], sort_keys=True).encode()).hexdigest()
 
     assert npu_utils.get_so_path() == str(cached_so)
-    assert version_calls == ["torch_npu"]
+    assert version_calls == ["torch", "torch_npu"]
     assert captured_keys == [expected_key]
+    assert driver.NPUUtils().get_so_path() == str(cached_so)
+    assert captured_keys == [expected_key, expected_key]
+    assert version_calls == ["torch", "torch_npu"]
     assert "torch_npu" not in sys.modules
 
 

@@ -23,7 +23,6 @@ is 910_95 would exercise a different compiler/toolchain contract and would not
 validate this pass's original gate.
 """
 
-import re
 import pytest
 import torch
 import triton
@@ -73,32 +72,9 @@ def strided_axis_coalescing_copy(src, dst, T: tl.constexpr, S: tl.constexpr, BLO
     tl.store(dst_block, value)
 
 
-def _launcher_source_from_compiled_metadata(metadata):
-    """Render the launch-grid section from actual compiler metadata.
-
-    Grid coalescing is entirely metadata-driven.  A minimal two-pointer
-    signature therefore keeps this assertion independent of the incidental
-    representation of ``CompiledKernel.src`` while still exercising the real
-    driver implementation and the metadata emitted by this compilation.
-    """
-    if metadata is None:
-        return None, "CompiledKernel no longer exposes metadata"
-    try:
-        from triton.backends.ascend import driver as ascend_driver
-
-        return (
-            ascend_driver.make_launcher(
-                constants={},
-                signature={0: "*fp32", 1: "*fp32"},
-                metadata=metadata,
-            ),
-            None,
-        )
-    except Exception as error:
-        # This is intentionally a safe degradation for launcher *source*
-        # introspection only.  Do not hide a real compile/run/metadata error:
-        # the actual launch above has already built and used its launcher.
-        return None, f"{type(error).__name__}: {error}"
+def _launch_spec_from_compiled_metadata(metadata):
+    from triton.backends.ascend import driver as ascend_driver
+    return ascend_driver.make_launch_spec(metadata, ascend_driver.NPUUtils())
 
 
 def test_strided_axis_coalescing_gate_on_e2e():
@@ -149,16 +125,7 @@ def test_strided_axis_coalescing_gate_on_e2e():
     assert metadata.coalesce_axis == 0
     assert metadata.coalesce_grid_ceil_div is False
 
-    launcher_source, launcher_reason = _launcher_source_from_compiled_metadata(metadata)
-    # This is an acceptance test for the compiler-to-launcher handoff, not a
-    # value-only smoke test.  A missing launcher representation would leave
-    # Axis's floor-div grid contract unverified, so it must fail rather than
-    # downgrade the native gate-on result to a warning.
-    assert launcher_source is not None, ("StridedAxisCoalescing launcher source introspection is unavailable: "
-                                         f"{launcher_reason}")
-
-    # make_launcher emits both the C ABI and local C++ launch paths.  Check
-    # both, including Axis's floor-divisibility contract (unlike Row's
-    # ceil-div handling).
-    assert len(re.findall(r"assert\(gridX % 4 == 0", launcher_source)) == 2
-    assert launcher_source.count("gridX = gridX / 4;") == 2
+    from triton.backends.ascend.launcher import COALESCE_CEIL
+    spec = _launch_spec_from_compiled_metadata(metadata)
+    assert (spec.coalesce_factor, spec.coalesce_axis) == (s, 0)
+    assert not spec.flags & COALESCE_CEIL

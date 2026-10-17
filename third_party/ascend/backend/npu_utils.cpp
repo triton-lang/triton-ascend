@@ -43,6 +43,7 @@
 #include <ATen/ATen.h>
 #include <acl/acl.h>
 #include <functional>
+#include <torch_npu/csrc/core/npu/NPUCachingAllocator.h>
 #include <torch_npu/csrc/core/npu/NPUWorkspaceAllocator.h>
 #include <torch_npu/csrc/framework/OpCommand.h>
 #endif
@@ -439,6 +440,20 @@ extern "C" void *triton_allocate_workspace(uint64_t size, void **handle) {
   auto tensor = at::empty(
       size, at::TensorOptions().device(at::kPrivateUse1).dtype(at::kByte));
   return retainTensor(std::move(tensor), handle, "workspace", size);
+}
+
+extern "C" void *triton_allocate_workspace_on_stream(uint64_t size,
+                                                     void *stream) {
+  // The caching allocator only reuses a freed block on its allocation stream.
+  // Use the launch stream explicitly: it can differ from the submitting
+  // thread's current stream, and the owner is released before device
+  // completion.
+  return c10_npu::NPUCachingAllocator::raw_alloc_with_stream(
+      size, reinterpret_cast<aclrtStream>(stream));
+}
+
+extern "C" void triton_release_workspace(void *data) {
+  c10_npu::NPUCachingAllocator::raw_delete(data);
 }
 
 extern "C" void *triton_allocate_sync_block_lock(uint64_t size, void *stream,

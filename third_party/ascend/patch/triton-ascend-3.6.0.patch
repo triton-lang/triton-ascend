@@ -444,6 +444,28 @@ index 5af645bc0..011f82d60 100644
        .def("create_assume",
             [](TritonOpBuilder &self, Value &condition) {
               self.create<LLVM::AssumeOp>(condition);
+diff --git a/python/triton/__init__.py b/python/triton/__init__.py
+index 3d637cf0b..5a850e0cf 100644
+--- a/python/triton/__init__.py
++++ b/python/triton/__init__.py
+@@ -80,3 +80,17 @@ def next_power_of_2(n: int):
+     n |= n >> 32
+     n += 1
+     return n
++
++
++# Backend runtimes may depend on the public symbols defined above. Install
++# their patches only after the top-level API is ready, without probing devices.
++def _initialize_backend_runtime():
++    from .backends import backends
++
++    if "ascend" in backends:
++        from .backends.ascend.runtime import install_runtime_patches
++        install_runtime_patches()
++
++
++_initialize_backend_runtime()
++del _initialize_backend_runtime
 diff --git a/python/triton/_utils.py b/python/triton/_utils.py
 index a3cf0ff0c..28ba11c92 100644
 --- a/python/triton/_utils.py

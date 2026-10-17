@@ -79,10 +79,10 @@ if __name__ == "__main__":
 # configs：
 # - 社区版 autotune（默认）需要显式传入一组 triton.Config，框架会对这些配置逐一编译并基准测试以选择最优配置
 # - 进阶版 autotune 框架基于 kernel 自动生成候选 tiling 配置，并对配置逐一编译并基准测试以选择最优配置
-# * 注意：1. 进阶模式启动需用户手动 import triton.backends.ascend.runtime;
+# * 注意：1. 已注册 Ascend 后端时，import triton 会自动启用进阶 autotune，无需额外导入后端 runtime;
 #        2. 若 configs=[]，框架基于 kernel 自动生成候选 tiling 配置，注意此时需要将@triton.autotune装饰器直接应用在@triton.jit之上，
 #           中间不能插入其他装饰器，例如libentry;
-#        3. 若 configs 不为空，则框架默认不会自动生成候选 tiling 配置;
+#        3. 若 configs 不为空，仅当任意配置含 Ascend 专有编译选项时默认关闭自动生成，否则默认开启;
 #        4. 若 configs 不为空，且hints.auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
 #        5. 进阶版本支持通过设置os.environ["TRITON_BENCH_METHOD"] = ( "npu" ) 来设置性能采集方式。
 #
@@ -100,10 +100,11 @@ if __name__ == "__main__":
 #     分块轴通常可以根据 `tl.arange()` 分块表达式来确定
 # low_dim_axes (List[str]): 所有低维轴的轴名称列表，axis name必须在参数key的轴名称集合里
 # reduction_axes (List[str]): 所有规约轴的轴名称列表，axis name必须在参数key的轴名称集合里， 在轴名称前添加前缀 r
-# auto_gen_config (bool): 默认为False,涉及如下场景组合
+# auto_gen_config (bool): 显式设置时覆盖非空 configs 的默认策略，涉及如下场景组合
 #     1. 用户未定义Config,无论是否设置auto_gen_config,框架默认自动生成Config；
-#     2. 用户定义了Config,且auto_gen_config=False,则框架不自动生成Config,只使用用户定义的Config；
-#     3. 用户定义了Config,且auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
+#     2. 用户定义了Config,且显式设置auto_gen_config=False,则框架不自动生成Config,只使用用户定义的Config；
+#     3. 用户定义了Config,且显式设置auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
+#     4. 用户定义了Config,但未设置auto_gen_config时，任意Config含multibuffer等Ascend专有选项则关闭，否则开启；
 #
 # key（list[str]/Dict[str,str]）：
 # - 传入运行时参数名列表；列表中任一参数值变化会触发候选配置的重新生成与评估

@@ -26,6 +26,7 @@
 #include <optional>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 
@@ -118,7 +119,7 @@ private:
   void collectIntraCoreInputConditions(
       OpBuilder &builder, Location loc, SmallVector<int> &intraCoreInputValues,
       DenseMap<int, Value> &idxToVar, SmallVector<Value> &conditions,
-      DenseSet<Value> &usedVarsSet,
+      SetVector<Value> &usedVarsSet,
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   int collectIntraCoreOutputConditions(
@@ -126,7 +127,7 @@ private:
       DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
           &intraCoreBuffers,
       SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
-      SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+      SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   // Build the ifOp variable mapping for the tensor iter_args
@@ -135,13 +136,13 @@ private:
   // Collect the consumption conditions of the tensor iter_args consumer
   void collectTensorIterArgInputConditions(
       OpBuilder &builder, Location loc, scf::IfOp ifOp,
-      SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+      SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   // Collect tensor iter_args producer conditions
   void collectTensorIterArgOutputConditions(
       OpBuilder &builder, Location loc, scf::IfOp ifOp,
-      SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+      SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
       DenseMap<Value, VarUpdateType> &varUpdateTypes);
 
   SmallVector<Type> buildNewIfResultTypes(scf::IfOp oldIfOp, bool hasCounter,

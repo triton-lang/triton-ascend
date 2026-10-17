@@ -727,6 +727,19 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
         return (False, str(e))
 
 
+@functools.lru_cache(None)
+def _bishengir_supports_optimized_metaop(compiler_path: str) -> bool:
+    result = subprocess.run([compiler_path, "--help-hidden"], check=True, capture_output=True, text=True)
+    return re.search(r"^\s*--enable-optimized-metaop(?:[=\s]|$)", result.stdout, re.MULTILINE) is not None
+
+
+def _optimized_metaop_compile_options(enabled: bool):
+    compiler_path, _ = _get_npucompiler_path()
+    if not _bishengir_supports_optimized_metaop(compiler_path):
+        return []
+    return [f"--enable-optimized-metaop={str(enabled).lower()}"]
+
+
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
@@ -781,7 +794,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
+        _compile_option_list += _optimized_metaop_compile_options(is_cann_version_at_least(9, 2, 0))
 
         npu_utils = NPUUtils()
         if npu_utils.has_device_limit():
@@ -1025,7 +1038,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
 
-        _compile_option_list += [f"--enable-optimized-metaop=false"]
+        _compile_option_list += _optimized_metaop_compile_options(False)
 
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]

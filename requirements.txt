@@ -4,7 +4,8 @@ pybind11
 #from CANN
 attrs
 cython
-numpy==1.26.4
+numpy>=1.26.4,<2;python_version<'3.13'
+numpy>=2.1;python_version>='3.13'
 decorator
 sympy
 cffi

@@ -5,6 +5,7 @@
 #include "Data/TreeData.h"
 #include "Profiler/Cupti/CuptiProfiler.h"
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
+#include "Profiler/Mspti/MsptiProfiler.h"
 #include "Profiler/Roctracer/RoctracerProfiler.h"
 #include "Utility/String.h"
 
@@ -19,6 +20,8 @@ Profiler *makeProfiler(const std::string &name) {
     return &RoctracerProfiler::instance();
   } else if (proton::toLower(name) == "instrumentation") {
     return &InstrumentationProfiler::instance();
+  } else if (proton::toLower(name) == "mspti") {
+    return &MsptiProfiler::instance();
   }
   throw std::runtime_error("Unknown profiler: " + name);
 }

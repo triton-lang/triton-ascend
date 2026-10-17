@@ -6,4 +6,6 @@ add_proton_library(ProtonDriver
 	GPU/HsaApi.cpp
 	GPU/RoctracerApi.cpp
 	GPU/NvtxApi.cpp
+	GPU/MsptiApi.cpp
+	GPU/CannApi.cpp
 )

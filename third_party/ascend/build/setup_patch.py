@@ -480,6 +480,8 @@ def _get_install_requirements():
         "pyelftools>=0.29",
         "triton==3.6.0",
     ]
+    if os.getenv("TRITON_BUILD_PROTON", "ON").lower() not in ("0", "false", "off", "no"):
+        install_requires.append("llnl-hatchet")
     return [*install_requires]
 
 
@@ -510,8 +512,9 @@ def patch_module(mod):
 
     mod.get_llvm_package_info = get_llvm_package_info
 
-    # 3. Skip downloading NVIDIA proprietary toolchain dependencies
-    #    (ptxas/cuobjdump/...); they are irrelevant for the Ascend wheel.
+    # 3. Skip NVIDIA toolchain downloads for normal Ascend builds. Proton
+    #    still needs the CUDA/CUPTI headers provided by this helper.
+    _download_and_copy_dependencies = mod.download_and_copy_dependencies
     mod.download_and_copy_dependencies = lambda *args, **kwargs: None
 
     # 4. Patch CMakeBuild to apply the Ascend patch / coverage / tools.
@@ -519,8 +522,46 @@ def patch_module(mod):
 
     class CMakeBuild(_OrigCMakeBuild):
 
+        def get_proton_cmake_args(self):
+            cmake_args = super().get_proton_cmake_args()
+            cann_home = (os.getenv("ASCEND_TOOLKIT_HOME", "") or os.getenv("ASCEND_HOME_PATH", ""))
+
+            cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "")
+            if not cann_include_dir and cann_home:
+                cann_include_dir = os.path.join(cann_home, "include")
+
+            if cann_include_dir:
+                cmake_args.append(f"-DCANN_INCLUDE_DIR={cann_include_dir}")
+
+            mspti_include_dir = os.getenv("MSPTI_INCLUDE_DIR", "")
+            if not mspti_include_dir and cann_home:
+                mspti_include_dir = os.path.join(
+                    cann_home,
+                    "tools",
+                    "mspti",
+                    "include",
+                )
+
+            if mspti_include_dir:
+                cmake_args.append(f"-DMSPTI_INCLUDE_DIR={mspti_include_dir}")
+
+            mspti_lib_dir = os.getenv("MSPTI_LIB_DIR", "")
+            if not mspti_lib_dir and cann_home:
+                mspti_lib_dir = os.path.join(
+                    cann_home,
+                    "tools",
+                    "mspti",
+                    "lib64",
+                )
+
+            if mspti_lib_dir:
+                cmake_args.append(f"-DMSPTI_LIB_DIR={mspti_lib_dir}")
+            return cmake_args
+
         def run(self):
             _apply_triton_ascend_patch()
+            if mod.check_env_flag("TRITON_BUILD_PROTON", "ON"):
+                _download_and_copy_dependencies()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \
                             in ("1", "on", "true")

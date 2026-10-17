@@ -2420,11 +2420,35 @@ BlockDataParser::rewriteTerminator(
   return success();
 }
 
+// Producers whose results BlockDataParser::parse can structurally describe.
+// Mirrors the op dispatch in BlockDataParser::parse, minus the two
+// narrow-pattern producers: triton::ReduceOp (only the min(load) shape is
+// supported) and arith::SelectOp (only dense-constant / all-ones-dims
+// shapes are supported). When an address-use influence chain passes through
+// a producer outside this set, the legacy loop decomposition cannot
+// represent the carried slot, so the loop must stay on the ordinary
+// conversion path instead of being forced into the BlockData rewrite.
+static bool isBlockDataParseableProducer(Operation *op) {
+  return isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::DivSIOp,
+             arith::RemSIOp, arith::ExtSIOp, arith::ConstantOp, arith::FPToSIOp,
+             triton::AddPtrOp, triton::BroadcastOp, triton::SplatOp,
+             triton::ExpandDimsOp, triton::BitcastOp, triton::MakeRangeOp,
+             triton::LoadOp, triton::AtomicRMWOp, tensor::CastOp,
+             tensor::ExtractSliceOp, linalg::FillOp, scf::ForOp>(op) ||
+         (isa<linalg::GenericOp>(op) && op->hasAttr("tt.from_make_range")) ||
+         isDistributedTypeCustomOp(op);
+}
+
 // This function is util function for rewriteLoopOp that
-// check if given regionIterArg is used with given condition
-bool isUsedWithCondition(Value v, std::function<bool(OpOperand *)> cond,
-                         int depth = 0,
-                         llvm::SmallSetVector<Value, 8> *visited = nullptr) {
+// check if given regionIterArg is used with given condition.
+// When `producerFilter` is set, the transitive traversal only propagates
+// through producers accepted by the filter; influence chains crossing any
+// other producer stop there, because the legacy analysis cannot describe
+// such chains anyway.
+bool isUsedWithCondition(
+    Value v, std::function<bool(OpOperand *)> cond, int depth = 0,
+    llvm::SmallSetVector<Value, 8> *visited = nullptr,
+    const std::function<bool(Operation *)> &producerFilter = nullptr) {
   llvm::SmallSetVector<Value, 8> localVisited;
   if (!visited) {
     visited = &localVisited;
@@ -2442,31 +2466,35 @@ bool isUsedWithCondition(Value v, std::function<bool(OpOperand *)> cond,
       continue;
     if (cond(&use))
       return true;
+    if (producerFilter && !producerFilter(user))
+      continue;
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(user);
         loopOp && !loopOp->hasAttr("ExtractedLoadOrStore")) {
       Value tiedArg = loopOp.getTiedLoopRegionIterArg(&use);
-      if (tiedArg && isUsedWithCondition(tiedArg, cond, depth + 1, visited))
+      if (tiedArg && isUsedWithCondition(tiedArg, cond, depth + 1, visited,
+                                         producerFilter))
         return true;
     } else if (auto yieldOp = dyn_cast<scf::YieldOp>(user);
                yieldOp && !isa<scf::WhileOp>(user->getParentOp())) {
-      if (depth && isUsedWithCondition(yieldOp->getParentOp()->getResult(
-                                           use.getOperandNumber()),
-                                       cond, depth - 1, visited))
+      if (depth &&
+          isUsedWithCondition(
+              yieldOp->getParentOp()->getResult(use.getOperandNumber()), cond,
+              depth - 1, visited, producerFilter))
         return true;
     } else if (auto conditionOp = dyn_cast<scf::ConditionOp>(user);
                conditionOp && use.getOperandNumber() > 0) {
       auto whileOp = cast<scf::WhileOp>(conditionOp->getParentOp());
       if (depth &&
           isUsedWithCondition(whileOp->getResult(use.getOperandNumber() - 1),
-                              cond, depth - 1, visited))
+                              cond, depth - 1, visited, producerFilter))
         return true;
       if (isUsedWithCondition(
               whileOp.getAfterArguments()[use.getOperandNumber() - 1], cond,
-              depth, visited))
+              depth, visited, producerFilter))
         return true;
     }
     for (auto res : user->getResults()) {
-      if (isUsedWithCondition(res, cond, depth, visited))
+      if (isUsedWithCondition(res, cond, depth, visited, producerFilter))
         return true;
     }
   }
@@ -2497,17 +2525,27 @@ bool isLoopCarriedValueUsedWithCondition(
 // loop. Reuse the established traversal for the region arguments, but do not
 // start another traversal from the loop result: a numerical carrier can feed
 // an unrelated reduction after the loop and eventually reach an address use.
+// The traversal is additionally restricted to influence chains that stay
+// within BlockData-parseable producers: a carried integer tensor whose
+// address influence crosses tt.reduce / tt.scan / arith.select /
+// arith.extui / arith.cmpi (e.g. a scan-driven scatter index) cannot be
+// described by the legacy decomposition anyway, so such loops must remain on
+// the ordinary conversion path instead of failing inside rewriteLoopOp.
 static bool isLoopCarriedAddressValueUsed(
     LoopLikeOpInterface loopOp, unsigned index,
     const std::function<bool(OpOperand *)> &condition) {
   if (index >= loopOp.getRegionIterArgs().size() ||
       index >= loopOp->getNumResults())
     return false;
-  if (isUsedWithCondition(loopOp.getRegionIterArgs()[index], condition))
+  if (isUsedWithCondition(loopOp.getRegionIterArgs()[index], condition,
+                          /*depth=*/0, /*visited=*/nullptr,
+                          isBlockDataParseableProducer))
     return true;
   if (auto whileOp = dyn_cast<scf::WhileOp>(loopOp.getOperation())) {
     if (index < whileOp.getAfterArguments().size() &&
-        isUsedWithCondition(whileOp.getAfterArguments()[index], condition))
+        isUsedWithCondition(whileOp.getAfterArguments()[index], condition,
+                            /*depth=*/0, /*visited=*/nullptr,
+                            isBlockDataParseableProducer))
       return true;
   }
   return false;

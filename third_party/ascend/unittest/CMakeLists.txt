@@ -30,6 +30,8 @@ if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   add_subdirectory(costmodel_ut)
 endif()
 
+add_subdirectory(Utils)
+
 # The deallocation observer uses ELF linker wrapping.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_subdirectory(Analysis)

@@ -7,13 +7,230 @@
   ],
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
-  "profile_version": "david-v100-simd-simt-20260903-v20",
-  "schema_version": 12,
+  "profile_version": "david-v100-simd-simt-20261010-v26",
+  "schema_version": 18,
   "score_unit": "system_cycle_selection_score",
   "selection_calibration": {
     "description": "Structural formula-domain thresholds consumed by Stage classification; numerical Stage costs come from route-specific resource formulas.",
     "source": "The tiny-dot threshold selects the bounded Stage formula family; it is not a fitted route multiplier or an online route-admission gate.",
     "tiny_dot_flops_max": 16384
+  },
+  "histogram": {
+    "description": "Calibrated tt.histogram rows in AIV system cycles per histogram call. tt.histogram is priced here instead of through an operation rate because its cost lives inside the lowering (dhistv2 template instructions, or the simt_only atomicAdd loop) and never appears in TTIR. Row selection mirrors the lowering gates and lives in the C++ model; this section only supplies structure constants and coefficients. A row is a bag of named coefficients, so masked shapes may select an independent row instead of reusing the unmasked coefficients.",
+    "structure": {
+      "chunk_lanes": 256,
+      "threads_per_warp": 32,
+      "max_segments_u16": 16,
+      "max_segments_u32": 8,
+      "self_amortised_segments": 4,
+      "chunks_per_segment": 2,
+      "flush_chunks": 255,
+      "atomic_window_bytes": 65536.0
+    },
+    "simd_template": {
+      "description": "dhistv2 SIMD template rows, used by every compile mode except simt_only. Rows are keyed by the shape that selects them: dtype, whether num_bins fits one 256-lane segment (bins_lt_256 or bins_256) or spans several segments (bins_gt_256), and whether a mask is present. u8/s8, u16/s16, and u32/s32 share a row per shape because the lowering generates byte-identical signless-integer code. u8 has one row because a u8 value can never reach bins >= 256, and u64 only has the bins <= 256 shapes because that is all the u64 gate admits.",
+      "rows": {
+        "u8": {
+          "intercept": 42.933308,
+          "per_chunk": 6.841466
+        },
+        "u16_bins_256_unmasked": {
+          "intercept": 45.243114,
+          "per_chunk": 7.969507
+        },
+        "u16_bins_256_masked": {
+          "intercept": 181.54912,
+          "per_chunk": 7.016222,
+          "per_chunk_beyond_knee": 8.07008,
+          "knee_chunks": 32
+        },
+        "u16_bins_gt_256": {
+          "intercept": 40.119816,
+          "per_chunk_per_segment": 5.74145,
+          "per_segment": 94.598387
+        },
+        "u32_bins_lt_256_unmasked": {
+          "intercept": 158.556435,
+          "per_chunk": 9.412428
+        },
+        "u32_bins_lt_256_masked": {
+          "intercept": 288.240881,
+          "per_chunk": 9.512578
+        },
+        "u32_bins_256_unmasked": {
+          "intercept": 178.71633,
+          "per_chunk": 13.690205
+        },
+        "u32_bins_256_masked": {
+          "intercept": 190.003767,
+          "per_chunk": 13.703791
+        },
+        "u32_bins_gt_256": {
+          "intercept": 87.475935,
+          "per_chunk_per_segment": 13.653535,
+          "per_segment": 95.411301
+        },
+        "u32_small_bins_park": {
+          "intercept": 45.38806,
+          "per_chunk": 9.479497
+        },
+        "u32_small_bins_pred_mask": {
+          "intercept": 44.347971,
+          "per_chunk": 11.705578
+        },
+        "u64_bins_lt_256_unmasked": {
+          "intercept": 86.728572,
+          "per_chunk": 27.267575
+        },
+        "u64_bins_lt_256_masked": {
+          "intercept": 93.816495,
+          "per_chunk": 28.476863
+        },
+        "u64_bins_256_unmasked": {
+          "intercept": 86.790202,
+          "per_chunk": 26.055616
+        },
+        "u64_bins_256_masked": {
+          "intercept": 93.798158,
+          "per_chunk": 27.26484
+        },
+        "u16_bins_lt_256_masked": {
+          "intercept": 145.025651,
+          "per_chunk": 7.049853
+        },
+        "u16_bins_lt_256_unmasked": {
+          "intercept": 48.525611,
+          "per_chunk": 7.555187
+        }
+      }
+    },
+    "simt_template": {
+      "description": "Template SIMT atomicAdd fallback rows, queued when the dhistv2 gate fails. per_elem is the sum of a scan and an in-range count part; the count part charges the data-dependent n_counted at its worst case n. Masked and unmasked shapes have independent rows.",
+      "rows": {
+        "u8": {
+          "intercept": 215.3,
+          "scan_per_elem": 0.27,
+          "count_per_elem": 0.64
+        },
+        "u16": {
+          "intercept": 160.828592,
+          "per_elem": 0.70898
+        },
+        "u32": {
+          "intercept": 158.539205,
+          "per_elem": 0.73019
+        },
+        "u16_masked": {
+          "intercept": 246.55355,
+          "per_elem": 0.581115
+        },
+        "u32_masked": {
+          "intercept": 220.74349,
+          "per_elem": 0.546313
+        },
+        "u64": {
+          "intercept": 116.86571,
+          "per_elem": 0.659149
+        },
+        "u64_masked": {
+          "intercept": 209.338129,
+          "per_elem": 0.574338
+        }
+      }
+    },
+    "simt_only": {
+      "description": "simt_only IR-lowering rows (HistogramOpToLLVM.cpp). The atomicAdd is emitted for every element, so there is no n_counted term. Masked and unmasked shapes select independent rows; every row is the per-element family, one rate per structural cost the kernel pays plus an optional knee on the per-thread round count. Fitted on 307 in-domain training cases over 8 dtype/mask groups and num_warps 1..64, limited to a per-thread footprint of at most 128 elements and below 1024 bytes; larger footprints either degrade 1.5-1.8x or fault the device.",
+      "rows": {
+        "u8": {
+          "intercept": 169.1785952641772,
+          "per_elem": 0.955987798244436,
+          "per_iter": 1e-08,
+          "per_bin": 4.651696377497628,
+          "per_thread": 0.038784013512923265,
+          "per_replicated_elem": 0.9056806583471435,
+          "per_iter_beyond_knee": 15.091458843471994,
+          "iter_knee": 16,
+          "per_kink": 0.0
+        },
+        "u16": {
+          "intercept": 186.9208061802446,
+          "per_elem": 0.9772334348624827,
+          "per_iter": 1e-08,
+          "per_bin": 3.394693724244148,
+          "per_thread": 0.03119377627218034,
+          "per_replicated_elem": 0.9228147521885952,
+          "per_iter_beyond_knee": 19.00033317145767,
+          "iter_knee": 16,
+          "per_kink": 0.0
+        },
+        "u32": {
+          "intercept": 201.69292602269604,
+          "per_elem": 1.0034326356392949,
+          "per_iter": 0.016141677238380607,
+          "per_bin": 2.331986387323155,
+          "per_thread": 0.009865083967224964,
+          "per_replicated_elem": 0.9489839547907704,
+          "per_kink": 0.0
+        },
+        "u64": {
+          "intercept": 238.06667713367764,
+          "per_elem": 1.0492667717946889,
+          "per_iter": 6.988976415078804,
+          "per_bin": 1.1230046069497879,
+          "per_thread": 1e-08,
+          "per_replicated_elem": 1.019299077383417,
+          "per_iter_beyond_knee": 33.89890313763946,
+          "iter_knee": 16,
+          "per_kink": 0.165
+        },
+        "u8_masked": {
+          "intercept": 132.793080883583,
+          "per_elem": 1.0301041704529068,
+          "per_iter": 11.9404830405195,
+          "per_bin": 1e-08,
+          "per_thread": 0.029124766758274134,
+          "per_replicated_elem": 0.9987984960404551,
+          "per_iter_beyond_knee": 119.59196178368315,
+          "iter_knee": 32,
+          "per_kink": 0.0
+        },
+        "u16_masked": {
+          "intercept": 152.75076853416888,
+          "per_elem": 1.0827576539801373,
+          "per_iter": 11.243051753732615,
+          "per_bin": 1e-08,
+          "per_thread": 1e-08,
+          "per_replicated_elem": 1.0087876923907038,
+          "per_iter_beyond_knee": 75.80535061497541,
+          "iter_knee": 32,
+          "per_kink": 0.0
+        },
+        "u32_masked": {
+          "intercept": 168.20334001630138,
+          "per_elem": 1.113804521525719,
+          "per_iter": 8.251704145767576,
+          "per_bin": 1e-08,
+          "per_thread": 1e-08,
+          "per_replicated_elem": 1.0018071371836754,
+          "per_iter_beyond_knee": 73.7905493735812,
+          "iter_knee": 32,
+          "per_kink": 0.0
+        },
+        "u64_masked": {
+          "intercept": 105.14008664070829,
+          "per_elem": 1.364461107131108,
+          "per_iter": 21.765130250191508,
+          "per_bin": 1e-08,
+          "per_thread": 1e-08,
+          "per_replicated_elem": 1.0732711899606886,
+          "per_iter_beyond_knee": 265.73844254043297,
+          "iter_knee": 32,
+          "per_kink": 0.165
+        }
+      }
+    },
+    "source": "v14 refit (2026-10-10), dav-c310 (950PR) dual-binary A/B (dhistv2 template vs SIMT-only baseline), per-path least squares. The 17 dhistv2 template rows and the 7 simt_template rows are validated on a disjoint 348-case sweep: overall template MAPE 2.07%, worst group 6.06% (simt_template.u16_masked), every group <= 10%. The 8 simt_only rows use the same per-element family with an optional knee on the per-thread round count. On the separately measured holdout (n in {1024, 4096}) the 8 groups give an overall simt_only MAPE of 5.45%, worst group 9.32% (u64_masked), every group <= 10%. The family is selected by nested leave-one-out on the training cases only (overall 5.50%, worst group 12.33% u64_masked, itself the single over-10% outlier driven by high-leverage extreme-warp training points). Coefficients are target-specific and must be re-fitted when the lowering template, the unified-buffer size, or the target changes; see costmodel/profiles/microbench/data_provider/camodel/histogram_costmodel_notes.md.",
+    "confidence": "medium"
   },
   "simd": {
     "description": "Inputs used to estimate the all-SIMD candidate: SIMD width, setup, operation, memory, and dot costs.",

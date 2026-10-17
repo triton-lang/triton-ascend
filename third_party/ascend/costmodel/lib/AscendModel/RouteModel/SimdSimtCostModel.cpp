@@ -10,6 +10,7 @@
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/StageHistogramCosts.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/IR/BuiltinAttributes.h"
@@ -629,6 +630,16 @@ public:
     if (auto value = parent.getNumber(key))
       return *value;
     return defaultValue;
+  }
+
+  /// An absent key leaves an optional section uncalibrated; a key that is
+  /// present but does not hold an object is still reported.
+  const llvm::json::Object *optionalObject(const llvm::json::Object &parent,
+                                           llvm::StringRef key,
+                                           llvm::StringRef context) {
+    if (!parent.get(key))
+      return nullptr;
+    return object(parent, key, context);
   }
 
   bool failed() const { return !error.empty(); }
@@ -2473,6 +2484,15 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     if (!timing.isValid())
       reader.setError("profile.kernel_timing contains invalid generic kernel "
                       "boundary parameters");
+  }
+
+  // A profile without a histogram section is uncalibrated by design: histogram
+  // Stages then keep the generic Stage estimate. A malformed section is still
+  // rejected.
+  if (const auto *histogram =
+          reader.optionalObject(*root, "histogram", "profile")) {
+    if (llvm::Error error = readHistogramRates(*histogram, hardware.histogram))
+      reader.setError(llvm::toString(std::move(error)));
   }
 
   const auto *simd = reader.object(*root, "simd", "profile");

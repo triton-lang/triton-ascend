@@ -2511,7 +2511,7 @@ static StageCostModelKind classifySemanticRoot(Operation *root) {
   if (operationTreeHasAnyName(root, {"tt.atomic_rmw", "tt.atomic_cas"}))
     return StageCostModelKind::AtomicMemory;
   if (operationTreeHasAnyName(root, {"tt.histogram"}))
-    return StageCostModelKind::VectorIssue;
+    return StageCostModelKind::Histogram;
   if (operationTreeContainsLoadedIndexMemory(root) ||
       operationTreeHasAnyName(root, {"tt.gather"}))
     return StageCostModelKind::IndirectGatherMemory;
@@ -2552,6 +2552,10 @@ static StageScheduleKind scheduleForSemanticRoot(Operation *root,
   if (kind == StageCostModelKind::IndirectGatherMemory)
     return StageScheduleKind::PartiallyDependent;
   if (kind == StageCostModelKind::AtomicMemory)
+    return StageScheduleKind::PartiallyDependent;
+  // tt.histogram updates shared bins with atomics, so colliding lanes make the
+  // Stage partially dependent.
+  if (kind == StageCostModelKind::Histogram)
     return StageScheduleKind::PartiallyDependent;
   if (kind == StageCostModelKind::AutoBlockifyLoop ||
       kind == StageCostModelKind::IndependentPipelinedLoop ||
@@ -2816,6 +2820,7 @@ static int semanticKindPriority(StageCostModelKind kind) {
   case StageCostModelKind::TinyCubeRoofline:
     return 70;
   case StageCostModelKind::AtomicMemory:
+  case StageCostModelKind::Histogram:
     return 65;
   case StageCostModelKind::IndirectScalarMemory:
   case StageCostModelKind::IndirectGatherMemory:

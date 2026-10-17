@@ -15,11 +15,15 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+import csv
+from collections import Counter
+
 import pytest
 import torch
 import torch_npu
 import triton
 import triton.language as tl
+from triton.backends.ascend import driver
 
 
 def profiler_wrapper(fn, *args):
@@ -114,3 +118,68 @@ def test_elementwise_ops(dtype, low, high):
         _ = triton_add_func(x0, x1, N) if dtype != torch.bool else triton_or_func(x0, x1, N)
 
     profiler_wrapper(wrapper)
+
+
+@triton.jit
+def _profiling_unused_arguments(unused_head, x, n, unused_middle, BLOCK: tl.constexpr, y, state, unused_tail):
+    offsets = tl.arange(0, BLOCK)
+    values = tl.load(x + offsets, offsets < n, other=0)
+    previous = tl.load(state + offsets, offsets < n, other=0)
+    tl.store(y + offsets, values + 1, offsets < n)
+    tl.store(state + offsets, previous + values, offsets < n)
+
+
+@pytest.mark.parametrize("taskqueue", [False, True])
+def test_profiler_preserves_unused_pointer_positions(tmp_path, monkeypatch, taskqueue):
+    monkeypatch.setenv("TRITON_ENABLE_TASKQUEUE", str(taskqueue))
+    x = torch.arange(128, dtype=torch.float32, device="npu")
+    y = torch.empty((16, 8), dtype=torch.float32, device="npu")
+    state = torch.zeros((4, 32), dtype=torch.float32, device="npu")
+    unused = [torch.empty(shape, device="npu") for shape in [(3, 5), (7, 9), (11, )]]
+    args = (unused[0], x, 128, unused[1], 128, y, state, unused[2])
+    compiled = _profiling_unused_arguments.warmup(*args, grid=(1, ))
+    compiled._init_handles()
+    # Bind a launcher under this test's taskqueue setting even on a JIT cache hit.
+    instance = driver.NPULauncher(compiled.src, compiled.metadata)
+    stream = driver.NPUDriver().get_current_stream()
+
+    def run(arguments):
+        instance(1, 1, 1, stream, compiled.function, compiled.packed_metadata, None, None, None, *arguments)
+
+    torch.npu.synchronize()
+
+    # Warm up without profiling, then reuse the same callable with new shapes.
+    run(args)
+    torch.npu.synchronize()
+    state.zero_()
+    torch.npu.synchronize()
+    reshaped_args = (unused[0], x.view(8, 16), 128, unused[1], 128, y.view(128), state.view(2, 64), unused[2])
+    with torch_npu.profiler.profile(
+            activities=[torch_npu.profiler.ProfilerActivity.NPU], record_shapes=True,
+            experimental_config=torch_npu.profiler._ExperimentalConfig(
+                profiler_level=torch_npu.profiler.ProfilerLevel.Level1),
+            on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(str(tmp_path))):
+        run(args)
+        run(reshaped_args)
+        torch.npu.synchronize()
+
+    assert torch.equal(y.flatten().cpu(), x.cpu() + 1)
+    assert torch.equal(state.flatten().cpu(), x.cpu() * 2)
+    reports = list(tmp_path.rglob("kernel_details.csv"))
+    assert len(reports) == 1, f"Expected one profiler report, found {reports}"
+    with reports[0].open(newline="") as report:
+        rows = [row for row in csv.DictReader(report) if compiled.metadata.kernel_name in row["Name"]]
+    assert len(rows) == 2, rows
+
+    def shapes(value):
+        # CANN keeps literal quotes around the shape list inside the CSV field.
+        return tuple(tuple(int(dim) for dim in shape.split(",")) for shape in value.strip('"').split(";") if shape)
+
+    reported = Counter((shapes(row["Input Shapes"]), shapes(row["Output Shapes"])) for row in rows)
+    expected = Counter([
+        (((128, ), (4, 32)), ((16, 8), (4, 32))),
+        (((8, 16), (2, 64)), ((128, ), (2, 64))),
+    ])
+    assert reported == expected
+    # Hidden workspace/lock arguments and the scalar/constexpr do not add slots.
+    assert compiled.metadata.tensor_kinds == [-1, 0, -1, 1, 2, -1]

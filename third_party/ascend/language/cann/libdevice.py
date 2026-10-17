@@ -3450,43 +3450,19 @@ def nearbyint(arg0: core.tensor, _semantic=None):
         """
         arg0 = _semantic.to_tensor(arg0)
 
-        half = _semantic.full(arg0.shape, 0.5, arg0.type.scalar)
+        # FP32 spacing is one at 2**23. Adding this bias rounds a smaller
+        # nonnegative magnitude to an integer using round-to-nearest-even.
+        # At and above 2**23 every finite FP32 value is already integral.
+        magnitude = core.tensor(_semantic.builder.create_fabs(arg0.handle), arg0.type)
+        bias = _semantic.full(arg0.shape, 2.0**23, arg0.type.scalar)
+        rounded = _semantic.sub(_semantic.add(magnitude, bias, True), bias, True)
 
-        positive_adjust = _semantic.add(arg0, half, True)
-        negative_adjust = _semantic.sub(arg0, half, True)
-
-        positive_result = core.tensor(_semantic.builder.create_floor(positive_adjust.handle), arg0.type)
-        negative_result = core.tensor(_semantic.builder.create_ceil(negative_adjust.handle), arg0.type)
-
-        zero = _semantic.full(arg0.shape, 0.0, arg0.type.scalar)
-        is_positive = _semantic.greater_equal(arg0, zero)
-        basic_round = _semantic.where(is_positive, positive_result, negative_result)
-
-        # Banker's rounding special treatment: For values exactly in the middle, round to the nearest even number.
-        fractional = _semantic.sub(arg0, basic_round, True)
-        abs_fractional = core.tensor(_semantic.builder.create_fabs(fractional.handle), fractional.type)
-
-        is_half = _semantic.equal(abs_fractional, half)
-
-        two = _semantic.full(arg0.shape, 2.0, arg0.type.scalar)
-
-        half_value = math.fdiv(basic_round, two, _semantic=_semantic)
-        half_floor = core.tensor(_semantic.builder.create_floor(half_value.handle), half_value.type)
-        double_half = _semantic.mul(half_floor, two, True)
-
-        is_even = _semantic.equal(basic_round, double_half)
-
-        adjustment = _semantic.where(is_positive, _semantic.full(arg0.shape, -1.0, arg0.type.scalar),
-                                     _semantic.full(arg0.shape, 1.0, arg0.type.scalar))
-
-        banker_result = _semantic.where(
-            is_even,
-            basic_round,
-            _semantic.add(basic_round, adjustment, True),
-        )
-
-        # Final result: Use banker's rounding for cases exactly at 0.5, otherwise use basic rounding.
-        return _semantic.where(is_half, banker_result, basic_round)
+        # Restore the input sign bit, including negative results rounded to zero.
+        sign_mask = _semantic.full(arg0.shape, -2147483648, core.int32)
+        sign = _semantic.and_(_semantic.bitcast(arg0, core.int32), sign_mask)
+        signed = _semantic.bitcast(_semantic.or_(_semantic.bitcast(rounded, core.int32), sign), arg0.type.scalar)
+        # Also preserve infinities and NaNs.
+        return _semantic.where(_semantic.less_than(magnitude, bias), signed, arg0)
 
 
 @core.extern

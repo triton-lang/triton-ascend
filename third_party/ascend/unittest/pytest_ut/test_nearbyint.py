@@ -55,7 +55,7 @@ def test_nearbyint(shape, dtype):
     x[0, 2] = -2.71  # Should be rounded to -3.0
     x[0, 3] = 5.0  # Integer, should remain unchanged
     x[0, 4] = -3.0  # Negative integer, should remain unchanged
-    x[0, 5] = 2.5  # Should be rounded to 3.0
+    x[0, 5] = 2.5  # Should be rounded to 2.0 (ties to even)
     x[0, 6] = -1.5  # Should be rounded to -2.0
 
     y = torch.empty_like(x)
@@ -67,3 +67,42 @@ def test_nearbyint(shape, dtype):
 
     expected = torch.round(x)
     test_common.validate_cmp('float32', y, expected)
+
+
+@pytest.mark.parametrize('block_size', [192, 1024])
+def test_nearbyint_fp32_exact(block_size):
+    halfway = torch.arange(-256, 257, dtype=torch.float32) + 0.5
+    special = torch.tensor([
+        0.0,
+        -0.0,
+        float('inf'),
+        -float('inf'),
+        float('nan'),
+        8388607.0,
+        8388608.0,
+        8388609.0,
+        8388611.0,
+        -8388609.0,
+        16777215.0,
+        -16777215.0,
+        torch.finfo(torch.float32).max,
+    ])
+    generator = torch.Generator().manual_seed(79)
+    bit_patterns = torch.randint(-2147483648, 2147483647, (65536, ), dtype=torch.int32, generator=generator)
+    x_cpu = torch.cat([
+        special,
+        halfway,
+        torch.nextafter(halfway, torch.full_like(halfway, -torch.inf)),
+        torch.nextafter(halfway, torch.full_like(halfway, torch.inf)),
+        bit_patterns.view(torch.float32),
+    ])
+    x = x_cpu.npu()
+    y = torch.empty_like(x)
+    nearbyint_kernel[(triton.cdiv(x.numel(), block_size), )](x, y, x.numel(), BLOCK_SIZE=block_size)
+    expected = torch.round(x_cpu)
+    actual = y.cpu()
+    is_nan = torch.isnan(expected)
+    assert torch.equal(torch.isnan(actual), is_nan)
+    # Numeric tolerances hide one-integer errors at large magnitudes and
+    # cannot detect the sign of zero. Both are part of nearbyint's contract.
+    assert torch.equal(actual[~is_nan].view(torch.int32), expected[~is_nan].view(torch.int32))

@@ -18,7 +18,11 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import inspect
 import os
+import re
+from unittest.mock import Mock
+
 import pytest
 import triton
 import torch
@@ -28,7 +32,7 @@ import triton.language.extra.cann.extension as al
 from triton.language.extra.cann.extension import index_put, gather_out_to_ub, scatter_ub_to_out
 from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
-from triton._C.libtriton import ir, buffer_ir
+from triton._C.libtriton import ir, buffer_ir, ascend
 from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.compiler.errors import MLIRCompilationError
 from triton.backends.ascend import _apply_ascend_patch
@@ -55,9 +59,144 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     buffer_ir.load_dialects(context)
     ascend_ir.load_dialects(context)
+    ascend.load_dialects(context)
     module = ast_to_ttir(kernel, src, context, Options(), {"create_address_space": al.semantic.create_address_space},
                          {})
     return str(module)
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("kernel_size, dilation, padding, expected_padding, output_length", [
+    (1, 1, "same", (0, 0), 8),
+    (3, 1, "same", (1, 1), 8),
+    (4, 1, "same", (1, 2), 8),
+    (3, 2, "same", (2, 2), 8),
+    (4, 2, "same", (3, 3), 8),
+    (4, 3, "same", (4, 5), 8),
+    (3, 1, 0, 0, 6),
+    (3, 1, 1, 1, 8),
+    (4, 1, (1, 2), (1, 2), 8),
+    (3, 1, "valid", 0, 6),
+])
+def test_conv1d_padding_frontend(monkeypatch, batched, kernel_size, dilation, padding, expected_padding, output_length):
+    # Exercise the real frontend with constexpr tensor shapes, stopping before
+    # IR construction so padding normalization is checked independently.
+    input_shape = [2, 2, 8] if batched else [2, 8]
+    input_tensor = tl.tensor(None, tl.block_type(tl.float16, input_shape))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, kernel_size]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+    semantic = object()
+
+    al.conv1d(input_tensor, weight, padding=padding, dilation=dilation, _semantic=semantic)
+
+    output_shape = [2, 4, output_length] if batched else [4, output_length]
+    semantic_conv1d.assert_called_once_with(input_tensor, weight, None, 1, expected_padding, dilation, 1, output_shape,
+                                            semantic)
+    actual_padding = semantic_conv1d.call_args.args[4]
+    padding_values = actual_padding if isinstance(actual_padding, tuple) else (actual_padding, )
+    assert all(type(value) is int for value in padding_values)
+    assert type(semantic_conv1d.call_args.args[7][-1]) is int
+
+
+def test_conv1d_same_rejects_strided_convolution(monkeypatch):
+    input_tensor = tl.tensor(None, tl.block_type(tl.float16, [2, 8]))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, 3]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+
+    with pytest.raises(ValueError, match="padding='same' is only supported when stride=1"):
+        al.conv1d(input_tensor, weight, padding="same", stride=2, _semantic=object())
+
+    semantic_conv1d.assert_not_called()
+
+
+CONV1D_PADDING_SIZE_ERROR = "conv1d() got an unexpected keyword argument 'padding_size'; use 'padding' instead."
+
+
+@pytest.mark.parametrize("padding_size,also_padding", [
+    (0, False),
+    (None, False),
+    ((1, 2), False),
+    (tl.constexpr(None), False),
+    (0, True),
+])
+def test_conv1d_padding_size_reports_replacement(monkeypatch, padding_size, also_padding):
+    x = tl.tensor(None, tl.block_type(tl.float16, [2, 8]))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, 1]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+    kwargs = {"padding_size": padding_size}
+    if also_padding:
+        kwargs["padding"] = 0
+
+    with pytest.raises(TypeError) as error:
+        al.conv1d(x, weight, **kwargs, _semantic=object())
+
+    assert str(error.value) == CONV1D_PADDING_SIZE_ERROR
+    semantic_conv1d.assert_not_called()
+
+
+def test_conv1d_padding_signature_and_positional_call(monkeypatch):
+    assert list(inspect.signature(
+        al.conv1d).parameters) == ["input", "weight", "bias", "stride", "padding", "dilation", "groups", "_semantic"]
+    x = tl.tensor(None, tl.block_type(tl.float16, [2, 8]))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, 4]))
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+    semantic = object()
+
+    al.conv1d(x, weight, None, 1, (1, 2), 1, 1, _semantic=semantic)
+
+    semantic_conv1d.assert_called_once_with(x, weight, None, 1, (1, 2), 1, 1, [4, 8], semantic)
+
+
+def test_conv1d_other_unknown_keyword_remains_an_error(monkeypatch):
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+    x = tl.tensor(None, tl.block_type(tl.float16, [2, 8]))
+    weight = tl.tensor(None, tl.block_type(tl.float16, [4, 2, 1]))
+
+    with pytest.raises(TypeError, match="unexpected keyword argument 'padding_sze'"):
+        al.conv1d(x, weight, padding_sze=0, _semantic=object())
+
+    semantic_conv1d.assert_not_called()
+
+
+@triton.jit
+def kernel_conv1d_legacy_padding():
+    x = tl.full((2, 8), 1, tl.float16)
+    weight = tl.full((4, 2, 1), 1, tl.float16)
+    al.conv1d(x, weight, padding_size=0)
+
+
+def test_conv1d_padding_size_jit_reports_replacement(monkeypatch):
+    semantic_conv1d = Mock()
+    monkeypatch.setattr(al.semantic, "conv1d", semantic_conv1d)
+
+    with pytest.raises(triton.CompilationError, match=re.escape(CONV1D_PADDING_SIZE_ERROR)):
+        compile_kernel(kernel_conv1d_legacy_padding, {}, {})
+
+    semantic_conv1d.assert_not_called()
+
+
+@triton.jit
+def kernel_conv1d_padding(Y, K: tl.constexpr, PADDING: tl.constexpr):
+    x = tl.full((2, 8), 1, tl.float16)
+    weight = tl.full((4, 2, K), 1, tl.float16)
+    result = al.conv1d(x, weight, padding=PADDING)
+    tl.store(Y + tl.arange(0, 32), tl.reshape(result, (32, )))
+
+
+@pytest.mark.parametrize("kernel_size,padding,padding_attr", [
+    (1, 0, "padding = 0 : i64"),
+    (4, (1, 2), "padding = array<i32: 1, 2>"),
+])
+def test_conv1d_padding_real_ttir(kernel_size, padding, padding_attr):
+    module = compile_kernel(kernel_conv1d_padding, {"Y": "*fp16"}, {"K": kernel_size, "PADDING": padding})
+    convolution = next(line for line in module.splitlines() if "ascend.conv1d" in line)
+    assert padding_attr in convolution
+    assert "-> tensor<4x8xf16>" in convolution
 
 
 # Test cases for core.py

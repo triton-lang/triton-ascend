@@ -75,6 +75,43 @@ using namespace mlir;
 using namespace triton;
 using namespace TritonToStructured;
 
+namespace {
+// Pointer analysis can insert scalar helpers outside the matched op's block.
+// Roll back only this attempt's new IR when no memory rewrite is performed.
+class ScopedAnalysisOps : public RewriterBase::ForwardingListener {
+public:
+  explicit ScopedAnalysisOps(PatternRewriter &rewriter)
+      : ForwardingListener(rewriter.getListener()), rewriter(rewriter),
+        previousListener(rewriter.getListener()) {
+    rewriter.setListener(this);
+  }
+
+  ~ScopedAnalysisOps() {
+    rewriter.setListener(previousListener);
+    if (!committed)
+      for (Operation *op : llvm::reverse(insertedOps)) {
+        assert(op->use_empty() && "analysis must not modify existing users");
+        rewriter.eraseOp(op);
+      }
+  }
+
+  void notifyOperationInserted(Operation *op,
+                               OpBuilder::InsertPoint previous) override {
+    assert(!previous.isSet() && "analysis must not move existing operations");
+    insertedOps.push_back(op);
+    ForwardingListener::notifyOperationInserted(op, previous);
+  }
+
+  void commit() { committed = true; }
+
+private:
+  PatternRewriter &rewriter;
+  OpBuilder::Listener *previousListener;
+  SmallVector<Operation *> insertedOps;
+  bool committed = false;
+};
+} // namespace
+
 LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
                                              PatternRewriter &rewriter) const {
   // no need to analyze and rewrite
@@ -86,7 +123,7 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
       llvm::dbgs() << "no need to analyze and rewrite Load" << "\n";
       llvm::dbgs() << "----------------------------------------------\n";
     });
-    return success();
+    return failure();
   }
 
   auto loc = op.getLoc();
@@ -95,6 +132,7 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   auto oldOther = op.getOther();
 
   MemOpTransformer tf(MemOpTransformer::MemType::load);
+  ScopedAnalysisOps analysisOps(rewriter);
 
   Value newPtr = nullptr;
   if (oldPtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
@@ -107,11 +145,11 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
     InFlightDiagnostic diag = emitWarning(loc)
                               << "PtrAnalysis: only MakeTensorPtrOp, "
                                  "AdvanceOp, and AddPtrOp are supported.";
-    return success();
+    return failure();
   }
   if (!tf.ptrState.isPermuted) {
     // no need to rewrite
-    return success();
+    return failure();
   }
 
   auto newMask = tf.createNewMask(oldMask, loc, rewriter);
@@ -140,6 +178,7 @@ LogicalResult LoadConverter::matchAndRewrite(triton::LoadOp op,
   auto permuteResult =
       tf.materializeImplicitPermute(loadOp.getResult(), loc, rewriter);
 
+  analysisOps.commit();
   rewriter.replaceOp(op, permuteResult);
   return success();
 }
@@ -152,6 +191,7 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   auto oldValue = op.getValue();
 
   MemOpTransformer tf(MemOpTransformer::MemType::store);
+  ScopedAnalysisOps analysisOps(rewriter);
   Value newPtr = nullptr;
   if (oldPtr.getDefiningOp<triton::MakeTensorPtrOp>()) {
     newPtr = tf.createNewTensorPtr(oldPtr, loc, rewriter);
@@ -163,11 +203,11 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
     InFlightDiagnostic diag = emitWarning(loc)
                               << "PtrAnalysis: only MakeTensorPtrOp, "
                                  "AdvanceOp, and AddPtrOp are supported.";
-    return success();
+    return failure();
   }
   if (!tf.ptrState.isPermuted) {
     // no need to rewrite
-    return success();
+    return failure();
   }
   auto newMask = tf.createNewMask(oldMask, loc, rewriter);
 
@@ -193,6 +233,7 @@ LogicalResult StoreConverter::matchAndRewrite(triton::StoreOp op,
   storeOp->setAttr(ImplicitPermuteHandledTAG,
                    UnitAttr::get(rewriter.getContext()));
 
+  analysisOps.commit();
   rewriter.eraseOp(op);
   return success();
 }
@@ -206,24 +247,24 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op,
   auto oldVal = op.getVal();
 
   MemOpTransformer tf(MemOpTransformer::MemType::store);
+  ScopedAnalysisOps analysisOps(rewriter);
 
   Value newPtr = nullptr;
   if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
     newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
   } else {
     emitWarning(loc) << "PtrAnalysis: AtomicRMW only support AddPtrOp.";
-    return success();
+    return failure();
   }
 
-  Value newMask = tf.createNewMask(oldMask, loc, rewriter);
-
   if (!tf.ptrState.isPermuted) {
-    return success();
+    return failure();
   }
   if (!newPtr) {
     emitWarning(loc) << "PtrAnalysis: failed to analyze atomic_rmw pointer.";
     return failure();
   }
+  Value newMask = tf.createNewMask(oldMask, loc, rewriter);
   if (oldMask && !newMask) {
     emitWarning(loc) << "MaskAnalysis: failed to analyze atomic_rmw mask.";
     return failure();
@@ -246,6 +287,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op,
   Value permutedRes =
       tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
 
+  analysisOps.commit();
   rewriter.replaceOp(op, permutedRes);
   return success();
 }
@@ -259,17 +301,18 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op,
   auto oldVal = op.getVal();
 
   MemOpTransformer tf(MemOpTransformer::MemType::store);
+  ScopedAnalysisOps analysisOps(rewriter);
 
   Value newPtr = nullptr;
   if (oldPtr.getDefiningOp<triton::AddPtrOp>()) {
     newPtr = tf.createNewAddPtr(oldPtr, loc, rewriter);
   } else {
-    emitWarning(loc) << "PtrAnalysis: AtomicRMW only support AddPtrOp.";
-    return success();
+    emitWarning(loc) << "PtrAnalysis: AtomicCAS only support AddPtrOp.";
+    return failure();
   }
 
   if (!tf.ptrState.isPermuted) {
-    return success();
+    return failure();
   }
   if (!newPtr) {
     emitWarning(loc) << "PtrAnalysis: failed to analyze atomic_cas pointer.";
@@ -292,6 +335,7 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op,
   Value permutedRes =
       tfLoad.materializeImplicitPermute(newAtomic.getResult(), loc, rewriter);
 
+  analysisOps.commit();
   rewriter.replaceOp(op, permutedRes);
   return success();
 }
@@ -369,6 +413,8 @@ Value MemOpTransformer::createNewAddPtr(Value oldPtr, const Location loc,
   }
 
   ptrState.analyzePermute();
+  if (!ptrState.isPermuted)
+    return oldPtr;
   return ptrState.createAddPtrOp(rewriter, loc);
 }
 
@@ -388,6 +434,8 @@ Value MemOpTransformer::createNewTensorPtr(Value oldPtr, const Location loc,
     return oldPtr;
   }
   ptrState.analyzePermute();
+  if (!ptrState.isPermuted)
+    return oldPtr;
   LLVM_DEBUG({
     llvm::dbgs() << "----------------------------------------------\n";
     llvm::dbgs() << "After ptrState.analyzePermute:\n";
@@ -442,7 +490,14 @@ Value MemOpTransformer::createNewMask(Value oldMask, const Location loc,
     llvm::dbgs() << "MaskAnalysis: analyzing load/store mask.\n";
   });
 
-  if (!oldMask || maskState.analysisMask(oldMask).failed()) {
+  // Keep mask-analysis helpers in the same rollback scope as pointer helpers.
+  // analysisMask creates a private builder without the rewriter's listener.
+  LogicalResult maskAnalysis = failure();
+  if (Operation *maskOp = oldMask.getDefiningOp()) {
+    OpBuilder builder(maskOp, rewriter.getListener());
+    maskAnalysis = maskState.parse(oldMask, maskOp->getLoc(), builder);
+  }
+  if (failed(maskAnalysis) || maskState.isEmpty()) {
     LLVM_DEBUG({
       llvm::dbgs() << "----------------------------------------------\n";
       llvm::dbgs() << "MaskAnalysis: no mask or failed to analyze mask.\n";

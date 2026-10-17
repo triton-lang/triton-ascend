@@ -18,6 +18,7 @@ All Ascend-specific behavior stays isolated under ``third_party/ascend/build``;
 import glob
 import os
 import platform
+import shlex
 import shutil
 import subprocess
 import sys
@@ -489,7 +490,6 @@ def patch_module(mod):
         def build_extension(self, ext):
             extdir = os.path.abspath(os.path.dirname(self.get_ext_fullpath(ext.path)))
 
-            orig_check_call = subprocess.check_call
             asc_extra_args = list(_get_ascend_cmake_args())
             asc_extra_args.append("-DLLVM_MAJOR_VERSION_22_COMPATIBLE=ON")
             if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
@@ -497,17 +497,19 @@ def patch_module(mod):
             else:
                 asc_extra_args.append("-DTRITON_BUILD_TD=OFF")
 
-            def patched_check_call(cmd, *args, **kwargs):
-                if (isinstance(cmd, (list, tuple)) and cmd and cmd[0] == "cmake" and "--build" not in cmd):
-                    cmd = list(cmd) + asc_extra_args
-                return orig_check_call(cmd, *args, **kwargs)
+            # Route the Ascend CMake flags through setup.py's native
+            # TRITON_APPEND_CMAKE_ARGS channel instead of monkey-patching
+            # subprocess.check_call. setup.py appends these flags to the tail
+            # of the cmake configure command (same position the patch used),
+            # and CMake -D entries follow last-definition-wins semantics.
+            appended = " ".join(shlex.quote(arg) for arg in asc_extra_args)
+            current_append = os.environ.get("TRITON_APPEND_CMAKE_ARGS", "")
+            if current_append:
+                os.environ["TRITON_APPEND_CMAKE_ARGS"] = current_append + " " + appended
+            else:
+                os.environ["TRITON_APPEND_CMAKE_ARGS"] = appended
 
-            subprocess.check_call = patched_check_call
-            try:
-                super().build_extension(ext)
-            finally:
-                subprocess.check_call = orig_check_call
-
+            super().build_extension(ext)
             _copy_ascend_tools(extdir, mod.get_cmake_dir())
 
     mod.CMakeBuild = CMakeBuild

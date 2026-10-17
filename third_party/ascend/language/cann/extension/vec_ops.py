@@ -403,7 +403,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         if fp_downcast_rounding is not None:
             raise ValueError("fp_downcast_rounding should be set only for truncating fp conversions. "
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
-    if not is_compile_on_910_95():
+    if not is_compile_on_910_95(_semantic.builder.options.arch):
         if (src_sca_ty.is_fp8() or dst_sca_ty.is_fp8()) or (src_sca_ty.is_fp64() or dst_sca_ty.is_fp64()):
             raise ValueError("[fp8, fp64] is unsupported on Ascend for now."
                              "Source scalar type is " + str(src_sca_ty) + " and destination type is " + str(dst_sca_ty))
@@ -456,7 +456,7 @@ def ascend_cast_impl(input: tensor, dst_ty: dtype, _semantic=None, fp_downcast_r
         elif overflow_mode == "saturate" and \
              (src_sca_ty.is_int_unsigned() or dst_sca_ty.is_int_unsigned()) and \
              src_sca_ty.int_bitwidth >= dst_sca_ty.int_bitwidth:
-            if is_compile_on_910_95():
+            if is_compile_on_910_95(_semantic.builder.options.arch):
                 result = tensor(
                     _semantic.builder.create_int_cast(input.handle, dst_ty.to_ir(_semantic.builder), sign_extend),
                     dst_ty)

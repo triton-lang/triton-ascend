@@ -1,3 +1,8 @@
+import triton
+import triton.language as tl
+import triton.extension.buffer.language as bl
+
+
 @triton.jit
 def kernel_func(XBLOCK: tl.constexpr):
     buffer1 = bl.alloc(tl.float32, [XBLOCK])

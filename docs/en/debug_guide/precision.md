@@ -37,20 +37,25 @@ def test_vector_add(n, dtype):
         tl.store(out_ptr + idx, a + b)
 
     def triton_func(x, y):
-        out = torch.empty_like(x)
-        add_kernel[(1,)](x.npu(), y.npu(), out, n=x.numel())
+        x_dev = x.npu()
+        y_dev = y.npu()
+        out = torch.empty_like(x_dev)
+        add_kernel[(1,)](x_dev, y_dev, out, n=x.numel())
         return out
 
     triton_cal = triton_func(x, y)
 
-    # 4. Precision comparison
+    # 4. Accuracy Comparison
     compare_precision(triton_cal.cpu(), torch_ref)
+
+# 5. Run the testcase
+test_vector_add(16,torch.float16)
 ```
 
 ## 2. Precision Comparison Function
 
 ```python
-def compare_precision(cal, ref):
+def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
     """
     Precision comparison function: selects the appropriate comparison
     strategy based on the data type.
@@ -68,7 +73,7 @@ def compare_precision(cal, ref):
     tensor_dtype = cal.dtype
 
     if tensor_dtype == torch.float16:
-        torch.testing.assert_close(ref, cal, rtol=1e-3, atol=1e-3, equal_nan=True)
+        torch.testing.assert_close(ref, cal, rtol=rtol, atol=atol, equal_nan=True)
 
     elif tensor_dtype == torch.bfloat16:
         torch.testing.assert_close(ref, cal, rtol=5e-3, atol=5e-3, equal_nan=True)
@@ -100,7 +105,7 @@ def compare_precision(cal, ref):
 
 Internal logic of `torch.testing.assert_close`:
 
-```
+```python
 |cal - ref| <= atol + rtol * |ref|
 ```
 

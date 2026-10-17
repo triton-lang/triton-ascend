@@ -23,7 +23,7 @@ import pytest
 import numpy as np
 import torch
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 import test_common
 
 # ---------------
@@ -37,7 +37,7 @@ def sort_kernel_2d(X, Z, N: tl.constexpr, M: tl.constexpr, descending: tl.conste
     offy = tl.arange(0, N) * M
     off2d = offx[None, :] + offy[:, None]
     x = tl.load(X + off2d)
-    x = extension.sort(x, descending=descending, dim=1)
+    x = al.sort(x, descending=descending, dim=1)
     tl.store(Z + off2d, x)
 
 
@@ -73,7 +73,7 @@ def sort_kernel_3d(X, Z, D0: tl.constexpr, D1: tl.constexpr, D2: tl.constexpr, d
     off = off2[None, None, :] + off1[None, :, None] + off0[:, None, None]
     x = tl.load(X + off)
 
-    x = extension.sort(x, descending=descending, dim=2)
+    x = al.sort(x, descending=descending, dim=2)
 
     tl.store(Z + off, x)
 
@@ -99,4 +99,29 @@ def test_sort_3d(shape, descending, dtype):
     D1 = x.shape[1]
     D2 = x.shape[2]
     sort_kernel_3d[(1, )](x, triton_res, D0, D1, D2, descending)
+    assert (torch_res == triton_res).all(), (torch_res, triton_res)
+
+
+@triton.jit
+def sort_kernel_1d(X, Z, M: tl.constexpr, descending: tl.constexpr):
+    off = tl.arange(0, M)
+    x = tl.load(X + off)
+    x = al.sort(x, descending=descending, dim=0)
+    tl.store(Z + off, x)
+
+
+@triton.jit
+def sort_call_kernel(X, Z, M: tl.constexpr, descending: tl.constexpr):
+    sort_kernel_1d(X, Z, M, descending)
+
+
+def test_sort_call():
+    shape = (8, )
+    descending = True
+    x = torch.randn(size=shape, dtype=torch.float32).npu()
+    triton_res = torch.empty_like(x)
+    M = x.shape[0]
+    sort_call_kernel[(1, )](x, triton_res, M, descending)
+
+    torch_res = torch.sort(x, descending=descending)[0]
     assert (torch_res == triton_res).all(), (torch_res, triton_res)

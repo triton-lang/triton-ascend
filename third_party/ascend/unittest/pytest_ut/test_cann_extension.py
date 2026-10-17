@@ -256,7 +256,7 @@ def test_mem_ops():
     dst = torch.zeros(4, 2, device='npu').half()
 
     # ✅ 核心：把编译+运行的代码包在这里，pytest 才能捕获
-    with pytest.raises(MLIRCompilationError):
+    with pytest.warns(FutureWarning, match="index_put"), pytest.raises(MLIRCompilationError):
         # 这一行会触发编译，直接抛出你要的错误
         kernel_index_put_simple[(1, )](value, index, dst)
 
@@ -273,7 +273,7 @@ def test_mem2_ops():
     index = torch.tensor([[0, 1], [2, 3]], device='npu')
     out = torch.empty((2, 2), device='npu', dtype=torch.float32)
 
-    with pytest.raises(MLIRCompilationError):
+    with pytest.warns(FutureWarning, match="gather_out_to_ub"), pytest.raises(MLIRCompilationError):
         simple_gather_kernel[(1, )](src, index, out)
 
     print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
@@ -289,7 +289,7 @@ def test_mem3_ops():
     value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
     index = torch.tensor([[1, 2], [3, 0]], device='npu')
 
-    with pytest.raises(MLIRCompilationError):
+    with pytest.warns(FutureWarning, match="scatter_ub_to_out"), pytest.raises(MLIRCompilationError):
         simple_scatter_kernel[(1, )](value, index, dst)
 
     print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
@@ -305,7 +305,7 @@ def test_mem4_ops():
     value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
     index = torch.tensor([[1, 2], [3, 0]], device='npu')
 
-    with pytest.raises(MLIRCompilationError):
+    with pytest.warns(FutureWarning, match="scatter_ub_to_out"), pytest.raises(MLIRCompilationError):
         simple_scatter_kernel[(1, )](value, index, dst)
 
     print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")

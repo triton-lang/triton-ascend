@@ -33,9 +33,9 @@
 // CHECK: return %[[F32_TO_BF16]] : bf16
 // CHECK-LABEL: func.func @tensor_f8e4m3fn_to_f8e5m2_rtne
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f8E4M3FN to f32
+// CHECK: arith.extf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : tensor<8xf8E4M3FN> to tensor<8xf32>
 // CHECK-NOT: tt.fp_to_fp
-// CHECK: arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : f32 to f8E5M2
+// CHECK: arith.truncf %{{.*}} {round_mode = #hfusion.round_mode<rint>} : tensor<8xf32> to tensor<8xf8E5M2>
 // CHECK-NOT: tt.fp_to_fp
 // CHECK: return
 // CHECK-LABEL: func.func @scalar_f8e4m3fn_identity

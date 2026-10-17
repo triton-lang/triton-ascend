@@ -1,6 +1,6 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt' %s --split-input-file | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' %s --split-input-file | FileCheck %s
 
-// tt.load/store -> ascend.unstructured_load/store in simd_simt mode
+// tt.load -> tt.indirect_load
 tt.func public @triton_ldst_indirect_05_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
   %cst = arith.constant dense<16> : tensor<8x1xi32>
   %c8_i32 = arith.constant 8 : i32
@@ -73,7 +73,7 @@ tt.func public @triton_ldst_indirect_05_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.p
 
 // -----
 
-// tt.store -> ascend.unstructured_store
+// tt.store -> tt.indirect_store
 tt.func public @triton_ldst_indirect_08_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
   %cst = arith.constant dense<32> : tensor<8x1xi32>
   %c8_i32 = arith.constant 8 : i32

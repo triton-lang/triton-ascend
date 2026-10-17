@@ -38,8 +38,8 @@ namespace triton {
 
 namespace {
 
-constexpr int kDefaultIntraBufferCount = 2;
-constexpr int kDefaultInterBufferCount = 1;
+constexpr int kDefaultIntraBufferCount = 3;
+constexpr int kDefaultInterBufferCount = 2;
 constexpr int kDefaultLoadBufferCount = 1;
 constexpr int kBufferCountWarningThreshold = 3;
 
@@ -103,9 +103,9 @@ void BufferCountManager::setBufferCount(DepType type, int count) {
     LOG_DEBUG("Invalid buffer count: " << count << " (must be > 0)");
     return;
   }
-  if (count >= kBufferCountWarningThreshold) {
-    LOG_DEBUG("Warning: buffer count " << count
-                                       << " >= " << kBufferCountWarningThreshold
+  if (count > kBufferCountWarningThreshold) {
+    LOG_DEBUG("Warning: buffer count " << count << " > "
+                                       << kBufferCountWarningThreshold
                                        << " is not recommended");
   }
   OpBuilder builder(module_.getContext());
@@ -147,6 +147,13 @@ void BufferCountManager::buildBufferCountMap(
 
 int BufferCountManager::getBufferCountByType(DepType type) const {
   auto attr = module_->getAttrOfType<IntegerAttr>(getAttrName(type));
+  if (!attr) {
+    int defaultCount = getBufferCountByType(type);
+    LOG_DEBUG("getBufferCountByType(" << static_cast<int>(type)
+                                      << ") returns default buffer count "
+                                      << defaultCount);
+    return defaultCount;
+  }
   int count = static_cast<int>(attr.getInt());
   LOG_DEBUG("getBufferCountByType(" << static_cast<int>(type)
                                     << ") = " << count);

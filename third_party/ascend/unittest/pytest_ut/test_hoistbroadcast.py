@@ -129,7 +129,7 @@ def test_copy(param_list):
     src_loc = torch.tensor([0], dtype=torch.int32, device=device)
     tgt_loc = torch.tensor([0], dtype=torch.int32, device=device)
 
-    data_ptr = torch.tensor([data.data_ptr()], dtype=torch.uint64, device=device)
+    data_ptr = torch.tensor([data.data_ptr()], dtype=torch.int64, device=device)
     stride = shape[1]
     copy[(1, )](data_ptr, tgt_loc, src_loc, 1, stride, 1)
     data_ref[0, :] += 1
@@ -149,10 +149,10 @@ def test_hoistbroadcast_compare(param_list):
     k_buffer_ref = kv_buffer_ref[0]
     v_buffer_ref = kv_buffer_ref[1]
 
-    data_ptrs = torch.tensor([x.data_ptr() for x in [k_buffer]] + [x.data_ptr() for x in [v_buffer]],
-                             dtype=torch.uint64, device=device)
+    data_ptrs = torch.tensor([x.data_ptr() for x in [k_buffer]] + [x.data_ptr() for x in [v_buffer]], dtype=torch.int64,
+                             device=device)
     data_ptrs_ref = torch.tensor([x.data_ptr() for x in [k_buffer_ref]] + [x.data_ptr() for x in [v_buffer_ref]],
-                                 dtype=torch.uint64, device=device)
+                                 dtype=torch.int64, device=device)
 
     data_strides = torch.cat([
         torch.tensor([np.prod(x.shape[1:]) * x.dtype.itemsize for x in k_buffer], device=device),

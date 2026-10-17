@@ -46,7 +46,7 @@
 // num_programs(axis).
 namespace RowCoalescing {
 
-void rewriteRowCoalesce(mlir::ModuleOp moduleOp);
+void rewriteRowCoalesceForLayoutMerge(mlir::ModuleOp moduleOp);
 
 std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createRowCoalescingPass();
 

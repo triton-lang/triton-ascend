@@ -44,7 +44,6 @@ def alloc(etype: tl.dtype, shape: List[tl.constexpr], address_space: bl.address_
     handle = builder.alloc(memref_ty)
     if is_mem_unique:
         builder.create_annotation_mark(handle, "mem_unique", builder.get_unit_attr())
-    builder.create_annotation_mark(handle, "effects", builder.get_str_array_attr(["write", "read"]))
 
     buffer_ty = bl.buffer_type(element_ty=etype, shape=shape, space=address_space)
     return bl.buffer(handle, buffer_ty)

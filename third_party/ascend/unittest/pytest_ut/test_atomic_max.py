@@ -52,6 +52,20 @@ def triton_test_fn_atomic_max_dma_supply(in_ptr0, out_ptr0, n_elements: tl.const
     tmp1 = tl.atomic_max(out_ptr0 + (x1), tmp0, xmask)
 
 
+@triton.jit
+def float_scalar_atomic_max_kernel(
+    value_ptr,
+    output_ptr,
+    n_elements,
+    BLOCK_SIZE: tl.constexpr,
+):
+    offsets = tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    values = tl.load(value_ptr + offsets, mask=mask, other=-1.0e9)
+    block_max = tl.max(values, axis=0)
+    tl.atomic_max(output_ptr, block_max)
+
+
 # torch.max do not support int
 @pytest.mark.parametrize('param_list', [
     ['int32', (32, 32), 2],
@@ -98,6 +112,25 @@ def test_atomic_max_2d_supply(dtype, shape):
     n_elements = shape[0] * shape[1]
     triton_test_fn_atomic_max_dma_supply[shape[0], 1, 1](x0, x1, n_elements, BLOCK_SIZE=shape[1])
     test_common.validate_cmp(dtype, x1, x1_ref)
+
+
+def test_float_scalar_atomic_max():
+    n_elements = 257
+    block_size = 1024
+
+    values_cpu = torch.linspace(-4.0, 4.0, n_elements, dtype=torch.float32, device="cpu")
+    values = values_cpu.npu()
+    output = torch.full((1, ), float("-inf"), dtype=torch.float32, device="npu")
+
+    float_scalar_atomic_max_kernel[(1, )](
+        values,
+        output,
+        n_elements,
+        BLOCK_SIZE=block_size,
+    )
+
+    expected = values_cpu.max().reshape(1)
+    torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
 
 
 # if __name__ == "__main__":

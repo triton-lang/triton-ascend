@@ -13,7 +13,7 @@ UB Overflow 是 Triton-Ascend 开发中常见的问题。本文档详细介绍 U
 #### `tl.maximum`、`tl.minimum`、`tl.clamp` 接口的 `propagate_nan` 参数
 
 **问题描述：**
-当设置 `propagate_nan=tl.PropagateNAN.NONE` 时，系统会自动添加 NaN 值检测和处理逻辑。
+当设置 `propagate_nan=tl.PropagateNan.NONE` 时，系统会自动添加 NaN 值检测和处理逻辑。
 
 **影响：**
 

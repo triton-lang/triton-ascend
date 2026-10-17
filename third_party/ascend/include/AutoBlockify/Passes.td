@@ -13,7 +13,7 @@ def AutoBlockify : Pass<"auto-blockify", "mlir::ModuleOp"> {
     ];
     let options = [
         Option<"autoBlockifySize", "auto-blockify-size", "int", "1",
-           "Apply auto blockify v2 when TRITON_ALL_BLOCKS_PARALLEL is 1."
+           "Apply auto blockify v2 with the automatic block-mapping policy."
            "Expand highest dimension with blockify size">
     ];
 }

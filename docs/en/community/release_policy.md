@@ -19,7 +19,7 @@ Triton-Ascend follows [PEP 440](https://peps.python.org/pep-0440/) version speci
 
 | Triton-Ascend | Triton commit hash                                           | Python    | CANN  | PyTorch | LLVM commit hash                                             | Patch                                                        |
 | ------------- | ------------------------------------------------------------ | --------- | ----- | ------- | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| `main`        | [cfc0a9d](https://github.com/triton-lang/triton-ascend/commit/cfc0a9d) | `3.9~3.13` | `9.0.0` | `2.7.1`   | [fad3272](https://github.com/llvm/llvm-project/commit/fad3272) | [llvm_patch_fad3272.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_fad3272.patch) |
+| `main`        | [85400f8](https://github.com/triton-lang/triton-ascend/commit/85400f8) | `3.9~3.13` | `9.0.0` | `2.10.0`   | [f6ded0b](https://github.com/llvm/llvm-project/commit/f6ded0b) | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
 
 ## Maintenance Branches and Lifecycle
 
@@ -31,7 +31,7 @@ Maintenance branch statuses include:
 
 | Branch              | Status     | Triton Version | Triton-Ascend Release              | End of Maintenance |
 | ----------------- | -------- | ---------------- | ----------------------------------- | ------------ |
-| `main`            | `Active`   | `3.5.0`          | /                                   | /            |
+| `main`            | `Active`   | `3.6.0`          | /                                   | /            |
 | `release/3.2.1` | `Active`   | `3.2.0`          | `3.2.1`                             | /            |
 | `release/3.2.x` | `Maintenance`   | `3.2.0`          | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /            |
 

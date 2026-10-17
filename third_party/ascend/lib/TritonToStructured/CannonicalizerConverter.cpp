@@ -33,6 +33,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Linalg/Passes.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/Attributes.h"
@@ -246,16 +247,28 @@ AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp,
 // Move load before broadcast when possible:
 // If load.ptr is a triton::BroadcastOp and
 //  - load.mask is null; or
-//  - load.mask is a triton::BroadcastOp and the broadcast sources (before
-//  broadcast)
-//    of ptr and mask have identical shapes,
-// then replace
-//   %ptr_b = tt.broadcast %ptr_src
-//   %mask_b = tt.broadcast %mask_src?         (optional)
-//   %v = tt.load %ptr_b, %mask_b
-// with
-//   %v_small = tt.load %ptr_src, %mask_src?
+//  - load.mask is a triton::BroadcastOp,
+// then rewrite the load in one of two ways depending on whether the ptr src
+// and mask src shapes match:
+//
+// Case 1 (shapes match, original fast path):
+//   %ptr_b  = tt.broadcast %ptr_src
+//   %mask_b = tt.broadcast %mask_src        (src shapes identical)
+//   %v = tt.load %ptr_b, %mask_b, %other_splat
+// becomes:
+//   %v_small = tt.load %ptr_src, %mask_src, %other_small
 //   %v = tt.broadcast %v_small
+//
+// Case 2 (shapes differ, e.g. ptr and mask broadcast on different axes):
+//   %ptr_b  = tt.broadcast %ptr_src         // e.g. [1,64] -> [256,64]
+//   %mask_b = tt.broadcast %mask_src        // e.g. [256,1] -> [256,64]
+//   %v = tt.load %ptr_b, %mask_b, %other
+// becomes:
+//   %v_small = tt.load %ptr_src             (no mask, no other — safe)
+//   %v_bc    = tt.broadcast %v_small
+//   %v       = arith.select %mask_b, %v_bc, %other
+// The full mask is applied via select after broadcast, which downstream
+// select analysis lowers to extract_slice / insert_slice.
 LogicalResult
 LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
                                         PatternRewriter &rewriter) const {
@@ -271,23 +284,19 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
 
   // mask can be null
   Value mask = loadOp.getMask();
+  triton::BroadcastOp maskBroadcast = nullptr;
   Value maskSrc = nullptr;
+  RankedTensorType maskSrcType = nullptr;
   if (mask) {
-    auto maskBroadcast = mask.getDefiningOp<triton::BroadcastOp>();
+    maskBroadcast = mask.getDefiningOp<triton::BroadcastOp>();
     if (!maskBroadcast)
       return failure();
     maskSrc = maskBroadcast.getSrc();
-    // shapes of ptrBroadcast.src and maskBroadcast.src must match
-    auto ptrSrcType =
-        dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
-    auto maskSrcType = dyn_cast<RankedTensorType>(maskSrc.getType());
-    if (!ptrSrcType || !maskSrcType)
-      return failure();
-    if (ptrSrcType.getShape() != maskSrcType.getShape())
+    maskSrcType = dyn_cast<RankedTensorType>(maskSrc.getType());
+    if (!maskSrcType)
       return failure();
   }
 
-  // Prepare the smaller load: load from ptrBroadcast.src with maskSrc (or null)
   Location loc = loadOp.getLoc();
   Value smallPtr = ptrBroadcast.getSrc();
 
@@ -296,56 +305,229 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
   auto cache = loadOp.getCache();
   auto evict = loadOp.getEvict();
   auto isVolatile = loadOp.getIsVolatile();
-
-  // If 'other' exists, it must be a constant DenseElementsAttr so we can
-  // construct a smaller-shaped constant to feed the small load. If it's
-  // non-constant, abort the transformation.
-  Value newOther = other;
-  if (other) {
-    Attribute otherAttr;
-    if (!matchPattern(other, m_Constant(&otherAttr)))
-      return failure();
-    auto denseOther = dyn_cast<DenseElementsAttr>(otherAttr);
-    if (!denseOther)
-      return failure();
-
-    // Build a small-shaped tensor type that uses the ptr src's shape but the
-    // element type of the 'other' constant
-    auto ptrSrcRT = dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
-    if (!ptrSrcRT)
-      return failure();
-
-    auto elemType = denseOther.getType().getElementType();
-    if (!elemType)
-      return failure();
-
-    auto smallType = RankedTensorType::get(ptrSrcRT.getShape(), elemType);
-
-    DenseElementsAttr newDense;
-    if (denseOther.isSplat()) {
-      // Reuse the splat value; assume element/value types are compatible.
-      newDense = DenseElementsAttr::get(smallType,
-                                        denseOther.getSplatValue<Attribute>());
-    } else {
-      // Multi-element dense constant cannot be safely reshaped here
-      return failure();
-    }
-
-    auto constOp = rewriter.create<arith::ConstantOp>(loc, newDense);
-    newOther = constOp.getResult();
-  }
-
-  auto newLoad = rewriter.create<triton::LoadOp>(
-      loc, smallPtr, maskSrc, newOther, cache, evict, isVolatile);
-
-  // Broadcast result back to original result type
   auto resultType = dyn_cast<RankedTensorType>(loadOp.getResult().getType());
   if (!resultType)
     return failure();
+
+  bool shapesMatch = !mask || (ptrSrcType.getShape() == maskSrcType.getShape());
+
+  // no mask, or ptr/mask src shapes match
+  if (shapesMatch) {
+    Value newOther = other;
+    if (other) {
+      // Build a small-shaped 'other' constant matching ptr src shape.
+      // Only splat dense constants are supported here (same as before).
+      Attribute otherAttr;
+      if (!matchPattern(other, m_Constant(&otherAttr)))
+        return failure();
+      auto denseOther = dyn_cast<DenseElementsAttr>(otherAttr);
+      if (!denseOther)
+        return failure();
+
+      auto elemType = denseOther.getType().getElementType();
+      if (!elemType)
+        return failure();
+      auto smallType = RankedTensorType::get(ptrSrcType.getShape(), elemType);
+
+      DenseElementsAttr newDense;
+      if (denseOther.isSplat()) {
+        newDense = DenseElementsAttr::get(
+            smallType, denseOther.getSplatValue<Attribute>());
+      } else {
+        return failure();
+      }
+      newOther = rewriter.create<arith::ConstantOp>(loc, newDense).getResult();
+    }
+
+    auto newLoad = rewriter.create<triton::LoadOp>(
+        loc, smallPtr, maskSrc, newOther, cache, evict, isVolatile);
+    auto broadcasted = rewriter.create<triton::BroadcastOp>(
+        loc, resultType, newLoad.getResult());
+    rewriter.replaceOp(loadOp, broadcasted.getResult());
+    return success();
+  }
+
+  auto newLoad = rewriter.create<triton::LoadOp>(
+      loc, smallPtr, /*mask=*/nullptr, /*other=*/nullptr, cache, evict,
+      isVolatile);
   auto broadcasted = rewriter.create<triton::BroadcastOp>(loc, resultType,
                                                           newLoad.getResult());
+  Value result = broadcasted.getResult();
 
-  rewriter.replaceOp(loadOp, broadcasted.getResult());
+  if (!other) {
+    // default for masked-off elements is 0
+    auto zeroAttr = DenseElementsAttr::get(
+        resultType, rewriter.getZeroAttr(resultType.getElementType()));
+    other = rewriter.create<arith::ConstantOp>(loc, zeroAttr).getResult();
+  }
+  auto selectOp = rewriter.create<arith::SelectOp>(loc, mask, result, other);
+  rewriter.replaceOp(loadOp, selectOp.getResult());
+  return success();
+}
+
+// Move store before broadcast when possible:
+// If store.ptr is defined by a triton::BroadcastOp, the broadcast axes refer
+// to the same memory locations (every pointer along a broadcast axis points
+// to the same address), so storing once at the first index of each broadcast
+// axis is sufficient. Rewrite
+//   %ptr   = tt.broadcast %ptr_src            // e.g. [32,1] -> [32,32]
+//   %mask  = tt.broadcast %mask_src?          // optional, same expansion
+//   tt.store %ptr, %val, %mask?
+// with
+//   %val_small  = tensor.extract_slice %val[..0..]  // first index per
+//                                                    // broadcast axis
+//   %mask_small = %mask_src | tensor.extract_slice %mask
+//   tt.store %ptr_src, %val_small, %mask_small?
+LogicalResult
+StoreBroadcastConverter::matchAndRewrite(triton::StoreOp storeOp,
+                                         PatternRewriter &rewriter) const {
+  // Match when ptr is defined by BroadcastOp
+  Value ptr = storeOp.getPtr();
+  auto ptrBroadcast = ptr.getDefiningOp<triton::BroadcastOp>();
+  if (!ptrBroadcast)
+    return failure();
+
+  auto ptrSrcType = dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
+  auto resultType = dyn_cast<RankedTensorType>(ptr.getType());
+  if (!ptrSrcType || !resultType)
+    return failure();
+
+  // Find the axes expanded by broadcast (src size 1 -> full size)
+  auto srcShape = ptrSrcType.getShape();
+  auto resultShape = resultType.getShape();
+  SmallVector<int64_t> broadcastAxes;
+  for (size_t i = 0; i < srcShape.size(); ++i) {
+    if (srcShape[i] == 1 && resultShape[i] != 1)
+      broadcastAxes.push_back(i);
+  }
+  if (broadcastAxes.empty())
+    return failure();
+
+  Location loc = storeOp.getLoc();
+  SmallVector<OpFoldResult> offsets, sizes, strides;
+  for (size_t i = 0; i < resultShape.size(); ++i) {
+    offsets.push_back(rewriter.getIndexAttr(0));
+    strides.push_back(rewriter.getIndexAttr(1));
+    sizes.push_back(rewriter.getIndexAttr(resultShape[i]));
+  }
+  for (auto axis : broadcastAxes)
+    sizes[axis] = rewriter.getIndexAttr(1);
+
+  // Slice value along the broadcast axes (first index) if it has the full
+  // broadcast shape; otherwise it must already match the small ptr shape.
+  Value newValue = storeOp.getValue();
+  if (auto valueType = dyn_cast<RankedTensorType>(newValue.getType())) {
+    if (valueType.getShape() == resultShape) {
+      newValue = rewriter.create<tensor::ExtractSliceOp>(loc, newValue, offsets,
+                                                         sizes, strides);
+    } else if (valueType.getShape() != srcShape) {
+      return failure();
+    }
+  }
+
+  // Slice mask the same way; reuse mask's broadcast source when its shape
+  // matches the small ptr shape, avoiding a redundant extract_slice.
+  Value newMask;
+  if (Value mask = storeOp.getMask()) {
+    auto maskType = dyn_cast<RankedTensorType>(mask.getType());
+    if (!maskType)
+      return failure();
+    if (maskType.getShape() == resultShape) {
+      Value maskSrc = nullptr;
+      if (auto maskBroadcast = mask.getDefiningOp<triton::BroadcastOp>()) {
+        auto maskSrcType =
+            dyn_cast<RankedTensorType>(maskBroadcast.getSrc().getType());
+        if (maskSrcType && maskSrcType.getShape() == srcShape)
+          maskSrc = maskBroadcast.getSrc();
+      }
+      newMask =
+          maskSrc ? maskSrc
+                  : static_cast<Value>(rewriter.create<tensor::ExtractSliceOp>(
+                        loc, mask, offsets, sizes, strides));
+    } else if (maskType.getShape() != srcShape) {
+      return failure();
+    } else {
+      newMask = mask;
+    }
+  }
+
+  // Store the reduced slice; broadcast dims all alias the same address.
+  if (newMask) {
+    rewriter.create<triton::StoreOp>(loc, ptrBroadcast.getSrc(), newValue,
+                                     newMask, storeOp.getBoundaryCheck(),
+                                     storeOp.getCache(), storeOp.getEvict());
+  } else {
+    rewriter.create<triton::StoreOp>(loc, ptrBroadcast.getSrc(), newValue,
+                                     storeOp.getBoundaryCheck(),
+                                     storeOp.getCache(), storeOp.getEvict());
+  }
+  rewriter.eraseOp(storeOp);
+  return success();
+}
+
+LogicalResult ZeroStrideMakeTensorPtrConverter::matchAndRewrite(
+    triton::MakeTensorPtrOp op, PatternRewriter &rewriter) const {
+  // Only rewrite when every stride is statically 0; any non-zero stride
+  // would mean the dimension actually varies in memory and the broadcast
+  // pattern doesn't apply.
+  if (!llvm::all_of(op.getStrides(), [](Value stride) {
+        Attribute attr;
+        if (!matchPattern(stride, m_Constant(&attr)))
+          return false;
+        if (auto intAttr = dyn_cast<IntegerAttr>(attr))
+          return intAttr.getValue() == 0;
+        return false;
+      })) {
+    return failure();
+  }
+
+  auto isAllowedUser = [](Operation *user) {
+    // FIXME: temporary solution
+    // return isa<triton::LoadOp, triton::StoreOp, triton::AdvanceOp>(user);
+    return isa<triton::LoadOp>(user);
+  };
+  if (!llvm::all_of(op->getUsers(), isAllowedUser))
+    return failure();
+
+  Location loc = op.getLoc();
+  Value base = op.getBase();
+
+  auto ptrType = cast<triton::PointerType>(op.getResult().getType());
+  auto pointeeTensorTy = cast<RankedTensorType>(ptrType.getPointeeType());
+
+  SmallVector<triton::LoadOp> loadUsers;
+  SmallVector<triton::StoreOp> storeUsers;
+  SmallVector<triton::AdvanceOp> advanceUsers;
+  for (Operation *user : op->getUsers()) {
+    if (auto loadOp = dyn_cast<triton::LoadOp>(user))
+      loadUsers.push_back(loadOp);
+    else if (auto storeOp = dyn_cast<triton::StoreOp>(user))
+      storeUsers.push_back(storeOp);
+    else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(user))
+      advanceUsers.push_back(advanceOp);
+  }
+
+  // Rewrite loads: load a scalar from `base` directly (tt.load accepts a
+  // pointer-to-scalar type) and splat it to the block shape. The
+  // "splat" Triton op is the intended way to broadcast a scalar value into
+  // a tensor of arbitrary shape — equivalent in semantics to what
+  // `tt.broadcast(0-D-tensor -> shape)` does, but without the intermediate
+  // 0-D tensorization step.
+  auto rewriteLoad = [&](triton::LoadOp loadOp) {
+    rewriter.setInsertionPoint(loadOp);
+    auto scalarLoad = rewriter.create<triton::LoadOp>(
+        loc, base, /*mask=*/Value(), /*other=*/Value(), loadOp.getCache(),
+        loadOp.getEvict(), loadOp.getIsVolatile());
+
+    auto broadcasted = rewriter.create<triton::SplatOp>(loc, pointeeTensorTy,
+                                                        scalarLoad.getResult());
+    rewriter.replaceOp(loadOp, broadcasted.getResult());
+  };
+
+  for (triton::LoadOp loadOp : loadUsers)
+    rewriteLoad(loadOp);
+
+  rewriter.eraseOp(op);
   return success();
 }
 
@@ -406,10 +588,16 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteForAddPtr(
   // 4. Rewrite the loop body
   if (failed(rewriteLoopBody(forOp, newForOp, pointerArgsInfo, indexMap,
                              rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   // 5. Replace original loop results
-  return replaceResults(forOp, newForOp, pointerArgsInfo, indexMap, rewriter);
+  if (failed(replaceResults(forOp, newForOp, pointerArgsInfo, indexMap,
+                            rewriter))) {
+    rewriter.eraseOp(newForOp);
+    return failure();
+  }
+  return success();
 }
 
 // Transform a for loop that uses pointer iteration arguments into one that uses
@@ -463,6 +651,7 @@ LogicalResult PromotePointerIterArgsPattern::matchAndRewriteAdvancePtr(
   // 5. Rewrite the loop body
   if (failed(rewriteLoopBodyForAdvancePtr(forOp, newForOp, pointerArgsInfo,
                                           indexMap, rewriter))) {
+    rewriter.eraseOp(newForOp);
     return failure();
   }
   rewriter.replaceOp(forOp, newForOp);
@@ -1732,7 +1921,7 @@ LogicalResult SimplifyTensorIterArgsPattern::matchAndRewrite(
     scf::ForOp oldFor = forOp;
     if (failed(rewriteForWithRelayCandidates(newFor, oldFor, relayCandidates,
                                              rewriter))) {
-      newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+      rewriter.eraseOp(newFor);
       return failure();
     }
     return success();
@@ -1886,7 +2075,7 @@ SimplifyTensorIterArgsPattern::rewriteForWithLocalCandidates(
   newFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> LogicalResult {
-    newFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newFor);
     return failure();
   };
 
@@ -2173,9 +2362,6 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
     return failure();
   }
 
-  constexpr llvm::StringLiteral kFailedAttr =
-      "tts.simplify_tensor_iter_args.failed";
-
   Block &oldOuterBody = *outerFor.getBody();
   if (!oldOuterBody.mightHaveTerminator()) {
     return failure();
@@ -2206,7 +2392,7 @@ SimplifyTensorIterArgsPattern::rewriteOuterForWithRelayCandidates(
   newOuterFor->setAttr(kIncompleteAttr, rewriter.getUnitAttr());
 
   auto failAfterCreate = [&]() -> FailureOr<scf::ForOp> {
-    newOuterFor->setAttr(kFailedAttr, rewriter.getUnitAttr());
+    rewriter.eraseOp(newOuterFor);
     return failure();
   };
 

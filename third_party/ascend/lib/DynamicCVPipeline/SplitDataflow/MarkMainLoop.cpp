@@ -47,15 +47,30 @@ void MarkMainLoopPass::runOnOperation() {
   SmallVector<Operation *> mainLoops;
 
   // Find all candidate main loops (ForOp + WhileOp)
+  auto isL1Fixpipe = [](Operation *op) -> bool {
+    auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
+    if (!fixpipeOp)
+      return false;
+    auto dstType = dyn_cast<MemRefType>(fixpipeOp.getDst().getType());
+    if (!dstType)
+      return false;
+    auto addrSpaceAttr =
+        dyn_cast_or_null<hivm::AddressSpaceAttr>(dstType.getMemorySpace());
+    return addrSpaceAttr &&
+           addrSpaceAttr.getAddressSpace() == hivm::AddressSpace::L1;
+  };
+
   module.walk([&](Operation *op) {
-    if (isa<hivm::FixpipeOp, hivm::CopyOp>(op)) {
-      if (auto forOp = op->getParentOfType<scf::ForOp>()) {
-        mainLoops.push_back(forOp);
-      }
-      if (auto whileOp = op->getParentOfType<scf::WhileOp>()) {
-        mainLoops.push_back(whileOp);
-      }
-    }
+    if (!isa<hivm::FixpipeOp, hivm::CopyOp>(op))
+      return;
+
+    if (isL1Fixpipe(op))
+      return;
+
+    if (auto forOp = op->getParentOfType<scf::ForOp>())
+      mainLoops.push_back(forOp);
+    if (auto whileOp = op->getParentOfType<scf::WhileOp>())
+      mainLoops.push_back(whileOp);
   });
 
   for (Operation *loopOp : mainLoops) {

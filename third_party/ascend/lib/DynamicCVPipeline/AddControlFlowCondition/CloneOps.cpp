@@ -203,9 +203,14 @@ static bool shouldEraseOpForCube(
     const llvm::DenseMap<Operation *, llvm::SmallPtrSet<Operation *, 4>>
         &sameBlockIdExecAfter,
     const llvm::DenseSet<Operation *> &erasedOps) {
-  // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase
+  // Rule 1: SyncBlockWaitOp, SyncBlockSetOp, FixpipeOp -> directly erase,
+  // including when inter-core multi-buffering has already wrapped them in an
+  // scf.if picking the flag for this iteration's buffer half. Only scf.ifs
+  // that yield nothing qualify: the wrapper around a transfer op yields its
+  // result and is data, not a handshake.
   if (isa<SyncBlockWaitOp>(op) || isa<SyncBlockSetOp>(op) ||
-      isa<hivm::FixpipeOp>(op)) {
+      isa<hivm::FixpipeOp>(op) ||
+      (op->getNumResults() == 0 && isIfOpWithOnlySyncOps(op))) {
     return true;
   }
 
@@ -283,6 +288,18 @@ static LogicalResult validateClonedSyncOpsErased(Block *bodyBlock) {
     if (isa<SyncBlockWaitOp>(&op) || isa<SyncBlockSetOp>(&op) ||
         isa<hivm::FixpipeOp>(&op)) {
       LDBG("[ERROR]: Cloned sync/fixpipe op should have been erased: "
+           << op.getName());
+      return failure();
+    }
+    // Look inside as well
+    WalkResult nested = op.walk([](Operation *inner) {
+      return isa<SyncBlockWaitOp>(inner) || isa<SyncBlockSetOp>(inner)
+                 ? WalkResult::interrupt()
+                 : WalkResult::advance();
+    });
+    if (nested.wasInterrupted()) {
+      LDBG("[ERROR]: Cloned op still holds a sync op that should have been "
+           "erased: "
            << op.getName());
       return failure();
     }

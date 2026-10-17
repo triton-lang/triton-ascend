@@ -30,6 +30,8 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include <string>
+
 #define GEN_PASS_CLASSES
 #include "ascend/include/TritonToLinalg/Passes.h.inc"
 
@@ -45,7 +47,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createTritonToLinalgPass();
 
 std::unique_ptr<OperationPass<ModuleOp>>
 createTritonToLinalgPass(bool, bool, bool, bool, bool,
-                         const std::string &compileMode = "simd");
+                         const std::string &compileMode = "simd_simt_template");
 
 } // namespace triton
 } // namespace mlir
@@ -102,7 +104,7 @@ public:
 
   TritonToLinalgPass(bool globalKernel, bool namedOps, bool enableNd2nzOnVector,
                      bool enableSelectAnalysis, bool compileOn91095,
-                     const std::string &compileMode = "simd") {
+                     const std::string &compileMode = "simd_simt_template") {
     this->globalKernel = globalKernel;
     this->namedOps = namedOps;
     this->enableNd2nzOnVector = enableNd2nzOnVector;

@@ -1,75 +1,10 @@
 import triton.language as tl
 from triton.language import core
-from triton.language.core import (_unwrap_if_constexpr, _tensor_member_fn, _unwrap_iterable, builtin, constexpr, dtype,
-                                  tensor, check_bit_width, _unwrap_if_constexpr, range)
+from triton.language.core import (_unwrap_if_constexpr, _unwrap_iterable, builtin, constexpr, dtype, tensor,
+                                  check_bit_width, _unwrap_if_constexpr, range)
 
 from typing import Optional, Tuple, List, overload, Union
 from triton._C.libtriton import ir
-from ._utils import custom_op
-
-
-@_tensor_member_fn
-@builtin
-def sync_block_all(mode, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_all instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
-    mode = _unwrap_if_constexpr(mode)
-    event_id = _unwrap_if_constexpr(event_id)
-    assert isinstance(mode, str), f"mode: {mode} is not string"
-    assert isinstance(event_id, int) and (event_id >= 0) and (event_id < 16), f"event_id: {event_id} should be 0 ~ 15"
-    assert mode == "all_cube" or mode == "all_vector" or mode == "all", f"ERROR: mode = {mode}, only supports all_cube/all_vector/all"
-    custom_op(_semantic.builder, "sync_block_all", mode=mode, event_id=event_id)
-
-
-@_tensor_member_fn
-@builtin
-def sync_block_set(sender, receiver, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_set instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
-    sender = _unwrap_if_constexpr(sender)
-    receiver = _unwrap_if_constexpr(receiver)
-    event_id = _unwrap_if_constexpr(event_id)
-    assert isinstance(sender, str) and (sender == "cube"
-                                        or sender == "vector"), f"ERROR: sender = {sender}, only supports cube/vector"
-    assert isinstance(receiver, str) and (receiver == "cube" or receiver
-                                          == "vector"), f"ERROR: receiver = {receiver}, only supports cube/vector"
-    assert isinstance(event_id, int) and (event_id >= 0) and (event_id < 16), f"event_id: {event_id} should be 0 ~ 15"
-    if sender == receiver:
-        raise ValueError(f'Unexpected pair: {sender} -> {receiver}, only supports cube -> vector or vector -> cube')
-    custom_op(_semantic.builder, "sync_block_set", sender=sender, event_id=event_id)
-
-
-@_tensor_member_fn
-@builtin
-def sync_block_wait(sender, receiver, event_id, _semantic=None):
-    import warnings
-
-    warnings.warn(
-        ("This method would be deprecated. Use al.sync_block_wait instead."),
-        DeprecationWarning,
-        stacklevel=1,
-    )
-    sender = _unwrap_if_constexpr(sender)
-    receiver = _unwrap_if_constexpr(receiver)
-    event_id = _unwrap_if_constexpr(event_id)
-    assert isinstance(sender, str) and (sender == "cube"
-                                        or sender == "vector"), f"ERROR: sender = {sender}, only supports cube/vector"
-    assert isinstance(receiver, str) and (receiver == "cube" or receiver
-                                          == "vector"), f"ERROR: receiver = {receiver}, only supports cube/vector"
-    assert isinstance(event_id, int) and (event_id >= 0) and (event_id < 16), f"event_id: {event_id} should be 0 ~ 15"
-    if sender == receiver:
-        raise ValueError(f'Unexpected pair: {sender} -> {receiver}, only supports cube -> vector or vector -> cube')
-    custom_op(_semantic.builder, "sync_block_wait", sender=sender, event_id=event_id)
 
 
 class parallel(range):

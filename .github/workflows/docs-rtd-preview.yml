@@ -9,16 +9,14 @@ name: Docs RTD Preview
 # The workflow only runs trusted inline JavaScript — no PR code is executed.
 
 on:
-  # Disabled: RTD preview no longer runs on PRs
-  # pull_request_target:
-  #   types: [opened, synchronize, reopened]
-  #   paths:
-  #     - 'docs/**'
-  #     - '**/*.rst'
-  #     - '**/*.md'
-  #     - '**/requirements*.txt'
-  #     - '**/setup.cfg'
-  #     - '.readthedocs.yaml'
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'docs/**'
+      - '*.md'
+      - '.github/workflows/scripts/readthedocs_checkout.sh'
+      - '.github/workflows/docs-rtd-preview.yml'
+      - '.readthedocs.yaml'
 
 permissions:
   contents: read

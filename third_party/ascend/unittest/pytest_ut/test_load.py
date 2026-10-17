@@ -114,3 +114,94 @@ def test_load_store_multi_d(param_list):
         shapes.append(1)
     triton_load_store_multi_d[(1, )](x0, y_actual, *blocks, *blocks, *shapes)
     test_common.validate_cmp(dtype, y_actual, y_expect)
+
+
+@triton.jit
+def triton_load_other_mask(in_ptr, out_ptr, N, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < N
+    x = tl.load(in_ptr + offs, mask=mask, other=mask)
+    tl.store(out_ptr + offs, x, mask=mask)
+
+
+@triton.jit
+def triton_load_other_scalar(in_ptr, out_ptr, N, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < N
+    x = tl.load(in_ptr + offs, mask=mask, other=0.0)
+    tl.store(out_ptr + offs, x, mask=mask)
+
+
+@triton.jit
+def triton_load_other_tensor(in_ptr, out_ptr, other_ptr, N, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = offs < N
+    other = tl.load(other_ptr + offs)
+    x = tl.load(in_ptr + offs, mask=mask, other=other)
+    tl.store(out_ptr + offs, x)
+
+
+@triton.jit
+def triton_load_other_tensor_discrete_mask(in_ptr, out_ptr, other_ptr, N, BLOCK: tl.constexpr):
+    offs = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    mask = (offs % 2) == 0
+    other = tl.load(other_ptr + offs)
+    x = tl.load(in_ptr + offs, mask=mask, other=other)
+    tl.store(out_ptr + offs, x)
+
+
+@pytest.mark.parametrize('param_list', [
+    ['float32', 1000, 128],
+    ['int8', 1000, 128],
+])
+def test_load_with_other_mask(param_list):
+    dtype, n, block = param_list
+    x = test_common.generate_tensor((n, ), dtype).npu()
+    out_mask = torch.empty(n, device='npu', dtype=getattr(torch, dtype))
+    out_zero = torch.empty(n, device='npu', dtype=getattr(torch, dtype))
+    grid = (triton.cdiv(n, block), )
+    triton_load_other_mask[grid](x, out_mask, n, block)
+    triton_load_other_scalar[grid](x, out_zero, n, block)
+    test_common.validate_cmp(dtype, out_mask, x)
+    test_common.validate_cmp(dtype, out_zero, x)
+    test_common.validate_cmp(dtype, out_mask, out_zero)
+
+
+@pytest.mark.parametrize('param_list', [
+    ['float32', 1000, 128],
+    ['int8', 1000, 128],
+])
+def test_load_with_other_tensor(param_list):
+    dtype, n, block = param_list
+    grid = (triton.cdiv(n, block), )
+    total = grid[0] * block
+    torch_dtype = getattr(torch, dtype)
+    x = test_common.generate_tensor((n, ), dtype).npu()
+    x_pad = torch.zeros(total, device='npu', dtype=torch_dtype)
+    x_pad[:n] = x
+    other = test_common.generate_tensor((total, ), dtype).npu()
+    out = torch.empty(total, device='npu', dtype=torch_dtype)
+    triton_load_other_tensor[grid](x_pad, out, other, n, block)
+    ref = other.clone()
+    ref[:n] = x
+    test_common.validate_cmp(dtype, out, ref)
+
+
+@pytest.mark.parametrize('param_list', [
+    ['float32', 1000, 128],
+    ['int8', 1000, 128],
+])
+def test_load_with_other_tensor_discrete_mask(param_list):
+    dtype, n, block = param_list
+    grid = (triton.cdiv(n, block), )
+    total = grid[0] * block
+    torch_dtype = getattr(torch, dtype)
+    x = test_common.generate_tensor((total, ), dtype).npu()
+    other = test_common.generate_tensor((total, ), dtype).npu()
+    out = torch.empty(total, device='npu', dtype=torch_dtype)
+    triton_load_other_tensor_discrete_mask[grid](x, out, other, n, block)
+    offs = torch.arange(total, device='npu')
+    mask = (offs % 2) == 0
+    ref = other.clone()
+    ref[mask] = x[mask]
+    test_common.validate_cmp(dtype, out, ref)

@@ -15,9 +15,11 @@ from triton.language.core import (
 from typing import Optional, Tuple, List, overload, Union
 from triton._C.libtriton import ir
 
+from ..utils import _deprecated
 from ._utils import _convert_elem_to_ir_value
 
 
+@_deprecated()
 @_tensor_member_fn
 @builtin
 def index_put(ptr: tensor, index: tensor, value: tensor, dim: int, index_boundary: int, end_offset: tuple,
@@ -109,6 +111,7 @@ def index_put(ptr: tensor, index: tensor, value: tensor, dim: int, index_boundar
                           _semantic.builder)
 
 
+@_deprecated()
 @_tensor_member_fn
 @builtin
 def gather_out_to_ub(src: tensor, index: tensor, index_boundary: int, dim: int, src_stride: tuple, end_offset: tuple,
@@ -197,6 +200,7 @@ def gather_out_to_ub(src: tensor, index: tensor, index_boundary: int, dim: int, 
                                  _semantic.builder)
 
 
+@_deprecated()
 @_tensor_member_fn
 @builtin
 def scatter_ub_to_out(ptr: tensor, value: tensor, index: tensor, index_boundary: int, dim: int, dst_stride: tuple,
@@ -390,13 +394,25 @@ def index_select_simd(src, dim, index, src_shape, src_offset, read_shape, _seman
             else:
                 newsrc_offset.append(s.handle if hasattr(s, 'handle') else s)
 
+        # Match tl.load's ABI for bool values: bool is stored as an i8 byte.
+        element_ty = src.type.element_ty
+        is_bool = element_ty == tl.int1
+        if is_bool:
+            src = _semantic.cast(src, tl.pointer_type(tl.int8, src.type.address_space))
+            element_ty = tl.int8
+
         # Create output type
         return_shape = [index.shape[0] if i == dim else read_shape[i] for i in range(ndim)]
-        element_ty = src.type.element_ty
         output_ty = tl.block_type(element_ty, return_shape)
         out = _builder.create_index_select_simd(src.handle, index.handle, dim, newsrc_shape, newsrc_offset, read_shape,
                                                 return_shape)
-        return tl.tensor(out, output_ty)
+        if is_bool:
+            out.set_attr("was_bool_to_int8", _builder.get_bool_attr(True))
+
+        ret = tl.tensor(out, output_ty)
+        if is_bool:
+            ret.was_bool_to_int8 = True
+        return ret
 
     dim = _unwrap_if_constexpr(dim)
 

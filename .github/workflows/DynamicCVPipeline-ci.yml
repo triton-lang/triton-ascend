@@ -3,9 +3,11 @@ name: DynamicCVPipeline PreCheck Tests
 on:
   pull_request:
     paths:
+      - '.github/workflows/DynamicCVPipeline-ci.yml'
       - 'third_party/ascend/lib/DynamicCVPipeline/**'
       - 'third_party/ascend/include/DynamicCVPipeline/**'
       - 'third_party/ascend/unittest/DynamicCVPipeline_ut/**'
+      - 'third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/ttadapter/**'
 
   workflow_dispatch:
     inputs:
@@ -141,3 +143,184 @@ jobs:
         with:
           name: run_result
           path: ${{ github.workspace }}/result/
+
+  mojo-compile-check:
+    if: >-
+      github.event_name == 'pull_request' ||
+      github.event_name == 'workflow_dispatch'
+    # This job only generates ttadapter MLIR. It cross-compiles for Ascend 950
+    # and does not launch kernels, so it does not need an NPU runner.
+    runs-on: linux-amd64-cpu-16
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:9.1.0-950-ubuntu22.04-py3.12-latest
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: 'true'
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/pull/{0}/merge', inputs.pr_id) || github.sha }}
+          path: pr
+
+      - name: Add git safe directories
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/pr"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE/mojo_opset"
+
+      - name: Checkout pinned mojo_opset
+        uses: actions/checkout@v4
+        with:
+          repository: XPU-Forces/mojo_opset
+          ref: 73f472fa6ed9fefc5fea2d5963dc1595fae905e6
+          path: mojo_opset
+          persist-credentials: false
+
+      - name: Validate Mojo sources and record revisions
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/result/mojo_ttadapter"
+          git -C "$GITHUB_WORKSPACE/mojo_opset" rev-parse HEAD \
+            | tee "$GITHUB_WORKSPACE/result/mojo_ttadapter/source_revision.txt"
+          git -C "$GITHUB_WORKSPACE/pr" rev-parse HEAD \
+            > "$GITHUB_WORKSPACE/result/mojo_ttadapter/pr_revision.txt"
+          python3.12 pr/third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/ttadapter/compile_ttadapter.py \
+            --batch pr/third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/ttadapter/dynamic_cv_cases_github_master.txt \
+            --root "$GITHUB_WORKSPACE/mojo_opset" \
+            --validate-sources --cube-cores 40 \
+            --output-dir "$GITHUB_WORKSPACE/result/mojo_ttadapter/source_check" \
+            --verbose
+
+      - name: Prepare Mojo import dependencies
+        shell: bash
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          set -euo pipefail
+          # This Mojo commit has no packaging metadata. Import it via PYTHONPATH.
+          # Pytest is used by Mojo's import hook; no pytest tests are executed.
+          python3.12 -m pip install pytest==8.3.5 einops==0.8.1
+          python3.12 -c 'import torch, torch_npu, numpy, packaging; print("Mojo import dependencies are available")'
+
+      - name: Cache Mojo build dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.triton/llvm
+            ~/.triton/json
+            ~/.triton/nvidia
+            ${{ github.workspace }}/.ccache
+          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/cmake/llvm-hash.txt', 'pr/cmake/json-version.txt', 'pr/cmake/nvidia-toolchain-version.json', 'pr/third_party/ascend/patch/llvm_patch_*.patch') }}
+
+      - name: Install Bisheng compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd pr
+          arch=$(uname -m)
+          filename=$(sed -n "s/^${arch}: //p" cmake/bisheng-version.txt | xargs)
+          checksum=$(sed -n "s/^${arch}_sha256: //p" cmake/bisheng-version.txt | xargs)
+          test -n "$filename"
+          test -n "$checksum"
+          curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
+            "https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/cann/${filename}" \
+            -o bisheng.run
+          echo "${checksum}  bisheng.run" | sha256sum -c -
+          chmod +x bisheng.run
+          ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
+          echo /usr/local/bisheng/tools/bishengir/bin >> "$GITHUB_PATH"
+
+      - name: Build and install PR wheel for Mojo check
+        shell: bash
+        env:
+          TRITON_BUILD_WITH_CCACHE: 'true'
+          TRITON_BUILD_WITH_CLANG_LLD: 'TRUE'
+          TRITON_DISABLE_LINE_INFO: '1'
+          CCACHE_COMPRESS: 'true'
+          CCACHE_DIR: ${{ github.workspace }}/.ccache
+          TRITON_BUILD_WITH_O1: 'true'
+          TRITON_BUILD_PROTON: 'OFF'
+          TRITON_BUILD_TD: 'OFF'
+          TRITON_WHEEL_NAME: triton-ascend
+          TRITON_APPEND_CMAKE_ARGS: '-DTRITON_BUILD_UT=OFF'
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          set -euo pipefail
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          mkdir -p "$CCACHE_DIR"
+          cd pr
+          if [ -f setup_ascend.py ]; then
+            setup_py=setup_ascend.py
+          elif [ -f setup.py ]; then
+            setup_py=setup.py
+          elif [ -f python/setup.py ]; then
+            cd python
+            setup_py=setup.py
+          else
+            echo 'ERROR: setup.py or setup_ascend.py not found' >&2
+            exit 1
+          fi
+          jobs=$(( $(nproc) / 3 ))
+          if [ "$jobs" -lt 1 ]; then jobs=1; fi
+          MAX_JOBS="$jobs" python3.12 "$setup_py" bdist_wheel --dist-dir="$GITHUB_WORKSPACE/pr/wheelhouse"
+          shopt -s nullglob
+          wheels=("$GITHUB_WORKSPACE"/pr/wheelhouse/*.whl)
+          if [ "${#wheels[@]}" -ne 1 ]; then
+            echo "ERROR: expected one PR wheel, found ${#wheels[@]}" >&2
+            exit 1
+          fi
+          python3.12 -m pip install --force-reinstall --no-deps "${wheels[0]}"
+
+      - name: Compile Mojo kernels and check DynamicCVPipeline
+        shell: bash
+        env:
+          MOJO_ASCEND_ARCH: a5
+          MOJO_OPSET_PLUGIN_AUTOLOAD: '0'
+          PYTHONPATH: ${{ github.workspace }}/mojo_opset
+        run: |
+          source /usr/local/Ascend/cann/set_env.sh
+          set -euo pipefail
+          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
+          python3.12 -m pip freeze > "$GITHUB_WORKSPACE/result/mojo_ttadapter/environment.txt"
+          python3.12 -c 'import triton; print("triton:", triton.__file__)' \
+            | tee "$GITHUB_WORKSPACE/result/mojo_ttadapter/compiler.txt"
+          echo 'target: Ascend950PR_9579 (explicit compile target)' \
+            | tee -a "$GITHUB_WORKSPACE/result/mojo_ttadapter/compiler.txt"
+          python3.12 pr/third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/ttadapter/compile_ttadapter.py \
+            --batch pr/third_party/ascend/unittest/Conversion/General/DynamicCVPipeline/ttadapter/dynamic_cv_cases_github_master.txt \
+            --root "$GITHUB_WORKSPACE/mojo_opset" \
+            --arch Ascend950PR_9579 \
+            --cube-cores 40 \
+            --output-dir "$GITHUB_WORKSPACE/result/mojo_ttadapter" \
+            --verbose 2>&1 | tee "$GITHUB_WORKSPACE/result/mojo_ttadapter/compile.log"
+
+      - name: Publish Mojo check summary
+        if: always()
+        shell: bash
+        run: |
+          python3.12 - <<'PY'
+          import csv
+          import os
+          from pathlib import Path
+
+          summary = Path(os.environ["GITHUB_WORKSPACE"]) / "result/mojo_ttadapter/summary.tsv"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as output:
+              output.write("Mojo commit: `73f472fa6ed9fefc5fea2d5963dc1595fae905e6`\n\n")
+              if summary.is_file():
+                  rows = list(csv.reader(summary.open(), delimiter="\t"))
+                  output.write("| " + " | ".join(rows[0]) + " |\n| --- | --- |\n")
+                  for row in rows[1:]:
+                      output.write("| " + " | ".join(row) + " |\n")
+              else:
+                  output.write("Compilation did not produce a summary; inspect the failed step.\n")
+          PY
+
+      - name: Upload Mojo compilation results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mojo-dynamic-cv-ttadapter
+          path: ${{ github.workspace }}/result/mojo_ttadapter/
+          if-no-files-found: warn

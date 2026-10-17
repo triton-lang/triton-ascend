@@ -247,6 +247,30 @@ def test_index_select_extension(src_shape, dim, indice_shape, dtype):
     test_common.validate_cmp(dtype, triton_cal, torch_ref)
 
 
+@pytest.mark.interpreter
+def test_index_select_extension_bool():
+    src_shape = (64, 128)
+    indices = torch.tensor([0, 7, 31, 63], dtype=torch.int32).npu()
+    x0 = test_common.generate_tensor(src_shape, "bool").npu()
+
+    out = torch.empty((len(indices), src_shape[1]), dtype=x0.dtype).npu()
+    index_select_extension_kernel[1, 1, 1](
+        x0,
+        indices,
+        out,
+        0,
+        other_numel=src_shape[0],
+        g_stride=src_shape[1],
+        indice_length=indices.numel(),
+        g_block=indices.numel(),
+        g_block_sub=indices.numel(),
+        other_block=src_shape[1],
+    )
+
+    torch_ref = torch_index_select(x0, 0, indices)
+    test_common.validate_cmp("bool", out, torch_ref)
+
+
 @pytest.mark.parametrize("src_shape, dim, indice_shape, dtype", INDEX_SELECT_TEST_CASES)
 def test_index_select_auto(src_shape, dim, indice_shape, dtype):
     """Test auto-lowering implementation using standard tl.load."""

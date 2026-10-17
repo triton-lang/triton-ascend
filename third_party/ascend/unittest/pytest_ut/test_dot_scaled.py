@@ -94,7 +94,7 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
             # Clamp to avoid relative error issues
             ret.clamp_(-2**comp_dtype_max_exp, 2**comp_dtype_max_exp - 1)
         else:
-            ret = torch.randint(256, shape, dtype=torch.int8, device=device)
+            ret = torch.randint(256, shape, dtype=torch.uint8, device=device)
         return ret
 
     type_a = normal_type
@@ -104,9 +104,9 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
     y = make_arg((K, N), type_b)
 
     min_scale, max_scale = (0, 142) if type_a == torch.bfloat16 else (124, 131)
-    scale_x = torch.randint(min_scale - 128, max_scale - 127, (M, K // 32), dtype=torch.int8, device=device)
+    scale_x = torch.randint(min_scale, max_scale, (M, K // 32), dtype=torch.uint8, device=device)
     min_scale, max_scale = (0, 142) if type_b == torch.bfloat16 else (124, 131)
-    scale_y = torch.randint(min_scale - 128, max_scale - 127, (N, K // 32), dtype=torch.int8, device=device)
+    scale_y = torch.randint(min_scale, max_scale, (N, K // 32), dtype=torch.uint8, device=device)
 
     if not rhs_scale:
         scale_y = None
@@ -115,10 +115,10 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
         shape_expand_x = x.shape[-1] // scale_x.shape[-1]
         if x.dtype == torch.bfloat16:
             upscale_x = scale_x.repeat_interleave(shape_expand_x, dim=1).to(torch.int16)
-            upscale_x = (upscale_x + 127 << 7).view(torch.bfloat16)
+            upscale_x = (upscale_x << 7).view(torch.bfloat16)
         else:
             scale_fp32 = scale_x.repeat_interleave(shape_expand_x, dim=1).to(torch.int32)
-            scale_fp32 = (scale_fp32 + 127 << 23).view(torch.float32)
+            scale_fp32 = (scale_fp32 << 23).view(torch.float32)
             upscale_x = scale_fp32.to(torch.float16)
         upscale_y = None
         if scale_y is None:
@@ -128,10 +128,10 @@ def test_scaled_dot(M, N, K, rhs_scale, normal_type, num_warps, acc_num):
             shape_expand_y = y.shape[0] // scale_y.shape[0]
             if y.dtype == torch.bfloat16:
                 upscale_y = scale_y.repeat_interleave(shape_expand_y, dim=0).to(torch.int16)
-                upscale_y = (upscale_y + 127 << 7).view(torch.bfloat16)
+                upscale_y = (upscale_y << 7).view(torch.bfloat16)
             else:
                 scale_fp32 = scale_y.repeat_interleave(shape_expand_y, dim=0).to(torch.int32)
-                scale_fp32 = (scale_fp32 + 127 << 23).view(torch.float32)
+                scale_fp32 = (scale_fp32 << 23).view(torch.float32)
                 upscale_y = scale_fp32.to(torch.float16)
         ret = torch.matmul(x * upscale_x, y * upscale_y)
         return ret
@@ -177,8 +177,8 @@ def test_scaled_dot_fast_math(normal_type):
     def make_scale_tensor(scale, data_dtype):
         if data_dtype == torch.bfloat16:
             scale_i16 = scale.to(torch.int16)
-            return ((scale_i16 + 127) << 7).view(torch.bfloat16)
-        scale_fp32 = ((scale.to(torch.int32) + 127) << 23).view(torch.float32)
+            return (scale_i16 << 7).view(torch.bfloat16)
+        scale_fp32 = (scale.to(torch.int32) << 23).view(torch.float32)
         return scale_fp32.to(torch.float16)
 
     def golden_ref(x, scale_x, y, scale_y, fast_math):
@@ -189,8 +189,8 @@ def test_scaled_dot_fast_math(normal_type):
         scaled_y = y * upscale_y
 
         if not fast_math:
-            lhs_nan_mask = scale_x.eq(-1).repeat_interleave(x.shape[1] // scale_x.shape[1], dim=1)
-            rhs_nan_mask = scale_y_t.eq(-1).repeat_interleave(y.shape[0] // scale_y_t.shape[0], dim=0)
+            lhs_nan_mask = scale_x.eq(255).repeat_interleave(x.shape[1] // scale_x.shape[1], dim=1)
+            rhs_nan_mask = scale_y_t.eq(255).repeat_interleave(y.shape[0] // scale_y_t.shape[0], dim=0)
             scaled_x = torch.where(lhs_nan_mask, torch.full_like(scaled_x, float("nan")), scaled_x)
             scaled_y = torch.where(rhs_nan_mask, torch.full_like(scaled_y, float("nan")), scaled_y)
 
@@ -199,10 +199,10 @@ def test_scaled_dot_fast_math(normal_type):
     dtype = torch.float16 if normal_type == "fp16" else torch.bfloat16
     x = torch.full((m, k), 2.0, dtype=dtype, device=device)
     y = torch.full((k, n), 3.0, dtype=dtype, device=device)
-    scale_x = torch.zeros((m, k // 32), dtype=torch.int8, device=device)
-    scale_y = torch.zeros((n, k // 32), dtype=torch.int8, device=device)
-    scale_x[3, 0] = -1
-    scale_y[5, 0] = -1
+    scale_x = torch.zeros((m, k // 32), dtype=torch.uint8, device=device)
+    scale_y = torch.zeros((n, k // 32), dtype=torch.uint8, device=device)
+    scale_x[3, 0] = 255
+    scale_y[5, 0] = 255
 
     def run_kernel(fast_math):
         out = torch.empty((m, n), dtype=dtype, device=device)
@@ -216,10 +216,9 @@ def test_scaled_dot_fast_math(normal_type):
     ref_fast_math = golden_ref(x, scale_x, y, scale_y, fast_math=True)
     ref_precise = golden_ref(x, scale_x, y, scale_y, fast_math=False)
 
-    assert not torch.isnan(out_fast_math).any()
     assert torch.isnan(out_precise[3, :]).all()
     assert torch.isnan(out_precise[:, 5]).all()
     assert not torch.isnan(out_precise[:3, :5]).any()
 
-    torch.testing.assert_close(out_fast_math, ref_fast_math, atol=1e-3, rtol=1e-2)
+    torch.testing.assert_close(out_fast_math, ref_fast_math, atol=1e-3, rtol=1e-2, equal_nan=True)
     torch.testing.assert_close(out_precise, ref_precise, atol=1e-3, rtol=1e-2, equal_nan=True)

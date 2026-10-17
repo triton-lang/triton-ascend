@@ -20,7 +20,7 @@ triton.language.minimum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用
 
 返回值：
-`x`：与输入x的shape相同的张量
+与输入 `x` 和 `y` 形状相同的张量
 
 ### 2.2 OP 规格
 

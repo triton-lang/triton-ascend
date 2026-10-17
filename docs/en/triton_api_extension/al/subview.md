@@ -36,7 +36,7 @@ Return value: `bl.buffer`
 
 ## 4. Constraints
 
-- Input parameters `size`, `offset`, and `stride` must be greater than 0 (`offset` may be 0) and cannot be negative.
+- Input parameters `size` and `stride` must be greater than 0. `offset` must be non-negative (>= 0) and cannot be negative.
 
 - The size of each dimension in `size` cannot exceed the size of the original buffer.
 

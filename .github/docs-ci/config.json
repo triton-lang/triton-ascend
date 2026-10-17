@@ -2,7 +2,7 @@
   "name": "triton-ascend docs check config",
   "config": {
     "base": {
-      "docPath": "^(?!.*menu).*$",
+      "docPath": "^(?!.*(?:menu|CONTRIBUTOR|MAINTAINERS)).*$",
       "markdownlintRemoteConfigUrl": ".github/docs-ci/markdownlint.config.json",
       "linkValidityCheckRemoteWhitelistUrl": ".github/docs-ci/url.whitelist.json",
       "resourceExistenceCheckRemoteWhitelistUrl": ".github/docs-ci/url.whitelist.json",

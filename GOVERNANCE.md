@@ -48,7 +48,7 @@ Triton-Ascend is an open-source project under the Triton community, with role ap
 - Actively participate in community code reviews, deliver at least one major feature, and maintain continuous high-quality contributions
 - Actively handle `Issues`, respond to inquiries, and participate in discussions
 - Made significant technical contributions to the project (such as core feature development, architectural design, performance optimization, etc.)
-- Demon good technical judgment and community collaboration skills
+- Demonstrate good technical judgment and community collaboration skills
 
 **Permissions**: Granted GitHub repository write permissions, including read, clone, and push code to the repository, core branch protection and merge permissions, release execution permissions, and management of `Issues` and `Pull Requests`.
 

@@ -53,7 +53,7 @@ public:
     // more specific layout rewrites so it cannot steal their proven access
     // patterns.  All three transformations share hacc.coalesce_factor/axis,
     // therefore a successful earlier rewrite makes this call a no-op.
-    RowCoalescing::rewriteRowCoalesce(module);
+    RowCoalescing::rewriteRowCoalesceForLayoutMerge(module);
 
     PassManager cleanup(&getContext(), module.getOperationName());
     cleanup.addPass(createCSEPass());

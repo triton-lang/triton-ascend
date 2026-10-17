@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/random_number_generation.rst

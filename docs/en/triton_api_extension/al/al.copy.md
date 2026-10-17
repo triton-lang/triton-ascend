@@ -2,8 +2,6 @@
 
 ## 1. Background
 
-Its functionality is similar to `copy_from_ub_to_l1`, with added UB-to-UB copy support. The original `copy_from_ub_to_l1` now carries a deprecation warning.
-
 Its functionality is similar to copy_from_ub_to_l1. Based on copy_from_ub_to_l1, it adds support for UB-to-UB copying. The original copy_from_ub_to_l1 has been updated to include a deprecation warning.
 
 ## 2. Interface Description

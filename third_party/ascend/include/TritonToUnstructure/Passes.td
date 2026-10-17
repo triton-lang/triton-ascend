@@ -12,12 +12,9 @@ def TritonToUnstructure : Pass<"triton-to-unstructure", "mlir::ModuleOp"> {
         Option<"compileOn91095", "compile-on-910-95",
             "bool", /*default*/"false",
             "compile on 910_95">,
-        Option<"forceSimtTemplate", "force-simt-template",
-            "bool", /*default*/"false",
-            "Deprecated alias for compile-mode=simd_simt_template">,
         Option<"compileMode", "compile-mode",
-            "std::string", /*default*/"\"simd\"",
-            "Compilation mode: simd, simd_simt, simd_simt_template">
+            "std::string", /*default*/"\"simd_simt_template\"",
+            "Compilation mode: simd, simd_simt_template (or unstructured_in_simt), simt_only">
     ];
 }
 
@@ -27,6 +24,9 @@ def BubbleUpOperation : Pass<"bubble-up-operation", "mlir::ModuleOp"> {
     let options = [
         Option<"enableAggressiveMode", "enable-aggressive-mode", "bool", "true",
            "Enable aggressive bubble up operation.">,
+        Option<"compileOn91095", "compile-on-910-95",
+            "bool", /*default*/"false",
+            "compile on 910_95">,
     ];
 }
 

@@ -1,4 +1,5 @@
 add_triton_library(TritonToLLVM
+  NormalizeDebugLineLocations.cpp
   TritonToLLVM.cpp
 
   DEPENDS

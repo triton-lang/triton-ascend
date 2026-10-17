@@ -15,15 +15,9 @@ def DiscreteMaskAccessConversion : Pass<"discrete-mask-access-conversion", "mlir
     Option<"compileOn91095", "compile-on-910-95",
         "bool", /*default*/"false",
         "compile on 910_95">,
-    Option<"forceSimtTemplate", "force-simt-template",
-        "bool", /*default*/"false",
-        "Deprecated alias for compile-mode=simd_simt_template">,
-    Option<"enableSyncBlockLock", "enable-sync-block-lock",
-        "bool", /*default*/"true",
-        "enable sync block lock/unlock in store">,
     Option<"compileMode", "compile-mode",
-        "std::string", /*default*/"\"simd\"",
-        "Compilation mode: simd, simd_simt, simd_simt_template">
+        "std::string", /*default*/"\"simd_simt_template\"",
+        "Compilation mode: simd, simd_simt_template (or unstructured_in_simt), simt_only">
   ];
 }
 

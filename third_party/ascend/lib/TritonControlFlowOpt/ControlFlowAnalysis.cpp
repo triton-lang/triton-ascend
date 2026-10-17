@@ -22,6 +22,7 @@
 
 #include "TritonControlFlowOpt/ControlFlowAnalysis.h"
 
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 
@@ -38,13 +39,56 @@ namespace {
 /// Control-flow kinds whose operand/result correspondence is understood by
 /// both the analyzer and the mechanical rewrite.
 static bool isSupportedControlFlow(Operation *op) {
-  return isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op);
+  return isa<scf::ForOp, scf::WhileOp, scf::IfOp, scope::ScopeOp>(op);
+}
+
+/// Scope rewriting deliberately supports only the frontend's single-block,
+/// operand-free form. Validating the complete shape here keeps the later
+/// rewrite mechanical and prevents partially rewriting an unfamiliar Scope
+/// region contract.
+static FailureOr<scope::ReturnOp>
+getSupportedScopeReturn(scope::ScopeOp scopeOp) {
+  if (scopeOp->getNumOperands() != 0 || scopeOp->getNumRegions() != 1)
+    return failure();
+
+  Region &region = scopeOp.getBodyRegion();
+  if (!llvm::hasSingleElement(region))
+    return failure();
+  Block &body = region.front();
+  if (body.getNumArguments() != 0)
+    return failure();
+
+  auto returnOp = dyn_cast<scope::ReturnOp>(body.getTerminator());
+  if (!returnOp || returnOp.getNumOperands() != scopeOp.getNumResults())
+    return failure();
+  for (auto [operand, result] :
+       llvm::zip(returnOp.getOperands(), scopeOp.getResults())) {
+    if (operand.getType() != result.getType())
+      return failure();
+  }
+  return returnOp;
+}
+
+/// Returns true when an identity can be reused while the defining Scope is
+/// replaced. Internal values disappear with the old region and therefore must
+/// be represented by an expanded result instead.
+static bool isDefinedOutsideScope(scope::ScopeOp scopeOp, Value value) {
+  if (!value)
+    return false;
+  if (Operation *definingOp = value.getDefiningOp())
+    return !scopeOp->isAncestor(definingOp);
+
+  auto blockArgument = dyn_cast<BlockArgument>(value);
+  if (!blockArgument)
+    return false;
+  Operation *owner = blockArgument.getOwner()->getParentOp();
+  return owner != scopeOp && (!owner || !scopeOp->isAncestor(owner));
 }
 
 static void setResultIdentity(AnalyzedValue &value, Value result,
                               ArrayRef<unsigned> componentIndices) {
   // A transferred component is represented by the SCF result outside the op;
-  // invariant components retain their incoming symbolic identities.
+  // non-transferred components retain their incoming symbolic identities.
   for (unsigned index : componentIndices)
     value.components[index].identity =
         ComponentIdentity::fromValue(result, index);
@@ -53,7 +97,8 @@ static void setResultIdentity(AnalyzedValue &value, Value result,
 static ControlFlowSlotAnalysis
 makeSlotAnalysis(unsigned oldIndex, unsigned componentCount,
                  ArrayRef<unsigned> componentIndices,
-                 SmallVector<Type> componentTypes) {
+                 SmallVector<Type> componentTypes,
+                 SmallVector<Attribute> resultAttributes) {
   // Preserve the full classification for future Recomputed support while also
   // storing a compact ordered list used by the current signature rewrite.
   ControlFlowSlotAnalysis slot;
@@ -64,6 +109,7 @@ makeSlotAnalysis(unsigned oldIndex, unsigned componentCount,
   slot.componentIndices.append(componentIndices.begin(),
                                componentIndices.end());
   slot.componentTypes = std::move(componentTypes);
+  slot.resultAttributes = std::move(resultAttributes);
   return slot;
 }
 
@@ -120,8 +166,8 @@ void ControlFlowAnalysisContext::bindRegionArgument(
     Value argument, const AnalyzedValue &initial,
     ArrayRef<unsigned> componentIndices) {
   // Only candidate loop components acquire a new identity at region entry.
-  // Policy-owned invariants and non-carried components remain traceable to the
-  // initial descriptor and can therefore be checked at the backedge.
+  // Policy-owned non-carried components remain traceable to the initial
+  // descriptor and can therefore be checked at the backedge.
   AnalyzedValue argumentState = initial;
   for (unsigned index : componentIndices)
     argumentState.components[index].identity =
@@ -231,20 +277,25 @@ ControlFlowAnalysisContext::analyzeFor(Operation *operation) {
       return failure();
 
     AnalyzedValue resultState = *initialStates[index];
-    if (!transferred->empty()) {
-      // The ordered component/type list is the complete contract consumed by
-      // rewriteForOp; rewrite does not rediscover its signature on the fly.
-      FailureOr<SmallVector<Type>> types =
-          getTransferredTypes(*initialStates[index], *next, *transferred);
-      if (failed(types))
-        return failure();
-      for (auto [component, type] : llvm::zip(*transferred, *types))
-        resultState.components[component].type = type;
-      result.slots.push_back(makeSlotAnalysis(index,
-                                              resultState.components.size(),
-                                              *transferred, std::move(*types)));
-      setResultIdentity(resultState, forOp.getResult(index), *transferred);
-    }
+    // A decomposition-target slot remains in the plan even when every
+    // component is invariant. An empty component list means remove the old
+    // pointer slot and rebuild it from the initial descriptor without adding
+    // replacement loop operands/results.
+    FailureOr<SmallVector<Type>> types =
+        getTransferredTypes(*initialStates[index], *next, *transferred);
+    if (failed(types))
+      return failure();
+    FailureOr<SmallVector<Attribute>> resultAttributes =
+        policy.mergeControlFlowAttributes(*initialStates[index], *next);
+    if (failed(resultAttributes))
+      return failure();
+    resultState.attributes = *resultAttributes;
+    for (auto [component, type] : llvm::zip(*transferred, *types))
+      resultState.components[component].type = type;
+    result.slots.push_back(
+        makeSlotAnalysis(index, resultState.components.size(), *transferred,
+                         std::move(*types), std::move(*resultAttributes)));
+    setResultIdentity(resultState, forOp.getResult(index), *transferred);
     analyzedValues[forOp.getResult(index)] = std::move(resultState);
   }
 
@@ -347,24 +398,37 @@ ControlFlowAnalysisContext::analyzeWhile(Operation *operation) {
     llvm::sort(transferred);
 
     AnalyzedValue resultState = *initialStates[index];
-    if (!transferred.empty()) {
-      FailureOr<SmallVector<Type>> types = getTransferredTypes(
-          *initialStates[index], *conditionStates[index], transferred);
-      if (failed(types))
+    FailureOr<SmallVector<Type>> types = getTransferredTypes(
+        *initialStates[index], *conditionStates[index], transferred);
+    if (failed(types))
+      return failure();
+    FailureOr<SmallVector<Attribute>> resultAttributes =
+        policy.mergeControlFlowAttributes(*initialStates[index],
+                                          *conditionStates[index]);
+    if (failed(resultAttributes))
+      return failure();
+    for (auto [component, type] : llvm::zip(transferred, *types)) {
+      FailureOr<Type> joined =
+          policy.joinComponentTypes(type, next->components[component].type);
+      if (failed(joined))
         return failure();
-      for (auto [component, type] : llvm::zip(transferred, *types)) {
-        FailureOr<Type> joined =
-            policy.joinComponentTypes(type, next->components[component].type);
-        if (failed(joined))
-          return failure();
-        type = *joined;
-        resultState.components[component].type = type;
-      }
-      result.slots.push_back(makeSlotAnalysis(index,
-                                              resultState.components.size(),
-                                              transferred, std::move(*types)));
-      setResultIdentity(resultState, whileOp.getResult(index), transferred);
+      type = *joined;
+      resultState.components[component].type = type;
     }
+    // The initial/condition schema is already the fixed point for the common
+    // analyzer. TensorPtr policy metadata is monotone and is joined again
+    // against the yielded state below.
+    AnalyzedValue conditionMergedState = resultState;
+    conditionMergedState.attributes = *resultAttributes;
+    FailureOr<SmallVector<Attribute>> finalAttributes =
+        policy.mergeControlFlowAttributes(conditionMergedState, *next);
+    if (failed(finalAttributes))
+      return failure();
+    resultState.attributes = *finalAttributes;
+    result.slots.push_back(
+        makeSlotAnalysis(index, resultState.components.size(), transferred,
+                         std::move(*types), std::move(*finalAttributes)));
+    setResultIdentity(resultState, whileOp.getResult(index), transferred);
     analyzedValues[whileOp.getResult(index)] = std::move(resultState);
   }
 
@@ -416,19 +480,90 @@ ControlFlowAnalysisContext::analyzeIf(Operation *operation) {
       return failure();
 
     AnalyzedValue resultState = *thenState;
-    if (!transferred->empty()) {
-      FailureOr<SmallVector<Type>> types =
-          getTransferredTypes(*thenState, *elseState, *transferred);
-      if (failed(types))
-        return failure();
-      for (auto [component, type] : llvm::zip(*transferred, *types))
-        resultState.components[component].type = type;
-      result.slots.push_back(makeSlotAnalysis(index,
-                                              resultState.components.size(),
-                                              *transferred, std::move(*types)));
-      setResultIdentity(resultState, opResult, *transferred);
-    }
+    FailureOr<SmallVector<Type>> types =
+        getTransferredTypes(*thenState, *elseState, *transferred);
+    if (failed(types))
+      return failure();
+    FailureOr<SmallVector<Attribute>> resultAttributes =
+        policy.mergeControlFlowAttributes(*thenState, *elseState);
+    if (failed(resultAttributes))
+      return failure();
+    resultState.attributes = *resultAttributes;
+    for (auto [component, type] : llvm::zip(*transferred, *types))
+      resultState.components[component].type = type;
+    result.slots.push_back(
+        makeSlotAnalysis(index, resultState.components.size(), *transferred,
+                         std::move(*types), std::move(*resultAttributes)));
+    setResultIdentity(resultState, opResult, *transferred);
     analyzedValues[opResult] = std::move(resultState);
+  }
+
+  return result;
+}
+
+//===----------------------------------------------------------------------===//
+// scope.scope schema analysis
+//===----------------------------------------------------------------------===//
+
+FailureOr<ControlFlowOpAnalysis>
+ControlFlowAnalysisContext::analyzeScope(Operation *operation) {
+  auto scopeOp = cast<scope::ScopeOp>(operation);
+  FailureOr<scope::ReturnOp> returnOp = getSupportedScopeReturn(scopeOp);
+  if (failed(returnOp))
+    return failure();
+
+  ControlFlowOpAnalysis result;
+  Block &body = scopeOp.getBodyRegion().front();
+  if (failed(analyzeNestedOperations(&body, result.hasNestedRewrite)))
+    return failure();
+
+  // Scope has no incoming region argument and no backedge. Each pointer result
+  // is therefore described by the value returned from the body. The policy
+  // chooses the components that become explicit Scope results; every omitted
+  // component must already name an SSA value defined outside this Scope.
+  for (auto [index, scopeResult] : llvm::enumerate(scopeOp.getResults())) {
+    if (!policy.isDecompositionTarget(scopeResult))
+      continue;
+
+    FailureOr<AnalyzedValue> returned =
+        analyzeValue(returnOp->getOperand(index));
+    if (failed(returned) || returned->originalType != scopeResult.getType())
+      return failure();
+    FailureOr<SmallVector<unsigned>> candidates =
+        policy.getScopeCandidateComponents(*returned);
+    if (failed(candidates))
+      return failure();
+
+    SmallVector<bool> isCandidate(returned->components.size(), false);
+    std::optional<unsigned> previousIndex;
+    for (unsigned componentIndex : *candidates) {
+      if (componentIndex >= returned->components.size() ||
+          (previousIndex && componentIndex <= *previousIndex))
+        return failure();
+      isCandidate[componentIndex] = true;
+      previousIndex = componentIndex;
+    }
+
+    for (auto [componentIndex, component] :
+         llvm::enumerate(returned->components)) {
+      if (isCandidate[componentIndex])
+        continue;
+      if (component.identity.kind != ComponentIdentity::Kind::Value ||
+          !isDefinedOutsideScope(scopeOp, component.identity.value))
+        return failure();
+    }
+
+    SmallVector<Type> componentTypes;
+    componentTypes.reserve(candidates->size());
+    for (unsigned componentIndex : *candidates)
+      componentTypes.push_back(returned->components[componentIndex].type);
+
+    AnalyzedValue resultState = *returned;
+    result.slots.push_back(
+        makeSlotAnalysis(index, resultState.components.size(), *candidates,
+                         std::move(componentTypes), resultState.attributes));
+    setResultIdentity(resultState, scopeResult, *candidates);
+    analyzedValues[scopeResult] = std::move(resultState);
   }
 
   return result;
@@ -454,6 +589,8 @@ ControlFlowAnalysisContext::analyzeControlFlowOp(Operation *op) {
     result = analyzeWhile(op);
   else if (isa<scf::IfOp>(op))
     result = analyzeIf(op);
+  else if (isa<scope::ScopeOp>(op))
+    result = analyzeScope(op);
 
   operationsBeingAnalyzed.erase(op);
   if (failed(result))

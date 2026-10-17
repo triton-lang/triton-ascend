@@ -1,6 +1,6 @@
-// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt' %s --split-input-file | FileCheck %s
+// RUN: triton-opt --triton-to-structured '--discrete-mask-access-conversion=compile-on-910-95=True compile-mode=simd_simt_template' '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' %s --split-input-file | FileCheck %s
 
-// tt.load -> ascend.unstructured_load in simd_simt mode
+// tt.load -> ascend.unstructured_load
 tt.func public @triton_indirect_load_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<i64>, %arg2: !tt.ptr<f32>, %arg3: i32) attributes {noinline = false} {
   %cst = arith.constant dense<32> : tensor<8x1xi32>
   %c8_i32 = arith.constant 8 : i32
@@ -43,7 +43,7 @@ tt.func public @triton_indirect_load_kernel(%arg0: !tt.ptr<f32>, %arg1: !tt.ptr<
 
 // -----
 
-// Block-pointer load with mayDiscretememaccess must not use SIMT unstructured_load.
+// Block-pointer load with mayDiscretememaccess must not use SIMT indirect_load.
 tt.func public @block_ptr_load_skip_indirect(%arg0: !tt.ptr<f32>) -> tensor<32x32xf32> attributes {noinline = false} {
   %c32_i64 = arith.constant 32 : i64
   %c1_i64 = arith.constant 1 : i64

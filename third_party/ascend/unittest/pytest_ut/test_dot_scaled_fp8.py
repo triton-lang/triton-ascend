@@ -100,8 +100,8 @@ def test_2D_scaled_dot_chain(M, N, K, dtype):
     lhs_format = dtype[3:]
     rhs_format = lhs_format
 
-    lhs = test_common.generate_tensor_fp4_fp8(shape=(M, K), dtype=dtype).npu()
-    rhs = test_common.generate_tensor_fp4_fp8(shape=(K, N), dtype=dtype).npu()
+    lhs = test_common.generate_tensor_fp8(shape=(M, K), dtype=dtype).npu()
+    rhs = test_common.generate_tensor_fp8(shape=(K, N), dtype=dtype).npu()
     lhs_scale = torch.randint(low=110, high=128, size=(M, K // 32), dtype=torch.int8).npu()
     rhs_scale = torch.randint(low=110, high=128, size=(N, K // 32), dtype=torch.int8).npu()
 

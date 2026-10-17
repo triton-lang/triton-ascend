@@ -23,17 +23,40 @@ Triton-Ascend是面向昇腾平台构建的Triton编译框架，旨在让Triton�
 Tag遵循以下格式：<br/>
 `{triton-ascend版本}-{CANN版本}-{torch_npu版本}-{适用产品}-<操作系统>-<python版本>`
 
-
 | 字段              | 示例值                        |
 |-----------------|----------------------------|
-| triton-ascend版本 | 3.2.1                      |
-| CANN版本          | cann9.0.0                  |
-| torch_npu版本     | torch_npu2.7.1.post4       |
+| triton-ascend版本 | 3.2.2                      |
+| CANN版本          | cann9.0.0, cann9.1.0       |
+| torch_npu版本     | torch_npu2.7.1.post8       |
 | 适用产品            | 910b、a3、950                |
-| 操作系统            | ubuntu22.04、openeuler24.03 |
+| 操作系统            | ubuntu24.04、openeuler24.03 |
 | python版本        | py3.11                     |
 
 ## Triton-Ascend 镜像
+
+### Release 3.2.2
+
+#### 镜像内关键组件
+
+| 组件              | 版本          |
+|-----------------|-------------|
+| Triton-Ascend   | 3.2.2       |
+| CANN            | 9.1.0       |
+| Torch-NPU       | 2.7.1.post8 |
+
+#### 镜像列表
+
+| 镜像标签                                                            | Dockerfile                                                                                                        | 镜像下载命令                                                                                            |
+|-----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11       | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11/Dockerfile) | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11       |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11    | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11/Dockerfile)                             | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11    |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11 | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11/Dockerfile)                          | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11 |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11         | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11/Dockerfile)                                  | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11         |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11      | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11/Dockerfile)                               | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11      |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11   | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11/Dockerfile)                            | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11   |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11        | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11/Dockerfile)                                 | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11        |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11     | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11/Dockerfile)                              | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11     |
+| 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11  | [Dockerfile](3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11/Dockerfile)                           | docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11  |
 
 ### Release 3.2.1
 
@@ -43,7 +66,7 @@ Tag遵循以下格式：<br/>
 |-----------------|-------------|
 | Triton-Ascend   | 3.2.1       |
 | CANN            | 9.0.0       |
-| Torch-npu       | 2.7.1.post4 |
+| Torch-NPU       | 2.7.1.post4 |
 
 #### 镜像列表
 
@@ -65,7 +88,7 @@ Tag遵循以下格式：<br/>
 
 ```bash
 # 假设您的NPU设备型号是A3,且设备安装在/dev/davinci1上，并且您的NPU驱动程序安装在/usr/local/Ascend上：
-docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host --privileged \
+docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
 --device=/dev/davinci1 \
@@ -84,7 +107,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container --net=host -
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /etc/ascend_install.info:/etc/ascend_install.info \
 -v /home:/home \
-quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11 \
+quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11 \
 /bin/bash
 
 ```
@@ -97,7 +120,7 @@ quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/arm64 \
--t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-aarch64 \
+-t triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11-aarch64 \
 -f Dockerfile .
 ```
 
@@ -107,7 +130,7 @@ docker build \
 docker build \
 --network host \
 --build-arg TARGETPLATFORM=linux/amd64 \
--t triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntun22.04-py3.11-x86_64 \
+-t triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11-x86_64 \
 -f Dockerfile .
 ```
 
@@ -115,7 +138,7 @@ docker build \
 
 ```bash
 # 以triton-ascend镜像为基础镜像，叠加用户软件
-FROM quay.io/ascend/triton:3.2.1-cann9.0.0-torch_npu2.7.1.post4-a3-ubuntu22.04-py3.11
+FROM quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11
 RUN apt update -y && \
     apt install wget \
     ...
@@ -131,5 +154,5 @@ RUN apt update -y && \
 
 # 许可证
 
-查看镜像中包含的CANN、Torch-npu、Triton-Ascend软件的[许可证信息](https://www.hiascend.com/zh/software/protocol)。<br/>
+查看镜像中包含的CANN、Torch-NPU、Triton-Ascend软件的[许可证信息](https://www.hiascend.com/zh/software/protocol)。<br/>
 与所有容器镜像一样，预装软件包（Python、系统库等）可能受其自身许可证约束。

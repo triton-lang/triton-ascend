@@ -23,24 +23,39 @@
 #include <queue>
 
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Interfaces/LoopLikeInterface.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Utils/Util.h"
 
@@ -158,6 +173,30 @@ void OpClassifierPass::markCube(Operation *op) {
   }
 }
 
+static bool isExtractedLoadStoreRelated(Operation *op) {
+  if (!op)
+    return false;
+  return llvm::TypeSwitch<Operation *, bool>(op)
+      .Case([](bufferization::ToTensorOp toTensorOp) {
+        return isExtractedLoadStoreRelated(
+            toTensorOp.getBuffer().getDefiningOp());
+      })
+      .Case([](memref::AllocOp allocOp) {
+        Value memref = allocOp.getMemref();
+        for (auto user : memref.getUsers()) {
+          auto forOp = user->getParentOfType<scf::ForOp>();
+          if (forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+            return true;
+        }
+        return false;
+      })
+      .Case([](ViewLikeOpInterface viewOp) {
+        return isExtractedLoadStoreRelated(
+            viewOp.getViewSource().getDefiningOp());
+      })
+      .Default([](auto) { return false; });
+}
+
 // ============================================================================
 // Pattern: to_tensor → matmul (Upstream)
 // ============================================================================
@@ -184,18 +223,22 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
   if (!toTensorOp)
     return;
 
-  // special case: implicit transpose
+  // special case: implicit transpose -> remains vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
                                    kMayImplicitTransposeWithLastAxis)) {
+    return;
+  }
+
+  // special case: ExtractedLoadOrStore -> remains vector
+  if (isExtractedLoadStoreRelated(toTensorOp)) {
     return;
   }
 
   markCube(toTensorOp);
   cubeSeeds.push_back(toTensorOp);
 
-  // Also mark the memref allocation as CUBE
   Value memref = toTensorOp.getBuffer();
-
+  // Also mark the memref allocation as CUBE
   if (Operation *memrefDef = memref.getDefiningOp()) {
     markCube(memrefDef);
     cubeSeeds.push_back(memrefDef);
@@ -241,7 +284,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 
   // Helper lambda to check if an operand's defining op qualifies for CUBE seed
   auto shouldMarkCubeSeed = [](Operation *opDef) -> bool {
-    if (!opDef)
+    if (!opDef || isExtractedLoadStoreRelated(opDef))
       return false;
     return (isa<bufferization::BufferizationDialect>(opDef->getDialect()) &&
             !isa<bufferization::AllocTensorOp>(opDef)) ||
@@ -251,24 +294,18 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
   // Check input tensor
   auto operands = transposeOp->getOperands();
   for (const auto &op : operands) {
-    if (shouldMarkCubeSeed(op.getDefiningOp()) &&
-        !utils::getAnnotateOpWithAttr(
-            op, hivm::kMayImplicitTransposeWithLastAxis)) {
-      markCube(op.getDefiningOp());
-      cubeSeeds.push_back(op.getDefiningOp());
-      break; // No need to check other operands, one is enough to seed the
-             // transpose as CUBE
+    auto defOp = op.getDefiningOp();
+    if (!shouldMarkCubeSeed(defOp) ||
+        utils::getAnnotateOpWithAttr(op,
+                                     hivm::kMayImplicitTransposeWithLastAxis)) {
+      continue;
     }
-  }
-
-  // Check outs (DpsInits)
-  auto outs = transposeOp.getDpsInits();
-  for (const auto &out : outs) {
-    if (shouldMarkCubeSeed(out.getDefiningOp())) {
-      markCube(out.getDefiningOp());
-      cubeSeeds.push_back(out.getDefiningOp());
-      break;
+    if (llvm::isa<bufferization::ToTensorOp>(defOp)) {
+      matchToTensorPattern(defOp);
+      continue;
     }
+    markCube(defOp);
+    cubeSeeds.push_back(defOp);
   }
 }
 
@@ -754,6 +791,10 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
                       << ": inside linalg block\n");
     return true;
   }
+  if (isExtractedLoadStoreRelated(op)) {
+    LOG_DEBUG("skip " << *op << ": Extracted Load/Store Related");
+    return true;
+  }
   return false;
 }
 
@@ -1037,6 +1078,26 @@ int OpClassifierPass::propagateVectorUpstream() {
 
 namespace {
 
+Value getAliasSource(Value val) {
+  auto *op = val.getDefiningOp();
+  if (!op) {
+    return nullptr;
+  }
+  return llvm::TypeSwitch<Operation *, Value>(op)
+      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+      .Case([](bufferization::ToTensorOp totensorOp) {
+        return totensorOp.getBuffer();
+      })
+      .Default([](auto) { return nullptr; });
+}
+
+Value getViewSource(Value val) {
+  while (auto source = getAliasSource(val)) {
+    val = source;
+  }
+  return val;
+}
+
 // A loader loop may only contain data-movement and (scalar) index computation.
 // Any tensor-producing compute op means the loop does real vector work and must
 // not be swallowed into the cube pipe.
@@ -1056,13 +1117,36 @@ bool isDisqualifyingLoaderOp(Operation *op) {
       }
     }
   }
+  if (auto memInt = llvm::dyn_cast<MemoryEffectOpInterface>(op)) {
+    // No matmul - must not be store to gm
+    llvm::SmallVector<MemoryEffects::EffectInstance> effects;
+    memInt.getEffects(effects);
+    for (auto effect : effects) {
+      Value val = effect.getValue();
+      if (!val || !isa<MemoryEffects::Write>(effect.getEffect())) {
+        continue;
+      }
+      val = getViewSource(val);
+      if (auto barg = llvm::dyn_cast<BlockArgument>(val)) {
+        if (llvm::isa<func::FuncOp>(barg.getOwner()->getParentOp())) {
+          return true;
+        }
+      }
+    }
+  }
   return false;
 }
 
 } // namespace
 
 bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
+  if (forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+    return false;
+
   // Every result must be live and used only by CUBE consumers
+  if (forOp.getNumResults() == 0) {
+    return false;
+  }
   for (Value result : forOp.getResults()) {
     for (Operation *user : result.getUsers()) {
       if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
@@ -1121,7 +1205,7 @@ markLoopBodyAsCube(Operation *loop, Block *body,
   opCoreTypes[loop] = OP_CUBE_ONLY;
 }
 
-int OpClassifierPass::penetrateCubeIntoForLoops() {
+llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
   // Collect first so recoloring earlier loops cannot perturb the scan.
   // Use a combined walk to collect both ForOps and WhileOps
   llvm::SmallVector<Operation *> loaderLoops;
@@ -1140,7 +1224,7 @@ int OpClassifierPass::penetrateCubeIntoForLoops() {
       markLoopBodyAsCube(loop, body, opCoreTypes);
   }
 
-  return 0;
+  return llvm::success();
 }
 
 // ============================================================================
@@ -1502,7 +1586,7 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 }
 
 // ============================================================================
-// Step 6: CUBE_AND_VECTOR Operation Handling
+// Step 7: CUBE_AND_VECTOR Operation Handling
 // ============================================================================
 // Problem: an operation (e.g., linalg.fill) is used by both CUBE users
 // (linalg.matmul) and VECTOR users (arith.addf) simultaneously.
@@ -1658,7 +1742,7 @@ int OpClassifierPass::handleCubeAndVector() {
 }
 
 // ============================================================================
-// Step 7: Stamp Core Type to IR
+// Step 9: Stamp Core Type to IR
 // ============================================================================
 
 int OpClassifierPass::stampToIR() {
@@ -1707,6 +1791,90 @@ int OpClassifierPass::stampToIR() {
   return 0;
 }
 
+// ============================================================================
+// Step 1: Mark Synchronization Op
+// ============================================================================
+llvm::LogicalResult OpClassifierPass::markSynchronizationOp() {
+  ModuleOp module = getOperation();
+  CVPipeline::ComputeBlockIdManager bm(module);
+
+  for (Operation *op : allOps) {
+    if (!isSyncOp(op)) {
+      continue;
+    }
+    if (isa<gpu::BarrierOp>(op)) {
+      setCoreType(op, OP_CUBE_AND_VECTOR);
+      LLVM_DEBUG(DBGS() << "Barrier classified as CUBE_AND_VECTOR: " << *op
+                        << "\n");
+    }
+    // Pre-existing hivm.sync_block_set/wait carry an explicit tcore_type
+    // operand.
+    else if (isa<hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp>(op)) {
+      auto tcoreAttr = op->getAttrOfType<hivm::TCoreTypeAttr>("tcore_type");
+      if (!tcoreAttr) {
+        continue;
+      }
+      switch (tcoreAttr.getTcoretype()) {
+      case hivm::TCoreType::CUBE:
+        setCoreType(op, OP_CUBE_ONLY);
+        break;
+      case hivm::TCoreType::VECTOR:
+        setCoreType(op, OP_VECTOR_ONLY);
+        break;
+      default:
+        // CUBE_OR_VECTOR / CUBE_AND_VECTOR are not produced by the sync
+        // frontend; let the default-VECTOR sweep decide.
+        break;
+      }
+      LOG_DEBUG("sync block set/wait classified by tcore_type: " << *op
+                                                                 << "\n");
+    } else {
+      // Pre-existing hivm.sync_block_all carry an explicit SyncBlockMode
+      // attribute Its core type is decided by this attribute
+      auto syncBlock = dyn_cast<hivm::SyncBlockOp>(op);
+      if (!syncBlock) {
+        continue;
+      }
+      switch (syncBlock.getSyncBlockModeAttr().getSyncMode()) {
+      case hivm::SyncBlockMode::ALL_CUBE:
+        // stamped as "CUBE" by stampToIR
+        setCoreType(op, OP_CUBE_ONLY);
+        break;
+      case hivm::SyncBlockMode::ALL_VECTOR:
+        [[fallthrough]];
+      case hivm::SyncBlockMode::ALL_SUB_VECTOR:
+        // stamped as "VECTOR" by stampToIR
+        setCoreType(op, OP_VECTOR_ONLY);
+        break;
+      case hivm::SyncBlockMode::ALL:
+        // handleCubeAndVector splits it into a CUBE copy + a VECTOR copy that
+        // keep the same block id; the degrade pass re-pairs them by block id.
+        setCoreType(op, OP_CUBE_AND_VECTOR);
+        break;
+      default:
+        // BARRIER_CUBE / BARRIER_VECTOR are not planned by this pipeline.
+        break;
+      }
+    }
+
+    LOG_DEBUG("sync_block_all classified by mode: " << *op << "\n");
+
+    // Give every debug barrier / sync block its own unique block id so the sync
+    // ops lowered from it inherit a block id that no other op shares. Sync ops
+    // that OpClassifier already stamped (e.g. hivm.sync_block_all) keep their
+    // id; markOpBlockId would fail on them because they are already recorded.
+    if (llvm::failed(bm.markOpBlockId(op))) {
+      return failure();
+    }
+    LOG_DEBUG("======== Assigned unique block_id for synchronization op "
+              << *op << "\n");
+    op->setAttr(CVPipeline::kExternalSync,
+                IntegerAttr::get(IntegerType::get(op->getContext(), 32), 1));
+  }
+
+  return success();
+}
+
 // Run the pass
 void OpClassifierPass::runOnOperation() {
   ModuleOp module = getOperation();
@@ -1728,50 +1896,55 @@ void OpClassifierPass::runOnOperation() {
   // Initialize the pass
   initializePass(module);
 
-  // Step 1: Pattern match around each linalg.matmul to find CUBE seeds
+  // Step 1: Mark synchronization ops at the very beginning
+  if (failed(markSynchronizationOp())) {
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step 2: Pattern match around each linalg.matmul to find CUBE seeds
   if (patternMatchCUBE() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 2: CUBE upstream BFS from seed loads
+  // Step 3: CUBE upstream BFS from seed loads
   if (propagateCubeUpstream() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 3: Penetrate CUBE coloring into pure loader for-loops.
-  if (CVPipeline::isCubeBlockMergeEnabled() &&
-      penetrateCubeIntoForLoops() != 0) {
+  // Step 4: Penetrate CUBE coloring into pure loader for-loops.
+  if (penetrateCubeIntoForLoops().failed()) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 4: Mark remaining operations as VECTOR
+  // Step 5: Mark remaining operations as VECTOR
   if (markRemainingAsVector() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 5: VECTOR upstream BFS
+  // Step 6: VECTOR upstream BFS
   if (propagateVectorUpstream() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 6: Handle CUBE_AND_VECTOR operations
+  // Step 7: Handle CUBE_AND_VECTOR operations
   if (handleCubeAndVector() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 7: Process SCF yield results
+  // Step 8: Process SCF yield results
   if (handleSCFYield() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }
 
-  // Step 8: Stamp to IR
+  // Step 9: Stamp to IR
   if (stampToIR() != 0) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;

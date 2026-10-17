@@ -20,7 +20,7 @@ def triton_maximum(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBL
         tl.store(out_ptr0 + x_index, tmp2, xmask)
 
 
-def test_maximum(param_list):
+def test_maximum():
     param_list = ['float32', (2, 4096, 8), 2, 32768, 1024]
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x0 = torch.randn(size=shape, dtype=eval('torch.' + dtype)).npu()

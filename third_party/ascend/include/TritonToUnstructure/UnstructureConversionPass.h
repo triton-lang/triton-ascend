@@ -38,7 +38,6 @@
 #include "ascend/include/TritonToUnstructure/Passes.h.inc"
 
 extern bool compileOn91095Flag;
-extern bool forceSimtTemplateFlag;
 
 namespace mlir {
 namespace triton {
@@ -108,8 +107,9 @@ private:
                         ArrayRef<OpFoldResult> sizes,
                         ArrayRef<OpFoldResult> strides) const;
   template <typename U = MemAccOpTy>
-  typename std::enable_if<std::is_same_v<U, triton::LoadOp>, void>::type
-  splatAndLoadScenario(MemAccOpTy op, int rank,
+  typename std::enable_if<std::is_same_v<U, triton::LoadOp>,
+                          LogicalResult>::type
+  splatAndLoadScenario(MemAccOpTy op, const PtrOffsetInfo &ptrOffsetInfo,
                        PatternRewriter &rewriter) const;
 
   template <typename... Args>

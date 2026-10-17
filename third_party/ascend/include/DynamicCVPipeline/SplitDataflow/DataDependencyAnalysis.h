@@ -37,7 +37,7 @@
 
 namespace mlir {
 namespace triton {
-enum class DependencyType { VectorToCube, CubeToVector };
+enum class DependencyType { VectorToCube, CubeToVector, CubeToCube };
 
 struct BlockInfo {
   int blockId;
@@ -58,11 +58,17 @@ struct DependencyInfo {
 
   bool isAllTranspoesd = false;
 
+  // Optional Items for splitted if
+  bool isSplitedIf = false;
+  mlir::Value realValue;
+
   // Optional Items for memDependencies
   mlir::Operation *predOp;
   mlir::Operation *nextOp;
   // Optional Items for iterarg yield dependency
   mlir::Operation *consumerYieldOp = nullptr;
+
+  mlir::OpOperand *operand = nullptr;
 };
 
 class DataDependencyInfo {
@@ -86,8 +92,14 @@ public:
   llvm::SmallVector<DependencyInfo> &getC2VDependencies() {
     return c2vDependencies;
   }
+  llvm::SmallVector<DependencyInfo> &getC2CDependencies() {
+    return c2cDependencies;
+  }
   llvm::SmallVector<DependencyInfo> &getMemoryDependencies() {
     return memoryDependencies;
+  }
+  llvm::SmallVector<DependencyInfo> &getIntraC2CDependencies() {
+    return intraC2CDependencies;
   }
 
   void setValid(bool v) { valid = v; }
@@ -99,6 +111,7 @@ private:
   llvm::SmallVector<DependencyInfo> c2vDependencies;
   llvm::SmallVector<DependencyInfo> c2cDependencies;
   llvm::SmallVector<DependencyInfo> memoryDependencies;
+  llvm::SmallVector<DependencyInfo> intraC2CDependencies;
 };
 
 // Define pass
@@ -145,18 +158,21 @@ private:
   void analyzeExternalInputs(DataDependencyInfo &info);
   void analyzeExternalOutputs(DataDependencyInfo &info);
 
+  void analyzeInternalDeps(DataDependencyInfo &info);
+
   void analyzeMemoryEffect(DataDependencyInfo &info);
   std::pair<int, int> findCommonLevelBlockIds(DataDependencyInfo &info,
                                               int producerBlockId,
                                               int consumerBlockId);
 
   bool isControlFlowOp(mlir::Operation *op);
-  bool isCubeOrVectorOp(mlir::Operation *op);
+  bool isCubeAndVectorOp(mlir::Operation *op);
   bool isValidShapeForDependency(mlir::Value value);
   bool isValidValueForDependency(mlir::Value value);
   bool isValidScalarDependency(mlir::Value value);
   bool isValid1DValueForDependency(mlir::Value value);
-  bool isAllTransposedInVector(mlir::Value value);
+  std::pair<bool, std::optional<mlir::Operation *>>
+  isAllTransposedInVector(mlir::Value value);
   bool isOuterOpArg(mlir::Value value);
   mlir::Value resolveNestedIterArgInitValue(mlir::Value initValue);
   void processIterArgDependencies();

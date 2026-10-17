@@ -1,18 +1,19 @@
 add_subdirectory(AutoBlockify)
 add_subdirectory(AutoBlockifyV1)
 add_subdirectory(Dialect)
-add_subdirectory(TritonToAnnotation)
-add_subdirectory(TritonToHFusion)
-add_subdirectory(TritonToHIVM)
+add_subdirectory(TritonMemoryAccess)
+add_subdirectory(Utils)
+add_subdirectory(TritonToStructured)
 add_subdirectory(TritonToGraph)
 add_subdirectory(TritonToLinalg)
 add_subdirectory(TTIRLayoutMerge)
-add_subdirectory(Utils)
+add_subdirectory(TritonToAnnotation)
+add_subdirectory(TritonToHFusion)
+add_subdirectory(TritonToHIVM)
 add_subdirectory(TritonControlFlowOpt)
 add_subdirectory(DiscreteMaskAccessConversion)
 add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
-add_subdirectory(TritonToStructured)
 add_subdirectory(DynamicCVPipeline)
 add_subdirectory(LibEntry)
 
@@ -29,6 +30,8 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       TritonToStructured
       TritonToUnstructure
       MLIRTritonNPUUtils           # from Utils
+      TritonMemoryAccessCore
+      TritonMemoryAccessAnalysis
       TritonAscendIR               # from Dialect/TritonAscend/IR
       TritonStructuredIR           # from Dialect/TritonStructured/IR
       AutoBlockify

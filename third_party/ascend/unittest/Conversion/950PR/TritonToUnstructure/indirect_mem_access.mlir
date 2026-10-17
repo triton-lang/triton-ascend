@@ -1,4 +1,4 @@
-// RUN: triton-opt %s '--triton-to-unstructure=compile-on-910-95=True force-simt-template=True' | FileCheck %s
+// RUN: triton-opt %s '--triton-to-unstructure=compile-on-910-95=True compile-mode=simd_simt_template' | FileCheck %s
 
 // CHECK-LABEL: tt.func @triton_indirect_load
 // CHECK: ascend.unstructured_load %{{.*}} : <i32>, %{{.*}} : tensor<1024xi64> unstructured_dims = []

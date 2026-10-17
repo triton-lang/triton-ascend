@@ -39,7 +39,9 @@ if [ "${READTHEDOCS_VERSION_TYPE:-}" = "external" ]; then
 
   if [ -n "$base" ] && git diff --quiet "$base" HEAD -- \
       "docs/" \
+      "*.md"  \
       ".readthedocs.yaml" \
+      ".github/workflows/docs-rtd-preview.yml" \
       ".github/workflows/scripts/readthedocs_checkout.sh"; then
     echo "No docs-affecting changes in this PR; cancelling build."
     exit 183

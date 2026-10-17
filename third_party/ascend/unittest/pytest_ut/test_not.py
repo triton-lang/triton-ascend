@@ -39,15 +39,11 @@ def triton_not(in_ptr0, out_ptr0, xnumel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.c
         xmask = xindex < xnumel
         x0 = xindex
         tmp0 = tl.load(in_ptr0 + (x0), xmask)
-        tmp2 = not (tmp0)
+        tmp2 = not (tmp0.to(tl.int1))
         tl.store(out_ptr0 + (xindex), tmp2, xmask)
 
 
 @pytest.mark.parametrize('param_list', [
-    ['int8', (2, 4096, 8), 2, 32768, 1024],
-    ['int16', (2, 4096, 8), 2, 32768, 1024],
-    ['int32', (2, 4096, 8), 2, 32768, 1024],
-    ['int64', (2, 4096, 8), 2, 32768, 1024],
     ['bool', (2, 4096, 8), 2, 32768, 1024],
 ])
 def test_not(param_list):

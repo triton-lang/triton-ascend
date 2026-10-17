@@ -26,7 +26,7 @@
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
 结论：Ascend 比 GPU 少了fp64的支持，但多了fp16，bf16的支持。
-torch_npu不支持u8。
+torch_npu不支持uint8。
 
 #### 2.2.2 Shape 支持
 

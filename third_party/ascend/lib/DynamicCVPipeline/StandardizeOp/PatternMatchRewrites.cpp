@@ -63,6 +63,7 @@ void PatternMatchRewritePass::runOnOperation() {
   auto *ctx = &getContext();
   RewritePatternSet patterns(ctx);
   patterns.add<SplitMatmulPattern>(ctx, needSplitAll);
+  patterns.add<FoldExpandExtCollapse>(ctx);
 
   // the way we handle matmul dependencies across for blocks
   // requres the patternmatching to go top-down

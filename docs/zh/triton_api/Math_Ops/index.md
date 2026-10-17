@@ -39,6 +39,7 @@ add.md
 sub.md
 mul.md
 div.md
+floordiv.md
 abs.md
 neg.md
 cdiv.md

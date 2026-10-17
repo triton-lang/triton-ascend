@@ -461,6 +461,7 @@ struct StageResourceCycles {
 
 struct StageImplementationCost {
   bool calibratedTailReduction = false;
+  bool calibratedFirstReduction = false;
   StageImplementation implementation;
   double totalCycles = 0.0;
   /// A profiled semantic operation in this implementation already includes

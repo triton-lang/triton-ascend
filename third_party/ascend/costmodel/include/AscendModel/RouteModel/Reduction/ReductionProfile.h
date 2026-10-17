@@ -7,6 +7,23 @@
 #include <vector>
 namespace mlir::ascend {
 enum class ReductionMode { SIMD, SIMT };
+struct ReductionExpression {
+  enum class Kind { Constant, Feature, Operator };
+  Kind kind = Kind::Constant;
+  double constant = 0;
+  std::string name;
+  std::vector<ReductionExpression> arguments;
+};
+struct ReductionSegment {
+  std::string id;
+  int64_t laneWidth = 1;
+  ReductionExpression condition;
+  ReductionExpression expression;
+};
+struct ReductionFunction {
+  std::vector<int64_t> supportedWarps;
+  std::vector<ReductionSegment> segments;
+};
 /// Target-calibrated numeric parameters for tail-axis tt.reduce formulas.
 /// Keys are stable formula/route identifiers; keeping values in the hardware
 /// profile allows recalibration without changing the evaluator source.
@@ -22,12 +39,15 @@ class ReductionProfile {
 public:
   static llvm::Expected<ReductionProfile> loadFromFile(llvm::StringRef path);
   const ReductionCostProfile &getModeProfile(ReductionMode mode) const;
+  const ReductionFunction *findFirstAxis(ReductionMode mode, llvm::StringRef op,
+                                         llvm::StringRef dtype) const;
   llvm::StringRef getTarget() const { return target; }
   llvm::StringRef getContentHash() const { return contentHash; }
 
 private:
   std::string target, contentHash;
   ReductionCostProfile simd, simt;
+  llvm::StringMap<ReductionFunction> firstAxisFunctions;
 };
 } // namespace mlir::ascend
 #endif

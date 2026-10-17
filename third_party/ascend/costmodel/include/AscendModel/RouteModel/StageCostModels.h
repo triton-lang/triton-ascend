@@ -8,8 +8,8 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
-#include "AscendModel/RouteModel/StageRouteCostModel.h"
 #include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
+#include "AscendModel/RouteModel/StageRouteCostModel.h"
 
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/StringMap.h"

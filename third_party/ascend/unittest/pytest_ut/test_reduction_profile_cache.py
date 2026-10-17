@@ -13,8 +13,7 @@ def test_reduction_profile_changes_in_one_process(tmp_path):
     source = profiles / "simd_simt" / "ascend_950pr_simd_simt_v1.json"
     selection = json.loads(source.read_text())
     reduction = json.loads((source.parent / selection["reduction_profile"]).read_text())
-    selection["microbenchmark_profile"] = str(
-        (source.parent / selection["microbenchmark_profile"]).resolve())
+    selection["microbenchmark_profile"] = str((source.parent / selection["microbenchmark_profile"]).resolve())
     dependency = tmp_path / "reduction.json"
     dependency.write_text(json.dumps(reduction))
     selection["reduction_profile"] = str(dependency)
@@ -38,8 +37,7 @@ def test_reduction_profile_changes_in_one_process(tmp_path):
         ascend.load_dialects(context)
         module = ir.parse_mlir_module(str(module_path), context)
         manager = ir.pass_manager(context)
-        ascend.passes.ttir.add_select_simd_simt_costmodel(
-            manager, "report", str(profile), "Ascend950PR_9579", 4, True)
+        ascend.passes.ttir.add_select_simd_simt_costmodel(manager, "report", str(profile), "Ascend950PR_9579", 4, True)
         manager.run(module, "reduction_profile_cache_test")
         report = json.loads(ascend.ir.get_string_attr(module, "ascend.simt_costmodel.report_json"))
         return report["profile_content_sha256"]

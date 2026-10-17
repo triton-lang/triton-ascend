@@ -278,3 +278,129 @@ std::optional<double> mlir::ascend::estimateTailAxisReductionCycles(
     return std::nullopt;
   return cycles;
 }
+
+namespace {
+std::optional<double> evaluate(const ReductionExpression &e,
+                               const llvm::StringMap<double> &features) {
+  if (e.kind == ReductionExpression::Kind::Constant)
+    return e.constant;
+  if (e.kind == ReductionExpression::Kind::Feature) {
+    auto i = features.find(e.name);
+    return i == features.end() ? std::nullopt
+                               : std::optional<double>(i->second);
+  }
+  std::vector<double> args;
+  for (const auto &a : e.arguments) {
+    auto v = evaluate(a, features);
+    if (!v)
+      return std::nullopt;
+    args.push_back(*v);
+  }
+  double x = args[0];
+  llvm::StringRef op = e.name;
+  if (op == "neg")
+    x = -x;
+  else if (op == "not")
+    x = !x;
+  else if (op == "indicator")
+    x = x != 0;
+  else if (op == "ceil")
+    x = std::ceil(x);
+  else if (op == "sqrt") {
+    if (x < 0)
+      return std::nullopt;
+    x = std::sqrt(x);
+  } else if (op == "log2") {
+    if (x <= 0)
+      return std::nullopt;
+    x = std::log2(x);
+  } else if (op == "sub")
+    x -= args[1];
+  else if (op == "div") {
+    if (args[1] <= 0)
+      return std::nullopt;
+    x /= args[1];
+  } else if (op == "pow") {
+    if (x < 0)
+      return std::nullopt;
+    x = std::pow(x, args[1]);
+  } else if (op == "lt")
+    x = x < args[1];
+  else if (op == "le")
+    x = x <= args[1];
+  else if (op == "gt")
+    x = x > args[1];
+  else if (op == "ge")
+    x = x >= args[1];
+  else if (op == "eq")
+    x = x == args[1];
+  else if (op == "ne")
+    x = x != args[1];
+  else
+    for (size_t i = 1; i < args.size(); ++i) {
+      if (op == "add")
+        x += args[i];
+      else if (op == "mul")
+        x *= args[i];
+      else if (op == "min")
+        x = std::min(x, args[i]);
+      else if (op == "max")
+        x = std::max(x, args[i]);
+      else if (op == "and")
+        x = x && args[i];
+      else if (op == "or")
+        x = x || args[i];
+      else
+        return std::nullopt;
+    }
+  return std::isfinite(x) ? std::optional<double>(x) : std::nullopt;
+}
+} // namespace
+std::optional<double> mlir::ascend::estimateFirstAxisReductionCycles(
+    const ReductionWorkload &work, const ReductionProfile &profile,
+    ReductionMode mode, int64_t warps) {
+  if (!work.isFiniteAndNonNegative() || work.axis != 0 || work.shape.size() < 2)
+    return std::nullopt;
+  const auto *function = profile.findFirstAxis(mode, work.kind, work.dataType);
+  if (!function || std::find(function->supportedWarps.begin(),
+                             function->supportedWarps.end(),
+                             warps) == function->supportedWarps.end())
+    return std::nullopt;
+  if (work.shape[0] == 1)
+    return 0.0;
+  int64_t groups = 1;
+  for (size_t i = 1; i < work.shape.size(); ++i) {
+    if (groups > INT64_MAX / work.shape[i])
+      return std::nullopt;
+    groups *= work.shape[i];
+  }
+  const double r = work.shape[0], g = groups;
+  llvm::StringMap<double> features;
+  features["R"] = r;
+  features["G"] = g;
+  features["W"] = warps;
+  features["rank"] = work.shape.size();
+  features["d1"] = work.shape[1];
+  features["d2"] = work.shape.size() > 2 ? work.shape[2] : 1;
+  const ReductionSegment *matched = nullptr;
+  for (const auto &segment : function->segments) {
+    features["L"] = segment.laneWidth;
+    features["Q"] = std::ceil(g / segment.laneWidth);
+    auto condition = evaluate(segment.condition, features);
+    if (!condition)
+      return std::nullopt;
+    if (*condition == 0)
+      continue;
+    if (matched)
+      return std::nullopt;
+    matched = &segment;
+  }
+  if (!matched)
+    return std::nullopt;
+  features["L"] = matched->laneWidth;
+  features["Q"] = std::ceil(g / matched->laneWidth);
+  auto cost = evaluate(matched->expression, features);
+  if (!cost || *cost <= 0)
+    return std::nullopt;
+  return cost;
+}

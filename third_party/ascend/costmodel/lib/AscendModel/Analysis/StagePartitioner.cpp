@@ -1,7 +1,7 @@
 //===- StagePartitioner.cpp - Build semantic Stage IR -------------------===//
 
-#include "AscendModel/RouteModel/Reduction/ReductionAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
+#include "AscendModel/RouteModel/Reduction/ReductionAnalysis.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -2044,7 +2044,8 @@ inferRuntimeGridStrideIterations(const LogicalStage &stage,
 }
 
 static void mergeWorkload(StageWorkload &into, StageWorkload from) {
-  llvm::append_range(into.reductionWorkloads, std::move(from.reductionWorkloads));
+  llvm::append_range(into.reductionWorkloads,
+                     std::move(from.reductionWorkloads));
   for (auto field : workloadScalarFields)
     into.*field += from.*field;
   into.memoryAccesses.insert(into.memoryAccesses.end(),
@@ -3291,9 +3292,10 @@ StageWorkloadAnalysis::analyze(StagePartition &partition,
     external.paysKernelSetup = work.paysKernelSetup;
     auto ignoredFeatures = stage.features;
     for (Operation *root : stage.operations)
-      accumulateDynamicOperationTree(
-          root, external, semanticRootEntryMultiplicity(root),
-          fallbackLoopTripCount, ignoredFeatures, logicalProgramCountHint, {}, true);
+      accumulateDynamicOperationTree(root, external,
+                                     semanticRootEntryMultiplicity(root),
+                                     fallbackLoopTripCount, ignoredFeatures,
+                                     logicalProgramCountHint, {}, true);
     scaleWorkload(external, 1.0 / std::max<int64_t>(1, stage.iterationCount));
     stage.reductionExternalWorkload = std::move(external);
     recomputeIssueElements(work);

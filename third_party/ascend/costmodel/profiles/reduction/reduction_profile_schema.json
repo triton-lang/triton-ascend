@@ -60,8 +60,175 @@
               }
             }
           }
+        },
+        "first_axis": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "mode": {
+                "enum": [
+                  "simd",
+                  "simt"
+                ]
+              },
+              "op": {
+                "enum": [
+                  "sum",
+                  "max",
+                  "min",
+                  "prod",
+                  "xor",
+                  "and",
+                  "or"
+                ]
+              },
+              "dtype": {
+                "type": "string"
+              },
+              "supported_warps": {
+                "type": "array",
+                "uniqueItems": true,
+                "items": {
+                  "enum": [
+                    1,
+                    2,
+                    4,
+                    8,
+                    16,
+                    32,
+                    64
+                  ]
+                }
+              },
+              "segments": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "lane_width": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "condition": {
+                      "$ref": "#/$defs/expression"
+                    },
+                    "expression": {
+                      "$ref": "#/$defs/expression"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "lane_width",
+                    "condition",
+                    "expression"
+                  ]
+                }
+              }
+            },
+            "required": [
+              "family",
+              "mode",
+              "op",
+              "dtype",
+              "supported_warps",
+              "segments"
+            ]
+          }
         }
       }
+    }
+  },
+  "$defs": {
+    "expression": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "constant": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "constant"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "feature": {
+              "enum": [
+                "R",
+                "G",
+                "Q",
+                "L",
+                "W",
+                "rank",
+                "d1",
+                "d2"
+              ]
+            }
+          },
+          "required": [
+            "feature"
+          ]
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "op": {
+              "enum": [
+                "add",
+                "sub",
+                "mul",
+                "div",
+                "pow",
+                "lt",
+                "le",
+                "gt",
+                "ge",
+                "eq",
+                "ne",
+                "not",
+                "neg",
+                "and",
+                "or",
+                "indicator",
+                "sqrt",
+                "ceil",
+                "log2",
+                "max",
+                "min"
+              ]
+            },
+            "args": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "items": {
+                "$ref": "#/$defs/expression"
+              }
+            }
+          },
+          "required": [
+            "op",
+            "args"
+          ]
+        }
+      ]
     }
   }
 }

@@ -71,6 +71,9 @@ mlir::ascend::analyzeReduction(Operation *operation) {
   ReductionWorkload result;
   result.kind = getReductionCombineKind(operation).str();
   result.dataType = getReductionDataType(input.getElementType());
+  if (dimension == 0 && input.getRank() > 1 &&
+      input.getElementType().isInteger(1))
+    result.dataType = "bool";
   result.shape.assign(input.getShape().begin(), input.getShape().end());
   result.axis = dimension;
   return result;

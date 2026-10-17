@@ -118,6 +118,11 @@ def _export_coalesce_metadata(mod, metadata):
 def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
     rc = _get_then_remove_rc(mod, "triton_ascend.dynamic_cv_pipeline.rc")
     if rc != -1 and rc > 0:
+        report = metadata.get("auto_simt_scope_report", "{}")
+        report = json.loads(report) if isinstance(report, str) else report
+        if isinstance(report, dict) and report.get("cube_grid_cost", {}).get("applied") is True:
+            raise RuntimeError("dynamic CV fallback invalidates the calibrated Cube cost domain; "
+                               "recompile with enable_dynamic_cv_pipeline=False")
         # When the option dynamic_cv_pipeline is set to False,
         # these options should also reverted.
         metadata["enable_dynamic_cv_pipeline"] = False
@@ -823,6 +828,15 @@ def _publish_route_transform_capability(metadata, opt) -> str:
     capability = {
         "schema_version":
         2,
+        "compile_options": {
+            "num_warps": num_warps,
+            "num_stages": getattr(opt, "num_stages", None),
+            "enable_dynamic_cv_pipeline": getattr(opt, "enable_dynamic_cv_pipeline", None),
+            "debug": getattr(opt, "debug", None),
+        },
+        "launch_options": {
+            "disable_ffts": target_supported or bool(force_disable_ffts()),
+        },
         "layout_merge_applied":
         bool(metadata.get("ttir_layout_merge_applied", False)),
         "layout_coalescing_applied":

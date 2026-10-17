@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <limits>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -201,6 +202,9 @@ struct SelectSimdSimtCostModelPass
     SimdSimtCostModelOptions options;
     options.profilePath = profilePath.getValue();
     options.actualTarget = actualTarget.getValue();
+    // The disposable analysis module may contain AutoBlockify scheduling
+    // loops. Cube completion matches the route-neutral executable workload.
+    options.cubeCompositionModule = module;
     options.numWarps =
         static_cast<unsigned>(std::max<int64_t>(1, numWarps.getValue()));
     options.includeFeaturesInJSON = true;
@@ -225,6 +229,18 @@ struct SelectSimdSimtCostModelPass
     if (auto capability =
             llvm::json::parse(routeTransformCapabilityJSON.getValue()))
       if (auto *object = capability->getAsObject()) {
+        if (const auto *compile = object->getObject("compile_options")) {
+          if (auto stages = compile->getInteger("num_stages"))
+            if (*stages > 0 && *stages <= std::numeric_limits<unsigned>::max())
+              options.numStages = static_cast<unsigned>(*stages);
+          if (auto enabled = compile->getBoolean("enable_dynamic_cv_pipeline"))
+            options.dynamicCvPipeline = *enabled;
+          if (auto enabled = compile->getBoolean("debug"))
+            options.debug = *enabled;
+        }
+        if (const auto *launch = object->getObject("launch_options"))
+          if (auto disabled = launch->getBoolean("disable_ffts"))
+            options.disableFfts = *disabled;
         if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();

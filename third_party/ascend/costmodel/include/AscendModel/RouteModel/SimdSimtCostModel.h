@@ -65,6 +65,13 @@ struct SimdSimtCostModelOptions {
   std::string profilePath;
   std::string actualTarget;
   unsigned numWarps = 32;
+  unsigned numStages = 0;
+  /// Unknown compile/launch facts must not admit a calibrated Cube domain.
+  int dynamicCvPipeline = -1;
+  int debug = -1;
+  int disableFfts = -1;
+  /// Route-neutral TTIR used to recognize whole-kernel Cube transactions.
+  mlir::ModuleOp cubeCompositionModule;
   bool includeFeaturesInJSON = true;
   /// Full Stage implementation matrices are diagnostic-only.
   bool includeDiagnosticStageDetailsInJSON = true;
@@ -157,6 +164,8 @@ struct SimdSimtCostReport {
   std::vector<std::string> unsupported;
   SimdSimtFeatureSummary features;
   StageCostModelSummary stageModel;
+  /// Whole-completion calibration; Stage/body reference scores stay intact.
+  llvm::json::Object cubeGridCost;
   bool includeFeaturesInJSON = true;
   bool includeDiagnosticStageDetailsInJSON = true;
 

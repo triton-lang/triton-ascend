@@ -4196,6 +4196,120 @@
   },
   "description": "Target-specific hardware resource profile consumed by the online Stage Cost Model. Stage partitions and workloads are derived from transformed TTIR.",
   "properties": {
+    "cube_grid_completion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "enabled",
+        "model",
+        "target",
+        "physical_ai_cores",
+        "input_bytes_per_cycle",
+        "transaction_startup",
+        "cycles_per_quantum",
+        "fill_base",
+        "fill_input",
+        "fill_mmad",
+        "fill_fix",
+        "occupancy_base",
+        "occupancy_input",
+        "occupancy_fix",
+        "serialized_input",
+        "serialized_mmad",
+        "serialized_fix",
+        "wave_base",
+        "wave_input",
+        "wave_mmad",
+        "wave_fix",
+        "evidence"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "model": {
+          "const": "cube-grid-v9"
+        },
+        "target": {
+          "const": "Ascend950PR_9579"
+        },
+        "physical_ai_cores": {
+          "const": 28
+        },
+        "input_bytes_per_cycle": {
+          "type": "number",
+          "minimum": 0
+        },
+        "transaction_startup": {
+          "type": "number",
+          "minimum": 0
+        },
+        "cycles_per_quantum": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fill_base": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fill_input": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fill_mmad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "fill_fix": {
+          "type": "number",
+          "minimum": 0
+        },
+        "occupancy_base": {
+          "type": "number",
+          "minimum": 0
+        },
+        "occupancy_input": {
+          "type": "number",
+          "minimum": 0
+        },
+        "occupancy_fix": {
+          "type": "number",
+          "minimum": 0
+        },
+        "serialized_input": {
+          "type": "number",
+          "minimum": 0
+        },
+        "serialized_mmad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "serialized_fix": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wave_base": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wave_input": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wave_mmad": {
+          "type": "number",
+          "minimum": 0
+        },
+        "wave_fix": {
+          "type": "number",
+          "minimum": 0
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
     "$schema": {
       "type": "string",
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
@@ -4229,8 +4343,11 @@
       "description": "Version identifier accepted by the C++ Route Model loader and emitted in decision reports."
     },
     "schema_version": {
-      "const": 19,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 19 replaces exact-signature route elapsed/completion fits with one generic Stage resource formula and a route-independent kernel boundary."
+      "enum": [
+        19,
+        20
+      ],
+      "description": "Version 19 uses generic Stage resources and kernel boundaries. Version 20 optionally replaces admitted all-SIMD dense-GEMM completion with measured Cube grid costs; unmatched routes retain the generic formula."
     },
     "score_unit": {
       "type": "string",

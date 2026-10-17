@@ -36,7 +36,8 @@ protected:
   void enterInstrumentedOp(uint64_t streamId, uint64_t functionId,
                            uint8_t *buffer, size_t size) override;
   void exitInstrumentedOp(uint64_t streamId, uint64_t functionId,
-                          uint8_t *buffer, size_t size) override;
+                          uint8_t *buffer, size_t size,
+                          bool isHost = false) override;
 
   // OpInterface
   void startOp(const Scope &scope) override {

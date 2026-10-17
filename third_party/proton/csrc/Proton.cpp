@@ -3,6 +3,7 @@
 #include <map>
 #include <stdexcept>
 
+#include "Data/Metric.h"
 #include "pybind11/pybind11.h"
 #include "pybind11/stl.h"
 #include "pybind11/stl_bind.h"
@@ -83,11 +84,17 @@ static void initProton(pybind11::module &&m) {
         streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
   });
 
-  m.def("exit_instrumented_op", [](uint64_t streamId, uint64_t functionId,
-                                   uint64_t buffer, size_t size) {
-    SessionManager::instance().exitInstrumentedOp(
-        streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size);
-  });
+  m.def(
+      "exit_instrumented_op",
+      [](uint64_t streamId, uint64_t functionId, uint64_t buffer, size_t size,
+         bool isHost) {
+        SessionManager::instance().exitInstrumentedOp(
+            streamId, functionId, reinterpret_cast<uint8_t *>(buffer), size,
+            isHost);
+      },
+      pybind11::arg("streamId"), pybind11::arg("functionId"),
+      pybind11::arg("buffer"), pybind11::arg("size"),
+      pybind11::arg("isHost") = false);
 
   m.def("enter_state", [](const std::string &state) {
     SessionManager::instance().setState(state);
@@ -100,6 +107,14 @@ static void initProton(pybind11::module &&m) {
         [](size_t scopeId,
            const std::map<std::string, MetricValueType> &metrics) {
           SessionManager::instance().addMetrics(scopeId, metrics);
+        });
+
+  m.def("add_kernel_metric",
+        [](size_t scopeId, uint64_t startTime, uint64_t endTime,
+           uint64_t deviceId, uint64_t deviceType, uint64_t streamId) {
+          auto metric = std::make_shared<KernelMetric>(
+              startTime, endTime, 1, deviceId, deviceType, streamId);
+          SessionManager::instance().addMetric(scopeId, metric);
         });
 
   m.def("get_context_depth", [](size_t sessionId) {

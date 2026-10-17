@@ -60,6 +60,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <map>
@@ -520,23 +521,46 @@ getBoundarySizes(llvm::ArrayRef<int32_t> boundaryCheck, Value ptr,
   OpFoldResult offsetShift = subOpFoldResult(
       curPtrOffset, fullShapeReCast.getConstifiedMixedOffset(), loc, rewriter);
 
-  for (int i = 0; i < shapedType.getRank(); ++i) {
-    if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
-      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
+  auto strides = fullShapeReCast.getConstifiedMixedStrides();
+  SmallVector<int> axisOrder;
+  axisOrder.reserve(shapedType.getRank());
+  for (int i = 0; i < shapedType.getRank(); ++i)
+    axisOrder.push_back(i);
 
-      OpFoldResult curOffset = divOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+  bool allStridesConstant = llvm::all_of(strides, [](OpFoldResult stride) {
+    return getConstantIntValue(stride).has_value();
+  });
+  if (allStridesConstant) {
+    llvm::stable_sort(axisOrder, [&strides](int lhs, int rhs) {
+      return std::abs(*getConstantIntValue(strides[lhs])) >
+             std::abs(*getConstantIntValue(strides[rhs]));
+    });
+  }
+
+  for (int i : axisOrder) {
+    OpFoldResult curStride = strides[i];
+    if (llvm::find(boundaryCheck, i) != boundaryCheck.end()) {
+      if (isZero(curStride)) {
+        emitWarning(loc)
+            << "getBoundarySizes() cannot reconstruct boundary on checked "
+               "zero-stride axis "
+            << i << "; keep current block size for this axis";
+        continue;
+      }
+
+      OpFoldResult curOffset =
+          divOpFoldResult(offsetShift, curStride, loc, rewriter);
+      auto fullShape = fullShapeReCast.getConstifiedMixedSizes()[i];
       OpFoldResult curLeftSize =
           maxOpFoldResult(subOpFoldResult(fullShape, curOffset, loc, rewriter),
                           rewriter.getIndexAttr(0), loc, rewriter);
 
       boundarySize[i] =
           minOpFoldResult(boundarySize[i], curLeftSize, loc, rewriter);
+    }
 
-      offsetShift = remOpFoldResult(
-          offsetShift, fullShapeReCast.getConstifiedMixedStrides()[i], loc,
-          rewriter);
+    if (!isZero(curStride)) {
+      offsetShift = remOpFoldResult(offsetShift, curStride, loc, rewriter);
     }
   }
 

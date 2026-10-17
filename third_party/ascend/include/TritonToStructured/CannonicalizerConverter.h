@@ -78,6 +78,22 @@ public:
                                 PatternRewriter &rewriter) const override;
 };
 
+// Rewrites `tt.load %bptr` whose `%bptr = tt.make_tensor_ptr ...` has all
+// statically zero strides. The zero strides are the IR-level signature of a
+// broadcasted tensor: every element of the loaded block refers to the same
+// memory location `base`. Lower the load into a single scalar `tt.load %base`
+// followed by `tt.broadcast` back to the original block shape, so downstream
+// passes see only standard ops.
+class ZeroStrideMakeTensorPtrConverter
+    : public OpRewritePattern<triton::MakeTensorPtrOp> {
+public:
+  explicit ZeroStrideMakeTensorPtrConverter(MLIRContext *context)
+      : OpRewritePattern<triton::MakeTensorPtrOp>(context) {}
+
+  LogicalResult matchAndRewrite(triton::MakeTensorPtrOp op,
+                                PatternRewriter &rewriter) const override;
+};
+
 class IfYieldAddHoistConverter : public OpRewritePattern<scf::IfOp> {
 public:
   explicit IfYieldAddHoistConverter(MLIRContext *context)

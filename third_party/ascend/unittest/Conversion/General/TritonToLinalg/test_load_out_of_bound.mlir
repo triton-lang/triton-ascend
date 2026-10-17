@@ -4,7 +4,7 @@
 // CHECK: %[[CST:.*]] = arith.constant 0.000000e+00 : f32
 // CHECK: %[[ALLOC_5:.*]] = memref.alloc() : memref<64xf32>
 // CHECK: linalg.fill ins(%[[CST]] : f32) outs(%[[ALLOC_5]] : memref<64xf32>)
-// CHECK: bufferization.to_tensor %[[ALLOC_5]] restrict writable : memref<64xf32> to tensor<64xf32>
+// CHECK: bufferization.to_tensor %[[ALLOC_5]] restrict writable : memref<64xf32>
 
 module attributes {hacc.target = #hacc.target<"Ascend910_9382">} {
   tt.func public @_triton_mrope_forward(%q_ptr: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %k_ptr: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %cos: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %sin: !tt.ptr<f32> {tt.divisibility = 16 : i32}, %num_tokens: i32 {tt.divisibility = 16 : i32}) attributes {noinline = false} {

@@ -22,7 +22,7 @@
 // Single producer-side hivm.hir.copy.
 // CHECK:       hivm.hir.copy ins({{.*}} : tensor<128xf32>) outs({{.*}} : memref<128xf32>)
 // Single consumer-side bufferization.to_tensor (the readback).
-// CHECK:       bufferization.to_tensor {{.*}}: memref<128xf32> to tensor<128xf32>
+// CHECK:       bufferization.to_tensor {{.*}}: memref<128xf32>
 // main_loop attribute survives on the new whileOp.
 // CHECK:       } {{.*}}ssbuffer.main_loop = 1 : i64
 

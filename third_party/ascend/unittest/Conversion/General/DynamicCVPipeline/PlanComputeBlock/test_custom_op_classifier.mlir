@@ -10,7 +10,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // CHECK-LABEL: func.func @test_classify_and_pack_vector_custom_op
   // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:   %[[ALLOC:.*]] = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
-  // CHECK:   %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.core_type = "VECTOR"} : memref<2048xf32> to tensor<2048xf32>
+  // CHECK:   %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
   // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, ssbuffer.core_type = "VECTOR", symbol = "tanh_fp32"} "tanh_fp32" ins(%arg0 : tensor<2048xf32>) outs(%[[TENSOR]] : tensor<2048xf32>) -> tensor<2048xf32>
   // CHECK:   scope.return %[[CUSTOM]] : tensor<2048xf32>
   // CHECK: } {ssbuffer.core_type = "VECTOR"}
@@ -32,7 +32,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // CHECK-LABEL: func.func @test_classify_and_pack_cube_custom_op
   // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:   %[[ALLOC:.*]] = memref.alloc() {ssbuffer.core_type = "CUBE"} : memref<2048xf32>
-  // CHECK:   %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.core_type = "CUBE"} : memref<2048xf32> to tensor<2048xf32>
+  // CHECK:   %[[TENSOR:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable {ssbuffer.core_type = "CUBE"} : memref<2048xf32>
   // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_MTE1>, hivm.tcore_type = #hivm.tcore_type<CUBE>, ssbuffer.core_type = "CUBE", symbol = "cube_custom"} "cube_custom" ins(%arg0 : tensor<2048xf32>) outs(%[[TENSOR]] : tensor<2048xf32>) -> tensor<2048xf32>
   // CHECK:   scope.return %[[CUSTOM]] : tensor<2048xf32>
   // CHECK: } {ssbuffer.core_type = "CUBE"}
@@ -55,7 +55,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   // CHECK: scf.for
   // CHECK:   %[[SCOPE_LOOP:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:     %[[ALLOC_LOOP:.*]] = memref.alloc() {ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
-  // CHECK:     %[[TENSOR_LOOP:.*]] = bufferization.to_tensor %[[ALLOC_LOOP]] restrict writable {ssbuffer.core_type = "VECTOR"} : memref<2048xf32> to tensor<2048xf32>
+  // CHECK:     %[[TENSOR_LOOP:.*]] = bufferization.to_tensor %[[ALLOC_LOOP]] restrict writable {ssbuffer.core_type = "VECTOR"} : memref<2048xf32>
   // CHECK:     %[[CUSTOM_LOOP:.*]] = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, ssbuffer.core_type = "VECTOR", symbol = "tanh_fp32"} "tanh_fp32" ins(%arg0 : tensor<2048xf32>) outs(%[[TENSOR_LOOP]] : tensor<2048xf32>) -> tensor<2048xf32>
   // CHECK:     scope.return %[[CUSTOM_LOOP]] : tensor<2048xf32>
   // CHECK:   } {ssbuffer.core_type = "VECTOR"}

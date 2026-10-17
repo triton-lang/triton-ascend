@@ -154,17 +154,11 @@ public:
 // (Sklansky) cumsum template; cumprod / generic scans and multi-dim cumsum stay
 // on SIMD.
 static bool isSimt1DCumsum(triton::ScanOp op) {
-  // (1) Must be a single-add combine body (skip pure type-cast ops, mirroring
-  // ReductionOpBaseConverter::getRealReductionOps).
-  Operation *reduceOp = nullptr;
-  for (Operation &bodyOp : op.getBody()->without_terminator()) {
-    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
-      continue;
-    if (reduceOp)
-      return false; // more than one real op -> not a simple cumsum
-    reduceOp = &bodyOp;
-  }
-  if (!reduceOp || !isa<arith::AddFOp, arith::AddIOp>(reduceOp))
+  // (1) Use the same result slice as ScanConverter. Debug overflow checks
+  // must not hide a cumsum that lowering will implement with a SIMT template.
+  auto realOps = TTOpConverters::collectRealReductionOps(op.getBody());
+  if (realOps.size() != 1 ||
+      !isa<arith::AddFOp, arith::AddIOp>(realOps.front()))
     return false;
 
   // (2) Must be the 1-D scenario: all non-scan dims are unit-sized.

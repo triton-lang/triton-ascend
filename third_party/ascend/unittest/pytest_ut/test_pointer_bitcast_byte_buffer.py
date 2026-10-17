@@ -127,7 +127,7 @@ def test_pointer_bitcast_paged_scale_tensor_offset():
     _write_u32_le(host, byte_offsets, values)
 
     src = host.npu()
-    block_tables = torch.tensor(block_table, dtype=torch.int32).npu()
+    block_tables = torch.tensor(block_table, dtype=torch.int32, device="cpu").npu()
     out = torch.empty((n_positions, ), dtype=torch.int32, device="npu")
     _paged_scale_load[(1, )](
         src,

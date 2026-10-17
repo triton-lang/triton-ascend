@@ -538,6 +538,10 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             auto dependNodes =
                 findDependency(chain[i], chainPreNode, linkIn, linkStart);
             for (auto node : dependNodes) {
+              if (nodeCoreType[node] ==
+                  static_cast<int>(CVPipeline::CoreType::CUBE_ONLY)) {
+                continue;
+              }
               if (nodeBlockId[node] != optBlockId) {
                 recordChange[node] = optBlockId;
               }

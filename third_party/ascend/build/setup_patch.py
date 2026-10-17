@@ -163,12 +163,24 @@ def _apply_triton_ascend_patch():
     dev_patch = os.path.join(patch_path, "triton-ascend-dev-3.6.0.patch")
     patch = os.path.join(patch_path, "triton-ascend-3.6.0.patch")
     patch_files, dev_patch_files = get_triton_ascend_patch_file()
+    original_files = {}
+    for name in patch_files + dev_patch_files:
+        path = _REPO_ROOT / name
+        if path.is_file() and not path.is_symlink():
+            original_files[path] = (path.stat(), path.read_bytes())
     if _is_dev_mode() and os.path.isfile(dev_patch):
         checkout_file(dev_patch_files)
         _apply_patch(str(dev_patch))
     if os.path.isfile(patch):
         checkout_file(patch_files)
         _apply_patch(str(patch))
+
+    # Resetting and reapplying identical patches must not dirty Ninja inputs.
+    # Compare the final bytes so changed patches and upstream sources still rebuild.
+    for path, (metadata, contents) in original_files.items():
+        if (path.is_file() and not path.is_symlink() and path.stat().st_mode == metadata.st_mode
+                and path.read_bytes() == contents):
+            os.utime(path, ns=(metadata.st_atime_ns, metadata.st_mtime_ns))
 
 
 def _print_patch_restore_warning():

@@ -7,8 +7,10 @@ add_compile_definitions(
 add_mlir_library(AscendModelRouteModel
   ../Analysis/SimtAnchorAnalysis.cpp
   ../Analysis/StagePartitioner.cpp
+  ../Analysis/StageMemoryPatternAnalysis.cpp
   ../Analysis/SimtRegisterPressureAnalysis.cpp
   StageCostModels.cpp
+  Models/IndirectGatherMemoryCostModel.cpp
   StageRouteCostModel.cpp
   SimdSimtCostModel.cpp
   ../Transforms/SelectSimdSimtCostModel.cpp
@@ -23,6 +25,7 @@ add_mlir_library(AscendModelRouteModel
 
   LINK_LIBS PUBLIC
   AscendModelProfile
+  TritonOffsetAnalysis
   TritonIR
   MLIRIR
   MLIRAnalysis

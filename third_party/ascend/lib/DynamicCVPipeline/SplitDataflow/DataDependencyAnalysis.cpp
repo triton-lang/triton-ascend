@@ -813,14 +813,10 @@ void DataDependencyAnalysisPass::analyzeExternalOutputs(
 
     for (mlir::Value output : blockInfo.outputs) {
       // Check if output is a value which can be produced by CUBE
-      if (!isValidValueForDependency(output)) {
+      if (!isValidShapeForDependency(output) ||
+          isCubeAndVectorOp(output.getDefiningOp())) {
         LOG_DEBUG("Warning: [c->v] Output value is not a valid tensor for "
                   "dependency analysis.\n");
-        continue;
-      }
-      if (isa<mlir::IntegerType, mlir::FloatType>(output.getType())) {
-        LOG_DEBUG("Warning: [c->v] Output value is a scalar, not a valid "
-                  "tensor for dependency analysis.\n");
         continue;
       }
 

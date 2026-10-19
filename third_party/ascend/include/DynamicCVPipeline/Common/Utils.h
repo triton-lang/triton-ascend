@@ -22,6 +22,7 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -63,6 +64,9 @@ inline constexpr llvm::StringLiteral kAnalyzeFlagId =
 inline constexpr llvm::StringLiteral kLoopId = "ssbuffer.loop_id";
 inline constexpr llvm::StringLiteral kLoopCarriedL0C =
     "ssbuffer.loop_carried_l0c";
+// Private read marker follows the proved value when scheduling clones the op.
+inline constexpr llvm::StringLiteral kOnlineSoftmaxOldMaxRead =
+    "ascend.online_softmax_old_max_read";
 inline constexpr llvm::StringLiteral kCrossCoreDeps = "ssbuffer.crossCoreDeps";
 inline constexpr llvm::StringLiteral kIntraDeps = "ssbuffer.intraDeps";
 inline constexpr llvm::StringLiteral kMemCrossDeps = "ssbuffer.memCrossDeps";
@@ -268,6 +272,8 @@ int64_t getBTSizeFromValidBroadcastOp(linalg::BroadcastOp broadcastOp);
 
 int getLoopCarriedArgIndex(Value operand, Block *block);
 
+Operation *findOnlineSoftmaxOldMaxRead(Value state, Block *body);
+
 // Returns the index of `v` in `iterArgs` when `v` is a tensor-type iter_arg,
 // or -1 otherwise.
 int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs);
@@ -332,6 +338,23 @@ inline bool isTensorComputeOp(Operation *op) {
 // - arith.trunci: i32 -> i8
 std::optional<hivm::FixpipePreQuantMode>
 getFixpipePreQuantMode(Operation *truncOp);
+
+// Describes a result conversion that can be emitted directly by FIXPIPE. The
+// optional layout op represents the physical output layout selected for the
+// transfer; the cast supplies the FIXPIPE pre_quant mode.
+struct FixpipeOutputCastInfo {
+  linalg::MatmulOp matmulOp;
+  Operation *layoutOp = nullptr;
+  arith::MulFOp scaleOp;
+  linalg::FillOp scaleSplatOp;
+  Operation *castOp = nullptr;
+  Value quantScale;
+  hivm::FixpipePreQuantMode preQuantMode;
+};
+
+// Match f32 matmul -> [NZ16 layout/scalar scale, either order] -> f16 cast.
+// Callers select the transfer edge when the producer has other users.
+std::optional<FixpipeOutputCastInfo> matchFixpipeOutputCast(Operation *castOp);
 
 // Trace an operand's defining op back through C2C intermediate ops to find the
 // underlying producing op. Returns null when the operand has no defining op.

@@ -103,3 +103,16 @@ class _index_select:
         self.arg_type['start_offset'] = index.dtype
         self.arg_type['src_stride'] = index.dtype
         self.extra_attr = f"src_stride_len={len(src_stride)}"
+
+
+@register_custom_op
+class _online_softmax_nz:
+    """A5 FP16 N512 ABI; bufferization supplies the same-root strided FP8 P."""
+    name = '__builtin_online_softmax_nz'
+    symbol = name
+    core = CORE.VECTOR
+    pipe = PIPE.PIPE_V
+    mode = MODE.SIMD
+
+    def __init__(self, scores, m, indices, causal_limits=None, mask_required=None, out=None):
+        pass

@@ -24,6 +24,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include <algorithm>
+#include <array>
 #include <memory>
 #include <optional>
 #include <set>
@@ -44,14 +45,19 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/MemRef/Utils/MemRefUtils.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Builders.h"
-#include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
 using namespace mlir;
@@ -572,6 +578,28 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   SmallVector<int64_t> expectedShape =
       computeExpectedShape(origValue, NzDimWidth);
   int originBlockId = dep.iniProducerBlockId;
+  // A fractal dot operand is already NZ. Reuse its physical tensor instead
+  // of materializing NZ->ND->NZ on Vector before the L1 transfer.
+  if (auto convert = origValue.getDefiningOp<hivm::ConvertLayoutOp>()) {
+    auto sourceType = dyn_cast<RankedTensorType>(convert.getSource().getType());
+    auto ndType = cast<RankedTensorType>(origValue.getType());
+    if (sourceType && ndType.getRank() == 2 &&
+        ndType.getShape() == ArrayRef<int64_t>(expectedShape) &&
+        !convert.getSrcLayout().getTransposeValue().value_or(false) &&
+        !convert.getDstLayout().getTransposeValue().value_or(false) &&
+        convert.getSrcLayout().getFractalSizes() &&
+        convert.getSrcLayout().getFractalSizes().asArrayRef() ==
+            ArrayRef<int64_t>({NzDimWidth, blk}) &&
+        convert.getSrcLayout().getDataLayout() == hivm::DataLayout::Fractal &&
+        convert.getDstLayout().getDataLayout() == hivm::DataLayout::ND &&
+        sourceType.getShape() ==
+            ArrayRef<int64_t>({expectedShape[1] / blk,
+                               expectedShape[0] / NzDimWidth, NzDimWidth,
+                               blk})) {
+      ndnzValueMapping[origValue] = convert.getSource();
+      return;
+    }
+  }
   // Step 2: If shapes match, return original value
   bool isEqualedShape = isExpectedShape(origValue, expectedShape);
   LOG_DEBUG("newValue" << newValue << "\n");
@@ -927,35 +955,67 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue
                                                             << "\n");
   auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
-  int64_t M = srcTensorType.getDimSize(0);
-  int64_t N = srcTensorType.getDimSize(1);
   Type elemType = srcTensorType.getElementType();
 
   int cubeBlockId =
       CVPipeline::getOpBlockId(srcValue.getDefiningOp()).value_or(-1);
   int vecBlockId = CVPipeline::getOpBlockId(vectorStartOp).value_or(-1);
 
-  auto targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
-                                         : std::vector<int64_t>{M, N};
+  // OpClassifier keeps a FIXPIPE-representable output cast on CUBE. Reuse the
+  // same capability matcher here so classification, dependency analysis, and
+  // transfer folding cannot disagree about the supported producer chain.
+  Operation *foldedTruncOp = nullptr;
+  Operation *foldedScaleOp = nullptr;
+  Operation *foldedScaleSplatOp = nullptr;
+  Operation *foldedConvertOp = nullptr;
+  std::optional<FixpipePreQuantMode> quantMode;
+  Value quantScale;
+  Value fixpipeSrcValue = dep.realValue ? dep.realValue : srcValue;
+  bool foldedNzOutput = false;
+  std::vector<int64_t> targetShape;
+  if (!dep.realValue) {
+    if (auto info =
+            CVPipeline::matchFixpipeOutputCast(srcValue.getDefiningOp())) {
+      quantMode = info->preQuantMode;
+      fixpipeSrcValue = info->matmulOp.getResult(0);
+      targetShape.assign(srcTensorType.getShape().begin(),
+                         srcTensorType.getShape().end());
+      foldedTruncOp = info->castOp;
+      foldedScaleOp = info->scaleOp;
+      foldedScaleSplatOp = info->scaleSplatOp;
+      foldedConvertOp = info->layoutOp;
+      quantScale = info->quantScale;
+      foldedNzOutput = info->layoutOp != nullptr;
+    }
+  }
+
+  if (!foldedTruncOp) {
+    int64_t M = srcTensorType.getDimSize(0);
+    int64_t N = srcTensorType.getDimSize(1);
+    targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
+                                      : std::vector<int64_t>{M, N};
+  }
+
   auto targetTensorType = RankedTensorType::get(targetShape, elemType);
   auto [cubeAllocOp, vecAllocOp] = createTransferAllocs(
       builder, loc, targetShape, elemType, hivm::AddressSpace::UB, cubeEndOp,
       vectorStartOp, cubeBlockId, vecBlockId, CVPipeline::kCoreTypeCube,
       CVPipeline::kCoreTypeVector, transferIndex);
   auto dmaModeAttr = FixpipeDMAModeAttr::get(
-      builder.getContext(),
-      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
+      builder.getContext(), foldedNzOutput        ? FixpipeDMAMode::NZ2NZ
+                            : dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN
+                                                  : FixpipeDMAMode::NZ2ND);
+  FixpipePreQuantModeAttr quantModeAttr = nullptr;
+  if (quantMode)
+    quantModeAttr =
+        FixpipePreQuantModeAttr::get(builder.getContext(), *quantMode);
 
-  auto realValue = dep.value;
-  if (dep.realValue) {
-    realValue = dep.realValue;
-  }
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{},    // No return value
-      realValue,                 // src
+      fixpipeSrcValue,           // src
       cubeAllocOp->getResult(0), // dst
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      nullptr, nullptr, quantScale, mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, CVPipeline::kCoreTypeCube,
                      transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
@@ -1009,6 +1069,14 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   if (consumedDataOp) {
     *consumedDataOp = toTensorOp;
   }
+  SmallVector<Operation *> foldedOps{foldedTruncOp, foldedScaleOp,
+                                     foldedConvertOp, foldedScaleSplatOp};
+  if (foldedScaleOp && foldedConvertOp &&
+      foldedConvertOp->getOperand(0).getDefiningOp() == foldedScaleOp)
+    std::swap(foldedOps[1], foldedOps[2]);
+  for (Operation *op : foldedOps)
+    if (op && op->use_empty())
+      op->erase();
   return fixpipeOp;
 }
 
@@ -1781,6 +1849,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   Operation *transferOp =
       insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc,
                                  transferIndex, dep, &consumedDataOp);
+  // The original layout consumer may have been folded into the transfer.
+  consumerPoint = consumedDataOp;
 
   auto [newProdStart, newProdEnd] =
       getBlockStartEnd(dep.producerBlockId, module); // C Block
@@ -2319,6 +2389,9 @@ void InterCoreTransferAndSyncPass::moveStartEndSync(OpBuilder &builder) {
 }
 
 // Main Processing
+static void forwardTransferDestinations(ModuleOp module,
+                                        FlagIdReuseManager &relations);
+
 LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager) {
   LOG_DEBUG("Starting InterCoreTransferAndSyncPass processDependencies...\n");
@@ -2463,6 +2536,8 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   LOG_DEBUG("Completed memory syncs.\n");
   LOG_DEBUG("=====================================================\n");
 
+  forwardTransferDestinations(module, flagIdReuseManager);
+
   if (!flagManager.checkCurrentId()) {
     llvm::SmallVector<mlir::Operation *> analyzeFlagIdOps =
         insertAnalyzeFlagRelations(module, flagIdReuseManager);
@@ -2495,6 +2570,340 @@ void InterCoreTransferAndSyncPass::getDependentDialects(
                   scf::SCFDialect, tensor::TensorDialect,
                   bufferization::BufferizationDialect, memref::MemRefDialect,
                   hivm::HIVMDialect, annotation::AnnotationDialect>();
+}
+
+namespace {
+
+// Follow tensor views and declared in-place results before dropping a copy.
+// TA's standalone IR build has no lower-level bufferization external models.
+static bool hasLocalTransferUses(Value value, Operation *&lastUse) {
+  Block *block = value.getParentBlock();
+  SmallVector<Value> worklist{value};
+  llvm::DenseSet<Value> visited;
+  while (!worklist.empty()) {
+    Value current = worklist.pop_back_val();
+    if (!visited.insert(current).second)
+      continue;
+    if (!isa<RankedTensorType>(current.getType()))
+      return false;
+    for (OpOperand &use : current.getUses()) {
+      Operation *user = use.getOwner();
+      auto dps = dyn_cast<DestinationStyleOpInterface>(user);
+      if (user->hasTrait<OpTrait::IsTerminator>() ||
+          isa<CallOpInterface>(user) || (user->getNumRegions() && !dps) ||
+          (!dps && !isMemoryEffectFree(user) &&
+           !isa<MemoryEffectOpInterface>(user)))
+        return false;
+      SmallVector<Value> aliases;
+      if (isa<ViewLikeOpInterface, tensor::CastOp, tensor::ExtractSliceOp,
+              tensor::ExpandShapeOp, tensor::CollapseShapeOp>(user))
+        aliases.append(user->result_begin(), user->result_end());
+      if (dps && dps.isDpsInit(&use))
+        aliases.push_back(dps.getTiedOpResult(&use));
+      if (auto custom = dyn_cast<CustomOp>(user)) {
+        if (auto *semantics = custom.getBufferSemantics();
+            semantics && semantics->requiredByteAlias &&
+            semantics->requiredByteAlias->first == use.getOperandNumber())
+          aliases.push_back(
+              custom.getResult(semantics->requiredByteAlias->second));
+      }
+      llvm::TypeSwitch<Operation *>(user).Case<CustomOp, CustomMacroOp>(
+          [&](auto custom) {
+            for (unsigned i = 0; i < custom.getNumResults(); ++i)
+              if (custom.getInplaceInputIndexForOutput(i) ==
+                  use.getOperandNumber())
+                aliases.push_back(custom.getResult(i));
+          });
+      if (llvm::any_of(user->getResultTypes(),
+                       [](Type type) { return isa<BaseMemRefType>(type); }))
+        return false;
+      bool writes = false;
+      if (auto effects = dyn_cast<MemoryEffectOpInterface>(user)) {
+        SmallVector<MemoryEffects::EffectInstance> instances;
+        effects.getEffects(instances);
+        writes = llvm::any_of(instances, [&](const auto &effect) {
+          return effect.getValue() == current &&
+                 isa<MemoryEffects::Write>(effect.getEffect());
+        });
+      }
+      if (writes && aliases.empty() && user->getNumResults())
+        return false;
+      Operation *ancestor = user;
+      if (user->getBlock() != block) {
+        if (!aliases.empty() || writes)
+          return false;
+        while (ancestor->getBlock() != block) {
+          ancestor = ancestor->getParentOp();
+          if (!ancestor || !isa<scf::IfOp>(ancestor))
+            return false;
+        }
+      }
+      if (lastUse->isBeforeInBlock(ancestor))
+        lastUse = ancestor;
+      worklist.append(aliases);
+    }
+  }
+  return true;
+}
+
+static annotation::MarkOp getTransferMark(memref::AllocOp alloc) {
+  for (auto *user : alloc->getUsers())
+    if (auto mark = dyn_cast<annotation::MarkOp>(user);
+        mark && mark->hasAttr(HIVMTightlyCoupledBufferAttr::name))
+      return mark;
+  return {};
+}
+
+static DictionaryAttr getStorageAttrs(Operation *op) {
+  NamedAttrList attrs(op->getAttrs());
+  for (StringRef name :
+       {CVPipeline::kBlockId, CVPipeline::kTransferId, CVPipeline::kCoreType})
+    attrs.erase(name);
+  attrs.erase(HIVMTightlyCoupledBufferAttr::name);
+  return attrs.getDictionary(op->getContext());
+}
+
+static LogicalResult forwardTransferDestination(tensor::InsertSliceOp last,
+                                                IRRewriter &rewriter,
+                                                FlagIdReuseManager &relations) {
+  auto full = last.getType();
+  if (!full.hasStaticShape() || full.getEncoding())
+    return failure();
+  SmallVector<tensor::InsertSliceOp> inserts;
+  for (auto insert = last; insert;
+       insert = insert.getDest().getDefiningOp<tensor::InsertSliceOp>()) {
+    if (insert->getBlock() != last->getBlock() ||
+        (insert != last && !insert->hasOneUse()))
+      return failure();
+    inserts.push_back(insert);
+  }
+  if (inserts.size() < 2)
+    return failure();
+  std::reverse(inserts.begin(), inserts.end());
+  Operation *lastUse = last;
+  if (!hasLocalTransferUses(last.getResult(), lastUse))
+    return failure();
+  for (Operation &op : llvm::make_range(inserts.front()->getIterator(),
+                                        std::next(lastUse->getIterator())))
+    if (op.walk([](Operation *nested) {
+            return isa<SyncBlockSetOp, SyncBlockOp, SyncBlockUnlockOp,
+                       FreeLockVarOp, CallOpInterface>(nested)
+                       ? WalkResult::interrupt()
+                       : WalkResult::advance();
+          }).wasInterrupted())
+      return failure();
+
+  struct Piece {
+    tensor::InsertSliceOp insert;
+    bufferization::ToTensorOp tensor;
+    memref::MemorySpaceCastOp cast;
+    std::array<memref::AllocOp, 2> buffers;
+  };
+  SmallVector<Piece> pieces;
+  llvm::SmallPtrSet<Operation *, 8> allocations;
+  SmallVector<Attribute> dependencies;
+  std::array<Operation *, 2> loops{};
+  int64_t volume = 0;
+  auto func = last->getParentOfType<func::FuncOp>();
+  for (auto insert : inserts) {
+    auto type = insert.getSourceType();
+    if (!type.hasStaticShape() || type.getEncoding() ||
+        type.getRank() != full.getRank() ||
+        insert.getStaticSizes() != type.getShape() ||
+        !llvm::all_of(insert.getStaticStrides(),
+                      [](int64_t stride) { return stride == 1; }))
+      return failure();
+    int64_t offset = 0;
+    for (int64_t dim = 0; dim < full.getRank(); ++dim) {
+      int64_t start = insert.getStaticOffsets()[dim];
+      int64_t size = type.getDimSize(dim);
+      if (start < 0 || size <= 0 || start > full.getDimSize(dim) - size)
+        return failure();
+      offset = offset * full.getDimSize(dim) + start;
+    }
+    for (auto previous : inserts) {
+      if (previous == insert)
+        break;
+      bool overlap = true;
+      for (int64_t dim = 0; dim < full.getRank(); ++dim) {
+        int64_t a = previous.getStaticOffsets()[dim];
+        int64_t b = insert.getStaticOffsets()[dim];
+        overlap &= a < b + type.getDimSize(dim) &&
+                   b < a + previous.getStaticSizes()[dim];
+      }
+      if (overlap)
+        return failure();
+    }
+    volume += type.getNumElements();
+    auto tensor = insert.getSource().getDefiningOp<bufferization::ToTensorOp>();
+    if (!tensor || !tensor->hasOneUse() || !tensor.getRestrict() ||
+        !tensor.getWritable() || tensor->getBlock() != last->getBlock())
+      return failure();
+    auto cast =
+        tensor->getOperand(0).getDefiningOp<memref::MemorySpaceCastOp>();
+    Value buffer = cast ? cast.getSource() : tensor->getOperand(0);
+    auto receiver = buffer.getDefiningOp<memref::AllocOp>();
+    if (!receiver || (cast && !cast->hasOneUse()))
+      return failure();
+    auto tid = receiver->getAttrOfType<IntegerAttr>(CVPipeline::kTransferId);
+    auto receiverMark = getTransferMark(receiver);
+    if (!tid || !receiverMark)
+      return failure();
+    SmallVector<memref::AllocOp> pair;
+    func.walk([&](memref::AllocOp alloc) {
+      if (alloc->getAttr(CVPipeline::kTransferId) == tid)
+        pair.push_back(alloc);
+    });
+    if (pair.size() != 2)
+      return failure();
+    Piece piece{insert,
+                tensor,
+                cast,
+                {receiver, pair[0] == receiver ? pair[1] : pair[0]}};
+    for (unsigned role = 0; role < 2; ++role) {
+      auto alloc = piece.buffers[role];
+      auto mark = getTransferMark(alloc);
+      auto reference = pieces.empty() ? alloc : pieces.front().buffers[role];
+      auto memrefType = alloc.getType();
+      auto blockElems = getBlockElemsFor32BAlign(full.getElementType());
+      if (!allocations.insert(alloc).second || !mark ||
+          mark->getAttr(HIVMTightlyCoupledBufferAttr::name) !=
+              receiverMark->getAttr(HIVMTightlyCoupledBufferAttr::name) ||
+          memrefType != receiver.getType() ||
+          !memref::isStaticShapeAndContiguousRowMajor(memrefType) ||
+          memrefType.getMemorySpace() != reference.getType().getMemorySpace() ||
+          alloc->getBlock() != reference->getBlock() ||
+          getStorageAttrs(alloc) != getStorageAttrs(reference) ||
+          getStorageAttrs(mark) !=
+              getStorageAttrs(getTransferMark(reference)) ||
+          !blockElems || offset % blockElems ||
+          (offset * getElemBytesForAlign(full.getElementType())) %
+              alloc.getAlignment().value_or(1))
+        return failure();
+      for (auto *user : alloc->getUsers()) {
+        if (user == mark || user == tensor || (cast && user == cast))
+          continue;
+        if (!isa<DestinationStyleOpInterface>(user) || user->getNumResults() ||
+            user->getNumRegions())
+          return failure();
+        auto *ancestor = last->getBlock()->findAncestorOpInBlock(*user);
+        if (!ancestor || !ancestor->isBeforeInBlock(insert))
+          return failure();
+        Operation *loop = user->getParentOp();
+        while (loop && !isa<scf::ForOp, scf::WhileOp>(loop))
+          loop = loop->getParentOp();
+        if (!pieces.empty() && loops[role] != loop)
+          return failure();
+        loops[role] = loop;
+      }
+    }
+    dependencies.push_back(tid);
+    dependencies.push_back(
+        rewriter.getI32IntegerAttr(CVPipeline::crossCoreConsumerId));
+    pieces.push_back(piece);
+  }
+  if (volume != full.getNumElements())
+    return failure();
+
+  std::array<Value, 2> whole;
+  for (unsigned role = 0; role < 2; ++role) {
+    auto reference = pieces.front().buffers[role];
+    Operation *earliest = reference;
+    for (auto &piece : pieces)
+      if (piece.buffers[role]->isBeforeInBlock(earliest))
+        earliest = piece.buffers[role];
+    rewriter.setInsertionPoint(earliest);
+    auto type =
+        MemRefType::get(full.getShape(), full.getElementType(), AffineMap{},
+                        reference.getType().getMemorySpace());
+    auto alloc = rewriter.create<memref::AllocOp>(last.getLoc(), type);
+    alloc->setAttrs(reference->getAttrs());
+    whole[role] = alloc;
+    IRMapping mapping;
+    mapping.map(reference.getMemref(), alloc.getMemref());
+    rewriter.clone(*getTransferMark(reference), mapping);
+  }
+  for (auto &piece : pieces)
+    for (unsigned role = 0; role < 2; ++role) {
+      auto alloc = piece.buffers[role];
+      auto mark = getTransferMark(alloc);
+      SmallVector<Operation *> users(alloc->getUsers().begin(),
+                                     alloc->getUsers().end());
+      for (auto *user : users) {
+        if (user == mark)
+          continue;
+        rewriter.setInsertionPoint(user);
+        auto view = rewriter.create<memref::SubViewOp>(
+            piece.insert.getLoc(), whole[role], piece.insert.getMixedOffsets(),
+            piece.insert.getMixedSizes(), piece.insert.getMixedStrides());
+        for (StringRef name : {CVPipeline::kBlockId, CVPipeline::kCoreType,
+                               CVPipeline::kTransferId})
+          if (auto attr = user->getAttr(name))
+            view->setAttr(name, attr);
+        rewriter.modifyOpInPlace(user, [&] {
+          user->replaceUsesOfWith(alloc.getMemref(), view.getResult());
+          if (auto cast = dyn_cast<memref::MemorySpaceCastOp>(user)) {
+            auto type = view.getType();
+            cast.getResult().setType(MemRefType::get(
+                type.getShape(), type.getElementType(), type.getLayout()));
+          }
+        });
+      }
+      relations.replaceOperation(mark, whole[role].getDefiningOp());
+      relations.replaceOperation(alloc, whole[role].getDefiningOp());
+      rewriter.eraseOp(mark);
+      rewriter.eraseOp(alloc);
+    }
+  rewriter.setInsertionPoint(last);
+  auto plain = MemRefType::get(full.getShape(), full.getElementType());
+  auto cast = rewriter.create<memref::MemorySpaceCastOp>(last.getLoc(), plain,
+                                                         whole[0]);
+  auto tensor = rewriter.create<bufferization::ToTensorOp>(last.getLoc(), full,
+                                                           cast, true, true);
+  for (auto *op : {cast.getOperation(), tensor.getOperation()}) {
+    for (StringRef name :
+         {CVPipeline::kBlockId, CVPipeline::kCoreType, CVPipeline::kTransferId})
+      if (auto attr = pieces.front().tensor->getAttr(name))
+        op->setAttr(name, attr);
+    if (auto id = CVPipeline::getOpBlockId(last))
+      op->setAttr(CVPipeline::kBlockId, rewriter.getI32IntegerAttr(*id));
+    if (auto id = getSubBlockId(last))
+      CVPipeline::setSubBlockId(op, *id);
+  }
+  cast->setAttr(CVPipeline::kCrossCoreDeps,
+                rewriter.getArrayAttr(dependencies));
+  rewriter.replaceAllUsesWith(last.getResult(), tensor.getResult());
+  for (auto insert : llvm::reverse(inserts)) {
+    relations.replaceOperation(insert, tensor);
+    rewriter.eraseOp(insert);
+  }
+  for (auto &piece : pieces) {
+    relations.replaceOperation(piece.tensor, tensor);
+    rewriter.eraseOp(piece.tensor);
+    if (piece.cast) {
+      relations.replaceOperation(piece.cast, cast);
+      rewriter.eraseOp(piece.cast);
+    }
+  }
+  return success();
+}
+
+} // namespace
+
+static void forwardTransferDestinations(ModuleOp module,
+                                        FlagIdReuseManager &relations) {
+  SmallVector<tensor::InsertSliceOp> terminals;
+  module.walk([&](tensor::InsertSliceOp insert) {
+    if (insert->hasOneUse())
+      if (auto next =
+              dyn_cast<tensor::InsertSliceOp>(*insert->getUsers().begin());
+          next && next.getDest() == insert.getResult())
+        return;
+    terminals.push_back(insert);
+  });
+  IRRewriter rewriter(module.getContext());
+  for (auto insert : terminals)
+    (void)forwardTransferDestination(insert, rewriter, relations);
 }
 
 // Pass Entry Point

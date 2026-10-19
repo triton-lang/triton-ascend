@@ -81,6 +81,8 @@ from .mem_ops import (
     index_select_simd,
 )
 
+from .online_softmax import online_softmax_nz
+
 __all__ = [
     # core
     "builtin",
@@ -132,6 +134,7 @@ __all__ = [
     "custom_semantic",
     "register_custom_op",
     "SyncEventSlot",
+    "online_softmax_nz",
 
     # math ops
     "atan2",

@@ -1,4 +1,4 @@
-// RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
+// RUN: triton-opt --split-input-file --add_multi_buffer_outer_scope %s | FileCheck %s
 
 // Test: C→V transfer with scf.while (main_loop) in double-buffer mode.
 // - pin inter_core_buf_count=2: polling branch (scf.if dispatch) now
@@ -68,12 +68,12 @@ func.func @tc_while_ctov_sender() {
   hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 3
   // --- CUBE scope (sender for C→V: fixpipe writes to ub) ---
   scope.scope : () -> () {
-    %buf_cc = memref.alloc() {ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf16, #hivm.address_space<cc>>
+    %buf_cc = memref.alloc() {ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf32, #hivm.address_space<cc>>
     %buf_ub = memref.alloc() {ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf16, #hivm.address_space<ub>>
     annotation.mark %buf_ub {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<0>, ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} : memref<128xf16, #hivm.address_space<ub>>
     scf.for %i = %c0_i32 to %c100_i32 step %c1_i32 iter_args() -> () : i32 {
       hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 3
-      hivm.hir.fixpipe {ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} ins(%buf_cc : memref<128xf16, #hivm.address_space<cc>>) outs(%buf_ub : memref<128xf16, #hivm.address_space<ub>>)
+      hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32} ins(%buf_cc : memref<128xf32, #hivm.address_space<cc>>) outs(%buf_ub : memref<128xf16, #hivm.address_space<ub>>)
       hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 20 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 3
       scf.yield
     } {ssbuffer.main_loop = 1 : i64}
@@ -141,7 +141,7 @@ func.func @tc_while_both_sides() {
   hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 6
   // --- CUBE scope ---
   scope.scope : () -> () {
-    %buf_cc = memref.alloc() {ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128xf16, #hivm.address_space<cc>>
+    %buf_cc = memref.alloc() {ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128xf32, #hivm.address_space<cc>>
     %buf_ub = memref.alloc() {ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128xf16, #hivm.address_space<ub>>
     annotation.mark %buf_ub {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<1>, ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128xf16, #hivm.address_space<ub>>
     scf.while (%iter = %c0_i32) : (i32) -> i32 {
@@ -150,11 +150,58 @@ func.func @tc_while_both_sides() {
     } do {
     ^bb0(%iter: i32):
       hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 6
-      hivm.hir.fixpipe {ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} ins(%buf_cc : memref<128xf16, #hivm.address_space<cc>>) outs(%buf_ub : memref<128xf16, #hivm.address_space<ub>>)
+      hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32} ins(%buf_cc : memref<128xf32, #hivm.address_space<cc>>) outs(%buf_ub : memref<128xf16, #hivm.address_space<ub>>)
       hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 40 : i32, ssbuffer.transfer_id = 2 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 6
       %next_iter = arith.addi %iter, %c1_i32 : i32
       scf.yield %next_iter : i32
     } attributes {ssbuffer.main_loop = 1 : i64}
+    scope.return
+  } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
+  return
+}
+
+}
+
+// -----
+
+// CHECK-LABEL: func.func @tc_layout_transfer_boundary
+// CHECK: scf.if {{.*}} -> (tensor<16x16xf16>) {
+// CHECK: hivm.hir.convert_layout
+// CHECK: memref.memory_space_cast
+// CHECK: } else {
+// CHECK: hivm.hir.convert_layout
+// CHECK: memref.memory_space_cast
+// CHECK: ssbuffer.crossCoreDeps = [3 : i32, 0 : i32]
+// CHECK: return
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32} {
+func.func @tc_layout_transfer_boundary() {
+  %c0 = arith.constant 0 : i32
+  %c2 = arith.constant 2 : i32
+  %c1 = arith.constant 1 : i32
+  scope.scope : () -> () {
+    %buffer = memref.alloc() {ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32} : memref<1x1x16x16xf16, #hivm.address_space<ub>>
+    annotation.mark %buffer {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32} : memref<1x1x16x16xf16, #hivm.address_space<ub>>
+    scf.for %i = %c0 to %c2 step %c1 : i32 {
+      hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 9
+      %layout = hivm.hir.convert_layout %buffer output_shape [16, 16] {srcLayout = #hivm.data_layout<nZ>, dstLayout = #hivm.data_layout<ND>, ssbuffer.block_id = 50 : i32, ssbuffer.crossCoreDeps = [3 : i32, 0 : i32], ssbuffer.transfer_id = 3 : i32} : (memref<1x1x16x16xf16, #hivm.address_space<ub>>) -> memref<16x16xf16, #hivm.address_space<ub>>
+      %plain = memref.memory_space_cast %layout {ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32} : memref<16x16xf16, #hivm.address_space<ub>> to memref<16x16xf16>
+      %value = bufferization.to_tensor %plain restrict writable : memref<16x16xf16> to tensor<16x16xf16>
+      %use = arith.negf %value {ssbuffer.block_id = 50 : i32} : tensor<16x16xf16>
+      hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 9
+    } {ssbuffer.main_loop = 3 : i64}
+    scope.return
+  } {hivm.tcore_type = #hivm.tcore_type<VECTOR>}
+  hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 50 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_FIX>, <PIPE_V>] flag = 9
+  hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 9
+  scope.scope : () -> () {
+    %source = memref.alloc() : memref<1x1x16x16xf32, #hivm.address_space<cc>>
+    %buffer = memref.alloc() {ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32} : memref<1x1x16x16xf16, #hivm.address_space<ub>>
+    annotation.mark %buffer {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32} : memref<1x1x16x16xf16, #hivm.address_space<ub>>
+    scf.for %i = %c0 to %c2 step %c1 : i32 {
+      hivm.hir.sync_block_wait {ssbuffer.analyze_flag_id, ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = 9
+      hivm.hir.fixpipe {pre_quant = #hivm.fixpipe_pre_quant_mode<F322F16>, ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32} ins(%source : memref<1x1x16x16xf32, #hivm.address_space<cc>>) outs(%buffer : memref<1x1x16x16xf16, #hivm.address_space<ub>>)
+      hivm.hir.sync_block_set {ssbuffer.analyze_flag_id, ssbuffer.block_id = 60 : i32, ssbuffer.transfer_id = 3 : i32}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = 9
+    } {ssbuffer.main_loop = 3 : i64}
     scope.return
   } {hivm.tcore_type = #hivm.tcore_type<CUBE>}
   return

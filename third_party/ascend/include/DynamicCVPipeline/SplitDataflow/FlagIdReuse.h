@@ -42,6 +42,7 @@ public:
   FlagIdReuseManager() {}
 
   void insertRelationBetweenSetAndWait(Operation *before, Operation *after);
+  void replaceOperation(Operation *before, Operation *after);
   DenseMap<int, int>
   reuseInterCoreTransferFlagIds(const llvm::SmallVector<Operation *> &syncOps);
 

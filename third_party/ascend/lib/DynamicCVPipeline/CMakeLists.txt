@@ -71,6 +71,7 @@ add_triton_library(DynamicCVPipeline
   BiShengIRAnnotationDialect
   MLIRLinalgTransformOps
   MLIRLinalgTransforms
+  MLIRMemRefUtils
   MLIRSCFTransformOps
   MLIRTransformDialect
   MLIRTransformDialectTransforms

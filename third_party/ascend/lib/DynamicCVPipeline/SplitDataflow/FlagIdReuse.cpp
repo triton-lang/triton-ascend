@@ -57,6 +57,16 @@ void FlagIdReuseManager::insertRelationBetweenSetAndWait(Operation *before,
   return;
 }
 
+void FlagIdReuseManager::replaceOperation(Operation *before, Operation *after) {
+  if (auto it = relations.find(before); it != relations.end()) {
+    auto outgoing = std::move(it->second);
+    relations.erase(it);
+    relations[after].append(outgoing);
+  }
+  for (auto &[source, targets] : relations)
+    llvm::replace(targets, before, after);
+}
+
 DenseMap<int, int> FlagIdReuseManager::reuseInterCoreTransferFlagIds(
     const llvm::SmallVector<Operation *> &syncOps) {
   DenseMap<int, int> remapResult;

@@ -35,6 +35,9 @@ from triton.runtime.cache import get_cache_manager, get_dump_manager
 from . import utils
 from .program_grid import (ProgramGridContractError, get_persistent_transform, normalize_program_grid_transforms)
 
+# Host optimization for the shared runtime and lazy C export adapter.
+_LAUNCHER_CFLAGS = ("-O2", )
+
 # Keep these values in sync with launcher_abi.h. These are data tags, not C++
 # spellings: a signature is decoded once when a native plan is constructed.
 CONSTEXPR, POINTER, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64 = range(12)
@@ -316,7 +319,7 @@ def _shared_key(fingerprint, sources):
 
 
 def _build_shared(name, sources, debug=False):
-    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=("-O3", ))
+    fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
     cache = get_cache_manager(key)
     filename = name + sysconfig.get_config_var("EXT_SUFFIX")
@@ -331,7 +334,7 @@ def _build_shared(name, sources, debug=False):
                 Path(temp, source_name).write_text(content)
             source_path = Path(temp,
                                "launcher_runtime.cpp" if name == "__triton_launcher_runtime" else "launcher_export.cpp")
-            built = utils._build_npu_ext(name, str(source_path), extra_cflags=("-O3", ))
+            built = utils._build_npu_ext(name, str(source_path), extra_cflags=_LAUNCHER_CFLAGS)
             return Path(built).read_bytes()
 
     return utils._get_or_build_npu_artifact(cache, filename, build)

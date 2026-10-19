@@ -39,7 +39,7 @@ from triton.backends.ascend.launcher import (argument_types, export_launcher, ge
 import triton.backends.ascend.utils as _ascend_utils
 
 # The helper contains the per-call Torch-NPU submission path as well as setup.
-_NPU_UTILS_CFLAGS = ("-O3", )
+_NPU_UTILS_CFLAGS = ("-O2", )
 
 
 @functools.lru_cache(maxsize=32)

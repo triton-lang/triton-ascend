@@ -169,31 +169,43 @@ def test_export_path_is_lazy_and_cached(policy, monkeypatch):
     assert len(calls) == 1
 
 
-def test_runtime_cache_tracks_headers_build_inputs_and_root(tmp_path, monkeypatch):
+@pytest.mark.parametrize("name,filename", [("__triton_launcher_runtime", "launcher_runtime.cpp"),
+                                           ("launcher_export", "launcher_export.cpp")])
+def test_runtime_cache_tracks_headers_build_inputs_and_root(tmp_path, monkeypatch, name, filename):
     compiled = []
     build_inputs = {"compiler": "toolchain-a"}
-    monkeypatch.setattr(utils, "npu_extension_fingerprint", lambda *a, **k: dict(build_inputs))
+    monkeypatch.setattr(utils, "npu_extension_fingerprint",
+                        lambda *a, **k: {**build_inputs, "flags": list(k["extra_cflags"])})
 
     def build(name, source, **kwargs):
         path = Path(source).with_suffix(".so")
-        path.write_bytes(b"a compiled module")
+        path.write_bytes(repr(tuple(kwargs["extra_cflags"])).encode())
         compiled.append(source)
         return str(path)
 
     monkeypatch.setattr(utils, "_build_npu_ext", build)
     monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "cache-a"))
-    sources = {"launcher_runtime.cpp": "#include \"contract.h\"", "contract.h": "v1"}
-    first = launcher._build_shared("__triton_launcher_runtime", sources)
-    assert launcher._build_shared("__triton_launcher_runtime", sources) == first
+    sources = {filename: "#include \"contract.h\"", "contract.h": "v1"}
+    configured_flags = launcher._LAUNCHER_CFLAGS
+    assert configured_flags == ("-O2", )
+    first = launcher._build_shared(name, sources)
+    assert Path(first).read_bytes() == repr(configured_flags).encode()
+    assert launcher._build_shared(name, sources) == first
     assert len(compiled) == 1
-    changed = launcher._build_shared("__triton_launcher_runtime", {**sources, "contract.h": "v2"})
+    monkeypatch.setattr(launcher, "_LAUNCHER_CFLAGS", ("-O3", ))
+    other_level = launcher._build_shared(name, sources)
+    assert other_level != first
+    assert Path(other_level).read_bytes() == repr(("-O3", )).encode()
+    monkeypatch.setattr(launcher, "_LAUNCHER_CFLAGS", configured_flags)
+    assert launcher._build_shared(name, sources) == first
+    changed = launcher._build_shared(name, {**sources, "contract.h": "v2"})
     assert changed != first
     build_inputs["compiler"] = "toolchain-b"
-    assert launcher._build_shared("__triton_launcher_runtime", sources) != first
+    assert launcher._build_shared(name, sources) != first
     monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "cache-b"))
-    relocated = launcher._build_shared("__triton_launcher_runtime", sources)
+    relocated = launcher._build_shared(name, sources)
     assert str(tmp_path / "cache-b") in relocated
-    assert len(compiled) == 4
+    assert len(compiled) == 5
 
 
 @pytest.fixture
@@ -252,8 +264,9 @@ def test_folded_arguments_reach_runtime_and_export(prepared_backend, monkeypatch
     assert instance.signature == {0: "*i32", 1: "i32", 2: "i32"}
 
 
-def test_helper_optimization_flags_invalidate_cached_artifact(prepared_backend, monkeypatch):
-    """An optimized helper must not reuse the earlier unoptimized binary."""
+@pytest.mark.parametrize("previous_flags", [(), ("-O3", )])
+def test_helper_optimization_flags_invalidate_cached_artifact(prepared_backend, monkeypatch, previous_flags):
+    """Changing optimization must not reuse an artifact built with old flags."""
     state = prepared_backend
     build_flags = []
 
@@ -269,15 +282,15 @@ def test_helper_optimization_flags_invalidate_cached_artifact(prepared_backend, 
     monkeypatch.setattr(utils, "npu_extension_fingerprint", fingerprint)
     monkeypatch.setattr(state.driver, "_build_npu_ext", build)
     configured_flags = state.driver._NPU_UTILS_CFLAGS
-    assert configured_flags == ("-O3", )
-    monkeypatch.setattr(state.driver, "_NPU_UTILS_CFLAGS", ())
-    unoptimized = state.driver.NPUUtils().get_so_path()
+    assert configured_flags == ("-O2", )
+    monkeypatch.setattr(state.driver, "_NPU_UTILS_CFLAGS", previous_flags)
+    previous = state.driver.NPUUtils().get_so_path()
     monkeypatch.setattr(state.driver, "_NPU_UTILS_CFLAGS", configured_flags)
     optimized = state.driver.NPUUtils().get_so_path()
-    assert optimized != unoptimized
+    assert optimized != previous
     assert Path(optimized).read_bytes() == repr(configured_flags).encode()
     assert state.driver.NPUUtils().get_so_path() == optimized
-    assert build_flags == [(), configured_flags]
+    assert build_flags == [previous_flags, configured_flags]
 
 
 def test_repeated_preparation_reuses_keys_and_artifacts(prepared_backend, monkeypatch):

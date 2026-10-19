@@ -195,3 +195,7 @@ if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
 else()
   target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
 endif()
+
+if(TRITON_BUILD_PROTON)
+  target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_ENABLE_PROTON=1)
+endif()

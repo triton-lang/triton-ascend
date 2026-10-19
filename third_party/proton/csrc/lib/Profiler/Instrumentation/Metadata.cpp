@@ -23,6 +23,11 @@ void InstrumentationMetadata::parse() {
   if (metadataJson.contains("num_warps")) {
     numWarps = metadataJson["num_warps"].get<size_t>();
   }
+
+  numUnits = numWarps;
+  if (metadataJson.contains("profile_num_units")) {
+    numUnits = metadataJson["profile_num_units"].get<size_t>();
+  }
 }
 
 } // namespace proton

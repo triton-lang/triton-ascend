@@ -450,6 +450,8 @@ def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op
         return linalg, parsed_metadata
 
     def run_bisheng(command, **_kwargs):
+        if command[-1] == "--help-hidden":
+            return SimpleNamespace(stdout="  --enable-optimized-metaop=<bool>\n")
         commands.append(list(command))
         Path(command[command.index("-o") + 1] + "_reloc.o").write_bytes(b"npubin")
         return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
@@ -959,6 +961,8 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
     commands = []
 
     def capture(command, **_kwargs):
+        if command[-1] == "--help-hidden":
+            return SimpleNamespace(stdout="  --enable-optimized-metaop=<bool>\n")
         commands.append(command)
         raise CommandCaptured
 

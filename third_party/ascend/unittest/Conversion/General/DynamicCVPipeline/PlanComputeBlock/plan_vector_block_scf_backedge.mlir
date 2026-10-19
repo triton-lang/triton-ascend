@@ -223,3 +223,27 @@ func.func @for_if_second_result(%cond: i1, %n: index, %a: tensor<8x8xf32>, %b: t
   } {ssbuffer.core_type = "VECTOR, VECTOR"}
   return %r#1 : tensor<8x8xf32>
 }
+
+// -----
+
+module {
+  // CHECK-LABEL: func.func @same_block_state_read
+  // CHECK: arith.addf {{.*}} {ssbuffer.block_id = [[VECTOR:[0-9]+]] : i32
+  // CHECK-NEXT: {{.*}}arith.extf {{.*}} {ssbuffer.block_id = [[VECTOR]] : i32
+  func.func @same_block_state_read(%init: tensor<16xf16>, %offset: tensor<16xf16>,
+                            %ext_init: tensor<16xf32>, %n: index,
+                            %lhs: tensor<16x16xf16>, %rhs: tensor<16x16xf16>,
+                            %acc_init: tensor<16x16xf32>) -> (tensor<16xf32>, tensor<16x16xf32>) {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %r:3 = scf.for %i = %c0 to %n step %c1 iter_args(%old = %init, %last = %ext_init, %acc = %acc_init) -> (tensor<16xf16>, tensor<16xf32>, tensor<16x16xf32>) {
+      %mm = linalg.matmul {ssbuffer.core_type = "CUBE", ssbuffer.block_id = 1 : i32}
+          ins(%lhs, %rhs : tensor<16x16xf16>, tensor<16x16xf16>)
+          outs(%acc : tensor<16x16xf32>) -> tensor<16x16xf32>
+      %next = arith.addf %old, %offset {ssbuffer.core_type = "VECTOR"} : tensor<16xf16>
+      %snapshot = arith.extf %old {ssbuffer.core_type = "VECTOR"} : tensor<16xf16> to tensor<16xf32>
+      scf.yield %next, %snapshot, %mm : tensor<16xf16>, tensor<16xf32>, tensor<16x16xf32>
+    }
+    return %r#1, %r#2 : tensor<16xf32>, tensor<16x16xf32>
+  }
+}

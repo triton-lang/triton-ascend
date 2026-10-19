@@ -25,8 +25,6 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
-#include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -88,9 +86,11 @@ collectTensorArgBlockInfo(ArrayRef<Value> iterArgs, Block *body) {
 
 // Check if any tensor-type iter_arg appears in different block_ids.
 static bool checkMultiBlockUse(
-    const llvm::DenseMap<unsigned, TensorArgBlockInfo> &argBlockInfo) {
+    const llvm::DenseMap<unsigned, TensorArgBlockInfo> &argBlockInfo,
+    ArrayRef<Value> iterArgs, Block *body) {
   for (auto &p : argBlockInfo) {
-    if (p.second.blockIds.size() > 1)
+    if (p.second.blockIds.size() > 1 &&
+        !CVPipeline::findOnlineSoftmaxOldMaxRead(iterArgs[p.first], body))
       return true;
   }
   return false;
@@ -105,6 +105,8 @@ static bool checkUseUpdateMismatch(
 
   for (unsigned i = 0; i < iterArgs.size(); ++i) {
     if (!isa<RankedTensorType>(iterArgs[i].getType()))
+      continue;
+    if (CVPipeline::findOnlineSoftmaxOldMaxRead(iterArgs[i], body))
       continue;
 
     auto it = argBlockInfo.find(i);
@@ -125,7 +127,7 @@ static bool checkUseUpdateMismatch(
 static bool hasTensorArgInDifferentBlockIds(ArrayRef<Value> iterArgs,
                                             Block *body) {
   auto argBlockInfo = collectTensorArgBlockInfo(iterArgs, body);
-  return checkMultiBlockUse(argBlockInfo) ||
+  return checkMultiBlockUse(argBlockInfo, iterArgs, body) ||
          checkUseUpdateMismatch(iterArgs, body, argBlockInfo);
 }
 
@@ -159,8 +161,14 @@ static bool checkUpdateBeforeUse(ArrayRef<Value> iterArgs, Block *body) {
       if (!defOp->isBeforeInBlock(directChild))
         continue;
 
-      if (CVPipeline::getOpBlockId(directChild) != defBlockId)
-        return true;
+      if (CVPipeline::getOpBlockId(directChild) == defBlockId)
+        continue;
+
+      if (user == CVPipeline::findOnlineSoftmaxOldMaxRead(iterArg, body)) {
+        continue;
+      }
+
+      return true;
     }
   }
   return false;

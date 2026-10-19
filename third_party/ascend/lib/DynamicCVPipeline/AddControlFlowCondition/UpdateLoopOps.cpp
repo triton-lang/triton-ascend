@@ -579,8 +579,11 @@ LogicalResult UpdateLoopOpsPass::analyzeTensorIterArgDependencies(
     // whileOp: getAfterArguments() (before-block args aren't visible in body).
     llvm::SmallVector<Value> iterArgsVec = MainLoop(op).getIterArgs();
 
-    for (auto iterArg : iterArgsVec) {
+    for (Value iterArg : iterArgsVec) {
       if (!mlir::isa<TensorType>(iterArg.getType())) {
+        continue;
+      }
+      if (findOnlineSoftmaxOldMaxRead(iterArg, MainLoop(op).getBody())) {
         continue;
       }
 

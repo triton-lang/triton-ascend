@@ -23,7 +23,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
-#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
@@ -72,6 +71,12 @@ static std::optional<int64_t> getErrorCode(ModuleOp moduleOp) {
                      : std::nullopt;
 }
 
+static void removeOnlineSoftmaxSchedulingHints(ModuleOp moduleOp) {
+  moduleOp.walk([](Operation *op) {
+    op->removeAttr(CVPipeline::kOnlineSoftmaxOldMaxRead);
+  });
+}
+
 static inline void addPasses(OpPassManager &pm) {
   pm.addPass(createPreCheckAvailablePass());
   pm.addPass(createStandardizeOpPass());
@@ -107,6 +112,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
   moduleOp->removeAttr(CVPipeline::ERRCODE_ATTR);
 
   if (!compileOn91095Flag) {
+    removeOnlineSoftmaxSchedulingHints(moduleOp);
     llvm::errs() << "Add-dynamic-cv-pipeline is only supported on 91095 now.\n";
     return;
   }
@@ -142,6 +148,7 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     auto result = pm.run(moduleOp);
     auto errCode = getErrorCode(moduleOp);
     if (succeeded(result) && !errCode.has_value()) {
+      removeOnlineSoftmaxSchedulingHints(moduleOp);
       if (tuplePreloadFailed) {
         CVPipeline::setFallbackAttr(moduleOp,
                                     CVPipeline::ERRCODE_TUPLE_PRELOAD_FAILED);
@@ -183,12 +190,14 @@ void AddDynamicCVPipelinePass::runOnOperation() {
     }
 
     fallback.restore();
+    removeOnlineSoftmaxSchedulingHints(moduleOp);
     moduleOp->setAttr(CVPipeline::ERRCODE_ATTR,
                       builder.getI32IntegerAttr(
                           errCode.value_or(CVPipeline::ERRCODE_FAILED)));
     return;
   }
 
+  removeOnlineSoftmaxSchedulingHints(moduleOp);
   LDBG("Process successfully");
 }
 

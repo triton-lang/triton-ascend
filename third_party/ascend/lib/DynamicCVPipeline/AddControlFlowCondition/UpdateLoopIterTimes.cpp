@@ -625,7 +625,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIterDepsFactor(
         LDBG("Producer IfOp index (producerIdx) is not greater than consumer "
              "IfOp index "
              "(comsumerIdx)!");
-        LDBG("arg value: " << relation.iterArg);
+        // The loop may already have been rebuilt, so relation.iterArg can
+        // refer to an erased block argument. Do not dereference it in debug
+        // logging on this failure path.
         LDBG("Producer IfOp index producerIdx: " << producerIdx);
         LDBG("consumer IfOp index comsumerIdx: " << comsumerIdx);
         return {-1, -1};

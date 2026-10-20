@@ -155,6 +155,7 @@ MemoryDependenceGraph::MemoryDependenceGraph(Operation *root, AliasAnalysis &aa)
   }
   analyzeOp(root);
   slots.clear();
+  lastUnknownOp = nullptr;
   valueToSlot.clear();
 }
 
@@ -205,6 +206,7 @@ MemoryDependenceGraph::getRealDependency(Operation *frontOp,
 
   // Create slots for frontOps, using existing effects logic to process
   slots.clear();
+  lastUnknownOp = nullptr;
   valueToSlot.clear();
   llvm::SmallSetVector<Operation *, INIT_SIZE> dependencyOps;
   for (Operation *leafOp : leafOps) {
@@ -226,7 +228,7 @@ MemoryDependenceGraph::getRealDependency(Operation *frontOp,
   // Analyze denpendence from frontOps to backOp
   SmallVector<Operation *> defs;
   SmallVector<Operation *> preds;
-  collectPreds(backEffects, backUnknown, defs, preds);
+  collectPreds(backOp, backEffects, backUnknown, defs, preds);
   dependencyOps.insert(preds.begin(), preds.end());
   return {dependencyOps.begin(), dependencyOps.end()};
 }
@@ -252,7 +254,7 @@ void MemoryDependenceGraph::analyzeOp(Operation *op) {
   // Step 2: collect defs(WAR) and preds(WAR, WAW, RAW) dependency.
   SmallVector<Operation *> defs;
   SmallVector<Operation *> preds;
-  collectPreds(effects, unknown, defs, preds);
+  collectPreds(op, effects, unknown, defs, preds);
   LOG_DEBUG("Defs: \n");
   for (auto def : defs) {
     LOG_DEBUG(*def << "\n");
@@ -285,6 +287,7 @@ void MemoryDependenceGraph::analyzeRegionsOf(Operation *op) {
     Snapshot snap = takeSnapshot();
     if (isolated) {
       slots.clear();
+      lastUnknownOp = nullptr;
       valueToSlot.clear();
     }
 
@@ -441,8 +444,8 @@ MemoryDependenceGraph::resolveAliasSlots(
 }
 
 void MemoryDependenceGraph::collectPreds(
-    ArrayRef<MemoryEffects::EffectInstance> effects, bool unknown,
-    SmallVectorImpl<Operation *> &defsOut,
+    Operation *op, ArrayRef<MemoryEffects::EffectInstance> effects,
+    bool unknown, SmallVectorImpl<Operation *> &defsOut,
     SmallVectorImpl<Operation *> &predsOut) {
   llvm::SmallSetVector<Operation *, INIT_SIZE> defs;
   llvm::SmallSetVector<Operation *, INIT_SIZE> preds;
@@ -464,10 +467,19 @@ void MemoryDependenceGraph::collectPreds(
     }
   };
 
+  for (auto res : op->getResults()) {
+    if (isa<MemRefType>(res.getType()) && lastUnknownOp) {
+      preds.insert(lastUnknownOp);
+    }
+  }
+
   // The unknown op is considered as a barrier.
   if (unknown) {
     for (auto &slot : slots) {
       addFromSlot(slot.get(), true);
+    }
+    if (lastUnknownOp) {
+      preds.insert(lastUnknownOp);
     }
     predsOut.assign(preds.begin(), preds.end());
     return;
@@ -476,7 +488,12 @@ void MemoryDependenceGraph::collectPreds(
   DenseMap<Value, SmallVector<MemSlot *>> cache;
   for (const auto &e : effects) {
     Value v = e.getValue();
-    if (isa<MemoryEffects::Read>(e.getEffect())) {
+    if (isa<MemoryEffects::Allocate>(e.getEffect())) {
+      // The edge for unknown ops to alloc ops.
+      if (lastUnknownOp) {
+        preds.insert(lastUnknownOp);
+      }
+    } else if (isa<MemoryEffects::Read>(e.getEffect())) {
       for (MemSlot *s : resolveAliasSlots(v, cache)) {
         addFromSlot(s, false);
       }
@@ -497,10 +514,12 @@ void MemoryDependenceGraph::applyEffects(
     bool unknown) {
   // Conservative strategy. Unknown op is to treat as barrier.
   if (unknown) {
+    LOG_DEBUG("This op is unknown effect: " << *op << "\n");
     for (auto &slot : slots) {
       slot->lastWriter = op;
       slot->pendingReads.clear();
     }
+    lastUnknownOp = op;
     return;
   }
 
@@ -572,6 +591,7 @@ void MemoryDependenceGraph::applyEffects(
 
 MemoryDependenceGraph::Snapshot MemoryDependenceGraph::takeSnapshot() const {
   Snapshot snap;
+  snap.lastUnknownOp = lastUnknownOp;
   snap.states.reserve(slots.size());
   for (const auto &slot : slots) {
     snap.states.push_back(*slot);
@@ -581,6 +601,7 @@ MemoryDependenceGraph::Snapshot MemoryDependenceGraph::takeSnapshot() const {
 
 void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap) {
   slots.clear();
+  lastUnknownOp = snap.lastUnknownOp;
   valueToSlot.clear();
   slots.reserve(snap.states.size());
   for (auto &s : snap.states) {

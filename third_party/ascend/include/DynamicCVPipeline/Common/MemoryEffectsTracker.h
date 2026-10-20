@@ -64,6 +64,7 @@ private:
 
   struct Snapshot {
     SmallVector<MemSlot> states;
+    Operation *lastUnknownOp = nullptr;
   };
 
   void analyzeOp(Operation *op);
@@ -77,7 +78,8 @@ private:
   resolveAliasSlots(Value v, DenseMap<Value, SmallVector<MemSlot *>> &cache);
   MemSlot *getOrCreateSlot(Value v);
 
-  void collectPreds(ArrayRef<MemoryEffects::EffectInstance> effects,
+  void collectPreds(Operation *op,
+                    ArrayRef<MemoryEffects::EffectInstance> effects,
                     bool unknown, SmallVectorImpl<Operation *> &defsOut,
                     SmallVectorImpl<Operation *> &predsOut);
 
@@ -110,6 +112,7 @@ private:
   DenseMap<Operation *, SmallVector<Operation *>> execAfter;
 
   SmallVector<std::unique_ptr<MemSlot>> slots;
+  Operation *lastUnknownOp = nullptr;
   DenseMap<Value, MemSlot *> valueToSlot;
 
   // Per-block sync walls

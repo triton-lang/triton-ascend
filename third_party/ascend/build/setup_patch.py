@@ -156,7 +156,9 @@ def get_triton_ascend_patch_file():
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
+        "python/triton/runtime/autotuner.py",
         "python/triton/runtime/interpreter.py",
+        "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
@@ -623,6 +625,8 @@ def patch_module(mod):
 
     def get_packages():
         yield from _orig_get_packages()
+        yield "triton.backends.ascend.reuse"
+        yield "triton.backends.ascend.reuse.dsl"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")

@@ -23,8 +23,9 @@
 #ifndef TRITON_ADAPTER_OP_CLASSIFIER_H
 #define TRITON_ADAPTER_OP_CLASSIFIER_H
 
-#include "llvm/Support/LogicalResult.h"
-
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -35,12 +36,6 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
-
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace mlir {
@@ -75,10 +70,6 @@ public:
     return "Classify operations as CUBE or VECTOR for dynamic CV pipeline";
   }
   ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
-
-  void getDependentDialects(::mlir::DialectRegistry &registry) const override {
-    registry.insert<scope::ScopeDialect>();
-  }
 
 private:
   llvm::DenseMap<Operation *, Operation *> CloneOpMap;
@@ -206,8 +197,6 @@ private:
 
   // Helper: Mark fill operations as CUBE when their output buffer is CUBE
   void markFillOpsAsCube();
-
-  LogicalResult groupCustomOps();
 
   // Step 8: Stamp core type info to IR
   int stampToIR();

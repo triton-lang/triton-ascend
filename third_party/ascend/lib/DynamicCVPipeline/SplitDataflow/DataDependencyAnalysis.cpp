@@ -978,7 +978,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
     if (op->getNumRegions() > 0) {
       return WalkResult::advance();
     }
-    if (isa<annotation::MarkOp, gpu::BarrierOp>(op)) {
+    if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(op)) {
       return WalkResult::advance();
     }
     auto currBlockIdOpt = CVPipeline::getOpBlockId(op);
@@ -989,7 +989,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
     int currBlockId = *currBlockIdOpt;
 
     for (mlir::Operation *predOp : memDepGraph.getExecBefore(op)) {
-      if (isa<annotation::MarkOp, gpu::BarrierOp>(predOp)) {
+      if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(predOp)) {
         continue;
       }
       if (predOp->getNumRegions() > 0) {
@@ -998,7 +998,8 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
           return WalkResult::advance();
         }
         for (mlir::Operation *realPredOp : realdeps) {
-          if (isa<annotation::MarkOp, gpu::BarrierOp>(realPredOp)) {
+          if (isa<annotation::MarkOp, gpu::BarrierOp, LLVM::AssumeOp>(
+                  realPredOp)) {
             continue;
           }
           auto realPredBlockIdOpt = CVPipeline::getOpBlockId(realPredOp);

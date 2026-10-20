@@ -9,6 +9,7 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -28,7 +29,6 @@
 #include "mlir/IR/Visitors.h"
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
-#include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
@@ -543,23 +543,6 @@ CoreType getValueCoreType(Value value) {
     return UNDETERMINED;
   }
   return fromStrCoreType(coreTypeStrs[resultIdx]);
-}
-
-Value getAliasSource(Value value) {
-  if (auto barg = dyn_cast<BlockArgument>(value)) {
-    auto parentOp = barg.getOwner()->getParentOp();
-    if (isa<func::FuncOp>(parentOp)) {
-      return nullptr;
-    }
-    LOG_DEBUG("Warning: " << *parentOp << " carries memref bargs!" << "\n");
-    return nullptr;
-  }
-  return llvm::TypeSwitch<Operation *, Value>(value.getDefiningOp())
-      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
-      .Case([](bufferization::ToTensorOp toTensor) {
-        return toTensor.getBuffer();
-      })
-      .Default([](auto) { return nullptr; });
 }
 
 } // namespace CVPipeline

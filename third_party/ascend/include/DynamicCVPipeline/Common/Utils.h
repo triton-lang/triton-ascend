@@ -22,12 +22,16 @@
 
 #ifndef ADD_AUTO_SCHEDULING_COMMON_UTILS_H
 #define ADD_AUTO_SCHEDULING_COMMON_UTILS_H
-
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/Support/Casting.h"
+#include <cstdint>
+#include <optional>
+#include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -85,8 +89,8 @@ inline constexpr llvm::StringLiteral kCoreTypeCube = "CUBE";
 inline constexpr llvm::StringLiteral kCoreTypeVector = "VECTOR";
 inline constexpr llvm::StringLiteral kFromMakeRange = "tt.from_make_range";
 inline constexpr llvm::StringLiteral kSubBlock = "ssbuffer.subBlock";
-inline constexpr llvm::StringLiteral kSkipExtraReorder =
-    "ssbuffer.skip_extra_reorder";
+inline constexpr llvm::StringLiteral kMergeComputeBlockApplied =
+    "ssbuffer.merge_compute_block_applied";
 inline constexpr llvm::StringLiteral kMergeSmallBlockFirstRunDone =
     "ssbuffer.merge_small_block_first_run_done";
 
@@ -332,16 +336,6 @@ getFixpipePreQuantMode(Operation *truncOp);
 // Trace an operand's defining op back through C2C intermediate ops to find the
 // underlying producing op. Returns null when the operand has no defining op.
 Operation *getSourceThroughCIntermediateOps(Value operand);
-
-Value getAliasSource(Value val);
-
-// Trace memdefs through to_tensor and ViewLikeOpInterfaces
-inline Value traceMemDef(Value val) {
-  while (auto source = getAliasSource(val)) {
-    val = source;
-  }
-  return val;
-}
 
 } // namespace CVPipeline
 } // namespace mlir

@@ -537,7 +537,7 @@ void MemoryDependenceGraph::applyEffects(
     } else if (isa<MemoryEffects::Write>(e.getEffect())) {
       for (MemSlot *s : resolveAliasSlots(v, cache)) {
         // annotation::MarkOp, no data produced, is marked with Mem::Write
-        if (!isa<annotation::MarkOp>(op)) {
+        if (!isa<annotation::MarkOp, LLVM::AssumeOp>(op)) {
           s->dataSource = op;
         }
         s->lastWriter = op;

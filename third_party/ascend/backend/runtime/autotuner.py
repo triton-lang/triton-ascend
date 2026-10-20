@@ -2670,11 +2670,14 @@ class AutoTilingTuner(Autotuner):
                 config.pre_hook(full_nargs)
             self.pre_hook(full_nargs)
             try:
+                from triton.backends.ascend.reuse.context import exact_request_scope
+
                 current.update({"warmup": warmup})
-                res = self.fn.run(
-                    *args,
-                    **current,
-                )
+                with exact_request_scope():
+                    res = self.fn.run(
+                        *args,
+                        **current,
+                    )
                 if isinstance(res, tuple):
                     res = res[0]
                 packed_metadata = getattr(res, "packed_metadata", None)
@@ -2702,8 +2705,11 @@ class AutoTilingTuner(Autotuner):
         ret = []
 
         def warmup_config(config):
+            from triton.backends.ascend.reuse.context import exact_request_scope
+
             compile_options = dict(config.all_kwargs(), **kwargs)
-            return self.fn.warmup(*args, **compile_options)
+            with exact_request_scope():
+                return self.fn.warmup(*args, **compile_options)
 
         if self.compile_parallel:
             import psutil

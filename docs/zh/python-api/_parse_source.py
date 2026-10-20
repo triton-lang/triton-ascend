@@ -200,3 +200,7 @@ def install_source_module(
         export_filter=export_filter,
     )
     _sys.modules[module_name] = module
+
+    _parent_name, _sep, _leaf = module_name.rpartition(".")
+    if _sep and _parent_name in _sys.modules:
+        setattr(_sys.modules[_parent_name], _leaf, module)

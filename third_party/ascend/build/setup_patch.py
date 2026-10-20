@@ -92,9 +92,17 @@ def _get_ascend_llvm_package_info(base_dir):
         elif arch == "arm64":
             system_suffix = "ubuntu-arm64"
         elif arch == "x64":
-            vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
-            vglibc = vglibc[0] * 100 + vglibc[1]
-            system_suffix = "ubuntu-x64" if vglibc > 228 else "almalinux-x64"
+            # AlmaLinux (manylinux) images always take the almalinux build,
+            # which is compiled against glibc 2.28 and therefore runs on any
+            # >= 2.28 image. The glibc-version heuristic below picked
+            # ubuntu-x64 on manylinux_2_34 (glibc 2.34 > 2.28), whose
+            # Ubuntu 22.04 binaries need glibc 2.35 and fail to run there.
+            if _is_linux_os("almalinux"):
+                system_suffix = "almalinux-x64"
+            else:
+                vglibc = tuple(map(int, platform.libc_ver()[1].split(".")))
+                vglibc = vglibc[0] * 100 + vglibc[1]
+                system_suffix = "ubuntu-x64" if vglibc > 228 else "almalinux-x64"
         else:
             return None
     else:
@@ -148,7 +156,9 @@ def get_triton_ascend_patch_file():
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
+        "python/triton/runtime/autotuner.py",
         "python/triton/runtime/interpreter.py",
+        "python/triton/runtime/autotuner.py",
         "python/triton/runtime/jit.py",
         "bin/RegisterTritonDialects.h",
         "bin/triton-opt.cpp",
@@ -306,10 +316,39 @@ def _git_check_call_with_retry(cmd, cwd=None, retries=3, interval=5):
     raise last_error
 
 
-def _ensure_npuir_submodule():
-    if os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
+def _npuir_build_enabled():
+    return os.getenv("TRITON_BUILD_NPUIR", "OFF").upper() in ["ON", "1", "YES", "TRUE", "Y"]
+
+
+def _ensure_npuir_payload():
+    """ON mode: build the BishengIR payload in-image via build_npuir.py
+    (which fetches the AscendNPU-IR stable branch itself)."""
+    if not _npuir_build_enabled():
         return
     build_npuir()
+
+
+def _ensure_npuir_sources():
+    """OFF mode: fetch the AscendNPU-IR stable sources when they are missing.
+
+    The prebuilt payload from npuir-build.yml only provides the runtime
+    binaries bundled into the wheel; the C++ plugin build still compiles the
+    BiShengIR dialects via
+    ``add_subdirectory(third_party/ascend/AscendNPU-IR)``, so the source tree
+    must be present. The CI docker context carries no submodule checkout, so
+    fetch stable HEAD — the same source the payload was built from — via the
+    shared workflow script (nested third-party submodules included; trimming
+    those is a possible follow-up once the standalone-IR build is confirmed
+    not to need them). An existing checkout (a local developer's initialized
+    submodule, or a previous fetch) is left untouched.
+    """
+    if _npuir_build_enabled():
+        return  # build_npuir() fetches the sources itself
+    npuir_dir = _REPO_ROOT / "third_party" / "ascend" / "AscendNPU-IR"
+    if (npuir_dir / "CMakeLists.txt").exists():
+        return
+    script = _REPO_ROOT / ".github" / "workflows" / "build" / "fetch-npuir-stable.sh"
+    subprocess.check_call(["bash", str(script), str(npuir_dir)])
 
 
 def _ensure_distributed_submodule():
@@ -375,18 +414,26 @@ def _copy_ascend_tools(extdir, cmake_dir):
 
 
 def _get_bishengir_payload_source():
+    # Priority: an explicit external payload dir (TRITON_ASCEND_BISHENGIR_PATH,
+    # the prebuilt npuir-build artifact flow), else the in-repo output of
+    # build_npuir.py when TRITON_BUILD_NPUIR=ON.
     raw_path = os.getenv(_BISHENGIR_PAYLOAD_ENV)
-    if not raw_path:
+    if raw_path:
+        source = Path(raw_path).expanduser().resolve()
+        origin = _BISHENGIR_PAYLOAD_ENV
+    elif _npuir_build_enabled():
+        source = _REPO_ROOT / "third_party" / "ascend" / "backend" / "bishengir"
+        origin = "TRITON_BUILD_NPUIR (build_npuir output)"
+    else:
         return None
 
-    source = Path(raw_path).expanduser().resolve()
     required_paths = [
         source / "bin" / "bishengir-compile",
         source / "bin" / "bishengir-opt",
         source / "lib",
     ]
     if not source.is_dir() or any(not path.exists() for path in required_paths):
-        raise RuntimeError(f"{_BISHENGIR_PAYLOAD_ENV} must name a BishengIR directory containing "
+        raise RuntimeError(f"{origin} must name a BishengIR directory containing "
                            "bin/bishengir-compile, bin/bishengir-opt, and lib")
     return source
 
@@ -396,6 +443,13 @@ def _copy_bishengir_payload(build_lib):
     if source is None:
         return
 
+    # Must match the runtime lookup in utils.py:
+    #   <dir of utils.py>/bishengir/bin/bishengir-compile
+    # utils.py installs to triton/backends/ascend/utils.py (the source
+    # tree's backend/ dir flattens into the ascend package), so the payload
+    # must land at triton/backends/ascend/bishengir — WITHOUT the extra
+    # backend/ layer (build_npuir.py's source-tree copy is flattened the
+    # same way at package time).
     destination = Path(build_lib) / "triton" / "backends" / "ascend" / "bishengir"
     if destination.exists():
         shutil.rmtree(destination)
@@ -510,6 +564,8 @@ def patch_module(mod):
 
             _copy_ascend_tools(extdir, mod.get_cmake_dir())
 
+    mod.open_url = _robust_open_url
+
     mod.CMakeBuild = CMakeBuild
 
     _OrigCMakeBuildPy = mod.CMakeBuildPy
@@ -532,14 +588,16 @@ def patch_module(mod):
 
             if is_manylinux:
                 file = glob.glob(os.path.join(self.dist_dir, "*-linux_*.whl"))[0]
+                # Target policy is fixed to the build image (manylinux_2_34);
+                # auditwheel's own repair error names the policy if the image
+                # ever drifts to a toolchain that does not know it.
+                target_policy = f"manylinux_2_34_{platform.machine()}"
                 auditwheel_cmd = [
                     "auditwheel",
                     "-v",
                     "repair",
                     "--plat",
-                    f"manylinux_2_27_{platform.machine()}",
-                    "--plat",
-                    f"manylinux_2_28_{platform.machine()}",
+                    target_policy,
                     "-w",
                     self.dist_dir,
                     file,
@@ -567,6 +625,8 @@ def patch_module(mod):
 
     def get_packages():
         yield from _orig_get_packages()
+        yield "triton.backends.ascend.reuse"
+        yield "triton.backends.ascend.reuse.dsl"
         if mod.check_env_flag("TRITON_BUILD_TD", "OFF"):
             distributed_pkg_root = os.path.join("third_party", "ascend", "Triton-distributed-ascend", "python",
                                                 "triton_dist")
@@ -598,13 +658,45 @@ def patch_module(mod):
     mod._ascend_is_manylinux = is_manylinux
 
 
+def _robust_open_url(url, retries=5):
+    """Download ``url`` fully to a temp file with resumable retries.
+
+    The prebuilt LLVM tarballs are ~1.2 GB. The upstream setup.py streams
+    them via urllib with a 300 s timeout and no retry: OBS serves large
+    objects at ~2.5 MB/s per connection, so every download exceeds the
+    timeout (or gets cut) and the build dies — systematically, on every
+    job. Use curl with `-C -` so each attempt resumes from the bytes
+    already on disk instead of restarting.
+    """
+    import subprocess
+    import tempfile
+
+    tmp = tempfile.NamedTemporaryFile(delete=False)
+    tmp.close()
+    last_error = None
+    for attempt in range(1, retries + 1):
+        proc = subprocess.run(
+            [
+                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
+                "--max-time", "1000", "-o", tmp.name, url
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if proc.returncode == 0:
+            return open(tmp.name, "rb")
+        last_error = proc.stderr.decode(errors="replace")[-300:]
+        print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
+    raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
+
+
 def _build_setup_kwargs(mod, kwargs):
     """Modify kwargs passed to setup() for Ascend."""
     is_manylinux = mod._ascend_is_manylinux
 
     kwargs["name"] = os.environ.get("TRITON_WHEEL_NAME", "triton_ascend")
     kwargs["version"] = _get_version(is_manylinux, mod.get_git_commit_hash)
-    kwargs["url"] = "https://gitcode.com/Ascend/triton-ascend/"
+    kwargs["url"] = "https://github.com/triton-lang/triton-ascend/"
 
     # README as long_description
     readme = _REPO_ROOT / "README.md"
@@ -638,9 +730,10 @@ def _build_setup_kwargs(mod, kwargs):
 
 
 def prepare():
-    """Top-of-setup.py hook: defaults and optional submodules."""
+    """Top-of-setup.py hook: defaults and optional npuir/distributed sources."""
     _set_default_env_vars()
-    _ensure_npuir_submodule()
+    _ensure_npuir_payload()
+    _ensure_npuir_sources()
     _ensure_distributed_submodule()
 
 

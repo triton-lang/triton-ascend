@@ -12,7 +12,15 @@
 //   - The update ops should be moved to block_id = 8
 //   - block_id = 33 should no longer exist in the for loop body
 
+
 module {
+  // CHECK-LABEL: func.func @test_refine_args_block_id
+  // After the pass:
+  // CHECK: arith.index_cast {{.*}} {ssbuffer.block_id = 8 : i32}
+  // CHECK: arith.addi {{.*}} {ssbuffer.block_id = 8 : i32}
+  // block_id = 33 should be gone from the for loop body
+  // CHECK-NOT: ssbuffer.block_id = 33
+
   func.func @test_refine_args_block_id() {
     %c0_i32 = arith.constant 0 : i32
     %c32_i32 = arith.constant 32 : i32
@@ -46,11 +54,46 @@ module {
 
     return
   }
-}
+  // CHECK: %[[IV_I32:.*]] = arith.index_cast {{.*}} {ssbuffer.block_id = 13 : i32} : index to i32
+  func.func @refine_loop_carried_scalar_dependency(
+      %input: memref<?xi32>, %limit: i32, %base: i32) -> i32 {
+    %c0 = arith.constant 0 : i32
+    %c1 = arith.constant 1 : i32
+    %c64 = arith.constant 64 : i32
 
-// CHECK-LABEL: func.func @test_refine_args_block_id
-// After the pass:
-// CHECK: arith.index_cast {{.*}} {ssbuffer.block_id = 8 : i32}
-// CHECK: arith.addi {{.*}} {ssbuffer.block_id = 8 : i32}
-// block_id = 33 should be gone from the for loop body
-// CHECK-NOT: ssbuffer.block_id = 33
+    %c0_index = arith.constant 0 : index
+    %c1_index = arith.constant 1 : index
+    %limit_index = arith.index_cast %limit : i32 to index
+
+    %result = scf.for %iv = %c0_index to %limit_index step %c1_index
+        iter_args(%acc = %c0) -> (i32) {
+      %idx = arith.addi %iv, %c0_index {ssbuffer.block_id = 13 : i32} : index
+      %current = memref.load %input[%idx] {ssbuffer.block_id = 13 : i32} : memref<?xi32>
+
+      %iv_i32 = arith.index_cast %iv {ssbuffer.block_id = 13 : i32} : index to i32
+      %next_iv = arith.addi %iv_i32, %c1 {ssbuffer.block_id = 13 : i32} : i32
+      %has_next = arith.cmpi slt, %next_iv, %limit {ssbuffer.block_id = 13 : i32} : i32
+
+      %next = scf.if %has_next -> (i32) {
+        %next_idx = arith.index_cast %next_iv {ssbuffer.block_id = 13 : i32} : i32 to index
+        %loaded = memref.load %input[%next_idx] {ssbuffer.block_id = 13 : i32} : memref<?xi32>
+        scf.yield %loaded : i32
+      } else {
+        scf.yield %c0 : i32
+      } {ssbuffer.block_id = 13 : i32}
+
+      %delta = arith.subi %next, %current {ssbuffer.block_id = 13 : i32} : i32
+      %scaled = arith.muli %delta, %c64 {ssbuffer.block_id = 13 : i32} : i32
+      %updated = arith.addi %acc, %scaled {ssbuffer.block_id = 13 : i32} : i32
+
+      %consumer_a = arith.addi %base, %acc {ssbuffer.block_id = 3 : i32} : i32
+      %consumer_b = arith.addi %consumer_a, %c1 {ssbuffer.block_id = 5 : i32} : i32
+      %unused = arith.addi %consumer_b, %c1 {ssbuffer.block_id = 5 : i32} : i32
+
+      scf.yield %updated : i32
+    } {ssbuffer.block_id = 21 : i32, ssbuffer.main_loop = 0 : i32}
+
+    return %result : i32
+  }
+
+}

@@ -126,6 +126,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Operator optimization | `enable_flatten` | Controls the NPU compiler flatten pass. | `None`; boolean | Yes | Normal path |
 | Operator optimization | `enable_auto_vectorize_v2` | Controls NPU compiler AutoVectorizeV2. | `None`; boolean | Yes | Normal path |
 | Operator optimization | `vf_fusion_mode` | Selects the VF fusion strategy. | `None`, switch omitted; `"max-parallel"`, `"all-op"`, `"ub-aware-op"` | — | Normal path |
+| Operator optimization | `enable_vf_stack_limit` | Limits fusion based on vector function (VF) stack-usage estimates during BiShengIR compilation to reduce the risk of stack overflow. | `False`; boolean | — | Normal path |
 | Operator optimization | `hfusion_enable_multiple_consumer_fusion` | Controls multiple-consumer HFusion. | `None`; boolean | — | Normal path |
 | Operator optimization | `enable_hivm_batch_matmul` | Enables batch matmul in BiShengIR compilation. | `False`; boolean | — | Normal path |
 | Operator optimization | `auto_vectorize_v2_max_fused_ops_num` | Sets the AutoVectorizeV2 fused-op limit. | `None`; integer | — | Normal path |

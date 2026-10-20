@@ -1913,7 +1913,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           count * instructions / profile.predicateOperationsPerCycle;
     }
   }
-  if (calibratedReduction) {
+  if (calibratedReduction && work.reductionOperations == 0.0) {
     resources.reduction = *calibratedReduction;
   } else {
     const double simdReductionStartupOwners =
@@ -1952,7 +1952,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
       resources.reduction = std::max(resources.reduction,
                                      resources.scalarizedMultiResultReduction);
     }
-    if (!simd && wholeSimt && superblockFactor == 1 &&
+    if (!calibratedReduction && !simd && wholeSimt && superblockFactor == 1 &&
         profile.multiResultReductionGroupBaseWarpCount > 0 &&
         profile.activeWarpCount ==
             profile.multiResultReductionGroupBaseWarpCount * superblockFactor &&
@@ -2006,7 +2006,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           profile.maskedAccumulatorReductionCompletionSetupCycles;
       resources.setup += resources.maskedAccumulatorReductionCompletionSetup;
     }
-    if (!simd && wholeSimt && profile.rowwiseReductionGroupBaseWarpCount > 0 &&
+    if (!calibratedReduction && !simd && wholeSimt &&
+        profile.rowwiseReductionGroupBaseWarpCount > 0 &&
         profile.activeWarpCount ==
             profile.rowwiseReductionGroupBaseWarpCount * superblockFactor) {
       const auto exactOperations =
@@ -2054,7 +2055,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             std::get<1>(shape) > 1 && count > 0.0)
           geometry = std::make_pair(std::get<0>(shape), std::get<1>(shape));
       }
-      if (!geometry) {
+      if (!geometry && !calibratedReduction) {
         const auto exactOperations =
             exactNonNegativeWorkCount(work.reductionOperations);
         if (exactOperations)
@@ -2111,6 +2112,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
     }
   }
+  if (calibratedReduction && work.reductionOperations > 0.0)
+    resources.reduction += *calibratedReduction;
   if (work.dotFlops > 0.0) {
     // A Stage can own multiple tiny dots.
     resources.dot = work.dotOperations * profile.dotSetupCycles +
@@ -2179,51 +2182,92 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
 }
 
 // The calibration prices one reduction window, not an entire Stage body.
-static std::optional<StageResourceCycles> mapOrdinaryReduction(
+struct OrdinaryReductionMapping {
+  StageResourceCycles resources;
+  bool first = false, middle = false, tail = false;
+  double fallbackInstances = 0;
+  std::map<std::string, double> fittedInstances;
+};
+static std::optional<OrdinaryReductionMapping> mapOrdinaryReduction(
     const LogicalStage &stage, const StageImplementation &implementation,
     const HardwareProfile &hardware, const StageModeProfile &modeProfile,
-    const StageResourceCycles &legacy, bool firstAxis) {
+    const StageResourceCycles &legacy) {
   if (!hardware.reductionProfile || !stage.reductionExternalWorkload ||
       implementation.aivSubblocks != 1 ||
       stage.costModelKind != StageCostModelKind::RowwiseReduction ||
-      legacy.rowwiseReductionGroupBody > 0.0 ||
-      legacy.multiResultReductionGroupBody > 0.0 ||
+      legacy.rowwiseReductionGroupBody > 0 ||
+      legacy.multiResultReductionGroupBody > 0 ||
       !stage.workload.scalarizedMultiResultReductionCounts.empty() ||
       !stage.workload.oneTripMaskedAccumulatorReductionExtents.empty() ||
-      stage.workload.reductionWorkloads.empty() ||
-      !stage.workload.prefixScanCounts.empty())
+      !stage.workload.prefixScanCounts.empty() ||
+      stage.workload.reductionWorkloads.empty())
     return std::nullopt;
-  double occurrences = 0.0, cycles = 0.0;
-  const ReductionMode mode = implementation.mode == StageMode::SIMD
-                                 ? ReductionMode::SIMD
-                                 : ReductionMode::SIMT;
-  for (const auto &work : stage.workload.reductionWorkloads) {
-    // Memory address/stride costs belong to the memory model. Match the
-    // reduction window using its semantic tensor geometry, not its GM source.
-    auto cost =
-        firstAxis
-            ? estimateFirstAxisReductionCycles(work, *hardware.reductionProfile,
-                                               mode, hardware.baseSimtWarpCount)
-            : estimateTailAxisReductionCycles(
-                  work, hardware.reductionProfile->getModeProfile(mode), mode,
-                  hardware.baseSimtWarpCount);
-    if (!cost || !std::isfinite(*cost) || *cost < 0.0)
-      return std::nullopt;
-    cycles += work.instances * *cost;
+  OrdinaryReductionMapping result;
+  double cycles = 0, occurrences = 0;
+  LogicalStage residual = stage;
+  residual.workload = *stage.reductionExternalWorkload;
+  auto mode = implementation.mode == StageMode::SIMD ? ReductionMode::SIMD
+                                                     : ReductionMode::SIMT;
+  const bool decomposed = !stage.reductionContributions.empty();
+  const auto consume = [&](const ReductionWorkload &work,
+                           const StageWorkload *contribution) {
     occurrences += work.instances;
+    auto estimate = estimateReductionCycles(work, *hardware.reductionProfile,
+                                            mode, hardware.baseSimtWarpCount);
+    if (!estimate) {
+      if (!contribution)
+        return false;
+      mergeReductionResidualWorkload(residual.workload, *contribution);
+      result.fallbackInstances += work.instances;
+      return true;
+    }
+    cycles += work.instances * estimate->cycles;
+    std::string family = estimate->axis == ReductionAxisKind::First ? "first"
+                         : estimate->axis == ReductionAxisKind::Middle
+                             ? "middle"
+                             : "tail";
+    result.fittedInstances[family + "/" + work.kind + "/" + work.dataType] +=
+        work.instances;
+    result.first |= estimate->axis == ReductionAxisKind::First;
+    result.middle |= estimate->axis == ReductionAxisKind::Middle;
+    result.tail |= estimate->axis == ReductionAxisKind::Tail;
+    return true;
+  };
+  if (decomposed) {
+    for (const auto &contribution : stage.reductionContributions) {
+      if (contribution.reductionWorkloads.size() != 1 ||
+          std::abs(contribution.reductionOperations -
+                   contribution.reductionWorkloads.front().instances) > 1e-9 ||
+          !consume(contribution.reductionWorkloads.front(), &contribution))
+        return std::nullopt;
+    }
+  } else {
+    // Hand-built/native stages retain their former all-supported compatibility.
+    // Their external snapshot can still contain semantic reduction roots.
+    for (const auto &work : stage.workload.reductionWorkloads)
+      if (!consume(work, nullptr))
+        return std::nullopt;
+    residual.workload.reductionOperations = 0;
+    residual.workload.shuffleLaneSteps = 0;
+    residual.workload.reductionWorkloads.clear();
+    residual.workload.reductionGeometryCounts.clear();
+    residual.workload.reductionCombineClassCounts.clear();
   }
-  if (!std::isfinite(cycles) ||
+  if (!(result.first || result.middle || result.tail) ||
+      !std::isfinite(cycles) ||
       std::abs(occurrences - stage.workload.reductionOperations) > 1e-9)
     return std::nullopt;
-  LogicalStage external = stage;
-  external.workload = *stage.reductionExternalWorkload;
-  // Keep the candidate's execution domain. The fitted window prices one
-  // logical program; applySuperBlock owns the physical-group composition.
-  return mapWorkload(external, modeProfile, implementation.mode,
-                     implementation.superblockFactor,
-                     implementation.mode == StageMode::SIMT &&
-                         !implementation.localScope,
-                     cycles);
+  // Avoid deriving residual reduction geometry from the full Stage's input
+  // load. The residual reductionGeometryCounts are authoritative when present.
+  auto mapped = mapWorkload(residual, modeProfile, implementation.mode,
+                            implementation.superblockFactor,
+                            implementation.mode == StageMode::SIMT &&
+                                !implementation.localScope,
+                            cycles);
+  if (!mapped)
+    return std::nullopt;
+  result.resources = *mapped;
+  return result;
 }
 
 /// Balanced CV tensor partition on one AIV.
@@ -3631,20 +3675,19 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           implementation.mode == StageMode::SIMT && !implementation.localScope);
       if (!resources)
         continue;
-      auto calibrated =
-          mapOrdinaryReduction(executionStage, implementation, profile,
-                               modeProfile, *resources, false);
-      const bool calibratedTail = calibrated.has_value();
-      if (!calibrated)
-        calibrated =
-            mapOrdinaryReduction(executionStage, implementation, profile,
-                                 modeProfile, *resources, true);
+      auto calibrated = mapOrdinaryReduction(executionStage, implementation,
+                                             profile, modeProfile, *resources);
       if (calibrated)
-        resources = *calibrated;
+        resources = calibrated->resources;
       StageImplementationCost cost;
       cost.implementation = implementation;
-      cost.calibratedTailReduction = calibratedTail;
-      cost.calibratedFirstReduction = calibrated.has_value() && !calibratedTail;
+      cost.calibratedTailReduction = calibrated && calibrated->tail;
+      cost.calibratedFirstReduction = calibrated && calibrated->first;
+      cost.calibratedMiddleReduction = calibrated && calibrated->middle;
+      cost.reductionFallbackInstances =
+          calibrated ? calibrated->fallbackInstances : 0;
+      if (calibrated)
+        cost.fittedReductionInstances = calibrated->fittedInstances;
       cost.resources = *resources;
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
@@ -3702,8 +3745,10 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       if (!stage.workload.segmentedIndirectStoreCounts.empty() &&
           resources->indirectMemoryAnalyticalFallback)
         cost.formulaEvidence += "+segmented_indirect_store_analytical_fallback";
-      if (calibrated)
+      if (cost.calibratedTailReduction)
         cost.formulaEvidence += "+calibrated_tail_reduction_window";
+      if (cost.calibratedMiddleReduction)
+        cost.formulaEvidence += "+calibrated_middle_reduction_window";
       if (cost.calibratedFirstReduction)
         cost.formulaEvidence += "+calibrated_first_reduction_window";
       if (resources->scalarizedMultiResultReduction > 0.0)

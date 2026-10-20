@@ -63,6 +63,8 @@ struct StageControlFlowRates {
   bool isFiniteAndNonNegative() const;
 };
 
+void mergeReductionResidualWorkload(StageWorkload &into, StageWorkload from);
+
 struct LogicalStage {
   std::string id;
   StageCostModelKind costModelKind = StageCostModelKind::ScalarIssue;
@@ -70,8 +72,11 @@ struct LogicalStage {
   int64_t iterationCount = 1;
   StageModelFeatures features;
   StageWorkload workload;
-  /// Same traversal excluding reduce combine bodies; preserves external work.
+  /// Work outside reduce roots and their nested regions, normalized per
+  /// iteration.
   std::optional<StageWorkload> reductionExternalWorkload;
+  // Full per-reduce root and combine contributions, normalized per iteration.
+  std::vector<StageWorkload> reductionContributions;
   /// Exact TTIR ownership when StagePartition was built from an operation
   /// graph.
   std::vector<Operation *> operations;

@@ -462,6 +462,9 @@ struct StageResourceCycles {
 struct StageImplementationCost {
   bool calibratedTailReduction = false;
   bool calibratedFirstReduction = false;
+  bool calibratedMiddleReduction = false;
+  double reductionFallbackInstances = 0;
+  std::map<std::string, double> fittedReductionInstances;
   StageImplementation implementation;
   double totalCycles = 0.0;
   /// A profiled semantic operation in this implementation already includes

@@ -7,6 +7,9 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Parser/Parser.h"
 
+#include "llvm/Support/FileSystem.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/raw_ostream.h"
 #include <gtest/gtest.h>
 
 using mlir::ascend::HardwareProfile;
@@ -72,6 +75,8 @@ HardwareProfile hardwareProfile(ScopeHandoffCost scopeHandoff = {}) {
     mode.storeWarpInstructionsPerCycle = 1.0;
     mode.predicateOperationsPerCycle = 1.0;
     mode.shuffleLanesPerCycle = 32.0;
+    mode.reductionLaneStepsPerCycle = 32.0;
+    mode.prefixScanStepLatencyCycles = 1.0;
     mode.dotSetupCycles = 8.0;
     mode.dotFlopsPerCycle = 64.0;
     mode.issueOperationsPerCycle = 4.0;
@@ -1904,7 +1909,8 @@ TEST(SimdSimtCostModelTest, TailCalibrationPreservesCandidateExecutionDomain) {
   EXPECT_EQ(local, 3u);
 }
 
-TEST(SimdSimtCostModelTest, TailUnsupportedOrSpecialLayoutPreservesLegacy) {
+TEST(SimdSimtCostModelTest,
+     TailUnsupportedFallsBackAndStridedInputStillCalibrates) {
   for (bool unsupported : {false, true}) {
     auto stage = ordinaryTailStage();
     if (unsupported)
@@ -1921,6 +1927,11 @@ TEST(SimdSimtCostModelTest, TailUnsupportedOrSpecialLayoutPreservesLegacy) {
               baseline->stages.front().implementations.size());
     for (size_t i = 0; i < changed->stages.front().implementations.size();
          ++i) {
+      if (!unsupported) {
+        EXPECT_TRUE(
+            changed->stages.front().implementations[i].calibratedTailReduction);
+        continue;
+      }
       EXPECT_FALSE(
           changed->stages.front().implementations[i].calibratedTailReduction);
       EXPECT_DOUBLE_EQ(changed->stages.front().implementations[i].totalCycles,
@@ -1929,7 +1940,8 @@ TEST(SimdSimtCostModelTest, TailUnsupportedOrSpecialLayoutPreservesLegacy) {
   }
 }
 
-TEST(SimdSimtCostModelTest, TailPartialSupportFallsBackForWholeCandidate) {
+TEST(SimdSimtCostModelTest,
+     SyntheticStageWithoutContributionsPreservesAllOrNothingFallback) {
   auto stage = ordinaryTailStage();
   stage.workload.reductionWorkloads.push_back({"custom", "f32", {64}, 0, 1});
   stage.workload.reductionOperations = 2;
@@ -1937,4 +1949,252 @@ TEST(SimdSimtCostModelTest, TailPartialSupportFallsBackForWholeCandidate) {
   ASSERT_TRUE(static_cast<bool>(table));
   for (const auto &cost : table->stages.front().implementations)
     EXPECT_FALSE(cost.calibratedTailReduction);
+}
+
+TEST(SimdSimtCostModelTest, MiddleAxisFrozenNumericFixtures) {
+  auto hardware = tailMigrationProfile();
+  auto buffer =
+      llvm::MemoryBuffer::getFile(TRITON_ASCEND_MIDDLE_TEST_FIXTURE_PATH);
+  ASSERT_TRUE(buffer);
+  auto parsed = llvm::json::parse((*buffer)->getBuffer());
+  ASSERT_TRUE(static_cast<bool>(parsed));
+  auto *fixtures = parsed->getAsArray();
+  ASSERT_TRUE(fixtures);
+  for (const auto &entry : *fixtures) {
+    const auto *o = entry.getAsObject();
+    ASSERT_TRUE(o);
+    mlir::ascend::ReductionWorkload work;
+    work.kind = o->getString("op")->str();
+    work.dataType = o->getString("dtype")->str();
+    work.axis = 1;
+    for (const auto &d : *o->getArray("shape"))
+      work.shape.push_back(*d.getAsInteger());
+    auto estimate = mlir::ascend::estimateReductionCycles(
+        work, *hardware.reductionProfile,
+        o->getString("mode") && *o->getString("mode") == "simd"
+            ? mlir::ascend::ReductionMode::SIMD
+            : mlir::ascend::ReductionMode::SIMT,
+        *o->getInteger("warps"));
+    ASSERT_TRUE(estimate) << work.kind << "/" << work.dataType;
+    EXPECT_EQ(estimate->axis, mlir::ascend::ReductionAxisKind::Middle);
+    EXPECT_NEAR(estimate->cycles, *o->getNumber("cycle"),
+                1e-6 * std::max(1.0, *o->getNumber("cycle")));
+  }
+}
+
+TEST(SimdSimtCostModelTest, PerReductionMixedAxesAndPartialFallback) {
+  auto profile = tailMigrationProfile();
+  profile.baseSimtWarpCount = 4;
+  auto stage = ordinaryTailStage();
+  stage.workload = {};
+  stage.reductionExternalWorkload = StageWorkload{};
+  std::vector<mlir::ascend::ReductionWorkload> reductions = {
+      {"sum", "f32", {64}, 0, 1},
+      {"sum", "f32", {8, 64}, 0, 2},
+      {"max", "f32", {2, 32, 32}, 1, 1},
+      {"unknown", "f32", {16}, 0, 3}};
+  double fitted = 0;
+  for (const auto &work : reductions) {
+    StageWorkload contribution;
+    contribution.reductionWorkloads.push_back(work);
+    contribution.reductionOperations = work.instances;
+    double elements = 1;
+    for (auto d : work.shape)
+      elements *= d;
+    contribution.shuffleLaneSteps =
+        work.instances * elements * std::ceil(std::log2(work.shape[work.axis]));
+    contribution.reductionGeometryCounts[{
+        static_cast<int64_t>(elements / work.shape[work.axis]),
+        work.shape[work.axis], 32}] = work.instances;
+    stage.reductionContributions.push_back(contribution);
+    mlir::ascend::mergeReductionResidualWorkload(stage.workload, contribution);
+    auto estimate = mlir::ascend::estimateReductionCycles(
+        work, *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
+        profile.baseSimtWarpCount);
+    if (estimate)
+      fitted += work.instances * estimate->cycles;
+  }
+  StagePartition partition;
+  partition.operationOwnershipComplete = true;
+  partition.stages.push_back(stage);
+  auto table = StageCostEvaluator().evaluate(partition, profile);
+  ASSERT_TRUE(static_cast<bool>(table));
+  const auto &cost = table->stages.front().implementations.front();
+  EXPECT_TRUE(cost.calibratedFirstReduction);
+  EXPECT_TRUE(cost.calibratedTailReduction);
+  EXPECT_TRUE(cost.calibratedMiddleReduction);
+  EXPECT_EQ(cost.reductionFallbackInstances, 3);
+  EXPECT_GE(cost.resources.reduction, fitted);
+  auto oldProfile = profile;
+  oldProfile.reductionProfile.reset();
+  auto allLegacy = StageCostEvaluator().evaluate(partition, oldProfile);
+  ASSERT_TRUE(static_cast<bool>(allLegacy));
+  EXPECT_FALSE(allLegacy->stages.front()
+                   .implementations.front()
+                   .calibratedTailReduction);
+}
+
+TEST(SimdSimtCostModelTest, PartialReductionPreservesOnlyUnmatchedCombine) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.allowUnregisteredDialects();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+ module {
+  func.func @kernel(%a: tensor<64xf32>) {
+   %x = "tt.reduce"(%a) ({
+    ^bb0(%l:f32,%r:f32):
+     %v=arith.addf %l,%r:f32
+     "tt.reduce.return"(%v):(f32)->()
+   }) {axis=0:i32} : (tensor<64xf32>)->f32
+   %y = "tt.reduce"(%a) ({
+    ^bb0(%l:f32,%r:f32):
+     %v=arith.addf %l,%r:f32
+     %w=arith.mulf %v,%r:f32
+     "tt.reduce.return"(%w):(f32)->()
+   }) {axis=0:i32} : (tensor<64xf32>)->f32
+   return
+  }
+ })mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+  auto stage = logicalStage("partial", StageCostModelKind::RowwiseReduction);
+  stage.features.hasReduction = true;
+  auto fn = module->lookupSymbol<mlir::func::FuncOp>("kernel");
+  for (auto &op : fn.getBody().front().without_terminator())
+    stage.operations.push_back(&op);
+  StagePartition partition;
+  partition.operationOwnershipComplete = true;
+  partition.stages.push_back(stage);
+  if (auto err = StageWorkloadAnalysis().analyze(partition))
+    FAIL() << llvm::toString(std::move(err));
+  auto &analyzed = partition.stages.front();
+  ASSERT_EQ(analyzed.reductionContributions.size(), 2u);
+  EXPECT_EQ(analyzed.reductionExternalWorkload->reductionOperations, 0);
+  EXPECT_TRUE(analyzed.reductionExternalWorkload->operationCounts.empty());
+  auto profile = tailMigrationProfile();
+  auto got = StageCostEvaluator().evaluate(partition, profile);
+  ASSERT_TRUE(static_cast<bool>(got));
+  StagePartition residual = partition;
+  residual.stages.front().workload = analyzed.reductionContributions[1];
+  residual.stages.front().reductionContributions.clear();
+  residual.stages.front().reductionExternalWorkload.reset();
+  auto plainProfile = profile;
+  plainProfile.reductionProfile.reset();
+  auto baseline = StageCostEvaluator().evaluate(residual, plainProfile);
+  ASSERT_TRUE(static_cast<bool>(baseline));
+  auto &cost = got->stages.front().implementations.front();
+  auto &old = baseline->stages.front().implementations.front();
+  EXPECT_TRUE(cost.calibratedTailReduction);
+  EXPECT_EQ(cost.reductionFallbackInstances, 1);
+  EXPECT_DOUBLE_EQ(cost.resources.compute, old.resources.compute);
+  EXPECT_DOUBLE_EQ(cost.resources.issue, old.resources.issue);
+  auto estimate = mlir::ascend::estimateReductionCycles(
+      analyzed.reductionContributions[0].reductionWorkloads.front(),
+      *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
+      profile.baseSimtWarpCount);
+  ASSERT_TRUE(estimate);
+  EXPECT_NEAR(cost.resources.reduction,
+              old.resources.reduction + estimate->cycles, 1e-9);
+}
+
+TEST(SimdSimtCostModelTest, CurrentFirstAxisAllSegmentFixtures) {
+  auto hardware = tailMigrationProfile();
+  auto buf = llvm::MemoryBuffer::getFile(TRITON_ASCEND_FIRST_TEST_FIXTURE_PATH);
+  ASSERT_TRUE(buf);
+  auto data = llvm::json::parse((*buf)->getBuffer());
+  ASSERT_TRUE(static_cast<bool>(data));
+  ASSERT_TRUE(data->getAsArray());
+  for (const auto &v : *data->getAsArray()) {
+    auto o = v.getAsObject();
+    ASSERT_TRUE(o);
+    mlir::ascend::ReductionWorkload work;
+    work.kind = o->getString("op")->str();
+    work.dataType = o->getString("dtype")->str();
+    work.axis = 0;
+    for (const auto &d : *o->getArray("shape"))
+      work.shape.push_back(*d.getAsInteger());
+    auto c = mlir::ascend::estimateReductionCycles(
+        work, *hardware.reductionProfile,
+        *o->getString("mode") == "simd" ? mlir::ascend::ReductionMode::SIMD
+                                        : mlir::ascend::ReductionMode::SIMT,
+        *o->getInteger("W"));
+    ASSERT_TRUE(c);
+    EXPECT_EQ(c->axis, mlir::ascend::ReductionAxisKind::First);
+    EXPECT_NEAR(c->cycles, *o->getNumber("expected"),
+                1e-6 * std::max(1.0, *o->getNumber("expected")));
+  }
+}
+
+TEST(SimdSimtCostModelTest, ReductionProfileHierarchyAndLegacyAreEquivalent) {
+  using namespace mlir::ascend;
+  const char *first =
+      R"({"supported_warps":[4],"segments":[{"id":"f","lane_width":1,"condition":{"constant":1},"expression":{"constant":42}}]})";
+  const char *middle =
+      R"({"layout_policy_id":"row_major_128bit_v1","supported_warps":[4],"segments":[{"id":"m","lane_width":1,"condition":{"constant":1},"expression":{"constant":43}}]})";
+  auto makeRecord = [](const char *text, llvm::StringRef family) {
+    auto parsed = llvm::json::parse(text);
+    if (!parsed) {
+      ADD_FAILURE() << llvm::toString(parsed.takeError());
+      return llvm::json::Object{};
+    }
+    auto record = *parsed->getAsObject();
+    record["family"] = family.str();
+    record["mode"] = "simd";
+    record["op"] = "sum";
+    record["dtype"] = "f32";
+    return record;
+  };
+  for (bool hierarchical : {false, true}) {
+    llvm::json::Object families{
+        {"tail_axis", llvm::json::Object{{"simd", llvm::json::Object{}},
+                                         {"simt", llvm::json::Object{}}}}};
+    for (const auto &entry : {std::make_pair("first_axis", first),
+                              std::make_pair("middle_axis", middle)}) {
+      if (hierarchical) {
+        auto parsed = llvm::json::parse(entry.second);
+        ASSERT_TRUE(static_cast<bool>(parsed))
+            << llvm::toString(parsed.takeError());
+        families[entry.first] = llvm::json::Object{
+            {"simd",
+             llvm::json::Object{
+                 {"sum", llvm::json::Object{{"f32", std::move(*parsed)}}}}}};
+      } else {
+        families[entry.first] =
+            llvm::json::Array{makeRecord(entry.second, entry.first)};
+      }
+    }
+    llvm::json::Object root{{"schema_version", 1},
+                            {"target", "test"},
+                            {"profile_version", "test"},
+                            {"unit", "syscnt_cycle"},
+                            {"families", std::move(families)}};
+    int fd;
+    llvm::SmallString<128> path;
+    ASSERT_FALSE(llvm::sys::fs::createTemporaryFile("reduction-hierarchy",
+                                                    "json", fd, path));
+    {
+      llvm::raw_fd_ostream stream(fd, true);
+      stream << llvm::json::Value(std::move(root));
+    }
+    auto profile = ReductionProfile::loadFromFile(path);
+    llvm::sys::fs::remove(path);
+    ASSERT_TRUE(static_cast<bool>(profile))
+        << llvm::toString(profile.takeError());
+    ReductionWorkload work;
+    work.kind = "sum";
+    work.dataType = "f32";
+    work.shape = {8, 16};
+    work.axis = 0;
+    auto cost = estimateFirstAxisReductionCycles(work, *profile,
+                                                 ReductionMode::SIMD, 4);
+    ASSERT_TRUE(cost);
+    EXPECT_DOUBLE_EQ(*cost, 42);
+    work.shape = {2, 8, 16};
+    work.axis = 1;
+    cost = estimateMiddleAxisReductionCycles(work, *profile,
+                                             ReductionMode::SIMD, 4);
+    ASSERT_TRUE(cost);
+    EXPECT_DOUBLE_EQ(*cost, 43);
+  }
 }

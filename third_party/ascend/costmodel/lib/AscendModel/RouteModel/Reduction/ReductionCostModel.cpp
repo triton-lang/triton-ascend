@@ -1,4 +1,5 @@
 #include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
+#include "AscendModel/RouteModel/Reduction/ReductionLayoutModel.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Twine.h"
 #include <algorithm>
@@ -403,4 +404,80 @@ std::optional<double> mlir::ascend::estimateFirstAxisReductionCycles(
   if (!cost || *cost <= 0)
     return std::nullopt;
   return cost;
+}
+
+std::optional<double> mlir::ascend::estimateMiddleAxisReductionCycles(
+    const ReductionWorkload &work, const ReductionProfile &profile,
+    ReductionMode mode, int64_t warps) {
+  auto g = normalizeMiddleAxis(work);
+  if (!g)
+    return std::nullopt;
+  auto fn = profile.findMiddleAxis(mode, work.kind, work.dataType);
+  if (!fn || fn->layoutPolicy != "row_major_128bit_v1" ||
+      std::find(fn->supportedWarps.begin(), fn->supportedWarps.end(), warps) ==
+          fn->supportedWarps.end())
+    return std::nullopt;
+  if (g->reduction == 1)
+    return 0.0;
+  int64_t bits = work.dataType == "f16" || work.dataType == "bf16" ? 16
+                 : work.dataType == "f32"                          ? 32
+                                                                   : 0;
+  if (!bits && work.dataType.size() > 1 &&
+      (work.dataType[0] == 'i' || work.dataType[0] == 'u')) {
+    auto str = llvm::StringRef(work.dataType).drop_front();
+    if (str.getAsInteger(10, bits))
+      return std::nullopt;
+  }
+  auto layout = projectReductionLayout(*g, bits, warps);
+  if (mode == ReductionMode::SIMT && !layout)
+    return std::nullopt;
+  llvm::StringMap<double> features;
+  if (layout)
+    features = middleAxisFeatures(*g, *layout, warps);
+  features["O"] = g->outer;
+  features["K"] = g->reduction;
+  features["H"] = g->inner;
+  features["G"] = static_cast<double>(g->outer) * g->inner;
+  features["N"] = features["G"] * g->reduction;
+  features["W"] = warps;
+  const ReductionSegment *matched = nullptr;
+  for (const auto &segment : fn->segments) {
+    features["L"] = segment.laneWidth;
+    auto cond = evaluate(segment.condition, features);
+    if (!cond)
+      return std::nullopt;
+    if (!*cond)
+      continue;
+    if (matched)
+      return std::nullopt;
+    matched = &segment;
+  }
+  if (!matched)
+    return std::nullopt;
+  features["L"] = matched->laneWidth;
+  auto c = evaluate(matched->expression, features);
+  return c && *c > 0 ? c : std::nullopt;
+}
+std::optional<FittedReductionEstimate>
+mlir::ascend::estimateReductionCycles(const ReductionWorkload &work,
+                                      const ReductionProfile &profile,
+                                      ReductionMode mode, int64_t warps) {
+  if (!work.isFiniteAndNonNegative())
+    return std::nullopt;
+  ReductionAxisKind axis;
+  std::optional<double> c;
+  if (work.axis + 1 == work.shape.size()) {
+    axis = ReductionAxisKind::Tail;
+    c = estimateTailAxisReductionCycles(work, profile.getModeProfile(mode),
+                                        mode, warps);
+  } else if (work.axis == 0) {
+    axis = ReductionAxisKind::First;
+    c = estimateFirstAxisReductionCycles(work, profile, mode, warps);
+  } else {
+    axis = ReductionAxisKind::Middle;
+    c = estimateMiddleAxisReductionCycles(work, profile, mode, warps);
+  }
+  if (!c || !std::isfinite(*c) || *c < 0)
+    return std::nullopt;
+  return FittedReductionEstimate{*c, axis};
 }

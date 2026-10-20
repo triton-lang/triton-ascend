@@ -35,10 +35,19 @@ parseExpression(const llvm::json::Value &v, unsigned depth, unsigned &nodes) {
     return e;
   }
   if (auto f = o->getString("feature")) {
-    if (o->size() != 1 || !llvm::StringSwitch<bool>(*f)
-                               .Cases("R", "G", "Q", "L", true)
-                               .Cases("W", "rank", "d1", "d2", true)
-                               .Default(false))
+    if (o->size() != 1 ||
+        !llvm::StringSwitch<bool>(*f)
+             .Cases("R", "G", "Q", "L", true)
+             .Cases("W", "rank", "d1", "d2", true)
+             .Cases("O", "K", "H", "N", "route_id", true)
+             .Cases("R_t", "A_t", "N_local", "N_warp", "N_cross", true)
+             .Cases("uK", "wK", "tK", "tO", "tH", "sH", true)
+             .Cases("wO", "wH", "S", "S2", "Sr", "Lr", true)
+             .Cases("Lm", "Sc", "gLane", "mem", "Npack", true)
+             .Cases("localTo", "sqrtN", "one", "bar", true)
+             .Cases("Glogu", "hingeS", "hingeS2", true)
+             .Cases("packedTraffic", "r16To", "R3", true)
+             .Default(false))
       return invalid("unknown reduction feature");
     e.kind = ReductionExpression::Kind::Feature;
     e.name = f->str();
@@ -67,7 +76,7 @@ parseExpression(const llvm::json::Value &v, unsigned depth, unsigned &nodes) {
   }
   if (*op == "pow" &&
       (e.arguments[1].kind != ReductionExpression::Kind::Constant ||
-       e.arguments[1].constant < 0 || e.arguments[1].constant > 4))
+       e.arguments[1].constant < -4 || e.arguments[1].constant > 4))
     return invalid("reduction power requires a fixed exponent in [0,4]");
   return e;
 }
@@ -81,7 +90,8 @@ parseFirstAxisFunctions(const llvm::json::Array &functions) {
   for (const auto &value : functions) {
     const auto *f = value.getAsObject();
     if (!f || !f->getString("family") ||
-        *f->getString("family") != "first_axis")
+        (*f->getString("family") != "first_axis" &&
+         *f->getString("family") != "middle_axis"))
       return invalid("unsupported reduction family");
     auto mode = f->getString("mode"), op = f->getString("op"),
          dtype = f->getString("dtype");
@@ -101,6 +111,12 @@ parseFirstAxisFunctions(const llvm::json::Array &functions) {
         segments->size() > 128)
       return invalid("invalid reduction function");
     ReductionFunction function;
+    if (*f->getString("family") == "middle_axis") {
+      auto policy = f->getString("layout_policy_id");
+      if (!policy || *policy != "row_major_128bit_v1")
+        return invalid("unsupported middle-axis layout policy");
+      function.layoutPolicy = policy->str();
+    }
     for (const auto &w : *warps) {
       auto n = w.getAsInteger();
       if (!n || *n < 1 || *n > 64 || (*n & (*n - 1)) ||
@@ -141,6 +157,44 @@ parseFirstAxisFunctions(const llvm::json::Array &functions) {
       return invalid("duplicate reduction function");
   }
   return result;
+}
+
+// Accept the legacy record array as well as mode/op/dtype hierarchy.
+static llvm::Expected<llvm::StringMap<ReductionFunction>>
+parseAxisFunctions(const llvm::json::Value &value, llvm::StringRef family) {
+  if (const auto *array = value.getAsArray())
+    return parseFirstAxisFunctions(*array);
+  const auto *modes = value.getAsObject();
+  if (!modes)
+    return invalid("reduction family must be an array or mode/op/dtype object");
+  llvm::json::Array records;
+  for (const auto &mode : *modes) {
+    if (mode.first != "simd" && mode.first != "simt")
+      return invalid("unsupported reduction mode");
+    const auto *ops = mode.second.getAsObject();
+    if (!ops)
+      return invalid("reduction mode must contain op objects");
+    for (const auto &op : *ops) {
+      const auto *dtypes = op.second.getAsObject();
+      if (!dtypes)
+        return invalid("reduction op must contain dtype objects");
+      for (const auto &dtype : *dtypes) {
+        const auto *leaf = dtype.second.getAsObject();
+        if (!leaf || leaf->get("family") || leaf->get("mode") ||
+            leaf->get("op") || leaf->get("dtype"))
+          return invalid("reduction leaf must not repeat path fields");
+        llvm::json::Object record = *leaf;
+        record["family"] = family.str();
+        record["mode"] = mode.first.str();
+        record["op"] = op.first.str();
+        record["dtype"] = dtype.first.str();
+        records.push_back(std::move(record));
+        if (records.size() > 1024)
+          return invalid("too many reduction functions");
+      }
+    }
+  }
+  return parseFirstAxisFunctions(records);
 }
 
 bool ReductionCostProfile::isValid() const {
@@ -219,13 +273,16 @@ ReductionProfile::loadFromFile(llvm::StringRef path) {
   profile.simd = std::move(*simdParameters);
   profile.simt = std::move(*simtParameters);
   if (const auto *value = families->get("first_axis")) {
-    const auto *functions = value->getAsArray();
-    if (!functions)
-      return invalid("first_axis must be an array");
-    auto parsedFunctions = parseFirstAxisFunctions(*functions);
+    auto parsedFunctions = parseAxisFunctions(*value, "first_axis");
     if (!parsedFunctions)
       return parsedFunctions.takeError();
     profile.firstAxisFunctions = std::move(*parsedFunctions);
+  }
+  if (const auto *value = families->get("middle_axis")) {
+    auto parsed = parseAxisFunctions(*value, "middle_axis");
+    if (!parsed)
+      return parsed.takeError();
+    profile.middleAxisFunctions = std::move(*parsed);
   }
   auto bytes = buffer.get()->getBuffer();
   auto hash = llvm::SHA256::hash(llvm::ArrayRef<uint8_t>(
@@ -244,4 +301,11 @@ ReductionProfile::findFirstAxis(ReductionMode mode, llvm::StringRef op,
                                 llvm::StringRef dtype) const {
   auto it = firstAxisFunctions.find(key("first_axis", mode, op, dtype));
   return it == firstAxisFunctions.end() ? nullptr : &it->second;
+}
+
+const ReductionFunction *
+ReductionProfile::findMiddleAxis(ReductionMode mode, llvm::StringRef op,
+                                 llvm::StringRef dtype) const {
+  auto it = middleAxisFunctions.find(key("middle_axis", mode, op, dtype));
+  return it == middleAxisFunctions.end() ? nullptr : &it->second;
 }

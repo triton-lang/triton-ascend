@@ -339,7 +339,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
     }
 
     // Update maxRequiredBuffers/maxX
-    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX) {
+    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX ||
+        (crossRequiredBuffers * maxX == maxRequiredBuffers * crossX &&
+         crossRequiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = crossRequiredBuffers;
       maxX = crossX;
     }
@@ -360,8 +362,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
       return {-1, -1};
     }
     // Compare iterRequiredBuffers/iterX vs maxRequiredBuffers/maxX
-    // Take the larger fraction
-    if (iterRequiredBuffers * maxX > maxRequiredBuffers * iterX) {
+    if (iterRequiredBuffers * maxX > maxRequiredBuffers * iterX ||
+        (iterRequiredBuffers * maxX == maxRequiredBuffers * iterX &&
+         iterRequiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = iterRequiredBuffers;
       maxX = iterX;
     }
@@ -458,7 +461,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
     int requiredBuffers = ConsumerIdx - producerIdx + 1;
 
     // Update maxRequiredBuffers/maxX
-    if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+    if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+        (requiredBuffers * maxX == maxRequiredBuffers * x &&
+         requiredBuffers > maxRequiredBuffers)) {
       maxRequiredBuffers = requiredBuffers;
       maxX = x;
     }
@@ -558,7 +563,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
       // Update max value using fraction comparison to avoid precision issues
       // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
       // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+      if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+          (requiredBuffers * maxX == maxRequiredBuffers * x &&
+           requiredBuffers > maxRequiredBuffers)) {
         maxRequiredBuffers = requiredBuffers;
         maxX = x;
       }
@@ -637,7 +644,9 @@ std::pair<int, int> UpdateLoopIterTimesPass::calculateIterDepsFactor(
                                     << ", producerIdx: " << producerIdx);
       LDBG("requiredBuffers: " << requiredBuffers);
 
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
+      if (requiredBuffers * maxX > maxRequiredBuffers * x ||
+          (requiredBuffers * maxX == maxRequiredBuffers * x &&
+           requiredBuffers > maxRequiredBuffers)) {
         maxRequiredBuffers = requiredBuffers;
         maxX = x;
       }
@@ -1131,7 +1140,7 @@ int UpdateLoopIterTimesPass::ComputeMainLoopTimes(
 
       // If flowOpt optimization is enabled, reserve extra iterations to host
       // the flowOpt condition's third if block.
-      if (isFlowOptEnabled(info)) {
+      if (isFlowOptEnabled(info) && iterInfo.requiredBuffers > 1) {
         int optNum = std::min(info->intraCoreBufferCount - 1,
                               info->crossCoreBufferCount);
         iterInfo.ifCount += (optNum - 1);
@@ -1164,7 +1173,10 @@ int UpdateLoopIterTimesPass::collectForOpsAndUpdateMax(
         }
         // requiredBuffers/x > maxRequiredBuffers/maxX =
         // requiredBuffers * maxX > maxRequiredBuffers * x
-        if (iterInfo.requiredBuffers * maxX > maxRequiredBuffers * iterInfo.x) {
+        if (iterInfo.requiredBuffers * maxX > maxRequiredBuffers * iterInfo.x ||
+            (iterInfo.requiredBuffers * maxX ==
+                 maxRequiredBuffers * iterInfo.x &&
+             iterInfo.requiredBuffers > maxRequiredBuffers)) {
           maxRequiredBuffers = iterInfo.requiredBuffers;
           maxX = iterInfo.x;
         }

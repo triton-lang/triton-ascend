@@ -27,8 +27,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       annotation.mark %alloc_6 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       // CHECK:       hivm.hir.sync_block_set[<VECTOR>, <PIPE_S>, <PIPE_S>]
       // CHECK:       %[[IFCOUNT:.*]] = arith.constant 4
-      // CHECK:       %[[REQUIRENUM:.*]] = arith.constant 1
-      // CHECK:       %[[BUFFERNUM:.*]] = arith.constant 1
+      // CHECK:       %[[REQUIRENUM:.*]] = arith.constant 2
+      // CHECK:       %[[BUFFERNUM:.*]] = arith.constant 2
       // CHECK:       arith.subi
       // CHECK:       arith.ceildivui
       // CHECK:       arith.muli %{{.*}}, %[[REQUIRENUM]]
@@ -68,8 +68,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
       %alloc_7 = memref.alloc() {ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       annotation.mark %alloc_7 {effects = ["write", "read"], hivm.tightly_coupled_buffer = #hivm.tightly_coupled_buffer<2>, ssbuffer.block_id = 9 : i32, ssbuffer.transfer_id = 2 : i32} : memref<128x128xf32, #hivm.address_space<ub>>
       // CHECK:       %[[IFCOUNT:.*]] = arith.constant 4
-      // CHECK:       %[[REQUIRENUM:.*]] = arith.constant 1
-      // CHECK:       %[[BUFFERNUM:.*]] = arith.constant 1
+      // CHECK:       %[[REQUIRENUM:.*]] = arith.constant 2
+      // CHECK:       %[[BUFFERNUM:.*]] = arith.constant 2
       // CHECK:       arith.subi
       // CHECK:       arith.ceildivui
       // CHECK:       arith.muli %{{.*}}, %[[REQUIRENUM]]

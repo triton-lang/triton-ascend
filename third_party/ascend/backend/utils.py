@@ -35,6 +35,24 @@ import pybind11
 
 _is_compile_on_910_95 = None
 
+
+def _multibuffer_mode_to_tuple(value):
+    """Freeze a mode dictionary, or restore its pairs from a JSON cache.
+
+    Sort keys for stable hashing regardless of dictionary insertion order.
+    NPU IR owns level names, count semantics and legacy-option handling.
+    """
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        value = tuple(value.items())
+    if not isinstance(value, (list, tuple)) or any(not isinstance(pair, (list, tuple)) or len(pair) != 2
+                                                   or not isinstance(pair[0], str) or type(pair[1]) is not int
+                                                   for pair in value):
+        raise TypeError("multibuffer_mode must be a dict[str, int], cached (str, int) pairs, or None")
+    return tuple(sorted((level, count) for level, count in value))
+
+
 # Compatibility boundary for compile-option cleanup.  Public dictionaries
 # route renamed options and discard backend-managed options before community
 # JIT validates the remaining keys.
@@ -44,6 +62,7 @@ _DEPRECATED_NPU_OPTIONS = frozenset({
     "arch",
     "auto_blockify_size",
     "auto_tile_and_bind_subblock",
+    "bisheng_options",
     "code_motion",
     "compile_on_910_95",
     "enable_auto_blockify",
@@ -126,6 +145,7 @@ _DEPRECATED_NPU_OPTION_DETAILS = {
     "auto_blockify_size": "it is ignored; this option has no replacement because it had no effective consumer.",
     "auto_tile_and_bind_subblock":
     "it is ignored; tiling and subblock binding are derived from Linalg IR and lock semantics.",
+    "bisheng_options": "it is ignored; BiSheng compiler arguments and libdevice linkage are backend-managed.",
     "code_motion": "it is ignored; the removed vendor compiler control has no replacement.",
     "enable_auto_blockify": "it is ignored; automatic block mapping and its safety blacklist are backend-managed.",
     "enable_buffer_insert_optimization":
@@ -842,6 +862,7 @@ def _find_cann_version_file():
     return None
 
 
+@functools.lru_cache(None)
 def get_cann_version():
     _cann_version = None
     try:

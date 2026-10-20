@@ -53,7 +53,8 @@ class BubbleUpExtract : public OpRewritePattern<ExtractOpTy> {
 public:
   using OpRewritePattern<ExtractOpTy>::OpRewritePattern;
 
-  explicit BubbleUpExtract(MLIRContext *context, bool enableAggressiveMode);
+  explicit BubbleUpExtract(MLIRContext *context, bool enableAggressiveMode,
+                           bool compileOn91095);
 
   LogicalResult matchAndRewrite(ExtractOpTy op,
                                 PatternRewriter &rewriter) const override;
@@ -61,6 +62,7 @@ public:
 private:
   Value createExtractOp(ExtractOpTy op, Value value, Location loc,
                         PatternRewriter &rewriter) const;
+  bool isBf16ExtSliceMisaligned(ExtractOpTy op, arith::ExtFOp parentOp) const;
   template <typename BinOpTy>
   void bubbleUpIntBinaryOp(ExtractOpTy op, BinOpTy binOp, Location loc,
                            PatternRewriter &rewriter) const;
@@ -107,6 +109,7 @@ private:
                          Location loc, PatternRewriter &rewriter) const;
 
   bool enableAggressiveMode;
+  bool compileOn91095;
 };
 
 class BubbleUpOperationPass

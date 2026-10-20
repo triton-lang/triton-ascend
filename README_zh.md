@@ -22,6 +22,7 @@ Triton-Ascend
 
 ## 🔥 最新消息
 
+- [2026.10.15]Triton-Ascend 3.2.2.post2及3.6.0正式版本上线
 - [2026.07.31]Triton-Ascend 3.2.2正式版本上线
 - [2026.04.30]Triton-Ascend 3.2.1正式版本上线
 - [2026.01.20]Triton-Ascend 3.2.0正式版本上线
@@ -58,11 +59,11 @@ Triton-Ascend
 
 确定Python、CANN和TorchNPU软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
 
-- Python版本选择：py3.9-py3.13 均可。
+- Python版本选择：py3.10-py3.13 均可。
 
-- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.1.0 版本。
+- CANN版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成CANN的安装与配置。建议下载安装 9.2.0 版本。
 
-- TorchNPU版本选择：当前配套的TorchNPU版本为2.7.1.post8。
+- TorchNPU版本选择：当前配套的TorchNPU版本为2.10.0.post7。
 
 ### 访问昇腾NPU
 
@@ -71,7 +72,7 @@ Triton-Ascend
 ### 快速安装
 
 ```bash
-#以安装triton-ascend 3.2.2 为例
+#以安装triton-ascend 3.6.0 为例
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 

@@ -27,6 +27,7 @@
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToStructured/MemOpConverter.h"
+#include "ascend/include/TritonToUnstructure/OffsetAnalysis.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Attributes.h"
@@ -626,6 +627,28 @@ struct DiscreteMaskAtomicConversion
     : OpRewritePattern<mlir::triton::AtomicRMWOp> {
   using OpRewritePattern<mlir::triton::AtomicRMWOp>::OpRewritePattern;
 
+  bool routeToSIMD(mlir::triton::AtomicRMWOp op,
+                   PatternRewriter &rewriter) const {
+    if (op->hasAttr(ConverterUtils::explicitRouteToSIMDAttrName)) {
+      return op
+          ->getAttrOfType<BoolAttr>(ConverterUtils::explicitRouteToSIMDAttrName)
+          .getValue();
+    }
+
+    auto loc = op.getLoc();
+    auto ptr = op.getPtr();
+    llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
+    triton::parse(ptr, loc, rewriter, offsetMap);
+    auto it = offsetMap.find(ptr);
+    auto toSimd = it != offsetMap.end() &&
+                  llvm::all_of(it->second.getStructuredRef(), [](auto dim) {
+                    return dim == PtrOffsetInfo::AxisInfo::structured;
+                  });
+    op->setAttr(ConverterUtils::explicitRouteToSIMDAttrName,
+                rewriter.getBoolAttr(toSimd));
+    return toSimd;
+  }
+
   LogicalResult matchAndRewrite(mlir::triton::AtomicRMWOp op,
                                 PatternRewriter &rewriter) const final {
     auto loc = op.getLoc();
@@ -637,10 +660,14 @@ struct DiscreteMaskAtomicConversion
     if (failed(isDiscreteMask(op, mask, rewriter)))
       return failure();
 
-    // The template atomic ABI consumes the original lane mask.  Do not turn it
-    // into a select before TritonToUnstructure has the chance to preserve it.
+    // Keep the original mask for the SIMT atomic template when the pointer
+    // needs the indirect atomic ABI. The unstructure pass flattens it together
+    // with offsets and values; replacing it with a select here would lose that
+    // lane mask. Structured pointers do not need the indirect ABI, so fall
+    // through to the SIMD select+atomic rewrite below instead.
     if (compileOn91095Flag &&
-        triton::ascend::isSimtTemplateMode(compileModeFlag)) {
+        triton::ascend::isSimtTemplateMode(compileModeFlag) &&
+        !routeToSIMD(op, rewriter)) {
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();

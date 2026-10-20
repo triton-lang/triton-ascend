@@ -50,3 +50,16 @@ section#triton-ascend h1 {
 .toctree-wrapper.sidebar-groups-only {
     display: none;
 }
+
+dt.sig {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+
+dt.sig span.pre {
+    white-space: pre-wrap;
+}
+
+h1, h2, h3 {
+    overflow-wrap: anywhere;
+}

@@ -18,9 +18,9 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Ascend community website.
 
-- CANN version: 9.1.0
+- CANN version: 9.2.0
 - Python version: 3.11
-- TorchNPU version: 2.7.1.post8
+- TorchNPU version: 2.10.0.post7
 
 Note: For more compatibility relationships, refer to the [Release Notes](./release_note.md#version-compatibility-matrix).
 
@@ -103,22 +103,36 @@ If you need to customize the LLVM build process, follow the steps below to compi
     python3 setup.py install
     ```
 
-  **Table 1** Source‑build environment‑variable reference
+    **Table 1** Source‑build environment‑variable reference
 
-  | Option (Environment Variable) | Default                 | Description                                                                                                                                                                                                                                                                          |
-  |-------------------------------|-------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-  | `LLVM_SYSPATH`                | None                    | Path to a locally pre-built LLVM installation. When set, the prebuilt LLVM package is not downloaded; required for offline builds, pointing to the `${LLVM_INSTALL_PREFIX}` from the LLVM build step above.                                                                          |
-  | `TRITON_BUILD_WITH_CLANG_LLD` | true                    | Use clang/clang++ as the compiler and lld as the linker; clang>=15 and lld>=15 must be installed in advance.                                                                                                                                                                         |
-  | `TRITON_BUILD_WITH_CCACHE`    | true                    | Enable ccache to cache build results and speed up repeated builds; ccache must be installed in advance.                                                                                                                                                                              |
-  | `TRITON_BUILD_PROTON`         | OFF                     | Whether to build the Proton profiler. Set to `ON` when needed.                                                                                                                                                                                                                       |
-  | `TRITON_BUILD_TD`             | OFF                     | Whether to build the TD (Triton-distributed-ascend) components; disabled by default.                                                                                                                                                                                                 |
-  | `TRITON_BUILD_NPUIR`          | OFF                     | Whether to build AscendNPU-IR during installation. Setting it to `ON` triggers the `build_npuir.py` flow. AscendNPU-IR compilation depends on CANN,Source `/usr/local/Ascend/ascend-toolkit/set_env.sh` (example for default root install path) and ensure >30GB free disk space. |
-  | `TRITON_WHEEL_NAME`           | triton_ascend           | Name of the generated wheel package; usually no need to modify.                                                                                                                                                                                                                      |
-  | `TRITON_APPEND_CMAKE_ARGS`    | None                    | Extra arguments passed through to CMake, separated by spaces. For example, append `-DTRITON_BUILD_UT=OFF` disables unit test compilation.                                                                                                                                              |
-  | `TRITON_OFFLINE_BUILD`        | OFF                     | When set to `ON`, prevents the build from accessing the network to download dependencies (it also disables unit-test builds that fetch googletest); used in offline environments.                                                                                                    |
-  | `MAX_JOBS`                    | 2 × number of CPU cores | Number of parallel compile jobs. Lower it when memory is tight, e.g. `export MAX_JOBS=8`.                                                                                                                                                                                            |
-  | `TRITON_PARALLEL_LINK_JOBS`   | None                    | Number of parallel link jobs. Linking is memory intensive; set to `1` when memory is insufficient.                                                                                                                                                                                   |
-  | `IS_MANYLINUX`                | OFF                     | When set to `ON`, the generated wheel package is built in the manylinux-compatible format, so it can be installed across different Linux distributions.                                                                                                                              |
+    | Option (Environment Variable) | Default                 | Description                                                                                                                                                                                                                                                                          |
+    |-------------------------------|-------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+    | `LLVM_SYSPATH`                | None                    | Path to a locally pre-built LLVM installation. When set, the prebuilt LLVM package is not downloaded; required for offline builds, pointing to the `${LLVM_INSTALL_PREFIX}` from the LLVM build step above.                                                                          |
+    | `TRITON_BUILD_WITH_CLANG_LLD` | true                    | Use clang/clang++ as the compiler and lld as the linker; clang>=15 and lld>=15 must be installed in advance.                                                                                                                                                                         |
+    | `TRITON_BUILD_WITH_CCACHE`    | true                    | Enable ccache to cache build results and speed up repeated builds; ccache must be installed in advance.                                                                                                                                                                              |
+    | `TRITON_BUILD_PROTON`         | OFF                     | Whether to build the Proton profiler. Set to `ON` when needed.                                                                                                                                                                                                                       |
+    | `TRITON_BUILD_TD`             | OFF                     | Whether to build the TD (Triton-distributed-ascend) components; disabled by default.                                                                                                                                                                                                 |
+    | `TRITON_BUILD_NPUIR`          | OFF                     | Whether to build AscendNPU-IR during installation. Setting it to `ON` triggers the `build_npuir.py` flow. AscendNPU-IR compilation depends on CANN,Source `/usr/local/Ascend/ascend-toolkit/set_env.sh` (example for default root install path) and ensure >30GB free disk space. |
+    | `TRITON_WHEEL_NAME`           | triton_ascend           | Name of the generated wheel package; usually no need to modify.                                                                                                                                                                                                                      |
+    | `TRITON_APPEND_CMAKE_ARGS`    | None                    | Extra arguments passed through to CMake, separated by spaces. For example, append `-DTRITON_BUILD_UT=OFF` disables unit test compilation.                                                                                                                                              |
+    | `TRITON_OFFLINE_BUILD`        | OFF                     | When set to `ON`, prevents the build from accessing the network to download dependencies (it also disables unit-test builds that fetch googletest); used in offline environments.                                                                                                    |
+    | `MAX_JOBS`                    | 2 × number of CPU cores | Number of parallel compile jobs. Lower it when memory is tight, e.g. `export MAX_JOBS=8`.                                                                                                                                                                                            |
+    | `TRITON_PARALLEL_LINK_JOBS`   | None                    | Number of parallel link jobs. Linking is memory intensive; set to `1` when memory is insufficient.                                                                                                                                                                                   |
+    | `IS_MANYLINUX`                | OFF                     | When set to `ON`, the generated wheel package is built in the manylinux-compatible format, so it can be installed across different Linux distributions.                                                                                                                              |
+
+4. **(Optional)Triton-distributed-ascend**: If you use the features of [Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend), you need to compile the shmem v1.7.0 component from source.
+
+4.1 Obtain the source code:
+
+```bash
+    git clone https://gitcode.com/cann/shmem.git
+    cd shmem
+    git checkout v1.7.0
+```
+
+4.2 Compile from source:
+
+Refer to the **'Installation' -> 'Method 3: Source Code Compilation'** section in the README.md of the [shmem project](https://gitcode.com/cann/shmem).
 
 ## Container Image Installation
 

@@ -64,7 +64,7 @@ using namespace mlir::triton;
 using namespace hivm;
 
 static constexpr int kIntegerBitWidth = 32;
-static constexpr int NzDimWidth = 16;
+static constexpr int iniNzDimWidth = 16;
 
 static uint64_t getElemBytesForAlign(Type t) {
   static constexpr uint64_t kBitsPerByte = 8;
@@ -96,6 +96,66 @@ static uint64_t getBlockElemsFor32BAlign(Type elemType) {
     return 1;
   }
   return kAlignBytes / elemBytes;
+}
+
+std::pair<bool, bool>
+InterCoreTransferAndSyncPass::analyzeMatmulOperand(DependencyInfo &dep) {
+  bool isMatmulA = true;
+  bool isTranspose = false;
+
+  Value startValue = dep.value;
+
+  llvm::DenseSet<Value> visited;
+  SmallVector<Value> chain;
+  chain.push_back(startValue);
+  visited.insert(startValue);
+
+  while (!chain.empty()) {
+    Value currentValue = chain.back();
+    chain.pop_back();
+
+    for (Operation *userOp : currentValue.getUsers()) {
+      if (CVPipeline::getOpBlockId(userOp) != dep.iniConsumerBlockId) {
+        continue;
+      }
+      if (auto matmulOp = dyn_cast<linalg::MatmulOp>(userOp)) {
+        auto operands = matmulOp->getOperands();
+        if (operands[0] == currentValue) {
+          isMatmulA = true;
+        } else if (operands[1] == currentValue) {
+          isMatmulA = false;
+        } else {
+          LOG_DEBUG("[error] matmul C is from Vector!");
+          CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+        }
+
+        Operation *defOp = currentValue.getDefiningOp();
+        if (defOp && isa<linalg::TransposeOp>(defOp)) {
+          isTranspose = true;
+        }
+        return {isMatmulA, isTranspose};
+      }
+
+      for (Value result : userOp->getResults()) {
+        if (visited.insert(result).second) {
+          chain.push_back(result);
+        }
+      }
+    }
+  }
+
+  return {isMatmulA, isTranspose};
+}
+
+int InterCoreTransferAndSyncPass::getNzDimWidth(DependencyInfo &dep,
+                                                int64_t blk) {
+  auto [isA, isTransposed] = analyzeMatmulOperand(dep);
+  if (blk == 32) {
+    if (isA == isTransposed) {
+      return iniNzDimWidth * 2;
+    }
+  }
+  return iniNzDimWidth;
 }
 
 static void attachCommonTags(Operation *op, int blockId, StringRef coreType) {
@@ -196,6 +256,28 @@ static bool isValidC2CMatmulDependency(Value value, int consumerBlockId) {
     return false;
 
   return hasAnyMatmulABInputUser(value, consumerBlockId);
+}
+
+static void attachLoopIdTag(Operation *op, int loopId) {
+  MLIRContext *ctx = op->getContext();
+  op->setAttr(
+      CVPipeline::kLoopId,
+      IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), loopId));
+}
+
+bool hasStartEndSyncWhitelistKernel(ModuleOp module) {
+  std::vector<std::string> whitelist{
+      "_swa_bwd_dq_kernel",
+  };
+
+  bool isWhitelistKernel = false;
+  for (auto func : module.getOps<func::FuncOp>()) {
+    if (llvm::is_contained(whitelist, func.getName().str())) {
+      isWhitelistKernel = true;
+      break;
+    }
+  }
+  return isWhitelistKernel;
 }
 
 // Block Start/End Operation Retrieval
@@ -337,7 +419,8 @@ bool InterCoreTransferAndSyncPass::isOuterLayerDependency(
 
 // Nd2NzNormalizer
 SmallVector<int64_t>
-InterCoreTransferAndSyncPass::computeExpectedShape(mlir::Value depValue) {
+InterCoreTransferAndSyncPass::computeExpectedShape(mlir::Value depValue,
+                                                   int NzDimWidth) {
   auto tensorTy = dyn_cast<TensorType>(depValue.getType());
   static constexpr int NdShapeLength = 2;
   if (!tensorTy || tensorTy.getRank() != NdShapeLength) {
@@ -476,8 +559,18 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
     return;
   }
 
+  Type elemType = cast<RankedTensorType>(origValue.getType()).getElementType();
+  int64_t blk = getBlockElemsFor32BAlign(elemType);
+  if (blk == 0) {
+    LOG_DEBUG("Invalid block size.\n");
+    return;
+  }
+
+  auto NzDimWidth = getNzDimWidth(dep, blk);
+
   // Step 1: Compute expected shape
-  SmallVector<int64_t> expectedShape = computeExpectedShape(origValue);
+  SmallVector<int64_t> expectedShape =
+      computeExpectedShape(origValue, NzDimWidth);
   int originBlockId = dep.iniProducerBlockId;
   // Step 2: If shapes match, return original value
   bool isEqualedShape = isExpectedShape(origValue, expectedShape);
@@ -491,13 +584,6 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   auto srcTensorType = cast<RankedTensorType>(newValue.getType());
   int64_t M = srcTensorType.getDimSize(0);
   int64_t N = srcTensorType.getDimSize(1);
-  Type elemType = srcTensorType.getElementType();
-
-  int64_t blk = getBlockElemsFor32BAlign(elemType);
-  if (blk == 0) {
-    LOG_DEBUG("Invalid block size.\n");
-    return;
-  }
 
   SmallVector<int64_t> shape3D = {M, N / blk, blk};
   SmallVector<int64_t> shapeTrans = {N / blk, M, blk};
@@ -1100,6 +1186,14 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     attachAnalyzeFlagIdTag(setOpForWrite);
     attachAnalyzeFlagIdTag(setOpForStart);
     attachAnalyzeFlagIdTag(waitOpForEnd);
+
+    if (hasStartEndSyncWhitelistKernel(module)) {
+      auto loopId =
+          mainLoopOp->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
+      attachLoopIdTag(setOpForStart, loopId);
+      attachLoopIdTag(waitOpForEnd, loopId);
+    }
+
     // E2: register every set->wait pair of this transfer, not just the
     // loop start/end pair. Each pair is the only proof of cross-core
     // ordering for the sync ops it connects.
@@ -2141,6 +2235,89 @@ void InterCoreTransferAndSyncPass::sortDependencies(
             });
 }
 
+void InterCoreTransferAndSyncPass::analyzeLoopInclusion() {
+  loopInclusions.clear();
+  int maxLoopId = -1;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    auto loopOp = dyn_cast<LoopLikeOpInterface>(op);
+    if (!loopOp) {
+      return;
+    }
+
+    int loopId = 0;
+    Operation *parentLoop =
+        loopOp.getOperation()->getParentOfType<LoopLikeOpInterface>();
+    while (parentLoop) {
+      ++loopId;
+      parentLoop = parentLoop->getParentOfType<LoopLikeOpInterface>();
+    }
+    loopOp->setAttr(
+        CVPipeline::kLoopId,
+        IntegerAttr::get(
+            IntegerType::get(loopOp->getContext(), kIntegerBitWidth), loopId));
+    loopInclusions[loopId].push_back(loopOp);
+    maxLoopId = std::max(maxLoopId, loopId);
+  });
+  for (int loopId = 0; loopId <= maxLoopId; ++loopId) {
+    if (loopInclusions[loopId].size() != 1) {
+      break;
+    }
+    bool allSingle = true;
+    for (int outerId = loopId - 1; outerId >= 0; --outerId) {
+      if (loopInclusions[outerId].size() != 1) {
+        allSingle = false;
+        break;
+      }
+    }
+    if (allSingle) {
+      singleLoopSet.insert(loopId);
+    }
+  }
+}
+
+void InterCoreTransferAndSyncPass::moveStartEndSync(OpBuilder &builder) {
+  llvm::SmallVector<Operation *> startSyncOps;
+  llvm::SmallVector<Operation *> endSyncOps;
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kLoopId) ||
+        !(isa<hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp>(op))) {
+      return;
+    }
+    auto loopId = op->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
+    auto it = singleLoopSet.find(loopId);
+    if (it != singleLoopSet.end()) {
+      if (isa<hivm::SyncBlockSetOp>(op)) {
+        startSyncOps.push_back(op);
+      } else if (isa<hivm::SyncBlockWaitOp>(op)) {
+        endSyncOps.push_back(op);
+      }
+    }
+  });
+
+  if (loopInclusions.count(0) == 0 || loopInclusions[0].empty()) {
+    return;
+  }
+  Operation *outerLoop = loopInclusions[0][0];
+  if (!outerLoop) {
+    return;
+  }
+  // move startSyncOps and endSyncOps to the outer loop
+  builder.setInsertionPoint(outerLoop);
+  for (auto it = startSyncOps.begin(); it != startSyncOps.end(); ++it) {
+    builder.clone(**it);
+  }
+  builder.setInsertionPointAfter(outerLoop);
+  for (auto it = endSyncOps.rbegin(); it != endSyncOps.rend(); ++it) {
+    builder.clone(**it);
+  }
+  for (auto op : startSyncOps) {
+    op->erase();
+  }
+  for (auto op : endSyncOps) {
+    op->erase();
+  }
+}
+
 // Main Processing
 LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     FlagIdManager &flagManager, FlagIdReuseManager &flagIdReuseManager) {
@@ -2151,6 +2328,11 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   if (!info.isValid()) {
     LOG_DEBUG("Error: Data dependency analysis failed.\n");
     return failure();
+  }
+
+  // Analyze loop nesting before inserting inter-core transfer/sync.
+  if (hasStartEndSyncWhitelistKernel(module)) {
+    analyzeLoopInclusion();
   }
 
   llvm::SmallVector<DependencyInfo> &V2CDependencies =
@@ -2295,6 +2477,11 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   // Synchronize CUBE's fixpipe with VECTOR's direct MTE3 store. No VECTOR
   // tensor computation occurs between the transfer and the store.
   processCubeToVectorDirectStoreSync(builder, flagManager, flagIdReuseManager);
+
+  // move start/end sync ops
+  if (hasStartEndSyncWhitelistKernel(module)) {
+    moveStartEndSync(builder);
+  }
 
   LOG_DEBUG("InterCoreTransferAndSyncPass success!\n");
 

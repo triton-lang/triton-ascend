@@ -10,6 +10,8 @@
   </tr>
 </table>
 
+使用该 Ascend 亲和接口时，必须在 `triton.Config` 的 `kwargs` 或 kernel launch meta-parameter 中设置 `disable_auto_inject_block_sync=True`，禁用编译器自动插入核间同步，由用户显式管理核间同步。该编译选项的详细说明参见[编译选项参考表](../../environment_variable_and_compiler_options_reference.md#compiler-options-reference)。
+
 ## 2.1 入参
 
 <table>

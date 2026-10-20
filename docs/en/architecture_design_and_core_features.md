@@ -37,8 +37,18 @@
 
 This project extends the support for Huawei Ascend NPU (using the CANN software stack) based on the standard Triton. The overall design complies with the following **code principles**:
 
+**(1) Ownership decision: where the change lands depends on hardware affinity**
+
 > - **If the modification is target independent**, it should be retained in the **Triton core** part (such as general modifications to the language and runtime).
-> - **If the modification is target affinitive**, it should be placed in the **Triton-Ascend** part.
+> - **If the modification is strongly Ascend-target affinitive**, it should be placed in the **Triton-Ascend** part.
+
+**(2) Landing approach: keep upstream code untouched, carry changes as patches**
+
+To stay synchronized with upstream Triton / LLVM and reduce merge conflicts during version upgrades, the community source tree is **not modified in place** by default:
+
+> - Ascend-specific logic is first implemented as independent modules inside `third_party/ascend/`, rather than editing community directories such as `python/`, `include/`, and `lib/` in place.
+> - When a change to community code (Triton core or LLVM/MLIR) is unavoidable, the source files are not edited directly. Instead, the change is captured as a standalone `.patch` kept under `third_party/ascend/patch/` and applied with `git apply` during the build preparation stage.
+> - Each patch must correspond to a specific community baseline version / commit (reflected by a version number or commit in the file name). Target-independent improvements should preferably be contributed upstream to reduce the local patch footprint at the source.
 
 ### 2.2 Directory Structure and Function Description
 
@@ -47,6 +57,7 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 | `python/` | Triton core | Contains the common Python implementation from standard Triton, including `triton.language`, JIT, runtime, cache, and tool entry points. Target-independent capabilities should live here first. |
 | `include/` and `lib/` | Triton core | Contains the common C++/MLIR infrastructure, dialects, passes, and conversion logic from standard Triton. Ascend-specific backend code is not placed here. |
 | `third_party/ascend/` | Triton-Ascend | Root directory of the Ascend backend. It contains Ascend NPU, CANN, and BiSheng Compiler-specific language extensions, compiler backend, runtime driver, MLIR passes, examples, and tests. |
+| `third_party/ascend/patch/` | Triton-Ascend | Holds non-invasive patches (`.patch`) against community Triton core and LLVM/MLIR, applied with `git apply` during the build preparation stage so the community source tree stays clean and easy to upgrade with upstream. |
 | `third_party/ascend/language/` | Ascend language extension | Contains Ascend language extensions. During installation, this directory is linked under `triton.language.extra`, so Triton kernels can use `triton.language.extra.cann`. |
 | `third_party/ascend/language/cann/libdevice.py` | Ascend language extension | Provides the Ascend NPU-adapted Python `libdevice` interface, including math functions and low-level operator wrappers used by Triton kernels. |
 | `third_party/ascend/backend/compiler.py` | compiler | Main entry of the Ascend compiler backend. It registers compiler options, organizes TTIR lowering to Ascend-adapted IR, Linalg, LLVM, and related stages, and invokes the downstream toolchain to generate executable binaries. |
@@ -61,42 +72,33 @@ This project extends the support for Huawei Ascend NPU (using the CANN software 
 
 #### 3.1.1 Language Extension
 
-| No.| Operator     | Description       |
-| :--- | :--------------------------------------------- | :--------------------------------- |
-| 1    | `tl.insert_slice(full, src, offsets, sizes, strides)` | Inserts a tensor into another tensor according to the specified offset, size, and stride.<br>**Returns**: target tensor.<br>**full**: target tensor. The source tensor will be inserted into this tensor.<br>**src**: source tensor.<br>**offsets**: offset (integer tuple) on the target tensor.<br>**sizes**: size (integer tuple) on the source tensor.<br>**strides**: stride (integer tuple) on the target tensor.|
-| 2    | `tl.extract_slice(full, offsets, sizes, strides)`     | Extracts a slice tensor from another tensor according to the specified offset, size, and stride.<br>**Returns**: slice tensor.<br>**full**: source tensor. The slice is extracted from this tensor.<br>**offsets**: offset (integer tuple) on the source tensor.<br>**sizes**: size (integer tuple) of the slice tensor.<br>**strides**: stride (integer tuple) on the source tensor.                       |
-| 3    | `tl.get_element(source, offset)`                      | Reads a tensor with dimensions and returns a single element at the specified offset.<br>**source**: source tensor.<br>**offset**: offset (integer tuple) of the element to be extracted.  |
+To support more flexible tensor sub-region operations and single-element access, the language layer provides the following extension operators:
+
+| Operator | Brief description |
+| :--- | :--- |
+| `extension.insert_slice(full, src, offsets, sizes, strides)` | Inserts the source tensor into the target tensor according to the specified offsets, sizes, and strides. Returns the target tensor. |
+| `extension.extract_slice(full, offsets, sizes, strides)` | Extracts a slice tensor from the tensor according to the specified offsets, sizes, and strides. Returns the slice tensor. |
+| `extension.get_element(source, offset)` | Reads a single element from the tensor at the specified offset. |
+
+The full function signatures, parameter meanings, and examples are maintained in the Python API reference (to avoid duplicating them in the architecture document): see the *Vector/Memory Extension Ops* section of [triton.language.extra.cann.extension](https://triton-ascend.readthedocs.io/en/latest/python-api/triton.language.extra.cann.extension.html).
 
 ### 3.2 Triton-Ascend
 
 #### 3.2.1 Compiler Options
 
-|No.| NPU Option                                   | Hardware Platform    | Description|
-| --- | --------------------------------------------- | ---------- | ----- |
-| 1   | multibuffer                                   | NPU        | Enables or disables the ping-pong pipeline. Enabled by default.|
-| 2   | enable_graph_optimize                         | NPU        | Enables or disables TTIR Graph Optimization.|
-| 3   | bisheng_options                               | NPU (950) | Forwards additional arguments to BiSheng compilation paths that support this option.|
-| 4   | enable_auto_bind_sub_block                    | NPU        | Enables or disables automatic sub-block binding.|
-| 5   | enable_hivm_auto_cv_balance                   | NPU        | Enables or disables automatic CV balancing.|
-| 6   | enable_cube_block_merge                       | NPU (950) | Controls Cube block merging in the DynamicCV pipeline.|
-| 7   | vf_fusion_mode                                | NPU (950) | Selects the VF fusion strategy.|
-| 8   | enable_vf_fusion                              | NPU (950) | Enables or disables VF fusion.|
-| 9   | hfusion_enable_multiple_consumer_fusion       | NPU (950) | Enables or disables multiple-consumer HFusion.|
-| 10  | sync_solver                                   | NPU        | Enables or disables the synchronization solver.|
-| 11  | unit_flag                                     | NPU        | Enables or disables the sync unit flag.|
-| 12  | inject_barrier_all                            | NPU        | Enables or disables automatic barrier injection.|
-| 13  | inject_block_all                              | NPU        | Enables or disables automatic block injection.|
-| 14  | limit_auto_multi_buffer_only_for_local_buffer | NPU        | Restricts automatic multi-buffering to local buffers.|
-| 15  | limit_auto_multi_buffer_of_local_buffer       | NPU        | Configures the local-buffer automatic multi-buffering scope.|
-| 16  | set_workspace_multibuffer                     | NPU        | Configures workspace multi-buffering.|
-| 17  | tile_mix_vector_loop                          | NPU        | Configures the Vector loop split count.|
-| 18  | tile_mix_cube_loop                            | NPU        | Configures the Cube loop split count.|
-| 19  | buf_slot_num_of_veccore                       | NPU        | Configures the number of vector-core-local buffer slots.|
-| 20  | buf_slot_num_of_crosscore                     | NPU        | Configures the number of cross-core buffer slots.|
-| 21  | buf_slot_num_of_gm                            | NPU        | Configures the number of GM load buffer slots.|
-| 22  | compile_mode                                  | NPU        | Compilation mode: `"simd_simt_template"` (default) / `"simd"` / `"simt_only"`; `"simt_only"` is supported only on Ascend 950PR&950DT products.|
+NPUOptions are parameters that control the **compilation strategy of a single kernel**. They can be passed through `triton.Config`, Autotune arguments, or kernel launch meta-parameters, and take effect at compile time across the TTIR → Linalg IR → AscendNPU IR stages. They can be grouped by purpose as follows:
 
-See {ref}`Compiler Option Cleanup and Compatibility <compiler-option-cleanup-and-compatibility>` for deprecated-option compatibility and rename mappings.
+| Category | Purpose | Typical options |
+| --- | --- | --- |
+| Compilation mode and general pipeline | Select the SIMD/SIMT compilation path and control the ping-pong pipeline | `compile_mode`, `multibuffer` |
+| Graph optimization | Toggle Graph Optimization at the TTIR level | `enable_graph_optimize` |
+| CV fusion and tiling | Automatic sub-block binding, Cube/Vector balancing and splitting | `enable_auto_bind_sub_block`, `enable_hivm_auto_cv_balance`, `tile_mix_vector_loop`, `tile_mix_cube_loop` |
+| VF / HFusion | VF fusion strategy and multiple-consumer fusion on the 950 series | `vf_fusion_mode`, `hfusion_enable_multiple_consumer_fusion` |
+| Synchronization | Solver, unit flag, and barrier/block injection | `sync_solver`, `unit_flag`, `inject_barrier_all`, `inject_block_all` |
+| Multi-buffering and workspace | Buffer slot counts at each memory level and workspace multi-buffering | `multibuffer_mode`, `set_workspace_multibuffer` |
+| DynamicCV buffering | Number of buffer slots for veccore / cross-core / GM | `buf_slot_num_of_veccore`, `buf_slot_num_of_crosscore`, `buf_slot_num_of_gm` |
+
+The full option list, default / allowed values, and configuration methods are maintained in the reference document (to avoid inconsistencies caused by maintaining two copies): see [Environment Variables and Compiler Options · Compiler Option Reference Table](https://triton-ascend.readthedocs.io/en/latest/environment_variable_and_compiler_options_reference.html#compiler-options-reference). For the compatibility behavior of deprecated options and rename mappings, see [Compiler Option Cleanup and Compatibility](https://triton-ascend.readthedocs.io/en/latest/environment_variable_and_compiler_options_reference.html#compiler-option-cleanup-and-compatibility) in the same document.
 
 #### 3.2.2 SIMD Compiler
 
@@ -206,10 +208,18 @@ TritonToLinalg converts ttir to linalg ir.
 
 | Pass| Description| Core Converter| Description|
 |---|---|---|---|
-| triton-to-annotation | Converts Ascend NPU-specific compilation hint (`tl.compile_hint`) into backend annotation dialects, which are used to guide subsequent hardware-specific optimization or resource configuration.| TritonAnnotationConversion | Converts `triton::AnnotationOp` into `annotation::MarkOp` to transfer advanced compilation hints to the underlying annotation marks.|
+| triton-to-annotation | Converts Ascend NPU-specific compilation hint (`extension.compile_hint`) into backend annotation dialects, which are used to guide subsequent hardware-specific optimization or resource configuration.| TritonAnnotationConversion | Converts `triton::AnnotationOp` into `annotation::MarkOp` to transfer advanced compilation hints to the underlying annotation marks.|
 | triton-to-hfusion | Converts `TTIR` in Triton into the corresponding operation in the `HFusion` dialect of the Ascend NPU hardware accelerator.| TritonHistogramToHFusionConversion | Converts `triton::HistogramOp` into `hfusion::HistogramOp` to enable efficient execution on the dedicated NPU hardware.|
-| triton-to-hivm | Processes the block synchronization operations (`tl.sync_block_all`, `tl.sync_block_set`, and `tl.sync_block_wait`) of Triton and converts them into the cross-core synchronization instruction in the `HIVM` dialect of Ascend NPU. These instructions are used to manage synchronization and data dependencies in the multi-core pipeline, which is the key to pipeline optimization.| TritonCustomOpToHIVMSyncOpConversion | Converts Triton synchronization instructions to HIVM synchronization instructions.<br>• `sync_block_all`: synchronizes blocks globally.<br>• `sync_block_set`: sets a synchronization point.<br>• `sync_block_wait`: waits for a synchronization point.|
-| triton-to-llvm | Converts the inline assembly operation (`tl.inline_assembly`) in Triton to the inline assembly in the LLVM dialect, and finally maps it to a CCE hardware intrinsic function of Ascend NPU.| ElementwiseInlineAsmOpConversion | Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`.|
+| triton-to-hivm | Processes the block synchronization operations (`extension.sync_block_all`, `extension.sync_block_set`, and `extension.sync_block_wait`) of Triton and converts them into the cross-core synchronization instruction in the `HIVM` dialect of Ascend NPU. These instructions are used to manage synchronization and data dependencies in the multi-core pipeline, which is the key to pipeline optimization.| TritonCustomOpToHIVMSyncOpConversion | Converts Triton synchronization instructions to HIVM synchronization instructions.<br>• `sync_block_all`: synchronizes blocks globally.<br>• `sync_block_set`: sets a synchronization point.<br>• `sync_block_wait`: waits for a synchronization point.|
+| triton-to-llvm | Converts the inline assembly operation (`extension.inline_assembly`) in Triton to the inline assembly in the LLVM dialect, and finally maps it to a CCE hardware intrinsic function of Ascend NPU.| ElementwiseInlineAsmOpConversion | Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`.|
+
+<a id="dynamic-cv-pipeline"></a>
+
+##### 3.2.2.5 DynamicCV Pipelining (Ascend 950)
+
+DynamicCV optimizes kernels that combine Cube matrix computations with Vector computations. The compiler analyzes data dependencies, groups operations into compute blocks, and inserts multiple buffers and cross-core synchronization so that independent computations and data transfers can overlap, reducing wait time.
+
+With `enable_dynamic_cv_pipeline=True`, the compiler attempts this optimization. If the kernel is ineligible (for example, it contains no matrix multiplication), or the optimization cannot complete, the compiler **rolls back** the IR to its state before this optimization, sets `enable_dynamic_cv_pipeline=False`, restores the compilation options adjusted by the optimization, and continues compilation. See the [compiler options reference](./environment_variable_and_compiler_options_reference.md#compiler-options-reference) for defaults, related options, and buffer slot settings.
 
 #### 3.2.3 SIMT Compiler (Ascend 950PR&950DT products)
 
@@ -265,14 +275,16 @@ flowchart TD
     C4 -- No --> C5[Fall back to scalar loops]
     C5 --> B5
 
-    %% styling
-    classDef root fill:#e6f7ff,stroke:#1890ff
-    classDef pass fill:#fff7e6,stroke:#fa8c16,stroke-width:2px
-    classDef logic fill:#f0fff4,stroke:#52c41a
-    classDef simtOnly fill:#f0f2f5,stroke:#8c8c8c
+    %% styling (low-saturation steel blue / blue-grey / neutral grey, calm and professional)
+    classDef root fill:#d6dee8,stroke:#2c4257,stroke-width:2px,color:#1f2d3d
+    classDef mode fill:#e4eaf1,stroke:#3c5872,color:#1f2d3d
+    classDef pass fill:#eef2f6,stroke:#4d6580,color:#23303d
+    classDef logic fill:#f0f3f2,stroke:#5f7a72,color:#26322d
+    classDef simtOnly fill:#f1f1f1,stroke:#707070,color:#2b2b2b
 
     %% binding styles
     class A root
+    class B,C mode
     class B1,C1,B3,C3,B5,B6 pass
     class B2,B4,C2,C4,C5 logic
     class D,D1 simtOnly
@@ -307,10 +319,12 @@ Hybrid mode does **not** move the entire kernel to SIMT. Only discrete / unstruc
 
 #### 3.2.4 Ascend affinitive Operators
 
-| No.| Operator | Description|
+To express Ascend hardware semantics that standard Triton cannot cover (Cube-Vector cross-core cooperation, UB data movement, hardware-specific access, etc.), the backend extends `triton.language` with a set of Ascend-affinitive operators. They fall into three categories by capability:
+
+| Category | Representative extensions | Architectural role |
 |---|---|---|
-| 1 | tl.custom_op | A set of custom operators extended by Ascend NPU, used to support hardware-specific memory access and data movement patterns. For example:<br>• `index_select`: selects data based on an index.<br>• `index_put`: places data based on an index.<br>• `gather_out_to_ub`: collects external data to the unified buffer (UB).<br>• `scatter_ub_to_out`: scatters data from the UB to the output.<br>• `indirect_load`: loads content from an indirect address.<br>• `indirect_store`: stores content to an indirect address.|
-| 2 | tl.compile_hint | Provides hardware-specific compilation hints to the compiler, which are used to guide the backend optimization policy, resource allocation, or kernel configuration.|
-| 3 | tl.sync_block_wait(`sender, receiver, event_id`) | Waits for block synchronization. The `receiver` waits for the event signal (`event_id`) sent by the `sender`, which is used to manage data dependencies and execution sequence in the cross-core pipeline.|
-| 4 | tl.sync_block_set(`sender, receiver, event_id`) | Sets block synchronization. The `sender` sends an event signal (`event_id`) to the `receiver`, indicating that an execution phase or data is ready.|
-| 5 | tl.sync_block_all(`mode, event_id`) | Globally synchronizes blocks. The sender broadcasts an event signal (`event_id`) to all related receivers according to the specified synchronization mode (`mode`) to implement full-core synchronization or collective synchronization in a specific mode.|
+| Hardware-specific data movement | `extension.custom_op` (`index_select` / `index_put`, `gather_out_to_ub` / `scatter_ub_to_out`, `indirect_load` / `indirect_store`, etc.) | Supports index-based gather/scatter, direct GM ↔ Unified Buffer transfer, and indirect-address access and other hardware-specific movement patterns, reused by both the SIMD and SIMT compilation paths. |
+| Compilation hints | `extension.compile_hint` | Passes hardware-specific hints to the compiler to guide backend optimization policy, resource allocation, and kernel configuration. |
+| Cross-core block synchronization | `extension.sync_block_wait` / `extension.sync_block_set` / `extension.sync_block_all` | Explicitly coordinates inter-core execution order and data dependencies under the Cube-Vector architecture: point-to-point wait / notify, and global block synchronization broadcast by mode. |
+
+The function signatures, parameter values, usage constraints, and examples of each extension are maintained in the Python API reference (to avoid duplicating them in the architecture document): see [triton.language.extra.cann.extension](https://triton-ascend.readthedocs.io/en/latest/python-api/triton.language.extra.cann.extension.html) — for the index/gather/scatter movement ops see *Vector/Memory Extension Ops*, for the custom-op mechanism see *Custom Ops*, for cross-core synchronization see *Synchronization*, and for compilation hints and multi-buffering see *Core Types*.

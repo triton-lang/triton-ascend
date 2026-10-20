@@ -42,6 +42,7 @@ try:
 except ImportError:
     distributed = None
 from triton.backends.ascend.utils import (
+    _multibuffer_mode_to_tuple,
     _check_bishengir_api_change,
     _check_bishengir_able_save_ir,
     _check_bishengir_is_regbased,
@@ -67,6 +68,7 @@ from triton.backends.ascend.utils import (
     graph_ub_budget_bytes_for_arch,
     ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
+    is_cann_version_at_least,
 )
 from triton.backends.ascend.driver import (NPUUtils)
 from triton.backends.ascend.program_grid import (
@@ -381,7 +383,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hivm(pm)
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
-        ascend.passes.ttir.add_bubble_up_operation(pm)
+        ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
@@ -741,6 +743,11 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         callback_path = os.path.join(tmpdir, "libkernel.so")
         _compile_option_list = get_common_bishengir_compile_options(metadata)
 
+        multibuffer_mode = metadata.get("multibuffer_mode")
+        if multibuffer_mode is not None:
+            mode_arg = "[" + ",".join(f"({level},{count})" for level, count in multibuffer_mode) + "]"
+            _compile_option_list.append(f"--multibuffer-mode={mode_arg}")
+
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")
 
@@ -773,6 +780,9 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
+
+        _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
+
         npu_utils = NPUUtils()
         if npu_utils.has_device_limit():
             _compile_option_list += [
@@ -912,10 +922,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if plan_memory_strategy is not None:
             _compile_option_list += [f"--plan-memory-strategy={plan_memory_strategy}"]
 
-        if opt.debug:
-            src_file, _ = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
-            _compile_option_list += [f"--save-temps={os.path.dirname(src_file)}"]
-
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
@@ -981,6 +987,11 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--target={NPUUtils().get_arch()}",
         ]
 
+        multibuffer_mode = metadata.get("multibuffer_mode")
+        if multibuffer_mode is not None:
+            mode_arg = "[" + ",".join(f"({level},{count})" for level, count in multibuffer_mode) + "]"
+            _compile_option_list.append(f"--multibuffer-mode={mode_arg}")
+
         multibuffer = metadata.get("multibuffer")
         num_stages = metadata.get("num_stages")
 
@@ -1013,6 +1024,8 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         _compile_option_list += [
             f"--enable-auto-bind-sub-block={get_auto_bind_sub_block_option(metadata)}",
         ]
+
+        _compile_option_list += [f"--enable-optimized-metaop=false"]
 
         if _is_ascend_sanitizer_enabled():
             _compile_option_list += ["--enable-sanitizer=true"]
@@ -1120,10 +1133,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
             _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
-        if opt.debug:
-            src_file, _ = _get_dump_paths(metadata["hash"], ttadapter_path, bin_file)
-            _compile_option_list += [f"--save-temps={os.path.dirname(src_file)}"]
-
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 
         if opt.debug or os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1":
@@ -1224,7 +1233,8 @@ class NPUOptions:
     cluster_dims: tuple = (1, 1, 1)
     num_warps: int = 32
     num_ctas: int = 1
-    num_stages: int = 2
+    # Keep an omitted stage count distinct from an explicit mode.
+    num_stages: Optional[int] = None
     # Ascend threads-per-warp is a backend capability, not a compile option.
     warp_size: int = field(default=32, init=False)
     ir_override: Optional[str] = None  # filename of a user-defined IR (*.{ttir|ttadapter|mlirbc|bcmlir|npubin})
@@ -1247,8 +1257,12 @@ class NPUOptions:
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
-    bisheng_options: str = "-cce-link-aicore-ll-module " + get_libdevice()
+    # Backend-managed BiSheng arguments. Keep the name discoverable so legacy
+    # launch keywords are accepted, but never forward a user-supplied value.
+    bisheng_options: str = field(default="-cce-link-aicore-ll-module " + get_libdevice(), init=False)
     multibuffer: bool = True
+    # Public dictionaries are stored as sorted pairs for hashing and JSON caches.
+    multibuffer_mode: Optional[Union[Dict[str, int], Tuple[Tuple[str, int], ...]]] = None
     vf_fusion_mode: str = None
     enable_ubuf_saving: bool = None
     disable_size_align_for_cast: bool = None
@@ -1369,6 +1383,11 @@ class NPUOptions:
         # Keep the legacy name discoverable while its property and all
         # compiler decisions continue to use the injected target architecture.
         self.__dict__["arch"] = arch
+        object.__setattr__(self, "multibuffer_mode", _multibuffer_mode_to_tuple(self.multibuffer_mode))
+        if self.multibuffer_mode is not None and self.num_stages is not None:
+            raise ValueError("num_stages and multibuffer_mode cannot be specified together")
+        if self.multibuffer_mode is None and self.num_stages is None:
+            object.__setattr__(self, "num_stages", 2)
         if self.compile_on_910_95 is not None:
             _warn_deprecated_npu_option("compile_on_910_95")
         object.__setattr__(

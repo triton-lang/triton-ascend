@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+import triton
 import triton.backends.ascend.compiler as compiler
 from triton.backends.ascend import utils
 from triton.backends.compiler import GPUTarget
@@ -176,6 +177,26 @@ def test_ignored_values_preserve_defaults_and_input(backend, name):
     assert raw == original
     assert options.__dict__ == baseline.__dict__
     assert options.hash() == baseline.hash()
+
+
+@pytest.mark.parametrize("value", [None, "", "--unsupported-bisheng-option"])
+def test_legacy_bisheng_options_launch_uses_backend_defaults(backend, value):
+
+    @triton.jit
+    def kernel():
+        pass
+
+    baseline = backend.parse_options({})
+    kwargs = {"bisheng_options": value}
+
+    with pytest.warns(FutureWarning, match="bisheng_options.*backend-managed"):
+        options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
+
+    assert kwargs == {"bisheng_options": value}
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice()
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+    assert signature == constexprs == attrs == {}
 
 
 @pytest.mark.parametrize("stream", [None, 0, object()], ids=["none", "zero", "unused-object"])

@@ -104,8 +104,14 @@ private:
   int markAllocIndex = 0;
   int intraDepsGroupId = 0;
 
+  llvm::DenseMap<int, llvm::SmallVector<LoopLikeOpInterface>> loopInclusions;
+  llvm::DenseSet<int> singleLoopSet;
+
   llvm::DenseMap<mlir::Value, mlir::Value> ndnzValueMapping;
   SSBufferManager ssbufferManager;
+
+  void analyzeLoopInclusion();
+  void moveStartEndSync(mlir::OpBuilder &builder);
 
   mlir::LogicalResult
   processDependencies(FlagIdManager &flagManager,
@@ -134,7 +140,8 @@ private:
                          mlir::Operation *currConsStart,
                          llvm::SmallVector<DependencyInfo> &memDependencies);
 
-  SmallVector<int64_t> computeExpectedShape(mlir::Value depValue);
+  SmallVector<int64_t> computeExpectedShape(mlir::Value depValue,
+                                            int NzDimWidth);
   bool isExpectedShape(Value value, SmallVector<int64_t> &expectedShape);
   mlir::Value alignShapeByInsertSlice(mlir::OpBuilder &builder,
                                       DependencyInfo &dep, mlir::Location loc,
@@ -222,6 +229,8 @@ private:
                              FlagIdReuseManager &flagIdReuseManager);
   void remapInterCoreTransferFlagIds(llvm::DenseMap<int, int> &remapResult);
   bool isStoreDirectlyInUserChain(mlir::Value toTensorValue);
+  std::pair<bool, bool> analyzeMatmulOperand(DependencyInfo &dep);
+  int getNzDimWidth(DependencyInfo &dep, int64_t blk);
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createInterCoreTransferAndSyncPass();

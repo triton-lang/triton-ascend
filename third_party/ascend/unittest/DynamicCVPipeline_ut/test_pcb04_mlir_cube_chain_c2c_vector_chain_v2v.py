@@ -8,7 +8,8 @@ Description: Cube chain C2C (Cube1->Cube2) + Vector chain V2V (Vec1->Vec2)
 Refactoring approach (refer to test_custom.py):
   1. Remove precision comparison logic between Kernel and reference implementation
   2. Refer to compile_kernel in test_custom.py to implement MLIR code generation for each Triton Kernel
-  3. Add MLIR content validation in test functions to ensure the MLIR code contains the "scope" keyword
+  3. Add MLIR content validation in test functions; this is a fallback scenario,
+     so the MLIR code must NOT contain the "scope" keyword
   4. Keep the test framework complete and maintainable
 
 Test Cases:
@@ -260,7 +261,10 @@ def test_pcb04_tc01():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb04_tc01_cube_vec_chain(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
+    # The cube chain stages through L1 (L0C -> cbuf), which stays on CUBE, so the
+    # only cross-core traffic here is the V->C copies: a one-way interaction, and
+    # the pipeline falls back on those, as in sdf10 and the other one-way cases.
+    assert "scope" not in mlir, "Fallback scenario: MLIR code unexpectedly contains the 'scope' keyword"
 
     # Output MLIR code to the specified path
 
@@ -283,7 +287,10 @@ def test_pcb04_tc02():
     assert mlir and len(mlir) > 0, "MLIR code generation failed or is empty"
     assert "func.func @pcb04_tc02_cube_vec_chain(" in mlir, \
         "Kernel function definition not found in MLIR code"
-    assert "scope" in mlir, "MLIR code does not contain the 'scope' keyword"
+    # The cube chain stages through L1 (L0C -> cbuf), which stays on CUBE, so the
+    # only cross-core traffic here is the V->C copies: a one-way interaction, and
+    # the pipeline falls back on those, as in sdf10 and the other one-way cases.
+    assert "scope" not in mlir, "Fallback scenario: MLIR code unexpectedly contains the 'scope' keyword"
 
     # Output MLIR code to the specified path
 

@@ -123,5 +123,7 @@ Operation *createMainLoopOpWithExtras(Operation *oldOp,
 void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
                           llvm::StringRef header);
 
+bool isFlowOptEnabled(const triton::ControlFlowConditionInfo *info);
+
 } // namespace mlir
 #endif // TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_UTILS_H

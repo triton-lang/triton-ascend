@@ -87,8 +87,7 @@ inline void collectNestedOps(Block *block, SmallVector<Operation *> &ops) {
 
 // Walk the main loop body, group ops by their ssbuffer.block_id, build the
 // per-block InnerBlockInfo map, and collect cross-block tensor deps into
-// `depValueMap`. `i1Found` is set when any collected tensor dep has element
-// type i1; the caller is expected to abort and trigger fallback.
+// `depValueMap`.
 //
 // Run once per phase: Phase 1 feeds the empty/fill clone + scalar
 // rematerialize; Phase 2 picks up the new cross-block refs the clone
@@ -97,7 +96,7 @@ inline void collectNestedOps(Block *block, SmallVector<Operation *> &ops) {
 int collectInnerBlockInfo(const CVPipeline::MainLoop &loop,
                           DenseMap<Value, InnerBlockInfo> &blocks,
                           DenseMap<Value, SmallVector<Value>> &depValueMap,
-                          SmallVector<Operation *> &allOps, bool &i1Found);
+                          SmallVector<Operation *> &allOps);
 
 // Build the dependency-user map by scanning block ops and the yield operands
 // of any multi-region op (scf.if, scf.while, ...) whose depVal is not a direct
@@ -118,19 +117,15 @@ int cloneAllocTensorsInBlocks(
     DenseMap<Value, SmallVector<Operation *>> &depUserMap,
     OpBuilder &globalBuilder);
 
-// Phase 1 driver: run the initial dep collection, surface memref / i1
-// fallbacks, build the initial dep-user map, clone the empty+fill pattern
-// into consumer blocks, and rematerialize scalar chains rooted in a tensor.
-// On success populates `blocks` / `depValueMap` / `allOps` /
-// `phase1ClonedDepVals` for Phase 2 to consume (Phase 2 re-clears and
-// re-collects these).
+// Phase 1 driver: run the initial dep collection, surface memref fallback,
+// build the initial dep-user map, clone the empty+fill pattern into consumer
+// blocks, and rematerialize scalar chains rooted in a tensor. On success
+// populates `blocks` / `depValueMap` / `allOps` / `phase1ClonedDepVals` for
+// Phase 2 to consume (Phase 2 re-clears and re-collects these).
 //
-// Returns 0 on success, -1 on memref fallback or any failure. `i1Found` is
-// set whenever an i1 tensor dep surfaces; mirroring the original driver,
-// callers check `i1Found` after Phase 2's second dep collection rather than
-// here.
+// Returns 0 on success, -1 on memref fallback or any failure.
 int runDepAnalysisAndClone(CVPipeline::MainLoop &mainLoop,
-                           OpBuilder &globalBuilder, bool &i1Found,
+                           OpBuilder &globalBuilder,
                            DenseMap<Value, InnerBlockInfo> &blocks,
                            DenseMap<Value, SmallVector<Value>> &depValueMap,
                            SmallVector<Operation *> &allOps,

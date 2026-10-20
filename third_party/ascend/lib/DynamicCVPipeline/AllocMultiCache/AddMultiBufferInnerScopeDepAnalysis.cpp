@@ -244,16 +244,10 @@ static void rematerializeTensorRootedScalarDeps(const MainLoop &mainLoop) {
 // outermost id so inner ops of a multi-region op (e.g. subview at block 3
 // inside ifOp at block 4) are not treated as cross-block consumers of a
 // same-block producer.
-//
-// i1Found is set to true when the operand is a tensor with element type i1,
-// signaling the caller to fall back (set ERRCODE_IGNORED + signalPassFailure)
-// rather than process the dep through the multi-buffer pipeline. The operand
-// is intentionally NOT added to depValueMap in that case.
-// i1 return is done temporarily.
 static void collectDepValue(Value operand, Block *body, Operation *currentOp,
                             DenseMap<Value, int> &outputToBlockId,
                             DenseMap<Value, SmallVector<Value>> &depValueMap,
-                            Value groupKey, bool &i1Found) {
+                            Value groupKey) {
   if (auto barg = dyn_cast<BlockArgument>(operand)) {
     if (barg.getOwner() == body &&
         !llvm::is_contained(depValueMap[groupKey], barg))
@@ -269,18 +263,6 @@ static void collectDepValue(Value operand, Block *body, Operation *currentOp,
 
   if (currentOutermost.has_value() && currentOutermost == operandOutermost)
     return;
-
-  // i1 tensor deps: trigger fallback only for cross-block deps that are
-  // actually about to be multi-buffered. Same-block i1 tensors (e.g. a
-  // condition operand of an arith.select inside the same block) are
-  // filtered out by the same-block check above and never enter the
-  // multi-buffer pipeline, so they do not need the fallback.
-  if (auto shapedType = dyn_cast<ShapedType>(operand.getType())) {
-    if (shapedType.getElementType().isInteger(1)) {
-      i1Found = true;
-      return;
-    }
-  }
 
   if (!llvm::is_contained(depValueMap[groupKey], operand))
     depValueMap[groupKey].push_back(operand);
@@ -364,13 +346,11 @@ forEachYieldedCrossBlockDep(Operation *op,
 
 // Returns 0=success (including normal skip when blocks empty), -1=invalid
 // negative block id Returns 0=success (including normal skip when blocks
-// empty), -1=invalid negative block id. i1Found is set to true when any tensor
-// dep collected here has element type i1; the caller is expected to abort and
-// trigger fallback in that case.
+// empty), -1=invalid negative block id.
 int collectInnerBlockInfo(const MainLoop &loop,
                           DenseMap<Value, InnerBlockInfo> &blocks,
                           DenseMap<Value, SmallVector<Value>> &depValueMap,
-                          SmallVector<Operation *> &allOps, bool &i1Found) {
+                          SmallVector<Operation *> &allOps) {
   depValueMap.clear();
   Block *body = loop.getBody();
   if (!body)
@@ -413,7 +393,7 @@ int collectInnerBlockInfo(const MainLoop &loop,
     for (Operation *op : bi.ops)
       for (Value operand : op->getOperands())
         collectDepValue(operand, body, op, outputToBlockId, depValueMap,
-                        groupKey, i1Found);
+                        groupKey);
   }
 
   // Additional pass: collect deps from yield ops of multi-region consumers
@@ -674,13 +654,11 @@ int cloneAllocTensorsInBlocks(
 // sequence in addInnerMultiBuffer lines 1999-2022; exposed here so the main
 // file can call it as a single unit.
 int runDepAnalysisAndClone(MainLoop &mainLoop, OpBuilder &globalBuilder,
-                           bool &i1Found,
                            DenseMap<Value, InnerBlockInfo> &blocks,
                            DenseMap<Value, SmallVector<Value>> &depValueMap,
                            SmallVector<Operation *> &allOps,
                            DenseSet<Value> &phase1ClonedDepVals) {
-  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps, i1Found) !=
-      0)
+  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps) != 0)
     return -1;
 
   if (blocks.empty())

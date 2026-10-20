@@ -1275,8 +1275,7 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
 }
 
 static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
-                               scope::ScopeOp vectorScope, int &groupId,
-                               bool &i1Found) {
+                               scope::ScopeOp vectorScope, int &groupId) {
   OpBuilder globalBuilder(mainLoop.getContext());
 
   // Two-phase dep collection for empty+fill cloning:
@@ -1319,8 +1318,8 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   }
 
   DenseSet<Value> phase1ClonedDepVals;
-  if (runDepAnalysisAndClone(mainLoop, globalBuilder, i1Found, blocks,
-                             depValueMap, allOps, phase1ClonedDepVals) != 0)
+  if (runDepAnalysisAndClone(mainLoop, globalBuilder, blocks, depValueMap,
+                             allOps, phase1ClonedDepVals) != 0)
     return -1;
 
   // Phase 2: re-collect deps now that cloned ops (and rematerialized scalar
@@ -1330,16 +1329,8 @@ static int addInnerMultiBuffer(MainLoop mainLoop, OpBuilder &builder,
   blocks.clear();
   depValueMap.clear();
   allOps.clear();
-  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps, i1Found) !=
-      0)
+  if (collectInnerBlockInfo(mainLoop, blocks, depValueMap, allOps) != 0)
     return -1;
-
-  // Phase 2 may surface i1 tensor deps that the clone introduced (e.g. a
-  // cloned scalar chain reaching a producer-side i1 tensor). Abort here too.
-  if (i1Found) {
-    LDBG("i1 tensor dep found in Phase 2, falling back");
-    return -1;
-  }
 
   if (blocks.empty())
     return -1;
@@ -1461,15 +1452,7 @@ void AddMultiBufferInnerScopePass::runOnOperation() {
         LDBG("Nested main_loop found, this is not allowed");
         return WalkResult::interrupt();
       }
-      // i1Found is reset per main_loop so it only triggers fallback for
-      // the current scope's deps.
-      bool i1Found = false;
-      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId, i1Found);
-      if (i1Found) {
-        LDBG("i1 tensor dep found, setting fallback attribute");
-        CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_IGNORED);
-        return WalkResult::interrupt();
-      }
+      int ret = addInnerMultiBuffer(mainLoop, builder, scope, groupId);
       if (ret != 0) {
         LDBG(
             "addInnerMultiBuffer failed for main_loop; signaling pass failure");

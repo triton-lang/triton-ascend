@@ -23,6 +23,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+pytestmark = pytest.mark.backend("native")
+
 _MOCK_AICORE_NUM = 24
 _MOCK_AIVECTOR_NUM = _MOCK_AICORE_NUM * 2
 
@@ -165,3 +167,15 @@ def test_npu_device_limit_get_aicore_num(monkeypatch):
 
     assert NPUUtils.get_aicore_num(mock_utils) == 8
     assert NPUUtils.get_aivector_core_num(mock_utils) == 16
+
+
+def test_has_device_limit_unset_does_not_query_hardware(monkeypatch):
+    """NPU_DEVICE_LIMIT being unset must not require access to a physical NPU."""
+    mock_utils, NPUUtils = _make_mock_npu_utils()
+
+    monkeypatch.delenv("NPU_DEVICE_LIMIT", raising=False)
+    mock_utils.get_device_core.reset_mock()
+    mock_utils.get_device_core.side_effect = AssertionError("device must not be queried")
+
+    assert NPUUtils.has_device_limit(mock_utils) is False
+    mock_utils.get_device_core.assert_not_called()

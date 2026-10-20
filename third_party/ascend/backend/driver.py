@@ -177,6 +177,8 @@ class NPUUtils(object):
         return cube_core_num, vector_core_num
 
     def has_device_limit(self):
+        if os.getenv("NPU_DEVICE_LIMIT") is None:
+            return False
         num_aic, num_aiv = self.get_device_core()
         try:
             return num_aic != self.get_aicore_num() or num_aiv != self.get_aivector_core_num()

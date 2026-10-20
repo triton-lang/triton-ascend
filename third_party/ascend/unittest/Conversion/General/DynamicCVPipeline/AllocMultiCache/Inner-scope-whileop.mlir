@@ -17,18 +17,11 @@
 // CHECK-LABEL: func.func @test_while_mainloop_bufnum_one
 // Original whileOp do-region bb0 has only 2 block-args (no i32 counter).
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32):
-// Original alloc + to_tensor stay in producer block (orphaned, will be DCE'd).
-// CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32> to tensor<128xf32>
-// Cloned alloc + to_tensor appear in consumer block (block_id = 10).
-// CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32> to tensor<128xf32>
-// Consumer uses the cloned to_tensor at block_id = 10.
-// CHECK:       arith.addf {{.*}}{ssbuffer.block_id = 10 : i32} : tensor<128xf32>
-// NO UB alloc, NO hivm.copy chain — dep was cloned, not multi-buffered.
-// CHECK-NOT:   memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
-// CHECK-NOT:   hivm.hir.copy{{.*}}: tensor<128xf32>
-// whileOp carries main_loop but NOT iterCounter (bufNum == 1).
+// Single producer-side bufferization.materialize_in_destination.
+// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<128xf32>, memref<128xf32>) -> ()
+// Single consumer-side bufferization.to_tensor (the readback).
+// CHECK:       bufferization.to_tensor {{.*}}: memref<128xf32> to tensor<128xf32>
+// main_loop attribute survives on the new whileOp.
 // CHECK:       } {{.*}}ssbuffer.main_loop = 1 : i64
 // CHECK-NOT:   } {{.*}}ssbuffer.iterCounter,
 
@@ -50,24 +43,15 @@
 // CHECK-LABEL: func.func @test_while_mainloop_bufnum_two
 // WhileOp's do-region bb0 has 3 block-args now (the new i32 counter is last).
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32, %{{.*}}: i32):
-// Original alloc + to_tensor stay in producer block (orphaned).
-// CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32> to tensor<128xf32>
-// Cloned alloc + to_tensor appear in consumer block (block_id = 10).
-// CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32> to tensor<128xf32>
-// Consumer uses the cloned to_tensor at block_id = 10.
-// CHECK:       arith.addf {{.*}}{ssbuffer.block_id = 10 : i32} : tensor<128xf32>
-// NO UB alloc, NO scf.if dispatch, NO hivm.copy — dep was cloned, not
-// multi-buffered. (With bufNum==2 + non-cloneable dep, multi-buffer would
-// have generated the full chain.)
-// CHECK-NOT:   memref.alloc() : memref<128xf32, #hivm.address_space<ub>>
-// CHECK-NOT:   scf.if
-// CHECK-NOT:   hivm.hir.copy{{.*}}: tensor<128xf32>
-// arith.addi increment for the multi-buffer counter — relocated to the
-// first consumer's block_id (= 10, the cloned alloc), NOT 7.
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 10 : i32, ssbuffer.iterCounter} : i32
-// Counter-aware whileOp carries iterCounter alongside main_loop.
+// Producer arith.select chain (replaces scf.if dispatch; refactor innerscope).
+// CHECK:       arith.select
+// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<128xf32>, memref<128xf32>) -> ()
+// arith.addi increment for the multi-buffer counter (block_id=7, the first user's block).
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 7 : i32, ssbuffer.iterCounter} : i32
+// Consumer scf.if dispatch returning tensor.
+// CHECK:       scf.if {{.*}} -> (tensor<128xf32>)
+// CHECK:         bufferization.to_tensor
+// Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
 // CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
 // T-while-C: whileOp main_loop with scf.if inside the do-region (multi-region
@@ -110,21 +94,15 @@
 //   be detected as cross-block, and NO clone would be emitted.
 
 // CHECK-LABEL: func.func @test_while_outermost_id_priority
-// Original alloc + to_tensor stay at producer block (block_id = 8).
-// CHECK:       %[[D_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 8 : i32} : memref<32xf32>
-// CHECK:       %[[D_ORIG_TT:.*]] = bufferization.to_tensor %[[D_ORIG_ALLOC]] {ssbuffer.block_id = 8 : i32} : memref<32xf32> to tensor<32xf32>
-// Cloned alloc + to_tensor appear at consumer block (block_id = 12). If the
-// outermost-id priority bug were present, no clone would be emitted (the dep
-// would be misclassified as same-block and silently skipped).
-// CHECK:       %[[D_CLONE_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 12 : i32} : memref<32xf32>
-// CHECK:       %[[D_CLONE_TT:.*]] = bufferization.to_tensor %[[D_CLONE_ALLOC]] {ssbuffer.block_id = 12 : i32} : memref<32xf32> to tensor<32xf32>
-// CHECK:       arith.addf %[[D_CLONE_TT]], %[[D_CLONE_TT]] {ssbuffer.block_id = 12 : i32} : tensor<32xf32>
-// NO UB alloc, NO copy chain.
-// CHECK-NOT:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
-// CHECK-NOT:   hivm.hir.copy{{.*}}: tensor<32xf32>
-// Counter add-1 at first consumer's block_id (= 12).
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 12 : i32, ssbuffer.iterCounter} : i32
-// Counter-aware whileOp carries iterCounter alongside main_loop.
+// Multi-buffer must be emitted (proves cross-block judgment saw 8 != 12).
+// CHECK-DAG:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
+// CHECK-DAG:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
+// Producer-side select chain + materialize (replaces scf.if dispatch).
+// CHECK:       arith.select
+// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<32xf32>, memref<32xf32>) -> ()
+// arith.addi increment for the multi-buffer counter (block_id=8, the first user's block).
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 8 : i32, ssbuffer.iterCounter} : i32
+// Counter-aware whileOp carries ssbuffer.iterCounter alongside main_loop.
 // CHECK:       } {{.*}}ssbuffer.iterCounter, {{.*}}ssbuffer.main_loop = 1 : i64
 
 // T-while-E: whileOp main_loop with a tensor::EmptyOp + linalg::FillOp pattern
@@ -170,21 +148,15 @@
 //       the same %result (SSA is preserved across the move).
 
 // CHECK-LABEL: func.func @test_while_counter_relocation
-// Original alloc + to_tensor stay at producer block (block_id = 5, orphaned).
-// CHECK:       %[[G_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 5 : i32} : memref<16xf32>
-// CHECK:       %[[G_ORIG_TT:.*]] = bufferization.to_tensor %[[G_ORIG_ALLOC]] {ssbuffer.block_id = 5 : i32} : memref<16xf32> to tensor<16xf32>
-// Cloned alloc + to_tensor at consumer block (block_id = 50).
-// CHECK:       %[[G_CLONE_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 50 : i32} : memref<16xf32>
-// CHECK:       %[[G_CLONE_TT:.*]] = bufferization.to_tensor %[[G_CLONE_ALLOC]] {ssbuffer.block_id = 50 : i32} : memref<16xf32> to tensor<16xf32>
-// CHECK:       arith.addf %[[G_CLONE_TT]], %[[G_CLONE_TT]] {ssbuffer.block_id = 50 : i32} : tensor<16xf32>
-// NO UB alloc, NO copy chain.
-// CHECK-NOT:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
-// CHECK-NOT:   hivm.hir.copy{{.*}}: tensor<16xf32>
-// Constant 1 carrying block_id = 50 (relocated with the addi, follows the
-// first user which is the clone).
-// CHECK:       %{{.+}} = arith.constant {ssbuffer.block_id = 50 : i32} 1 : i32
-// Counter add-1 carries block_id = 50 and is tagged iterCounter.
-// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 50 : i32, ssbuffer.iterCounter} : i32
+// Multi-buffer producer (two allocs at block 5) emits the dispatch.
+// CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+// CHECK-DAG:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>
+// CHECK:       arith.select
+// CHECK:       bufferization.materialize_in_destination {{.*}}: (tensor<16xf32>, memref<16xf32>) -> ()
+// Constant 1 carrying block_id = 5 (relocated with the addi).
+// CHECK:       %{{.+}} = arith.constant {ssbuffer.block_id = 5 : i32} 1 : i32
+// Counter add-1 carries block_id = 5 and is tagged iterCounter.
+// CHECK:       %{{.+}} = arith.addi %{{.+}}, %{{.+}} {ssbuffer.block_id = 5 : i32, ssbuffer.iterCounter} : i32
 // scf.yield forwards the counter (referenced by the addi's %addi-res), proving
 // SSA is preserved.
 // CHECK:       scf.yield %{{.*}}, %{{.*}}, %{{.+}}

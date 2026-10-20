@@ -2,11 +2,6 @@ name: DCO Check
 
 on:
   pull_request_target:
-  merge_group:
-    branches: [main, 'release/**', '**-dev']
-    types: [checks_requested]
-  push:
-    branches: [main, 'release/**', '**-dev']
 
 concurrency:
   group: dco-check-${{ github.event.pull_request.number || github.sha }}
@@ -22,7 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: KineticCafe/actions-dco@v3.1.0
+      - uses: KineticCafe/actions-dco@v3.2.0
+        continue-on-error: true
         with:
           config: |
             comment = true

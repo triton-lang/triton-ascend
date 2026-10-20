@@ -43,6 +43,14 @@ private:
   bool needSplitAll;
 };
 
+class FoldExpandExtCollapse
+    : public mlir::OpRewritePattern<mlir::tensor::CollapseShapeOp> {
+public:
+  using OpRewritePattern<mlir::tensor::CollapseShapeOp>::OpRewritePattern;
+  llvm::LogicalResult matchAndRewrite(mlir::tensor::CollapseShapeOp collapseOp,
+                                      PatternRewriter &rewriter) const override;
+};
+
 class PatternMatchRewritePass
     : public PassWrapper<PatternMatchRewritePass, OperationPass<ModuleOp>> {
 public:

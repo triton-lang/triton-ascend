@@ -23,9 +23,10 @@ import torch_npu
 
 import triton
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 
 import pytest
+import test_common
 
 
 @triton.jit
@@ -37,7 +38,7 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
     output = x + y
-    out_sub = extension.extract_slice(output, [block_start], [32], [1])
+    out_sub = al.extract_slice(output, [block_start], [32], [1])
     out_idx = block_start + tl.arange(0, 32)
     out_msk = out_idx < n_elements
     tl.store(output_ptr + out_idx, out_sub, mask=out_msk)
@@ -58,3 +59,20 @@ def test_extract_slice():
     torch_ref = x + y
     triton_cal = triton_func(x, y)
     torch.testing.assert_close(triton_cal[:32], torch_ref[:32])
+
+
+@triton.jit
+def extract_slice_kernel(x_ptr, out_ptr, N: tl.constexpr, OFF: tl.constexpr, SZ: tl.constexpr):
+    offs = tl.arange(0, N)
+    x = tl.load(x_ptr + offs)
+    sub = al.extract_slice(x, [OFF], [SZ], [1])
+    tl.store(out_ptr + tl.arange(0, SZ), sub)
+
+
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'bfloat16', 'uint8'])
+def test_extract_slice_dtypes(dtype):
+    size, offset, sz = 64, 8, 16
+    x = test_common.generate_tensor((size, ), dtype).npu()
+    out = torch.zeros(sz, dtype=eval('torch.' + dtype)).npu()
+    extract_slice_kernel[(1, )](x, out, size, offset, sz)
+    torch.testing.assert_close(out, x[offset:offset + sz])

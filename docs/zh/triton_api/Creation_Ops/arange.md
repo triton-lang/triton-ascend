@@ -33,7 +33,7 @@ triton.language.arange(start, end, _semantic=None)
 
 #### 2.2.2 Shape 支持
 
-0 =< (end - start) <1048576
+0 <= (end - start) < 1048576
 end >= 0,  start  >= 0
 
 结论：在 Shape 方面，GPU 与 Ascend 平台无差异。

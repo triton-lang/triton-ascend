@@ -23,6 +23,7 @@
 __all__ = ["custom", "custom_semantic", "register_custom_op", "SyncEventSlot"]
 
 import inspect
+from warnings import warn
 import types
 import typing
 import itertools
@@ -384,6 +385,9 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     name = _unwrap_constexpr(name)
     # Get op class according the name.
     op_class = _get_op_class(name)
+    deprecated_message = getattr(op_class, "_deprecated_message", None)
+    if deprecated_message:
+        warn(deprecated_message, FutureWarning, stacklevel=3)
     # Convert constexpr to value in arguments.
     args = _unwrap_constexpr(args)
     kwargs = _unwrap_constexpr(kwargs)
@@ -419,7 +423,14 @@ def custom(name: str, *args, _semantic=None, **kwargs):
 
 
 def register_custom_op(op):
-    """Register a custom operation so that we can invoke it using al.custom()."""
+    """Register a custom operation so that it can be invoked via :func:`custom`.
+
+    Used as a class decorator. The decorated class must define a ``core`` field
+    (a :class:`CORE` value), a ``pipe`` field (a :class:`PIPE` value), and for
+    non-CUBE ops a ``mode`` field (a :class:`MODE` value).
+
+    :param op: the custom op class to register.
+    """
     assert inspect.isclass(op), "@register_custom_op should decorate on a class."
     # Use class name if name not set.
     if not hasattr(op, 'name'):

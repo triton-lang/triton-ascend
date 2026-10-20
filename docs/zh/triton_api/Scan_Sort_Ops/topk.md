@@ -46,7 +46,7 @@ torch_npu 支持 uint8。
 
 > 相对社区能力缺失且无法实现
 
-毕升编译器限制，int32、uint8、int64、float64、bool 无法实现。
+毕昇编译器限制，int32、uint8、int64、float64、bool 无法实现。
 
 当前 `topk` 仅返回最大值，不支持通过参数切换为返回最小值。
 `dim` 仅支持最后一个维度。

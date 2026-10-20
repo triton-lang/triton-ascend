@@ -71,7 +71,7 @@ using namespace triton;
 bool isMultiple(const OpFoldResult &dividend, const OpFoldResult &divisor) {
   auto staticDividend = getIntAttr(dividend);
   auto staticDivisor = getIntAttr(divisor);
-  if (!staticDividend || !staticDivisor) {
+  if (!staticDividend || !staticDivisor || staticDivisor.value() == 0) {
     return false;
   }
   return staticDividend.value() % staticDivisor.value() == 0;

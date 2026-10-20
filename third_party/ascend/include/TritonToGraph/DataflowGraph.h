@@ -209,9 +209,10 @@ public:
 // DataFlowGraph - 数据流图
 class DataFlowGraph {
 public:
-  explicit DataFlowGraph(ControlFlowGraph &cfg) : cfg(cfg) {}
+  DataFlowGraph(ControlFlowGraph &cfg, AliasAnalysis &aliasAnalysis)
+      : cfg(cfg), aliasAnalysis(aliasAnalysis) {}
 
-  ~DataFlowGraph() = default;
+  ~DataFlowGraph();
 
   // 构建完整的数据流信息
   void build();
@@ -260,12 +261,10 @@ public:
 
 private:
   ControlFlowGraph &cfg;
+  AliasAnalysis &aliasAnalysis;
 
-  // 组件
-  std::unique_ptr<AliasAnalysis> aliasAnalysis;
+  // The builder borrows alias analysis and must be destroyed before it.
   std::unique_ptr<MemorySSABuilder> memorySSABuilder;
-
-  // 数据流信息
   DataFlowInfo dataFlowInfo;
 
   // 构建def-use图

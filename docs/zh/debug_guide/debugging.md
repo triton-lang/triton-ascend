@@ -12,7 +12,7 @@
 | **2. 编译流程概览** | 介绍 Triton-Ascend 端到端编译链的关键阶段，为后续调试提供上下文基础。 |
 | **3. 临时文件指引** | 详解编译过程中生成的中间文件（如 `.mlir`、`.ll`、`.o` 等）的存储位置与用途，便于人工检查。 |
 | **4. 解释器模式** | 介绍如何通过 `TRITON_INTERPRET=1` 在 CPU 上运行 kernel，作为 NPU 计算结果的精度基准。 |
-| **5. 调试方法** | 提供多种实用调试手段：<br>• 静态/运行时打印<br>• 编译错误调试方法<br> |
+| **5. 调试方法** | 提供多种实用调试手段：静态/运行时打印、编译错误调试方法。 |
 | **附录 A** | 常用环境变量速查表，提升调试效率。 |
 
 建议开发者结合具体问题，按需查阅对应章节，以高效定位并解决 Triton-Ascend 集成中的各类异常。
@@ -23,8 +23,8 @@
 
 | 问题类型 | 典型表现/描述 | 推荐的首要调试方法 |
 | :--- | :--- | :--- |
-| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式 <br> 5.1 打印调试方法 |
-| **编译错误 (MLIRCompileError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompileError`。 | 5.2 编译错误调试方法 |
+| **精度问题** | NPU运行结果与标杆参考结果（如PyTorch或Triton CPU解释器）存在差异。 | 4. 解释器模式；5.1 打印调试方法 |
+| **编译错误 (MLIRCompilationError)** | 在编译转换阶段失败，通常在Python端抛出 `MLIRCompilationError`。 | 5.2 编译错误调试方法 |
 
 ## 2 Triton-Ascend 编译流程概览
 
@@ -87,6 +87,8 @@ export TRITON_ALWAYS_COMPILE=1
 ```
 
 缓存验证: 当怀疑缓存导致问题时，可删除相关缓存文件后重新测试。
+
+<a id="debug-dump-files"></a>
 
 ### 3.2 调试转储文件（Dump Files）
 
@@ -159,7 +161,7 @@ Dumping intermediate results to ~/.triton/dump/xxx
 - TTIR 样例
 查看 kernel.ttir.mlir 如下：
 
-```text
+```mlir
 module {
   tt.func public @add_kernel(%arg0: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg1: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg2: !tt.ptr<f32> {tt.divisibility = 16 : i32} , %arg3: i32 {tt.divisibility = 16 : i32} ) attributes {noinline = false} {
     %cst = arith.constant dense<0.000000e+00> : tensor<1024xf32> loc(#loc1)
@@ -196,12 +198,12 @@ TTIR 是 Triton 编译器前端生成的中间表示（Intermediate Representati
 
 TTIR 层面仍基于 Triton 原生抽象（如 `!tt.ptr<f32>`、`tt.load`/`tt.store` 等），尚未映射到底层硬件的具体内存模型或执行单元，是平台无关的高层次 IR。
 
-#### 3.4.1 TTAdapter IR（Target-Specific Adapter Representation）
+#### 3.4.2 TTAdapter IR（Target-Specific Adapter Representation）
 
 - TTAdapter IR 样例
 查看 kernel.ttadapter.mlir 如下：
 
-```text
+```mlir
 module {
   func.func @add_kernel(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32, %arg7: i32, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "aiv", parallel_mode = "simd"} {
     %cst = arith.constant 0.000000e+00 : f32
@@ -255,6 +257,8 @@ TTAdapter IR 是 Triton-Ascend 编译流程中将 TTIR 转换为适配昇腾 NPU
 
 TTAdapter IR 已完成从 Triton 抽象到适配昇腾 NPU 的格式。
 
+<a id="debug-interpreter-mode"></a>
+
 ## 4 解释器模式
 
 解释器的核心价值在于**隔离硬件差异**。通过环境变量 `TRITON_INTERPRET=1` 强制Triton在CPU上执行kernel计算，其结果可作为判断NPU计算精度的基准。
@@ -285,6 +289,8 @@ export TRITON_INTERPRET=0
 ```
 
 ## 5 调试方法
+
+<a id="debug-printing"></a>
 
 ### 5.1 打印调试方法
 
@@ -345,7 +351,7 @@ python your_program.py
 
 ### 5.1.2 运行时调试方法
 
-此方法的使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
+此方法使用 `tl.device_print` 可以灵活打印需要观察的变量的值。
 设置环境变量 `TRITON_DEVICE_PRINT=1` 可启用 `tl.device_print` 功能。此函数允许在kernel内部打印张量值，是分阶段验证计算精度的高效方法。
 **使用方法：**
 
@@ -404,9 +410,11 @@ TRITON_DEVICE_PRINT=1：启用运行时打印，同时也会启用编译时打�
 
 TRITON_DEBUG=1：启用所有调试输出（包括编译时和运行时打印）
 
+<a id="debug-compilation-error"></a>
+
 ### 5.2 编译错误调试方法
 
-当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompileError`.
+当 `ttir.mlir` → `ttadapter.mlir` 的转换过程失败，无法生成`ttadapter.mlir`，报错`MLIRCompilationError`.
 需要进入 Triton-Ascend 代码层面定位问题。Triton-Ascend 包含 Python 和 C++ 代码层，需根据报错日志中的调用栈信息，定位到具体的报错代码片段，并采用相应的调试方法。
 
 ### 5.2.1 Python 代码调试方法
@@ -434,7 +442,7 @@ def compile_fn(ttir):
 **示例:**
 假设在 `compiler.py` 的第 123 行设置了断点，程序暂停后：
 
-```python
+```text
 python
 (Pdb) l  # 查看当前代码上下文
 118     def compile_fn(ttir):
@@ -489,7 +497,7 @@ python your_triton_script.py
 
 在启用 `TRITON_ENABLE_LLVM_DEBUG=1` 时，可通过 `TRITON_LLVM_DEBUG_ONLY` 环境变量指定仅输出特定模块的调试日志。以下是常用 `DEBUG_TYPE` 的简要解释：
 
-```bash
+```text
 ## `isel`（Instruction Selection）
 - **作用**：将 LLVM IR 指令转换为目标架构的机器指令（MachineInstr）。
 - **调试内容**：显示 IR → 机器指令的映射过程、模式匹配结果。

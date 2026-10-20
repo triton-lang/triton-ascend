@@ -78,4 +78,10 @@ def RemoveSsbufAttrPass : Pass<"remove-ssbuf-attr", "mlir::ModuleOp"> {
   let constructor = "triton::createRemoveSsbufAttrPass()";
 }
 
+def CheckUnsupportedScenarioPass : Pass<"ssbuf-check-unsupported-scenario", "mlir::ModuleOp"> {
+  let summary = "Check unsupported scenario pass for ssbuf";
+  let constructor = "triton::createCheckUnsupportedScenarioPass()";
+  let dependentDialects = ["memref::MemRefDialect"];
+}
+
 #endif // TRITON_DYNAMIC_CV_PIPELINE_PASSES

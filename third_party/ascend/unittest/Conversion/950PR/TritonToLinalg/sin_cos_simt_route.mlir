@@ -2,7 +2,7 @@
 // RUN: triton-opt %s --triton-to-linalg='compile-on-910-95=false' --split-input-file | FileCheck %s --check-prefixes=OFF-CHECK-LABEL,OFF-CHECK-SAME
 
 // isSIMTOp() routes math.sin / math.cos on f16/f32 tensor inputs to the SIMT
-// template.  Downstream justification (A5 RegBase normalize, enable-high-
+// template.  Downstream justification (Ascend 950 RegBase normalize, enable-high-
 // precision defaults to true): these ops are rewritten into a Payne-Hanek
 // range reduction that looks up a 320xi32 2/pi limbs table with two
 // hfusion.gather ops, so the kernel must be launched as mix_simd_simt to

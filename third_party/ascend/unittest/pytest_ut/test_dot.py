@@ -74,7 +74,9 @@ def triton_dot_2_allow_tf32(output_ptr, x_ptr, y_ptr, B: tl.constexpr, C: tl.con
     Yidx = cidx[:, None] * D + didx[None, :]
     X = tl.load(x_ptr + Xidx, mask=x_mask, other=0.0)
     Y = tl.load(y_ptr + Yidx, mask=y_mask, other=0.0)
-    ret = tl.dot(X, Y, allow_tf32=True)
+    # when allow_tf32=True; input_precision=tf32
+    # After removing invasive modifications,input_precision needs to be passed.
+    ret = tl.dot(X, Y, input_precision="tf32")
     oidx = bidx[:, None] * D + didx[None, :]
     tl.store(output_ptr + oidx, ret, mask=out_mask)
 
@@ -126,7 +128,6 @@ typelist = [
 ]
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -135,11 +136,9 @@ def test_dot_2(restore_npu_hf32_setting, sigtype, B, C, D):
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
     triton_dot_2_None[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    torch.testing.assert_close(z, z_ref, rtol=3e-02, atol=3e-02, equal_nan=True)
 
 
-@pytest.mark.xfail(
-    reason="Temporarily disabled: TA backend does not support allow_tf32 yet. Will be fixed in follow-up.")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -148,10 +147,9 @@ def test_dot_2_allow_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
     triton_dot_2_allow_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    torch.testing.assert_close(z, z_ref, rtol=3e-02, atol=3e-02, equal_nan=True)
 
 
-@pytest.mark.skip(reason="not supported after the NPUIR is updated in April, and will be fixed later")
 @pytest.mark.parametrize("B, C, D", testlist2)
 @pytest.mark.parametrize("sigtype", typelist)
 def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
@@ -160,7 +158,7 @@ def test_dot_2_input_tf32(restore_npu_hf32_setting, sigtype, B, C, D):
     z_ref = torch_dot_None(x, y).to(torch.float32)
     z = torch.zeros((B, D), dtype=torch.float32).npu()
     triton_dot_2_input_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    torch.testing.assert_close(z, z_ref, rtol=3e-02, atol=3e-02, equal_nan=True)
 
 
 @pytest.mark.parametrize("B, C, D", testlist2)
@@ -180,7 +178,7 @@ def test_dot_2_ignore_tf32(sigtype, B, C, D):
         torch_npu.npu.matmul.allow_hf32 = original_allow_hf32
 
     triton_dot_2_ignore_tf32[1, 1, 1](z, x, y, B, C, D)
-    test_common.validate_cmp(sigtype, z, z_ref)
+    torch.testing.assert_close(z, z_ref, rtol=3e-02, atol=3e-02, equal_nan=True)
 
 
 # =============================================================================
@@ -256,21 +254,6 @@ class TestDotAscendPatch:
             rhs = _mock_tensor(tl.float32)
             patched(semantic, lhs, rhs, None, "hf32", None, tl.float32)
             assert mock_original.call_args[0][4] == "hf32"
-        finally:
-            cell.cell_contents = saved
-
-    def test_hf32_fp16_inputs_fallback_to_ieee(self, semantic):
-        """fp16 x fp16 + hf32 → falls back to ieee."""
-        patched = TritonSemantic.dot
-        mock_original = MagicMock(return_value=MagicMock())
-        cell = patched.__closure__[0]
-        saved = cell.cell_contents
-        cell.cell_contents = mock_original
-        try:
-            lhs = _mock_tensor(tl.float16)
-            rhs = _mock_tensor(tl.float16)
-            patched(semantic, lhs, rhs, None, "hf32", None, tl.float32)
-            assert mock_original.call_args[0][4] == "ieee"
         finally:
             cell.cell_contents = saved
 

@@ -4,7 +4,6 @@ import hashlib
 import json
 import os
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Optional
 
 from triton.runtime.cache import get_cache_manager
@@ -52,21 +51,6 @@ def run_costmodel(ttir_or_path, extra_args=None, dump_ir_on_error=False):
         return None
 
 
-def get_costmodel_jobs(num_tasks: int) -> int:
-    if num_tasks <= 1:
-        return 1
-    raw = os.environ.get("TRITON_COSTMODEL_WORKER_NUM")
-    if raw is not None:
-        try:
-            parsed = int(raw)
-            if parsed > 0:
-                return min(parsed, num_tasks)
-        except Exception:
-            pass
-    default_jobs = os.cpu_count() or 1
-    return min(max(1, default_jobs), num_tasks)
-
-
 def make_costmodel_cache_key(ttir: str, extra_args: Optional[List[str]]) -> str:
     h = hashlib.sha256()
     h.update(ttir.encode("utf-8"))
@@ -85,12 +69,13 @@ def load_costmodel_latency(cache_key: str) -> Optional[float]:
 
     cache_manager = get_cache_manager(_costmodel_cache_namespace())
     file_name = f"{cache_key}.json"
-    payload = cache_manager.get_file(file_name)
-    if payload is None:
+    payload_path = cache_manager.get_file(file_name)
+    if payload_path is None:
         return None
 
     try:
-        parsed = json.loads(payload)
+        with open(payload_path, "r", encoding="utf-8") as f:
+            parsed = json.load(f)
         latency = float(parsed["latency"])
         _COSTMODEL_MEM_CACHE[cache_key] = latency
         return latency
@@ -141,25 +126,21 @@ def _build_costmodel_extra_args(arg_bindings: str, hardware_config: str = ""):
     return [base]
 
 
-def _normalize_costmodel_items(config_ttir_items):
-    pending_items = []
-    costmodel_latencies = {}
+def _normalize_costmodel_item(item):
+    if not isinstance(item, dict):
+        return None, float("inf"), None
 
-    for item in config_ttir_items:
-        if not isinstance(item, dict):
-            continue
-        config = item.get("config")
-        ttir = item.get("ttir")
-        arg_bindings = item.get("arg_bindings", "")
-        hardware_config = item.get("hardware_config", "")
-        if config is None:
-            continue
-        if not ttir:
-            costmodel_latencies[config] = float("inf")
-            continue
-        pending_items.append((config, ttir, arg_bindings, hardware_config))
+    config = item.get("config")
+    if config is None:
+        return None, float("inf"), None
 
-    return pending_items, costmodel_latencies
+    ttir = item.get("ttir")
+    if not ttir:
+        return config, float("inf"), None
+
+    arg_bindings = item.get("arg_bindings", "")
+    hardware_config = item.get("hardware_config", "")
+    return config, None, (config, ttir, arg_bindings, hardware_config)
 
 
 def _eval_one_costmodel_item(item):
@@ -176,65 +157,30 @@ def _eval_one_costmodel_item(item):
     return config, latency
 
 
-def _evaluate_pending_items(pending_items, costmodel_latencies):
-    if not pending_items:
-        return
-
-    jobs = get_costmodel_jobs(len(pending_items))
-    if jobs <= 1:
-        for item in pending_items:
-            cfg, latency = _eval_one_costmodel_item(item)
-            costmodel_latencies[cfg] = latency
-        return
-
-    with ThreadPoolExecutor(max_workers=jobs) as executor:
-        futures = [executor.submit(_eval_one_costmodel_item, item) for item in pending_items]
-        for future in as_completed(futures):
-            try:
-                cfg, latency = future.result()
-                costmodel_latencies[cfg] = latency
-            except Exception:
-                pass
-
-
-def costmodel_bench(config_ttir_items):
-    """Evaluate candidate configs with costmodel from prebuilt TTIR payloads.
+def costmodel_bench(config_ttir_item):
+    """Evaluate one candidate config with costmodel from a prebuilt TTIR payload.
 
     Args:
-        config_ttir_items (Iterable[dict]): Iterable of per-config payloads.
-            Each item should contain:
-            - ``config``: config object used as result-map key.
+        config_ttir_item (dict): Per-config payload containing:
+            - ``config``: config object returned as the result key.
             - ``ttir`` (str): TTIR text for costmodel evaluation.
             - ``arg_bindings`` (str, optional): Runtime bindings string passed
               to costmodel (for example ``"arg3=98432,pid_x=0"``).
 
     Returns:
-        dict: Mapping ``{config: latency_us}``.
-            Returns ``float("inf")`` for configs with missing/invalid TTIR or
-            evaluation failures. Returns an empty dict for invalid/empty input.
+        tuple: ``(config, latency_us)``. ``latency_us`` is ``float("inf")``
+            when TTIR is missing/invalid or evaluation fails. Invalid items
+            without a config return ``(None, float("inf"))``.
     """
     try:
-        items = list(config_ttir_items)
-    except Exception:
-        _warn_costmodel("config_ttir_items is not iterable; skip costmodel")
-        return {}
-
-    if len(items) == 0:
-        return {}
-
-    try:
-        pending_items, costmodel_latencies = _normalize_costmodel_items(items)
-        _evaluate_pending_items(pending_items, costmodel_latencies)
-
-        for item in items:
-            if isinstance(item, dict) and item.get("config") is not None:
-                costmodel_latencies.setdefault(item["config"], float("inf"))
-
-        return costmodel_latencies
+        config, fallback_latency, pending_item = _normalize_costmodel_item(config_ttir_item)
+        if config is None:
+            return None, fallback_latency
+        if pending_item is None:
+            return config, fallback_latency
+        return _eval_one_costmodel_item(pending_item)
     except Exception as exc:
         _warn_costmodel(f"unexpected failure: {exc}")
-        fallback = {}
-        for item in items:
-            if isinstance(item, dict) and item.get("config") is not None:
-                fallback[item["config"]] = float("inf")
-        return fallback
+        if isinstance(config_ttir_item, dict) and config_ttir_item.get("config") is not None:
+            return config_ttir_item["config"], float("inf")
+        return None, float("inf")

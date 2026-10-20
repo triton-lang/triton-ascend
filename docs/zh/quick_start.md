@@ -1,50 +1,51 @@
 # 快速入门
 
 ## 项目介绍
-Triton-Ascend 是适配华为 Ascend 昇腾芯片的 Triton 优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容 Triton 核心语法并针对昇腾 NPU 特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
-本文以 Ubuntu 22.04 环境下通过软件包部署方式运行向量加法示例为例，指导用户快速上手使用 Triton-Ascend。
 
-## 软件包安装
+**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
 
-### 环境准备
+本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
 
-#### 硬件要求
+## 环境准备
 
-支持的操作系统: linux(aarch64/x86_64)
+**硬件要求**
 
-支持的 Ascend 产品: Atlas A2/A3/A5 系列
+支持的操作系统：Linux（aarch64/x86_64）
 
-最小硬件配置: 单卡 32GB 内存（推荐）
+支持的Ascend产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 
-#### 软件依赖
+最小硬件配置：单卡32GB内存（推荐）
 
-确定 Python、CANN 和 torch_npu 软件版本并安装，软件包安装和源码编译安装均需要先完成这一步。
--   Python 版本选择：py3.9-py3.11 均可。
+**软件依赖**
 
--   CANN 版本选择：可以访问昇腾社区官网，根据其提供的<a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">社区软件安装指引</a>完成 CANN 的安装与配置。建议下载安装 9.0.0 版本。
+确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
 
--   torch_npu 版本选择：当前配套的 torch_npu 版本为 2.7.1.post4。
+- CANN版本：9.2.0
+- Python版本：3.11
+- TorchNPU版本：2.10.0.post7
 
-### 具体实施（以whl包安装为例）
+注：更多配套关系请参考[版本说明表](./release_note.md#version-compatibility-matrix)。
+
+## 快速安装
+
 ```bash
-# 以安装 triton-ascend 3.2.1 为例
-pip install triton-ascend==3.2.1 --extra-index-url=https://triton-ascend.osinfra.cn/pypi/simple
+pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
-注意：triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
 
 ## 快速开始
 
-### 示例一：运行 tutorials 中向量加法示例验证结果
+**运行tutorials中的向量加法示例验证结果**
 
-向量加法实例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
-通过对比 Triton 核函数与 PyTorch 原生计算的输出结果进行对比，证明昇腾 NPU 设备可正确调用 Triton 核函数并保证计算精度。
+向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
+通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。
+> ⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）
 source /usr/local/Ascend/ascend-toolkit/set_env.sh
-# 拉取triton-ascend源码仓及用例（可选，非源码编译安装运行示例时需拉源码仓）
+# 拉取triton-ascend源码仓及用例
 git clone https://github.com/triton-lang/triton-ascend.git
-# 运行tutorials示例：
+# 运行tutorials示例
 python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 ```
 
@@ -56,108 +57,30 @@ tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
 ```
 
-### 示例二：从 GPU 到 NPU：迁移 Triton
+## 下一步：从样例到完整开发
 
-Triton-Ascend 在保持与社区 Triton 语法完全兼容的同时，只需在 **张量的设备声明** 和少量 `torch.cuda.*` 接口上做替换，原有 GPU 示例即可在昇腾 NPU 上运行。
-本节提供了一个简单的向量加法测试样例，采用最基础的迁移方法，对原 GPU 代码进行少量修改，演示完整的迁移过程，帮助用户快速体验 GPU 脚本迁移到昇腾 NPU 上的流程。
+本页帮助您完成安装与首个样例验证。若希望继续上手算子开发全流程，可按下面路径推进：
 
-GPU 版本示例文件`test_add.py`如下:
+1. **算子开发**：按算子类型阅读Vector / Cube / 融合开发教程，再对照典型样例修改Kernel，完成开发、编译、验证闭环。
+2. **自动调优**：使用Autotune选择合适的Tiling配置。
+3. **调试与调优**：掌握打印调试与性能采集方法。
+4. **迁移与进阶**：从GPU Triton迁移到Ascend，或查阅环境变量与编译选项。
 
-```python
-import pytest
-import torch
-from torch.testing import assert_close
+### 开发指南
 
-import triton
-import triton.language as tl
+| 文档 | 说明 |
+|------|------|
+| [Triton-Ascend算子开发](./programming_guide/index.md) | 分核、片上内存、访存、Tiling等通用开发原则 |
+| [Triton-Ascend算子迁移](./migration_guide/index.md) | GPU Triton算子迁移到昇腾NPU |
+| [Triton-Ascend算子调试与调优](./debug_guide/index.md) | 调试、性能分析与精度排查 |
+| [环境变量与编译选项](./environment_variable_and_compiler_options_reference.md) | 运行与编译相关配置说明 |
 
+### 教程与样例
 
-@triton.jit
-def add_kernel(
-    x_ptr,
-    y_ptr,
-    output_ptr,
-    n_elements,
-    BLOCK_SIZE: tl.constexpr,
-):
-    pid = tl.program_id(axis=0)
-    block_start = pid * BLOCK_SIZE
-    offsets = block_start + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    tl.store(output_ptr + offsets, x + y, mask=mask)
-
-
-@pytest.mark.parametrize('SIZE,BLOCK_SIZE', [(98432, 1024)])
-def test_add(SIZE, BLOCK_SIZE):
-    device_id = torch.cuda.current_device()
-    device = torch.device('cuda', device_id)
-
-    x = torch.randn(SIZE, device='cuda', dtype=torch.float32)
-    y = torch.randn(SIZE, device='cuda', dtype=torch.float32)
-
-    output_cpu = torch.empty(SIZE, dtype=torch.float32)
-    output = output_cpu.cuda()
-
-    def grid(meta):
-        return (triton.cdiv(SIZE, meta['BLOCK_SIZE']),)
-
-    add_kernel[grid](x, y, output, SIZE, BLOCK_SIZE=BLOCK_SIZE)
-
-    torch.cuda.synchronize()
-
-    output_torch = x + y
-    assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
-```
-
-迁移只需将 GPU 相关 API 替换为对应的 NPU 版本，对照关系如下：
-
-| GPU 写法                         | NPU 写法                        |
-| ------------------------------- | ------------------------------- |
-| `device='cuda'`                 | `device='npu'`                  |
-| `tensor.cuda()`                 | `tensor.npu()`                  |
-| `torch.cuda.current_device()`   | `torch.npu.current_device()`    |
-| `torch.cuda.synchronize()`      | `torch.npu.synchronize()`       |
-
-`@triton.jit` 标注的核函数使用的是 Triton 通用语言一般不需要特殊修改， Launch grid 的调用方式也与 GPU 完全一致。
-
-以 diff 形式展示核心改动：
-
-```diff
-import pytest
-import torch
-from torch.testing import assert_close
-
-import triton
-import triton.language as tl
-
-# ...（kernel 代码保持不变）...
-
-@pytest.mark.parametrize('SIZE,BLOCK_SIZE', [(98432, 1024)])
-def test_add(SIZE, BLOCK_SIZE):
--   device_id = torch.cuda.current_device()
-+   device_id = torch.npu.current_device()
-
--   x = torch.randn(SIZE, device='cuda', dtype=torch.float32)
--   y = torch.randn(SIZE, device='cuda', dtype=torch.float32)
-+   x = torch.randn(SIZE, device='npu', dtype=torch.float32)
-+   y = torch.randn(SIZE, device='npu', dtype=torch.float32)
-
-    output_cpu = torch.empty(SIZE, dtype=torch.float32)
--   output = output_cpu.cuda()
-+   output = output_cpu.npu()
-
-    add_kernel[grid](x, y, output, SIZE, BLOCK_SIZE=BLOCK_SIZE)
-
--   torch.cuda.synchronize()
-+   torch.npu.synchronize()
-
-    output_torch = x + y
-    assert_close(output, output_torch, rtol=1e-3, atol=1e-3)
-```
-修改完后，可用`pytest`运行用例，执行成功即表明迁移成功。
-```bash
-pytest test_add.py
-```
-若未安装`pytest`组件，可使用`pip install pytest`进行安装。
+| 文档 | 说明 |
+|------|------|
+| [Vector算子开发](./programming_guide/vector_operator.md) | 逐元素、归约、Gather/Scatter等Vector Core算子 |
+| [Cube算子开发](./programming_guide/cube_operator.md) | 以 `tl.dot`、矩阵乘为核心的Cube算子 |
+| [融合算子开发](./programming_guide/cv_fusion_operator.md) | 同一Kernel中Cube + Vector协同的CV融合场景 |
+| [Triton-Ascend autotune](./autotune_guide.md) | Autotune推荐用法与自动Tiling适用边界 |
+| [典型算子样例](./examples/index.md) | Softmax、LayerNorm、Attention、Matmul等端到端样例 |

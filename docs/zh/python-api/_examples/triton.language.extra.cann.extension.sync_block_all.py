@@ -1,3 +1,7 @@
+import triton
+import triton.language.extra.cann.extension as al
+
+
 @triton.jit
 def test_sync_block_all():
     al.sync_block_all("all_cube", 8)

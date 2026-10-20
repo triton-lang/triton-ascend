@@ -10,6 +10,7 @@ add_triton_library(TritonControlFlowOpt
   TritonControlFlowOptPassIncGen
 
   LINK_LIBS PUBLIC
+  BiShengIRScopeDialect
   MLIRArithDialect
   MLIRControlFlowDialect
   MLIRFuncDialect

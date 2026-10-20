@@ -10,29 +10,80 @@ This guide is intended for users who already know how to write Triton kernels an
 
 ## Recommended Usage
 
-On Triton-Ascend, the recommended usage is to keep the community-style `@triton.autotune` interface and set `configs=[]` when you want the backend to generate and evaluate candidate configurations automatically:
+On Triton-Ascend, the recommended usage is to keep the community-style `@triton.autotune` interface and set `configs` to `[]` when you want the backend to generate and evaluate candidate configurations automatically:
 
 ```python
+"""
+Vector Add
+=============
+"""
+
+
+import torch
+import torch_npu
 import triton
 import triton.language as tl
 import triton.backends.ascend.runtime
+from triton.backends.ascend.testing import do_bench_npu
 
 
-@triton.autotune(
-    configs=[],
-    key=["M", "N"],
-)
+@triton.autotune(configs=[], key=["n_elements"])
 @triton.jit
-def kernel(
-    x_ptr,
-    y_ptr,
-    out_ptr,
-    M,
-    N,
-    BLOCK_M: tl.constexpr,
-    BLOCK_N: tl.constexpr,
-):
-    ...
+def add_kernel(x_ptr,  # *Pointer* to first input vector.
+               y_ptr,  # *Pointer* to second input vector.
+               output_ptr,  # *Pointer* to output vector.
+               n_elements,  # Size of the vector.
+               BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+               # NOTE: `constexpr` so it can be used as a shape value.
+               ):
+    # There are multiple 'programs' processing different data. We identify which program
+    # we are here:
+    pid = tl.program_id(axis=0)  # We use a 1D launch grid so axis is 0.
+    # This program will process inputs that are offset from the initial data.
+    # For instance, if you had a vector of length 256 and block_size of 64, the programs
+    # would each access the elements [0:64, 64:128, 128:192, 192:256].
+    # Note that offsets is a list of pointers:
+    block_start = pid * BLOCK_SIZE
+    offsets = block_start + tl.arange(0, BLOCK_SIZE)
+    # Create a mask to guard memory operations against out-of-bounds accesses.
+    mask = offsets < n_elements
+    # Load x and y from DRAM, masking out any extra elements in case the input is not a
+    # multiple of the block size.
+    x = tl.load(x_ptr + offsets, mask=mask)
+    y = tl.load(y_ptr + offsets, mask=mask)
+    output = x + y
+    # Write x + y back to DRAM.
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+
+def add_torch(x, y):
+    return x + y
+
+
+def add_autotune(x, y):
+    output = torch.empty_like(x)
+    n_elements = output.numel()
+    add_kernel[lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )](x, y, output, n_elements)
+    return output
+
+
+def test_add(size: int):
+    x = torch.rand(size, device="npu")
+    y = torch.rand(size, device="npu")
+
+    output_torch = add_torch(x, y)
+    output_triton = add_autotune(x, y)
+    assert torch.allclose(output_triton, output_torch)
+    print(f"Vector Add {size} PASSED!")
+    triton_us = do_bench_npu(lambda: add_autotune(x, y))
+    torch_us = do_bench_npu(lambda: add_torch(x, y))
+    print(f"Triton kernel execution time: {triton_us:.4f} ms")
+    print(f"PyTorch kernel execution time: {torch_us:.4f} ms")
+
+
+if __name__ == "__main__":
+    test_add(98432)
+
 ```
 
 This means:
@@ -69,7 +120,7 @@ def kernel(...):
 
 `key` is effectively the autotune cache key. Any parameter included in `key` triggers autotune again when its value changes.
 
-In most cases, `key` contains shape parameters such as `M/N/K`, `seq_len`, or `hidden_size`, because they often have a significant impact on the optimal tiling choice. However, `key` is not limited to shape parameters. If another parameter affects configuration selection, it can also be included.
+In most cases, `key` contains shape parameters such as `M/N/K`, `seq_len`, or `hidden_size`, because they often have a significant impact on the optimal tiling choice. However, `key` is not limited to shape parameters. If another parameter affects configuration selection, it can also be included in `key`.
 
 ### 4. Do not fix parameters that should participate in automatic tuning too early
 
@@ -200,6 +251,28 @@ In this mode:
 - the framework still handles benchmarking, best-config selection, and cache reuse;
 - the usage pattern remains consistent with community Triton autotune.
 
+### Inspecting Autotuning Logs
+
+Set `TRITON_PRINT_AUTOTUNING=1` to view autotuning logs. When benchmarking completes, the output shows the tuning time, the best configuration, and the benchmark results for each successful configuration. The following output is illustrative (`...` indicates omitted configuration parameters):
+
+```text
+Triton autotuning for function kernel finished after 0.12s; best config selected: BLOCK_M: 128, BLOCK_N: 128, ...;
+Triton autotuning benchmark results for function kernel:
+  config=BLOCK_M: 128, BLOCK_N: 128, ...; p50=0.0100 ms, p20=0.0090 ms, p80=0.0110 ms [selected]
+  config=BLOCK_M: 64, BLOCK_N: 256, ...; p50=0.0140 ms, p20=0.0130 ms, p80=0.0150 ms
+```
+
+`[selected]` marks the best configuration. `p50`, `p20`, and `p80` are the 50th, 20th, and 80th percentile execution times in milliseconds. If the benchmark returns a mean time, it is shown as `mean=... ms` instead.
+
+If a user-provided configuration (`configs`, including configurations expanded through `hints`) fails, or an exception interrupts autotuning, the logs report the affected configuration's status and reason. The following examples illustrate a compilation failure and interrupted autotuning, respectively:
+
+```text
+Triton autotuning: config=BLOCK_M: 128, BLOCK_N: 128, ...; compile_failed; reason=CompileTimeAssertionFailure: <error message>
+Triton autotuning: config=BLOCK_M: 64, BLOCK_N: 256, ...; not_evaluated; reason=No benchmark result was produced. Autotuning interrupted: RuntimeError: <error message>
+```
+
+Here, `compile_failed` indicates a compilation failure, `not_evaluated` means the configuration's evaluation did not complete, and `reason` describes the failure or interruption.
+
 ## Advanced Usage: Combine Automatic Tiling with Other Tunable Parameters
 
 The following content is advanced usage and should only be considered when you want to continue tuning non-tiling kernel parameters or compilation parameters together with automatic tiling.
@@ -280,21 +353,30 @@ def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
     ...
 
 
+grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * meta["GROUP_SIZE_M"], triton.cdiv(N, meta["BLOCK_N"]))
 matmul_kernel[grid](a, b, M, N, K)
 ```
 
 This means:
 
 - tiling-related parameters are still generated automatically by Triton-Ascend;
-- non-tiling parameters or compilation parameters are provided explicitly by the user through `hints`;
+- non-tiling parameters or compilation parameters (such as `GROUP_SIZE_M` and `multibuffer`) are provided explicitly by the user through `hints`;
 - autotune evaluates the combined search space of both parts.
+
+## autotune tutorials
+
+| autotune                | tutorials |
+|-------------------------|----|
+| Vector Add autotune     |[01-vector-add.py](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/01-vector-add.py)|
+| Fusion Softmax autotune |[02-fused-softmax.py](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/02-fused-softmax.py)|
+| Layer Norm autotune     |[03-layer-norm.py](https://github.com/triton-lang/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/03-layer-norm.py)|
 
 ## Summary
 
 The key extension of Triton-Ascend over community autotune is not a change in user-facing interfaces, but the addition of automatic tiling-candidate generation and tuning on top of the community interface. For most users, the recommended usage is:
 
 - keep the community-style `@triton.autotune` interface;
-- set `configs=[]`;
+- set `configs` to `[]`;
 - let the Ascend backend generate, filter, benchmark, and cache candidate configurations automatically based on the kernel DSL and runtime shapes.
 
 If your case is not suitable for automatic tiling, you can return to handwritten `triton.Config`.

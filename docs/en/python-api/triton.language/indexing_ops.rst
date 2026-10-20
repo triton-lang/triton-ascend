@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/indexing_ops.rst

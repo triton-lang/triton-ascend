@@ -41,7 +41,10 @@ using namespace triton;
 namespace {
 
 static constexpr llvm::StringLiteral interceptrFunc[]{
-    "_parallel_hstu_attn_bwd"};
+    "kernel_sdpa_bwd_kv",
+    "_sparse_decode_kernel",
+    "_sparse_decode_model1_kernel",
+};
 
 static LogicalResult verifyFuncNames(ModuleOp module) {
   bool intercepted = false;

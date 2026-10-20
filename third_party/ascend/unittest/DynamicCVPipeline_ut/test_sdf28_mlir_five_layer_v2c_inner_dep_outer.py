@@ -52,7 +52,7 @@ def compile_kernel(kernel, signature, constants):
     ir.load_dialects(context)
     ascend_ir.load_dialects(context)
     try:
-        options = NPUOptions(arch="Ascend910_9589", compile_on_910_95=True, enable_dynamic_cv_pipeline=True)
+        options = NPUOptions(arch="Ascend910_9589", enable_dynamic_cv_pipeline=True)
         # Register codegen_fns, including min_dot_size required by tl.dot.
         codegen_fns = {"min_dot_size": min_dot_size(None)}
         ttir = ast_to_ttir(kernel, src, context, options, codegen_fns, {})

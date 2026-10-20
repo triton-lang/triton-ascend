@@ -20,9 +20,31 @@
 
 import triton
 import triton.language as tl
+import triton.language.extra.cann.extension as al
 
 import torch
 import torch_npu
 import pytest
 import test_common
-from triton.runtime.libentry import libentry
+
+# ---------------
+# test flip op
+# ---------------
+
+
+@triton.jit
+def flip_kernel(x_ptr, out_ptr, N: tl.constexpr):
+    offs = tl.arange(0, N)
+    x = tl.load(x_ptr + offs)
+    y = al.flip(x, dim=0)
+    tl.store(out_ptr + offs, y)
+
+
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'bfloat16', 'uint8'])
+def test_flip(dtype):
+    size = 64
+    x = test_common.generate_tensor((size, ), dtype).npu()
+    torch_ref = torch.flip(x, dims=[0])
+    triton_res = torch.zeros(size, dtype=eval('torch.' + dtype)).npu()
+    flip_kernel[(1, )](x, triton_res, size)
+    assert (torch_ref == triton_res).all(), (torch_ref, triton_res)

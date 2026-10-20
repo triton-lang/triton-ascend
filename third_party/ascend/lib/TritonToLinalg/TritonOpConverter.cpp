@@ -26,6 +26,7 @@
 #include "ascend/include/TritonToLinalg/BlockPtrAnalysis.h"
 #include "ascend/include/TritonToLinalg/MaskAnalysis.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
+#include "ascend/include/Utils/DebugUtils.h"
 #include "ascend/include/Utils/Utils.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
@@ -33,6 +34,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -69,13 +71,13 @@ using namespace triton;
 /**
  * Retrieves a boolean environment variable.
  * @param envVar The name of the environment variable.
- * @param defaultValue The default value to return if the variable is not set or
- * cannot be parsed.
+ * @param defaultValue The default value to return if the variable is not set
+ * or cannot be parsed.
  * @return true if the environment variable exists and its value is parsed as
  * "true", otherwise returns defaultValue. Parsing rules (case-insensitive):
- * "true" values: any non-empty string not equal to "0", "false", "no", "off" is
- * considered true. "false" values: an empty string or a string equal to any of
- * the false literals is considered false.
+ * "true" values: any non-empty string not equal to "0", "false", "no", "off"
+ * is considered true. "false" values: an empty string or a string equal to
+ * any of the false literals is considered false.
  */
 bool getEnvBool(const char *envVar, bool defaultValue) {
   const char *val = std::getenv(envVar);
@@ -106,6 +108,65 @@ generateUniqueFuncName(ModuleOp moduleOp, llvm::StringRef funcNameBase) {
     funcName += ("_" + std::to_string(uniqueId++));
   }
   return funcName;
+}
+
+// Unstructured load/store conversion normally consumes the already-converted
+// memref adaptor directly. That is correct for ordinary pointer bases, but it
+// skips BlockDataParser::materializePointer for an int_to_ptr base and loses
+// the required one-element identity view. Only scalar pointer-preserving
+// producers are followed here; tensor-of-pointers and arbitrary pointer
+// arithmetic retain their established conversion path.
+static bool isIntToPtrBasedScalarPointer(Value value) {
+  auto pointerType = dyn_cast<triton::PointerType>(value.getType());
+  if (!pointerType || isa<ShapedType>(pointerType.getPointeeType()))
+    return false;
+
+  SmallPtrSet<Value, 8> visited;
+  while (value && visited.insert(value).second) {
+    if (value.getDefiningOp<triton::IntToPtrOp>())
+      return true;
+
+    Operation *producer = value.getDefiningOp();
+    if (!producer)
+      return false;
+    if (auto addPtr = dyn_cast<triton::AddPtrOp>(producer)) {
+      value = addPtr.getPtr();
+      continue;
+    }
+    if (auto bitcast = dyn_cast<triton::BitcastOp>(producer)) {
+      value = bitcast.getSrc();
+      continue;
+    }
+    return false;
+  }
+  return false;
+}
+
+// A volatile indirect load whose scalar source is obtained through a Triton
+// pointer bitcast needs the same one-element identity descriptor as the
+// scalar-pointer path. Restrict this provenance check to scalar pointers and
+// a pointer-preserving bitcast/addptr chain so ordinary dynamic memrefs and
+// tensor-of-pointers keep their established ABI.
+static bool isVolatileBitcastScalarPointer(Value value) {
+  auto pointerType = dyn_cast<triton::PointerType>(value.getType());
+  if (!pointerType || isa<ShapedType>(pointerType.getPointeeType()))
+    return false;
+
+  SmallPtrSet<Value, 8> visited;
+  bool sawBitcast = false;
+  while (value && visited.insert(value).second) {
+    if (auto bitcast = value.getDefiningOp<triton::BitcastOp>()) {
+      sawBitcast = true;
+      value = bitcast.getSrc();
+      continue;
+    }
+    if (auto addPtr = value.getDefiningOp<triton::AddPtrOp>()) {
+      value = addPtr.getPtr();
+      continue;
+    }
+    break;
+  }
+  return sawBitcast;
 }
 
 LogicalResult
@@ -149,6 +210,7 @@ BitcastConverter::matchAndRewrite(triton::BitcastOp op, OpAdaptor adaptor,
 LogicalResult
 TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {
+  insertDebugNop(op.getLoc(), rewriter);
   auto src = adaptor.getSrc();
   auto res = ConverterUtils::getTransposedValue(src, op.getLoc(), rewriter,
                                                 op.getOrder());
@@ -156,10 +218,293 @@ TransposeConverter::matchAndRewrite(triton::TransOp op, OpAdaptor adaptor,
   return success();
 }
 
+bool hasScalarPointerResult(scf::IfOp op) {
+  bool hasPointerResult = false;
+  for (Type resultType : op.getResultTypes()) {
+    auto pointerType = dyn_cast<triton::PointerType>(resultType);
+    if (!pointerType)
+      continue;
+    if (isa<ShapedType>(pointerType.getPointeeType()))
+      return false;
+    hasPointerResult = true;
+  }
+  return hasPointerResult;
+}
+
+bool isScalarPointerSelect(arith::SelectOp op) {
+  auto pointerType = dyn_cast<triton::PointerType>(op.getType());
+  return pointerType && !isa<ShapedType>(pointerType.getPointeeType());
+}
+
+// Convert a scalar Triton pointer type to the canonical memref descriptor used
+// by TritonTypeConverter. It is reconstructed only after a complete byte
+// address has crossed control flow, so it needs no dynamic layout.
+static FailureOr<MemRefType>
+getScalarPointerCarrierType(Type originalType,
+                            const TypeConverter &typeConverter) {
+  auto pointerType = dyn_cast<triton::PointerType>(originalType);
+  if (!pointerType || isa<ShapedType>(pointerType.getPointeeType()))
+    return failure();
+
+  Type convertedType = typeConverter.convertType(originalType);
+  if (!convertedType)
+    return failure();
+  auto memrefType = dyn_cast<MemRefType>(convertedType);
+  if (!memrefType)
+    return failure();
+
+  return memrefType;
+}
+
+static Type getIfResultCarrierType(Type originalType) {
+  if (isa<triton::PointerType>(originalType))
+    return IntegerType::get(originalType.getContext(), 64);
+
+  // This converter exists only to carry scalar pointers as integer addresses.
+  // Sibling results already have valid SSA types and must stay unchanged; using
+  // the global type converter here would turn a tensor mask into a memref even
+  // though its existing users still consume the tensor value.
+  return originalType;
+}
+
+// Materialize a no-op-compatible memref cast to the common carrier. Returning
+// failure for non-memref or incompatible values prevents the pointer transport
+// pattern from silently changing element, shape, rank, or memory-space types.
+static FailureOr<Value>
+castToMemRefCarrier(Value value, MemRefType carrierType, Location loc,
+                    ConversionPatternRewriter &rewriter) {
+  if (value.getType() == carrierType)
+    return value;
+
+  auto sourceType = dyn_cast<MemRefType>(value.getType());
+  if (!sourceType ||
+      !memref::CastOp::areCastCompatible(sourceType, carrierType))
+    return failure();
+
+  return rewriter.create<memref::CastOp>(loc, carrierType, value).getResult();
+}
+
+// Dialect conversion may adapt a lane-local pointer descriptor such as
+// `memref<1xT, strided<[1], offset: ?>>` to the canonical scalar-pointer
+// carrier `memref<?xT>`. Address materialization must inspect the original
+// descriptor: its dynamic layout offset is part of the represented address and
+// cannot be recovered from the shape-only carrier type.
+//
+// Only unwrap a one-to-one memref materialization that preserves rank, element
+// type, and memory space. Other unrealized casts may represent a real element
+// or address-space conversion and must remain visible to their converters.
+static Value unwrapPointerDescriptorMaterialization(Value value) {
+  auto materialization = value.getDefiningOp<UnrealizedConversionCastOp>();
+  if (!materialization || materialization.getInputs().size() != 1 ||
+      materialization.getOutputs().size() != 1)
+    return value;
+
+  Value source = materialization.getInputs().front();
+  auto sourceType = dyn_cast<MemRefType>(source.getType());
+  auto targetType = dyn_cast<MemRefType>(value.getType());
+  if (!sourceType || !targetType ||
+      sourceType.getRank() != targetType.getRank() ||
+      sourceType.getElementType() != targetType.getElementType() ||
+      sourceType.getMemorySpace() != targetType.getMemorySpace())
+    return value;
+
+  return source;
+}
+
+// Converts a memref descriptor into the complete byte address represented by
+// that descriptor. extract_aligned_pointer_as_index yields the aligned buffer
+// pointer; the descriptor's element offset must therefore be converted to
+// bytes and added explicitly before the address crosses control flow.
+static FailureOr<Value>
+materializePointerAddress(Value value, Location loc,
+                          ConversionPatternRewriter &rewriter) {
+  value = unwrapPointerDescriptorMaterialization(value);
+  auto memrefType = dyn_cast<MemRefType>(value.getType());
+  if (!memrefType)
+    return failure();
+  Type elementType = memrefType.getElementType();
+  if (!elementType.isIntOrFloat())
+    return failure();
+
+  // A canonical scalar PointerCast already stores the complete byte address
+  // that IntToPtr received. Extracting its aligned pointer immediately and
+  // casting it back to i64 is an identity round trip. In current failing
+  // kernels this chain also survives into InjectSync, so folding it keeps a
+  // redundant region-local form out of the backend. Only fold the canonical
+  // one-dimensional carrier; descriptors with a non-zero offset or a non-unit
+  // stride still require the general address materialization below.
+  if (auto pointerCast = value.getDefiningOp<hivm::PointerCastOp>();
+      pointerCast && pointerCast->hasAttr(kScalarPointerCarrierAttr)) {
+    auto [strides, offset] = memrefType.getStridesAndOffset();
+    if (pointerCast.getAddrs().size() == 1 && memrefType.getRank() == 1 &&
+        offset == 0 && strides.size() == 1 && strides.front() == 1) {
+      Value address = pointerCast.getAddrs().front();
+      if (address.getType().isInteger(64))
+        return address;
+      if (address.getType().isIndex())
+        return rewriter
+            .create<arith::IndexCastOp>(loc, rewriter.getI64Type(), address)
+            .getResult();
+    }
+  }
+
+  Value address =
+      rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(loc, value);
+  int64_t staticOffset = memrefType.getStridesAndOffset().second;
+  if (staticOffset != 0) {
+    Value elementOffset;
+    if (ShapedType::isDynamic(staticOffset)) {
+      elementOffset =
+          rewriter.create<memref::ExtractStridedMetadataOp>(loc, value)
+              .getOffset();
+    } else {
+      elementOffset =
+          rewriter.create<arith::ConstantIndexOp>(loc, staticOffset);
+    }
+
+    int64_t elementBytes = (elementType.getIntOrFloatBitWidth() + 7) / 8;
+    if (elementBytes != 1) {
+      Value scale = rewriter.create<arith::ConstantIndexOp>(loc, elementBytes);
+      elementOffset = rewriter.create<arith::MulIOp>(loc, elementOffset, scale);
+    }
+    address = rewriter.create<arith::AddIOp>(loc, address, elementOffset);
+  }
+  return rewriter
+      .create<arith::IndexCastOp>(loc, rewriter.getI64Type(), address)
+      .getResult();
+}
+
+LogicalResult
+IfConverter::matchAndRewrite(scf::IfOp op, OpAdaptor adaptor,
+                             ConversionPatternRewriter &rewriter) const {
+  const TypeConverter *typeConverter = getTypeConverter();
+  if (!typeConverter)
+    return rewriter.notifyMatchFailure(op, "requires a type converter");
+  if (!hasScalarPointerResult(op))
+    return failure();
+  if (!op->hasAttr(kScalarPointerCarrierBoundaryAttr))
+    return rewriter.notifyMatchFailure(
+        op, "scalar-pointer if is missing its carrier boundary marker");
+
+  SmallVector<Type> convertedResultTypes;
+  convertedResultTypes.reserve(op.getNumResults());
+  for (Type resultType : op.getResultTypes()) {
+    convertedResultTypes.push_back(getIfResultCarrierType(resultType));
+  }
+
+  auto newIfOp = rewriter.create<scf::IfOp>(op.getLoc(), convertedResultTypes,
+                                            adaptor.getCondition(),
+                                            /*withElseRegion=*/true);
+  newIfOp->setAttrs(op->getAttrs());
+  newIfOp->setAttr(kScalarPointerCarrierBoundaryAttr,
+                   UnitAttr::get(rewriter.getContext()));
+
+  // Move the original regions instead of cloning them. Besides preserving
+  // side effects, this keeps nested operations in the conversion driver's
+  // worklist so their operands are remapped normally.
+  rewriter.eraseBlock(newIfOp.thenBlock());
+  rewriter.eraseBlock(newIfOp.elseBlock());
+  rewriter.inlineRegionBefore(op.getThenRegion(), newIfOp.getThenRegion(),
+                              newIfOp.getThenRegion().end());
+  rewriter.inlineRegionBefore(op.getElseRegion(), newIfOp.getElseRegion(),
+                              newIfOp.getElseRegion().end());
+
+  SmallVector<Value> replacementResults;
+  replacementResults.reserve(op.getNumResults());
+  rewriter.setInsertionPointAfter(newIfOp);
+  for (auto [originalResultType, newResult] :
+       llvm::zip(op.getResultTypes(), newIfOp.getResults())) {
+    if (!isa<triton::PointerType>(originalResultType)) {
+      replacementResults.push_back(newResult);
+      continue;
+    }
+    FailureOr<MemRefType> resultType =
+        getScalarPointerCarrierType(originalResultType, *typeConverter);
+    if (failed(resultType))
+      return rewriter.notifyMatchFailure(
+          op, "could not reconstruct a scalar pointer result");
+    replacementResults.push_back(
+        createScalarPointerCast(rewriter, op.getLoc(), *resultType, newResult)
+            .getResult());
+  }
+  rewriter.replaceOp(op, replacementResults);
+  return success();
+}
+
+LogicalResult PointerSelectConverter::matchAndRewrite(
+    arith::SelectOp op, OpAdaptor adaptor,
+    ConversionPatternRewriter &rewriter) const {
+  if (!isScalarPointerSelect(op))
+    return failure();
+
+  const TypeConverter *typeConverter = getTypeConverter();
+  if (!typeConverter)
+    return rewriter.notifyMatchFailure(op, "requires a type converter");
+
+  FailureOr<MemRefType> resultType =
+      getScalarPointerCarrierType(op.getType(), *typeConverter);
+  if (failed(resultType))
+    return rewriter.notifyMatchFailure(
+        op, "could not build a scalar pointer memref carrier");
+
+  FailureOr<Value> trueAddress =
+      materializePointerAddress(adaptor.getTrueValue(), op.getLoc(), rewriter);
+  FailureOr<Value> falseAddress =
+      materializePointerAddress(adaptor.getFalseValue(), op.getLoc(), rewriter);
+  if (failed(trueAddress) || failed(falseAddress))
+    return rewriter.notifyMatchFailure(
+        op, "selected pointer values have no complete integer address");
+
+  auto selectedAddress = rewriter.create<arith::SelectOp>(
+      op.getLoc(), rewriter.getI64Type(), adaptor.getCondition(), *trueAddress,
+      *falseAddress);
+  selectedAddress->setAttrs(op->getAttrs());
+  auto pointerCast = createScalarPointerCast(rewriter, op.getLoc(), *resultType,
+                                             selectedAddress.getResult());
+  rewriter.replaceOp(op, pointerCast.getResult());
+  return success();
+}
+
 LogicalResult
 YieldConverter::matchAndRewrite(scf::YieldOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
-  rewriter.replaceOpWithNewOp<scf::YieldOp>(op, adaptor.getOperands());
+  auto parentIf = dyn_cast<scf::IfOp>(op->getParentOp());
+  if (!parentIf || !parentIf->hasAttr(kScalarPointerCarrierBoundaryAttr))
+    return failure();
+
+  SmallVector<Value> convertedOperands(adaptor.getOperands());
+
+  if (parentIf.getNumResults() != convertedOperands.size())
+    return rewriter.notifyMatchFailure(op, "yield/result arity does not match");
+
+  for (auto [index, targetType] : llvm::enumerate(parentIf.getResultTypes())) {
+    Value &operand = convertedOperands[index];
+    if (operand.getType() == targetType)
+      continue;
+
+    if (targetType.isInteger(64) && isa<MemRefType>(operand.getType())) {
+      FailureOr<Value> address =
+          materializePointerAddress(operand, op.getLoc(), rewriter);
+      if (failed(address))
+        return rewriter.notifyMatchFailure(
+            op, "could not materialize a yielded pointer address");
+      operand = *address;
+      continue;
+    }
+    auto targetMemrefType = dyn_cast<MemRefType>(targetType);
+    if (!targetMemrefType)
+      return rewriter.notifyMatchFailure(
+          op, "converted yield operand is incompatible with if result");
+
+    FailureOr<Value> casted =
+        castToMemRefCarrier(operand, targetMemrefType, op.getLoc(), rewriter);
+    if (failed(casted))
+      return rewriter.notifyMatchFailure(
+          op, "converted yield operand is incompatible with if result");
+    operand = *casted;
+  }
+
+  rewriter.replaceOpWithNewOp<scf::YieldOp>(op, convertedOperands);
   return success();
 }
 
@@ -167,8 +512,7 @@ LogicalResult
 AdvanceConverter::matchAndRewrite(triton::AdvanceOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
   llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteAdvanceOp(op, rewriter, known);
-  return success();
+  return BlockDataParser::rewriteAdvanceOp(op, rewriter, known);
 }
 
 // ToDo:
@@ -180,9 +524,8 @@ LogicalResult MakeTensorPtrConverter::matchAndRewrite(
     triton::MakeTensorPtrOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   llvm::SmallDenseMap<Value, BlockData> known;
-  BlockDataParser::rewriteMakeTensorPtrOp(op, adaptor.getBase(), rewriter,
-                                          known);
-  return success();
+  return BlockDataParser::rewriteMakeTensorPtrOp(op, adaptor.getBase(),
+                                                 rewriter, known);
 }
 
 LogicalResult PreciseDivConverter::matchAndRewrite(
@@ -397,8 +740,8 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
 }
 
 /*
- * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
- * on function arguments
+ * Move tt.bitcast to a previous location if tt.bitcast is not directly
+ * applied on function arguments
  */
 LogicalResult
 BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
@@ -465,6 +808,8 @@ BitcastCanonicalizer::matchAndRewrite(triton::BitcastOp bitcastOp,
                                                "Unknown bitcast pattern");
           });
   if (succeeded(newRes)) {
+    // Preserve debug location in case beforeCastOp is erased below.
+    insertDebugNop(beforeCastOp->getLoc(), rewriter);
     rewriter.replaceOp(bitcastOp, newRes.value());
     if (beforeCastOp->use_empty()) {
       rewriter.eraseOp(beforeCastOp);
@@ -485,8 +830,8 @@ FpToFpCanonicalizer::matchAndRewrite(triton::FpToFpOp op,
   auto roundingMode = op.getRounding();
   if (roundingMode.has_value() &&
       roundingMode.value() != triton::RoundingMode::RTNE) {
-    // Non-RTNE rounding modes (e.g., RTZ) should be handled by TritonToHFusion
-    // pass Return failure here so this pattern doesn't match
+    // Non-RTNE rounding modes (e.g., RTZ) should be handled by
+    // TritonToHFusion pass Return failure here so this pattern doesn't match
     return failure();
   }
 
@@ -830,6 +1175,7 @@ LogicalResult
 MakeRangeConverter::matchAndRewrite(triton::MakeRangeOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto type = cast<TensorType>(op.getResult().getType());
   auto shape = type.getShape();
   auto elementType = type.getElementType();
@@ -889,6 +1235,9 @@ LogicalResult
 SplatConverter::matchAndRewrite(triton::SplatOp op, OpAdaptor adaptor,
                                 ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  // These NOPs are transient debug anchors: DeduplicateDebugNopsPass collapses
+  // them to one per source line before codegen.
+  insertDebugNopForAllLines(loc, rewriter);
   auto shape = op.getType().getShape();
   auto init = rewriter.create<tensor::EmptyOp>(loc, shape,
                                                op.getType().getElementType());
@@ -912,8 +1261,8 @@ UnsplatConverter::matchAndRewrite(triton::UnsplatOp op, OpAdaptor adaptor,
   auto srcType = cast<RankedTensorType>(src.getType());
   auto shape = srcType.getShape();
 
-  // Create index constants for all dimensions (all zeros since we're extracting
-  // the single element)
+  // Create index constants for all dimensions (all zeros since we're
+  // extracting the single element)
   SmallVector<Value> indices;
   for (int64_t dim : shape) {
     indices.push_back(
@@ -932,6 +1281,7 @@ LogicalResult
 ReshapeConverter::matchAndRewrite(triton::ReshapeOp op, OpAdaptor adaptor,
                                   ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto src = op.getSrc();
   auto dst = op.getResult();
   Value shape = rewriter.create<arith::ConstantOp>(
@@ -947,6 +1297,7 @@ LogicalResult ExpandDimsConverter::matchAndRewrite(
     triton::ExpandDimsOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
+  insertDebugNop(loc, rewriter);
   auto src = op.getSrc();
   auto resShape = cast<ShapedType>(op.getResult().getType()).getShape();
   auto axis = op.getAxis();
@@ -1035,7 +1386,7 @@ BroadcastConverter::matchAndRewrite(triton::BroadcastOp op, OpAdaptor adaptor,
   RankedTensorType resultType = cast<RankedTensorType>(op.getType());
   auto elementType = resultType.getElementType();
   auto loc = op.getLoc();
-
+  insertDebugNopForAllLines(loc, rewriter);
   auto initEmpty =
       rewriter.create<tensor::EmptyOp>(loc, resultType.getShape(), elementType);
 
@@ -1225,7 +1576,7 @@ ReduceConverter::convertToTargetOp(triton::ReduceOp op,
     finalResult =
         rewriter.create<tensor::ExtractOp>(loc, constantType, finalResult);
   }
-
+  insertDebugNop(loc, rewriter);
   rewriter.replaceOp(op, finalResult);
   return success();
 }
@@ -1348,6 +1699,7 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     addReduceWithIndexAttr(*params, rewriter, linalgOp);
   }
 
+  insertDebugNop(loc, rewriter);
   if (isScalarReduce) {
     SmallVector<Value> reduceResults;
     for (auto i = 0; i < linalgOp.getResults().size() && i < elemTypes.size();
@@ -1418,14 +1770,13 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
       argTypes.push_back(rewriter.getI1Type());
     }
     auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
-    auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
-
-    SymbolTable symTab(moduleOp);
-    auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-    if (failed(maybePrintFuncNameAttr)) {
-      return op->emitError(
-          "failed to create a unique func name for device_print");
-    }
+    // Unique the name before creating the op: building a SymbolTable over a
+    // module that already holds a symbol of this name -- a kernel named
+    // "triton_cumsum", say -- trips SymbolTable's "uniquely named symbol
+    // operations" assertion before any renaming can happen.
+    auto uniqueName = generateUniqueFuncName(moduleOp, funcName);
+    auto funcOp =
+        rewriter.create<func::FuncOp>(loc, uniqueName.str(), libFnType);
     SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
 
     rewriter.setInsertionPoint(op);
@@ -1478,7 +1829,18 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     auto memrefType = MemRefType::get(shape, elementType);
     Value inputMemRef =
         rewriter.create<bufferization::ToBufferOp>(loc, memrefType, scanInput);
-    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, memrefType);
+
+    // Wrap scan logic in a scope with UB address space for the output buffer.
+    auto tensorResultType = RankedTensorType::get(shape, elementType);
+    auto scopeOp =
+        rewriter.create<scope::ScopeOp>(loc, TypeRange{tensorResultType});
+    scopeOp.getBodyRegion().emplaceBlock();
+    rewriter.setInsertionPointToEnd(&scopeOp.getBodyRegion().front());
+
+    auto ubMemRefType = MemRefType::get(
+        shape, elementType, nullptr,
+        rewriter.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB));
+    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, ubMemRefType);
 
     auto processDimension = [&](ArrayRef<Value> baseIdxsArray) {
       auto startInd = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
@@ -1575,13 +1937,17 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     createSimpleNestedLoops(rewriter, loc, outputMemRef, nonScanDims,
                             processDimension);
 
-    rewriter.setInsertionPointAfter(op);
-
     mlir::Type resultType = mlir::memref::getTensorTypeFromMemRefType(
         dyn_cast<mlir::MemRefType>(outputMemRef.getType()));
     Value outputTensor = rewriter.create<bufferization::ToTensorOp>(
         loc, resultType, outputMemRef, true);
-    rewriter.replaceOp(op, outputTensor);
+    rewriter.create<scope::ReturnOp>(loc, ValueRange{outputTensor});
+
+    scopeOp->setAttr(hivm::TCoreTypeAttr::name,
+                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
+                                              hivm::TCoreType::VECTOR));
+
+    rewriter.replaceOp(op, scopeOp.getResult(0));
     return success();
   }
 }
@@ -1610,8 +1976,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     inputTensTypes.push_back(tensorTy);
   }
 
-  // 3. Validate all input tensors have the same shape (scan operation requires
-  // matching input dimensions)
+  // 3. Validate all input tensors have the same shape (scan operation
+  // requires matching input dimensions)
   auto baseShape = inputTensTypes[0].getShape();
   int rank = baseShape.size();
   int axis = op.getAxis();
@@ -1661,8 +2027,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
       firstIdx.push_back(startInd);
     }
 
-    // 5.1 Process the first element: directly copy multiple inputs to multiple
-    // outputs (initialize cumulative results)
+    // 5.1 Process the first element: directly copy multiple inputs to
+    // multiple outputs (initialize cumulative results)
     for (size_t i = 0; i < inputMemRefs.size(); ++i) {
       Value firstVal =
           rewriter.create<memref::LoadOp>(loc, inputMemRefs[i], firstIdx);
@@ -1688,8 +2054,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     Value k = forOp.getInductionVar();
 
     if (reverse) {
-      // Reverse scanning: Convert the forward loop index to the actual reverse
-      // index. (axis_size - 1) - k
+      // Reverse scanning: Convert the forward loop index to the actual
+      // reverse index. (axis_size - 1) - k
       Value axisSizeVal =
           rewriter.create<arith::ConstantIndexOp>(loc, baseShape[axis]);
       Value axisSizeMinusOne =
@@ -1736,8 +2102,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
       return;
     }
     Block &combineBlock = combineRegion.front();
-    // Validate that the number of reduction region arguments matches (number of
-    // previous results + number of current elements)
+    // Validate that the number of reduction region arguments matches (number
+    // of previous results + number of current elements)
     if (combineBlock.getNumArguments() != 2 * inputMemRefs.size()) {
       op->emitError("Combine region arguments mismatch with input count");
       loopResult = failure();
@@ -1788,8 +2154,8 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     return failure();
   }
 
-  // 7. Convert multiple output MemRefs back to tensors and replace the original
-  // tt.scan operation
+  // 7. Convert multiple output MemRefs back to tensors and replace the
+  // original tt.scan operation
   llvm::SmallVector<Value> outputTensors;
   for (auto outputMemRef : outputMemRefs) {
     mlir::Type resultType = mlir::memref::getTensorTypeFromMemRefType(
@@ -1829,13 +2195,13 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
     }
 
     // extern libdevice ops -> hivm.hir.custom
-    static constexpr llvm::StringLiteral simtLibdeviceSuffixes[] = {
+    static constexpr llvm::StringLiteral libdeviceSuffixes[] = {
         "_fp32", "_fp16", "_bf16", "_i32", "_i64", "_u32", "_u64"};
-    bool isSimtLibdeviceOp =
-        llvm::any_of(simtLibdeviceSuffixes, [&](llvm::StringRef suffix) {
+    bool isLibdeviceOp =
+        llvm::any_of(libdeviceSuffixes, [&](llvm::StringRef suffix) {
           return op.getSymbol().ends_with(suffix);
         });
-    if (isSimtLibdeviceOp) {
+    if (isLibdeviceOp) {
       auto originalTensorType = isDstScalar
                                     ? RankedTensorType::get({1}, dstElemTy)
                                     : cast<RankedTensorType>(dstTy);
@@ -1943,6 +2309,7 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
       customOp->setAttr("symbol",
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
+      customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();
@@ -2267,14 +2634,11 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
     inputTypes.push_back(arg.getType());
   }
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_print" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_print");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   auto prefixAttr = op.getPrefixAttr();
   funcOp->setAttr(prefixAttrName, prefixAttr);
@@ -2292,13 +2656,12 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
     triton::AssertOp op, OpAdaptor adaptor,
     mlir::ConversionPatternRewriter &rewriter) const {
   auto msgAttr = op.getMessageAttr();
-  // Filter out automatically inserted assert ops
-  if (auto strAttr = mlir::dyn_cast<mlir::StringAttr>(msgAttr)) {
-    llvm::StringRef msg = strAttr.getValue();
-    if (msg.contains("overflow detected for operation")) {
-      rewriter.eraseOp(op);
-      return success();
-    }
+  // The frontend marks only sanitize_overflow assertions.  A user may choose
+  // the same text for tl.device_assert, so message matching is not a safe
+  // provenance test here or in the graph rewrite.
+  if (op->hasAttr("tt.auto_overflow_assert")) {
+    rewriter.eraseOp(op);
+    return success();
   }
 
   auto moduleOp = op->getParentOfType<ModuleOp>();
@@ -2307,14 +2670,11 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
   auto conditionType = op.getCondition().getType();
 
   auto libFnType = rewriter.getFunctionType({conditionType}, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_assert" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  mlir::SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_assert");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   funcOp->setAttr(msgAttrName, msgAttr);
 
@@ -2335,7 +2695,20 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   auto dstType = cast<RankedTensorType>(op.getType());
   auto elemTy = dstType.getElementType();
   auto inputPrec = op.getInputPrecision();
-
+  // Ascend does not support tf32;  map it to hf32 which provides similar
+  // functionality.HF32 is only valid for fp32 x fp32 inputs; for other
+  // dtypes, fall back to ieee.
+  if (inputPrec == InputPrecision::TF32) {
+    op->emitWarning("Ascend does not support tf32; map it to hf32.");
+    inputPrec = InputPrecision::HF32;
+  }
+  if (inputPrec == InputPrecision::HF32) {
+    auto opaElemTy = cast<RankedTensorType>(opa.getType()).getElementType();
+    auto opbElemTy = cast<RankedTensorType>(opb.getType()).getElementType();
+    if (!opaElemTy.isF32() || !opbElemTy.isF32()) {
+      inputPrec = InputPrecision::IEEE;
+    }
+  }
   auto createOp = [&](auto &&rewriter, ValueRange operands,
                       ValueRange results) -> Operation * {
     if (dstType.getRank() == 2)
@@ -2851,19 +3224,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   if (lhsScaleTy.getElementType().isIntOrIndex()) {
     RankedTensorType lhsScaleI16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), i16Ty);
-    Value lhsScaleI16 =
-        rewriter.create<arith::ExtSIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
-
-    Value lhsShift127Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
-    Value lhsShift127 =
-        rewriter
-            .create<linalg::FillOp>(op.getLoc(), ValueRange{c127},
-                                    ValueRange{lhsShift127Empty})
-            .getResult(0);
-
-    Value lhsScaleI16Add127 =
-        rewriter.create<arith::AddIOp>(op.getLoc(), lhsScaleI16, lhsShift127);
+    Value lhsScaleI16;
+    lhsScaleI16 =
+        rewriter.create<arith::ExtUIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
 
     Value lhsShift7Empty = rewriter.create<tensor::EmptyOp>(
         op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
@@ -2871,8 +3234,8 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                           .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
                                                   ValueRange{lhsShift7Empty})
                           .getResult(0);
-    Value lhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
-        op.getLoc(), lhsScaleI16Add127, lhsShift7);
+    Value lhsScaleI16Shifted =
+        rewriter.create<arith::ShLIOp>(op.getLoc(), lhsScaleI16, lhsShift7);
 
     RankedTensorType lhsScaleBF16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), bf16Ty);
@@ -2914,26 +3277,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         DenseI32ArrayAttr::get(rewriter.getContext(), ArrayRef<int32_t>{1, 0}));
     RankedTensorType rhsScaleI16Ty =
         RankedTensorType::get(transposedShape, i16Ty);
-    Value rhsScaleI16 = rewriter.create<arith::ExtSIOp>(
-        op.getLoc(), rhsScaleI16Ty, transposedRhsScale);
-    Value rhsShift127Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
-    Value rhsShift127 =
-        rewriter
-            .create<linalg::FillOp>(op.getLoc(), ValueRange{c127},
-                                    ValueRange{rhsShift127Empty})
-            .getResult(0);
+    Value rhsScaleI16;
+    rhsScaleI16 = rewriter.create<arith::ExtUIOp>(op.getLoc(), rhsScaleI16Ty,
+                                                  transposedRhsScale);
 
-    Value rhsScaleI16Add127 =
-        rewriter.create<arith::AddIOp>(op.getLoc(), rhsScaleI16, rhsShift127);
     Value rhsShift7Empty = rewriter.create<tensor::EmptyOp>(
         op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
     Value rhsShift7 = rewriter
                           .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
                                                   ValueRange{rhsShift7Empty})
                           .getResult(0);
-    Value rhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
-        op.getLoc(), rhsScaleI16Add127, rhsShift7);
+    Value rhsScaleI16Shifted =
+        rewriter.create<arith::ShLIOp>(op.getLoc(), rhsScaleI16, rhsShift7);
 
     RankedTensorType rhsScaleBF16Ty =
         RankedTensorType::get(transposedShape, bf16Ty);
@@ -3119,26 +3474,41 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
 }
 
 LogicalResult
+IntToPtrConverter::matchAndRewrite(triton::IntToPtrOp op, OpAdaptor adaptor,
+                                   ConversionPatternRewriter &rewriter) const {
+  auto pointerType = dyn_cast<triton::PointerType>(op.getType());
+  if (!pointerType || isa<ShapedType>(pointerType.getPointeeType()))
+    return rewriter.notifyMatchFailure(
+        op, "only scalar pointer reconstruction is supported");
+
+  const TypeConverter *typeConverter = getTypeConverter();
+  if (!typeConverter)
+    return rewriter.notifyMatchFailure(op, "requires a type converter");
+  auto resultType =
+      dyn_cast<MemRefType>(typeConverter->convertType(op.getType()));
+  if (!resultType)
+    return rewriter.notifyMatchFailure(
+        op, "pointer result did not convert to a memref type");
+
+  // Rebuild the memref only after the integer address has crossed control
+  // flow. Selecting an i64 address is a pure SSA operation and avoids the
+  // backend interpreting a memref-valued merge as a GM-to-UB copy.
+  auto pointerCast = createScalarPointerCast(rewriter, op.getLoc(), resultType,
+                                             adaptor.getSrc());
+  rewriter.replaceOp(op, pointerCast.getResult());
+  return success();
+}
+
+LogicalResult
 PtrToIntConverter::matchAndRewrite(triton::PtrToIntOp op, OpAdaptor adaptor,
                                    ConversionPatternRewriter &rewriter) const {
-  auto loc = op.getLoc();
-  Value ptr = adaptor.getSrc();
-
-  if (!mlir::isa<MemRefType>(ptr.getType())) {
+  FailureOr<Value> address =
+      materializePointerAddress(adaptor.getSrc(), op.getLoc(), rewriter);
+  if (failed(address)) {
     return rewriter.notifyMatchFailure(op, "input is not a memref type");
   }
 
-  auto resultType = op.getType();
-
-  // memref.extract_aligned_pointer_as_index is used to obtain the integer
-  // representation of the base address.
-  auto ptrToIndexOp =
-      rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(loc, ptr);
-
-  Value intResult =
-      rewriter.create<arith::IndexCastOp>(loc, resultType, ptrToIndexOp);
-
-  rewriter.replaceOp(op, intResult);
+  rewriter.replaceOp(op, *address);
   return success();
 }
 
@@ -3292,13 +3662,14 @@ LogicalResult ScatterUbToOutConverter::matchAndRewrite(
   return success();
 }
 
+// Derive the contiguous burst length of an unstructured access from the
+// trailing structured dimensions, mirroring the SIMD/SIMT fusion contract.
 static int64_t computeUnstructuredBurstLength(ArrayRef<int64_t> shape,
                                               ArrayRef<int64_t> dimensions) {
   int64_t firstStructuredDimension = 0;
-  if (!dimensions.empty()) {
+  if (!dimensions.empty())
     firstStructuredDimension =
         *std::max_element(dimensions.begin(), dimensions.end()) + 1;
-  }
 
   int64_t burstLength = 1;
   for (int64_t i = firstStructuredDimension;
@@ -3314,62 +3685,90 @@ LogicalResult UnstructuredLoadConverter::matchAndRewrite(
     triton::ascend::UnstructuredLoadOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
-  Value base = adaptor.getBase();
-  Value indices = adaptor.getIndices();
-  Value mask = adaptor.getMask();
-  Value other = adaptor.getOther();
 
-  if (!isa<MemRefType>(base.getType()))
-    return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
+  auto src = adaptor.getBase();
+  auto offsets = op.getIndices();
+  auto mask = op.getMask();
+  auto other = op.getOther();
+  auto res = op.getResult();
+  auto resTy = res.getType();
 
-  auto resultType = cast<RankedTensorType>(op.getResult().getType());
+  // SIMD/SIMT mixed mode fuses the unstructured access into a gather whose
+  // burst length is derived from the unstructured dimensions.
   if (compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
+    if (!isa<MemRefType>(src.getType()))
+      return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
+    auto resultType = cast<RankedTensorType>(resTy);
     int64_t burstLength = computeUnstructuredBurstLength(
         resultType.getShape(), op.getUnstructuredDims());
     Value burstLengthValue =
         rewriter.create<arith::ConstantIntOp>(loc, burstLength, 32);
     Value destination = rewriter.create<tensor::EmptyOp>(
         loc, resultType.getShape(), resultType.getElementType());
-
     auto gather = rewriter.create<hfusion::GatherLoadOp>(
-        loc, base, indices, burstLengthValue, mask, other, destination,
+        loc, src, offsets, burstLengthValue, mask, other, destination,
         hfusion::CacheModifierAttr{}, hfusion::EvictionPolicyAttr{},
         op.getIsVolatileAttr());
     rewriter.replaceOp(op, gather.getResult());
     return success();
   }
 
-  if (compileModeFlag != triton::ascend::CompileMode::SimdSimtTemplate) {
+  if (compileModeFlag != triton::ascend::CompileMode::SimdSimtTemplate)
     return rewriter.notifyMatchFailure(
         op, "unstructured load requires a SIMD/SIMT mixed compile mode");
+
+  // The adaptor may already expose the dynamic carrier created by
+  // IntToPtrConverter.  Re-materialize that narrow provenance before the
+  // MemRefType fast path, otherwise the indirect helper receives memref<?xT>
+  // instead of the required one-element identity descriptor.
+  if (isIntToPtrBasedScalarPointer(op.getBase()) ||
+      (op.getIsVolatile() && isVolatileBitcastScalarPointer(op.getBase()))) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getBase(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize int_to_ptr unstructured-load source");
+    src = *materialized;
+  } else if (!isa<MemRefType>(src.getType())) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getBase(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize unstructured-load source as a memref");
+    src = *materialized;
+  }
+  // convert !tt.ptr<f32> to memref<?xf32>
+  auto srcTy = dyn_cast<MemRefType>(src.getType());
+  if (!srcTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
   }
 
-  // Keep the existing SIMT template ABI while using UnstructuredLoadOp as the
-  // single canonical intermediate operation.
   auto moduleOp = op->getParentOfType<ModuleOp>();
   rewriter.setInsertionPoint(moduleOp.getBody(),
                              std::prev(moduleOp.getBody()->end()));
   auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
 
-  SmallVector<Type> inputTypes({base.getType(), indices.getType()});
+  SmallVector<Type> inputTypes({srcTy, offsets.getType()});
   if (mask)
     inputTypes.push_back(mask.getType());
   if (other)
     inputTypes.push_back(other.getType());
-  auto libFnType = rewriter.getFunctionType(inputTypes, {resultType});
+  auto libFnType = rewriter.getFunctionType(inputTypes, {resTy});
   auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   auto isVolatileAttr = rewriter.getBoolAttr(op.getIsVolatile());
   funcOp->setAttr("isVolatile", isVolatileAttr);
 
   rewriter.setInsertionPoint(op);
-  SmallVector<Value> inputVals({base, indices});
+  SmallVector<Value> inputVals({src, offsets});
   if (mask)
     inputVals.push_back(mask);
   if (other)
     inputVals.push_back(other);
-  auto callOp = rewriter.create<func::CallOp>(
-      loc, funcOp.getSymNameAttr(), TypeRange({resultType}), inputVals);
+  auto callOp = rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(),
+                                              TypeRange({resTy}), inputVals);
   callOp->setAttr("isVolatile", isVolatileAttr);
   rewriter.replaceOp(op, callOp);
   return success();
@@ -3468,31 +3867,57 @@ LogicalResult UnstructuredStoreConverter::matchAndRewrite(
     triton::ascend::UnstructuredStoreOp op, OpAdaptor adaptor,
     ConversionPatternRewriter &rewriter) const {
   auto loc = op.getLoc();
-  Value base = adaptor.getBase();
-  Value indices = adaptor.getIndices();
-  Value value = adaptor.getValue();
-  Value mask = adaptor.getMask();
 
-  if (!isa<MemRefType>(base.getType()))
-    return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
+  auto src = adaptor.getBase();
+  auto offsets = op.getIndices();
+  auto value = op.getValue();
+  auto mask = op.getMask();
 
-  auto valueType = cast<RankedTensorType>(value.getType());
+  // SIMD/SIMT mixed mode fuses the unstructured access into a scatter whose
+  // burst length is derived from the unstructured dimensions.
   if (compileModeFlag == triton::ascend::CompileMode::SimdSimt) {
+    if (!isa<MemRefType>(src.getType()))
+      return rewriter.notifyMatchFailure(op, "expected MemRefType for base");
+    auto valueType = cast<RankedTensorType>(value.getType());
     int64_t burstLength = computeUnstructuredBurstLength(
         valueType.getShape(), op.getUnstructuredDims());
     Value burstLengthValue =
         rewriter.create<arith::ConstantIntOp>(loc, burstLength, 32);
-
     rewriter.create<hfusion::ScatterStoreOp>(
-        loc, TypeRange{}, indices, value, burstLengthValue, mask, base,
+        loc, TypeRange{}, offsets, value, burstLengthValue, mask, src,
         hfusion::CacheModifierAttr{}, hfusion::EvictionPolicyAttr{});
     rewriter.eraseOp(op);
     return success();
   }
 
-  if (compileModeFlag != triton::ascend::CompileMode::SimdSimtTemplate) {
+  if (compileModeFlag != triton::ascend::CompileMode::SimdSimtTemplate)
     return rewriter.notifyMatchFailure(
         op, "unstructured store requires a SIMD/SIMT mixed compile mode");
+
+  // Keep the unstructured-store ABI consistent with unstructured-load for a
+  // scalar address reconstructed by tt.int_to_ptr.  Ordinary dynamic memrefs
+  // retain the existing direct path.
+  if (isIntToPtrBasedScalarPointer(op.getBase())) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getBase(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize int_to_ptr unstructured-store source");
+    src = *materialized;
+  } else if (!isa<MemRefType>(src.getType())) {
+    llvm::SmallDenseMap<Value, BlockData> known;
+    FailureOr<Value> materialized =
+        BlockDataParser::materializePointer(op.getBase(), rewriter, known);
+    if (failed(materialized))
+      return rewriter.notifyMatchFailure(
+          op, "unable to materialize unstructured-store source as a memref");
+    src = *materialized;
+  }
+  // convert !tt.ptr<f32> to memref<?xf32>
+  auto srcTy = dyn_cast<MemRefType>(src.getType());
+  if (!srcTy) {
+    return rewriter.notifyMatchFailure(op, "expected MemRefType for src");
   }
 
   auto moduleOp = op->getParentOfType<ModuleOp>();
@@ -3500,16 +3925,16 @@ LogicalResult UnstructuredStoreConverter::matchAndRewrite(
                              std::prev(moduleOp.getBody()->end()));
   auto funcName = generateUniqueFuncName(moduleOp, funcNameBase);
 
-  SmallVector<Type> inputTypes(
-      {base.getType(), indices.getType(), value.getType()});
+  SmallVector<Type> inputTypes({srcTy, offsets.getType(), value.getType()});
   if (mask)
     inputTypes.push_back(mask.getType());
+
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
   auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
 
   rewriter.setInsertionPoint(op);
-  SmallVector<Value> inputVals({base, indices, value});
+  SmallVector<Value> inputVals({src, offsets, value});
   if (mask)
     inputVals.push_back(mask);
   rewriter.create<func::CallOp>(loc, funcOp.getSymNameAttr(), TypeRange({}),
@@ -3536,6 +3961,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
 
   // Get result type
   auto resultTensorType = cast<RankedTensorType>(op.getResult().getType());
+  static constexpr llvm::StringLiteral wasBoolToInt8AttrName =
+      "was_bool_to_int8";
+  bool wasBoolToInt8 = op->hasAttr(wasBoolToInt8AttrName);
 
   auto elemType = resultTensorType.getElementType();
   auto resultShape = resultTensorType.getShape();
@@ -3712,6 +4140,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
     // For index_select on the trailing axis, mark as discrete memory access
     // This degrades to scalar read/write handling to avoid alignment issues
     auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
     copyOp->setAttr(ConverterUtils::discreteAttrName, rewriter.getUnitAttr());
   } else {
     // For index_select on non-trailing axes, add stride alignment annotation
@@ -3724,7 +4154,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
                        rewriter.getDenseI32ArrayAttr({32}));
 
     // Copy from source to destination
-    rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
   }
 
   // Restore insertion point
@@ -3733,6 +4165,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
   // Convert memref to tensor
   auto resultTensor = rewriter.create<bufferization::ToTensorOp>(
       loc, resultTensorType, outputBuffer, true, true);
+  if (wasBoolToInt8)
+    resultTensor->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
 
   // Mark as index_select_simd
   resultTensor->setAttr("index_select_simd", rewriter.getUnitAttr());
@@ -3759,6 +4193,7 @@ HistogramConverter::matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
 
   auto loc = op.getLoc();
   Value input = adaptor.getSrc();
+  Value mask = adaptor.getMask();
   auto resultType = dyn_cast<RankedTensorType>(op.getResult().getType());
   if (!resultType || !resultType.hasStaticShape()) {
     return rewriter.notifyMatchFailure(op,
@@ -3777,10 +4212,14 @@ HistogramConverter::matchAndRewrite(triton::HistogramOp op, OpAdaptor adaptor,
 
   Value numBinsVal = rewriter.create<arith::ConstantIntOp>(loc, numBins, 64);
 
+  SmallVector<Value, 3> inputs = {input, numBinsVal};
+  if (mask) {
+    inputs.push_back(mask);
+  }
+
   auto customOp = rewriter.create<hivm::CustomOp>(
-      loc, TypeRange{resultType}, "__builtin_histogram",
-      ValueRange{input, numBinsVal}, ValueRange{fillOp.getResult(0)},
-      ValueRange{});
+      loc, TypeRange{resultType}, "__builtin_histogram", ValueRange{inputs},
+      ValueRange{fillOp.getResult(0)}, ValueRange{});
 
   customOp->setAttr("symbol", rewriter.getStringAttr("__builtin_histogram"));
   customOp->setAttr(

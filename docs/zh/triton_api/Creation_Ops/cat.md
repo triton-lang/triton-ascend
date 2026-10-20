@@ -16,7 +16,7 @@ triton.language.cat(input, other, can_reorder=False, _semantic=None)
 | ------------- | ----------------- | ---------------------------- |
 | `input`           | `Tensor`               | 拼接的第一个tensor |
 | `other`            | `Tensor`               | 拼接的第二个tensor |
-| `can_reorder`            | `Bool`               | 重新排序 – 编译器提示。如果为真，编译器在连接输入时允许重新排序元素。仅支持can_reorder=True。  |
+| `can_reorder`            | `Bool`               | 编译器提示 - 当为True时，允许编译器在连接输入时重新排序元素以优化性能。  |
 | `_semantic`            | `Optional[str]`               | 保留参数，暂不支持外部调用 |
 
 返回值：

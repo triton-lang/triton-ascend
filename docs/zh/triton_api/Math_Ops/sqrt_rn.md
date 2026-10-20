@@ -30,7 +30,7 @@ triton.language.sqrt_rn(x, _semantic=None)
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
 结论：Ascend 比 GPU 多了fp16，bf16的支持。
-torch_npu支持u8。
+torch_npu支持uint8。
 
 #### 2.2.2 Shape 支持
 

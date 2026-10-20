@@ -96,10 +96,10 @@ private:
   //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
   //   - maxX: the x value corresponding to maxRequiredBuffers
   //   - returns {-1, -1} on error
-  std::pair<int, int> calculateCrossDepsFactor(
-      scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-      DenseMap<Operation *, int> &ifOpIndex,
-      DenseMap<Operation *, SmallVector<Operation *>> &crossDeps);
+  std::pair<int, int>
+  calculateCrossDepsFactor(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
+                           DenseMap<Operation *, int> &ifOpIndex,
+                           ConsumerProducerMap &crossDeps);
 
   // Calculate factor based on iteration dependencies (tensor iter_args
   // dependencies) For iter deps: consumer and producer are IfOps within the

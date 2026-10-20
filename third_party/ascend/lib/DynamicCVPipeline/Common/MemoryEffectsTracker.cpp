@@ -34,9 +34,11 @@
 // Unknown ops (no SideEffect interface) act as full barriers: they depend on
 // all prior writers/readers and become the sole writer for every slot.
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
+
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -52,6 +54,12 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
+
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "DynamicCVPipeline/Common/SyncWall.h"
+#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 
 using namespace mlir;
 static constexpr const char *DEBUG_TYPE = "memory-effects-tracker";
@@ -115,7 +123,8 @@ remapEffectValue(const MemoryEffects::EffectInstance &effect, Value value) {
 
 bool isKnownNoMemoryEffectCall(Operation *op) {
   auto callOp = dyn_cast<func::CallOp>(op);
-  return callOp && callOp.getCallee().starts_with("triton_indirect_load");
+  return callOp && (callOp.getCallee().starts_with("triton_indirect_load") ||
+                    callOp.getCallee().starts_with("triton_stride_load"));
 }
 
 bool shouldAnalyzeAsLeaf(Operation *op) {
@@ -309,8 +318,7 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
   }
 
   if (auto allocTensorOp = dyn_cast<bufferization::AllocTensorOp>(op)) {
-    MemoryEffects::EffectInstance scopedAlloc(MemoryEffects::Allocate::get());
-    return {remapEffectValue(scopedAlloc, allocTensorOp.getResult())};
+    return {};
   }
 
   std::optional<SmallVector<MemoryEffects::EffectInstance>> raw;
@@ -348,9 +356,13 @@ MemoryDependenceGraph::collectOuterEffects(Operation *op, bool &unknown,
 AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
   auto lhsSource = getViewSource(lhs);
   auto rhsSource = getViewSource(rhs);
+  if (!lhsSource) {
+    lhsSource = lhs;
+  }
   if (!rhsSource) {
     rhsSource = rhs;
   }
+
   auto isFuncEntryArg = [](const Value &val) -> bool {
     auto arg = llvm::dyn_cast<BlockArgument>(val);
     if (!arg) {
@@ -360,8 +372,7 @@ AliasResult MemoryDependenceGraph::queryAlias(Value lhs, Value rhs) {
     return block->isEntryBlock() &&
            llvm::isa<func::FuncOp>(block->getParentOp());
   };
-  if (isFuncEntryArg(getViewSource(lhs)) &&
-      isFuncEntryArg(getViewSource(rhs))) {
+  if (isFuncEntryArg(lhsSource) && isFuncEntryArg(rhsSource)) {
     return lhs == rhs ? AliasResult::MustAlias : AliasResult::NoAlias;
   }
   return aa.alias(lhsSource, rhsSource);
@@ -581,21 +592,62 @@ void MemoryDependenceGraph::restoreSnapshot(Snapshot &&snap) {
   }
 }
 
+SyncWall &MemoryDependenceGraph::getWall(Block *block) {
+  auto it = walls.find(block);
+  if (it == walls.end()) {
+    it = walls.try_emplace(block, block).first;
+  }
+  return it->second;
+}
+
+bool MemoryDependenceGraph::isSyncSeparated(Operation *a, Operation *b) {
+  if (!a || !b) {
+    return false;
+  }
+
+  if (Block *block = a->getBlock()) {
+    if (Operation *bAnc = CVPipeline::getAncestorInBlock(b, block)) {
+      return getWall(block).hasSyncBetween(a, bAnc);
+    }
+  }
+
+  if (Block *block = b->getBlock()) {
+    if (Operation *aAnc = CVPipeline::getAncestorInBlock(a, block)) {
+      return getWall(block).hasSyncBetween(b, aAnc);
+    }
+  }
+  return false;
+}
+
 void MemoryDependenceGraph::recordEdges(Operation *op,
                                         ArrayRef<Operation *> defs,
                                         ArrayRef<Operation *> preds) {
-  if (!defs.empty()) {
+  // Drop memory edges that cross a synchronization op
+  SmallVector<Operation *> syncFreeDefs;
+  for (Operation *p : defs) {
+    if (!isSyncSeparated(op, p)) {
+      syncFreeDefs.push_back(p);
+    }
+  }
+  SmallVector<Operation *> syncFreePreds;
+  for (Operation *p : preds) {
+    if (!isSyncSeparated(op, p)) {
+      syncFreePreds.push_back(p);
+    }
+  }
+
+  if (!syncFreeDefs.empty()) {
     auto &defList = memDefs[op];
-    defList.assign(defs.begin(), defs.end());
-    for (Operation *p : defs) {
+    defList.assign(syncFreeDefs.begin(), syncFreeDefs.end());
+    for (Operation *p : syncFreeDefs) {
       memUsers[p].push_back(op);
     }
   }
 
-  if (!preds.empty()) {
+  if (!syncFreePreds.empty()) {
     auto &execBeforeList = execBefore[op];
-    execBeforeList.assign(preds.begin(), preds.end());
-    for (Operation *p : preds) {
+    execBeforeList.assign(syncFreePreds.begin(), syncFreePreds.end());
+    for (Operation *p : syncFreePreds) {
       execAfter[p].push_back(op);
     }
   }

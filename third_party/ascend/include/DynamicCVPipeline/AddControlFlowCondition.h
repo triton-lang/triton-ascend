@@ -44,6 +44,20 @@ struct TensorIterArgIfOpRelation {
   llvm::SmallVector<scf::IfOp> consumers;
 };
 
+// One consumer op may appear in multiple groups.
+// Each inner SmallVector is the producers of one group this consumer belongs
+// to.
+using ConsumerProducerMap =
+    llvm::DenseMap<Operation *,
+                   llvm::SmallVector<llvm::SmallVector<Operation *>>>;
+
+inline int countProducerGroups(const ConsumerProducerMap &map) {
+  int numProducerGroups = 0;
+  for (const auto &entry : map)
+    numProducerGroups += static_cast<int>(entry.second.size());
+  return numProducerGroups;
+}
+
 // Variables to control when an ifOp is both producer and consumer of a tensor
 // iter_args
 struct TensorIterArgIfOpVars {
@@ -52,6 +66,9 @@ struct TensorIterArgIfOpVars {
   // The variables that need to be controlled as a consumer
   llvm::SmallVector<Value> consumerVars;
 };
+
+// Kind of dependency edge between two ifOps in ifBlockDAG.
+enum class IfBlockDepKind : uint8_t { CrossCore = 0, IntraCore = 1 };
 
 // Per scf.while block-arg map: whileOp -> block_id -> (new_arg_idx ->
 // old_arg_idx).
@@ -64,7 +81,7 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<Operation *, int> blockCounterNums;
   llvm::DenseMap<Operation *, SmallVector<int>> innerDepConds;
 
-  llvm::DenseMap<Operation *, SmallVector<Operation *>> crossCoreDependentMap;
+  ConsumerProducerMap crossCoreDependentMap;
   llvm::DenseMap<Operation *,
                  llvm::DenseMap<Operation *, SmallVector<Operation *>>>
       intraCoreDependentMap;
@@ -81,8 +98,10 @@ struct ControlFlowConditionInfo {
   // unique counter value for each ifblock scf.for only.
   llvm::DenseMap<scf::IfOp, Value> cntArgs;
 
-  // DAG for if block cross-core dependencies
-  llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> ifBlockCrossCoreDAG;
+  // DAG for if block dependencies.
+  llvm::DenseMap<scf::IfOp,
+                 llvm::SmallVector<std::pair<scf::IfOp, IfBlockDepKind>>>
+      ifBlockDAG;
   llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
 
   // Buffer counts for flowOpt condition

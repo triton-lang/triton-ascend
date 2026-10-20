@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/shape_manipulation_ops.rst

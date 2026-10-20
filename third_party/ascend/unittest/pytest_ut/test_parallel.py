@@ -25,7 +25,7 @@ from torch.testing import assert_close
 
 import triton
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 
 
 @triton.jit
@@ -36,8 +36,8 @@ def parallel_kernel(x_ptr, out_ptr, M: tl.constexpr, N: tl.constexpr):
     block = tl.load(x_ptr + offs_m[:, None] * N + offs_n[None, :])
 
     SUB_M: tl.constexpr = M // 2
-    for s in extension.parallel(0, 2):
-        sub = extension.extract_slice(block, (s * SUB_M, 0), (SUB_M, N), (1, 1))
+    for s in al.parallel(0, 2):
+        sub = al.extract_slice(block, (s * SUB_M, 0), (SUB_M, N), (1, 1))
         sub = sub * 2.0
         offs_sub_m = s * SUB_M + tl.arange(0, SUB_M)
         out_ptrs = out_ptr + offs_sub_m[:, None] * N + offs_n[None, :]

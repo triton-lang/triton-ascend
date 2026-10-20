@@ -67,8 +67,7 @@ def test_lgamma_case(param_list):
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
-def test_all_blocks_parallel(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_all_blocks_parallel(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x = test_common.generate_tensor(shape, dtype).npu()
 
@@ -87,15 +86,13 @@ def test_all_blocks_parallel(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_lgamma[ncore, 1, 1](x, y_cal, x.numel(), xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")
 
 
 @pytest.mark.skip(reason="Wait for AscendNPU-IR support")
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 2048, 8), 2, 32768, 512],
 ])
-def test_auto_blockify(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_auto_blockify(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x = test_common.generate_tensor(shape, dtype).npu()
 
@@ -114,4 +111,3 @@ def test_auto_blockify(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_lgamma[ncore, 1, 1](x, y_cal, x.numel(), xblock, xblock_sub, auto_blockify_size=ncore)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")

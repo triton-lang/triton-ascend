@@ -20,7 +20,7 @@ GPU kernels often use a large logical grid and rely on the runtime and hardware 
 
 - Prefer 1D grids. NPU 2D adaptations are merged into 1D; for example, `(20,)` and `(4, 5)` produce equivalent execution results.
 - For Vector-only operators, organize concurrent tasks around the Vector Core count. For operators containing `tl.dot`, organize concurrent tasks around the AI Core count.
-- If the logical grid is much larger than the physical core count, consider letting each program process multiple tiles in an inner loop, or use `TRITON_ALL_BLOCKS_PARALLEL` when logical programs have no ordering dependency.
+- If the logical grid is much larger than the physical core count, the backend automatically folds eligible independent logical programs onto the available physical cores. For kernels with ordering dependencies or kernels rejected by IR safety analysis, let each program process multiple tiles in an inner loop.
 - `coreDim` cannot exceed `UINT16_MAX` (65535). For large shapes, control grid size through BLOCK_SIZE or tiling.
 
 | Dimension | Core Structure | Operator Type |
@@ -49,13 +49,17 @@ NPU and GPU compute units differ in supported data types and execution behavior.
 
 ### Example 1: Complete Vector Addition Migration
 
+The following example demonstrates correctness verification by comparing the results of native PyTorch computation with those of a Triton kernel after migrating a vector addition operator from CUDA to NPU:
+
 ```diff
 import torch
-+import torch_npu  # [Added] Import Ascend NPUs' PyTorch adaptation library to support NPU devices.
+# [Added] Import Ascend NPUs' PyTorch adaptation library to support NPU devices.
+import torch_npu
 import triton
 import triton.language as tl
 
--DEVICE = triton.runtime.driver.active.get_active_torch_device()  #  [Deleted] GPU devices are automatically obtained. NPUs do not need this logic.
+# [Deleted] GPU devices are automatically obtained. NPUs do not need this logic.
+# DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
 @triton.jit
 def add_kernel(
@@ -76,7 +80,7 @@ def add_kernel(
 
 def add(x: torch.Tensor, y: torch.Tensor):
     output = torch.empty_like(x)
--    assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [Deleted] GPU devices have consistency checks. NPUs do not need explicit assertion.
+    # assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE  # [Deleted] GPU device consistency check, which is not required on NPUs.
     n_elements = output.numel()
     grid = lambda meta: (triton.cdiv(n_elements, meta['BLOCK_SIZE']), )
     add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -84,10 +88,10 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 torch.manual_seed(0)
 size = 98432
--x = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
-+x = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
--y = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
-+y = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
+# x = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
+x = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
+# y = torch.rand(size, device='cuda')  # [Deleted] Specify the GPU device.
+y = torch.rand(size, device='npu')  # [Modified] Specify the Ascend NPU device.
 output_torch = x + y
 output_triton = add(x, y)
 print(output_torch)
@@ -123,11 +127,11 @@ def test_npu_1d(shape, dtype):
     XS = shape[0]
     YS = 4
 
--    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
-+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
+#    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='cuda')
+    x = torch.randint(-1000, 1000, (XS,), dtype=dtype, device='npu')
     std = torch.broadcast_to(x, (YS, XS))
--    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
-+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
+#    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='cuda')
+    output = torch.randint(-1000, 1000, (YS, XS), dtype=dtype, device='npu')
     fn_broadcast_1d[(1,)](output, x, XS, YS)
     assert torch.allclose(std, output)
 ```
@@ -155,11 +159,7 @@ Case: Optimizing the `zeros_like` function
 (data scale `N = 1073741824`; original `BLOCK_SIZE = 2048`; calculated `coreDim = 524288`, exceeding the limit of **65535**)
 
 Solution 1:
-To address the **coreDim** limit in the Ascend compiler, one solution is to set the environment variable *'TRITON_ALL_BLOCKS_PARALLEL'* to **1** by running this command:
-
-```bash
-export TRITON_ALL_BLOCKS_PARALLEL=1
-```
+The backend automatically enables block mapping for kernels that pass IR safety analysis, so no environment variable is required. Confirm that logical programs have no ordering dependency. If the compiler reports that automatic block mapping was skipped, use explicit tiling as described in Solution 2.
 
 Solution 2:
 Another solution is to increase **BLOCK_SIZE** to reduce the number of required cores and ensure that **coreDim** remains within the limit.
@@ -389,7 +389,7 @@ chunk_fwd_kernel_o[(NT, B * H)](
         block_shape=(BT,), # Block size
         order=(0,) # Sequential access
     )
-​)
+)
 ```
 
 Optimization Approach

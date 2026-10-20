@@ -1,6 +1,38 @@
-// RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true force-simt-template=true' \
+// RUN: triton-opt %s --triton-to-unstructure='compile-on-910-95=true compile-mode=simd_simt_template' \
 // RUN:                --triton-to-linalg='compile-on-910-95=true compile-mode=simd_simt_template' --split-input-file \
 // RUN: | FileCheck %s
+// RUN: triton-opt %s --mlir-print-ir-after-all \
+// RUN:                --triton-to-unstructure='compile-on-910-95=true compile-mode=simd_simt_template' \
+// RUN:                --triton-to-linalg='compile-on-910-95=true compile-mode=simd_simt_template' --split-input-file 2>&1 \
+// RUN: | FileCheck %s --check-prefix=SLS-INSPECT
+
+// The static stride-4 AddPtr below is deliberately inspected but cannot be
+// converted to an indirect load.  The trace locks down the original greedy
+// protocol: mark it after the Chunk/SLS stage, retain the mark through T2L's
+// in-place CSE/Canonicalizer cleanup, then lower it through memref.copy.
+// SLS-INSPECT: IR Dump After {{.*}}LayoutMemoryCompatibilityPass{{.*}}
+// SLS-INSPECT: tt.func public @addptr_stride4_1d
+// SLS-INSPECT: tt.load {{.*}} {InspectedByStridedLoadStoreRewrite}
+// SLS-INSPECT: IR Dump After CSE
+// SLS-INSPECT: tt.func public @addptr_stride4_1d
+// SLS-INSPECT: tt.load {{.*}} {InspectedByStridedLoadStoreRewrite}
+// SLS-INSPECT: IR Dump After Canonicalizer
+// SLS-INSPECT: tt.func public @addptr_stride4_1d
+// SLS-INSPECT: tt.load {{.*}} {InspectedByStridedLoadStoreRewrite}
+// SLS-INSPECT: IR Dump After TritonToLinalg
+// SLS-INSPECT: func.func @addptr_stride4_1d
+// SLS-INSPECT-NOT: call @triton_indirect_load
+// SLS-INSPECT: memref.copy
+
+// The masked stride-4 variant follows the indirect branch.  Keep this trace
+// separate from the inspect/no-rewrite case above so both greedy outcomes are
+// covered at the Graph compatibility boundary.
+// SLS-INSPECT: IR Dump After {{.*}}LayoutMemoryCompatibilityPass{{.*}}
+// SLS-INSPECT: tt.func public @addptr_stride4_masked_single_tile
+// SLS-INSPECT: ascend.unstructured_load {{.*}} {RewrittenByStridedLoadStoreRewrite, cache = 1 : i32, evict = 1 : i32, isVolatile = false}
+// SLS-INSPECT: IR Dump After TritonToLinalg
+// SLS-INSPECT: func.func @addptr_stride4_masked_single_tile
+// SLS-INSPECT: call @triton_indirect_load
 
 // -----
 // V1 rank-1 miss (AddPtr, static power-of-two stride 4):
@@ -29,6 +61,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // The structured strided-copy route would create a dynamic boundary size that
 // can become zero for over-launched programs. Route to indirect_load instead.
 // CHECK-LABEL: func.func @addptr_stride4_masked_single_tile
+// CHECK-SAME: parallel_mode = "mix_simd_simt"
 // CHECK: call @triton_indirect_load(%{{.*}}, %{{.*}}, %{{.*}}, %{{.*}}) {isVolatile = false} : (memref<?xf16>, tensor<1024xi64>, tensor<1024xi1>, tensor<1024xf16>) -> tensor<1024xf16>
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   tt.func public @addptr_stride4_masked_single_tile(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32},
@@ -48,6 +81,39 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %src_base = tt.splat %arg0 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>>
     %src_ptr = tt.addptr %src_base, %src_offsets : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
     %val = tt.load %src_ptr, %mask, %zero : tensor<1024x!tt.ptr<f16>>
+    %out = arith.addf %val, %one : tensor<1024xf16>
+    %dst_base = tt.splat %arg1 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>>
+    %dst_ptr = tt.addptr %dst_base, %idx : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+    tt.store %dst_ptr, %out, %mask : tensor<1024x!tt.ptr<f16>>
+    tt.return
+  }
+}
+
+// -----
+// V1 guard (AddPtr, static power-of-two stride 4, masked single tile):
+// This otherwise indirect-eligible load was already handled by
+// ImplicitPermute.  SLS must leave it on the normal memref.copy lowering path.
+// CHECK-LABEL: func.func @addptr_stride4_masked_implicit_permute_handled
+// CHECK-NOT: call @triton_indirect_load
+// CHECK: memref.copy
+module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
+  tt.func public @addptr_stride4_masked_implicit_permute_handled(%arg0: !tt.ptr<f16> {tt.divisibility = 16 : i32},
+                                                                 %arg1: !tt.ptr<f16> {tt.divisibility = 16 : i32}) {
+    %zero = arith.constant dense<0.000000e+00> : tensor<1024xf16>
+    %one = arith.constant dense<1.000000e+00> : tensor<1024xf16>
+    %c4 = arith.constant dense<4> : tensor<1024xi32>
+    %bound = arith.constant dense<1024> : tensor<1024xi32>
+    %c1024_i32 = arith.constant 1024 : i32
+    %pid = tt.get_program_id x : i32
+    %tile_base = arith.muli %pid, %c1024_i32 : i32
+    %range = tt.make_range {end = 1024 : i32, start = 0 : i32} : tensor<1024xi32>
+    %base_splat = tt.splat %tile_base : i32 -> tensor<1024xi32>
+    %idx = arith.addi %base_splat, %range : tensor<1024xi32>
+    %mask = arith.cmpi slt, %idx, %bound : tensor<1024xi32>
+    %src_offsets = arith.muli %idx, %c4 : tensor<1024xi32>
+    %src_base = tt.splat %arg0 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>>
+    %src_ptr = tt.addptr %src_base, %src_offsets : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>
+    %val = tt.load %src_ptr, %mask, %zero {ImplicitPermuteHandled} : tensor<1024x!tt.ptr<f16>>
     %out = arith.addf %val, %one : tensor<1024xf16>
     %dst_base = tt.splat %arg1 : !tt.ptr<f16> -> tensor<1024x!tt.ptr<f16>>
     %dst_ptr = tt.addptr %dst_base, %idx : tensor<1024x!tt.ptr<f16>>, tensor<1024xi32>

@@ -64,8 +64,7 @@ def test_case(param_list):
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
-def test_all_blocks_parallel(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_all_blocks_parallel(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x0 = test_common.generate_tensor(shape, dtype).npu()
     x1 = test_common.generate_tensor(shape, dtype).npu()
@@ -73,14 +72,12 @@ def test_all_blocks_parallel(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_add[ncore, 1, 1](x0, x1, y_cal, xblock, xblock_sub)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")
 
 
 @pytest.mark.parametrize('param_list', [
     ['float32', (2, 4096, 8), 2, 32768, 1024],
 ])
-def test_auto_blockify(param_list, monkeypatch):
-    monkeypatch.setenv("TRITON_ALL_BLOCKS_PARALLEL", "1")
+def test_auto_blockify(param_list):
     dtype, shape, ncore, xblock, xblock_sub = param_list
     x0 = test_common.generate_tensor(shape, dtype).npu()
     x1 = test_common.generate_tensor(shape, dtype).npu()
@@ -88,4 +85,3 @@ def test_auto_blockify(param_list, monkeypatch):
     y_cal = torch.zeros(shape, dtype=eval('torch.' + dtype)).npu()
     triton_add[ncore, 1, 1](x0, x1, y_cal, xblock, xblock_sub, auto_blockify_size=ncore)
     test_common.validate_cmp(dtype, y_cal, y_ref)
-    monkeypatch.delenv("TRITON_ALL_BLOCKS_PARALLEL")

@@ -33,13 +33,11 @@ from typing import (
 
 from triton.runtime.autotuner import Config
 
+from . import utils as runtime_utils
 from .utils import (
     get_byte_per_numel,
     is_valid_axis_name,
     next_power_of_2,
-    num_vector_core,
-    ub_size_in_kbytes,
-    rf_size_in_kbytes,
 )
 
 
@@ -192,16 +190,18 @@ class TileGenerator:
 
         self.num_buffers = 3 if kernel_meta.num_buffers == 0 else min(kernel_meta.num_buffers, 3)
         self.is_simt_mode = kernel_meta.is_simt_mode
-        local_mem_size = (rf_size_in_kbytes if self.is_simt_mode else ub_size_in_kbytes)
+        # Snapshot device-dependent values when generating configs, not on import.
+        self.num_vector_core = runtime_utils.num_vector_core
+        local_mem_size = (runtime_utils.rf_size_in_kbytes if self.is_simt_mode else runtime_utils.ub_size_in_kbytes)
         self.max_numel_threshold = local_mem_size * 1024 // self.dtype_bytes // self.num_buffers
         self.max_total_numel = functools.reduce(lambda x, y: x * y, [x.block_size
                                                                      for x in self.blocks]) if self.blocks else 1
         self.small_kernel = self.max_total_numel < 128 * 1024
         self.tiny_kernel = self.max_total_numel <= 32 * 1024
         self.stop_numel = min(1024 // self.dtype_bytes, self.max_total_numel //
-                              (num_vector_core * 2)) if self.small_kernel else 1024 // self.dtype_bytes
+                              (self.num_vector_core * 2)) if self.small_kernel else 1024 // self.dtype_bytes
         self.max_programs_num = 65535
-        self.tiny_program_threshold = num_vector_core // 8
+        self.tiny_program_threshold = self.num_vector_core // 8
         self.tiny_per_program_cap = 1
         self.tiny_low_program_hist = {p: 0 for p in range(1, self.tiny_program_threshold + 1)}
         self.tiny_low_program_active = False
@@ -232,7 +232,7 @@ class TileGenerator:
             else:
                 break
 
-        last_splits = num_vector_core // splits
+        last_splits = self.num_vector_core // splits
         last_splits = max(1, last_splits)
         last_blocks = (self.numels[axis_idx] + last_splits - 1) // last_splits
         return last_blocks
@@ -312,7 +312,7 @@ class TileGenerator:
         stop_numel_threshold = 0 if len(self.configs) < 10 or self.small_kernel else self.stop_numel + 100
         if self.tiny_low_program_active and self.tiny_low_program_tile_floor > 0:
             total_programs = self._calc_total_programs(candi_block)
-            program_threshold = self.tiny_program_threshold if self.small_kernel else num_vector_core // 2
+            program_threshold = self.tiny_program_threshold if self.small_kernel else self.num_vector_core // 2
             if total_programs <= program_threshold:
                 tiny_low_program_threshold = max(self.stop_numel, self.tiny_low_program_tile_floor // 2)
                 stop_numel_threshold = max(stop_numel_threshold, tiny_low_program_threshold)
@@ -345,7 +345,7 @@ class TileGenerator:
 
         reached_stop_numel = False
         slow_decend_split = False
-        num_vector_core_tile = num_vector_core
+        num_vector_core_tile = self.num_vector_core
         max_programs_num = num_vector_core_tile if self.kernel_meta.tiling_axis else self.max_programs_num
         if not is_split and len(self.candidate_blocks) == 0:
             self.candidate_blocks.append(tuple([x.block_size for x in self.blocks]))
@@ -386,7 +386,7 @@ class TileGenerator:
                             self.candidate_blocks.append(tuple([x.block_size for x in self.blocks]))
                         break
 
-                program_threshold = self.tiny_program_threshold if self.small_kernel else num_vector_core // 2
+                program_threshold = self.tiny_program_threshold if self.small_kernel else self.num_vector_core // 2
                 if self.tiny_kernel and total_programs <= program_threshold:
                     self._try_add_tiny_low_program_config(total_programs)
                 if total_programs > program_threshold or self.dual_reduction:

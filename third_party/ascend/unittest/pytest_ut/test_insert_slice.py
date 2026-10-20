@@ -23,8 +23,9 @@ import torch_npu
 
 import triton
 import triton.language as tl
-import triton.language.extra.cann.extension as extension
+import triton.language.extra.cann.extension as al
 import pytest
+import test_common
 
 
 @triton.jit
@@ -36,11 +37,11 @@ def triton_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
     mask = offsets < n_elements
     x = tl.load(x_ptr + offsets, mask=mask)
     y = tl.load(y_ptr + offsets, mask=mask)
-    x_sub = extension.extract_slice(x, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
-    y_sub = extension.extract_slice(y, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
+    x_sub = al.extract_slice(x, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
+    y_sub = al.extract_slice(y, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
     output_sub = x_sub + y_sub
     output = tl.load(output_ptr + offsets, mask=mask)
-    output = extension.insert_slice(output, output_sub, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
+    output = al.insert_slice(output, output_sub, [block_start + SLICE_OFFSET], [SLICE_SIZE], [1])
     tl.store(output_ptr + offsets, output, mask=mask)
 
 
@@ -62,3 +63,25 @@ def test_extract_slice():
     triton_cal = triton_func(x, y, slice_offset, slice_size)
     torch.testing.assert_close(triton_cal[slice_offset:slice_offset + slice_size],
                                torch_ref[slice_offset:slice_offset + slice_size])
+
+
+@triton.jit
+def insert_slice_kernel(x_ptr, out_ptr, N: tl.constexpr, OFF: tl.constexpr, SZ: tl.constexpr):
+    offs = tl.arange(0, N)
+    x = tl.load(x_ptr + offs)
+    sub = al.extract_slice(x, [OFF], [SZ], [1])
+    base = tl.zeros((N, ), dtype=x.dtype)
+    full = al.insert_slice(base, sub, [OFF], [SZ], [1])
+    tl.store(out_ptr + offs, full)
+
+
+@pytest.mark.parametrize("dtype", ['int8', 'int16', 'int32', 'int64', 'float16', 'float32', 'bfloat16', 'uint8'])
+def test_insert_slice_dtypes(dtype):
+    size, offset, sz = 64, 8, 16
+    x_cpu = test_common.generate_tensor((size, ), dtype)
+    expected = torch.zeros(size, dtype=eval('torch.' + dtype))
+    expected[offset:offset + sz] = x_cpu[offset:offset + sz]
+    x = x_cpu.npu()
+    out = torch.zeros(size, dtype=eval('torch.' + dtype)).npu()
+    insert_slice_kernel[(1, )](x, out, size, offset, sz)
+    torch.testing.assert_close(out.cpu(), expected)

@@ -10,6 +10,8 @@ When different cores operate on the same block of global memory and there may be
   </tr>
 </table>
 
+When using this Ascend affinity API, set `disable_auto_inject_block_sync=True` in `triton.Config` kwargs or kernel launch meta-parameters to disable automatic inter-core synchronization insertion and manage synchronization explicitly. Refer to the [compiler option reference](../../environment_variable_and_compiler_options_reference.md#compiler-options-reference) for more details about this compiler option.
+
 ## 2.1 Parameters
 
 <table>

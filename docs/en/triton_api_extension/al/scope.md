@@ -65,7 +65,7 @@ Ascend processors contain multiple types of compute units, such as the Cube Unit
 
 ## 3. Constraints
 
-each kernel have 1 scope for cube and vector, inside them they run parallely and there are other syncing operations that declares the sync between both of the scope
+each kernel have 1 scope for cube and vector, inside them they run parallel and there are other syncing operations that declares the sync between both of the scope
 
 - Parallel Execution: Operations within cube and vector scopes execute in parallel
 

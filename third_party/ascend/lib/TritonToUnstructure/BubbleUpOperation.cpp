@@ -31,9 +31,11 @@
 
 template <typename ExtractOpTy>
 BubbleUpExtract<ExtractOpTy>::BubbleUpExtract(MLIRContext *context,
-                                              bool enableAggressiveMode)
+                                              bool enableAggressiveMode,
+                                              bool compileOn91095)
     : OpRewritePattern<ExtractOpTy>(context),
-      enableAggressiveMode(enableAggressiveMode) {}
+      enableAggressiveMode(enableAggressiveMode),
+      compileOn91095(compileOn91095) {}
 
 template <typename ExtractOpTy>
 LogicalResult
@@ -58,6 +60,21 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
 
   if (!parentOp || (!enableAggressiveMode && !parentOp->hasOneUse())) {
     return failure();
+  }
+
+  // Keep the vector mask attached to discrete memory accesses. Depending on
+  // which mask conversion produced the select, the marker is either on the
+  // select itself or on the generated load loop that supplies its value.
+  if (auto selectOp = dyn_cast<arith::SelectOp>(parentOp);
+      selectOp && isa<ShapedType>(selectOp.getCondition().getType())) {
+    auto isDiscreteLoadResult = [](Value value) {
+      auto forOp = value.getDefiningOp<scf::ForOp>();
+      return forOp && forOp->hasAttr("ExtractedLoadOrStore");
+    };
+    if (selectOp->hasAttr(ConverterUtils::discreteAttrName) ||
+        isDiscreteLoadResult(selectOp.getTrueValue()) ||
+        isDiscreteLoadResult(selectOp.getFalseValue()))
+      return failure();
   }
 
   LLVM_DEBUG({
@@ -87,9 +104,19 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
     bubbleUpIntBinaryOp(op, orIOp, loc, rewriter);
   } else if (auto cmpIOp = dyn_cast<arith::CmpIOp>(parentOp)) {
     bubbleUpOperation(op, cmpIOp, loc, rewriter);
+  } else if (auto selectOp = dyn_cast<arith::SelectOp>(parentOp)) {
+    bubbleUpOperation(op, selectOp, loc, rewriter);
   } else if (auto truncFOp = dyn_cast<arith::TruncFOp>(parentOp)) {
     bubbleUpOperation(op, truncFOp, loc, rewriter);
   } else if (auto extFOp = dyn_cast<arith::ExtFOp>(parentOp)) {
+    // In misaligned scenarios, the vector cast (vcast) that arith.extf
+    // lowers to is unsupported and falls back to a scalar cast, which does
+    // not support the bf16 data type on non-A5 targets. Bubbling the slice
+    // above the extf on a bf16 source (2 bytes/element) can turn an aligned
+    // f32 slice into a misaligned bf16 slice, so keep the cast first in that
+    // case.
+    if (!compileOn91095 && isBf16ExtSliceMisaligned(op, extFOp))
+      return failure();
     bubbleUpOperation(op, extFOp, loc, rewriter);
   } else if (auto fpTosiOp = dyn_cast<arith::FPToSIOp>(parentOp)) {
     bubbleUpOperation(op, fpTosiOp, loc, rewriter);
@@ -178,6 +205,35 @@ Value BubbleUpExtract<tensor::ExtractSliceOp>::createExtractOp(
 }
 
 template <typename ExtractOpTy>
+bool BubbleUpExtract<ExtractOpTy>::isBf16ExtSliceMisaligned(
+    ExtractOpTy op, arith::ExtFOp parentOp) const {
+  if constexpr (!std::is_same_v<ExtractOpTy, tensor::ExtractSliceOp>) {
+    return false;
+  } else {
+    auto srcType = dyn_cast<RankedTensorType>(parentOp.getIn().getType());
+    if (!srcType || !srcType.getElementType().isBF16())
+      return false;
+    auto shape = srcType.getShape();
+    auto offsets = op.getMixedOffsets();
+    if (shape.size() != offsets.size())
+      return true;
+    // Row-major linear element offset of the slice start within the source.
+    int64_t linearOffset = 0;
+    int64_t stride = 1;
+    for (int64_t i = shape.size() - 1; i >= 0; --i) {
+      auto offset = getConstantIntValue(offsets[i]);
+      // Skip dynamic offset
+      if (!offset)
+        return true;
+      linearOffset += *offset * stride;
+      stride *= shape[i];
+    }
+    // bf16 is 2 bytes/element: 32-byte aligned if linearOffset % 16 == 0.
+    return linearOffset % 16 != 0;
+  }
+}
+
+template <typename ExtractOpTy>
 template <typename BinOpTy>
 void BubbleUpExtract<ExtractOpTy>::bubbleUpIntBinaryOp(
     ExtractOpTy op, BinOpTy binOp, Location loc,
@@ -217,6 +273,20 @@ void BubbleUpExtract<ExtractOpTy>::bubbleUpOperation(
   auto rhs = createExtractOp(op, parentOp.getRhs(), loc, rewriter);
   rewriter.replaceOpWithNewOp<arith::CmpIOp>(op, parentOp.getPredicateAttr(),
                                              lhs, rhs);
+}
+
+template <typename ExtractOpTy>
+void BubbleUpExtract<ExtractOpTy>::bubbleUpOperation(
+    ExtractOpTy op, arith::SelectOp parentOp, Location loc,
+    PatternRewriter &rewriter) const {
+  Value condition = parentOp.getCondition();
+  if (isa<ShapedType>(condition.getType()))
+    condition = createExtractOp(op, condition, loc, rewriter);
+  Value trueValue = createExtractOp(op, parentOp.getTrueValue(), loc, rewriter);
+  Value falseValue =
+      createExtractOp(op, parentOp.getFalseValue(), loc, rewriter);
+  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, condition, trueValue,
+                                               falseValue);
 }
 
 template <>
@@ -511,8 +581,8 @@ void BubbleUpOperationPass::runOnOperation() {
 
   RewritePatternSet patterns(ctx);
   patterns.add<BubbleUpExtract<tensor::ExtractOp>,
-               BubbleUpExtract<tensor::ExtractSliceOp>>(ctx,
-                                                        enableAggressiveMode);
+               BubbleUpExtract<tensor::ExtractSliceOp>>(
+      ctx, enableAggressiveMode, compileOn91095);
 
   if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
     moduleOp->emitError("failed to apply Patterns");

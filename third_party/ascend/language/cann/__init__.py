@@ -19,7 +19,6 @@
 # THE SOFTWARE.
 
 from triton.language import math
-from triton.backends.ascend.utils import triton_enable_libdevice_simt
 
 from . import libdevice
 from . import extension

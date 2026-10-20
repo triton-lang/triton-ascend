@@ -21,7 +21,7 @@ triton.language.maximum(x, y, propagate_nan: ~triton.language.core.constexpr = <
 | `_semantic`   | -                 | 保留参数，暂不支持外部调用
 
 返回值：
-`x`：输出张量的shape与输入x的shape相同
+输出张量shape与输入x和y的shape相同
 
 ### 2.2 OP 规格
 

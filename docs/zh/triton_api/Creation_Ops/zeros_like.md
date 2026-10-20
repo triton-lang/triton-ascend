@@ -39,7 +39,7 @@ triton.language.zeros_like(input)
 
 ### 2.4 使用方法
 
-以下示例实现了返回与给定张量具有相同形状和类型的零的张量。：
+以下示例实现了返回与给定张量具有相同形状和类型的零的张量：
 
 ```python
 @triton.jit

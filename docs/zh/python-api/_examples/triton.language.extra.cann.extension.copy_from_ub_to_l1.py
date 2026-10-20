@@ -1,3 +1,9 @@
+import triton
+import triton.language as tl
+import triton.extension.buffer.language as bl
+import triton.language.extra.cann.extension as al
+
+
 @triton.jit
 def copy_kernel(
     A_ptr,

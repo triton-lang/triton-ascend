@@ -1,0 +1,1 @@
+../../../zh/python-api/triton.language/logical_ops.rst

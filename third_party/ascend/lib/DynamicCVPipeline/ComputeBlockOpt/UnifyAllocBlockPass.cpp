@@ -30,6 +30,7 @@
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "llvm/ADT/SmallVector.h"
@@ -197,6 +198,58 @@ static bool hasOtherOpsInIf(const FillInfo &info) {
   return opCount > 1;
 }
 
+/// Trace back along the view-like chain from \p copyOp's source and collect
+/// all ops. Only ops in the same Block as the copyOp are collected.
+static void traceViewChain(memref::CopyOp copyOp,
+                           SmallVectorImpl<Operation *> &result) {
+  for (Value v = copyOp.getSource(); auto *defOp = v.getDefiningOp();) {
+    if (defOp->getBlock() != copyOp->getBlock())
+      break;
+    if (auto viewOp = dyn_cast<ViewLikeOpInterface>(defOp))
+      result.push_back(viewOp), v = viewOp.getViewSource();
+    else if (auto sliceOp = dyn_cast<tensor::ExtractSliceOp>(defOp))
+      result.push_back(sliceOp), v = sliceOp.getSource();
+    else
+      break;
+  }
+}
+
+/**
+ * @brief Collect source view chain ops from memref.copy's source operand
+ *
+ * For each memref.copy found by penetrating ViewLike direct users (subview of
+ * alloc), trace back the copy's source operand along the ViewLikeOpInterface /
+ * tensor.extract_slice chain (e.g., memref.subview -> memref.reinterpret_cast
+ * -> tensor.extract_slice), and collect all ops in the chain.
+ *
+ * @param directUsers Direct users of alloc result (containing ViewLike ops
+ *                    whose users include memref.copy)
+ * @return SmallVector<Operation*> Collected source view chain ops
+ *
+ */
+static SmallVector<Operation *>
+collectSourceViewChainOps(ArrayRef<Operation *> directUsers) {
+  SmallVector<Operation *> chainOps;
+  for (Operation *op : directUsers) {
+    if (!isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(op)) {
+      continue;
+    }
+    // Penetrate through view-like ops to find memref.copy users
+    SmallVector<Operation *> worklist = {op};
+    while (!worklist.empty()) {
+      Operation *cur = worklist.pop_back_val();
+      for (auto *user : cur->getUsers()) {
+        if (auto copyOp = dyn_cast<memref::CopyOp>(user)) {
+          traceViewChain(copyOp, chainOps);
+        } else if (isa<ViewLikeOpInterface, tensor::ExtractSliceOp>(user)) {
+          worklist.push_back(user);
+        }
+      }
+    }
+  }
+  return chainOps;
+}
+
 /**
  * @brief Try to unify block_id for a single alloc operation
  *
@@ -239,18 +292,19 @@ tryUnifyForAlloc(memref::AllocOp allocOp,
     return success();
   }
 
-  // Step5: Cycle detection and block_id assignment
+  // Step5: collect allocOp, ifOp, fillOp, directUsers and ViewChainOps
   SmallVector<Operation *> coreOps = {
       allocOp.getOperation(),
       fillInfo.fillOp.getOperation(),
       fillInfo.parentIf.getOperation(),
   };
   coreOps.append(directUsers);
+  coreOps.append(collectSourceViewChainOps(directUsers));
 
+  // Step6: Cycle detection and block_id assignment
   if (CVPipeline::willCreateCycle(coreOps, memGraph, targetBlockId, bm)) {
-    LOG_DEBUG(
-        "[Cycle detection] Find cycle, have unsupport IR! Should Check!!");
-    return success();
+    LOG_DEBUG("[error] Find cycle, have unsupport IR! Should Check!!");
+    return failure();
   }
   for (auto *op : coreOps) {
     bm.updateBlockId(op, targetBlockId);

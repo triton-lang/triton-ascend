@@ -4,11 +4,10 @@
 在此过程中，用户会学习到：
 
 - Triton 每种数据类型的精度比对方法。
-- 参考示例代码：triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 
-计算内核:
+## 计算内核
 
-```Python
+```python
 def test_add(x0, x1):
     """
     测试 Triton 实现的向量加法与 PyTorch 的结果,精度比对是否一致。
@@ -34,14 +33,15 @@ def test_add(x0, x1):
     ):
         # 生成 [0, 1, 2, ..., XS-1] 的索引数组
         idx = tl.arange(0, XS)
+        mask = idx < XS
         # 从 in_ptr0 + idx 处加载 x0 的值
-        tmp0 = tl.load(in_ptr0 + idx)
+        tmp0 = tl.load(in_ptr0 + idx, mask=mask)
         # 从 in_ptr1 + idx 处加载 x1 的值
-        tmp1 = tl.load(in_ptr1 + idx)
+        tmp1 = tl.load(in_ptr1 + idx, mask=mask)
         # 执行加法
         tmp2 = tmp0 + tmp1
         # 将结果写入 out_ptr0 + idx
-        tl.store(out_ptr0 + idx, tmp2)
+        tl.store(out_ptr0 + idx, tmp2, mask=mask)
 
     # 3. Triton 封装函数：调用 kernel 并返回结果
     def triton_func(x0, x1):
@@ -66,7 +66,7 @@ def test_add(x0, x1):
 
 创建一个精度比对函数，适应每一种dtype，采用对应的精度比对方法。
 
-```Python
+```python
 
 def accuracy_comparison(y_cal, y_ref):
     """
@@ -81,26 +81,26 @@ def accuracy_comparison(y_cal, y_ref):
     assert y_cal.dtype == y_ref.dtype, f"dtype mismatch: {y_cal.dtype} vs {y_ref.dtype}"
     tensor_dtype = y_cal.dtype
 
-    # 将张量移动到 NPU（假设测试在 NPU 上进行）
+    # 将张量搬运到 NPU（假设测试在 NPU 上进行）
     y_cal = y_cal.npu()
     y_ref = y_ref.npu()
 
     # 根据数据类型选择不同的比对方式
     if tensor_dtype == torch.float16:
         # float16 精度较低，允许稍大误差
-        torch.testing.assert_close(y_ref, y_cal, rtol=1e-3, atol=1e-3, equal_nan=True)
+        torch.testing.assert_close(y_cal, y_ref, rtol=1e-3, atol=1e-3, equal_nan=True)
     elif tensor_dtype == torch.bfloat16:
         # bfloat16 精度更低，建议转为 float32 再比较
         torch.testing.assert_close(
-            y_ref.to(torch.float32),
             y_cal.to(torch.float32),
+            y_ref.to(torch.float32),
             rtol=1e-3,
             atol=1e-3,
             equal_nan=True
         )
     elif tensor_dtype == torch.float32:
         # float32 精度较高，使用更严格的容差
-        torch.testing.assert_close(y_ref, y_cal, rtol=1e-4, atol=1e-4, equal_nan=True)
+        torch.testing.assert_close(y_cal, y_ref, rtol=1e-4, atol=1e-4, equal_nan=True)
     elif tensor_dtype in [torch.int64, torch.int32, torch.int16, torch.int8]:
         # 整数类型应完全相等
         assert torch.equal(y_cal, y_ref), f"Integer tensors are not equal for dtype {tensor_dtype}"
@@ -111,10 +111,4 @@ def accuracy_comparison(y_cal, y_ref):
         raise ValueError(f'Invalid or unsupported tensor dtype: {tensor_dtype}')
 
 
-```
-
-可以使用下面指令，运行参考示例代码：tutorials/14-accuracy-comparison.py
-
-```Python
-python triton-ascend/ascend/examples/tutorials/14-accuracy-comparison.py
 ```

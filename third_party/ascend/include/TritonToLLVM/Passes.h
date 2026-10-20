@@ -17,6 +17,10 @@ namespace triton {
 /// Creates a pass to convert Triton dialect to LLVM dialect.
 std::unique_ptr<OperationPass<ModuleOp>> createTritonToLLVMPass();
 
+/// Creates a pass to normalize locations for debug line table generation.
+std::unique_ptr<OperationPass<ModuleOp>>
+createNormalizeDebugLineLocationsPass();
+
 #define GEN_PASS_REGISTRATION
 #include "ascend/include/TritonToLLVM/Passes.h.inc"
 

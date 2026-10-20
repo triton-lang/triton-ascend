@@ -16,6 +16,9 @@
 #include "ascend/include/TTIRLayoutMerge/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
+#include "ascend/include/TritonToGraph/GraphOptimization.h"
+#include "ascend/include/TritonToGraph/LayoutMemoryOptimization.h"
+#include "ascend/include/TritonToGraph/Passes.h"
 #include "ascend/include/TritonToHFusion/Passes.h"
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
@@ -33,6 +36,10 @@
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+
+#include <cstdint>
+#include <limits>
+#include <string>
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
 #include "AscendModel/Analysis/HardwareConfig.h"
@@ -161,12 +168,15 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
               compileOn91095, compileMode));
         });
 
+  m.def("add_merge_concat_load_buffer", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::cfg::createMergeConcatLoadBufferPass());
+  });
+
   m.def("add_triton_to_unstructure",
-        [](mlir::PassManager &pm, bool compileOn91095, bool forceSimtTemplate,
+        [](mlir::PassManager &pm, bool compileOn91095,
            const std::string &compileMode) {
           TritonToUnstructureOptions opts;
           opts.compileOn91095 = compileOn91095;
-          opts.forceSimtTemplate = forceSimtTemplate;
           opts.compileMode = compileMode;
           pm.addPass(mlir::triton::createTritonToUnstructurePass(opts));
         });
@@ -177,13 +187,11 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
         });
 
   m.def("add_discrete_mask_access_conversion",
-        [](mlir::PassManager &pm, bool compileOn91095, bool forceSimtTemplate,
-           bool enableSyncBlockLock, const std::string &compileMode) {
+        [](mlir::PassManager &pm, bool compileOn91095,
+           const std::string &compileMode) {
           DiscreteMaskAccessConversionOptions opts;
           opts.compileOn91095 = compileOn91095;
-          opts.forceSimtTemplate = forceSimtTemplate;
           opts.compileMode = compileMode;
-          opts.enableSyncBlockLock = enableSyncBlockLock;
           pm.addPass(
               mlir::triton::createDiscreteMaskAccessConversionPass(opts));
         });
@@ -196,9 +204,16 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createTritonToLLVMPass());
   });
 
-  m.def("add_bubble_up_operation", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createBubbleUpOperationPass());
+  m.def("add_normalize_debug_line_locations", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createNormalizeDebugLineLocationsPass());
   });
+
+  m.def("add_bubble_up_operation",
+        [](mlir::PassManager &pm, bool compileOn91095) {
+          BubbleUpOperationOptions opts;
+          opts.compileOn91095 = compileOn91095;
+          pm.addPass(mlir::triton::createBubbleUpOperationPass(opts));
+        });
 
   m.def("add_dynamic_cv_pipeline",
         [](mlir::PassManager &pm, bool compileOn91095) {
@@ -206,6 +221,68 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
           opts.compileOn91095 = compileOn91095;
           pm.addPass(mlir::triton::createAddDynamicCVPipelinePass(opts));
         });
+
+  m.def(
+      "add_graph_optimize",
+      [](mlir::PassManager &pm, std::uint64_t ruleMask,
+         std::uint64_t maxRewritesPerFunction, std::uint64_t ubCapacityBytes,
+         std::uint64_t mappingUBCapacityBytes,
+         std::uint64_t storeCoalescingUBBudgetBytes,
+         const std::string &compileMode, std::uint64_t ubSafetyPercent,
+         std::uint64_t reservedUBBytes) {
+        if (ruleMask > std::numeric_limits<std::uint32_t>::max())
+          throw py::value_error("rule_mask must fit in uint32_t");
+        const auto graphRuleMask =
+            static_cast<mlir::triton::cfg::GraphOptimizationRuleMask>(ruleMask);
+        if (!mlir::triton::cfg::isValidGraphOptimizationRuleMask(
+                graphRuleMask)) {
+          throw py::value_error("rule_mask contains unknown graph rule bits");
+        }
+        if (maxRewritesPerFunction > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "max_rewrites_per_function must fit in unsigned");
+        if (ubCapacityBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error("ub_capacity_bytes must fit in unsigned");
+        if (mappingUBCapacityBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "mapping_ub_capacity_bytes must fit in unsigned");
+        if (storeCoalescingUBBudgetBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "store_coalescing_ub_budget_bytes must fit in unsigned");
+        if (ubSafetyPercent == 0 || ubSafetyPercent > 100 ||
+            ubSafetyPercent > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "ub_safety_percent must be an unsigned value in [1, 100]");
+        const std::uint64_t effectiveMappingUBCapacity =
+            mappingUBCapacityBytes ? mappingUBCapacityBytes : ubCapacityBytes;
+        if (reservedUBBytes > std::numeric_limits<unsigned>::max() ||
+            reservedUBBytes > effectiveMappingUBCapacity)
+          throw py::value_error("reserved_ub_bytes must fit in unsigned and "
+                                "not exceed mapping UB");
+
+        mlir::triton::cfg::GraphOptimizationOptions options;
+        options.enabledRuleMask = graphRuleMask;
+        options.maxRewritesPerFunction =
+            static_cast<unsigned>(maxRewritesPerFunction);
+        options.ubCapacityBytes = static_cast<unsigned>(ubCapacityBytes);
+        options.mappingUBCapacityBytes =
+            static_cast<unsigned>(mappingUBCapacityBytes);
+        options.storeCoalescingUBBudgetBytes =
+            static_cast<unsigned>(storeCoalescingUBBudgetBytes);
+        options.ubSafetyPercent = static_cast<unsigned>(ubSafetyPercent);
+        options.reservedUBBytes = static_cast<unsigned>(reservedUBBytes);
+        options.compileMode = compileMode;
+        pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
+      },
+      py::arg("pm"),
+      py::arg("rule_mask") = static_cast<std::uint64_t>(
+          mlir::triton::cfg::kDefaultGraphOptimizationRuleMask),
+      py::arg("max_rewrites_per_function") = 64,
+      py::arg("ub_capacity_bytes") = 0,
+      py::arg("mapping_ub_capacity_bytes") = 0,
+      py::arg("store_coalescing_ub_budget_bytes") = 0,
+      py::arg("compile_mode") = "simd_simt_template",
+      py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {
@@ -222,23 +299,13 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     }
   });
 
-  m.def("set_enable_cube_block_merge",
-        [](bool enable) { mlir::CVPipeline::setEnableCubeBlockMerge(enable); });
-
-  m.def("set_enable_ub_refine_opt", [](mlir::ModuleOp &moduleop, bool enable) {
+  m.def("set_enable_ub_refine_opt",
+        [](mlir::ModuleOp &moduleop, bool enable) { return; });
+  m.def("set_enable_buffer_insert_optimization", [](mlir::ModuleOp &moduleop) {
     OpBuilder builder(moduleop.getContext());
-    if (enable) {
-      moduleop->setAttr(CVPipeline::kEnableUbRefineOpt, builder.getUnitAttr());
-    }
+    moduleop->setAttr(CVPipeline::kInsertionOptimization,
+                      builder.getUnitAttr());
   });
-  m.def("set_enable_buffer_insert_optimization",
-        [](mlir::ModuleOp &moduleop, bool enable) {
-          OpBuilder builder(moduleop.getContext());
-          if (enable) {
-            moduleop->setAttr(CVPipeline::kInsertionOptimization,
-                              builder.getUnitAttr());
-          }
-        });
 }
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL

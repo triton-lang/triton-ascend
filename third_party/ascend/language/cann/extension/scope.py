@@ -32,24 +32,13 @@ class scope:
     """
     Context manager for entering and exiting a scope, where operations within a scope shares some common characteristics.
 
-    Example:
-    ```python
-        import triton.language.extra.cann.extension as extension
-
-        @triton.jit
-        def kernel(x_ptr, y_ptr, N):
-            # specify annotation
-            with extension.scope(feature_a=True):
-                a = tl.load(x_ptr)
-                b = tl.load(y_ptr)
-                result = tl.dot(a, b)
-    ```
-
-    Reserved keywords:
-        - `core_mode`: Selects cube or vector core operations.
-        - `vector_mode`: Selects the SIMD or SIMT vector path inside a mixed
-            compile mode (`compile_mode="simd_simt"` or
-            `"simd_simt_template"`).
+    :param core_mode: Allows explicitly specifying which core type should be used
+        for operations within a code block, helping the compiler generate
+        appropriate code for cube or vector cores. Either ``"cube"`` or
+        ``"vector"``.
+    :param vector_mode: Selects the SIMD or SIMT vector path inside a mixed
+        compile mode (``compile_mode="simd_simt"`` or
+        ``"simd_simt_template"``).
     """
 
     def __init__(self, core_mode: str = None, _builder=None, _semantic=None, vector_mode: str = None, **kwargs):

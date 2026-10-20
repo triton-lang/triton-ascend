@@ -45,6 +45,8 @@ import triton
 import triton.language as tl
 from triton.backends.ascend.utils import is_compile_on_910_95
 
+_TARGET_ARCH = triton.runtime.driver.active.get_current_target().arch
+
 SUPPORTED_DTYPES = [
     ("int8", torch.int8),
     ("int16", torch.int16),
@@ -375,7 +377,7 @@ def _launch_fully_unstructured(rank, offsets, compare, values, output, old, shap
 def test_atomic_cas_partially_structured_indirect_offsets(dtype_name, torch_dtype, rank):
     if rank == 1:
         pytest.skip("Partially structured test is not applicable to 1-D tensors")
-    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95(_TARGET_ARCH) and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = PARTIAL_STRUCTURED_SHAPES[rank]
     offsets, output_numel = _build_partial_structured_offsets(shape)
@@ -400,7 +402,7 @@ def test_atomic_cas_partially_structured_indirect_offsets(dtype_name, torch_dtyp
 @pytest.mark.parametrize("dtype_name, torch_dtype", TEST_DTYPE)
 @pytest.mark.parametrize("rank", TEST_RANKS)
 def test_atomic_cas_fully_unstructured_indirect_offsets(dtype_name, torch_dtype, rank):
-    if not is_compile_on_910_95() and torch_dtype in (torch.uint32, torch.uint64):
+    if not is_compile_on_910_95(_TARGET_ARCH) and torch_dtype in (torch.uint32, torch.uint64):
         pytest.skip("uint32 and uint64 atomics are only supported on 950")
     shape = RANK_SHAPES[rank]
     offsets, output_numel = _build_fully_unstructured_offsets(shape)

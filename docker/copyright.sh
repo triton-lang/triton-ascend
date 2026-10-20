@@ -1,8 +1,8 @@
 #!/bin/bash
 
-triton_ascend_version="3.2.1"
-cann_version="9.0.0"
-torch_npu_version="2.7.1"
+triton_ascend_version="3.2.2"
+cann_version="9.1.0"
+torch_npu_version="2.7.1.post8"
 python_version="3.11"
 
 GREEN='\033[1;32m'

@@ -99,6 +99,9 @@ struct MaskState {
   LogicalResult parseAdd(arith::AddIOp addOp, const Location loc,
                          OpBuilder &builder);
 
+  LogicalResult parseSub(arith::SubIOp subOp, const Location loc,
+                         OpBuilder &builder);
+
   LogicalResult parseBroadcast(triton::BroadcastOp broadcastOp,
                                const Location loc, OpBuilder &builder);
 
@@ -106,6 +109,13 @@ struct MaskState {
                           Location loc, OpBuilder &builder);
 
   LogicalResult addStateScalar(const MaskState &state,
+                               const OpFoldResult scalar, Location loc,
+                               OpBuilder &builder);
+
+  LogicalResult subStates(const MaskState &lhsState, const MaskState &rhsState,
+                          Location loc, OpBuilder &builder);
+
+  LogicalResult subStateScalar(const MaskState &state,
                                const OpFoldResult scalar, Location loc,
                                OpBuilder &builder);
 

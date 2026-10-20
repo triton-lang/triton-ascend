@@ -85,8 +85,7 @@ def test_linearize_mask_broadcast(M, N, BLOCK_SIZE_N, dtype, sigtype):
 
     grid = (ceil_div(2 * M * N, BLOCK_SIZE_N), )
 
-    linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE_N,
-                                          optimize_dynamic_offset=True)
+    linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE_N)
 
     torch_output = torch_linearize_mask_broadcast(in_tensor.clone())
     assert torch.allclose(triton_output, torch_output, rtol=1e-5, atol=1e-8)
@@ -99,8 +98,7 @@ def triton_linearize_mask_broadcast(in_tensor, BLOCK_SIZE):
     triton_output = torch.zeros_like(in_tensor)
     grid = (ceil_div(2 * M * N, BLOCK_SIZE), )
 
-    linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE,
-                                          optimize_dynamic_offset=True)
+    linearize_mask_broadcast_kernel[grid](in_tensor, triton_output, N=N, M=M, BLOCK_SIZE_N=BLOCK_SIZE)
 
 
 @triton.jit

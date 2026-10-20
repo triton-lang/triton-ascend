@@ -198,7 +198,7 @@ def test_index_put_atomic_selects_all_simt_only(tmp_path):
 
 
 @simd_simt_910_95_only
-def test_dacs_segsum_selects_all_simt_only(tmp_path):
+def test_dacs_segsum_selects_all_simd(tmp_path):
     batch = 16
     heads = 32
     seqlen = 2048
@@ -248,4 +248,6 @@ def test_dacs_segsum_selects_all_simt_only(tmp_path):
     torch.testing.assert_close(da_cs_rev[0, 0, :chunk_size], expected_cs_rev, rtol=1e-4, atol=1e-4)
     torch.testing.assert_close(segsum[0, 0, 0], expected_segsum, rtol=1e-4, atol=1e-4)
 
-    _assert_effective_route(report_path, "all_simt_only")
+    # Measured on Ascend950PR for this dacs/segsum kernel: all_simd 0.344 ms versus
+    # all_simt_only 1.937 ms, so the route model is expected to prefer all_simd.
+    _assert_effective_route(report_path, "all_simd")

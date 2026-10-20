@@ -135,11 +135,26 @@ static bool checkVecScopeMainLoop(ModuleOp module) {
   return hasMainLoop && allMainLoopsSatisfy;
 }
 
+static bool isFixpipeToUB(Operation *op) {
+  auto fixpipeOp = dyn_cast<hivm::FixpipeOp>(op);
+  if (!fixpipeOp)
+    return false;
+  auto dstType = dyn_cast<MemRefType>(fixpipeOp.getDst().getType());
+  if (!dstType)
+    return false;
+  auto addrSpaceAttr =
+      dyn_cast_or_null<hivm::AddressSpaceAttr>(dstType.getMemorySpace());
+  if (!addrSpaceAttr)
+    return false;
+
+  return addrSpaceAttr.getAddressSpace() == hivm::AddressSpace::UB;
+}
+
 // For every main_loop id, gather all for/while ops sharing that id and count
-// the hivm.hir.copy and hivm.hir.fixpipe ops within them. Only when ALL
-// main_loop ids have either count equal to zero (every id has only copy or
-// only fixpipe, none has both), the dynamic CV pipeline cannot be applied and
-// we fall back to the original workflow.
+// the hivm.hir.copy ops and the hivm.hir.fixpipe ops writing to UB within
+// them. Only when ALL main_loop ids have either count equal to zero (every id
+// has only copy or only fixpipe, none has both), the dynamic CV pipeline
+// cannot be applied and we fall back to the original workflow.
 //   - hivm::CopyOp    typically appears in VECTOR scope main_loops
 //   - hivm::FixpipeOp typically appears in CUBE scope main_loops
 // Nested regions inside the main_loop op are also walked, and scf.yield
@@ -171,7 +186,7 @@ static bool isMainLoopOnlyCopyOrFixpipe(ModuleOp module) {
       }
       if (isa<hivm::CopyOp>(innerOp)) {
         ++counts.first;
-      } else if (isa<hivm::FixpipeOp>(innerOp)) {
+      } else if (isFixpipeToUB(innerOp)) {
         ++counts.second;
       }
       return WalkResult::advance();

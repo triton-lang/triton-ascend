@@ -52,7 +52,6 @@ jobs:
           echo "RELEASE_NAME=triton-ascend-$tag_or_branch" >> "$GITHUB_ENV"
       - name: Create source distribution
         run: |
-          python -m pip install --upgrade pip || exit 1
           python -m pip install "setuptools<70" wheel build || exit 1
           python -m build -s || exit 1
           cd dist || exit 1

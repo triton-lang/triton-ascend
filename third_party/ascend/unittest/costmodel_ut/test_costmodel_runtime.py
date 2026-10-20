@@ -13,6 +13,7 @@ class DummyCacheManager:
 
     def __init__(self):
         self.storage = {}
+        self.cache_dir = tempfile.TemporaryDirectory()
 
     def get_file(self, name):
         return self.storage.get(name)
@@ -20,7 +21,16 @@ class DummyCacheManager:
     def put(self, payload, name, binary=False):
         if binary:
             raise AssertionError("costmodel cache should be text json")
-        self.storage[name] = payload
+        path = Path(self.cache_dir.name) / name
+        path.write_text(str(payload), encoding="utf-8")
+        self.storage[name] = str(path)
+        return str(path)
+
+    def cleanup(self):
+        self.cache_dir.cleanup()
+
+    def __del__(self):
+        self.cleanup()
 
 
 class CostmodelRuntimeTest(unittest.TestCase):
@@ -39,8 +49,6 @@ class CostmodelRuntimeTest(unittest.TestCase):
         runtime_mod.cache = cache_mod
         triton_mod.runtime = runtime_mod
 
-        import sys
-
         sys.modules.setdefault("triton", triton_mod)
         sys.modules.setdefault("triton.runtime", runtime_mod)
         sys.modules.setdefault("triton.runtime.cache", cache_mod)
@@ -56,17 +64,9 @@ class CostmodelRuntimeTest(unittest.TestCase):
     def setUp(self):
         self.cm._COSTMODEL_MEM_CACHE.clear()
 
-    def test_parse_latency_and_jobs(self):
+    def test_parse_latency(self):
         self.assertAlmostEqual(self.cm.parse_latency("Estimated Time: 3.25 us"), 3.25)
         self.assertEqual(self.cm.parse_latency("noise"), float("inf"))
-
-        with patch.dict("os.environ", {"TRITON_COSTMODEL_WORKER_NUM": "2"}, clear=False):
-            self.assertEqual(self.cm.get_costmodel_jobs(8), 2)
-
-        with patch.dict("os.environ", {"TRITON_COSTMODEL_WORKER_NUM": "bad"},
-                        clear=False), patch.object(self.cm.os, "cpu_count", return_value=6):
-            self.assertEqual(self.cm.get_costmodel_jobs(3), 3)
-            self.assertEqual(self.cm.get_costmodel_jobs(0), 1)
 
     def test_cache_namespace_variants(self):
         with patch.object(self.cm, "_triton_key", None):
@@ -96,10 +96,10 @@ class CostmodelRuntimeTest(unittest.TestCase):
             self.cm._COSTMODEL_MEM_CACHE.clear()
             self.assertAlmostEqual(self.cm.load_costmodel_latency(cache_key), 7.5)
 
-            payload = mgr.storage[f"{cache_key}.json"]
-            self.assertAlmostEqual(float(json.loads(payload)["latency"]), 7.5)
+            payload_path = Path(mgr.storage[f"{cache_key}.json"])
+            self.assertAlmostEqual(float(json.loads(payload_path.read_text())["latency"]), 7.5)
 
-            mgr.storage[f"{cache_key}.json"] = json.dumps({"latency": "bad-float"})
+            payload_path.write_text(json.dumps({"latency": "bad-float"}), encoding="utf-8")
             self.cm._COSTMODEL_MEM_CACHE.clear()
             self.assertIsNone(self.cm.load_costmodel_latency(cache_key))
 
@@ -166,35 +166,33 @@ class CostmodelRuntimeTest(unittest.TestCase):
         with patch("builtins.__import__", fake_import):
             self.assertIsNone(self.cm.run_costmodel("module-text", ["-ascend-perf-model"]))
 
-    def test_normalize_items_and_eval_item(self):
+    def test_normalize_item_and_eval_item(self):
         cfg1 = object()
         cfg2 = object()
-        cfg3 = object()
-        items = [
-            {"config": cfg1, "ttir": "ttir1", "arg_bindings": "a=1", "hardware_config": "h1"},
-            {"config": cfg2, "ttir": ""},
-            {"config": None, "ttir": "ignored"},
-            {"config": cfg3, "ttir": "ttir3"},
-            123,
-        ]
 
-        pending, lat = self.cm._normalize_costmodel_items(items)
-        self.assertEqual(len(pending), 2)
-        self.assertEqual(lat[cfg2], float("inf"))
+        config, latency, pending = self.cm._normalize_costmodel_item(
+            {"config": cfg1, "ttir": "ttir1", "arg_bindings": "a=1", "hardware_config": "h1"})
+        self.assertIs(config, cfg1)
+        self.assertIsNone(latency)
+        self.assertEqual(pending, (cfg1, "ttir1", "a=1", "h1"))
+
+        config, latency, pending = self.cm._normalize_costmodel_item({"config": cfg2, "ttir": ""})
+        self.assertIs(config, cfg2)
+        self.assertEqual(latency, float("inf"))
+        self.assertIsNone(pending)
+
+        config, latency, pending = self.cm._normalize_costmodel_item(123)
+        self.assertIsNone(config)
+        self.assertEqual(latency, float("inf"))
+        self.assertIsNone(pending)
 
         with patch.object(self.cm, "load_costmodel_latency", lambda _k: 1.23):
-            cfg, t = self.cm._eval_one_costmodel_item(pending[0])
+            cfg, t = self.cm._eval_one_costmodel_item((cfg1, "ttir1", "a=1", "h1"))
             self.assertIs(cfg, cfg1)
             self.assertAlmostEqual(t, 1.23)
 
-    def test_eval_item_miss_and_pending_eval(self):
+    def test_eval_item_miss(self):
         cfg1, cfg2 = object(), object()
-        pending = [
-            (cfg1, "ttir1", "arg=1", ""),
-            (cfg2, "ttir2", "", ""),
-        ]
-        lat = {}
-
         calls = []
 
         def fake_run(ttir_or_path, extra_args=None, dump_ir_on_error=False):
@@ -203,76 +201,39 @@ class CostmodelRuntimeTest(unittest.TestCase):
                 return "Estimated Time: 9.9 us"
             return None
 
-        with patch.object(self.cm, "load_costmodel_latency",
-                          lambda _k: None), patch.object(self.cm, "store_costmodel_latency",
-                                                         lambda *_args, **_kwargs: None), patch.object(
-                                                             self.cm, "run_costmodel",
-                                                             fake_run), patch.dict("os.environ",
-                                                                                   {"TRITON_COSTMODEL_WORKER_NUM": "1"},
-                                                                                   clear=False):
-            self.cm._evaluate_pending_items(pending, lat)
+        with patch.object(self.cm, "load_costmodel_latency", lambda _k: None), patch.object(
+                self.cm, "store_costmodel_latency",
+                lambda *_args, **_kwargs: None), patch.object(self.cm, "run_costmodel", fake_run):
+            out1 = self.cm._eval_one_costmodel_item((cfg1, "ttir1", "arg=1", ""))
+            out2 = self.cm._eval_one_costmodel_item((cfg2, "ttir2", "", ""))
 
-        self.assertAlmostEqual(lat[cfg1], 9.9)
-        self.assertEqual(lat[cfg2], float("inf"))
+        self.assertIs(out1[0], cfg1)
+        self.assertAlmostEqual(out1[1], 9.9)
+        self.assertIs(out2[0], cfg2)
+        self.assertEqual(out2[1], float("inf"))
         self.assertEqual(len(calls), 2)
 
-    def test_evaluate_pending_empty(self):
-        lat = {}
-        self.cm._evaluate_pending_items([], lat)
-        self.assertEqual(lat, {})
-
-    def test_evaluate_pending_parallel_exception_tolerated(self):
-        cfg1, cfg2 = object(), object()
-        pending = [
-            (cfg1, "ttir1", "", ""),
-            (cfg2, "ttir2", "", ""),
-        ]
-        out = {}
-
-        def fake_eval(item):
-            if item[0] is cfg1:
-                return cfg1, 0.5
-            raise RuntimeError("bad worker")
-
-        with patch.object(self.cm, "_eval_one_costmodel_item",
-                          fake_eval), patch.dict("os.environ", {"TRITON_COSTMODEL_WORKER_NUM": "2"}, clear=False):
-            self.cm._evaluate_pending_items(pending, out)
-
-        self.assertAlmostEqual(out[cfg1], 0.5)
-        self.assertNotIn(cfg2, out)
-
     def test_costmodel_bench_paths(self):
-        self.assertEqual(self.cm.costmodel_bench([]), {})
-
-        class BadIter:
-
-            def __iter__(self):
-                raise RuntimeError("bad")
-
-        self.assertEqual(self.cm.costmodel_bench(BadIter()), {})
+        self.assertEqual(self.cm.costmodel_bench([]), (None, float("inf")))
 
         cfg1, cfg2 = object(), object()
-        items = [{"config": cfg1, "ttir": "t1"}, {"config": cfg2, "ttir": ""}]
 
-        with patch.object(self.cm, "_normalize_costmodel_items", lambda _x:
-                          ([(cfg1, "t1", "", "")], {cfg2: float("inf")})):
+        with patch.object(self.cm, "_eval_one_costmodel_item", lambda _pending: (cfg1, 0.88)):
+            result = self.cm.costmodel_bench({"config": cfg1, "ttir": "t1"})
+        self.assertIs(result[0], cfg1)
+        self.assertAlmostEqual(result[1], 0.88)
 
-            def fake_eval(_pending, out):
-                out[cfg1] = 0.88
-
-            with patch.object(self.cm, "_evaluate_pending_items", fake_eval):
-                result = self.cm.costmodel_bench(items)
-
-        self.assertAlmostEqual(result[cfg1], 0.88)
-        self.assertEqual(result[cfg2], float("inf"))
+        result = self.cm.costmodel_bench({"config": cfg2, "ttir": ""})
+        self.assertIs(result[0], cfg2)
+        self.assertEqual(result[1], float("inf"))
 
         def explode(*_args, **_kwargs):
             raise RuntimeError("oops")
 
-        with patch.object(self.cm, "_normalize_costmodel_items", explode):
-            fallback = self.cm.costmodel_bench(items)
-        self.assertEqual(fallback[cfg1], float("inf"))
-        self.assertEqual(fallback[cfg2], float("inf"))
+        with patch.object(self.cm, "_normalize_costmodel_item", explode):
+            fallback = self.cm.costmodel_bench({"config": cfg1, "ttir": "t1"})
+        self.assertIs(fallback[0], cfg1)
+        self.assertEqual(fallback[1], float("inf"))
 
 
 if __name__ == "__main__":

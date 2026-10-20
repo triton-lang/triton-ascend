@@ -45,6 +45,14 @@ FlagIdManager::FlagIdManager(ModuleOp module) {
 
 void FlagIdManager::scanExistingFlags(ModuleOp module) {
   module.walk([&](Operation *op) {
+    if (auto syncBlock = dyn_cast<hivm::SyncBlockOp>(op)) {
+      if (auto flagIdOpt = syncBlock.getFlagId()) {
+        int64_t id = flagIdOpt->getInt();
+        if (id >= 0 && id <= MAX_FLAG_ID) {
+          currentMaxId = std::max(currentMaxId, id);
+        }
+      }
+    }
     if (isa<hivm::SyncBlockSetOp>(op) || isa<hivm::SyncBlockWaitOp>(op)) {
       int flag = -1;
       if (auto intAttr = op->getAttrOfType<IntegerAttr>("static_flag_id")) {

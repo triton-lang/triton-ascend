@@ -102,6 +102,8 @@ def test_atan2_common(dtype, sigtype, N, NUMEL):
 input_vals = [
     (0.0, 1.0),
     (0.0, -1.0),
+    (-1.0, -0.0),
+    (1.0, -0.0),
 ]
 
 
@@ -127,3 +129,6 @@ def test_atan2_special(dtype, sigtype, N, NUMEL, X, Y):
     triton_elementwise_unary[1, 1, 1](x0, y0, out, N=N, NUMEL=NUMEL, debug=True)
 
     test_common.validate_cmp(sigtype, out, ans)
+    # -0.0 and +0.0 compare equal, so the sign of a zero result is checked
+    # separately: atan2 must keep the sign of a negative zero y.
+    assert torch.equal(torch.signbit(out.cpu()), torch.signbit(ans.cpu()))

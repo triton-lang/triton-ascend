@@ -62,6 +62,10 @@ def gather_2d_simd(src_ptr, idx_ptr, out_ptr, M: constexpr, N: constexpr, K: con
         gather_2d_simd[grid](src, indices, output, M, N, K,
                              XBLOCK=32, XBLOCK_SUB=4)
     """
+    tl.static_print("[UserWarning: `gather_2d_simd` kernel is deprecated and will be removed "
+                    "from `third_party/ascend/language/kernels/gather.py`. "
+                    "It has been moved to `third_party/ascend/tutorials/` as an example kernel. "
+                    "Please update your imports accordingly.]")
     pid = tl.program_id(0)
     m_start = pid * XBLOCK
     m_end = min(m_start + XBLOCK, M)

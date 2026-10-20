@@ -30,7 +30,7 @@ triton.language.floor(x, _semantic=None)
 | Ascend A2/A3 | ×    | ×     | ×     | ×     | ×     | ×      | ×      | ×     | √    | √    | ×    | √    | ×    |
 
 结论：Ascend 比 GPU 少了fp64的支持，但多了fp16和bf16的支持。
-torch_npu支持u8。
+torch_npu支持uint8。
 
 #### 2.2.2 Shape 支持
 

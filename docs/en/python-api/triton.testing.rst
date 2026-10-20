@@ -1,0 +1,1 @@
+../../zh/python-api/triton.testing.rst

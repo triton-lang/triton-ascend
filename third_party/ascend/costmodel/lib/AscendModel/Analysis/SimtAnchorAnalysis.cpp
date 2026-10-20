@@ -450,8 +450,9 @@ collectTriangularSolveScopeOperations(Operation *anchor,
   return result;
 }
 
-static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
-                                                         bool compileOn91095) {
+static std::optional<SimtAnchorDescriptor>
+analyzeAnchor(Operation *op, bool compileOn91095,
+              const llvm::DenseSet<Operation *> &unstructuredMemory) {
   if (!op)
     return std::nullopt;
   SimtAnchorDescriptor descriptor;
@@ -522,6 +523,8 @@ static std::optional<SimtAnchorDescriptor> analyzeAnchor(Operation *op,
     descriptor.triangularSolve = analyzeTriangularSolveFacts(op);
   } else if (isLoadedIndexDependentMemoryOp(op)) {
     descriptor.kind = SimtAnchorKind::LoadedIndexDependentMemory;
+  } else if (unstructuredMemory.contains(op)) {
+    descriptor.kind = SimtAnchorKind::UnstructuredMemory;
   } else {
     return std::nullopt;
   }
@@ -538,6 +541,8 @@ llvm::StringRef mlir::ascend::stringifySimtAnchorKind(SimtAnchorKind kind) {
     return "direct_gather";
   case SimtAnchorKind::LoadedIndexDependentMemory:
     return "loaded_index_dependent_memory";
+  case SimtAnchorKind::UnstructuredMemory:
+    return "unstructured_memory";
   case SimtAnchorKind::Histogram:
     return "histogram";
   case SimtAnchorKind::PlainOneDimensionalCumsum:
@@ -639,11 +644,14 @@ bool mlir::ascend::isLoadedIndexDependentMemoryOp(Operation *op) {
 bool mlir::ascend::hasSimtAnchorInBody(Operation *operation) {
   if (!operation)
     return false;
+  auto memory = collectUnstructuredMemoryOps(operation);
+  llvm::DenseSet<Operation *> unstructuredMemory(memory.begin(), memory.end());
   return operation
       ->walk<WalkOrder::PreOrder>([&](Operation *nested) {
         if (nested == operation)
           return WalkResult::advance();
-        return analyzeAnchor(nested, /*compileOn91095=*/false)
+        return analyzeAnchor(nested, /*compileOn91095=*/false,
+                             unstructuredMemory)
                    ? WalkResult::interrupt()
                    : WalkResult::advance();
       })
@@ -653,12 +661,14 @@ bool mlir::ascend::hasSimtAnchorInBody(Operation *operation) {
 SimtAnchorPlan mlir::ascend::buildMixedSimtAnchorPlan(ModuleOp module,
                                                       bool compileOn91095) {
   SimtAnchorPlan plan;
+  auto memory = collectUnstructuredMemoryOps(module);
+  llvm::DenseSet<Operation *> unstructuredMemory(memory.begin(), memory.end());
   llvm::DenseSet<Operation *> operationsInPlannedScope;
   module.walk<WalkOrder::PreOrder>([&](Operation *op) {
     if (operationsInPlannedScope.contains(op))
       return WalkResult::skip();
     std::optional<SimtAnchorDescriptor> descriptor =
-        analyzeAnchor(op, compileOn91095);
+        analyzeAnchor(op, compileOn91095, unstructuredMemory);
     if (!descriptor)
       return WalkResult::advance();
 

@@ -4196,6 +4196,43 @@
   },
   "description": "Target-specific hardware resource profile consumed by the online Stage Cost Model. Stage partitions and workloads are derived from transformed TTIR.",
   "properties": {
+    "simt_indirect_store_model": {
+      "enum": [
+        "random_f32_store_fill_ab_20261007",
+        "unmasked_factor_candidate_20261017",
+        "prefix_mask_rank_factor_20261017",
+        "random_mask_rank_factor_20261017",
+        "random_store_no_fill_first_20261008",
+        "random_store_no_fill_reuse_20261008"
+      ],
+      "description": "Optional Ascend950PR SIMT store increment in SYS_CNT cycles. The mask_rank_factor_20261017 selectors add measured rank1-5, W1/4, q1/2/4, F1/2/4 mask geometries. prefix_mask requires a statically proven constant prefix. random_mask additionally opts into the original shuffled byte-mask prior (W1 density 1/2, W4 density 3/4), not arbitrary runtime masks. q<1 uses upstream resource curves. The experimental unmasked 20261017 candidate covers measured rank1 INT32-loaded addresses, representative payloads, W=1/4/16 and F=1/2/4, with unresolved outliers and first-write state only. Its full-group fit is divided by F before existing superblock accounting. Unsupported candidate inputs retain the 20261008 first-write F1 fit or upstream resource curves. The 20261008 reuse model requires explicit evidence; the 20261007 F32 target-fill model remains reproducible."
+    },
+    "simd_indirect_store_model": {
+      "enum": [
+        "random_f32_store_no_fill_first_20261007",
+        "random_f32_store_no_fill_reuse_20261007",
+        "random_store_no_fill_first_20261008",
+        "random_store_no_fill_reuse_20261008"
+      ],
+      "description": "Optional no-extra-fill SIMD store A/B increment in SYS_CNT cycles. The 20261008 models cover grouped storage widths and ranks 1-8; the 20261007 F32 models remain reproducible. First has unresolved outliers; reuse requires explicit evidence that identical targets were written twice. Profile selection alone is not a cache-state proof. Unsupported workloads use the generic resource model."
+    },
+    "simt_indirect_load_model": {
+      "enum": [
+        "random_i32_six_term_20261007",
+        "unmasked_factor_candidate_20261017",
+        "prefix_mask_rank_factor_20261017",
+        "random_mask_rank_factor_20261017",
+        "random_dtype_six_term_20261008"
+      ],
+      "description": "Optional Ascend950PR/dav-c310 SIMT load fit in SYS_CNT cycles. The mask_rank_factor_20261017 selectors add measured rank1-5, W1/4, q1/2/4, F1/2/4 mask geometries. prefix_mask requires a statically proven constant prefix. random_mask additionally opts into the original shuffled byte-mask prior (W1 density 1/2, W4 density 3/4), not arbitrary runtime masks. q<1 uses upstream resource curves. The experimental unmasked 20261017 candidate measures a complete one-AIV F-program group against an index-passthrough baseline, including address/layout differences; it is not isolated LDG latency. Rank1 INT32-loaded addresses, representative payloads and measured W=1/4/16,F=1/2/4 geometries only; small-E/W16/F4 outliers remain. The group fit is divided by F before existing superblock accounting. Other inputs retain the 20261008 width-based F1 fit or upstream resource curves. SIMD is unchanged."
+    },
+    "simd_indirect_load_model": {
+      "enum": [
+        "random_f32_matched_ab_20261007",
+        "random_dtype_matched_ab_20261008"
+      ],
+      "description": "Optional Ascend950PR SIMD random-address scalar load effective increment from matched-address A/B measurements, in SYS_CNT cycles. The 20261008 model extends validated integer/floating-point types and ranks 1-5 with two per-element rates; the 20261007 FP32 model remains reproducible. Unsupported workloads use the generic resource model."
+    },
     "$schema": {
       "type": "string",
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
@@ -4250,6 +4287,14 @@
       "type": "string",
       "minLength": 1,
       "description": "Canonical target for this calibration; it must equal the target of the referenced shared microbenchmark profile."
+    },
+    "partial_structured_memory_model": {
+      "enum": [
+        "ttir_q1_short_formula_20261014",
+        "ttir_static_simt_load_factor_20261017",
+        "ttir_static_partial_20261020"
+      ],
+      "description": "Versioned TTIR partial-memory fits. ttir_static_partial_20261020 enables static linear/power partial-memory models for load/store, SIMD F1 and SIMT F1/F2/F4, E=32..2048 independent of W, rank2..5 mixed axes, payload storage bits 8/16/32/64 and proven constant prefix rectangles or measured tail half-windows. SIMD float64 is not supported. Store uses first-write state. The fit has unresolved independent-input accuracy and direction limits; enabling this draft is not an accuracy guarantee. Unknown masks, unsupported addresses and invalid/nonpositive calibration scales retain fallback. ttir_q1_short_formula_20261014 retains the F1 q=1 unmasked models. ttir_static_simt_load_factor_20261017 additionally enables complete-group SIMT load increments for F2/F4, E=32..2048 independent of W, mixed rank2..5, representative u8/u16/f32/u64, known positive strides and program spacing, and proved constant rectangular masks. The 112-coefficient candidate has individual-input independent MAPE 30.325/32.596% without mask and 25.599/28.209% with mask for F2/F4; it does not meet 20%. Unsupported cases retain legacy pricing. No runtime sampling or q/U/V predictors in the F2/F4 model."
     }
   },
   "required": [

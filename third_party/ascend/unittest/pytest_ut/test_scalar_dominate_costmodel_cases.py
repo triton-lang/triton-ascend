@@ -316,15 +316,17 @@ def _binned_copy_wgrad(
 # ---------------------------------------------------------------------------
 def _make_expert_data(seed):
     torch.manual_seed(seed)
-    x_cpu = torch.randn((_SL, _HS), dtype=torch.float16)
-    top_expert = torch.randint(0, _NE, (_SL * _TOP_K, ), dtype=torch.int32)
+    # Other tests may set the default device to NPU in the same worker.
+    # Keep reference data on CPU regardless of that process-wide setting.
+    x_cpu = torch.randn((_SL, _HS), dtype=torch.float16, device="cpu")
+    top_expert = torch.randint(0, _NE, (_SL * _TOP_K, ), dtype=torch.int32, device="cpu")
     bin_ids_cpu, indices_cpu = torch.sort(top_expert)
     tokens_per_expert = torch.bincount(top_expert, minlength=_NE)[:_NE].to(torch.int32)
     bins_cpu = torch.cumsum(tokens_per_expert, dim=0).to(torch.int32)
     padded_tokens_per_expert = torch.div(tokens_per_expert + 127, 128, rounding_mode="trunc") * 128
     padded_bins_cpu = torch.cumsum(padded_tokens_per_expert, dim=0).to(torch.int32)
-    weights_cpu = torch.rand((_SL * _TOP_K, ), dtype=torch.float16)
-    grads_cpu = torch.randn((_SL, _HS), dtype=torch.float16)
+    weights_cpu = torch.rand((_SL * _TOP_K, ), dtype=torch.float16, device="cpu")
+    grads_cpu = torch.randn((_SL, _HS), dtype=torch.float16, device="cpu")
     return (x_cpu, indices_cpu, bin_ids_cpu, bins_cpu, padded_bins_cpu, weights_cpu, grads_cpu)
 
 
@@ -333,7 +335,7 @@ def _to_npu(tensors):
 
 
 def _padded_gather_reference(x, indices, bins, padded_bins, top_k):
-    out = torch.zeros((padded_bins[-1].item(), x.shape[1]), dtype=x.dtype)
+    out = torch.zeros((padded_bins[-1].item(), x.shape[1]), dtype=x.dtype, device="cpu")
     for i in range(bins.numel()):
         start = 0 if i == 0 else bins[i - 1].item()
         end = bins[i].item()
@@ -347,7 +349,7 @@ def _padded_gather_reference(x, indices, bins, padded_bins, top_k):
 
 def _padded_scatter_reference(gathered, indices, weights, bins, padded_bins, top_k):
     tokens = indices.shape[0] // top_k
-    out = torch.zeros((tokens, gathered.shape[1]), dtype=torch.float32)
+    out = torch.zeros((tokens, gathered.shape[1]), dtype=torch.float32, device="cpu")
     for i in range(bins.numel()):
         start = 0 if i == 0 else bins[i - 1].item()
         end = bins[i].item()
@@ -364,7 +366,7 @@ def _padded_scatter_reference(gathered, indices, weights, bins, padded_bins, top
 
 
 def _padded_wgrad_reference(gathered, grads, indices, bins, padded_bins, top_k):
-    out = torch.zeros((indices.shape[0], ), dtype=torch.float32)
+    out = torch.zeros((indices.shape[0], ), dtype=torch.float32, device="cpu")
     for i in range(bins.numel()):
         start = 0 if i == 0 else bins[i - 1].item()
         end = bins[i].item()
@@ -382,7 +384,7 @@ def _padded_wgrad_reference(gathered, grads, indices, bins, padded_bins, top_k):
 
 def _binned_gather_reference(x, indices, bins, expert_capacity, top_k):
     ne = bins.numel()
-    out = torch.zeros((ne, expert_capacity, x.shape[1]), dtype=x.dtype)
+    out = torch.zeros((ne, expert_capacity, x.shape[1]), dtype=x.dtype, device="cpu")
     for i in range(ne):
         start = 0 if i == 0 else bins[i - 1].item()
         end = bins[i].item()
@@ -397,7 +399,7 @@ def _binned_gather_reference(x, indices, bins, expert_capacity, top_k):
 def _binned_scatter_reference(gathered, indices, weights, bins, top_k):
     tokens = indices.shape[0] // top_k
     expert_capacity = gathered.shape[1]
-    out = torch.zeros((tokens, gathered.shape[2]), dtype=torch.float32)
+    out = torch.zeros((tokens, gathered.shape[2]), dtype=torch.float32, device="cpu")
     for i in range(bins.numel()):
         start = 0 if i == 0 else bins[i - 1].item()
         end = bins[i].item()
@@ -413,7 +415,7 @@ def _binned_scatter_reference(gathered, indices, weights, bins, top_k):
 
 
 def _binned_wgrad_reference(gathered, grads, indices, bins, top_k):
-    out = torch.zeros((indices.shape[0], ), dtype=torch.float32)
+    out = torch.zeros((indices.shape[0], ), dtype=torch.float32, device="cpu")
     expert_capacity = gathered.shape[1]
     for i in range(bins.numel()):
         start = 0 if i == 0 else bins[i - 1].item()

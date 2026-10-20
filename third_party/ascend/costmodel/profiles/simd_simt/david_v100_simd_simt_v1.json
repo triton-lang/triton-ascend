@@ -1,5 +1,10 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
+  "partial_structured_memory_model": "ttir_static_partial_20261020",
+  "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_store_model": "random_store_no_fill_first_20261008",
+  "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_load_model": "random_dtype_matched_ab_20261008",
   "compatible_targets": [
     "Ascend950*",
     "Ascend910_95*",
@@ -7,7 +12,7 @@
   ],
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
-  "profile_version": "david-v100-simd-simt-20260903-v20",
+  "profile_version": "david-v100-simd-simt-20261017-mask-rank-factor",
   "schema_version": 12,
   "score_unit": "system_cycle_selection_score",
   "selection_calibration": {

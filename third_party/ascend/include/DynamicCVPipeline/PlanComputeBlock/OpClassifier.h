@@ -148,6 +148,19 @@ private:
   bool isCubeLoaderForOp(scf::ForOp forOp);
   bool isCubeLoaderForWhileOp(scf::WhileOp whileOp);
 
+  // Step 4.6: Give the CUBE core type to scalar arith chains whose only
+  // consumers are the bounds/conditions of control flow that contains CUBE
+  // ops (the operand-driven CUBE BFS never reaches such isolated chains).
+  int classifyScalarControlFlowChains();
+
+  // Helper: true if any op inside the control flow region is CUBE
+  bool controlFlowContainsCube(Operation *cfOp);
+
+  // Helper: walk up through scalar arith ops giving them the CUBE type;
+  // stops at the first non-scalar-arith op (extract / math / memory / block
+  // arg / already-CUBE), which stays on the VECTOR side.
+  void colorScalarChainCube(Value value, llvm::DenseSet<Operation *> &visited);
+
   // Initialize the pass
   void initializePass(ModuleOp module);
 

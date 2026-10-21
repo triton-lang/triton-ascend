@@ -7,7 +7,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/wheels.yml
-      - .github/workflows/docker/wheels.Dockerfile
+      - .github/workflows/build/wheels.Dockerfile
       - setup.py
       - pyproject.toml
       - version.txt
@@ -93,7 +93,7 @@ jobs:
         uses: docker/build-push-action@v7
         with:
           context: .
-          file: .github/workflows/docker/wheels.Dockerfile
+          file: .github/workflows/build/wheels.Dockerfile
           build-args: |
             MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/pypa/manylinux_2_28_${{ matrix.config.arch }}:latest
             PYTHON_VERSION=${{ matrix.python }}

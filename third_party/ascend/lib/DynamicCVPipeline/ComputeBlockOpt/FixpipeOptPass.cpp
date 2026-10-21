@@ -20,14 +20,14 @@
  * THE SOFTWARE.
  */
 
+#include <optional>
+#include <utility>
+
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
-#include <optional>
-#include <utility>
 
-#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -52,6 +52,8 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "triton/Analysis/Utility.h"
@@ -532,8 +534,8 @@ void FixpipeOptPass::runOnOperation() {
     if (matchedOps.empty()) {
       continue;
     }
-    CVPipeline::SplitIf::ScalarClosure closure{matchedOps.front()->getBlock(),
-                                               matchedOps.getArrayRef(), false};
+    CVPipeline::ScalarClosure closure{matchedOps.front()->getBlock(),
+                                      matchedOps.getArrayRef(), false};
     closure.collect();
     for (auto op : closure.scalarOps) {
       matchedOps.insert(op);

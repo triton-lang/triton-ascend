@@ -47,7 +47,7 @@ public:
 
 private:
   static int getFlagId(Operation *op);
-  bool hasPath(llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited,
+  bool hasPath(llvm::SmallSet<Operation *, CVPipeline::kInitSize> &visited,
                Operation *from, Operation *to);
   void preworkForAnalyze(const llvm::SmallVector<Operation *> &syncOps);
 

@@ -20,22 +20,20 @@
  * THE SOFTWARE.
  */
 
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Support/Debug.h"
+#include <cstdint>
+#include <optional>
 
-#include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Diagnostics.h"
 #include "mlir/IR/DialectRegistry.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/WalkResult.h"
-#include "llvm/Support/Debug.h"
-#include <cstdint>
-#include <optional>
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
@@ -52,6 +50,7 @@
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
 
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 static constexpr const char *DEBUG_TYPE = "add-dynamic-cv-pipeline";
 static constexpr unsigned MAX_RETRY_TIMES = 2;
@@ -136,6 +135,14 @@ void AddDynamicCVPipelinePass::runOnOperation() {
 
     // Do not reuse pass instances or partially transformed IR on retry.
     PassManager pm(&getContext(), moduleOp.getOperationName());
+    if (failed(mlir::applyPassManagerCLOptions(pm))) {
+      LDBG("Failed to apply cli options - running in python");
+    }
+
+    if (tools::getBoolEnv("MLIR_ENABLE_DUMP")) {
+      pm.enableIRPrinting();
+    }
+
     addPasses(pm);
 
     // run passes in separate pm, instead of the pipeline to suppress reproducer

@@ -62,6 +62,7 @@
 
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 
@@ -437,7 +438,10 @@ static void preprocessScalarDependencies(CandidateIf &cand) {
   auto processGroup = [](BlockGroup &group) {
     auto allOpsIter = llvm::concat<Operation *>(group.ops, group.nestedIfs);
     SmallVector<Operation *> allOps{allOpsIter.begin(), allOpsIter.end()};
-    ScalarClosure closure{group, allOps};
+    if (allOps.empty()) {
+      return;
+    }
+    ScalarClosure closure{(**allOps.begin()).getBlock(), allOps, true};
     closure.collect();
 
     auto [newOps, mapper] = closure.capture(group.blockId);

@@ -1,13 +1,38 @@
+/*
+ * Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
+ */
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
 
-#include "Common.h"
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
+#include "DynamicCVPipeline/Common/Utils.h"
 
-static constexpr const char *DEBUG_TYPE = "SplitIfByBlockIdScalarClosure";
+static constexpr const char *DEBUG_TYPE = "ScalarClosure";
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -17,7 +42,6 @@ static constexpr const char *DEBUG_TYPE = "SplitIfByBlockIdScalarClosure";
 
 using namespace mlir;
 using namespace CVPipeline;
-using namespace SplitIf;
 
 void ScalarClosure::collectOuterDependency(Operation *op) {
   op->walk([this](Operation *nestedOp) {
@@ -57,19 +81,6 @@ void ScalarClosure::collect() {
   for (Operation *op : ops) {
     collectOuterDependency(op);
   }
-}
-
-ScalarClosure::ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops)
-    : ops(ops) {
-  if (group.ops.empty()) {
-    return;
-  }
-  block = group.ops.front()->getBlock();
-  Operation *parentOp = block->getParentOp();
-  if (!parentOp) {
-    return;
-  }
-  parentBlock = parentOp->getBlock();
 }
 
 ScalarClosure::ScalarClosure(Block *block, ArrayRef<Operation *> ops,
@@ -139,3 +150,4 @@ ScalarClosure::capture(int blockId) {
 
   return {newOps, mapper};
 }
+

@@ -60,8 +60,7 @@
 
 using namespace llvm;
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "SplitMatmul";
 #define LOG_DEBUG(...)                                                         \
@@ -556,7 +555,8 @@ static bool shouldSplitByInput(linalg::MatmulOp matmulOp, Value &outerOutValue,
     return true;
   }
 
-  if (operationIsFillZero(outerInValue.getDefiningOp())) {
+  if (operationIsFillZero(outerInValue.getDefiningOp()) ||
+      llvm::isa<tensor::EmptyOp>(outerInValue.getDefiningOp())) {
     LOG_DEBUG("Not split because bias is zero. " << matmulOp);
     return false;
   }

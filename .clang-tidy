@@ -1,0 +1,184 @@
+HeaderFilterRegex: '^third_party/ascend/include/DynamicCVPipeline/.*'
+
+Checks:
+  - -*
+
+  # ==========================================
+  # 1. 基础与底层依赖 (Base & LLVM)
+  # ==========================================
+  - clang-diagnostic-*
+  - llvm-*
+  - -llvm-namespace-comment
+  - -llvm-include-order
+  - -llvm-header-guard
+  - -llvm-use-new-mlir-op-builder
+
+  # ==========================================
+  # 2. 杂项 (Misc)
+  # ==========================================
+  - misc-*
+  - -misc-const-correctness
+  - -misc-non-private-member-variables-in-classes
+  - -misc-unused-parameters
+  - -misc-include-cleaner
+  - -misc-use-anonymous-namespace
+  - -misc-no-recursion
+  - -misc-confusable-identifiers
+  - -misc-unused-using-decls
+
+  # ==========================================
+  # 3. 性能优化 (Performance)
+  # ==========================================
+  - performance-*
+  - -performance-enum-size
+
+  # ==========================================
+  # 4. 可读性 (Readability) & G.FMT.11 / G.CNS.02
+  # ==========================================
+  - readability-*
+  - readability-identifier-naming       # (0.85s) 必须开，否则命名规范不生效
+  - readability-redundant-member-init   # (0.06s) 极快，必须开
+  - -readability-magic-numbers           # (0.05s) 极快，魔数检查
+  - readability-redundant-smartptr-get  # (0.52s) 智能指针冗余 get()
+  - readability-redundant-string-cstr   # (0.28s) 字符串冗余 c_str()
+  - readability-container-size-empty    # (1.65s) 虽然有点慢，但对性能规范极其重要，保留
+  - -readability-braces-around-statements  # (可选) 如果你完全信任 clang-format 的 InsertBraces，可以关掉这个避免重复报错，但开着更保险
+  - -readability-implicit-bool-conversion
+  - -readability-identifier-length
+  # - -readability-convert-member-functions-to-static
+  # 剔除噪音项（按需）
+  # - -readability-function-cognitive-complexity
+
+  # ==========================================
+  # 5. 现代化 C++ (Modernize)
+  # ==========================================
+  - modernize-*
+  - -modernize-use-trailing-return-type # 剔除：5.7s毒瘤
+  # - -modernize-macro-to-enum
+  # - -modernize-type-traits
+  # - -modernize-use-using
+
+
+  # ==========================================
+  # 6. 易错代码 (Bugprone) & G.PRE.02
+  # ==========================================
+  - bugprone-*                           # 全开覆盖 macro-parentheses, use-after-move 等
+  - bugprone-use-after-move                 # (3.13s) 虽然耗时第三，但是致命级错误拦截，必须花这3秒！
+  - bugprone-sizeof-expression              # (0.97s) 致命错误拦截：sizeof 指针等常见手误
+  - bugprone-integer-division               # (0.02s) 极快，意外的整数除法截断
+  - bugprone-macro-parentheses              # (极快) LLVM开发常写宏，必须检查括号
+  - bugprone-branch-clone                   # (0.03s) 极快，if/else 分支一模一样
+  - bugprone-forward-declaration-namespace  # (0.22s) 命名空间前置声明错误
+  - bugprone-unhandled-self-assignment      # (0.22s) 自赋值未处理
+  - bugprone-unchecked-optional-access
+  - bugprone-argument-comment
+
+  # ==========================================
+  # 7. 安全标准 (CERT)
+  # ==========================================
+  - cert-dcl50-cpp                     # 禁止可变参数函数
+  - cert-mem57-cpp                     # 检查 over-aligned 内存分配
+
+  # ==========================================
+  # 8. C++ 核心指南 (CppCoreGuidelines) & G.PRE.01
+  # ==========================================
+  - cppcoreguidelines-interfaces-global-init
+  - cppcoreguidelines-no-malloc
+  - cppcoreguidelines-slicing
+  - cppcoreguidelines-special-member-functions
+  - cppcoreguidelines-prefer-member-initializer
+  - cppcoreguidelines-explicit-virtual-functions
+  - cppcoreguidelines-avoid-capture-default-when-dangling
+  - cppcoreguidelines-macro-usage      # G.PRE.01: 禁止使用宏来表示常量
+  - -cppcoreguidelines-owning-memory    # 剔除：耗时2.25s且噪音大
+
+CheckOptions:
+  # --- 命名规范 ---
+  - key:             readability-identifier-naming.ClassCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.StructCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.UnionCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.EnumCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.EnumConstantCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.EnumConstantIgnoredRegexp
+    value:           ".*"
+  - key:             readability-identifier-naming.FunctionCase
+    value:           camelBack
+  - key:             readability-identifier-naming.MemberCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ParameterCase
+    value:           camelBack
+  - key:             readability-identifier-naming.VariableCase
+    value:           camelBack
+  - key:             readability-identifier-naming.TypedefCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.TypeAliasCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.MacroDefinitionCase
+    value:           UPPER_CASE
+  - key:             readability-identifier-naming.TemplateParameterCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.FunctionIgnoredRegexp
+    value:           "LLVMFuzzerTestOneInput"
+  - key:             readability-identifier-naming.IgnoreMainLikeFunctions
+    value:           1
+
+  # 常量命名
+  - key:             readability-identifier-naming.GlobalConstantCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.GlobalConstantPrefix
+    value:           k
+  - key:             readability-identifier-naming.StaticConstantCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ConstexprVariableCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ConstexprVariablePrefix
+    value:           k
+  - key:             readability-identifier-naming.LocalConstantCase
+    value:           camelBack
+  - key:             readability-identifier-naming.MemberConstantCase
+    value:           camelBack
+
+  - key:             readability-header-guard.HeaderGuardNamingStyle
+    value:           UPPER_SNAKE_CASE
+  - key:             readability-header-guard.HeaderGuardPrefix
+    value:           "TRITON_ADAPTER_"
+  - key:             readability-header-guard.HeaderGuardSuffix
+    value:           "_H"
+
+  # --- 行为规范配置 ---
+  # G.PRE.01: 允许带有特定前缀的宏（防止把 DEBUG 等合法宏拦截）
+  # - key:             cppcoreguidelines-macro-usage.AllowedRegexp
+  #  value:           "^(DEBUG|LOG|ASSERT)_"
+
+  # G.CNS.02: 魔鬼数字检查配置 (注: 取消了IgnorePowersOf2IntegerValues，否则 32 不会被拦截)
+  - key:             readability-magic-numbers.IgnoredIntegerValues
+    value:           "0;1"
+  - key:             readability-magic-numbers.IgnoredFloatingPointValues
+    value:           "0.0;1.0;-1.0"
+  - key:             readability-magic-numbers.IgnorePowersOf2IntegerValues
+    value:           "true"
+
+  # 其他杂项
+  - key:             readability-redundant-member-init.IgnoreBaseInCopyConstructors
+    value:           1
+  - key:             modernize-use-default-member-init.UseAssignment
+    value:           1
+  - key:             modernize-use-default-member-init.IgnoreMacros
+    value:           1
+  - key: performance-faster-string-find.StringLikeClasses
+    value: "::std::basic_string;::std::basic_string_view;::llvm::StringRef"
+  - key:             readability-identifier-length.MinimumVariableNameLength
+    value:           2
+  - key:             readability-identifier-length.MinimumParameterNameLength
+    value:           2
+  - key: readability-function-cognitive-complexity.IgnoreMacros
+    value: 'true'
+  - key:             readability-identifier-naming.ConstexprVariableIgnoredRegexp
+    value:           "^DEBUG_TYPE$"
+  - key: misc-non-private-member-variables-in-classes.IgnoreClassesWithAllMemberVariablesBeingPublic
+    value: true

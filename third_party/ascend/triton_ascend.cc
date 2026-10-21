@@ -1,3 +1,7 @@
+#include "DynamicCVPipeline/AddControlFlowCondition.h"
+#include "DynamicCVPipeline/AllocMultiCache.h"
+#include "DynamicCVPipeline/SeparateMemoryFromComputePass.h"
+#include "DynamicCVPipeline/SplitDataflowPass.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -220,6 +224,27 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
                          count);
     }
   });
+  m.def("pre_check_available", [](PassManager &pm) { pm.addPass(createPreCheckAvailablePass()); });
+
+  m.def("standardize_op", [](mlir::PassManager &pm) { pm.addPass(triton::createStandardizeOpPass()); });
+
+  m.def("plan_compute_block", [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createPlanComputeBlockPass()); });
+
+  m.def("split_dataflow", [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createSplitDataflowPass()); });
+
+  m.def("separate_memory_from_compute",
+        [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createSeparateMemoryFromComputePass()); });
+
+  m.def("alloc_multi_cache", [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createAllocMultiCachePass()); });
+
+  m.def("add_control_flow_condition",
+        [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createAddControlFlowConditionPass()); });
+
+  m.def("compute_block_opt", [](mlir::PassManager &pm) { pm.addPass(mlir::triton::createComputeBlockOptPass()); });
+
+  m.def("remove_ssbuf_attr", [](PassManager &pm) { pm.addPass(createRemoveSsbufAttrPass()); });
+
+  m.def("analyse_dataflow", [](PassManager &pm) { pm.addPass(createAnalyzeDataFlowPass()); });
 
   m.def("set_enable_ub_refine_opt",
         [](mlir::ModuleOp &moduleop, bool enable) { return; });

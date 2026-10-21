@@ -23,9 +23,8 @@
 #ifndef TRITON_ADAPTER_OP_CLASSIFIER_H
 #define TRITON_ADAPTER_OP_CLASSIFIER_H
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "llvm/Support/LogicalResult.h"
+
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -36,6 +35,12 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace mlir {
@@ -71,11 +76,20 @@ public:
   }
   ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
+  void getDependentDialects(::mlir::DialectRegistry &registry) const override {
+    registry.insert<scope::ScopeDialect>();
+  }
+
 private:
   llvm::DenseMap<Operation *, Operation *> CloneOpMap;
 
   // Map from operation to its core type
   llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
+
+  // Ops whose core type was already decided before this pass (e.g. packed
+  // scope units carrying `ssbuffer.core_type`). Their type is authoritative
+  // and they act as propagation boundaries.
+  llvm::DenseSet<Operation *> preClassifiedOps;
 
   // Cache: value -> whether its defining chain reaches a VECTOR-only op.
   // Memoizes hasVectorOnlyProducer during CUBE upstream propagation.

@@ -22,6 +22,7 @@
 
 #include <queue>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +30,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -39,6 +41,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -47,17 +50,22 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
+#include "DynamicCVPipeline/Common/Analysis.h"
+#include "DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "bishengir/Dialect/Utils/Util.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 using namespace mlir;
 using namespace mlir::CVPipeline;
@@ -67,9 +75,7 @@ static constexpr const char *DEBUG_TYPE = "op-classifier";
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 using namespace mlir::triton;
 
-namespace {
-
-bool isInsideNestedLinalgRegion(Operation *op) {
+static bool isInsideNestedLinalgRegion(Operation *op) {
   for (Operation *parent = op ? op->getParentOp() : nullptr; parent;
        parent = parent->getParentOp()) {
     if (isa<linalg::LinalgDialect>(parent->getDialect())) {
@@ -78,8 +84,6 @@ bool isInsideNestedLinalgRegion(Operation *op) {
   }
   return false;
 }
-
-} // namespace
 
 // Helper: describe operation for logging
 std::string OpClassifierPass::describeOp(Operation *op) const {
@@ -92,7 +96,7 @@ std::string OpClassifierPass::describeOp(Operation *op) const {
 }
 
 // Helper: convert OpCoreType to string for IR attribute
-std::string coreTypeToString(OpCoreType ct) {
+static std::string coreTypeToString(OpCoreType ct) {
   switch (ct) {
   case OP_CUBE_ONLY:
     return "CUBE";
@@ -105,22 +109,18 @@ std::string coreTypeToString(OpCoreType ct) {
   }
 }
 
-namespace {
-
 // Maximum number of core types in a comma-separated core type string (e.g.,
 // "CUBE,VECTOR")
-constexpr size_t kMaxCoreTypeParts = 4;
+static constexpr size_t kMaxCoreTypeParts = 4;
 
 // Minimum number of inputs for linalg.matmul (A and B matrices)
-constexpr size_t kMinMatmulInputs = 2;
-
-} // namespace
+static constexpr size_t kMinMatmulInputs = 2;
 
 // Helper: parse OpCoreType from string (handles both "CUBE" and "CUBE,VECTOR"
 // formats) For comma-separated multi-value strings, returns the i-th component
 // if index is provided, otherwise returns the first component.
-OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
-                                   size_t index = 0) {
+static OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
+                                          size_t index = 0) {
   llvm::StringRef ref(coreTypeStr);
   llvm::SmallVector<llvm::StringRef, kMaxCoreTypeParts> parts;
   ref.split(parts, ',');
@@ -148,20 +148,33 @@ void OpClassifierPass::initializePass(ModuleOp module) {
   vectorOnlyProducerCache.clear();
   inBroadcastChain.clear();
   CloneOpMap.clear();
+  preClassifiedOps.clear();
 
-  // Collect all operations
-  module.walk([&](Operation *op) {
+  // Collect all operations. A scope::ScopeOp produced by an earlier pass is an
+  // atomic unit: record the scope itself but deliberately do not descend into
+  // its body, otherwise the packed unit would be torn apart.
+  module.walk([&](Operation *op) -> WalkResult {
     if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(op)) {
-      return; // Skip module, function, and return ops
+      return WalkResult::advance(); // Skip module, function, and return ops
+    }
+    if (isa<scope::ScopeOp>(op)) {
+      allOps.push_back(op);
+      return WalkResult::skip();
     }
     allOps.push_back(op);
+    return WalkResult::advance();
   });
 
   LLVM_DEBUG(DBGS() << "Collected: " << allOps.size() << " ops\n");
 
-  // Initialize all ops to UNDETERMINED
+  // Initialize all ops to UNDETERMINED, honoring any core type already stamped
+  // on the IR (e.g. packed scope units). Such ops are never re-classified.
   for (Operation *op : allOps) {
     opCoreTypes[op] = OP_UNDETERMINED;
+    if (auto ctAttr = op->getAttrOfType<StringAttr>("ssbuffer.core_type")) {
+      opCoreTypes[op] = parseCoreTypeFromString(ctAttr.getValue().str());
+      preClassifiedOps.insert(op);
+    }
   }
 }
 
@@ -560,6 +573,21 @@ int OpClassifierPass::patternMatchCUBE() {
       if (!def)
         continue;
 
+      // Respect a core type decided before this pass.
+      if (preClassifiedOps.contains(def))
+        continue;
+
+      // A packed load unit (see PackMemrefPass) feeding matmul is CUBE. This
+      // replaces the old to_tensor pattern, which is now hidden inside the
+      // scope.
+      if (auto scopeOp = dyn_cast<scope::ScopeOp>(def)) {
+        if (scopeOp->hasAttr(CVPipeline::kScopeLoadAttr)) {
+          opCoreTypes[scopeOp] = OP_CUBE_ONLY;
+          cubeSeeds.push_back(scopeOp);
+        }
+        continue;
+      }
+
       matchToTensorPattern(def);
       matchTransposePattern(def);
       matchFillPattern(def);
@@ -828,6 +856,8 @@ int OpClassifierPass::propagateCubeUpstream() {
     for (Operation *def : upstreamOps) {
       if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
         continue;
+      if (preClassifiedOps.contains(def))
+        continue;
 
       // Shared skip rules (see shouldSkipCubeUpstream).
       if (shouldSkipCubeUpstream(def))
@@ -899,8 +929,9 @@ void OpClassifierPass::markFillOpsAsCube() {
   LLVM_DEBUG(DBGS() << "--- Marking fill ops as CUBE when outs is CUBE --->\n");
 
   for (Operation *op : allOps) {
-    // Only process fill ops that are still UNDETERMINED
-    if (!isa<linalg::FillOp>(op) || opCoreTypes[op] != OP_UNDETERMINED) {
+    // Only process fill ops that are still UNDETERMINED and not pre-classified
+    if (!isa<linalg::FillOp>(op) || opCoreTypes[op] != OP_UNDETERMINED ||
+        preClassifiedOps.contains(op)) {
       continue;
     }
 
@@ -1007,6 +1038,8 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
         continue;
       if (isa<linalg::MatmulOp>(upstreamOp))
         continue;
+      if (preClassifiedOps.contains(upstreamOp))
+        continue;
       // Same skip rules as the main CUBE BFS.
       if (shouldSkipCubeUpstream(upstreamOp))
         continue;
@@ -1060,8 +1093,9 @@ int OpClassifierPass::propagateVectorUpstream() {
         continue;
 
       // Skip operations that should not be marked VECTOR:
+      // - pre-classified ops keep their authoritative type
       // - matmul: never mark matmul as vector (CUBE-only operation)
-      if (isa<linalg::MatmulOp>(def) ||
+      if (preClassifiedOps.contains(def) || isa<linalg::MatmulOp>(def) ||
           isa<scf::SCFDialect>(def->getDialect())) {
         LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
                           << ": should not be marked VECTOR\n");
@@ -1215,10 +1249,14 @@ llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
   // Use a combined walk to collect both ForOps and WhileOps
   llvm::SmallVector<Operation *> loaderLoops;
   getOperation().walk([&](scf::ForOp forOp) {
+    if (forOp->getParentOfType<scope::ScopeOp>())
+      return;
     if (isCubeLoaderForOp(forOp))
       loaderLoops.push_back(forOp);
   });
   getOperation().walk([&](scf::WhileOp whileOp) {
+    if (whileOp->getParentOfType<scope::ScopeOp>())
+      return;
     if (isCubeLoaderForWhileOp(whileOp))
       loaderLoops.push_back(whileOp);
   });
@@ -1732,7 +1770,8 @@ int OpClassifierPass::handleCubeAndVector() {
     // Collect all ops still marked CUBE_AND_VECTOR
     llvm::SmallVector<Operation *> cubeAndVectorOps;
     for (Operation *op : allOps) {
-      if (opCoreTypes[op] == OP_CUBE_AND_VECTOR) {
+      if (opCoreTypes[op] == OP_CUBE_AND_VECTOR &&
+          !preClassifiedOps.contains(op)) {
         cubeAndVectorOps.push_back(op);
       }
     }

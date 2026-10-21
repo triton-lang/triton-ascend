@@ -20,21 +20,21 @@
  * THE SOFTWARE.
  */
 
+#include <memory>
+
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
-#include <memory>
 
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
-#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-#include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+
+#include "DynamicCVPipeline/StandardizeOp/Passes.h"
 
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "StandardizeOp";
 #define LOG_DEBUG(...)                                                         \
@@ -51,25 +51,12 @@ void StandardizeOpPass::runOnOperation() {
 
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
+
   pm.addPass(createPatternMatchRewritePass());
+  pm.addPass(createPackMemrefPass());
 
   if (llvm::failed(runPipeline(pm, op))) {
-    LOG_DEBUG("Pipeline Failed!");
-    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_FAILED);
-    return;
-  }
-
-  bool findMayNotExec = false;
-  op->walk([&](linalg::MatmulOp matmulOp) {
-    if (matmulOp->hasAttr(CVPipeline::kMayNotExec)) {
-      findMayNotExec = true;
-    }
-  });
-
-  if (findMayNotExec) {
-    LOG_DEBUG("Matmul may not execute!");
-    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_IGNORED);
-    return;
+    signalPassFailure();
   }
 }
 

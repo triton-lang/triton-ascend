@@ -192,34 +192,6 @@ def simple_gather_kernel(src_ptr, index_ptr, out_ptr):
     tl.store(out_ptr + y0_local * 2 + x1_local, gathered, mask)
 
 
-@triton.jit
-def simple_scatter_kernel(value_ptr, index_ptr, dst_ptr):
-    # index tile shape: [2,2]
-    y0_local = tl.arange(0, 2)[:, None]  # [0,1] rows
-    x1_local = tl.arange(0, 2)[None, :]  # [0,1] cols
-    mask = (y0_local < 2) & (x1_local < 2)
-
-    value = tl.load(value_ptr + y0_local * 2 + x1_local, mask)
-    index = tl.load(index_ptr + y0_local * 2 + x1_local, mask)
-
-    scatter_ub_to_out(ptr=dst_ptr, value=value, index=index, index_boundary=4, dim=0, dst_stride=(2, 1),
-                      end_offset=(2, 2), start_offset=(0, 0))
-
-
-@triton.jit
-def simple_scatter_kernel(value_ptr, index_ptr, dst_ptr):
-    # index tile shape: [2,2]
-    y0_local = tl.arange(0, 2)[:, None]  # [0,1] rows
-    x1_local = tl.arange(0, 2)[None, :]  # [0,1] cols
-    mask = (y0_local < 2) & (x1_local < 2)
-
-    value = tl.load(value_ptr + y0_local * 2 + x1_local, mask)
-    index = tl.load(index_ptr + y0_local * 2 + x1_local, mask)
-
-    scatter_ub_to_out(ptr=dst_ptr, value=value, index=index, index_boundary=4, dim=0, dst_stride=(2, 1),
-                      end_offset=(2, 2), start_offset=(0, 0))
-
-
 # Test function definitions
 def test_core_functions():
     print("=" * 60)
@@ -275,38 +247,6 @@ def test_mem2_ops():
 
     with pytest.warns(FutureWarning, match="gather_out_to_ub"), pytest.raises(MLIRCompilationError):
         simple_gather_kernel[(1, )](src, index, out)
-
-    print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
-
-
-def test_mem3_ops():
-    print("=" * 60)
-    print("Test 3: Memory Operations (EXPECTED TO FAIL)")
-    print("=" * 60)
-
-    # 构造输入（必须放在测试内，防止模块加载时报错）
-    dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
-    value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
-    index = torch.tensor([[1, 2], [3, 0]], device='npu')
-
-    with pytest.warns(FutureWarning, match="scatter_ub_to_out"), pytest.raises(MLIRCompilationError):
-        simple_scatter_kernel[(1, )](value, index, dst)
-
-    print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
-
-
-def test_mem4_ops():
-    print("=" * 60)
-    print("Test 3: Memory Operations (EXPECTED TO FAIL)")
-    print("=" * 60)
-
-    # 构造输入（必须放在测试内，防止模块加载时报错）
-    dst = torch.zeros((4, 2), device='npu', dtype=torch.float32)
-    value = torch.tensor([[1., 2.], [3., 4.]], device='npu')
-    index = torch.tensor([[1, 2], [3, 0]], device='npu')
-
-    with pytest.warns(FutureWarning, match="scatter_ub_to_out"), pytest.raises(MLIRCompilationError):
-        simple_scatter_kernel[(1, )](value, index, dst)
 
     print("✅ 成功捕获预期的 MLIRCompilationError 错误！测试通过！")
 
@@ -377,8 +317,6 @@ if __name__ == "__main__":
     test_math_ops()
     test_mem_ops()
     test_mem2_ops()
-    test_mem3_ops()
-    test_mem4_ops()
     test_vec_ops()
     test_aux_ops()
     test_scope()

@@ -45,12 +45,27 @@ from triton.backends.ascend.program_grid import (
 import triton.backends.ascend.utils as _ascend_utils
 
 
+_NPU_DEVICE_LIMIT_REGEX = re.compile(r'^\d+ *, *\d+$')
+
+
 class NPUUtils(object):
+
+    # Resolved npu_utils.so path keyed by the active Triton cache root. The key
+    # only depends on the CANN/torch_npu versions and the C++ source, all fixed
+    # within a process, so repeated NPUUtils() construction reuses the resolved
+    # path. Keying on the cache root keeps PyTorch Inductor's runtime
+    # TRITON_CACHE_DIR switches working: a new root simply resolves once more.
+    _so_path_cache = {}
 
     def __new__(cls):
         if not hasattr(cls, 'instance'):
             cls.instance = super(NPUUtils, cls).__new__(cls)
         return cls.instance
+
+    @staticmethod
+    def _current_cache_dir():
+        from triton import knobs
+        return knobs.cache.dir
 
     def __init__(self):
         # NPUUtils is a singleton, but __init__ must refresh the cached shared
@@ -68,6 +83,10 @@ class NPUUtils(object):
         return self._cache_path
 
     def _build_or_get_cached_so(self):
+        cache_dir = self._current_cache_dir()
+        cached = self._so_path_cache.get(cache_dir)
+        if cached is not None and os.path.exists(cached):
+            return cached
         dirname = os.path.dirname(os.path.realpath(__file__))
         src_path = os.path.join(dirname, "npu_utils.cpp")
         src = Path(src_path).read_text()
@@ -80,6 +99,7 @@ class NPUUtils(object):
         fname = "npu_utils.so"
         cache_path = cache.get_file(fname)
         if cache_path is not None and os.path.exists(cache_path):
+            self._so_path_cache[cache_dir] = cache_path
             return cache_path
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -89,6 +109,7 @@ class NPUUtils(object):
             so = _build_npu_ext("npu_utils", tmp_src_path)
             with open(so, "rb") as f:
                 cache_path = cache.put(f.read(), fname, binary=True)
+        self._so_path_cache[cache_dir] = cache_path
         return cache_path
 
     def _load_mod(self):
@@ -133,7 +154,7 @@ class NPUUtils(object):
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
-        is_valid = re.match(r'^\d+ *, *\d+$', npu_device_limit_str.strip())
+        is_valid = _NPU_DEVICE_LIMIT_REGEX.match(npu_device_limit_str.strip())
         if is_valid:
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
@@ -177,11 +198,12 @@ class NPUUtils(object):
         return cube_core_num, vector_core_num
 
     def has_device_limit(self):
-        num_aic, num_aiv = self.get_device_core()
         try:
-            return num_aic != self.get_aicore_num() or num_aiv != self.get_aivector_core_num()
+            limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
         except ValueError:
             return False
+        num_aic, num_aiv = self.get_device_core()
+        return num_aic != limited_aic or num_aiv != limited_aiv
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain

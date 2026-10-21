@@ -21,27 +21,29 @@ def test_full_row_copy_inlining_scope(monkeypatch, marked, arch, mode, parallel,
         metadata, "/compiler") == (["--enable-lib-call-no-inline=false"] if expected else [])
 
 
-@pytest.mark.parametrize("status,output,supported", [(0, "--enable-lib-call-no-inline", True), (0, "", False),
-                                                     (1, "--enable-lib-call-no-inline", False)])
-def test_compiler_option_probe(monkeypatch, status, output, supported):
+@pytest.mark.parametrize("output,supported", [("--enable-lib-call-no-inline", True), ("", False)])
+def test_compiler_option_probe(monkeypatch, output, supported):
     compiler._supports_full_row_copy_inlining.cache_clear()
-    monkeypatch.setattr(compiler.subprocess, "run",
-                        lambda *_args, **_kwargs: SimpleNamespace(returncode=status, stdout=output))
+    compiler._get_bishengir_compile_help.cache_clear()
+    monkeypatch.setattr(compiler, "_get_bishengir_compile_help", lambda _path: output)
     assert compiler._supports_full_row_copy_inlining("/compiler") == supported
     compiler._supports_full_row_copy_inlining.cache_clear()
+    compiler._get_bishengir_compile_help.cache_clear()
 
 
 def test_probe_failure_keeps_default(monkeypatch):
     compiler._supports_full_row_copy_inlining.cache_clear()
+    compiler._get_bishengir_compile_help.cache_clear()
 
-    def fail(*_args, **_kwargs):
+    def fail(_path):
         raise subprocess.TimeoutExpired("/compiler", 10)
 
-    monkeypatch.setattr(compiler.subprocess, "run", fail)
+    monkeypatch.setattr(compiler, "_get_bishengir_compile_help", fail)
     metadata = dict(has_full_row_copy=True, target=SimpleNamespace(arch="Ascend950PR"), mix_mode="aiv",
                     parallel_mode="simd")
     assert compiler._full_row_copy_compile_options(metadata, "/compiler") == []
     compiler._supports_full_row_copy_inlining.cache_clear()
+    compiler._get_bishengir_compile_help.cache_clear()
 
 
 @pytest.mark.parametrize("attrs,expected", [("tt.full_row_copy", True), ("tt.full_row_copy_extra", False), ("", False)])

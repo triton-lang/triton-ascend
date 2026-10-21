@@ -135,6 +135,7 @@ def compiler_module():
             "_get_triton_mlir_opt_path",
             "_get_triton_opt_path",
             "_get_bishengir_opt_path",
+            "_get_bishengir_compile_help",
     ):
         setattr(utils_stub, name, lambda *_args, **_kwargs: "")
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
@@ -439,6 +440,9 @@ def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op
         })
 
     class FakeNPUUtils:
+
+        def get_device_core_limits(self):
+            return None
 
         def has_device_limit(self):
             return False
@@ -950,7 +954,8 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
     monkeypatch.setattr(compiler, "get_auto_bind_sub_block_option", lambda _meta: True)
     monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/compiler", {}))
     monkeypatch.setattr(compiler, "NPUUtils",
-                        lambda: SimpleNamespace(has_device_limit=lambda: False, get_arch=lambda: options.target_arch))
+                        lambda: SimpleNamespace(get_device_core_limits=lambda: None, has_device_limit=lambda: False,
+                                                get_arch=lambda: options.target_arch))
     monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
 
     class CommandCaptured(BaseException):

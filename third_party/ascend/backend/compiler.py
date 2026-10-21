@@ -46,6 +46,7 @@ from triton.backends.ascend.utils import (
     _check_bishengir_api_change,
     _check_bishengir_able_save_ir,
     _check_bishengir_is_regbased,
+    _get_bishengir_compile_help,
     _enable_print_ub_bits,
     _enable_dump_memory_info,
     _enable_msdebug,
@@ -539,6 +540,31 @@ def __get_metadata_attr_by_callback(lib, postfix: str, metadata, meta_key: str):
         metadata[meta_key] = callback_func()
 
 
+# Precompiled Linalg IR patterns shared by every _parse_linalg_metadata call, so
+# hot-path compiles do not recompile the same regexes per kernel.
+
+# Example: module attributes { ... } / module @foo attributes { ... }
+_LINALG_MODULE_ATTRS_RE = re.compile(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}')
+_LINALG_FULL_ROW_COPY_RE = re.compile(r'\btt\.full_row_copy\b')
+_LINALG_DISABLE_AUTO_TILE_RE = re.compile(r'hivm.disable_auto_tile_and_bind_subblock')
+# Inserted by DiscreteMaskAccessConversionPass / MemOpConverter when discrete
+# masked stores need cross-block exclusion (e.g. hivm.sync_block_lock).
+_LINALG_SYNC_BLOCK_LOCK_RE = re.compile(r'\bsync_block_lock\b')
+_LINALG_SYNC_BLOCK_LOCK_UNORDERED_RE = re.compile(r"sync_block_lock_unordered")
+# Example: mix_mode = "aiv" -> aiv
+_LINALG_MIX_MODE_RE = re.compile(r'mix_mode\s*=\s*"([^"]+)"')
+# Example: parallel_mode = "mix_simd_simt" -> mix_simd_simt
+_LINALG_PARALLEL_MODE_RE = re.compile(r'parallel_mode\s*=\s*"([^"]+)"')
+# Example: func.func @gather_sorted_kernel(%arg0: ...) -> gather_sorted_kernel
+_LINALG_KERNEL_NAME_RE = re.compile(r"func\.func\s+@(\w+)")
+# Example: %arg1: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32} -> ('1', '0')
+_LINALG_TENSOR_KIND_RE = re.compile(r'%arg(\d+):[^,)]*?\{[^}]*?tt\.tensor_kind\s*=\s*([^:\s}]+)\s*:[^}]*?\}')
+# Example: bitcode = "a.bc"
+_LINALG_BITCODES_RE = re.compile(r'bitcode\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|(\w+))')
+# Example (TTIR): tt.func public @gather_sorted_kernel(...) -> gather_sorted_kernel
+_TTIR_FUNC_NAME_RE = re.compile(r"tt\.func\spublic\s+@(\w+)")
+
+
 def _parse_linalg_metadata(linalg: str, metadata: dict):
     """
     Parse Linalg IR to extract metadata required for NPU compilation.
@@ -551,46 +577,28 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
 
     Additionally, removes the mix_mode attribute from the IR.
     """
-    # --- Regular expressions and examples ---
-
-    DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX = r'hivm.disable_auto_tile_and_bind_subblock'
-
-    # Inserted by DiscreteMaskAccessConversionPass / MemOpConverter when discrete
-    # masked stores need cross-block exclusion (e.g. hivm.sync_block_lock).
-    SYNC_BLOCK_LOCK_REGEX = r'\bsync_block_lock\b'
-
-    # Example: mix_mode = "aiv" -> aiv
-    MIX_MODE_REGEX = r'mix_mode\s*=\s*"([^"]+)"'
-
-    # Example: parallel_mode = "mix_simd_simt" -> mix_simd_simt
-    PARALLEL_MODE_REGEX = r'parallel_mode\s*=\s*"([^"]+)"'
-
-    # Example: func.func @gather_sorted_kernel(%arg0: ...) -> gather_sorted_kernel
-    KERNEL_NAME_REGEX = r"func\.func\s+@(\w+)"
-
-    # Example: %arg1: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32} -> ('1', '0')
-    TENSOR_KIND_REGEX = r'%arg(\d+):[^,)]*?\{[^}]*?tt\.tensor_kind\s*=\s*([^:\s}]+)\s*:[^}]*?\}'
-
-    # Example: bitcode = "a.bc"
-    BITCODES_REGEX = r'bitcode\s*=\s*(?:"([^"]+)"|\'([^\']+)\'|(\w+))'
-
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
-    module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
-    metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
+    module_attrs = _LINALG_MODULE_ATTRS_RE.search(linalg)
+    metadata["has_full_row_copy"] = bool(
+        module_attrs and _LINALG_FULL_ROW_COPY_RE.search(module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module
-    metadata["auto_tile_and_bind_subblock"] = not re.search(DISABLE_AUTO_TILE_AND_BIND_SUBBLOCK_REGEX, linalg)
+    metadata["auto_tile_and_bind_subblock"] = not _LINALG_DISABLE_AUTO_TILE_RE.search(linalg)
+    # Scan the lock markers once and reuse the results below.
+    unordered_match = _LINALG_SYNC_BLOCK_LOCK_UNORDERED_RE.search(linalg)
     # Turn off auto-blockify only for the ORDERED (token-ring) sync_block_lock:
-    if re.search(SYNC_BLOCK_LOCK_REGEX, linalg) and not re.search(r"sync_block_lock_unordered", linalg):
+    if _LINALG_SYNC_BLOCK_LOCK_RE.search(linalg) and not unordered_match:
         metadata["has_auto_blockify_blacklist_op"] = True
     # Mixed kernels use (block, subblock) as the unordered-lock participant
     # identity. Pure AIV kernels keep subblock tiling disabled: they neither
     # need it nor necessarily have the FFTS runtime resource it requires.
-    has_unordered_sync_block_lock = re.search(r"sync_block_lock_unordered", linalg) is not None
+    has_unordered_sync_block_lock = unordered_match is not None
     metadata["has_unordered_sync_block_lock"] = has_unordered_sync_block_lock
+    # Resolve mix_mode once; it is needed both for the unordered-lock policy and
+    # for metadata["mix_mode"] below.
+    mix_mode = _LINALG_MIX_MODE_RE.search(linalg).group(1)
     if has_unordered_sync_block_lock:
-        mix_mode = re.search(MIX_MODE_REGEX, linalg).group(1)
         if mix_mode != "mix":
             metadata["auto_tile_and_bind_subblock"] = False
         # One metadata cache line for runtime participant_num, plus one
@@ -600,18 +608,18 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
         metadata["sync_block_lock_layout"] = 1 << 32
         metadata["lock_init_val"] = 0
     # the mix mode is also encoded into metadata['name'] for runtime to distinguish
-    metadata["mix_mode"] = re.search(MIX_MODE_REGEX, linalg).group(1)
-    metadata["parallel_mode"] = re.search(PARALLEL_MODE_REGEX, linalg).group(1)
-    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, linalg).group(1)
+    metadata["mix_mode"] = mix_mode
+    metadata["parallel_mode"] = _LINALG_PARALLEL_MODE_RE.search(linalg).group(1)
+    metadata["kernel_name"] = _LINALG_KERNEL_NAME_RE.search(linalg).group(1)
     # Check the function load_binary in npu_driver.py.
     metadata["name"] = metadata["kernel_name"]
     # Parse all tensor kinds from arguments
-    metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, linalg)]
+    metadata["tensor_kinds"] = [int(kind) for _, kind in _LINALG_TENSOR_KIND_RE.findall(linalg)]
     # init the ub bits of triton kernel for inductor autotune using
     metadata["required_ub_bits"] = 0
 
     # Parse all bitcode paths
-    bitcodes = re.findall(BITCODES_REGEX, linalg)
+    bitcodes = _LINALG_BITCODES_RE.findall(linalg)
     metadata["bitcodes"] = [val for group in bitcodes for val in group if val]
     return linalg, metadata
 
@@ -623,25 +631,18 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
       - kernel_name
       - shared (currently hardcoded)
     """
-    # --- Regular expressions and examples ---
-    # Example: tt.func @gather_sorted_kernel(%arg0: ...) -> gather_sorted_kernel
-    KERNEL_NAME_REGEX = r"tt\.func\spublic\s+@(\w+)"
-
-    # Example: %arg1: memref<?xf32> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32} -> ('1', '0')
-    TENSOR_KIND_REGEX = r'%arg(\d+):[^,)]*?\{[^}]*?tt\.tensor_kind\s*=\s*([^:\s}]+)\s*:[^}]*?\}'
-
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
     # Note: Currently, for TTIR inputs, we only support vector kernels.
     metadata["mix_mode"] = "aiv"
-    metadata["kernel_name"] = re.search(KERNEL_NAME_REGEX, ttir).group(1)
+    metadata["kernel_name"] = _TTIR_FUNC_NAME_RE.search(ttir).group(1)
     metadata["name"] = metadata["kernel_name"]
     # Keep this as compiler-derived safety metadata.  In particular, do not
     # trust a caller-provided False value to override an unsafe TTIR pattern.
     metadata["has_auto_blockify_blacklist_op"] = bool(_get_auto_blockify_blacklist_reasons(ttir))
-    # Parse all tensor kinds from arguments
-    metadata["tensor_kinds"] = [int(kind) for _, kind in re.findall(TENSOR_KIND_REGEX, ttir)]
+    # Parse all tensor kinds from arguments (same argument encoding as linalg).
+    metadata["tensor_kinds"] = [int(kind) for _, kind in _LINALG_TENSOR_KIND_RE.findall(ttir)]
     return metadata
 
 
@@ -654,11 +655,10 @@ def get_common_bishengir_compile_options(metadata):
 @functools.lru_cache()
 def _supports_full_row_copy_inlining(compiler_path):
     try:
-        result = subprocess.run([compiler_path, "--help"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                timeout=10, check=False)
+        help_text = _get_bishengir_compile_help(compiler_path)
     except (OSError, subprocess.SubprocessError):
         return False
-    return result.returncode == 0 and "--enable-lib-call-no-inline" in result.stdout
+    return "--enable-lib-call-no-inline" in help_text
 
 
 def _full_row_copy_compile_options(metadata, compiler_path):
@@ -732,6 +732,10 @@ def try_compile_with_config(linalg: str, ub_config: Dict[str, Any], metadata: di
         return (False, str(e))
 
 
+# Parsed once from bishengir stdout, e.g. "UB size = 12345 bits".
+_UB_SIZE_RE = re.compile(r'UB\s+size\s*=\s*(\d+)\s*bits')
+
+
 def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
@@ -789,12 +793,11 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
         npu_utils = NPUUtils()
-        if npu_utils.has_device_limit():
+        core_limits = npu_utils.get_device_core_limits()
+        if core_limits is not None:
             _compile_option_list += [
-                f"--custom-aic-number={npu_utils.get_aicore_num()}",
-            ]
-            _compile_option_list += [
-                f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                f"--custom-aic-number={core_limits[0]}",
+                f"--custom-aiv-number={core_limits[1]}",
             ]
 
         if force_disable_ffts(opt.target_arch):
@@ -948,7 +951,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
-        match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)
+        match = _UB_SIZE_RE.search(stdout_str)
         if match:
             # get the ub bits of triton kernel from bisheng for inductor autotune using
             metadata["required_ub_bits"] = int(match.group(1))
@@ -1162,7 +1165,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _save_npuir_debug_output(ret.stdout, ret.stderr, tmpdir, metadata["hash"])
 
         stdout_str = ret.stdout.decode('utf-8') if ret.stdout else ''
-        match = re.search(r'UB\s+size\s*=\s*(\d+)\s*bits', stdout_str)
+        match = _UB_SIZE_RE.search(stdout_str)
         if match:
             metadata["required_ub_bits"] = int(match.group(1))
 
@@ -1506,11 +1509,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
-                npu_utils = NPUUtils()
-                if npu_utils.has_device_limit():
+                core_limits = NPUUtils().get_device_core_limits()
+                if core_limits is not None:
                     _compile_option_list += [
-                        f"--custom-aic-number={npu_utils.get_aicore_num()}",
-                        f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                        f"--custom-aic-number={core_limits[0]}",
+                        f"--custom-aiv-number={core_limits[1]}",
                     ]
 
             bisheng_options = metadata["bisheng_options"]

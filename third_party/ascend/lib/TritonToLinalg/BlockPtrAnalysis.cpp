@@ -57,6 +57,7 @@
 #include <cassert>
 #include <limits>
 #include <set>
+#include <type_traits>
 
 #define DEBUG_TYPE "triton-block-ptr-analysis"
 namespace mlir {
@@ -645,6 +646,8 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
     return parseBitcast(bitcastOp, data, loc, rewriter, known);
   } else if (auto extsiOp = operand.getDefiningOp<arith::ExtSIOp>()) {
     return parseExtSI(extsiOp, data, loc, rewriter, known);
+  } else if (auto truncOp = operand.getDefiningOp<arith::TruncIOp>()) {
+    return parseTruncI(truncOp, data, loc, rewriter, known);
   } else if (auto divOp = operand.getDefiningOp<arith::DivSIOp>()) {
     return parseDiv(divOp, data, loc, rewriter, known);
   } else if (auto makeRangeOp = operand.getDefiningOp<triton::MakeRangeOp>()) {
@@ -653,10 +656,10 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
   } else if (auto reduceOp = operand.getDefiningOp<triton::ReduceOp>()) {
     return parseReduce(reduceOp, data, loc, rewriter, known);
   } else if (auto loadOp = operand.getDefiningOp<triton::LoadOp>()) {
-    parseIndirectLoad<triton::LoadOp>(loadOp, data, loc, rewriter, known);
+    parseDynamicOffset<triton::LoadOp>(loadOp, data, loc, rewriter, known);
     return success();
   } else if (auto castOp = operand.getDefiningOp<arith::FPToSIOp>()) {
-    parseIndirectLoad<arith::FPToSIOp>(castOp, data, loc, rewriter, known);
+    parseDynamicOffset<arith::FPToSIOp>(castOp, data, loc, rewriter, known);
     return success();
   } else if (auto extractSliceOp =
                  operand.getDefiningOp<tensor::ExtractSliceOp>()) {
@@ -666,7 +669,8 @@ BlockDataParser::parse(Value operand, BlockData &data, const Location &loc,
     if (!opResult)
       return forOp.emitOpError("expected an OpResult while parsing its result");
     unsigned resultIdx = opResult.getResultNumber();
-    parseIndirectLoad<scf::ForOp>(forOp, data, loc, rewriter, known, resultIdx);
+    parseDynamicOffset<scf::ForOp>(forOp, data, loc, rewriter, known,
+                                   resultIdx);
     return success();
   } else if (auto tensorCastOp = operand.getDefiningOp<tensor::CastOp>()) {
     // Used for identity operation.
@@ -946,6 +950,14 @@ LogicalResult BlockDataParser::parseExtSI(
   return parse(op.getIn(), data, loc, rewriter, known);
 }
 
+LogicalResult BlockDataParser::parseTruncI(
+    arith::TruncIOp op, BlockData &data, const Location &loc,
+    ConversionPatternRewriter &rewriter,
+    const llvm::SmallDenseMap<Value, BlockData> &known) {
+  assert(data.isEmpty());
+  return parse(op.getIn(), data, loc, rewriter, known);
+}
+
 LogicalResult BlockDataParser::parseBroadcast(
     triton::BroadcastOp op, BlockData &data, const Location &loc,
     ConversionPatternRewriter &rewriter,
@@ -1201,12 +1213,12 @@ LogicalResult BlockDataParser::parseReduce(
 }
 
 template <typename OpTy>
-void parseIndirectLoad(OpTy op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known,
-                       unsigned resultIdx) {
+void parseDynamicOffset(OpTy op, BlockData &data, const Location &loc,
+                        ConversionPatternRewriter &rewriter,
+                        const llvm::SmallDenseMap<Value, BlockData> &known,
+                        unsigned resultIdx) {
   assert(resultIdx < op->getNumResults() &&
-         "resultIdx out of range for parseIndirectLoad");
+         "resultIdx out of range for parseDynamicOffset");
   auto opRes = op->getResult(resultIdx);
   auto opResTy = opRes.getType();
   std::vector<int64_t> resShape;
@@ -1214,9 +1226,15 @@ void parseIndirectLoad(OpTy op, BlockData &data, const Location &loc,
     // For now, we consider this is UnstrucMemAcc because we have no other info.
     // Visiting other ops may change the type due to more info.
     resShape = shapedResTy.getShape().vec();
-    auto numOperands = 3;
-    if (resShape.size() == 1 && resShape[0] == 1 &&
-        op->getNumOperands() == numOperands) {
+    bool canExtractScalar = false;
+    if constexpr (std::is_same_v<OpTy, triton::LoadOp>) {
+      // A single-element tt.load result can extract a scalar when it is
+      // unmasked, or masked with an `other` fill value. A mask without
+      // `other` leaves mask=false lanes as poison, which must never be
+      // extracted into an address offset.
+      canExtractScalar = !op.getMask() || op.getOther();
+    }
+    if (resShape.size() == 1 && resShape[0] == 1 && canExtractScalar) {
       Value zeroIdx = rewriter.create<arith::ConstantIndexOp>(loc, 0);
       Value extracted =
           rewriter.create<tensor::ExtractOp>(loc, opRes, ValueRange{zeroIdx});

@@ -149,9 +149,8 @@ void OpClassifierPass::initializePass(ModuleOp module) {
   inBroadcastChain.clear();
   CloneOpMap.clear();
 
-  // Collect all operations. PostOrder stamps a nested container's core_type
-  // before an enclosing yield reads it.
-  module.walk<WalkOrder::PostOrder>([&](Operation *op) {
+  // Collect all operations
+  module.walk([&](Operation *op) {
     if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(op)) {
       return; // Skip module, function, and return ops
     }
@@ -1503,22 +1502,14 @@ void OpClassifierPass::processYieldOperation(Operation *op,
       // Case 2: then region yield of scf.if, or scf.for yield
       // ---------------------------------------------------------------
       // Determine type from the operand's defining operation:
-      //   - CUBE -> yield type is "CUBE"
-      //   - anything else (UNDETERMINED, VECTOR) -> "VECTOR"
+      //   - OP_CUBE_ONLY -> yield type is "CUBE"
+      //   - anything else (OP_UNDETERMINED, OP_VECTOR_ONLY) -> "VECTOR"
       // If the operand is a BlockArgument without a defining op (e.g., an
       // iter_arg that is passed through without modification), default to
       // VECTOR since no compute op is associated with it.
-      //
-      // getValueCoreType picks the i-th component of a nested container's
-      // ssbuffer.core_type; compute ops are not stamped until step 9, so they
-      // miss that lookup and fall back to the opCoreTypes map.
       if (Operation *def = operand.getDefiningOp()) {
-        CoreType ct = getValueCoreType(operand);
-        if (ct == CVPipeline::UNDETERMINED) {
-          ct = getCoreType(def) == OP_CUBE_ONLY ? CVPipeline::CUBE_ONLY
-                                                : CVPipeline::VECTOR_ONLY;
-        }
-        if (ct == CVPipeline::CUBE_ONLY) {
+        OpCoreType ct = getCoreType(def);
+        if (ct == OP_CUBE_ONLY) {
           coreTypes.push_back(OP_CUBE_ONLY);
         } else {
           coreTypes.push_back(OP_VECTOR_ONLY);

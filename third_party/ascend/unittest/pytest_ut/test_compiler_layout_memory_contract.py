@@ -673,6 +673,7 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
     common_options = ["--common-before-pure-simt", "--common-after-pure-simt"]
     pure_simt_prefix = [
+        '--enable-debug-info=true',
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",

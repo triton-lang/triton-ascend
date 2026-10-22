@@ -53,8 +53,8 @@ jobs:
         # when no artifact is available) builds the payload in-image via
         # build_npuir.py, also from stable.
         - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
-        - {ref: 'main-dev', tag: 'main-dev', local: 'dev', npuir: 'OFF'}
-        - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
+        # - {ref: 'main-dev', tag: 'main-dev', local: 'dev', npuir: 'OFF'}
+        # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
 
     permissions:
       id-token: write

@@ -13,7 +13,9 @@ jobs:
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
-    timeout-minutes: 300
+    # 540 = up to 240 min waiting for a PR-scoped LLVM package (only when
+    # the PR changes the LLVM hash/patches) + ~300 min build & tests.
+    timeout-minutes: 540
     strategy:
       matrix:
         # Each config entry carries its full environment (cann_version,
@@ -47,6 +49,21 @@ jobs:
             ~/.ccache
           key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
+
+      - name: Wait for prebuilt LLVM package (PR builds)
+        # PRs that change cmake/llvm-hash.txt or the LLVM patches need the
+        # llvm-build.yml + llvm-build-upload.yml relay to publish the
+        # PR-scoped package first. Exits immediately when the canonical
+        # package already exists; otherwise polls OBS and exports
+        # TRITON_ASCEND_LLVM_URL_PREFIX for the build step below. Fails fast
+        # if the LLVM Build run for this head SHA failed.
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          TIMEOUT_MINUTES: "240"
+        run: ${PYTHON} .github/workflows/scripts/wait_for_llvm_package.py
 
       - name: Download and install Bisheng compiler
         shell: bash

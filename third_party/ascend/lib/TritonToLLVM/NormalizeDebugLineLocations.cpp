@@ -222,7 +222,6 @@ bool isValuePreparationOp(Operation *op) {
              .Case("bufferization.alloc_tensor", true)
              .Case("bufferization.to_tensor", true)
              .Case("bufferization.to_buffer", true)
-             .Case("bufferization.to_memref", true)
              .Default(false) ||
          isTensorOnlyLinalgFillOp(op);
 }

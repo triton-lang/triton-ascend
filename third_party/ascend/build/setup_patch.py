@@ -153,6 +153,7 @@ def get_triton_ascend_patch_file():
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",
         "python/triton/compiler/errors.py",
+        "python/triton/extension/buffer/src/buffer_ir.cc",
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",

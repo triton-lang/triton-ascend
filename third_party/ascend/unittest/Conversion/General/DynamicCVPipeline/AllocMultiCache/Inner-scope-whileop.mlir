@@ -19,10 +19,10 @@
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32):
 // Original alloc + to_tensor stay in producer block (orphaned, will be DCE'd).
 // CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32> to tensor<128xf32>
+// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32>
 // Cloned alloc + to_tensor appear in consumer block (block_id = 10).
 // CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32> to tensor<128xf32>
+// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32>
 // Consumer uses the cloned to_tensor at block_id = 10.
 // CHECK:       arith.addf {{.*}}{ssbuffer.block_id = 10 : i32} : tensor<128xf32>
 // NO UB alloc, NO hivm.copy chain — dep was cloned, not multi-buffered.
@@ -52,10 +52,10 @@
 // CHECK:       ^bb0(%{{.*}}: tensor<128xf32>, %{{.*}}: i32, %{{.*}}: i32):
 // Original alloc + to_tensor stay in producer block (orphaned).
 // CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32> to tensor<128xf32>
+// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 7 : i32} : memref<128xf32>
 // Cloned alloc + to_tensor appear in consumer block (block_id = 10).
 // CHECK-DAG:   memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<128xf32>
-// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32> to tensor<128xf32>
+// CHECK-DAG:   bufferization.to_tensor {{.*}}{ssbuffer.block_id = 10 : i32} : memref<128xf32>
 // Consumer uses the cloned to_tensor at block_id = 10.
 // CHECK:       arith.addf {{.*}}{ssbuffer.block_id = 10 : i32} : tensor<128xf32>
 // NO UB alloc, NO scf.if dispatch, NO hivm.copy — dep was cloned, not
@@ -79,14 +79,14 @@
 // CHECK-LABEL: func.func @test_while_mainloop_attr_on_op
 // Original alloc + to_tensor stay in producer block (orphaned).
 // CHECK:       %[[C_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<64xf16>
-// CHECK:       %[[C_ORIG_TT:.*]] = bufferization.to_tensor %[[C_ORIG_ALLOC]] {ssbuffer.block_id = 7 : i32} : memref<64xf16> to tensor<64xf16>
+// CHECK:       %[[C_ORIG_TT:.*]] = bufferization.to_tensor %[[C_ORIG_ALLOC]] {ssbuffer.block_id = 7 : i32} : memref<64xf16>
 // Cloned alloc + to_tensor appear in BOTH consumer blocks (block_id = 11 in
 // the if-branch, block_id = 12 in the else-branch).
 // CHECK:       %[[C_CLONE_ALLOC_11:.*]] = memref.alloc() {ssbuffer.block_id = 11 : i32} : memref<64xf16>
-// CHECK:       %[[C_CLONE_TT_11:.*]] = bufferization.to_tensor %[[C_CLONE_ALLOC_11]] {ssbuffer.block_id = 11 : i32} : memref<64xf16> to tensor<64xf16>
+// CHECK:       %[[C_CLONE_TT_11:.*]] = bufferization.to_tensor %[[C_CLONE_ALLOC_11]] {ssbuffer.block_id = 11 : i32} : memref<64xf16>
 // CHECK:       arith.addf %[[C_CLONE_TT_11]], %[[C_CLONE_TT_11]] {ssbuffer.block_id = 11 : i32} : tensor<64xf16>
 // CHECK:       %[[C_CLONE_ALLOC_12:.*]] = memref.alloc() {ssbuffer.block_id = 12 : i32} : memref<64xf16>
-// CHECK:       %[[C_CLONE_TT_12:.*]] = bufferization.to_tensor %[[C_CLONE_ALLOC_12]] {ssbuffer.block_id = 12 : i32} : memref<64xf16> to tensor<64xf16>
+// CHECK:       %[[C_CLONE_TT_12:.*]] = bufferization.to_tensor %[[C_CLONE_ALLOC_12]] {ssbuffer.block_id = 12 : i32} : memref<64xf16>
 // CHECK:       arith.mulf %[[C_CLONE_TT_12]], %[[C_CLONE_TT_12]] {ssbuffer.block_id = 12 : i32} : tensor<64xf16>
 // NO UB alloc, NO consumer-side to_tensor readback — dep was cloned.
 // CHECK-NOT:   memref.alloc() : memref<64xf16, #hivm.address_space<ub>>
@@ -112,12 +112,12 @@
 // CHECK-LABEL: func.func @test_while_outermost_id_priority
 // Original alloc + to_tensor stay at producer block (block_id = 8).
 // CHECK:       %[[D_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 8 : i32} : memref<32xf32>
-// CHECK:       %[[D_ORIG_TT:.*]] = bufferization.to_tensor %[[D_ORIG_ALLOC]] {ssbuffer.block_id = 8 : i32} : memref<32xf32> to tensor<32xf32>
+// CHECK:       %[[D_ORIG_TT:.*]] = bufferization.to_tensor %[[D_ORIG_ALLOC]] {ssbuffer.block_id = 8 : i32} : memref<32xf32>
 // Cloned alloc + to_tensor appear at consumer block (block_id = 12). If the
 // outermost-id priority bug were present, no clone would be emitted (the dep
 // would be misclassified as same-block and silently skipped).
 // CHECK:       %[[D_CLONE_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 12 : i32} : memref<32xf32>
-// CHECK:       %[[D_CLONE_TT:.*]] = bufferization.to_tensor %[[D_CLONE_ALLOC]] {ssbuffer.block_id = 12 : i32} : memref<32xf32> to tensor<32xf32>
+// CHECK:       %[[D_CLONE_TT:.*]] = bufferization.to_tensor %[[D_CLONE_ALLOC]] {ssbuffer.block_id = 12 : i32} : memref<32xf32>
 // CHECK:       arith.addf %[[D_CLONE_TT]], %[[D_CLONE_TT]] {ssbuffer.block_id = 12 : i32} : tensor<32xf32>
 // NO UB alloc, NO copy chain.
 // CHECK-NOT:   memref.alloc() : memref<32xf32, #hivm.address_space<ub>>
@@ -172,10 +172,10 @@
 // CHECK-LABEL: func.func @test_while_counter_relocation
 // Original alloc + to_tensor stay at producer block (block_id = 5, orphaned).
 // CHECK:       %[[G_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 5 : i32} : memref<16xf32>
-// CHECK:       %[[G_ORIG_TT:.*]] = bufferization.to_tensor %[[G_ORIG_ALLOC]] {ssbuffer.block_id = 5 : i32} : memref<16xf32> to tensor<16xf32>
+// CHECK:       %[[G_ORIG_TT:.*]] = bufferization.to_tensor %[[G_ORIG_ALLOC]] {ssbuffer.block_id = 5 : i32} : memref<16xf32>
 // Cloned alloc + to_tensor at consumer block (block_id = 50).
 // CHECK:       %[[G_CLONE_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 50 : i32} : memref<16xf32>
-// CHECK:       %[[G_CLONE_TT:.*]] = bufferization.to_tensor %[[G_CLONE_ALLOC]] {ssbuffer.block_id = 50 : i32} : memref<16xf32> to tensor<16xf32>
+// CHECK:       %[[G_CLONE_TT:.*]] = bufferization.to_tensor %[[G_CLONE_ALLOC]] {ssbuffer.block_id = 50 : i32} : memref<16xf32>
 // CHECK:       arith.addf %[[G_CLONE_TT]], %[[G_CLONE_TT]] {ssbuffer.block_id = 50 : i32} : tensor<16xf32>
 // NO UB alloc, NO copy chain.
 // CHECK-NOT:   memref.alloc() : memref<16xf32, #hivm.address_space<ub>>

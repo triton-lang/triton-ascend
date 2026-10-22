@@ -452,13 +452,4 @@ void dumpWhileBlockArgMap(const triton::WhileBlockArgMap &map,
   });
 }
 
-bool isFlowOptEnabled(const triton::ControlFlowConditionInfo *info) {
-  if (!info) {
-    return false;
-  }
-  return info->crossCoreBufferCount >
-             triton::CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
-         info->intraCoreBufferCount > triton::INTRA_CORE_BUFFER_COUNT_THRESHOLD;
-}
-
 } // namespace mlir

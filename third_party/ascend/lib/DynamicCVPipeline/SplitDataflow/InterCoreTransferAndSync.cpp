@@ -265,6 +265,21 @@ static void attachLoopIdTag(Operation *op, int loopId) {
       IntegerAttr::get(IntegerType::get(ctx, kIntegerBitWidth), loopId));
 }
 
+bool hasStartEndSyncWhitelistKernel(ModuleOp module) {
+  std::vector<std::string> whitelist{
+      "_swa_bwd_dq_kernel",
+  };
+
+  bool isWhitelistKernel = false;
+  for (auto func : module.getOps<func::FuncOp>()) {
+    if (llvm::is_contained(whitelist, func.getName().str())) {
+      isWhitelistKernel = true;
+      break;
+    }
+  }
+  return isWhitelistKernel;
+}
+
 // Block Start/End Operation Retrieval
 std::pair<mlir::Operation *, mlir::Operation *>
 InterCoreTransferAndSyncPass::getBlockStartEnd(int targetId,
@@ -1172,10 +1187,12 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     attachAnalyzeFlagIdTag(setOpForStart);
     attachAnalyzeFlagIdTag(waitOpForEnd);
 
-    auto loopId =
-        mainLoopOp->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
-    attachLoopIdTag(setOpForStart, loopId);
-    attachLoopIdTag(waitOpForEnd, loopId);
+    if (hasStartEndSyncWhitelistKernel(module)) {
+      auto loopId =
+          mainLoopOp->getAttrOfType<IntegerAttr>(CVPipeline::kLoopId).getInt();
+      attachLoopIdTag(setOpForStart, loopId);
+      attachLoopIdTag(waitOpForEnd, loopId);
+    }
 
     // E2: register every set->wait pair of this transfer, not just the
     // loop start/end pair. Each pair is the only proof of cross-core
@@ -2314,7 +2331,9 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   }
 
   // Analyze loop nesting before inserting inter-core transfer/sync.
-  analyzeLoopInclusion();
+  if (hasStartEndSyncWhitelistKernel(module)) {
+    analyzeLoopInclusion();
+  }
 
   llvm::SmallVector<DependencyInfo> &V2CDependencies =
       info.getV2CDependencies();
@@ -2460,7 +2479,9 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
   processCubeToVectorDirectStoreSync(builder, flagManager, flagIdReuseManager);
 
   // move start/end sync ops
-  moveStartEndSync(builder);
+  if (hasStartEndSyncWhitelistKernel(module)) {
+    moveStartEndSync(builder);
+  }
 
   LOG_DEBUG("InterCoreTransferAndSyncPass success!\n");
 

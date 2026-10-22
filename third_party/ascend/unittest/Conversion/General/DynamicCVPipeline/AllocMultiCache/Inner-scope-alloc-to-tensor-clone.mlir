@@ -25,10 +25,10 @@
 // CHECK-LABEL: func.func @test_alloc_to_tensor_single_consumer
 // Original alloc + to_tensor stay in producer block (orphaned).
 // CHECK: %[[ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 9 : i32} : memref<f32>
-// CHECK: %[[ORIG_TT:.*]] = bufferization.to_tensor %[[ORIG_ALLOC]] restrict writable {ssbuffer.block_id = 9 : i32} : memref<f32> to tensor<f32>
+// CHECK: %[[ORIG_TT:.*]] = bufferization.to_tensor %[[ORIG_ALLOC]] restrict writable {ssbuffer.block_id = 9 : i32} : memref<f32>
 // Cloned alloc + to_tensor appear in consumer block, tagged with block 10.
 // CHECK: %[[CLONE_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<f32>
-// CHECK: %[[CLONE_TT:.*]] = bufferization.to_tensor %[[CLONE_ALLOC]] restrict writable {ssbuffer.block_id = 10 : i32} : memref<f32> to tensor<f32>
+// CHECK: %[[CLONE_TT:.*]] = bufferization.to_tensor %[[CLONE_ALLOC]] restrict writable {ssbuffer.block_id = 10 : i32} : memref<f32>
 // linalg.fill's outs is rewired to the cloned to_tensor, NOT the original.
 // CHECK: linalg.fill {ssbuffer.block_id = 10 : i32} ins(%{{.+}} : f32) outs(%[[CLONE_TT]] : tensor<f32>) -> tensor<f32>
 // alloc + to_tensor must NOT go through the multi-buffer path: no UB
@@ -39,15 +39,15 @@
 // CHECK-LABEL: func.func @test_alloc_to_tensor_multi_consumer
 // Original alloc + to_tensor stay in producer block (orphaned).
 // CHECK: %[[B_ORIG_ALLOC:.*]] = memref.alloc() {ssbuffer.block_id = 9 : i32} : memref<f32>
-// CHECK: %[[B_ORIG_TT:.*]] = bufferization.to_tensor %[[B_ORIG_ALLOC]] restrict writable {ssbuffer.block_id = 9 : i32} : memref<f32> to tensor<f32>
+// CHECK: %[[B_ORIG_TT:.*]] = bufferization.to_tensor %[[B_ORIG_ALLOC]] restrict writable {ssbuffer.block_id = 9 : i32} : memref<f32>
 // Clone for block_id = 10 consumer.
 // CHECK: %[[B_CLONE_ALLOC_10:.*]] = memref.alloc() {ssbuffer.block_id = 10 : i32} : memref<f32>
-// CHECK: %[[B_CLONE_TT_10:.*]] = bufferization.to_tensor %[[B_CLONE_ALLOC_10]] restrict writable {ssbuffer.block_id = 10 : i32} : memref<f32> to tensor<f32>
+// CHECK: %[[B_CLONE_TT_10:.*]] = bufferization.to_tensor %[[B_CLONE_ALLOC_10]] restrict writable {ssbuffer.block_id = 10 : i32} : memref<f32>
 // block_id = 10 fill uses the block 10 clone, NOT the original.
 // CHECK: linalg.fill {ssbuffer.block_id = 10 : i32} ins(%{{.+}} : f32) outs(%[[B_CLONE_TT_10]] : tensor<f32>) -> tensor<f32>
 // Clone for block_id = 11 consumer.
 // CHECK: %[[B_CLONE_ALLOC_11:.*]] = memref.alloc() {ssbuffer.block_id = 11 : i32} : memref<f32>
-// CHECK: %[[B_CLONE_TT_11:.*]] = bufferization.to_tensor %[[B_CLONE_ALLOC_11]] restrict writable {ssbuffer.block_id = 11 : i32} : memref<f32> to tensor<f32>
+// CHECK: %[[B_CLONE_TT_11:.*]] = bufferization.to_tensor %[[B_CLONE_ALLOC_11]] restrict writable {ssbuffer.block_id = 11 : i32} : memref<f32>
 // block_id = 11 fill uses the block 11 clone, NOT the original or block 10 clone.
 // CHECK: linalg.fill {ssbuffer.block_id = 11 : i32} ins(%{{.+}} : f32) outs(%[[B_CLONE_TT_11]] : tensor<f32>) -> tensor<f32>
 

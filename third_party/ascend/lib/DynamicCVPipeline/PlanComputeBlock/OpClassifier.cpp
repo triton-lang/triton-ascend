@@ -804,15 +804,6 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
 }
 
 // Propagate CUBE core type upstream
-//
-// Unlike `propagateVectorUpstream` (which iterates every op already marked
-// VECTOR_ONLY and can therefore walk into `scf.for` operands and reach an
-// `iter_args` init def), this BFS is seeded from the curated `cubeSeeds`
-// list only — `scf.for` / `scf.while` are never seeds, and the BFS is
-// strictly upstream over SSA + memory deps. For tensor `iter_arg`s the
-// BlockArgument has no defining op, so the BFS cannot reach an `iter_args`
-// init def through upstream walking. The same `skipIterArgInits` shield
-// used for VECTOR is therefore not required here.
 int OpClassifierPass::propagateCubeUpstream() {
   LLVM_DEBUG(DBGS() << "--- Step 2: CUBE upstream BFS --->\n");
   llvm::DenseSet<Operation *> cubeVisited;
@@ -1064,21 +1055,6 @@ int OpClassifierPass::propagateVectorUpstream() {
     llvm::SmallVector<Operation *> upstreamOps;
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
-    // Collect the iter_args init defining ops of the current loop op (if cur
-    // is one). The CUBE/VECTOR classification of an iter_args init must match
-    // what consumes the iter_arg inside the loop body — propagating VECTOR
-    // from the loop's external consumers onto the init would create a
-    // CUBE_AND_VECTOR classification that, once split, routes the init to the
-    // VECTOR clone while the body needs the CUBE original (which then becomes
-    // dead code).
-    llvm::SmallPtrSet<Operation *, 4> skipIterArgInits;
-    if (isa<scf::ForOp, scf::WhileOp>(cur)) {
-      for (Value init : CVPipeline::getLoopInitValues(cur)) {
-        if (Operation *defOp = init.getDefiningOp())
-          skipIterArgInits.insert(defOp);
-      }
-    }
-
     for (Operation *def : upstreamOps) {
       if (!def || vecVisited.count(def))
         continue;
@@ -1092,17 +1068,10 @@ int OpClassifierPass::propagateVectorUpstream() {
         continue;
       }
 
-      // Skip iter_args init defs — see comment above the SmallPtrSet.
-      if (skipIterArgInits.count(def)) {
-        LLVM_DEBUG(DBGS() << "skip " << *def
-                          << ": iter_args init (classification driven by body "
-                             "consumers)\n");
-        continue;
-      }
-
       vecVisited.insert(def);
 
-      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << *def << "\n");
+      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << def->getName().getStringRef()
+                        << "\n");
       opCoreTypes[def] =
           static_cast<OpCoreType>(opCoreTypes[def] | OP_VECTOR_ONLY);
       vecQueue.push(def);
@@ -1596,68 +1565,14 @@ int OpClassifierPass::handleSCFYield() {
   return 0;
 }
 
-OpCoreType
-OpClassifierPass::classifyIterArgFromBody(BlockArgument iterArg) const {
-  // Walk every non-yield user and accumulate the union of their core types,
-  // then decide. Short-circuiting on the first CUBE_ONLY user would lose the
-  // VECTOR_ONLY signal when the iter_arg has *both* CUBE and VECTOR consumers
-  // (e.g. matmul outs(%acc) AND arith.addf %acc ...). The init must mirror
-  // every body-side consumer, so mixed CUBE/VECTOR users must resolve to
-  // CUBE_AND_VECTOR rather than CUBE_ONLY.
-  //
-  // Priority (after collection):
-  //   any CUBE_AND_VECTOR consumer  -> CUBE_AND_VECTOR
-  //   any CUBE_ONLY + any VECTOR_ONLY -> CUBE_AND_VECTOR
-  //   only CUBE_ONLY consumers      -> CUBE_ONLY
-  //   only VECTOR_ONLY consumers    -> VECTOR_ONLY
-  //   no compute consumer (yield only) -> UNDETERMINED
-  bool hasCube = false;
-  bool hasVector = false;
-  for (Operation *user : iterArg.getUsers()) {
-    // Yield ops are pass-through, not compute consumers — skip them.
-    if (isa<scf::YieldOp>(user))
-      continue;
-    OpCoreType userCT = getCoreType(user);
-    if (userCT == OP_CUBE_ONLY) {
-      hasCube = true;
-    } else if (userCT == OP_CUBE_AND_VECTOR) {
-      // A CUBE_AND_VECTOR consumer already needs both value flows; the init
-      // must therefore provide both.
-      hasCube = true;
-      hasVector = true;
-    } else if (userCT == OP_VECTOR_ONLY) {
-      hasVector = true;
-    }
-  }
-  if (hasCube && hasVector)
-    return OP_CUBE_AND_VECTOR;
-  if (hasCube)
-    return OP_CUBE_ONLY;
-  if (hasVector)
-    return OP_VECTOR_ONLY;
-  return OP_UNDETERMINED;
-}
-
 OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
-  // The iter_args init value's classification must mirror the body-side
-  // consumers (the iteration carries this value forward; the CUBE/VECTOR
-  // type of the value has to match what consumes it inside the loop body).
-  //
-  // Looking only at the for-loop's yielded value's defining op is incorrect
-  // when that def is a region container (e.g. scf.if) that itself got
-  // classified as VECTOR by the default sweep, even though the body is CUBE.
-  // In that case the init would be mis-routed to a VECTOR clone while the
-  // body needs a CUBE value — the CUBE value becomes dead.
+  // Unified handling for scf.for and scf.while using the tied loop interface
   Operation *owner = operand->getOwner();
 
   if (auto forOp = dyn_cast<scf::ForOp>(owner)) {
     auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
-    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
-        fromBody != OP_UNDETERMINED)
-      return fromBody;
-    // No compute consumer (pure pass-through): fall back to existing logic.
     auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;
@@ -1671,9 +1586,6 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
     auto iterArg = whileOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
-    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
-        fromBody != OP_UNDETERMINED)
-      return fromBody;
     auto sourceOperand = whileOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;

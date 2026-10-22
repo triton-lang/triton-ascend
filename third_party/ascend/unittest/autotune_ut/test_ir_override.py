@@ -22,7 +22,7 @@ Test `ir_override` for Ascend NPU compilation stages.
 
 Strategy (inspired by upstream test_autotuner.py):
   1. Compile a "donor" kernel (does ``×10``) with ``TRITON_KERNEL_DUMP=1``
-     to obtain dumped IR files (``.ttir`` / ``.ttadapter`` / ``.bcmlir``).
+     to obtain dumped IR files (``.ttir`` / ``.ttadapter``).
   2. Replace the donor function name with the target function name in each
      dumped file and save them as override inputs.
   3. Run a "target" kernel (identity: load → store) with ``ir_override``
@@ -47,7 +47,7 @@ import triton.language as tl
 
 def _find_dumped_files(dump_root: str):
     """Walk *dump_root* and return ``{ext: filepath}`` for Ascend IR stages."""
-    extensions = ("ttir", "ttadapter", "bcmlir")
+    extensions = ("ttir", "ttadapter")
     found = {}
     for dirpath, _, filenames in os.walk(dump_root):
         for fn in filenames:
@@ -62,8 +62,8 @@ def _find_dumped_files(dump_root: str):
 
 class TestIrOverride:
     """
-    End-to-end tests for ``ir_override`` at three Ascend compilation stages:
-    ``.ttir``, ``.ttadapter``, and ``.bcmlir``.
+    End-to-end tests for ``ir_override`` at two Ascend compilation stages:
+    ``.ttir`` and ``.ttadapter``.
     """
 
     N = 1024
@@ -136,9 +136,7 @@ class TestIrOverride:
         tmp_path = donor_ir["tmp_path"]
 
         src_path = dumped.get(ext)
-        if src_path is None:
-            pytest.skip(f"No dumped .{ext} file found "
-                        f"(bytecode mode may be disabled or stage not reached)")
+        assert src_path is not None, f"Required .{ext} compilation stage was not dumped"
 
         # Copy donor IR and rename the function symbol inside.
         content = pathlib.Path(src_path).read_text()
@@ -186,8 +184,3 @@ class TestIrOverride:
     def test_override_ttadapter(self, donor_ir):
         """Override the ``.ttadapter`` compilation stage."""
         self._run_override_test(donor_ir, "ttadapter")
-
-    @pytest.mark.autotune
-    def test_override_bcmlir(self, donor_ir):
-        """Override the ``.bcmlir`` compilation stage (bytecode → MLIR text)."""
-        self._run_override_test(donor_ir, "bcmlir")

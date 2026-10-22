@@ -27,7 +27,6 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
-#include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "third_party/ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -747,7 +746,8 @@ void InitDependentMapPass::runOnOperation() {
 
   // Step 6: Collect flowOpt if block pairs from DAG (only when buffer counts
   // exceed threshold)
-  if (isFlowOptEnabled(info)) {
+  if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
+      info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
     LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
 
     if (collectFlowOptIfOpPairs(module, info) != 0) {

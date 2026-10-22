@@ -153,6 +153,7 @@ def get_triton_ascend_patch_file():
         "python/triton/compiler/code_generator.py",
         "python/triton/compiler/compiler.py",
         "python/triton/compiler/errors.py",
+        "python/triton/extension/buffer/src/buffer_ir.cc",
         "python/triton/language/math.py",
         "python/triton/language/semantic.py",
         "python/triton/language/standard.py",
@@ -355,7 +356,7 @@ def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "22f740b1138a43e789c470dc07bbd7abbbedc256"
+    commit_id = "82b8c919bc4f82e733e15ded7ea259aa089c9e6a"
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([

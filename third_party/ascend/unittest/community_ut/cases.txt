@@ -1,4 +1,4 @@
-# 335 community functions (device_assert dropped). official Triton 3.6.x scripts.
+# 337 community functions, official Triton 3.6.x scripts (unadapted).
 # Format:  test_name  relative/path.py
 
 test_math_extern  cuda/test_cuda_libdevice.py
@@ -300,6 +300,8 @@ test_specialize_impl  runtime/test_specialize.py
 test_compile_in_subproc  runtime/test_subproc.py
 test_compile_in_forked_subproc  runtime/test_subproc.py
 test_compile_in_forked_subproc_with_forced_gc  runtime/test_subproc.py
+test_device_assert  test_debug.py
+test_device_assert_barrier  test_debug.py
 test_static_assert  test_debug.py
 test_fn_dump  test_debug_dump.py
 test_filecheck_positive  test_filecheck.py

@@ -241,7 +241,7 @@ def argument_types(signature, constants=()):
     for index, sig in signature.items():
         for ty in _expand_signature(sig, constant_paths, (index, )):
             if ty.startswith("*"):
-                result.append((POINTER, utils.convert_sigtype_to_int(ty[1:])))
+                result.append((POINTER, utils.convert_sigtype_to_int(ty[1:].removeprefix("k"))))
             else:
                 result.append((_KINDS[ty], -1))
     return result

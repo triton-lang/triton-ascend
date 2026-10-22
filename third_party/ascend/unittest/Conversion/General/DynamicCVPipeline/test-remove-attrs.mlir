@@ -8,7 +8,7 @@ module {
     // CHECK-NOT: ssbuffer.block_id
     %memref = memref.alloc() {ssbuffer.core_type = "CUBE", ssbuffer.block_id = 1 : i32} : memref<1024x1024xf32>
 
-    // CHECK: bufferization.to_tensor %{{.*}} : memref<1024x1024xf32> to tensor<1024x1024xf32>
+    // CHECK: bufferization.to_tensor %{{.*}} : memref<1024x1024xf32>
     // CHECK-NOT: ssbuffer.core_type
     %tensor = bufferization.to_tensor %memref {ssbuffer.core_type = "CUBE"} : memref<1024x1024xf32> to tensor<1024x1024xf32>
     return

@@ -1493,6 +1493,12 @@ def ttir_to_npubin(mod, metadata, opt):
         # build compile options
         _compile_option_list = get_common_bishengir_compile_options(metadata)
         if opt.is_pure_simt:
+            if _is_ascend_sanitizer_enabled():
+                _compile_option_list += ["--enable-sanitizer=true"]
+            if not _is_debug_line_info_disabled():
+                _compile_option_list += ["--enable-debug-info=true"]
+            if _enable_msdebug():
+                _compile_option_list += ["--enable-debug-variables=true"]
             _compile_option_list += ["--enable-hivm-compile=false"]
             _compile_option_list += ["--enable-triton-ir-compile"]
             _compile_option_list += ["--pure-simt"]

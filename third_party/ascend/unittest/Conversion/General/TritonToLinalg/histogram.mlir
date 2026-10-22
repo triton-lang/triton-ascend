@@ -1,7 +1,7 @@
 // RUN: triton-opt "--triton-to-linalg=compile-on-910-95=true" --split-input-file %s | FileCheck %s
 
 // CHECK-LABEL: func.func @test_histogram_i32
-// CHECK: %[[INPUT:.*]] = bufferization.to_tensor {{.*}} : memref<1024xi32> to tensor<1024xi32>
+// CHECK: %[[INPUT:.*]] = bufferization.to_tensor {{.*}} : memref<1024xi32>
 // CHECK: %[[INIT:.*]] = linalg.fill ins(%{{.*}} : i32) outs(%{{.*}} : tensor<256xi32>) -> tensor<256xi32>
 // CHECK: %[[HIST:.*]] = hivm.hir.custom {gm_addr_args_indices = array<i32>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMT>, symbol = "__builtin_histogram"} "__builtin_histogram" ins(%[[INPUT]], %{{.*}} : tensor<1024xi32>, i64) outs(%[[INIT]] : tensor<256xi32>) -> tensor<256xi32>
 // CHECK: bufferization.materialize_in_destination %[[HIST]] in writable {{.*}} : (tensor<256xi32>, memref<256xi32, strided<[1]>>) -> ()
@@ -23,7 +23,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // -----
 
 // CHECK-LABEL: func.func @test_histogram_i16
-// CHECK: %[[INPUT:.*]] = bufferization.to_tensor {{.*}} : memref<16xi16> to tensor<16xi16>
+// CHECK: %[[INPUT:.*]] = bufferization.to_tensor {{.*}} : memref<16xi16>
 // CHECK: %[[INIT:.*]] = linalg.fill ins(%{{.*}} : i16) outs(%{{.*}} : tensor<8xi16>) -> tensor<8xi16>
 // CHECK: %[[HIST:.*]] = hivm.hir.custom {gm_addr_args_indices = array<i32>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMT>, symbol = "__builtin_histogram"} "__builtin_histogram" ins(%[[INPUT]], %{{.*}} : tensor<16xi16>, i64) outs(%[[INIT]] : tensor<8xi16>) -> tensor<8xi16>
 // CHECK: bufferization.materialize_in_destination %[[HIST]] in writable {{.*}} : (tensor<8xi16>, memref<8xi16, strided<[1]>>) -> ()

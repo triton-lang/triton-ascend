@@ -241,6 +241,11 @@ public:
              const llvm::SmallDenseMap<Value, BlockData> &known);
 
   static LogicalResult
+  parseTruncI(arith::TruncIOp op, BlockData &data, const Location &loc,
+              ConversionPatternRewriter &rewriter,
+              const llvm::SmallDenseMap<Value, BlockData> &known);
+
+  static LogicalResult
   parseBroadcast(triton::BroadcastOp op, BlockData &data, const Location &loc,
                  ConversionPatternRewriter &rewriter,
                  const llvm::SmallDenseMap<Value, BlockData> &known);
@@ -366,10 +371,10 @@ public:
 };
 
 template <typename OpTy>
-void parseIndirectLoad(OpTy op, BlockData &data, const Location &loc,
-                       ConversionPatternRewriter &rewriter,
-                       const llvm::SmallDenseMap<Value, BlockData> &known,
-                       unsigned resultIdx = 0);
+void parseDynamicOffset(OpTy op, BlockData &data, const Location &loc,
+                        ConversionPatternRewriter &rewriter,
+                        const llvm::SmallDenseMap<Value, BlockData> &known,
+                        unsigned resultIdx = 0);
 
 } // namespace triton
 

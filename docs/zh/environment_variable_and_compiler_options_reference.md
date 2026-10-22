@@ -1,201 +1,237 @@
 # 环境变量与编译选项
 
-本文汇总 Triton-Ascend 中可由开发者显式控制的行为开关，包括运行前设置的环境变量，以及编译期通过 `triton.Config` 或 kernel launch meta-parameter 传入的 NPU 编译选项。
+本文面向Triton-Ascend算子开发者，提供编译、运行、调试和自动调优配置的查阅入口，说明各配置项的用途、默认值及A2/A3、950支持情况。环境变量用于设置进程内的编译与运行行为，编译选项用于配置单个kernel。旧配置的迁移方式集中在文末的[编译选项清理与兼容性](#compiler-option-cleanup-and-compatibility)。
 
 ## 环境变量
 
 ### 环境变量用法示例
 
-环境变量需在运行 Python 程序前设置，例如：
+在启动Python程序前，使用 `export` 设置环境变量。例如，设置 `TRITON_DEBUG=1` 开启调试功能：
 
 ```bash
 export TRITON_DEBUG=1
-python run_kernel.py
+python3 run_kernel.py
+```
+
+`export` 设置的变量会被当前终端后续启动的程序继承。若只需为一次运行设置变量，可将赋值写在命令前：
+
+```bash
+TRITON_DEBUG=1 python3 run_kernel.py
 ```
 
 ### 环境变量参考表
 
-环境变量配置参考下表：
+950列包含Ascend 950PR/950DT；“—”表示不适用，编译模式限制见[编译选项参考表](#compiler-options-reference)。布尔环境变量除特别注明外可用 `1` 启用。
 
-| 类别 | 环境变量 | 默认值 | 功能说明 | 配置说明 | 变更声明 |
-|------|----------|--------|----------|----------|----------|
-| **调试与日志** | TRITON_DEBUG | 0 或未设置 | 启用 Triton 的调试输出功能，用于在运行时打印详细的调试信息。这对于排查编译或执行阶段的问题非常有用。 当设置为 1 时，Triton 会输出更多关于编译过程、内核生成和执行的信息。 某些实现中可能支持更细粒度的调试级别（如 2, 3 等），具体取决于 Triton 的版本和实现。 | 0：不启用DEBUG；1：启用DEBUG | |
-| **调试与日志** | MLIR_ENABLE_DUMP | 0 或未设置 | 在每次 MLIR 优化前转储所有内核的 IR。使用 `MLIR_ENABLE_DUMP=kernelName`可以只转储特定内核的IR。 | 0：不转储；1：转储所有内核IR；kernelName：转储特定内核IR | Triton 缓存可能干扰转储。如果 `MLIR_ENABLE_DUMP=1`  不生效，可尝试清理 Triton 缓存： `rm -r ~/.triton/cache` |
-| **调试与日志** | LLVM_IR_ENABLE_DUMP | 0 或未设置 | 在每次 LLVM IR 优化前转储 IR。 | 0：不转储；1：转储IR | |
-| **调试与日志** | TRITON_REPRODUCER_PATH | 未设置 | 在每个 MLIR 编译阶段前生成 MLIR 复现文件。如果某阶段失败，`<reproducer_path>`  将保存失败前的 MLIR 状态。 | <reproducer_path>：保存路径 | |
-| **调试与日志** | TRITON_INTERPRET | 0 或未设置 | 使用 Triton 解释器而非 GPU 运行，支持在核函数代码中插入 Python 断点 | 0：不支持断点；1：支持断点 | |
-| **调试与日志** | TRITON_ENABLE_LLVM_DEBUG | 0 或未设置 | 向LLVM 传递`-debug`参数，输出大量调试信息。若信息过多，可使用`TRITON_LLVM_DEBUG_ONLY`限制输出范围。 | 0：不传递；1：传递 | 另一种减少输出干扰的方法是：先设置 `LLVM_IR_ENABLE_DUMP=1`运行程序，提取目标LLVM优化通道前的中间表示（IR），然后单独运行LLVM的`opt`工具，此时可通过命令行添加`-debug-only=foo`参数来限定调试范围。 |
-| **调试与日志** | TRITON_LLVM_DEBUG_ONLY | 未设置 | 功能等同于 LLVM 的`-debug-only`命令行选项。该参数可将 LLVM 调试输出限定到特定的优化通道或组件名称（这些名称通过 LLVM 和 Triton 中的`#define DEBUG_TYPE`宏定义），从而有效减少调试信息的冗余输出。用户可指定一个或多个逗号分隔的值，例如：`TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions"`或`TRITON_LLVM_DEBUG_ONLY="tritongpu-remove-layout-conversions,regalloc"`。 | 逗号分隔值：通道或组件名称 | |
-| **调试与日志** | USE_IR_LOC | 0 或未设置 | 控制是否在生成的中间表示（IR）中包含位置信息（如文件名、行号等）。这些信息对调试很有帮助，但可能会增加生成的IR的大小。设置为1，会重新解析中间表示(IR)，将位置信息映射为具有特定扩展名的IR文件行号（而非Python源文件行号）。这能建立从IR到LLVM IR/PTX的直接映射关系。配合性能分析工具使用时，可实现对IR指令的细粒度性能剖析。 | 0：不包含位置信息；1：包含位置信息 | |
-| **调试与日志** | TRITON_DISABLE_LINE_INFO | true | 控制是否在`bishengir-compile`命令中追加`--enable-debug-info=true`，即是否在生成的内核可执行文件中包含行号等调试信息。**注意**：triton-ascend 默认值为`true`（默认**关闭**行号信息，与社区 Triton 默认开启相反）。行号信息可用于定位精度/性能问题及 profiling 分析，但会增加编译产物大小。 | 0/false：启用行号信息；1/true：禁用行号信息 | 配合性能分析使用时，请参考[算子性能调优方法](./debug_guide/profiling.md)。 |
-| **调试与日志** | TRITON_PRINT_AUTOTUNING | 0 或未设置 | 在自动调优完成后，输出每个内核的最佳配置及总耗时。 | 0：不输出；1：输出 | |
-| **调试与日志** | MLIR_ENABLE_REMARK | 0 或未设置 | 启用MLIR 编译过程中的备注信息输出，包括以备注形式输出的性能警告。 | 0：不启用；1：启用 | |
-| **调试与日志** | TRITON_KERNEL_DUMP | 0 或未设置 | 启用或禁用 Triton 内核的转储功能，当启用时，Triton 会将生成的内核代码（各编译阶段IR及最终NPU编译产物）保存到指定目录。 | 0：不启用；1：启用 | |
-| **调试与日志** | TRITON_DUMP_DIR | ~/.triton/dump | 指定 Triton 内核转储文件的保存目录。当`TRITON_KERNEL_DUMP=1`时保存IR和PTX的目录。 | "path"：保存路径 | |
-| **调试与日志** | TRITON_DEVICE_PRINT | 0 或未设置 | 当设置为`1` 或者 `true`时（`TRUE` 将被转换为 `true`），启用`tl.device_print`功能。 重要说明：该功能使用GM缓冲区（其指针被传递给内核）。 | 0：不启动；1：启用`tl.device_print`功能 | 每个线程的GM缓冲区最大为16KB，超限内容将被丢弃。该值目前固定，后续将通过环境变量调整。 |
-| **调试与日志** | TRITON_MEMORY_DISPLAY | 0 或未设置 | 控制是否生成内存使用情况的 json 文件。当`TRITON_MEMORY_DISPLAY=1`时保存 memory_info_aic/aiv.json 文件到当前目录 。 | 0：不启用；1：启用 | |
-| **编译控制** | TRITON_ALWAYS_COMPILE | 0 或未设置 | 控制 Triton 是否每次运行都强制重新编译内核，而不是使用已有的缓存版本。 默认情况下，Triton 会对已经编译过的内核进行缓存（基于参数和配置），以提高性能。 设置为 1 后，Triton 将忽略缓存并每次都重新编译内核，这在调试或测试新编译器特性时非常有用。 | 0：不启用；1：每次运行都重新编译所有内核 | |
-| **编译控制** | DISABLE_LLVM_OPT | 0 或未设置 | 当设置为 1 时，可以禁用 LLVM 编译过程中的优化步骤(make_llir和make_ptx的LLVM优化)。当设置为字符串，解析为要禁用的LLVM优化标志列表。例如使用`DISABLE_LLVM_OPT="disable-lsr"`可禁用循环强度优化（该优化在某些存在寄存器压力的内核中可能导致高达10%的性能波动）。 | 0：LLVM 的优化是启用状态；1：禁用 LLVM 编译过程中的优化步骤(make_llir和make_ptx的LLVM优化) <list>:"disable-lsr":禁用循环强度优化 </list>| |
-| **编译控制** | MLIR_ENABLE_TIMING | 0 或未设置 | 启用或禁用 MLIR 编译过程中的时间统计功能。 | 0：不启用；1：启用 | |
-| **编译控制** | LLVM_ENABLE_TIMING | 0 或未设置 | 启用或禁用 LLVM 编译过程中的时间统计功能。 | 0：不启用；1：启用 | |
-| **编译控制** | TRITON_DEFAULT_FP_FUSION | 1 启用 | 控制是否默认启用浮点运算融合优化，覆盖默认的浮点运算融合行为（如mul+add->fma）。 | 0：不启用；1：启用 | |
-| **编译控制** | TRITON_KERNEL_OVERRIDE | 0 或未设置 | 启用或禁用 Triton 内核覆盖功能，允许在每个编译阶段开始时用用户指定的外部文件（IR/NPU编译产物等）覆盖默认生成的内核代码。 | 0：不启用；1：启用 | |
-| **编译控制** | TRITON_OVERRIDE_DIR | ~/.triton/override | 指定 Triton 内核覆盖文件的查找目录。当`TRITON_KERNEL_OVERRIDE=1`时加载IR/PTX文件的目录。 | "path"：保存路径 | |
-| **编译控制** | TRITON_COMPILE_ONLY | 0 或未设置 | remote_launch时使用，只编译不运行。 | 0：不启用；1：启用 | |
-| **编译控制** | TRITON_DISABLE_PRECOMPILE | 0 或未设置 | 是否禁用预编译。                                                                                                                                                                                                                                                                                  | 0：启用预编译；1：禁用预编译                                                                               | |
-| **运行与调度** | TRITON_ENABLE_TASKQUEUE | 1 | 是否开启task_queue。 | 0：不启用；1：启用 | |
-| **运行与调度** | TRITON_ENABLE_SANITIZER | 0 或未设置 | 是否启用 SANITIZER。 | 0：不启用；1：启用 | |
-| **运行与调度** | ENABLE_PRINT_UB_BITS | 0 或未设置 | 打开后可以获取当前UB占用量，给inductor使用。 | 0：不启用；1：启用 | |
-| **运行与调度** | NPU_DEVICE_LIMIT | 未设置 | 用户设置算子运行时最大aicore和vector_core,格式要求：数字以,分割。比如：14,28。| 无默认值| |
-| **其他** | TRITON_BENCH_METHOD | 未设置 | 使用昇腾NPU时，将`testing.py`中的`do_bench`切换为`do_bench_npu`（需配合`INDUCTOR_ASCEND_AGGRESSIVE_AUTOTUNE = 1`使用）。设为`default`时即使NPU可用，仍调用原`do_bench`函数。 | "npu"：切换为`do_bench_npu` | |
-| **其他** | TRITON_REMOTE_RUN_CONFIG_PATH | path | 指定远程运行的配置路径。 | 直接给定path | |
+| 类别 | 环境变量 | 功能说明 | 默认值 | A2/A3 | 950 |
+|------|----------|----------|--------|-------|-----|
+| 调试 | `TRITON_DEBUG` | 开启JIT调试及设备断言，保存TTIR；常规路径还输出编译日志并保存后端IR与二进制。 | 关闭 | 支持 | 支持 |
+| 调试 | `USE_IR_LOC` | 以指定阶段的IR文件行号重建位置信息；当前AST编译可用 `ttir`，IR输入还可使用源文件位置快照。 | 未设置 | 支持 | 支持 |
+| 调试 | `TRITON_FRONT_END_DEBUGGING` | 前端错误发生时保留原始Python异常堆栈。 | 关闭 | 支持 | 支持 |
+| 调试 | `TRITON_KERNEL_DUMP` | 保存编译阶段产物及最终 `npubin`；只对实际发生的编译生效。 | 关闭 | 支持 | 支持 |
+| 调试 | `TRITON_DUMP_DIR` | 指定 `TRITON_KERNEL_DUMP` 的输出目录。 | `$TRITON_HOME/.triton/dump` | 支持 | 支持 |
+| 调试 | `TRITON_DISABLE_LINE_INFO` | `true/1` 禁止向毕昇编译器请求行号信息；`false/0` 启用。 | `true` | 支持 | 常规路径 |
+| 调试 | `LLVM_EXTRACT_DI_LOCAL_VARIABLES` | 请求毕昇编译器生成调试变量信息。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_DEVICE_PRINT` | 启用 `tl.device_print` 的设备端GM打印缓冲区。 | 关闭 | 支持 | 支持 |
+| 调试 | `TRITON_MEMORY_DISPLAY` | 请求编译器输出内存使用信息。 | 关闭 | 支持 | — |
+| 调试 | `ENABLE_PRINT_UB_BITS` | 请求编译器打印UB占用位数。 | 关闭 | 支持 | 常规路径 |
+| 调试 | `TRITON_INTERPRET` | 在CPU解释器中执行其支持的Triton操作，便于Python断点调试。 | 关闭 | 支持 | 支持 |
+| 调试 | `TRITON_ENABLE_SANITIZER` | 向Ascend NPU编译器传入sanitizer开关。 | 关闭 | 支持 | 常规路径 |
+| 编译 | `TRITON_ALWAYS_COMPILE` | 忽略命中的编译缓存，强制重新编译。 | 关闭 | 支持 | 支持 |
+| 编译 | `TRITON_KERNEL_OVERRIDE` | 从覆盖目录读取与编译阶段同名的外部IR/二进制文件。 | 关闭 | 支持 | 支持 |
+| 编译 | `TRITON_OVERRIDE_DIR` | 指定覆盖文件目录。 | `$TRITON_HOME/.triton/override` | 支持 | 支持 |
+| 编译 | `TRITON_F32_DEFAULT` | 设置 `tl.dot` 的默认F32输入精度；Ascend使用 `ieee`、`hf32`，兼容输入 `tf32` 会映射为 `hf32`。 | 未设置，使用后端的 `ieee` | 支持 | 支持 |
+| 编译 | `TRITON_ALLOW_NON_CONSTEXPR_GLOBALS` | 允许JIT前端引用非 `constexpr` 全局变量。 | 关闭 | 支持 | 支持 |
+| 编译 | `TRITON_ENABLE_LIBDEVICE` | 在A2/A3编译路径额外链接libdevice；非空字符串均视为开启，包括 `"0"`。 | 未设置 | 支持 | — |
+| 编译 | `TRITON_ENABLE_LIBDEVICE_SIMT` | 在950上为libdevice调用选择SIMT版本；非空字符串均视为开启，包括 `"0"`。 | 未设置 | — | 支持 |
+| 缓存与调优 | `TRITON_HOME` | 设置Triton缓存、dump和override目录的根位置。 | 用户主目录 | 支持 | 支持 |
+| 缓存与调优 | `TRITON_CACHE_DIR` | 指定编译缓存目录。 | `$TRITON_HOME/.triton/cache` | 支持 | 支持 |
+| 缓存与调优 | `TRITON_CACHE_AUTOTUNING` | 缓存autotune的选择结果。 | 关闭 | 支持 | 支持 |
+| 缓存与调优 | `TRITON_PRINT_AUTOTUNING` | 设为 `1` 时打印autotune结果及常规路径的编译命令。 | 关闭 | 支持 | 支持 |
+| 缓存与调优 | `TRITON_CACHE_MANAGER` | 用 `MODULE:CLASS` 指定编译缓存管理器；远程缓存设为 `triton.runtime.cache:RemoteCacheManager`。 | 本地缓存管理器 | 支持 | 支持 |
+| 缓存与调优 | `TRITON_REMOTE_CACHE_BACKEND` | 用 `MODULE:CLASS` 指定远程缓存的存储后端，需配合远程缓存管理器使用。 | 未设置 | 支持 | 支持 |
+| 缓存与调优 | `TRITON_ENABLE_UBTUNER` | 选择UB调优模式：`compile` 或 `run`。 | 未设置 | 支持 | 常规路径 |
+| 缓存与调优 | `TRITON_AUTOTUNE_PARALLEL_COMPILE` | 控制Ascend autotune的并行编译，`0` 关闭。 | `1` | 支持 | 支持 |
+| 缓存与调优 | `TRITON_BENCH_METHOD` | 设为 `npu` 时选择Ascend的 `do_bench_npu`；`default` 使用通用测量方法。 | `default` | 支持 | 支持 |
+| 运行 | `TRITON_COMPILE_ONLY` | 设为 `1/true` 时不启动kernel；编译及launcher扩展加载仍会执行。 | 关闭 | 支持 | 支持 |
+| 运行 | `TRITON_ENABLE_TASKQUEUE` | 控制Ascend launcher的task queue。 | 开启 | 支持 | 支持 |
+| 运行 | `TRITON_GRID_WARN_PRINT` | 打印Ascend launcher的grid大小警告。 | 关闭 | 支持 | 支持 |
+| 运行 | `NPU_DEVICE_LIMIT` | 按 `AI Core数,Vector Core数` 限制可用核心数，例如 `14,28`；需符合设备比例。 | 未设置，使用设备值 | 支持 | 支持 |
+| 工具链选择 | `CC` | 设置CPU launcher扩展的C/C++编译器。 | 未设置，使用系统默认编译器 | 支持 | 支持 |
+| 工具链选择 | `TRITON_NPU_COMPILER_PATH` | 仅当随包工具与 `PATH` 查找均失败时，作为Ascend编译器工具目录的后备路径。 | 未设置 | 支持 | 支持 |
+| 工具链选择 | `TRITON_BUILD_DIR` | 查找 `triton-opt`、`triton-mlir-opt` 时，在随包工具之后、`PATH` 之前查找该目录的 `bin/`。 | 未设置 | 支持 | 支持 |
 
 ## 编译选项
 
-编译选项用于控制单个 Triton kernel 的编译策略，可通过 `triton.Config`、Autotune 参数或 kernel launch meta-parameter 传入。
-
 ### 编译选项用法示例
 
-例如，可在 kernel launch 时直接传入 `multibuffer`：
+编译选项可以直接传入 `kernel[grid](...)`，也可以通过 `triton.Config` 设置自动调优的候选配置。`triton.Config` 的 `num_warps`、`num_stages` 和 `ir_override` 使用独立构造参数，其余受支持的编译选项放在 `kwargs` 中。
+
+示例中，`BLOCK_SIZE` 是kernel自定义的 `tl.constexpr` 参数，`compile_mode` 和 `num_stages` 是编译选项：
 
 ```python
-import torch
-import torch_npu
 import triton
-import triton.language as tl
 
-@triton.jit
-def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(0)
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-    x = tl.load(x_ptr + offsets, mask=mask)
-    y = tl.load(y_ptr + offsets, mask=mask)
-    tl.store(out_ptr + offsets, x + y, mask=mask)
+kernel[grid](*args, BLOCK_SIZE=1024, compile_mode="simd", num_stages=1)
 
-def add(x, y):
-    out = torch.empty_like(x)
-    n_elements = out.numel()
-    grid = (triton.cdiv(n_elements, 1024),)
-    add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=1024, multibuffer=True)
-    return out
-
-if __name__ == "__main__":
-    torch.manual_seed(0)
-    x = torch.randn((4096,), device="npu", dtype=torch.float32)
-    y = torch.randn((4096,), device="npu", dtype=torch.float32)
-    out = add(x, y)
-    torch.npu.synchronize()
-    print(out[:4])
+configs = [
+    triton.Config({"BLOCK_SIZE": 1024, "compile_mode": "simd"}, num_stages=1),
+    triton.Config({"BLOCK_SIZE": 1024, "compile_mode": "simd"}, num_stages=2),
+]
 ```
+
+候选配置的使用方法见 [Autotune使用指南](./autotune_guide.md)。
 
 <a id="compiler-options-reference"></a>
 
 ### 编译选项参考表
 
-编译选项配置参考下表：
+表中默认值以Ascend后端为准，`triton.Config` 的差异单独注明；`None` 通常表示由后端或工具链决定。
 
-| 类别 | 编译选项 | 默认值/可选值 | 功能说明 | 配置说明 |
-|------|----------|----------------|----------|----------|
-| **通用流水** | `multibuffer` | `True`（默认）、`False` | 启用或禁用 ping-pong/double buffer 流水。默认开启。 | `triton.Config` 或 launch meta-parameter |
-| **图优化** | `enable_graph_optimize` | `True`（默认）、`False` | 启用或禁用 TTIR Graph Optimization。具体规则、重写次数和 UB 预算由后端维护。 | `triton.Config` 或 launch meta-parameter |
-| **毕昇编译器** | `bisheng_options` | 后端默认字符串或用户字符串 | 向支持该选项的毕昇编译路径透传附加参数。 | `triton.Config` 或 launch meta-parameter |
-| **CV 融合** | `enable_auto_bind_sub_block` | `None`、`True`、`False` | 启用或禁用自动绑定 sub-block。 | `triton.Config` 或 launch meta-parameter |
-| **CV 融合** | `enable_hivm_auto_cv_balance` | `None`、`True`、`False` | 启用或禁用自动 CV balance。 | `triton.Config` 或 Autotune 参数 |
-| **CV 融合** | `enable_cube_block_merge` | `False`（默认）、`True` | 控制 DynamicCV pipeline 的 Cube block merge。 | `triton.Config` 或 launch meta-parameter |
-| **VF 融合** | `vf_fusion_mode` | `None`（默认，遵循 BiShengIR 默认值 `"max-parallel"`）、`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | 选择 Ascend 950PR&950DT products BiShengIR 阶段的 VF fusion 策略。 | `triton.Config` 或 launch meta-parameter |
-| **VF 融合** | `enable_vf_fusion` | `None`（默认，遵循 BiShengIR 默认值 `True`）、`True`、`False` | 控制 Ascend 950PR&950DT products BiShengIR 阶段是否启用 VF fusion。该选项是 VF fusion 的总开关；`vf_fusion_mode` 仅用于选择融合策略。 | `triton.Config` 或 launch meta-parameter |
-| **HFusion** | `hfusion_enable_multiple_consumer_fusion` | `False`（默认）、`True` | 控制 Ascend 950PR&950DT products BiShengIR 阶段的多 consumer 融合。 | `triton.Config` 或 launch meta-parameter |
-| **CV 融合/同步** | `sync_solver` | `None`、`True`、`False` | 启用或禁用 HIVM 同步求解器。 | `triton.Config` 或 launch meta-parameter |
-| **同步** | `unit_flag` | `None`、`True`、`False` | Cube 搬出相关同步优化项。 | `triton.Config` 或 Autotune 参数 |
-| **同步** | `inject_barrier_all` | `None`、`True`、`False` | 启用或禁用自动注入 barrier 同步。 | `triton.Config` 或 launch meta-parameter |
-| **同步** | `inject_block_all` | `None`、`True`、`False` | 启用或禁用自动注入 block 同步。 | `triton.Config` 或 launch meta-parameter |
-| **多缓冲范围** | `limit_auto_multi_buffer_only_for_local_buffer` | `None`、`True`、`False` | 限制自动 multi-buffer 只作用于 local buffer。 | `triton.Config` 或 Autotune 参数 |
-| **多缓冲范围** | `limit_auto_multi_buffer_of_local_buffer` | `None`、`"no-limit"`、`"no-l0c"` | 配置 local buffer 自动 multi-buffer 的 scope。 | `triton.Config` 或 Autotune 参数 |
-| **Workspace** | `set_workspace_multibuffer` | `None`、`2`、`4` | 配置 workspace multi-buffer 档位。 | `triton.Config` 或 Autotune 参数 |
-| **CV 融合 tiling** | `tile_mix_vector_loop` | `None`、`2`、`4`、`8` | 配置 Vector loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
-| **CV 融合 tiling** | `tile_mix_cube_loop` | `None`、`2`、`4`、`8` | 配置 Cube loop 的切分份数。 | `triton.Config` 或 Autotune 参数 |
-| **DynamicCV 缓冲** | `buf_slot_num_of_veccore` | `None`（默认）或整数 | 配置 veccore 内部 buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
-| **DynamicCV 缓冲** | `buf_slot_num_of_crosscore` | `None`（默认）或整数 | 配置跨 core buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
-| **DynamicCV 缓冲** | `buf_slot_num_of_gm` | `None`（默认）或整数 | 配置 GM load buffer slot 数量。 | `triton.Config` 或 launch meta-parameter |
-| **编译模式** | `compile_mode` | `"simd_simt_template"`（默认）、`"simd"`、`"simt_only"` | 控制 SIMD / SIMT 编译路径。`"simd"`：纯 SIMD；`"simd_simt_template"`：普通 SIMD pipeline，并在 Ascend 950PR&950DT products 上启用 template-SIMT 子路径；`"simt_only"`：仅 Ascend 950PR&950DT products 支持的纯 SIMT 路径（`ttir→npubin`）。 | `triton.Config` 或 launch meta-parameter |
+- **常规路径**：`compile_mode="simd"` 或 `"simd_simt_template"`。
+- **仅纯SIMT**：`compile_mode="simt_only"`，仅950支持。
+- **需DynamicCV生效**：编译器成功应用了 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)，即950常规路径中启用 `enable_dynamic_cv_pipeline=True`，且未发生回退。
+
+| 类别 | 编译选项 | 功能说明 | 默认值/可选值 | A2/A3 | 950 |
+|------|----------|----------|---------------|-------|-----|
+| Triton通用 | `debug` | 开启设备断言与编译调试；JIT下与环境变量 `TRITON_DEBUG` 任一开启即生效。 | `False`；布尔值 | 支持 | 支持 |
+| Triton通用 | `sanitize_overflow` | 启用整数溢出检查；检查通过设备断言执行，还需启用 `debug`。 | `True`；布尔值 | 支持 | 支持 |
+| Triton通用 | `num_stages` | 设为 `1` 时关闭自动多缓冲；其他值使用自动模式，不指定各层缓冲数量。 | 未设置 `multibuffer_mode` 时：后端 `2`，`triton.Config` 为 `3`；整数 | 支持 | 常规路径 |
+| Triton通用 | `num_warps` | 设置纯SIMT编译器的warp数。 | 后端 `32`；`triton.Config` 为 `4`；正整数 | — | 仅纯SIMT |
+| Triton通用 | `ir_override` | 用给定文件覆盖同扩展名的编译阶段产物。 | `None`；文件路径 | 支持 | 支持 |
+| 编译模式与图优化 | `compile_mode` | `simd` 使用SIMD；`simd_simt_template` 在A2/A3使用SIMD，在950启用模板SIMT子路径；`simt_only` 使用纯SIMT。 | `"simd_simt_template"`；另可选 `"simd"`、`"simt_only"` | 支持前两项 | 支持全部 |
+| 编译模式与图优化 | `enable_graph_optimize` | 控制TTIR Graph Optimization。 | `True`；布尔值 | 支持 | 支持 |
+| 多缓冲 | `multibuffer` | 控制自动多缓冲总开关；`num_stages=1` 也会将其关闭。 | `True`；布尔值 | 支持 | 常规路径 |
+| 多缓冲 | `multibuffer_mode` | 按 `gm`、`l1`、`l0c`、`ub` 设置多缓冲槽数；`1` 关闭该层多缓冲，大于 `1` 指定槽数。受 `multibuffer` 总开关控制，不能与 `num_stages` 同时显式设置。 | `None`；必须包含四个层级的字典，值为正的32位有符号整数 | 支持 | 常规路径 |
+| 多缓冲 | `set_workspace_multibuffer` | 设置workspace多缓冲级别；显式设置 `multibuffer_mode` 且 `gm>1` 时，NPU IR使用该GM槽数覆盖本值。 | `None`；整数，具体范围由NPU编译器决定 | 支持 | 常规路径 |
+| 同步 | `sync_solver` | 控制HIVM graph sync solver。 | `None`；布尔值 | 支持 | 常规路径 |
+| 同步 | `unit_flag` | 控制HIVM unit-flag同步。 | `None`；布尔值 | 支持 | 常规路径 |
+| 同步 | `inject_barrier_all` | 控制自动注入barrier同步。 | `None`；布尔值 | 支持 | 常规路径 |
+| 同步 | `inject_block_all` | 控制自动注入block同步。 | `None`；布尔值 | 支持 | 常规路径 |
+| 同步 | `disable_auto_inject_block_sync` | 禁用编译器自动插入核间同步。使用Ascend亲和接口 [`sync_block_all`](./triton_api_extension/al/sync_block_all.md)、[`sync_block_set`](./triton_api_extension/al/sync_block_set.md) 或 [`sync_block_wait`](./triton_api_extension/al/sync_block_wait.md) 时，必须设置 `disable_auto_inject_block_sync=True`。 | `None`；布尔值 | 支持 | 常规路径 |
+| 调度与流水 | `enable_auto_bind_sub_block` | 覆盖后端推导的sub-block自动绑定策略。 | `None`；布尔值 | 支持 | 常规路径 |
+| 调度与流水 | `enable_hivm_auto_cv_balance` | 控制HIVM的自动CV balance。 | `None`；布尔值 | 支持 | 常规路径 |
+| 调度与流水 | `tile_mix_vector_loop` | 设置Vector循环的切分份数。 | `None`；整数 | 支持 | — |
+| 调度与流水 | `tile_mix_cube_loop` | 设置Cube循环的切分份数。 | `None`；整数 | 支持 | — |
+| 调度与流水 | `enable_mixed_cv` | 控制NPU编译器的mixed CV路径。 | `None`；布尔值 | — | 常规路径 |
+| 调度与流水 | `enable_dynamic_cv_pipeline` | 启用950的 [DynamicCV流水优化](./architecture_design_and_core_features.md#dynamic-cv-pipeline)。优化生效时设置 `set_workspace_multibuffer=0`、`enable_mixed_cv=True`、`disable_auto_inject_block_sync=True`；若无法应用该优化，则恢复这些选项的原值并继续编译。 | `None`，按目标解析：A2/A3 `False`、950 `True`；布尔值 | — | 常规路径 |
+| 调度与流水 | `buf_slot_num_of_veccore` | 设置Vector Core本地缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
+| 调度与流水 | `buf_slot_num_of_crosscore` | 设置跨核缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
+| 调度与流水 | `buf_slot_num_of_gm` | 设置GM加载缓冲槽数量。 | `None`；整数 | — | 需DynamicCV生效 |
+| 内存优化 | `enable_ubuf_saving` | 控制UB saving。 | `None`；布尔值 | 支持 | — |
+| 内存优化 | `disable_size_align_for_cast` | 控制cast的size-align优化。 | `None`；布尔值 | 支持 | — |
+| 内存优化 | `disable_tightly_coupled_buffer_reuse` | 禁止NPU编译器复用tightly coupled buffer。 | `False`；布尔值 | — | 常规路径 |
+| 内存优化 | `plan_memory_strategy` | 选择内存规划策略。 | `None`；`"default"`、`"largest-first"` | — | 常规路径 |
+| 算子优化 | `enable_preload` | 控制NPU编译器的preload优化。 | `None`；布尔值 | 支持 | 常规路径 |
+| 算子优化 | `enable_flatten` | 控制NPU编译器的flatten pass。 | `None`；布尔值 | 支持 | 常规路径 |
+| 算子优化 | `enable_auto_vectorize_v2` | 控制NPU编译器的AutoVectorizeV2。 | `None`；布尔值 | 支持 | 常规路径 |
+| 算子优化 | `vf_fusion_mode` | 选择VF fusion策略。 | `None`，不传开关；`"max-parallel"`、`"all-op"`、`"ub-aware-op"` | — | 常规路径 |
+| 算子优化 | `enable_vf_stack_limit` | 在BiShengIR编译中根据向量函数（VF）的栈占用估算限制融合，降低栈溢出风险。 | `False`；布尔值 | — | 常规路径 |
+| 算子优化 | `hfusion_enable_multiple_consumer_fusion` | 控制多个消费者的HFusion。 | `None`；布尔值 | — | 常规路径 |
+| 算子优化 | `enable_hivm_batch_matmul` | 为BiShengIR编译启用batch matmul。 | `False`；布尔值 | — | 常规路径 |
+| 算子优化 | `auto_vectorize_v2_max_fused_ops_num` | 设置AutoVectorizeV2最大融合op数。 | `None`；整数 | — | 常规路径 |
+| 算子优化 | `prevec_max_fused_ops_num` | 设置预向量化最大融合op数。 | `None`；整数 | — | 常规路径 |
+| 纯SIMT | `simt_optimization_mode` | 设置纯SIMT的多位优化模式；在A2/A3或950常规路径显式传入时，会发出 `UserWarning` 并忽略。 | `0`；整数，位语义由NPU编译器定义 | — | 仅纯SIMT |
+| 纯SIMT | `shared_mem_dynamic_size` | 设置纯SIMT动态共享内存大小。 | `122880` 字节；可显式设整数字节数 | — | 仅纯SIMT |
+| 纯SIMT | `disable_fma` | 在纯SIMT编译路径禁用FMA优化。 | `False`；布尔值 | — | 仅纯SIMT |
+| 纯SIMT | `superblock_factor` | 在自动block mapping生效且未做row coalescing时，设置纯SIMT superblock因子。 | `1`；大于 `1` 时传给编译器 | — | 仅纯SIMT |
 
 <a id="compiler-option-cleanup-and-compatibility"></a>
 
-### 编译选项清理与兼容性
+## 编译选项清理与兼容性
 
-环境变量和编译选项参考表仅列出仍然生效的公开控制项。已经删除或转由后端内部维护的旧环境变量和编译选项不再列入参考表。作为临时兼容措施，当前继续传入这些废弃项时，编译器会发出 `FutureWarning` 并忽略用户值，使用后端维护值或默认行为。这些废弃项将在后续版本中按计划彻底删除；废弃编译选项彻底删除后，继续传入将被视为不支持的选项，并导致编译报错。用户应在兼容期内完成迁移。
+本节列出的旧编译选项仅在兼容期内接受。**未来版本彻底移除这些选项后，继续通过kernel启动参数或 `triton.Config` 传入它们将导致报错。** 请在升级前按下表迁移或删除旧选项。
 
-#### 已更名的编译选项
+由Triton-Ascend处理的更名和废弃项会发出 `FutureWarning`，同一名称在进程内只告警一次。旧多缓冲选项由NPU IR输出废弃提示。
 
-以下废弃名称仍可在兼容期内传入，编译器会将其路由到当前名称。新代码应直接使用当前名称：
+### 旧多缓冲选项迁移
+
+以下三个选项由NPU IR标记为废弃。兼容期内仍按旧语义生效；同时设置 `multibuffer_mode` 时，旧选项的取值被忽略。可按编译器提示的等效配置迁移，并在字典中完整指定四个层级：
+
+| 旧选项 | `multibuffer_mode` 中的对应设置 |
+|--------|--------------------------------|
+| `limit_auto_multi_buffer_only_for_local_buffer` | `True` 对应 `gm=1`，关闭GM多缓冲。 |
+| `limit_auto_multi_buffer_of_local_buffer` | `"no-l0c"` 对应 `l0c=1`；`"no-limit"` 对应 `l0c>1`。 |
+| `limit_auto_multi_buffer_buffer` | 950常规路径：`"only-cube"` 对应 `ub=1`；`"only-vector"` 对应 `l1=1`、`l0c=1`；`"no-limit"` 对应 `l1>1`、`ub>1`。 |
+
+例如，仅为L1配置双缓冲：
+
+```python
+triton.Config({"multibuffer_mode": {"gm": 1, "l1": 2, "l0c": 1, "ub": 1}})
+```
+
+### 已更名的编译选项
+
+将以下旧名称替换为对应的名称或取值：
 
 | 废弃名称 | 当前名称或取值 | 兼容行为 |
 |----------|----------------|----------|
-| `force_simt_only` | `compile_mode="simt_only"` | 显式传入即发出 `FutureWarning`；旧值为 `True` 时路由并覆盖已传入的 `compile_mode`，为 `False` 时不改变当前模式。 |
-| `force_simt_template` | `compile_mode="simd_simt_template"` | 显式传入即发出 `FutureWarning`；旧值为 `True` 时路由并覆盖已传入的 `compile_mode`，为 `False` 时不改变当前模式。 |
-| `intra_cache_num` | `buf_slot_num_of_veccore` | 发出 `FutureWarning` 后保留原值；同时传入新旧名称时使用新名称。 |
-| `inter_cache_num` | `buf_slot_num_of_crosscore` | 发出 `FutureWarning` 后保留原值；同时传入新旧名称时使用新名称。 |
-| `load_cache_num` | `buf_slot_num_of_gm` | 发出 `FutureWarning` 后保留原值；同时传入新旧名称时使用新名称。 |
+| `force_simt_only` | `compile_mode="simt_only"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。两个旧force开关都为 `True` 时，本项优先。 |
+| `force_simt_template` | `compile_mode="simd_simt_template"` | 旧值为 `True` 时覆盖已传入的 `compile_mode`，为 `False` 时不改变模式。 |
+| `intra_cache_num` | `buf_slot_num_of_veccore` | 沿用原值；同时传入新旧名称时使用新名称。 |
+| `inter_cache_num` | `buf_slot_num_of_crosscore` | 沿用原值；同时传入新旧名称时使用新名称。 |
+| `load_cache_num` | `buf_slot_num_of_gm` | 沿用原值；同时传入新旧名称时使用新名称。 |
+| `enable_bishengir_simt_optimization` | `simt_optimization_mode` | 沿用原值；同时传入新旧名称时使用新名称。仅在950纯SIMT路径生效。 |
 
-`compile_mode="unstructured_in_simt"` 当前作为 `compile_mode="simd_simt_template"` 的等价兼容取值接受，并会规范化为当前取值；它当前不会触发 `FutureWarning`。新代码应使用 `simd_simt_template`。
+兼容取值 `compile_mode="unstructured_in_simt"` 等同于 `compile_mode="simd_simt_template"`，仍可使用且不触发 `FutureWarning`。新代码使用 `simd_simt_template`。
 
-#### 应从用户配置中删除的编译选项
+### 已废弃的编译选项
 
-以下废弃选项没有继续生效的同名公开入口。兼容期内显式传入时，编译器会发出 `FutureWarning` 并忽略用户值；用户应按下表将其从 `triton.Config`、Autotune 配置或 kernel launch meta-parameter 中删除。
+从kernel启动参数和 `triton.Config` 中删除以下选项；编译器会忽略其取值。
 
-| 废弃选项 | 迁移方式及当前后端行为 |
+| 废弃选项 | 替代方式或当前行为 |
 |----------|--------------------------|
-| `add_auto_scheduling` | 删除该选项；DAG 自动调度开关已移除，无替代项。 |
-| `allow_fp8e4nv` | 删除该选项；该字段没有有效 consumer，无替代项。 |
-| `arch` | 删除该选项；目标架构由编译目标的 `GPUTarget.arch` 提供。 |
-| `auto_blockify_size` | 删除该选项；该字段没有有效 consumer，无替代项。 |
-| `auto_tile_and_bind_subblock` | 删除该选项；tiling 和 sub-block binding 由 Linalg IR 与 lock 语义推导。 |
-| `code_motion` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `compile_on_910_95` | 删除该选项；目标产品由编译目标自动识别。 |
-| `disable_auto_inject_block_sync` | 删除该选项；block synchronization injection 由 NPU IR 管理。 |
-| `disable_size_align_for_cast` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `enable_auto_blockify` | 删除该选项；自动 block mapping 及安全分析由后端管理。 |
-| `enable_buffer_insert_optimization` | 删除该选项；DynamicCV 在内部保持 buffer insertion optimization 开启。 |
-| `enable_cce_vf_auto_sync` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `enable_cce_vf_remove_membar` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `enable_cross_if_fusion` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `enable_drop_unit_dims` | 删除该选项；如果目的是启用 flatten，改用 `enable_flatten`。 |
-| `enable_linearize` | 删除该选项；该字段没有有效 consumer，无替代项。 |
-| `enable_mask_fallback_conversion` | 删除该选项；后端将 mask fallback conversion 固定为关闭。 |
-| `enable_nd2nz_on_vector` | 删除该选项；后端将 Vector ND2NZ conversion 固定为关闭。 |
-| `enable_select_analysis` | 删除该选项；后端将 select analysis 固定为开启。 |
-| `enable_sync_block_lock` | 删除该选项；该字段没有有效 consumer，无替代项。 |
-| `enable_ub_refine_opt` | 删除该选项；后端将 UB refine optimization 固定为关闭。 |
-| `graph_optimize_emit_remarks` | 删除该选项；Graph Optimization remarks 由后端固定为关闭。 |
-| `graph_optimize_max_rewrites_per_function` | 删除该选项；每个函数的最大重写次数由后端固定为 64。 |
-| `graph_optimize_rule_mask` | 删除该选项；Graph Optimization rule mask 由后端固定为 511。 |
-| `graph_optimize_ub_capacity_bytes` | 删除该选项；Graph Optimization UB 预算由后端根据目标产品推导。 |
-| `grid_num_tiles` | 删除该选项；该值由后端根据静态 grid 自动注入。 |
-| `has_auto_blockify_blacklist_op` | 删除该选项；安全标记由编译器扫描 TTIR 生成。 |
-| `kernel_name` | 删除该选项；kernel 名称由 TTIR 推导。 |
-| `llvm_version` | 删除该选项；该字段没有有效 consumer，无替代项。 |
-| `mix_mode` | 删除该选项；mix mode 由 Linalg IR 推导为内部 metadata。 |
-| `ops_reorder` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `optimize_dynamic_offset` | 删除该选项；后端将 dynamic-offset optimization 固定为关闭。 |
-| `parallel_mode` | 删除该选项；parallel mode 由 `compile_mode` 和 Linalg IR 推导。 |
-| `storage_align` | 删除该选项；原 vendor compiler 控制项已移除，无替代项。 |
-| `stream` | 删除该选项；launch stream 由 runtime 和 driver 管理。 |
-| `use_bytecode` | 删除该选项；bytecode pipeline 由后端固定启用。 |
-| `vf_merge_level` | 删除该选项；VF merge level 使用后端默认值。 |
-| `warp_size` | 删除该选项；Ascend 后端将 warp size 固定为 32。 |
+| `add_auto_scheduling` | DAG自动调度开关已移除，无替代项。 |
+| `allow_fp8e4nv` | 无替代项。 |
+| `arch` | 目标架构由编译目标的 `GPUTarget.arch` 提供。 |
+| `auto_blockify_size` | 无替代项。 |
+| `auto_tile_and_bind_subblock` | 切分与sub-block绑定由编译器自动决定。 |
+| `bisheng_options` | 用户值被忽略。 |
+| `code_motion` | 无替代项。 |
+| `compile_on_910_95` | 目标产品由编译目标自动识别。 |
+| `enable_auto_blockify` | 自动block映射及安全分析由编译器管理。 |
+| `enable_buffer_insert_optimization` | DynamicCV流水自动启用缓冲插入优化。 |
+| `enable_cce_vf_auto_sync` | 无替代项。 |
+| `enable_cce_vf_remove_membar` | 无替代项。 |
+| `enable_cross_if_fusion` | 无替代项。 |
+| `enable_drop_unit_dims` | 如果目的是启用flatten，改用 `enable_flatten`。 |
+| `enable_linearize` | 无替代项。 |
+| `enable_simt_reorder_instruction` | 改用 `simt_optimization_mode`。 |
+| `enable_vf_fusion` | 不再向NPU编译器透传。 |
+| `enable_mask_fallback_conversion` | 后端将mask fallback conversion固定为关闭。 |
+| `enable_nd2nz_on_vector` | 后端将Vector ND2NZ conversion固定为关闭。 |
+| `enable_select_analysis` | 后端将select analysis固定为开启。 |
+| `enable_sync_block_lock` | 无替代项。 |
+| `enable_ub_refine_opt` | 后端将UB refine optimization固定为关闭。 |
+| `graph_optimize_emit_remarks` | Graph Optimization remarks由后端固定为关闭。 |
+| `graph_optimize_max_rewrites_per_function` | 每个函数的最大重写次数由后端固定为64。 |
+| `graph_optimize_rule_mask` | 旧字段的取值被忽略。 |
+| `graph_optimize_ub_capacity_bytes` | Graph Optimization UB预算由后端根据目标产品推导。 |
+| `grid_num_tiles` | 该值由后端根据静态grid自动注入。 |
+| `has_auto_blockify_blacklist_op` | 安全标记由编译器扫描TTIR生成。 |
+| `kernel_name` | kernel名称由TTIR推导。 |
+| `llvm_version` | 无替代项。 |
+| `mix_mode` | 由编译器自动推导。 |
+| `ops_reorder` | 无替代项。 |
+| `optimize_dynamic_offset` | 后端将dynamic-offset optimization固定为关闭。 |
+| `parallel_mode` | parallel mode由 `compile_mode` 和Linalg IR推导。 |
+| `storage_align` | 无替代项。 |
+| `stream` | 执行流由运行时和驱动管理。 |
+| `use_bytecode` | bytecode pipeline由后端固定启用。 |
+| `vf_merge_level` | VF merge level使用后端默认值。 |
+| `warp_size` | Ascend后端将warp size固定为32。 |
 
-#### 已废弃的环境变量
+### 已废弃的环境变量
 
-以下环境变量在兼容期内被检测到时会发出 `FutureWarning`，但其值不再影响后端行为。用户应取消设置：
+从启动脚本或运行环境中移除以下变量；编译器会忽略其取值。
 
-| 废弃环境变量 | 迁移方式及当前后端行为 |
+| 废弃环境变量 | 替代方式或当前行为 |
 |----------------|--------------------------|
-| `LLVM_ROOT` | 取消设置；如需选择 CPU launcher 编译器，设置 `CC`。 |
-| `MLIR_ROOT` | 取消设置；使用随包提供或可从 `PATH` 发现的 MLIR 工具。 |
-| `TRITON_ALL_BLOCKS_PARALLEL` | 取消设置；自动 block mapping 由后端策略管理。 |
-| `TRITON_ASCEND_ARCH` | 取消设置；目标架构由显式编译目标的 `GPUTarget.arch` 提供。 |
-| `TRITON_ASCEND_COMPILE_SPEED_OPT` | 取消设置；该变量没有有效 consumer，无替代项。 |
-| `TRITON_BACKEND` | 取消设置；Ascend backend policy 不再由该环境变量选择。 |
-| `TRITON_DISABLE_FFTS` | 取消设置；FFTS policy 根据显式编译目标推导。 |
-| `TRITON_REGISTER_TENSOR_MSPROF` | 取消设置；tensor-shape msprof registration 不再由环境变量控制。 |
+| `LLVM_ROOT` | 如需选择CPU launcher编译器，设置 `CC`。 |
+| `MLIR_ROOT` | 使用随包提供或可从 `PATH` 发现的MLIR工具。 |
+| `TRITON_ALL_BLOCKS_PARALLEL` | 自动block mapping由后端策略管理。 |
+| `TRITON_ASCEND_ARCH` | 目标架构由显式编译目标的 `GPUTarget.arch` 提供。 |
+| `TRITON_ASCEND_COMPILE_SPEED_OPT` | 无替代项。 |
+| `TRITON_BACKEND` | 该变量不再用于选择Ascend后端策略。 |
+| `TRITON_DISABLE_FFTS` | FFTS策略由编译目标决定。 |
+| `TRITON_REGISTER_TENSOR_MSPROF` | 不再通过环境变量控制msprof的张量形状注册。 |

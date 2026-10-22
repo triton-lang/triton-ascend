@@ -30,6 +30,7 @@
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
+#include "mlir/Support/WalkResult.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/Support/Debug.h"
 
@@ -72,10 +73,11 @@ static void eraseOpsWithUnusedUsers(Operation *op, Block *loopBlock,
   }
 }
 
-static bool cloneDepSubgraph(Operation *yieldDefOp, Block *loopBlock,
-                             SmallVector<Operation *> &clonedOps,
-                             IRMapping &mapping, int targetBlockId,
-                             CVPipeline::ComputeBlockIdManager &bm) {
+static bool
+cloneDepSubgraph(Operation *yieldDefOp, Block *loopBlock,
+                 SmallVector<Operation *> &clonedOps, IRMapping &mapping,
+                 int targetBlockId, CVPipeline::ComputeBlockIdManager &bm,
+                 const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallVector<Operation *> worklist;
   llvm::SetVector<Operation *> visited;
   SmallVector<Operation *> toClone;
@@ -88,19 +90,24 @@ static bool cloneDepSubgraph(Operation *yieldDefOp, Block *loopBlock,
   while (!worklist.empty()) {
     Operation *cur = worklist.pop_back_val();
 
-    for (Value operand : cur->getOperands()) {
-      Operation *defOp = operand.getDefiningOp();
+    CVPipeline::DependencyHelper depHelper{memGraph};
+
+    auto res = depHelper.forEachSource(cur, [&](Operation *defOp) {
       if (!defOp || defOp->getBlock() != loopBlock || visited.count(defOp)) {
-        continue;
+        return WalkResult::advance();
       }
       if (defOp != yieldDefOp &&
           (defOp->getNumResults() != 1 ||
            !CVPipeline::isScalarLike(defOp->getResult(0)))) {
-        return false;
+        return WalkResult::interrupt();
       }
       visited.insert(defOp);
       toClone.push_back(defOp);
       worklist.push_back(defOp);
+      return WalkResult::advance();
+    });
+    if (res.wasInterrupted()) {
+      return false;
     }
   }
 
@@ -244,7 +251,7 @@ static void processOneLoop(Operation *loopOp,
 
     // Clone entire depSubgraph (yieldDefOp + upstream deps) to target block
     if (!cloneDepSubgraph(yieldDefOp, loopBlock, clonedOps, mapping,
-                          firstUserBlockId, bm)) {
+                          firstUserBlockId, bm, memGraph)) {
       LOG_DEBUG("Skip iter_arg " << i << " due to non-scalar dependency\n");
       continue;
     }

@@ -92,12 +92,11 @@ NPUOptions are parameters that control the **compilation strategy of a single ke
 | --- | --- | --- |
 | Compilation mode and general pipeline | Select the SIMD/SIMT compilation path and control the ping-pong pipeline | `compile_mode`, `multibuffer` |
 | Graph optimization | Toggle Graph Optimization at the TTIR level | `enable_graph_optimize` |
-| CV fusion and tiling | Automatic sub-block binding, Cube/Vector balancing and splitting | `enable_auto_bind_sub_block`, `enable_hivm_auto_cv_balance`, `enable_cube_block_merge`, `tile_mix_vector_loop`, `tile_mix_cube_loop` |
-| VF / HFusion | VF fusion strategy and multiple-consumer fusion on the 950 series | `enable_vf_fusion`, `vf_fusion_mode`, `hfusion_enable_multiple_consumer_fusion` |
+| CV fusion and tiling | Automatic sub-block binding, Cube/Vector balancing and splitting | `enable_auto_bind_sub_block`, `enable_hivm_auto_cv_balance`, `tile_mix_vector_loop`, `tile_mix_cube_loop` |
+| VF / HFusion | VF fusion strategy and multiple-consumer fusion on the 950 series | `vf_fusion_mode`, `hfusion_enable_multiple_consumer_fusion` |
 | Synchronization | Solver, unit flag, and barrier/block injection | `sync_solver`, `unit_flag`, `inject_barrier_all`, `inject_block_all` |
-| Multi-buffering and workspace | Multi-buffering scope and level for local buffer / workspace | `limit_auto_multi_buffer_only_for_local_buffer`, `limit_auto_multi_buffer_of_local_buffer`, `set_workspace_multibuffer` |
+| Multi-buffering and workspace | Buffer slot counts at each memory level and workspace multi-buffering | `multibuffer_mode`, `set_workspace_multibuffer` |
 | DynamicCV buffering | Number of buffer slots for veccore / cross-core / GM | `buf_slot_num_of_veccore`, `buf_slot_num_of_crosscore`, `buf_slot_num_of_gm` |
-| Toolchain pass-through | Forward additional arguments to the BiSheng compilation path | `bisheng_options` |
 
 The full option list, default / allowed values, and configuration methods are maintained in the reference document (to avoid inconsistencies caused by maintaining two copies): see [Environment Variables and Compiler Options · Compiler Option Reference Table](https://triton-ascend.readthedocs.io/en/latest/environment_variable_and_compiler_options_reference.html#compiler-options-reference). For the compatibility behavior of deprecated options and rename mappings, see [Compiler Option Cleanup and Compatibility](https://triton-ascend.readthedocs.io/en/latest/environment_variable_and_compiler_options_reference.html#compiler-option-cleanup-and-compatibility) in the same document.
 
@@ -213,6 +212,14 @@ TritonToLinalg converts ttir to linalg ir.
 | triton-to-hfusion | Converts `TTIR` in Triton into the corresponding operation in the `HFusion` dialect of the Ascend NPU hardware accelerator.| TritonHistogramToHFusionConversion | Converts `triton::HistogramOp` into `hfusion::HistogramOp` to enable efficient execution on the dedicated NPU hardware.|
 | triton-to-hivm | Processes the block synchronization operations (`extension.sync_block_all`, `extension.sync_block_set`, and `extension.sync_block_wait`) of Triton and converts them into the cross-core synchronization instruction in the `HIVM` dialect of Ascend NPU. These instructions are used to manage synchronization and data dependencies in the multi-core pipeline, which is the key to pipeline optimization.| TritonCustomOpToHIVMSyncOpConversion | Converts Triton synchronization instructions to HIVM synchronization instructions.<br>• `sync_block_all`: synchronizes blocks globally.<br>• `sync_block_set`: sets a synchronization point.<br>• `sync_block_wait`: waits for a synchronization point.|
 | triton-to-llvm | Converts the inline assembly operation (`extension.inline_assembly`) in Triton to the inline assembly in the LLVM dialect, and finally maps it to a CCE hardware intrinsic function of Ascend NPU.| ElementwiseInlineAsmOpConversion | Converts `triton::ElementwiseInlineAsmOp` to `LLVM::InlineAsmOp`.|
+
+<a id="dynamic-cv-pipeline"></a>
+
+##### 3.2.2.5 DynamicCV Pipelining (Ascend 950)
+
+DynamicCV optimizes kernels that combine Cube matrix computations with Vector computations. The compiler analyzes data dependencies, groups operations into compute blocks, and inserts multiple buffers and cross-core synchronization so that independent computations and data transfers can overlap, reducing wait time.
+
+With `enable_dynamic_cv_pipeline=True`, the compiler attempts this optimization. If the kernel is ineligible (for example, it contains no matrix multiplication), or the optimization cannot complete, the compiler **rolls back** the IR to its state before this optimization, sets `enable_dynamic_cv_pipeline=False`, restores the compilation options adjusted by the optimization, and continues compilation. See the [compiler options reference](./environment_variable_and_compiler_options_reference.md#compiler-options-reference) for defaults, related options, and buffer slot settings.
 
 #### 3.2.3 SIMT Compiler (Ascend 950PR&950DT products)
 

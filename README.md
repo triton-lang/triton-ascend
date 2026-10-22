@@ -22,6 +22,7 @@ Triton-Ascend
 
 ## 🔥 Latest News
 
+- [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available
 - [2026.04.30] Triton-Ascend 3.2.1 official release is now available
 - [2026.01.20] Triton-Ascend 3.2.0 official release is now available
@@ -58,11 +59,11 @@ Minimum hardware configuration: single card with 32GB memory (recommended)
 
 Determine and install the Python, CANN, and TorchNPU software versions. This step must be completed before both package installation and source code compilation installation.
 
-- Python version selection: py3.9-py3.13 are all supported.
+- Python version selection: py3.10-py3.13 are all supported.
 
-- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.1.0.
+- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
 
-- TorchNPU version selection: The currently bundled TorchNPU version is 2.7.1.post8.
+- TorchNPU version selection: The currently bundled TorchNPU version is 2.10.0.post7.
 
 ### Accessing Ascend NPU
 
@@ -71,7 +72,7 @@ If you need to access Ascend NPU computing resources for development or testing,
 ### Quick Installation
 
 ```bash
-# Taking the installation of triton-ascend 3.2.2 as an example
+# Taking the installation of triton-ascend 3.6.0 as an example
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 

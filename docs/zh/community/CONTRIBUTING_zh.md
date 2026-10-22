@@ -1,20 +1,11 @@
 # 贡献指南
 
-- [入门](#入门.md)
-- [开发者来源认证（DCO）](#开发者来源认证.md)
-- [开发指导](#开发指导.md)
-  - [代码风格](#代码风格.md)
-  - [Fork-Pull开发模式](#Fork-Pull开发模式.md)
-  - [代码门禁异常处理](#代码门禁异常处理.md)
-  - [ISSUE规范](#ISSUE规范.md)
-  - [提出PR](#提出PR.md)
-
-<h2 id="入门.md">入门</h2>
+## 入门
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上fork Triton-Ascend代码库。
 - 阅读[README_zh.md](https://github.com/triton-lang/triton-ascend/blob/main/README_zh.md)获取项目信息和构建开发环境。
 
-<h2 id="开发者来源认证.md">开发者来源认证（DCO）</h2>
+## 开发者来源认证（DCO）
 
 所有提交需包含 `Signed-off-by:` 行，使用 `git commit -s` 自动添加：
 
@@ -24,15 +15,9 @@ git commit -s -m "your commit message"
 
 这会在提交信息末尾自动添加一行 `Signed-off-by: Your Name <your.email@example.com>`，表明你确认该贡献的来源和授权。
 
-<h2 id="开发指导.md">开发指导</h2>
+## 开发指导
 
-- **[代码风格](#代码风格.md)**
-- **[Fork-Pull开发模式](#Fork-Pull开发模式.md)**
-- **[代码门禁异常处理](#代码门禁异常处理.md)**
-- **[ISSUE规范](#ISSUE规范.md)**
-- **[提出PR](#提出PR.md)**
-
-<h2 id="代码风格.md">代码风格</h2>
+### 代码风格
 
 请遵循以下编码风格，以使得Triton Ascend易于开发、维护和审查。
 
@@ -48,7 +33,7 @@ git commit -s -m "your commit message"
 
   我们鼓励开发人员对我们的代码进行重构来消除【代码坏味道】。重构的代码也应该遵循编码风格和测试风格的要求。当您收到警告时，您需要重构要合并的代码。
 
-<h2 id="Fork-Pull开发模式.md">Fork-Pull开发模式</h2>
+### Fork-Pull开发模式
 
 1、Fork Triton Ascend项目
 
@@ -98,7 +83,7 @@ git push origin {your_new_branch_name}
 
 代码推送至您的远程仓库后，您需要在您的新分支和Triton Ascend main分支之间新建Pull Request。完成新建合并请求后，“Jenkins CI“将自动设置为您构建流水线测试。您的Pull Request请尽快合并到上游main分支，以降低合并风险。
 
-<h2 id="代码门禁异常处理.md">代码门禁异常处理</h2>
+### 代码门禁异常处理
 
 代码门禁异常主要包含以下几种情况，请根据相关提示信息解决门禁异常问题。
 
@@ -114,7 +99,7 @@ git push origin {your_new_branch_name}
 
   请根据提示信息，查找出CI流水线未通过的测试用例并检查原因，解决后重新运行CI流水线。
 
-<h2 id="ISSUE规范.md">ISSUE规范</h2>
+### ISSUE规范
 
 为项目做贡献的一个好的方法是在遇到问题时发送详细报告。我们总是非常感谢写得详细、彻底的错误报告，并会因此非常感谢您！
 
@@ -135,7 +120,7 @@ git push origin {your_new_branch_name}
 - 如果问题已经打开一段时间，请您在解决该问题前进行预检查。
 - 如果您解决了自己报告的问题，在关闭该问题前还需要让其他人知道。
 
-<h2 id="提出PR.md">提出PR</h2>
+### 提出PR
 
 - 在[GitHub](https://github.com/triton-lang/triton-ascend)上提出您的想法作为问题。
 - 如果要开发的新功能需要大量设计细节，您还应提交设计方案。

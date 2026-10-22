@@ -78,9 +78,6 @@ if _is_zh:
 else:
     exclude_patterns.extend(['../zh'])
 
-# python-api RST files require triton import; mock it at build time.
-autodoc_mock_imports = ['triton']
-
 _HERE = os.path.dirname(__file__)
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
 
@@ -110,6 +107,8 @@ if _force_mock:
         "docs.en._mock._triton_mock",
         os.path.join(_HERE, "_mock", "_triton_mock.py"),
     ).install()
+
+autodoc_mock_imports = []
 
 import triton
 import triton.language.extra as _tl_extra

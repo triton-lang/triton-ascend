@@ -795,6 +795,11 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
     LOG_DEBUG("skip " << *op << ": Extracted Load/Store Related");
     return true;
   }
+  if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op)) {
+    LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
+                      << ": scf dialect op\n");
+    return true;
+  }
   return false;
 }
 
@@ -1293,6 +1298,14 @@ bool OpClassifierPass::shouldStopPropagationForYield(
 
   // Stop at func.func or builtin.module
   if (isa<func::FuncOp, ModuleOp>(op)) {
+    return true;
+  }
+
+  // Stop at hivm.hir.custom so the BFS does not cross from the SSA tensor
+  // world back into the memref world via memory dependencies and overwrite
+  // classifications already decided in earlier passes (e.g., a CUBE-classified
+  // memref.alloc that backs a matmul input via bufferization.to_tensor).
+  if (isa<hivm::CustomOp>(op)) {
     return true;
   }
 

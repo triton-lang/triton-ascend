@@ -238,5 +238,20 @@
   "xdist",
   "manylinux",
   "NVTX",
-  "CUPTI"
+  "CUPTI",
+  "shmem",
+  "SHMEM",
+  "msdebug",
+  "Maher",
+  "Ilya",
+  "Enkovich",
+  "Ettore",
+  "Tiotto",
+  "Lezcano",
+  "Casado",
+  "Pawel",
+  "Szczerbuk",
+  "Raoux",
+  "Zahi",
+  "Moudallal"
 ]

@@ -92,12 +92,11 @@ NPUOptions 是控制**单个 kernel 编译策略**的参数，可通过 `triton.
 | --- | --- | --- |
 | 编译模式与通用流水 | 选择 SIMD/SIMT 编译路径，控制 ping-pong 流水 | `compile_mode`、`multibuffer` |
 | 图优化 | TTIR 层 Graph Optimization 开关 | `enable_graph_optimize` |
-| CV 融合与 tiling | 自动绑定 sub-block、Cube/Vector 平衡与切分 | `enable_auto_bind_sub_block`、`enable_hivm_auto_cv_balance`、`enable_cube_block_merge`、`tile_mix_vector_loop`、`tile_mix_cube_loop` |
-| VF / HFusion | 950 系列的 VF 融合策略与多 consumer 融合 | `enable_vf_fusion`、`vf_fusion_mode`、`hfusion_enable_multiple_consumer_fusion` |
+| CV 融合与 tiling | 自动绑定 sub-block、Cube/Vector 平衡与切分 | `enable_auto_bind_sub_block`、`enable_hivm_auto_cv_balance`、`tile_mix_vector_loop`、`tile_mix_cube_loop` |
+| VF / HFusion | 950 系列的 VF 融合策略与多 consumer 融合 | `vf_fusion_mode`、`hfusion_enable_multiple_consumer_fusion` |
 | 同步 | 求解器、unit flag 及 barrier/block 注入 | `sync_solver`、`unit_flag`、`inject_barrier_all`、`inject_block_all` |
-| 多缓冲与 Workspace | local buffer / workspace 的 multi-buffer 范围与档位 | `limit_auto_multi_buffer_only_for_local_buffer`、`limit_auto_multi_buffer_of_local_buffer`、`set_workspace_multibuffer` |
+| 多缓冲与 Workspace | 各存储层级的缓冲槽数与 workspace 多缓冲级别 | `multibuffer_mode`、`set_workspace_multibuffer` |
 | DynamicCV 缓冲 | veccore / 跨核 / GM 的 buffer slot 数量 | `buf_slot_num_of_veccore`、`buf_slot_num_of_crosscore`、`buf_slot_num_of_gm` |
-| 编译链透传 | 向毕昇编译路径透传附加参数 | `bisheng_options` |
 
 完整选项清单、默认值 / 可选值与配置方式以参考文档为准（避免两处维护导致不一致）：见[环境变量与编译选项 · 编译选项参考表](https://triton-ascend.readthedocs.io/zh-cn/latest/environment_variable_and_compiler_options_reference.html#compiler-options-reference)；已废弃选项的兼容行为与更名映射见同文档[编译选项清理与兼容性](https://triton-ascend.readthedocs.io/zh-cn/latest/environment_variable_and_compiler_options_reference.html#compiler-option-cleanup-and-compatibility)。
 
@@ -216,6 +215,14 @@ TritonToLinalg 用于将 TTIR 转换为 Linalg IR。
 | triton-to-hfusion | 将Triton中的`TTIR`转换为Ascend NPU硬件加速器`HFusion`方言中的对应操作。 | TritonHistogramToHFusionConversion | 将 `triton::HistogramOp` 转换为 `hfusion::HistogramOp`，使其能在NPU的专用硬件上高效执行。 |
 | triton-to-hivm | 处理Triton的块同步操作 (`extension.sync_block_all`, `extension.sync_block_set`, `extension.sync_block_wait`)，将其转换为Ascend NPU的`HIVM`方言中的跨核心同步指令。这些指令用于管理多核流水线中的同步与数据依赖，是流水优化的关键。 | TritonCustomOpToHIVMSyncOpConversion | 实现Triton同步指令到HIVM同步指令的转换：`sync_block_all`（全局块同步）；`sync_block_set`（设置同步点）；`sync_block_wait`（等待同步点） |
 | triton-to-llvm | 将Triton中的内联汇编操作 (`extension.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` 。|
+
+<a id="dynamic-cv-pipeline"></a>
+
+##### 3.2.2.5 DynamicCV 流水优化（Ascend 950）
+
+DynamicCV 用于优化同时包含 Cube 矩阵计算和 Vector 计算的 kernel。编译器分析数据依赖、划分计算块，并插入多缓冲和核间同步，使可并行的计算与数据搬运交错执行，减少相互等待。
+
+设置 `enable_dynamic_cv_pipeline=True` 后，编译器会尝试应用这项优化。若 kernel 不满足优化条件（例如不包含矩阵乘法），或优化无法完成，编译器会将 IR **回退**到本次优化前的状态，将 `enable_dynamic_cv_pipeline` 置为 `False`，并恢复由该优化调整的编译选项，随后继续编译。开关的默认值、关联选项和缓冲槽配置见[编译选项参考表](./environment_variable_and_compiler_options_reference.md#compiler-options-reference)。
 
 #### 3.2.3 SIMT 编译器（Ascend 950PR&950DT系列产品）
 

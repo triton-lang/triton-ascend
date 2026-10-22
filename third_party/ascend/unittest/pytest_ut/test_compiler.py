@@ -2,6 +2,7 @@ import json
 import os
 import sys
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -280,3 +281,16 @@ def test_unknown_options_remain_available_for_jit_validation(backend):
 
     assert raw == {"unknown_compile_option": True}
     assert "unknown_compile_option" not in options.__dict__
+
+
+def test_save_temps_isolates_same_hash_compilations(monkeypatch, tmp_path):
+    monkeypatch.setattr(compiler, "get_dump_manager", lambda key: MagicMock(cache_dir=str(tmp_path)))
+    first = Path(compiler._get_save_temps_dir("same-hash"))
+    (first / "kernel.ll").write_text("first compilation")
+    second = Path(compiler._get_save_temps_dir("same-hash"))
+    (second / "kernel.ll").write_text("second compilation")
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+    assert (first / "kernel.ll").read_text() == "first compilation"
+    assert (second / "kernel.ll").read_text() == "second compilation"

@@ -28,3 +28,21 @@ target_link_options(TestTritonOffsetCacheLifetime PRIVATE
   "LINKER:--wrap=_ZdlPv"
   "LINKER:--wrap=_ZdlPvm"
 )
+
+add_triton_ut(
+  NAME TestTritonImplicitPermute
+  SRCS ImplicitPermuteTest.cpp
+  LIBS
+    ${offset_cache_test_libs}
+    TritonNVIDIAGPUToLLVM
+    BiShengIRAnnotationDialect
+    BiShengIRHACCDialect
+    BiShengIRHFusionDialect
+    BiShengIRHIVMDialect
+    BiShengIRMathExtDialect
+    BiShengIRMemRefExtDialect
+    BiShengIRScopeDialect
+    BiShengIRSymbolDialect
+    BiShengIRTensorDialect
+    MLIRParser
+)

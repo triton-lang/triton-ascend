@@ -165,6 +165,18 @@ class CompilerCostmodelContractTest(unittest.TestCase):
         expected = Path(__file__).resolve().parents[2] / "costmodel" / "profiles"
         self.assertEqual(cmplr._costmodel_profiles_dir(), expected)
 
+    def test_indirect_parameters_participate_in_asset_hash(self):
+        cmplr, _dump_mgr, _GPUTarget = self._load_compiler_module()
+        with tempfile.TemporaryDirectory() as temporary:
+            profile, coefficients = Path(temporary) / "profile.json", Path(temporary) / "fit.json"
+            profile.write_text('{"indirect_memory_profile": "fit.json"}')
+            coefficients.write_text('{"coefficient": 1}')
+            first = cmplr._auto_simt_asset_hash(str(profile), "unused")
+            coefficients.write_text('{"coefficient": 2}')
+            self.assertNotEqual(first, cmplr._auto_simt_asset_hash(str(profile), "unused"))
+            coefficients.unlink()
+            self.assertNotEqual(first, cmplr._auto_simt_asset_hash(str(profile), "unused"))
+
     def test_costmodel_profiles_find_native_package_assets(self):
         cmplr, _dump_mgr, _GPUTarget = self._load_compiler_module()
 

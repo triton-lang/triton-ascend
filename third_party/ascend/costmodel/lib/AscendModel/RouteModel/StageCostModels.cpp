@@ -1,6 +1,8 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
+#include "mlir/IR/BuiltinTypes.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -984,15 +986,24 @@ static void mapCompositeDotPaths(StageWorkload &work,
 
 static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
-            StageMode mode, int64_t superblockFactor, bool wholeSimt) {
+            StageMode mode, int64_t superblockFactor, bool wholeSimt,
+            StageMemoryCost fitted = {}) {
   StageResourceCycles resources;
   StageWorkload work = stage.workload;
   if (wholeSimt)
     mapCompositeDotPaths(work, profile, superblockFactor, resources);
   const bool simd = mode == StageMode::SIMD;
   resources.setup = work.paysKernelSetup ? profile.setupCycles : 0.0;
-  if (simd)
-    mapSimdIrregularTileCompletion(work, profile, resources);
+  if (simd) {
+    StageWorkload completionWork = work;
+    if (fitted.nativeSimdEnvelope)
+      llvm::erase_if(completionWork.memoryAccesses,
+                     [&](const StageMemoryAccess &a) {
+                       return a.addressDependsOnLoadedIndex &&
+                              a.store == bool(fitted.store);
+                     });
+    mapSimdIrregularTileCompletion(completionWork, profile, resources);
+  }
   if (work.scalarLoadCount > 0.0)
     resources.load +=
         simd ? mainScalarLoadCycles(work.scalarLoadCount, profile)
@@ -1199,7 +1210,11 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
         count * depth * profile.prefixScanStepLatencyCycles;
   }
   // Unclassified scalar operations have no execution-throughput evidence.
-  if (stage.features.hasIndirectMemory) {
+  // Mixed-axis classification does not replace #2528's resource pricing.
+  if (stage.features.hasIndirectMemory || fitted.load || fitted.store ||
+      stage.costModelKind == StageCostModelKind::PartialContinuousTileMemory ||
+      work.indirectLoadTransactions > 0.0 ||
+      work.indirectStoreTransactions > 0.0) {
     const double loads = work.loadWarpInstructions;
     const double stores = work.storeWarpInstructions;
     double curvedLoadBytes = 0.0;
@@ -1209,6 +1224,20 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
     double curvedStoreOperations = 0.0;
     double curvedStoreWarpInstructions = 0.0;
     double loadStartup = 0.0;
+    // Fits are target A/B increments, not whole-stage envelopes. Cover the
+    // target once and leave unrelated memory and helper resources untouched.
+    if (fitted.load) {
+      resources.load += *fitted.load;
+      curvedLoadBytes = work.indirectLoadBytes;
+      curvedLoadOperations = 1.0;
+      curvedLoadWarpInstructions = work.indirectLoadTransactions;
+    }
+    if (fitted.store) {
+      resources.store += *fitted.store;
+      curvedStoreBytes = work.indirectStoreBytes;
+      curvedStoreOperations = 1.0;
+      curvedStoreWarpInstructions = work.indirectStoreTransactions;
+    }
     std::map<std::tuple<int64_t, int64_t, int64_t>, double>
         coveredSegmentedLoadCounts;
     const auto factorLoad =
@@ -1261,6 +1290,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             ? factorStartup->second
             : profile.indirectLoadStartupSystemCyclesByWarpInstructions;
     for (const auto &[shape, count] : work.segmentedIndirectLoadCounts) {
+      if (fitted.load)
+        break;
       const int64_t bytes = std::get<0>(shape);
       const int64_t elements = std::get<1>(shape);
       const int64_t contiguousElements = std::get<2>(shape);
@@ -1292,6 +1323,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
       coveredSegmentedLoadCounts[shape] += count;
     }
     for (const auto &[shape, count] : work.indirectLoadCounts) {
+      if (fitted.load)
+        break;
       const int64_t bytes = shape.first;
       const int64_t elements = shape.second;
       const int64_t warpInstructions = llvm::divideCeil(elements, int64_t(32));
@@ -1330,7 +1363,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
         resources.indirectLoadGroupStartup = loadStartup;
     }
     // Loaded-index stores are indexed by distinct destination segments.
-    if (!profile.indirectStoreSystemCyclesBySegments.empty()) {
+    if (!fitted.store && !profile.indirectStoreSystemCyclesBySegments.empty()) {
       auto priceStore = [&](int64_t bytes, int64_t elements,
                             int64_t contiguousElements, double count) {
         if (bytes != elements * 4 || elements <= 0 || contiguousElements <= 0)
@@ -1381,6 +1414,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           uncoveredLoadOperations * profile.loadOperationSetupCycles +
           uncoveredLoadBytes / profile.loadBytesPerCycle;
       for (const auto &[shape, count] : work.segmentedIndirectLoadCounts) {
+        if (fitted.load)
+          break;
         const int64_t elements = std::get<1>(shape);
         const int64_t contiguousElements = std::get<2>(shape);
         const int64_t segments = llvm::divideCeil(elements, contiguousElements);
@@ -1911,6 +1946,27 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           count * instructions / profile.predicateOperationsPerCycle;
     }
   }
+  if (simd && fitted.coveredPredicate) {
+    auto tensor =
+        cast<RankedTensorType>(fitted.coveredPredicate->getResult(0).getType());
+    double instructions =
+        std::ceil(double(tensor.getNumElements()) / profile.vectorWidth);
+    if (fullyDescribed(segmented.logicalElements.lookup("predicate.cmp"),
+                       predicateElements)) {
+      for (const auto &entry : work.tensorOperationWorkloads)
+        if (entry.operation == "predicate.cmp" &&
+            entry.logicalElements == tensor.getNumElements()) {
+          instructions = entry.segmentCount *
+                         std::ceil(double(entry.contiguousElementsPerSegment *
+                                          entry.elementBitWidth) /
+                                   profile.vectorWidthBits);
+          break;
+        }
+    }
+    resources.predicate =
+        std::max(0.0, resources.predicate -
+                          instructions / profile.predicateOperationsPerCycle);
+  }
   const double simdReductionStartupOwners =
       std::min(1.0, std::max(0.0, work.reductionOperations));
   resources.reduction =
@@ -2343,6 +2399,7 @@ static double applySuperBlock(const LogicalStage &stage,
        stage.costModelKind == StageCostModelKind::ContinuousShortLoad ||
        stage.costModelKind == StageCostModelKind::CachePolicyStore ||
        stage.costModelKind == StageCostModelKind::IndirectScalarMemory ||
+       stage.costModelKind == StageCostModelKind::PartialContinuousTileMemory ||
        stage.costModelKind == StageCostModelKind::IndirectGatherMemory) &&
       (resources.continuousLoadGroup > 0.0 ||
        resources.continuousStoreGroup > 0.0 ||
@@ -2609,6 +2666,8 @@ llvm::StringRef mlir::ascend::stringifyStageCostModel(StageCostModelKind kind) {
     return "loop_predicate";
   case StageCostModelKind::ContinuousTileMemory:
     return "continuous_tile_memory";
+  case StageCostModelKind::PartialContinuousTileMemory:
+    return "partial_continuous_tile_memory";
   case StageCostModelKind::ContinuousTileStore:
     return "continuous_tile_store";
   case StageCostModelKind::ContinuousShortLoad:
@@ -3369,12 +3428,32 @@ bool StageModeProfile::isValid(StageMode mode) const {
 }
 
 bool HardwareProfile::isValid() const {
-  return !profileVersion.empty() && !target.empty() && baseSimtWarpCount > 0 &&
+  return baseSimtWarpCount > 0 &&
          (cvAivSubblocks == 1 || cvAivSubblocks == 2) &&
          maximumSimtEstimationFactor >= 1 &&
          maximumSimtEstimationFactor <= 64 &&
          (maximumSimtEstimationFactor & (maximumSimtEstimationFactor - 1)) ==
              0 &&
+         !profileVersion.empty() && !target.empty() &&
+         (simtIndirectLoadModel.empty() ||
+          ((simtIndirectLoadModel == "unmasked_complete_factor_20261020" ||
+            simtIndirectLoadModel == "prefix_mask_rank_factor_20261017" ||
+            simtIndirectLoadModel == "random_mask_rank_factor_20261017") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simdIndirectLoadModel.empty() ||
+          ((simdIndirectLoadModel == "random_dtype_matched_ab_20261008" ||
+            simdIndirectLoadModel == "simd_mask_envelope_20261019") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simtIndirectStoreModel.empty() ||
+          ((simtIndirectStoreModel == "unmasked_complete_factor_20261020" ||
+            simtIndirectStoreModel == "prefix_mask_rank_factor_20261017" ||
+            simtIndirectStoreModel == "random_mask_rank_factor_20261017") &&
+           target == "Ascend950PR/dav-c310")) &&
+         (simdIndirectStoreModel.empty() ||
+          ((simdIndirectStoreModel == "random_store_no_fill_first_20261008" ||
+            simdIndirectStoreModel == "random_store_no_fill_reuse_20261008" ||
+            simdIndirectStoreModel == "simd_mask_envelope_20261019") &&
+           target == "Ascend950PR/dav-c310")) &&
          logicalWarpGroupCount > 0 && superblockUsefulFactorLimit > 0 &&
          superblockPersistentStatePressureFreeFactor > 0 &&
          superblockPersistentStatePressureFreeFactor <=
@@ -3563,15 +3642,30 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
               stage.workload.dotFlops > 0.0);
       const LogicalStage executionStage =
           perAivStage(stage, implementation.aivSubblocks);
+      const StageMemoryCost fitted = IndirectGatherMemoryCostModel().cost(
+          executionStage, profile, implementation);
       std::optional<StageResourceCycles> resources = mapWorkload(
           executionStage, modeProfile, implementation.mode,
           implementation.superblockFactor,
-          implementation.mode == StageMode::SIMT && !implementation.localScope);
+          implementation.mode == StageMode::SIMT && !implementation.localScope,
+          fitted);
       if (!resources)
         continue;
       StageImplementationCost cost;
       cost.implementation = implementation;
       cost.resources = *resources;
+      if (fitted.load)
+        cost.indirectLoadPricing = implementation.mode == StageMode::SIMD
+                                       ? profile.simdIndirectLoadModel
+                                       : profile.simtIndirectLoadModel;
+      if (fitted.store)
+        cost.indirectStorePricing = implementation.mode == StageMode::SIMD
+                                        ? profile.simdIndirectStoreModel
+                                        : profile.simtIndirectStoreModel;
+      if (fitted.loadPricing)
+        cost.indirectLoadPricing = fitted.loadPricing;
+      if (fitted.storePricing)
+        cost.indirectStorePricing = fitted.storePricing;
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
       if (resources->recurrenceGroupCriticalPath > 0.0 ||
@@ -3606,6 +3700,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         cost.formulaEvidence = "uncalibrated_superblock_fallback";
       else
         cost.formulaEvidence = "analytical_resource_formula";
+      if (fitted.load || fitted.store)
+        cost.formulaEvidence = "matched_ab_indirect_memory_increment";
       if (resources->indirectMemoryAnalyticalFallback &&
           cost.formulaEvidence.find(
               "analytical_indirect_memory_resource_fallback") ==
@@ -3728,6 +3824,18 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           applySuperBlock(executionStage, *resources, implementation, profile,
                           estimateStage(executionStage, profile,
                                         implementation.mode, *resources));
+      if (fitted.nativeSimdEnvelope)
+        cost.formulaEvidence += "+native_simd_target_loop_completion";
+      if (fitted.densityRange) {
+        auto upper = *resources;
+        (fitted.store ? upper.store : upper.load) +=
+            fitted.densityRange->second - fitted.densityRange->first;
+        const double high = applySuperBlock(
+            executionStage, upper, implementation, profile,
+            estimateStage(executionStage, profile, implementation.mode, upper));
+        cost.totalCycles = (cost.totalCycles + high) / 2;
+        cost.formulaEvidence += "+stage_density_range_midpoint";
+      }
       if (implementation.aivSubblocks > 1) {
         cost.cvPartitionIdealTotalCycles = cost.totalCycles;
         cost.cvPartitionPayloadEfficiency =

@@ -1,5 +1,9 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
+  "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_store_model": "simd_mask_envelope_20261019",
+  "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_load_model": "simd_mask_envelope_20261019",
   "compatible_targets": [
     "Ascend950*",
     "Ascend910_95*",
@@ -7,7 +11,7 @@
   ],
   "description": "Stage Route Model hardware profile. Stage partitions and workloads are generated online from transformed TTIR; this file contains no workload-specific Stage template or route multiplier.",
   "microbenchmark_profile": "../microbench/ascend_davidv100_v1.json",
-  "profile_version": "david-v100-simd-simt-20260903-v20",
+  "profile_version": "david-v100-simd-simt-20261020-unmasked-complete-simd-mask",
   "schema_version": 12,
   "score_unit": "system_cycle_selection_score",
   "selection_calibration": {
@@ -474,5 +478,6 @@
     },
     "warp_size_measurement": "simt.warp_size"
   },
+  "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310"
 }

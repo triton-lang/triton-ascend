@@ -4196,6 +4196,37 @@
   },
   "description": "Target-specific hardware resource profile consumed by the online Stage Cost Model. Stage partitions and workloads are derived from transformed TTIR.",
   "properties": {
+    "simt_indirect_store_model": {
+      "enum": [
+        "unmasked_complete_factor_20261020",
+        "prefix_mask_rank_factor_20261017",
+        "random_mask_rank_factor_20261017"
+      ],
+      "description": "Optional Ascend950PR indirect memory model in SYS_CNT ticks. Final unmasked and masked models retain their measured-domain guards; unsupported inputs use upstream resource pricing. SIMD reuse requires explicit workload evidence. SIMT random mask requires its configured density prior."
+    },
+    "simd_indirect_store_model": {
+      "enum": [
+        "random_store_no_fill_first_20261008",
+        "random_store_no_fill_reuse_20261008",
+        "simd_mask_envelope_20261019"
+      ],
+      "description": "Optional Ascend950PR indirect memory model in SYS_CNT ticks. Final unmasked and masked models retain their measured-domain guards; unsupported inputs use upstream resource pricing. SIMD reuse requires explicit workload evidence. SIMT random mask requires its configured density prior."
+    },
+    "simt_indirect_load_model": {
+      "enum": [
+        "unmasked_complete_factor_20261020",
+        "prefix_mask_rank_factor_20261017",
+        "random_mask_rank_factor_20261017"
+      ],
+      "description": "Optional Ascend950PR indirect memory model in SYS_CNT ticks. Final unmasked and masked models retain their measured-domain guards; unsupported inputs use upstream resource pricing. SIMD reuse requires explicit workload evidence. SIMT random mask requires its configured density prior."
+    },
+    "simd_indirect_load_model": {
+      "enum": [
+        "random_dtype_matched_ab_20261008",
+        "simd_mask_envelope_20261019"
+      ],
+      "description": "Optional Ascend950PR indirect memory model in SYS_CNT ticks. Final unmasked and masked models retain their measured-domain guards; unsupported inputs use upstream resource pricing. SIMD reuse requires explicit workload evidence. SIMT random mask requires its configured density prior."
+    },
     "$schema": {
       "type": "string",
       "description": "Relative path to this JSON Schema; used by editors and offline validators, not by Route Model scoring."
@@ -4217,6 +4248,11 @@
     },
     "kernel_timing": {
       "$ref": "#/definitions/kernel_timing"
+    },
+    "indirect_memory_profile": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Relative path to validated indirect-memory model parameters."
     },
     "microbenchmark_profile": {
       "type": "string",

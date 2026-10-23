@@ -16,6 +16,7 @@
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,7 @@ enum class StageCostModelKind {
   PredicateMask,
   LoopPredicate,
   ContinuousTileMemory,
+  PartialContinuousTileMemory,
   ContinuousTileStore,
   ContinuousShortLoad,
   CachePolicyStore,
@@ -525,9 +527,23 @@ struct StageModeProfile {
   bool isValid(StageMode mode) const;
 };
 
+class IndirectMemoryParameters;
+
 struct HardwareProfile {
+  std::shared_ptr<const IndirectMemoryParameters> indirectMemoryParameters;
   std::string profileVersion;
   std::string target;
+  /// Explicit opt-in to a target-specific random-address, matched-ALU fit.
+  /// The dtype model selects by storage width, not integer/floating names;
+  /// the INT32-only identifier is retained for old-profile reproducibility.
+  /// Empty retains the legacy transaction model.
+  std::string simtIndirectLoadModel;
+  /// FP32 scalar-loop matched-address differential, random-address prior.
+  std::string simdIndirectLoadModel;
+  /// Random store A/B fits. Empty retains legacy transactions. Store state is
+  /// an explicit profile prior; reuse additionally requires workload evidence.
+  std::string simtIndirectStoreModel;
+  std::string simdIndirectStoreModel;
   /// Base warp count of one logical SIMT program.
   int64_t baseSimtWarpCount = 1;
   /// CV1:2 work partition, applied before local SuperBlock grouping. This is

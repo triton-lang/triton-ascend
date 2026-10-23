@@ -1,7 +1,12 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261013-v142-clean-toolchain-refresh",
+  "profile_version": "ascend-950pr-simd-simt-20261020-unmasked-complete-simd-mask",
+  "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_store_model": "simd_mask_envelope_20261019",
+  "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
+  "simd_indirect_load_model": "simd_mask_envelope_20261019",
+  "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310",
   "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction.",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",

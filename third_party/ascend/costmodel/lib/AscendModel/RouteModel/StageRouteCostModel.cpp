@@ -705,32 +705,83 @@ llvm::json::Object TensorOperationWorkload::toJSON() const {
       {"simd_lowering", "segmented_vector"}};
 }
 
+llvm::json::Object AddressAxisSummary::toJSON() const {
+  llvm::json::Object result;
+  result["extent"] = extent;
+  result["offset_axis_info"] = offsetAxisInfo;
+  result["regularity"] = regularity;
+  result["provenance"] = provenance;
+  result["known_stride_elements"] = knownStride
+                                        ? llvm::json::Value(*knownStride)
+                                        : llvm::json::Value(nullptr);
+  result["has_unknown_component"] = hasUnknownComponent;
+  result["alignment_bytes"] = alignmentBytes
+                                  ? llvm::json::Value(*alignmentBytes)
+                                  : llvm::json::Value(nullptr);
+  result["reason"] = reason;
+  return result;
+}
+
+llvm::json::Object AddressPatternSummary::toJSON() const {
+  llvm::json::Object result;
+  result["ttir_load_ordinal"] = ttirLoadOrdinal;
+  result["stage_id"] = stageId;
+  result["source_location"] = sourceLocation;
+  result["memory_op"] = memoryOp;
+  result["pattern_class"] = patternClass;
+  result["depends_on_loaded_value"] = dependsOnLoadedValue;
+  llvm::json::Array axisValues;
+  for (const AddressAxisSummary &axis : axes)
+    axisValues.push_back(axis.toJSON());
+  result["axes"] = std::move(axisValues);
+  return result;
+}
+
 bool StageWorkload::isFiniteAndNonNegative() const {
-  const std::array<double, 22> values = {scalarOperations,
-                                         loadBytes,
-                                         storeBytes,
-                                         loadOperations,
-                                         storeOperations,
-                                         loadWarpInstructions,
-                                         storeWarpInstructions,
-                                         sharedLocalLoadInstructions,
-                                         sharedLocalStoreInstructions,
-                                         privateStackLoadInstructions,
-                                         privateStackStoreInstructions,
-                                         reductionOperations,
-                                         shuffleLaneSteps,
-                                         dotOperations,
-                                         dotFlops,
-                                         issueElements,
-                                         loopBackedges,
-                                         conditionalBranches,
-                                         divergentBranches,
-                                         synchronizations,
-                                         scalarLoadCount,
-                                         scalarStoreCount};
-  if (!std::all_of(values.begin(), values.end(), [](double value) {
-        return std::isfinite(value) && value >= 0.0;
-      }))
+  const double values[] = {scalarOperations,
+                           loadBytes,
+                           storeBytes,
+                           loadOperations,
+                           storeOperations,
+                           loadWarpInstructions,
+                           storeWarpInstructions,
+                           indirectLoadBytes,
+                           indirectStoreBytes,
+                           indirectLoadTransactions,
+                           indirectStoreTransactions,
+                           partialContinuousLoadRows,
+                           partialContinuousStoreRows,
+                           partialContinuousLoadBytes,
+                           partialContinuousStoreBytes,
+                           partialContinuousLoadWarpInstructions,
+                           partialContinuousStoreWarpInstructions,
+                           sharedLocalLoadInstructions,
+                           sharedLocalStoreInstructions,
+                           privateStackLoadInstructions,
+                           privateStackStoreInstructions,
+                           reductionOperations,
+                           shuffleLaneSteps,
+                           dotOperations,
+                           dotFlops,
+                           issueElements,
+                           loopBackedges,
+                           conditionalBranches,
+                           divergentBranches,
+                           synchronizations,
+                           scalarLoadCount,
+                           scalarStoreCount};
+  if (!std::all_of(
+          std::begin(values), std::end(values),
+          [](double value) { return std::isfinite(value) && value >= 0.0; }) ||
+      indirectLoadBytes > loadBytes || indirectStoreBytes > storeBytes ||
+      indirectLoadTransactions > loadWarpInstructions ||
+      indirectStoreTransactions > storeWarpInstructions ||
+      partialContinuousLoadBytes > loadBytes - indirectLoadBytes ||
+      partialContinuousStoreBytes > storeBytes - indirectStoreBytes ||
+      partialContinuousLoadWarpInstructions >
+          loadWarpInstructions - indirectLoadTransactions ||
+      partialContinuousStoreWarpInstructions >
+          storeWarpInstructions - indirectStoreTransactions)
     return false;
   auto validCounts = [](const auto &counts) {
     return llvm::all_of(counts, [](const auto &shapeCount) {
@@ -883,6 +934,10 @@ static llvm::json::Array reductionShapesToJSON(
 
 llvm::json::Object StageWorkload::toJSON() const {
   llvm::json::Object result;
+  llvm::json::Array addressValues;
+  for (const AddressPatternSummary &pattern : addressPatterns)
+    addressValues.push_back(pattern.toJSON());
+  result["address_patterns"] = std::move(addressValues);
   llvm::json::Object operations;
   llvm::json::Object instances;
   for (const auto &[name, counts] : operationCounts) {
@@ -907,6 +962,30 @@ llvm::json::Object StageWorkload::toJSON() const {
   result["store_operations_per_iteration"] = storeOperations;
   result["load_warp_instructions_per_iteration"] = loadWarpInstructions;
   result["store_warp_instructions_per_iteration"] = storeWarpInstructions;
+  result["direct_load_bytes_per_iteration"] = loadBytes - indirectLoadBytes;
+  result["direct_store_bytes_per_iteration"] = storeBytes - indirectStoreBytes;
+  result["direct_load_warp_instructions_per_iteration"] =
+      loadWarpInstructions - indirectLoadTransactions;
+  result["direct_store_warp_instructions_per_iteration"] =
+      storeWarpInstructions - indirectStoreTransactions;
+  result["indirect_load_bytes_per_iteration"] = indirectLoadBytes;
+  result["indirect_store_bytes_per_iteration"] = indirectStoreBytes;
+  result["has_proven_indirect_store_reuse"] = hasProvenIndirectStoreReuse;
+  result["indirect_load_transactions_per_iteration"] = indirectLoadTransactions;
+  result["indirect_store_transactions_per_iteration"] =
+      indirectStoreTransactions;
+  result["partial_continuous_load_rows_per_iteration"] =
+      partialContinuousLoadRows;
+  result["partial_continuous_store_rows_per_iteration"] =
+      partialContinuousStoreRows;
+  result["partial_continuous_load_bytes_per_iteration"] =
+      partialContinuousLoadBytes;
+  result["partial_continuous_store_bytes_per_iteration"] =
+      partialContinuousStoreBytes;
+  result["partial_continuous_load_warp_instructions_per_iteration"] =
+      partialContinuousLoadWarpInstructions;
+  result["partial_continuous_store_warp_instructions_per_iteration"] =
+      partialContinuousStoreWarpInstructions;
   result["shared_local_load_instructions_per_iteration"] =
       sharedLocalLoadInstructions;
   result["shared_local_store_instructions_per_iteration"] =
@@ -1010,6 +1089,7 @@ llvm::json::Object StageModelFeatures::toJSON() const {
   result["has_pointer_induction"] = hasPointerInduction;
   result["has_contiguous_memory"] = hasContiguousMemory;
   result["has_indirect_memory"] = hasIndirectMemory;
+  result["has_partial_continuous_memory"] = hasPartialContinuousMemory;
   result["has_atomic_memory"] = hasAtomicMemory;
   result["has_reduction"] = hasReduction;
   result["has_prefix_scan"] = hasPrefixScan;
@@ -1160,6 +1240,8 @@ bool StageImplementationCost::isValid() const {
 llvm::json::Object StageImplementationCost::toJSON() const {
   llvm::json::Object result{
       {"implementation", implementation.toJSON()},
+      {"indirect_load_pricing", indirectLoadPricing},
+      {"indirect_store_pricing", indirectStorePricing},
       {"total_system_cycles", totalCycles},
       {"local_scope_completion_inclusive", localScopeCompletionInclusive},
       {"formula_evidence", formulaEvidence},
@@ -1179,6 +1261,8 @@ llvm::json::Object StageImplementationCost::toJSON() const {
 llvm::json::Object StageImplementationCost::toCompactJSON() const {
   llvm::json::Object result{
       {"implementation", implementation.toJSON()},
+      {"indirect_load_pricing", indirectLoadPricing},
+      {"indirect_store_pricing", indirectStorePricing},
       {"total_system_cycles", totalCycles},
       {"formula_evidence", formulaEvidence},
       {"resource_system_cycles", resources.toCompactJSON()}};
@@ -3476,6 +3560,11 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   };
   const bool hasUnlowerableSimdMaskedLoadedIndexVector =
       llvm::any_of(costTable.stages, [](const LogicalStageCost &stage) {
+        // All-D GM stages support masked scalar-loop SIMD lowering. Keep the
+        // historical row-coalescing protection for other stage kinds: model
+        // applicability (and density knowledge) is not backend legality.
+        if (stage.model == "indirect_gather_memory")
+          return false;
         return llvm::any_of(
             stage.workload.memoryAccesses, [](const StageMemoryAccess &access) {
               if (!access.addressDependsOnLoadedIndex || !access.masked ||

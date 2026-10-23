@@ -2679,6 +2679,36 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       simdProfile.dotFlopsPerCycle = resolveNumberOrMeasurement(
           *dot, "flops_per_system_cycle", "throughput_measurement",
           "flop/system_cycle", microbench, reader, "simd.dot");
+      if (dot->get("by_input_domain")) {
+        const auto *domains = dot->getObject("by_input_domain");
+        if (!domains) {
+          reader.setError("simd.dot.by_input_domain must be an object");
+        } else {
+          for (const auto &[name, value] : *domains) {
+            const auto *entry = value.getAsObject();
+            if (!entry) {
+              reader.setError("simd.dot.by_input_domain." + name.str() +
+                              " must be an object");
+              break;
+            }
+            const std::string path = "simd.dot.by_input_domain." + name.str();
+            DotInputDomainRate rate;
+            rate.setupCycles = resolveNumberOrMeasurement(
+                *entry, "startup_system_cycles", "startup_measurement",
+                "system_cycle", microbench, reader, path);
+            rate.flopsPerCycle = resolveNumberOrMeasurement(
+                *entry, "flops_per_system_cycle", "throughput_measurement",
+                "flop/system_cycle", microbench, reader, path);
+            if (entry->get("dependency_system_cycles_per_dot"))
+              rate.dependencyCyclesPerDot = reader.number(
+                  *entry, "dependency_system_cycles_per_dot", path);
+            if (entry->get("dependency_fill_system_cycles"))
+              rate.dependencyFillCycles =
+                  reader.number(*entry, "dependency_fill_system_cycles", path);
+            simdProfile.dotByInputDomain[name.str()] = rate;
+          }
+        }
+      }
     }
     readStageResources(reader, *simd, "simd", microbench, simdProfile);
     const auto predicate = simdProfile.operationRates.lookup("predicate.cmp");

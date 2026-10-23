@@ -775,6 +775,21 @@ bool StageWorkload::isFiniteAndNonNegative() const {
         return !entry.first.empty() && entry.second.first > 0 &&
                std::isfinite(entry.second.second) && entry.second.second >= 0.0;
       });
+  const bool validDotDomains =
+      llvm::all_of(dotInputDomainWork, [](const auto &entry) {
+        const llvm::StringRef domain(entry.first);
+        return (domain == "f16" || domain == "bf16" || domain == "f32.ieee" ||
+                domain == "f32.hf32") &&
+               std::isfinite(entry.second.first) && entry.second.first >= 0.0 &&
+               std::isfinite(entry.second.second) && entry.second.second >= 0.0;
+      });
+  const bool validDotChainDepths =
+      llvm::all_of(dotDirectCChainDepthByInputDomain, [](const auto &entry) {
+        const llvm::StringRef domain(entry.first);
+        return (domain == "f16" || domain == "bf16" || domain == "f32.ieee" ||
+                domain == "f32.hf32") &&
+               entry.second > 0;
+      });
   const bool validTensorOperations = llvm::all_of(
       tensorOperationWorkloads, [](const TensorOperationWorkload &tensor) {
         return tensor.isFiniteAndNonNegative();
@@ -783,10 +798,10 @@ bool StageWorkload::isFiniteAndNonNegative() const {
       llvm::all_of(atomicWorkloads, [](const AtomicWorkload &atomic) {
         return atomic.isFiniteAndNonNegative();
       });
-  return validAccesses && validDotPaths && validTensorOperations &&
-         validAtomicWorkloads && validCounts(predicateCounts) &&
-         validCounts(dotFlopCounts) && validPrefixScans &&
-         validMemoryCounts(indirectLoadCounts) &&
+  return validAccesses && validDotPaths && validDotDomains &&
+         validDotChainDepths && validTensorOperations && validAtomicWorkloads &&
+         validCounts(predicateCounts) && validCounts(dotFlopCounts) &&
+         validPrefixScans && validMemoryCounts(indirectLoadCounts) &&
          validSegmentedIndirect(segmentedIndirectLoadCounts) &&
          validMemoryCounts(indirectStoreCounts) &&
          validSegmentedIndirect(segmentedIndirectStoreCounts) &&
@@ -979,6 +994,20 @@ llvm::json::Object StageWorkload::toJSON() const {
   result["one_trip_masked_accumulator_reductions_per_iteration"] =
       std::move(maskedAccumulatorReductions);
   result["dot_operations_per_iteration"] = dotOperations;
+  llvm::json::Array dotDomains;
+  for (const auto &[domain, entry] : dotInputDomainWork)
+    dotDomains.push_back(
+        llvm::json::Object{{"input_domain", domain},
+                           {"matrix_instances_per_iteration", entry.first},
+                           {"flops_per_iteration", entry.second}});
+  result["dot_input_domains_per_iteration"] = std::move(dotDomains);
+  result["dot_has_mixed_direct_c_chain"] = dotHasMixedDirectCChain;
+  llvm::json::Array dotChainDepths;
+  for (const auto &[domain, depth] : dotDirectCChainDepthByInputDomain)
+    dotChainDepths.push_back(llvm::json::Object{
+        {"input_domain", domain}, {"direct_c_chain_depth", depth}});
+  result["dot_direct_c_chain_depth_by_input_domain"] =
+      std::move(dotChainDepths);
   llvm::json::Array dotInstances;
   for (const auto &[flops, count] : dotFlopCounts)
     dotInstances.push_back(llvm::json::Object{{"flops_per_matrix", flops},
@@ -1030,7 +1059,7 @@ llvm::json::Object StageModelFeatures::toJSON() const {
   return result;
 }
 
-std::array<std::pair<llvm::StringRef, double>, 51>
+std::array<std::pair<llvm::StringRef, double>, 52>
 StageResourceCycles::keyedValues() const {
   return {
       {{"setup", setup},
@@ -1069,6 +1098,8 @@ StageResourceCycles::keyedValues() const {
        {"shuffle_per_iteration", shuffle},
        {"scan_shuffle_per_iteration", scanShuffle},
        {"dot_per_iteration", dot},
+       {"dot_dependency_critical_path_per_iteration",
+        dotDependencyCriticalPath},
        {"dot_operand_group_included_in_dot", dotOperandGroup},
        {"dot_input_loads_owned_by_composite", dotInputLoadsCovered},
        {"loop_control_per_iteration", loopControl},

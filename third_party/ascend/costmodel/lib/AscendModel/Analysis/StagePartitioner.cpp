@@ -384,6 +384,28 @@ static void accumulateTensorOperationWorkload(
 
 static std::optional<std::string> describeDotOperandPath(Operation *operation);
 
+static std::optional<std::string> getDotInputDomain(Operation *operation) {
+  auto dot = dyn_cast<triton::DotOp>(operation);
+  if (!dot)
+    return std::nullopt;
+  auto lhs = dyn_cast<ShapedType>(dot.getA().getType());
+  auto rhs = dyn_cast<ShapedType>(dot.getB().getType());
+  if (!lhs || !rhs || lhs.getElementType() != rhs.getElementType())
+    return std::nullopt;
+  Type elementType = lhs.getElementType();
+  if (elementType.isF16())
+    return "f16";
+  if (elementType.isBF16())
+    return "bf16";
+  if (!elementType.isF32())
+    return std::nullopt;
+  const llvm::StringRef precision =
+      triton::stringifyInputPrecision(dot.getInputPrecision());
+  if (precision == "ieee" || precision == "hf32")
+    return std::string("f32.") + precision.str();
+  return std::nullopt;
+}
+
 static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
   if (operation->getNumOperands() < 2)
     return;
@@ -425,6 +447,11 @@ static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
     work.dotOperations += batch;
     work.dotFlopCounts[flopsPerMatrix] += batch;
     work.dotFlops += static_cast<double>(flopsPerMatrix) * batch;
+    if (auto domain = getDotInputDomain(operation)) {
+      auto &domainWork = work.dotInputDomainWork[*domain];
+      domainWork.first += batch;
+      domainWork.second += static_cast<double>(flopsPerMatrix) * batch;
+    }
     if (auto path = describeDotOperandPath(operation)) {
       auto &entry = work.dotOperandPaths[*path];
       entry.first = flopsPerMatrix;
@@ -1218,6 +1245,10 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   scaleCounts(work.sortCounts, scale);
   scaleCounts(work.oneTripMaskedAccumulatorReductionExtents, scale);
   scaleCounts(work.dotFlopCounts, scale);
+  for (auto &[domain, entry] : work.dotInputDomainWork) {
+    entry.first *= scale;
+    entry.second *= scale;
+  }
   for (auto &[key, entry] : work.dotOperandPaths)
     entry.second *= scale;
   for (auto &entry : work.operationCounts)
@@ -2002,6 +2033,57 @@ static void accumulateDynamicOperationTree(
             logicalProgramCountHint, childMappedTensor);
 }
 
+static void collectOwnedDots(Operation *operation,
+                             llvm::SmallPtrSetImpl<Operation *> &dots) {
+  if (isa<triton::DotOp>(operation))
+    dots.insert(operation);
+  // Match workload traversal: these bodies belong to other semantic roots.
+  if (operation->hasAttr("ta.auto_blockify_v1.loop") ||
+      shouldSplitLoopBodyIntoStages(operation))
+    return;
+  for (Region &region : operation->getRegions())
+    for (Block &block : region)
+      for (Operation &nested : block.getOperations())
+        collectOwnedDots(&nested, dots);
+}
+
+static int64_t
+directDotCChainDepth(triton::DotOp dot, const std::string &domain,
+                     const llvm::SmallPtrSetImpl<Operation *> &ownedDots,
+                     std::map<Operation *, int64_t> &depths) {
+  auto [position, inserted] = depths.try_emplace(dot.getOperation(), 1);
+  if (!inserted)
+    return position->second;
+  auto parent = dot.getC().getDefiningOp<triton::DotOp>();
+  if (parent && parent->getBlock() == dot->getBlock() &&
+      ownedDots.contains(parent.getOperation()) &&
+      getDotInputDomain(parent.getOperation()) == domain)
+    position->second += directDotCChainDepth(parent, domain, ownedDots, depths);
+  return position->second;
+}
+
+static void accumulateDirectDotCChainDepth(const LogicalStage &stage,
+                                           StageWorkload &work) {
+  llvm::SmallPtrSet<Operation *, 32> ownedDots;
+  for (Operation *root : stage.operations)
+    collectOwnedDots(root, ownedDots);
+  std::map<Operation *, int64_t> depths;
+  for (Operation *operation : ownedDots) {
+    auto dot = cast<triton::DotOp>(operation);
+    auto parent = dot.getC().getDefiningOp<triton::DotOp>();
+    auto domain = getDotInputDomain(operation);
+    if (parent && parent->getBlock() == dot->getBlock() &&
+        ownedDots.contains(parent.getOperation()) &&
+        getDotInputDomain(parent.getOperation()) != domain)
+      work.dotHasMixedDirectCChain = true;
+    if (!domain)
+      continue;
+    int64_t &maximum = work.dotDirectCChainDepthByInputDomain[*domain];
+    maximum = std::max(maximum,
+                       directDotCChainDepth(dot, *domain, ownedDots, depths));
+  }
+}
+
 static int64_t countAlgorithmLoops(const LogicalStage &stage) {
   int64_t count = 0;
   for (Operation *root : stage.operations) {
@@ -2063,6 +2145,15 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   mergeCounts(into.oneTripMaskedAccumulatorReductionExtents,
               from.oneTripMaskedAccumulatorReductionExtents);
   mergeCounts(into.dotFlopCounts, from.dotFlopCounts);
+  for (const auto &[domain, entry] : from.dotInputDomainWork) {
+    auto &combined = into.dotInputDomainWork[domain];
+    combined.first += entry.first;
+    combined.second += entry.second;
+  }
+  for (const auto &[domain, depth] : from.dotDirectCChainDepthByInputDomain)
+    into.dotDirectCChainDepthByInputDomain[domain] =
+        std::max(into.dotDirectCChainDepthByInputDomain[domain], depth);
+  into.dotHasMixedDirectCChain |= from.dotHasMixedDirectCChain;
   for (const auto &[key, entry] : from.dotOperandPaths) {
     into.dotOperandPaths[key].first = entry.first;
     into.dotOperandPaths[key].second += entry.second;
@@ -3280,6 +3371,7 @@ StageWorkloadAnalysis::analyze(StagePartition &partition,
       accumulateDynamicOperationTree(
           root, work, semanticRootEntryMultiplicity(root),
           fallbackLoopTripCount, stage.features, logicalProgramCountHint);
+    accumulateDirectDotCChainDepth(stage, work);
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);

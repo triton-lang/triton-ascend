@@ -330,6 +330,16 @@ struct StageWorkload {
       oneTripMaskedAccumulatorReductionExtents;
   /// Dynamic dot matrix instances per Stage iteration (including batch).
   double dotOperations = 0.0;
+  /// TTIR tt.dot input domain -> (matrix instances, FLOPs) per Stage iteration.
+  /// Recognized domains are f16, bf16, f32.ieee, and f32.hf32. Unrecognized
+  /// dots remain in the aggregate dotOperations/dotFlops fields.
+  std::map<std::string, std::pair<double, double>> dotInputDomainWork;
+  /// Mixed-domain direct-C chains retain the generic dot model until a
+  /// weighted heterogeneous dependency path is calibrated.
+  bool dotHasMixedDirectCChain = false;
+  /// Longest direct tt.dot C-operand chain within this Stage, by input domain.
+  /// This is structural depth, not a dynamic occurrence count.
+  std::map<std::string, int64_t> dotDirectCChainDepthByInputDomain;
   /// Per-matrix FLOP shape -> dynamic matrix instances.
   std::map<int64_t, double> dotFlopCounts;
   /// TTIR operand provenance/layout key -> (FLOPs per dot, occurrences).
@@ -402,6 +412,8 @@ struct StageResourceCycles {
   /// Portion of shuffle attributed to tt.scan dependency levels.
   double scanShuffle = 0.0;
   double dot = 0.0;
+  /// Alternative SIMD direct-C dependency bound; never summed with dot.
+  double dotDependencyCriticalPath = 0.0;
   /// Diagnostic attribution only: already included in dot, not additive.
   double dotOperandGroup = 0.0;
   double dotInputLoadsCovered = 0.0;
@@ -449,7 +461,7 @@ struct StageResourceCycles {
   double criticalPath = 0.0;
   bool indirectMemoryAnalyticalFallback = false;
 
-  std::array<std::pair<llvm::StringRef, double>, 51> keyedValues() const;
+  std::array<std::pair<llvm::StringRef, double>, 52> keyedValues() const;
   bool isFiniteAndNonNegative() const;
   llvm::json::Object toJSON() const;
   /// Preserve every non-zero resource while omitting default-valued

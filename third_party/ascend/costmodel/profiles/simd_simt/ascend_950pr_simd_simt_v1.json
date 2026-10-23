@@ -1,7 +1,7 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261013-v142-clean-toolchain-refresh",
+  "profile_version": "ascend-950pr-simd-simt-20261019-v143-simd-dot-candidate",
   "target": "Ascend950PR/dav-c310",
   "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction.",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
@@ -269,6 +269,34 @@
       "startup_measurement": "simd.dot.tiny.dependent.startup",
       "flops_per_system_cycle": 568.16419,
       "throughput_measurement": "simd.dot.tiny.dependent.throughput",
+      "by_input_domain": {
+        "f16": {
+          "startup_system_cycles": 28.009524,
+          "flops_per_system_cycle": 1430.798021,
+          "dependency_system_cycles_per_dot": 65.4675,
+          "dependency_fill_system_cycles": 136.073333,
+          "source": "950PR device1 independent static-resident count2/4 fits at 16^3 and 32^3; direct-C long chain count8/12/16; nine untouched depths3/6/10 across three domains. Candidate pending geometry validation."
+        },
+        "bf16": {
+          "startup_system_cycles": 45.216667,
+          "flops_per_system_cycle": 2516.743472,
+          "dependency_system_cycles_per_dot": 68.003333,
+          "dependency_fill_system_cycles": 128.176667,
+          "source": "950PR device1 BF16 lowering uses IEEE MMAD; independent static-resident count2/4 fits and direct-C count8/12/16 chain. Candidate pending geometry validation."
+        },
+        "f32.ieee": {
+          "startup_system_cycles": 78.462619,
+          "flops_per_system_cycle": 691.94755,
+          "source": "950PR device1 FP32 IEEE independent static-resident count2/4 fit; long-chain count8/12/16 follows throughput arm. Candidate pending geometry validation."
+        },
+        "f32.hf32": {
+          "startup_system_cycles": 52.280952,
+          "flops_per_system_cycle": 2491.953357,
+          "dependency_system_cycles_per_dot": 66.675833,
+          "dependency_fill_system_cycles": 50.283333,
+          "source": "950PR device1 FP32 HF32 independent static-resident count2/4 fit and direct-C count8/12/16 chain. Candidate pending geometry validation."
+        }
+      },
       "source": "Ascend950PR dependent N=16/N=32 dot-chain joint fit with one final store",
       "confidence": "medium"
     },

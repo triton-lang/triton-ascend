@@ -262,6 +262,36 @@
       },
       "additionalProperties": false
     },
+    "dot_input_domain_rate": {
+      "type": "object",
+      "description": "SIMD MMAD issue service and optional direct-accumulator critical path for one TTIR input domain.",
+      "required": [
+        "startup_system_cycles",
+        "flops_per_system_cycle"
+      ],
+      "properties": {
+        "startup_system_cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "flops_per_system_cycle": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "dependency_system_cycles_per_dot": {
+          "type": "number",
+          "minimum": 0
+        },
+        "dependency_fill_system_cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
     "dot_model": {
       "type": "object",
       "description": "Fixed setup plus throughput model for dot work.",
@@ -286,6 +316,24 @@
           "type": "number",
           "exclusiveMinimum": 0,
           "description": "Modeled dot arithmetic rate in FLOP per SYS_CNT cycle."
+        },
+        "by_input_domain": {
+          "type": "object",
+          "properties": {
+            "f16": {
+              "$ref": "#/definitions/dot_input_domain_rate"
+            },
+            "bf16": {
+              "$ref": "#/definitions/dot_input_domain_rate"
+            },
+            "f32.ieee": {
+              "$ref": "#/definitions/dot_input_domain_rate"
+            },
+            "f32.hf32": {
+              "$ref": "#/definitions/dot_input_domain_rate"
+            }
+          },
+          "additionalProperties": false
         },
         "flops_per_system_cycle_by_active_warp_count": {
           "type": "object",

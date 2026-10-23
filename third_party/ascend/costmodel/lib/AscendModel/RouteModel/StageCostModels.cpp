@@ -2099,8 +2099,60 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
   }
   if (work.dotFlops > 0.0) {
     // A Stage can own multiple tiny dots.
-    resources.dot = work.dotOperations * profile.dotSetupCycles +
-                    work.dotFlops / profile.dotFlopsPerCycle;
+    double genericOperations = work.dotOperations;
+    double genericFlops = work.dotFlops;
+    const auto usesCalibratedDotDomain = [&](const std::string &domain,
+                                             double operations) {
+      if (domain != "f32.ieee" && domain != "f32.hf32")
+        return true;
+      // The independent f32 probes reuse two direct GM operands. Computed
+      // operands have different staging and keep the established generic rate.
+      double described = 0.0;
+      double directGM = 0.0;
+      for (const auto &[path, entry] : work.dotOperandPaths) {
+        const llvm::StringRef key(path);
+        if (!key.starts_with("f32:"))
+          continue;
+        described += entry.second;
+        if (key.contains(":lhs=gm{") && key.contains(":rhs=gm{"))
+          directGM += entry.second;
+      }
+      const double tolerance = 1e-9 * std::max(1.0, operations);
+      return std::abs(described - operations) <= tolerance &&
+             std::abs(directGM - operations) <= tolerance;
+    };
+    if (simd && !work.dotHasMixedDirectCChain) {
+      for (const auto &[domain, domainWork] : work.dotInputDomainWork) {
+        auto rate = profile.dotByInputDomain.find(domain);
+        if (rate == profile.dotByInputDomain.end() ||
+            !usesCalibratedDotDomain(domain, domainWork.first))
+          continue;
+        resources.dot += domainWork.first * rate->second.setupCycles +
+                         domainWork.second / rate->second.flopsPerCycle;
+        genericOperations -= domainWork.first;
+        genericFlops -= domainWork.second;
+      }
+    }
+    resources.dot += std::max(0.0, genericOperations) * profile.dotSetupCycles +
+                     std::max(0.0, genericFlops) / profile.dotFlopsPerCycle;
+    if (simd && !work.dotHasMixedDirectCChain &&
+        (stage.costModelKind == StageCostModelKind::CubeRoofline ||
+         stage.costModelKind == StageCostModelKind::TinyCubeRoofline)) {
+      for (const auto &[domain, depth] :
+           work.dotDirectCChainDepthByInputDomain) {
+        auto rate = profile.dotByInputDomain.find(domain);
+        auto domainWork = work.dotInputDomainWork.find(domain);
+        if (rate == profile.dotByInputDomain.end() ||
+            domainWork == work.dotInputDomainWork.end() ||
+            rate->second.dependencyCyclesPerDot <= 0.0 ||
+            !usesCalibratedDotDomain(domain, domainWork->second.first))
+          continue;
+        resources.dotDependencyCriticalPath =
+            std::max(resources.dotDependencyCriticalPath,
+                     std::max(0.0, depth * rate->second.dependencyCyclesPerDot -
+                                       rate->second.dependencyFillCycles));
+      }
+    }
     if (stage.features.isGridStrideLoopShell ||
         stage.features.insideGridStrideLoopBody) {
       const auto factorBody =
@@ -2194,6 +2246,8 @@ static LogicalStage perAivStage(const LogicalStage &logical, int64_t parts) {
   work.reductionOperations /= parts;
   work.shuffleLaneSteps /= parts;
   work.dotFlops /= parts;
+  for (auto &[domain, domainWork] : work.dotInputDomainWork)
+    domainWork.second /= parts;
   work.sharedLocalLoadInstructions /= parts;
   work.sharedLocalStoreInstructions /= parts;
   work.privateStackLoadInstructions /= parts;
@@ -2501,14 +2555,22 @@ static double estimateStageBase(const LogicalStage &stage,
     return r.setup + count * std::max(execution, r.issue);
   }
   case StageCostModelKind::CubeRoofline:
-  case StageCostModelKind::TinyCubeRoofline:
-    if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
-      return r.setup +
-             count *
-                 std::max(r.scalar + r.predicate + r.reduction + r.shuffle +
-                              std::max({r.load, r.compute + r.dot, r.store}),
-                          r.issue);
+  case StageCostModelKind::TinyCubeRoofline: {
+    if (mode == StageMode::SIMD) {
+      const double dotService = std::max(r.dot, r.dotDependencyCriticalPath);
+      if (permitsSimdOverlap(stage))
+        return r.setup +
+               count *
+                   std::max(
+                       r.scalar + r.predicate + r.reduction + r.shuffle +
+                           std::max({r.load, r.compute + dotService, r.store}),
+                       r.issue);
+      StageResourceCycles serialResources = r;
+      serialResources.dot = dotService;
+      return r.setup + count * serialBody(serialResources);
+    }
     return serial;
+  }
   case StageCostModelKind::ConversionPack:
     if (mode == StageMode::SIMD && permitsSimdOverlap(stage))
       return r.setup +
@@ -3271,6 +3333,21 @@ bool StageModeProfile::isValid(StageMode mode) const {
       validPositiveKeyTree(indirectStoreSystemCyclesBySegments, positiveLeaf);
   const bool validDotWarpCurve =
       validPositiveKeyTree(dotFlopsPerCycleByWarpCount, positiveLeaf);
+  const bool validDotInputDomains =
+      llvm::all_of(dotByInputDomain, [&](const auto &entry) {
+        const llvm::StringRef domain(entry.first);
+        return (domain == "f16" || domain == "bf16" || domain == "f32.ieee" ||
+                domain == "f32.hf32") &&
+               std::isfinite(entry.second.setupCycles) &&
+               entry.second.setupCycles >= 0.0 &&
+               positiveLeaf(entry.second.flopsPerCycle) &&
+               std::isfinite(entry.second.dependencyCyclesPerDot) &&
+               entry.second.dependencyCyclesPerDot >= 0.0 &&
+               std::isfinite(entry.second.dependencyFillCycles) &&
+               entry.second.dependencyFillCycles >= 0.0 &&
+               (entry.second.dependencyCyclesPerDot > 0.0 ||
+                entry.second.dependencyFillCycles == 0.0);
+      });
   const bool validIndirectStartupCurve = validPositiveKeyTree(
       indirectLoadStartupSystemCyclesByWarpInstructions,
       [](double value) { return std::isfinite(value) && value >= 0.0; });
@@ -3308,9 +3385,10 @@ bool StageModeProfile::isValid(StageMode mode) const {
                   return entry.first > 0 && std::isfinite(entry.second) &&
                          entry.second > 0.0;
                 });
-  return validDotWarpCurve && validIndirectCurve && validIndirectElementCurve &&
-         validIndirectStoreCurve && validIndirectStartupCurve &&
-         validStoreService && validGridStrideCompositionResidual &&
+  return validDotWarpCurve && validDotInputDomains && validIndirectCurve &&
+         validIndirectElementCurve && validIndirectStoreCurve &&
+         validIndirectStartupCurve && validStoreService &&
+         validGridStrideCompositionResidual &&
          validSingleResultRowReductionRecurrenceCompletion &&
          validFactorSurfaces(
              twoPassRowwiseCompletionResidualByFactorExtentAndProgramsPerSlot) &&

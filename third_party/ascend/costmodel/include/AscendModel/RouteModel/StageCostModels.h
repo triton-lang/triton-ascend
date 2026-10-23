@@ -238,6 +238,14 @@ struct StageAtomicRate {
   bool isValid() const;
 };
 
+struct DotInputDomainRate {
+  double setupCycles = 0.0;
+  double flopsPerCycle = 0.0;
+  /// Effective critical path of a direct accumulator-feedback MMAD chain.
+  double dependencyCyclesPerDot = 0.0;
+  double dependencyFillCycles = 0.0;
+};
+
 struct StageModeProfile {
   /// Resolved by the evaluator; not an independently editable profile knob.
   int64_t activeWarpCount = 0;
@@ -428,6 +436,9 @@ struct StageModeProfile {
   double prefixScanDependencyFactor = 1.0;
   double dotSetupCycles = 0.0;
   double dotFlopsPerCycle = 0.0;
+  /// Optional SIMD MMAD service rates keyed by TTIR operand dtype/precision.
+  /// Missing keys retain the generic dotSetupCycles/dotFlopsPerCycle fallback.
+  std::map<std::string, DotInputDomainRate> dotByInputDomain;
   /// Aggregate dependent-dot throughput selected by the physical active-warp
   /// count.
   std::map<int64_t, double> dotFlopsPerCycleByWarpCount;

@@ -24,14 +24,15 @@ from .autotuner import get_max_configs, max_autotune
 
 
 def _patch_autotune():
-    try:
-        import triton
-    except ImportError:
-        return
+    import triton
+    import triton.runtime as runtime
+    import triton.runtime.autotuner as autotuner_module
 
     from .autotuner import autotune
 
     triton.autotune = autotune
+    runtime.autotune = autotune
+    autotuner_module.autotune = autotune
 
 
 def _patch_config_init():
@@ -44,6 +45,9 @@ def _patch_config_init():
     would be lost (or crash) on a disk-cache round-trip. This patch restores it.
     """
     from triton.runtime.autotuner import Config
+
+    if getattr(Config.__init__, "_ascend_config_patch_applied", False):
+        return
 
     _original_config_init = Config.__init__
     _default_num_stages = object()
@@ -62,6 +66,7 @@ def _patch_config_init():
         if "ubtune_cfg" in extra:
             setattr(self, "ubtune_cfg", extra["ubtune_cfg"])
 
+    _patched_config_init._ascend_config_patch_applied = True
     Config.__init__ = _patched_config_init
 
 
@@ -75,18 +80,32 @@ def _patch_cache_invalidating_env_vars():
     """
     import triton.runtime.autotuner as _autotuner_module
 
-    _original_get_env_vars = _autotuner_module.get_cache_invalidating_env_vars
+    from . import autotuner as ascend_autotuner
 
-    def _patched_get_env_vars():
-        env_vars = _original_get_env_vars()
-        ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
-        if ubtuner_mode:
-            env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
-        return env_vars
+    original_get_env_vars = _autotuner_module.get_cache_invalidating_env_vars
+    if not getattr(original_get_env_vars, "_ascend_cache_env_patch_applied", False):
 
-    _autotuner_module.get_cache_invalidating_env_vars = _patched_get_env_vars
+        def _patched_get_env_vars():
+            env_vars = dict(original_get_env_vars())
+            ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+            if ubtuner_mode:
+                env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
+            return env_vars
+
+        _patched_get_env_vars._ascend_cache_env_patch_applied = True
+        _autotuner_module.get_cache_invalidating_env_vars = _patched_get_env_vars
+
+    # Ascend imports the native function directly, so update its reference too.
+    ascend_autotuner.get_cache_invalidating_env_vars = _autotuner_module.get_cache_invalidating_env_vars
 
 
-_patch_autotune()
-_patch_config_init()
-_patch_cache_invalidating_env_vars()
+def install_runtime_patches():
+    """Install Ascend runtime support; repeated calls do not stack wrappers."""
+    _patch_config_init()
+    _patch_cache_invalidating_env_vars()
+    # Rebind aliases even on repeat calls, e.g. after reloading triton.
+    _patch_autotune()
+
+
+# Preserve compatibility with explicit imports of this package.
+install_runtime_patches()

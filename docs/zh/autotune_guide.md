@@ -15,7 +15,6 @@
 ```python
 import triton
 import triton.language as tl
-import triton.backends.ascend.runtime
 
 
 @triton.autotune(
@@ -40,15 +39,31 @@ def kernel(
 - `key` 的语义与社区版保持一致，用于决定哪些输入变化会触发重新选择配置；
 - `configs=[]` 在 Triton-Ascend 中表示“由 Ascend backend 自动生成候选配置并完成寻优”，而不是“没有可选配置”。
 
-### 1. 先启用 Ascend 对 autotune 的扩展
+### 自动生成配置的默认规则
 
-只有导入下面这行后，才会进入 Triton-Ascend 的 autotune 扩展路径：
+`configs` 非空时，框架检查归一化后的每个 `Config.kwargs`：
+
+- 任意配置包含 Ascend 专有编译选项（如 `multibuffer`、`multibuffer_mode`、`vf_fusion_mode`、`enable_ubuf_saving`），默认关闭自动生成，只使用用户配置。
+- 如果只有 kernel 参数（如 `BLOCK_SIZE`）和通用编译选项，则默认开启自动生成，并将生成的候选与用户配置一起择优。`num_warps`、`num_stages` 等通用选项不会关闭自动生成。
+- 根据选项名是否存在判断，`multibuffer=False` 也属于显式指定 Ascend 选项。
+- 显式设置 `hints={"auto_gen_config": True/False}` 可以覆盖非空 `configs` 的默认行为。希望严格限定候选配置时，请设置为 `False`。
+- `configs=[]` 保持原有行为：始终启用自动生成。
+
+判断使用编译器的有效配置字段；废弃选项先经过现有兼容转换，已被忽略的选项不影响默认开关。开启自动生成后，kernel 仍须满足本文说明的 DSL 解析与自动 Tiling 条件。
+
+### 1. 导入 Triton 即可启用 Ascend autotune
+
+在已注册 Ascend 后端的 Triton-Ascend 安装中，`import triton` 完成时会自动安装 Ascend runtime 扩展，无需额外导入后端 runtime。下面三种入口使用同一个 Ascend autotune 实现：
 
 ```python
-import triton.backends.ascend.runtime
+import triton
+from triton import autotune
+from triton.runtime import autotune
 ```
 
-如果没有这一步，使用的仍然是社区版 `triton.autotune`，`configs=[]` 也不会触发 Ascend 的自动 Tiling 生成。
+`triton.runtime.autotuner.autotune` 也同步指向该实现。原有的 `import triton.backends.ascend.runtime` 仍然兼容，重复安装不会叠加 `Config` 和缓存函数的包装。
+
+自动安装依据后端注册信息，不探测或初始化 NPU 驱动；未注册 Ascend 后端时保留上游实现。该策略适用于 Ascend 发行包，不提供同一进程内 CUDA/NPU autotuner 的动态分派。当前 Ascend autotuner 依赖 `torch`，因此这些 Python 依赖会在 `import triton` 时加载；依赖加载错误会直接报出。
 
 ### 2. `@triton.autotune` 必须直接包在 `@triton.jit` 外层
 

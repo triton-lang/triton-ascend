@@ -37,7 +37,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor
 import itertools
 from collections.abc import Sequence
-from dataclasses import asdict, is_dataclass
+from dataclasses import asdict, fields, is_dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from torch import Tensor
@@ -79,6 +79,36 @@ _RESERVED_HINT_KEYS = {
 _DEFAULT_HINT_NUM_STAGES = [1, 2]
 _DEFAULT_COMPILE_MODE = "simd_simt_template"
 _FAILURE_DETAIL_MAX_LENGTH = 512
+
+
+# Options shared with upstream backends do not indicate an Ascend-specific
+# tuning configuration. Keep this independent of installed CUDA/HIP backends.
+_COMMON_COMPILE_OPTIONS = frozenset({
+    "num_warps", "num_ctas", "num_stages", "maxnreg", "ir_override", "debug", "sanitize_overflow",
+    "enable_fp_fusion", "launch_cooperative_grid", "supported_fp8_dtypes", "deprecated_fp8_dtypes",
+    "default_dot_input_precision", "allowed_dot_input_precisions", "max_num_imprecise_acc_default",
+    "extern_libs", "backend_name", "instrumentation_mode",
+})
+
+
+def _resolve_auto_gen_config(configs, hints):
+    # Preserve automatic generation for an empty user config list, and the
+    # explicit opt-in/opt-out for nonempty lists.
+    if not configs:
+        return True
+    if "auto_gen_config" in hints:
+        return hints["auto_gen_config"]
+
+    from triton.backends.ascend.compiler import NPUOptions
+
+    # Inspect the schema only: constructing NPUOptions installs compiler
+    # patches and is unnecessary here. Ignore internal/derived metadata.
+    ascend_options = {
+        option.name for option in fields(NPUOptions)
+        if option.init and option.name not in _COMMON_COMPILE_OPTIONS
+        and option.name not in _RESERVED_NPU_OPTION_NAMES
+    }
+    return not any(ascend_options.intersection(config.kwargs) for config in configs)
 
 
 def _format_autotune_failure(exc) -> str:
@@ -396,7 +426,7 @@ class AutoTilingTuner(Autotuner):
             hints_axes,
         )
 
-        self.auto_gen_config = not configs or self.hints.get("auto_gen_config", False)
+        self.auto_gen_config = _resolve_auto_gen_config(configs, self.hints)
         self.gen_configs = []  # generated configs from TileGenerator
         self.auto_profile_dir = auto_profile_dir
         if not configs:
@@ -3023,6 +3053,10 @@ def autotune(configs, key, prune_configs_by=None, reset_to_zero=None, restore_va
         If this parameter is None or the best config is retrieved from cache, the profiling process will be ignored.
     :type auto_prof_dir: str
     :param hints: a dict of autotune hint auguments passed to AutoTilingTuner.
+        With nonempty configs, automatic config generation defaults to enabled
+        unless a config explicitly contains an Ascend-specific compile option.
+        hints['auto_gen_config'] overrides this default. Empty configs always
+        enable automatic generation. Generated and user configs are combined.
     """
 
     def decorator(fn):

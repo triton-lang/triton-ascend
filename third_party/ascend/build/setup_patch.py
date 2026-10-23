@@ -16,6 +16,7 @@ All Ascend-specific behavior stays isolated under ``third_party/ascend/build``;
 """
 
 import glob
+import json
 import os
 import platform
 import shutil
@@ -74,6 +75,29 @@ def _get_llvm_patch_hash():
     return h.hexdigest()[:8]
 
 
+def _load_llvm_bom(base_dir):
+    """Load the LLVM pin from ``third_party/ascend/deps/llvm-info.json``.
+
+    Cross-checks the declared patch manifest against the ``llvm_patch_*.patch``
+    files actually present under ``third_party/ascend/patch`` so a stale BOM
+    fails fast instead of silently building against the wrong revision.
+    """
+    bom_path = Path(base_dir) / "third_party" / "ascend" / "deps" / "llvm-info.json"
+    with open(bom_path, "r") as f:
+        llvm_info = json.load(f)
+    patch_dir = Path(base_dir) / "third_party" / "ascend" / "patch"
+    if patch_dir.is_dir():
+        on_disk = sorted(f for f in os.listdir(patch_dir)
+                         if f.startswith("llvm_patch_") and f.endswith(".patch") and (patch_dir / f).is_file())
+    else:
+        on_disk = []
+    declared = sorted(llvm_info.get("patches", []))
+    if declared != on_disk:
+        raise RuntimeError(f"LLVM patch manifest mismatch: {bom_path} declares {declared}, "
+                           f"but {patch_dir} contains {on_disk}")
+    return llvm_info
+
+
 def _get_ascend_llvm_package_info(base_dir):
     system = platform.system()
     try:
@@ -108,8 +132,8 @@ def _get_ascend_llvm_package_info(base_dir):
     else:
         return None
 
-    llvm_hash_path = Path(base_dir) / "cmake" / "llvm-hash.txt"
-    rev = llvm_hash_path.read_text()[:8]
+    llvm_info = _load_llvm_bom(base_dir)
+    rev = llvm_info["llvm_hash"][:8]
     patch_hash = _get_llvm_patch_hash()
     name = f"llvm-{rev}-{patch_hash}-{system_suffix}"
     sym_name = f"llvm-{system_suffix}"

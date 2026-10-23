@@ -22,9 +22,13 @@ from math import pi as math_pi
 from triton.language import core, math, semantic, standard
 from triton._C.libtriton import ir
 from triton.runtime.jit import jit
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import is_compile_on_910_95, triton_enable_libdevice_simt
 
 from .utils import _deprecated
+
+
+def _is_libdevice_simt_enabled(_semantic) -> bool:
+    return triton_enable_libdevice_simt(_semantic.builder.options.arch)
 
 
 def _is_a5_target(_semantic) -> bool:
@@ -296,7 +300,7 @@ def tanh(arg0, _semantic=None):
     if original_dtype == core.dtype("bf16"):
         arg0 = _semantic.cast(arg0, core.float32)
 
-    if _is_a5_target(_semantic) and original_dtype == core.dtype("fp32"):
+    if _is_libdevice_simt_enabled(_semantic):
         dispatch = {
             (core.dtype("fp32"), ): ("__hmf_tanh_fp32", core.dtype("fp32")),
         }

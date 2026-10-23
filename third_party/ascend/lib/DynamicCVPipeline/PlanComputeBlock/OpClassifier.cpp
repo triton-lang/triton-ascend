@@ -1317,6 +1317,17 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(
   if (!startOp)
     return;
 
+  // Constrain the BFS to the block that contains the starting op. Both the
+  // SSA traversal and the memDep traversal must stay inside this block. This
+  // keeps the propagation from crossing SCF region, function, or
+  // bufferization boundaries out of the yield's scope, which previously
+  // allowed the BFS to walk out and overwrite labels that earlier passes had
+  // already set (e.g., a CUBE-classified memref.alloc that backs a matmul
+  // input via bufferization.to_tensor).
+  Block *regionBlock = startOp->getBlock();
+  if (!regionBlock)
+    return;
+
   llvm::DenseSet<Operation *> visited;
   std::queue<Operation *> queue;
   queue.push(startOp);
@@ -1329,25 +1340,45 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(
     if (!cur || !cur->getBlock())
       continue;
 
+    // Block-bound: stop if we ever step outside the starting block.
+    if (cur->getBlock() != regionBlock)
+      continue;
+
     if (shouldStopPropagationForYield(cur, targetCoreType))
       continue;
 
+    // OR semantics: if an upstream op was already colored with a different
+    // core type by an earlier pass, mark it as CUBE_AND_VECTOR and stop here
+    // so we do not overwrite a stable classification.
+    OpCoreType existing = opCoreTypes.lookup(cur);
+    if (existing != OP_UNDETERMINED && existing != targetCoreType) {
+      opCoreTypes[cur] = OP_CUBE_AND_VECTOR;
+      continue;
+    }
+
     opCoreTypes[cur] = targetCoreType;
 
-    // Propagate to operands (upstream)
+    // SSA propagation, restricted to defs in the same block. This handles
+    // pure tensor chains (extract_slice, expand_shape, arith on tensors, etc.).
     for (Value operand : cur->getOperands()) {
-      if (Operation *defOp = operand.getDefiningOp()) {
-        if (!visited.count(defOp) && defOp != cur) {
-          visited.insert(defOp);
-          queue.push(defOp);
-        }
+      Operation *defOp = operand.getDefiningOp();
+      if (defOp && defOp->getBlock() == regionBlock && !visited.count(defOp) &&
+          defOp != cur) {
+        visited.insert(defOp);
+        queue.push(defOp);
       }
     }
 
-    // Also propagate to memory dependencies
+    // memDep propagation, restricted to memDefs in the same block. This is
+    // needed so memref.allocs inside the yield's block (typical for ops in
+    // a scf.for body that allocate scratch buffers and feed them to the
+    // yielded value via bufferization.to_tensor) get colored consistently
+    // with the yield. Without it, those allocs would stay at their default
+    // VECTOR label even when the yielded value is CUBE.
     if (memDepGraph) {
       for (Operation *memDef : memDepGraph->getMemDefs(cur)) {
-        if (!visited.count(memDef) && memDef != cur) {
+        if (memDef && memDef->getBlock() == regionBlock &&
+            !visited.count(memDef) && memDef != cur) {
           visited.insert(memDef);
           queue.push(memDef);
         }

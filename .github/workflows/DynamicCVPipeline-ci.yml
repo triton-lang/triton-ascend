@@ -44,7 +44,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('third_party/ascend/deps/**') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv
 
       - name: Checkout base
@@ -212,16 +212,17 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/cmake/llvm-hash.txt', 'pr/cmake/json-version.txt', 'pr/cmake/nvidia-toolchain-version.json', 'pr/third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/third_party/ascend/deps/**') }}
 
       - name: Install Bisheng compiler
         shell: bash
         run: |
           set -euo pipefail
           cd pr
+          command -v jq >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq jq; }
           arch=$(uname -m)
-          filename=$(sed -n "s/^${arch}: //p" cmake/bisheng-version.txt | xargs)
-          checksum=$(sed -n "s/^${arch}_sha256: //p" cmake/bisheng-version.txt | xargs)
+          filename=$(jq -r --arg arch "${arch}" '.bisheng[$arch].file // empty' third_party/ascend/deps/toolchain.json)
+          checksum=$(jq -r --arg arch "${arch}" '.bisheng[$arch].sha256 // empty' third_party/ascend/deps/toolchain.json)
           test -n "$filename"
           test -n "$checksum"
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \

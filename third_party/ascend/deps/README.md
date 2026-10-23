@@ -14,11 +14,12 @@ the files below instead of hardcoding them, mirroring how other backends
 | `toolchain.json` | Bisheng compiler run packages per arch (with sha256), nlohmann-json version | Bisheng install steps in the CI workflows (`jq`) |
 | `runtime.json` | Supported CANN runtimes and their matching torch / torch-npu versions | CI matrix values and container image tags |
 
-`toolchain.json` and `runtime.json` are currently read by
-`scripts/check_bom_consistency.py` only; the workflows still carry their own
-copies of some of these values and are migrated to read the BOM directly in
-follow-up changes. The consistency check keeps the two in sync in the
-meantime.
+The CI workflows read the BOM directly: the Bisheng install steps parse
+`toolchain.json` with `jq`, and the container image tags in `wheels.yml` /
+`build-docker-image.yml` resolve `runtime.json`'s `default_cann` in a
+lightweight `deps` job. Values that cannot read JSON at their point of use —
+the `requirements.txt` / `docker/Dockerfile` pins and the static matrix
+entries — remain hardcoded but are covered by `scripts/check_bom_consistency.py`.
 
 ## Relation to the `cmake/` mirrors
 
@@ -32,17 +33,13 @@ with upstream Triton and are kept as mirrors of this BOM:
 workflow) fails if a mirror drifts from the BOM, so a version bump that
 forgets one of the copies is caught at PR time.
 
-`cmake/bisheng-version.txt` is the pre-BOM location of the Bisheng pins and is
-still consumed by several workflows; it will be removed once those workflows
-read `toolchain.json` directly.
-
 ## Updating a dependency
 
 1. Edit the entry in the JSON file in this directory. Never edit the `cmake/`
    mirrors by hand.
-2. Update the mirrors (`cmake/llvm-hash.txt`, `cmake/json-version.txt`) and —
-   until the remaining migrations land — the still-hardcoded workflow values
-   to the same version.
+2. Update the mirrors (`cmake/llvm-hash.txt`, `cmake/json-version.txt`) and
+   the still-hardcoded values (`requirements.txt`, `docker/Dockerfile`,
+   static matrix entries) to the same version.
 3. Run `python scripts/check_bom_consistency.py` locally; it must pass.
 4. Commit everything in one change so cache keys derived from these files
    rotate atomically.

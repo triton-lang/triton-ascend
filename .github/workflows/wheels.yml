@@ -13,6 +13,7 @@ on:
       - version.txt
       - cmake/llvm-hash.txt
       - cmake/json-version.txt
+      - third_party/ascend/deps/**
   schedule:
     - cron: "0 8 * * *"
 
@@ -24,11 +25,22 @@ permissions: read-all
 
 jobs:
 
+  deps:
+    runs-on: ubuntu-latest
+    outputs:
+      cann: ${{ steps.deps.outputs.cann }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Resolve pinned CANN version from the BOM
+        id: deps
+        run: echo "cann=$(jq -r .default_cann third_party/ascend/deps/runtime.json)" >> "$GITHUB_OUTPUT"
+
   Build-Wheels:
+    needs: deps
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:${{ needs.deps.outputs.cann }}-a3-ubuntu22.04-py3.12
       # PYTHON must live under container.env (not job env) so ARC maps it into
       # the job container's pod-spec env, where the runner pod's postStart hook
       # (buildkitd node pinning) can read it. Same pattern as vllm-ascend's SOC.
@@ -376,11 +388,11 @@ jobs:
   # publishes its own artifact.
   Publish-Wheels:
     name: Publish wheels (${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }})
-    needs: [Build-Wheels, Test-Wheels]
+    needs: [deps, Build-Wheels, Test-Wheels]
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.config.runs_on }}
     container:
-      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:${{ needs.deps.outputs.cann }}-a3-ubuntu22.04-py3.12
       env:
         PYTHON: ${{matrix.python}}
     timeout-minutes: 60

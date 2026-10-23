@@ -103,16 +103,17 @@ jobs:
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
+          if [ ! -f third_party/ascend/deps/toolchain.json ]; then
+            echo "third_party/ascend/deps/toolchain.json not found, skipping"
             exit 0
           fi
+          command -v jq >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq jq; }
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
           ARCH=$(uname -m)
-          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_FILENAME=$(jq -r --arg arch "${ARCH}" '.bisheng[$arch].file // empty' third_party/ascend/deps/toolchain.json)
+          BISHENG_SHA256=$(jq -r --arg arch "${ARCH}" '.bisheng[$arch].sha256 // empty' third_party/ascend/deps/toolchain.json)
           if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
+            echo "Error: third_party/ascend/deps/toolchain.json has no bisheng entry for arch ${ARCH}." >&2
             exit 1
           fi
           echo "Downloading: ${BISHENG_FILENAME}"
@@ -134,7 +135,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('third_party/ascend/deps/**') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-
 
       # ── Install the sync workflow package + Claude Code CLI ────────────────

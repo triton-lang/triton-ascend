@@ -1,0 +1,29 @@
+name: BOM Consistency Check
+
+on:
+  pull_request:
+    paths:
+      - third_party/ascend/deps/**
+      - third_party/ascend/patch/**
+      - cmake/**
+      - requirements.txt
+      - docker/**
+      - .github/workflows/**
+      - scripts/check_bom_consistency.py
+      - docs/en/community/release_policy.md
+  schedule:
+    - cron: "0 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v5
+
+      - name: Run BOM consistency checks
+        run: python3 scripts/check_bom_consistency.py

@@ -5,12 +5,14 @@ on:
     paths:
       - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
+      - third_party/ascend/deps/llvm-info.json
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   pull_request:
     paths:
       - cmake/llvm-hash.txt
       - third_party/ascend/patch/llvm_patch_*.patch
+      - third_party/ascend/deps/llvm-info.json
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   workflow_dispatch:
@@ -66,7 +68,7 @@ jobs:
     - name: Fetch LLVM Commit Hash
       shell: bash
       run: |
-        LLVM_COMMIT_HASH="$(cat cmake/llvm-hash.txt)"
+        LLVM_COMMIT_HASH="$(jq -r .llvm_hash third_party/ascend/deps/llvm-info.json)"
         echo "Found LLVM commit hash: ${LLVM_COMMIT_HASH}"
         echo "llvm_commit_hash=${LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
 

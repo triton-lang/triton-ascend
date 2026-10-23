@@ -1,0 +1,29 @@
+{
+  "default_cann": "9.0.0",
+  "runtimes": [
+    {
+      "cann": "9.0.0",
+      "status": "main",
+      "torch": "2.7.1",
+      "torch_npu": "2.7.1.post8"
+    },
+    {
+      "cann": "8.5.0",
+      "status": "maintained",
+      "torch": "2.7.1",
+      "torch_npu": "2.7.1.post8"
+    },
+    {
+      "cann": "9.1.0",
+      "status": "early-access",
+      "torch": "2.7.1",
+      "torch_npu": "2.7.1.post8"
+    },
+    {
+      "cann": "9.2.0",
+      "status": "planned",
+      "torch": "2.10.0",
+      "torch_npu": "2.10.0.post7"
+    }
+  ]
+}

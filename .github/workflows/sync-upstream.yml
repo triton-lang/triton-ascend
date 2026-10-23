@@ -2,18 +2,17 @@
 #
 # This is a THIN wrapper around the TA_main2main_workflow package. All the real
 # logic (detect gap → merge → AI resolve conflicts → build → NPU test → AI fix
-# retry loop → push branch → open PR) lives inside `ta-kickoff --mode=full`.
+# retry loop → push branch → open PR) lives inside `ta-kickoff`.
 # The Action only provisions the environment and runs that one command, exactly
-# like running it locally:
+# like running it locally the package is pinned to its `add_merge_ta_main_func` branch):
 #
 #   PUSH_TO_GITHUB=true \
 #   GITHUB_REPO=triton-lang/triton-ascend \
 #   AI_BACKEND=claude \
-#   ta-kickoff --mode=full
+#   ta-kickoff
 #
-# Because --mode=full builds and runs pytest on Ascend NPU, the whole job runs
-# on the self-hosted NPU runner inside the ascend CI container (same image as
-# integration-tests-ascend.yml).
+# The whole job runs on the self-hosted NPU runner inside the ascend CI
+# container (same image as integration-tests-ascend.yml).
 #
 # Required GitHub Secrets (Settings → Secrets and variables → Actions):
 #   ANTHROPIC_API_KEY  — DeepSeek API key (used via Anthropic-compatible API)
@@ -29,8 +28,21 @@ on:
         description: 'Upstream triton commit SHA (leave empty for latest)'
         required: false
         default: ''
+      llvm_commit:
+        description: 'llvm-project commit SHA to fetch and check out (leave empty for latest)'
+        required: true
+        default: ''
+      llvm_repo_url:
+        description: 'llvm-project repo URL to clone (leave empty for default https://github.com/llvm/llvm-project.git)'
+        required: false
+        default: 'https://github.com/llvm/llvm-project.git'
+      progressive_merge:
+        description: 'Progressive merge: split commits into <=1000-line steps. Disable to skip planning and merge directly to the target commit in one step.'
+        type: boolean
+        required: false
+        default: true
       skip_baseline_llvm:
-        description: 'Skip baseline LLVM compilation'
+        description: 'Skip baseline LLVM compilation (default true)'
         required: false
         default: 'false'
       skip_build:
@@ -39,6 +51,14 @@ on:
         default: 'false'
       skip_e2e_test:
         description: 'Skip end-to-end tests'
+        required: false
+        default: 'false'
+      skip_llvm20compat:
+        description: 'Skip LLVM 2.0 compatibility checks (default true)'
+        required: false
+        default: 'true'
+      enable_triton_report:
+        description: 'Enable triton-report MCP server setup'
         required: false
         default: 'false'
   schedule:
@@ -54,10 +74,10 @@ jobs:
   sync:
     runs-on: [linux-aarch64-a3-800i-4, cn12-001]
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-a3-ubuntu22.04-py3.10-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:8.5.0-a3-ubuntu22.04-py3.11-latest
     timeout-minutes: 600
     env:
-      PYTHON: "python3.10"
+      PYTHON: "python3.11"
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
       PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
@@ -119,14 +139,17 @@ jobs:
             echo "cmake/bisheng-version.txt not found, skipping"
             exit 0
           fi
+          # The ascendnpu-ir run package is arch-specific: aarch64 (a3) and
+          # x86_64 (a5) each have their own; select by the container's arch.
+          ARCH=$(uname -m)
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n '1p' cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n '2p' cmake/bisheng-version.txt | sed 's/^sha256://' | xargs)
+          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
+          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
           if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt must contain a Bisheng filename on the first line." >&2
+            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
             exit 1
           fi
-          echo "Downloading: ${BISHENG_FILENAME}"
+          echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
           curl -fL "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
           if [ -n "${BISHENG_SHA256}" ]; then
             echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
@@ -145,14 +168,52 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.10-triton-
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.11-triton-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-a3-py3.11-triton-
+
+      # Config triton-report mcp serve
+      - name: Set up triton-report MCP
+        if: ${{ github.event.inputs.enable_triton_report == 'true' }}
+        run: |
+          git clone --depth 1 https://github.com/zhudada0120/triton-report.git /tmp/triton-report
+          pip install -q -r /tmp/triton-report/requirements.txt
+          python3 - <<'EOF'
+          import json, os
+          path = os.path.expanduser("~/.claude.json")
+          cfg = {}
+          if os.path.exists(path):
+              try:
+                  with open(path, encoding="utf-8") as fh:
+                      cfg = json.load(fh)
+              except Exception:
+                  cfg = {}
+          servers = cfg.setdefault("mcpServers", {})
+          servers["triton-report"] = {
+              "type": "stdio",
+              "command": "python",
+              "args": [
+                  "-m", "src.mcp_server_app",
+                  "--data-dir", "/tmp/triton-report/data",
+                  "--ascend-repo-path", os.environ["GITHUB_WORKSPACE"],
+              ],
+              "cwd": "/tmp/triton-report",
+          }
+          with open(path, "w", encoding="utf-8") as fh:
+              json.dump(cfg, fh, indent=2)
+          print("Claude Code MCP servers:", json.dumps(cfg, indent=2))
+          EOF
 
       # ── Install the sync workflow package + Claude Code CLI ────────────────
       - name: Install TA_main2main_workflow
         run: |
+          # Self-hosted runners persist /tmp between jobs — start from a fresh
+          # clone, and pin the known-good branch.
+          rm -rf /tmp/ta-workflow
           git clone https://github.com/TecJesh/main2main_workflow.git /tmp/ta-workflow
           cd /tmp/ta-workflow
+          git fetch origin
+          git checkout add_merge_ta_main_func
+          pip install -r requirements.txt
           ${PYTHON} -m pip install -e .
           echo "TA workflow installed: $(ta-kickoff --help 2>&1 | head -1)"
 
@@ -179,10 +240,30 @@ jobs:
           npm install -g @anthropic-ai/claude-code
           echo "claude: $(command -v claude || echo '<not found>')"
 
+      # ── Cached llvm-project source: skip the huge network clone ──────────
+      # Restores the whole repo (full clone, history included) from the
+      # Actions cache. Keyed on the target commit: a primary-key hit means
+      # the commit itself is already in the restored repo — the clone step
+      # below turns into a local checkout, zero network. Fallback keys reuse
+      # the most recent cached clone for other commits: full history is
+      # local, so the missing objects come from a tiny incremental fetch.
+      - name: Cache llvm-project source
+        uses: actions/cache@v4
+        with:
+          path: ~/llvm-project
+          key: ${{ runner.os }}-${{ runner.arch }}-llvm-project-src-${{ inputs.llvm_commit || 'default' }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-llvm-project-src-
+
       # ── Clone llvm-project to ~ for IR patch generation ──────────────────
       - name: Clone llvm-project
         shell: bash
-        timeout-minutes: 30
+        timeout-minutes: 60
+        env:
+          LLVM_TARGET_COMMIT: ${{ inputs.llvm_commit }}
+          # `|| 'default'` fallback matters for schedule triggers, where
+          # inputs.* is the empty string.
+          LLVM_REPO_URL: ${{ inputs.llvm_repo_url || 'https://github.com/llvm/llvm-project.git' }}
         run: |
           # llvm-project is huge — bump postBuffer and disable low-speed
           # timeouts to avoid fetch-pack / early-EOF disconnects.
@@ -194,11 +275,11 @@ jobs:
           git config --global pack.packSizeLimit 2g
           git config --global protocol.version 2
 
-          # Retry helper: retry a command up to 6 times with 20s waits.
+          # Retry helper: retry a command up to 10 times with 30s waits.
           # If the repo is corrupted, delete it so the next attempt re-clones.
           retry() {
-            for i in 1 2 3 4 5 6; do
-              echo "[attempt $i/6]" "$@"
+            for i in 1 2 3 4 5 6 7 8 9 10; do
+              echo "[attempt $i/10]" "$@"
               if "$@"; then
                 return 0
               fi
@@ -207,27 +288,48 @@ jobs:
                 cd / && rm -rf ~/llvm-project
                 return 1
               fi
-              echo "Retrying in 20s..."
-              sleep 20
+              echo "Retrying in 30s..."
+              sleep 30
             done
-            echo "ERROR: command failed after 6 attempts: $*" >&2
+            echo "ERROR: command failed after 10 attempts: $*" >&2
             return 1
           }
 
           if [ ! -d ~/llvm-project/.git ]; then
-            retry git clone --depth=1 https://github.com/llvm/llvm-project.git ~/llvm-project
+            retry git clone "${LLVM_REPO_URL}" ~/llvm-project
           fi
           cd ~/llvm-project
+          # Optional pin: fetch and check out the requested commit
+          # (workflow_dispatch input llvm_commit; empty on schedule — keep
+          # the cloned default HEAD).
+          if [ -n "${LLVM_TARGET_COMMIT:-}" ]; then
+            # Cache hit: the commit is already in the restored repo — use
+            # it directly, zero network.
+            if git cat-file -e "${LLVM_TARGET_COMMIT}^{commit}" 2>/dev/null; then
+              echo "LLVM commit already present (cache hit): $LLVM_TARGET_COMMIT"
+            else
+              echo "Fetching requested LLVM commit: $LLVM_TARGET_COMMIT"
+              retry git fetch origin "$LLVM_TARGET_COMMIT"
+            fi
+            # -f: the restored tree may carry leftover changes from the run
+            # that saved the cache (applied patches, build artifacts) — a
+            # plain checkout would refuse with "local changes would be
+            # overwritten". ta-kickoff re-fetches/resets the pin itself, so
+            # discarding here is safe.
+            git checkout -f "$LLVM_TARGET_COMMIT"
+            echo "Checked out LLVM commit: $(git rev-parse HEAD)"
+          fi
           echo "llvm-project ready at ~/llvm-project ($(git rev-parse --short HEAD))"
       - name: Prepare LLVM install prefix
         shell: bash
         run: mkdir -p ~/llvm-install-sync
 
       # ── Run the full sync flow (this is the local command) ─────────────────
-      - name: Run ta-kickoff --mode=full
+      - name: Run ta-kickoff
         shell: bash
         env:
-          # Repo paths — full mode uses the same checkout for both.
+          # Repo paths — the checkout serves as triton-ascend; ~/triton-upstream
+          # is the bare upstream clone used for commit scanning / diffs.
           TRITON_ASCEND_PATH: ${{ github.workspace }}
           TRITON_PATH: ~/triton-upstream
           TRITON_TARGET_COMMIT: ${{ inputs.target_commit }}
@@ -238,20 +340,33 @@ jobs:
           # Enable single-step per-commit merge → build → test → fix pipeline.
           TA_SINGLE_STEP_MODE: "true"
           # Optional skip flags (configure via workflow_dispatch inputs).
-          SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm }}
-          SKIP_BUILD: ${{ inputs.skip_build }}
-          SKIP_E2E_TEST: ${{ inputs.skip_e2e_test }}
+          # Default everywhere: 'false' = do NOT skip baseline LLVM / build /
+          # e2e tests. The `|| 'false'` fallbacks matter for schedule
+          # triggers, where inputs.* is the empty string. SKIP_LLVM20COMPAT is
+          # the exception: it defaults to 'true' (skip) unless set otherwise.
+          TA_PROGRESSIVE_MERGE: "${{ github.event.inputs.progressive_merge }}"
+          SKIP_BASELINE_LLVM: ${{ inputs.skip_baseline_llvm || 'false' }}
+          SKIP_BUILD: ${{ inputs.skip_build || 'false' }}
+          SKIP_E2E_TEST: ${{ inputs.skip_e2e_test || 'false' }}
+          SKIP_LLVM20COMPAT: ${{ inputs.skip_llvm20compat || 'true' }}
           # Push branch + open PR when everything passes.
           PUSH_TO_GITHUB: "true"
-          GITHUB_REPO: triton-lang/triton-ascend
-          TA_BASE_BRANCH: upstream-sync
-          PR_AUTHOR: TA
-          PR_TYPE: sync
+          GITHUB_REPO: TecJesh/triton-ascend
+          TA_BASE_BRANCH: main2main-upgrade-3.8
+          # PR opens against the same branch (package default happens to
+          # match, but keep it explicit and in sync with TA_BASE_BRANCH).
+          TA_PR_BASE_BRANCH: main2main-upgrade-3.8
+          # Base the work branch on `origin` — this checkout only has the
+          # `origin` and `upstream-triton` remotes; the package default
+          # `upstream-ascend` does not exist here (script sets "origin").
+          TA_WORK_BRANCH_BASE: origin
+          PR_AUTHOR: Sync
+          PR_TYPE: feat
           GH_TOKEN: ${{ secrets.SYNC_PAT || secrets.GITHUB_TOKEN }}
           # AI backend: Claude Code CLI wired to DeepSeek's Anthropic-compatible API.
           AI_BACKEND: claude
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: https://api.deepseek.com/anthropic
+          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
           ANTHROPIC_MODEL: deepseek-v4-pro[1m]
           ANTHROPIC_DEFAULT_OPUS_MODEL: deepseek-v4-pro[1m]
           ANTHROPIC_DEFAULT_SONNET_MODEL: deepseek-v4-pro[1m]
@@ -270,13 +385,16 @@ jobs:
           source /usr/local/Ascend/cann/set_env.sh || echo "warn: CANN set_env.sh not sourced"
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
           npu-smi info || true
-          # Limit build parallelism (nproc/3) and NPU pytest workers (nproc/9)
-          # to match integration-tests-ascend.yml and avoid build / NPU OOM.
+          # MAX_JOBS: nproc/3, matching integration-tests-ascend.yml and the
+          # local script. NUM_PROCS: fixed at 16 — the value tuned in
+          # more NPU pytest workers caused NPU OOM.
           MAX_JOBS=$(( $(nproc) / 3 )); [ "$MAX_JOBS" -lt 1 ] && MAX_JOBS=1
-          NUM_PROCS=$(( $(nproc) / 9 )); [ "$NUM_PROCS" -lt 1 ] && NUM_PROCS=1
+          NUM_PROCS=16
           export MAX_JOBS NUM_PROCS
           echo "MAX_JOBS=$MAX_JOBS  NUM_PROCS=$NUM_PROCS"
-          ta-kickoff --mode=full
+          # ta-kickoff has no --mode flag on the pinned add_merge_ta_main_func
+          # branch — run it bare, exactly like the known-good script.
+          ta-kickoff
 
       # ── Always surface the workspace (logs, patches, summaries) ────────────
       - name: Upload sync workspace

@@ -9,18 +9,42 @@ from triton.experimental.gluon.language._core import builtin, _unwrap_if_constex
 if TYPE_CHECKING:
     from triton._C import ir
 
-__all__ = ["async_copy_global_to_shared", "async_copy_shared_to_global", "store_wait"]
+__all__ = [
+    "async_atomic_add",
+    "async_atomic_and",
+    "async_atomic_max",
+    "async_atomic_min",
+    "async_atomic_or",
+    "async_atomic_xor",
+    "async_copy_global_to_shared",
+    "async_copy_global_to_shared_im2col",
+    "async_copy_shared_to_global",
+    "async_load",
+    "async_load_im2col",
+    "async_store",
+    "store_wait",
+    "tensor_descriptor",
+    "tensor_descriptor_im2col",
+    "tensor_descriptor_type",
+    "tensor_descriptor_im2col_type",
+    "make_tensor_descriptor",
+]
 
 
 @dataclass(eq=True)
-class tensor_descriptor_type(base_type):
+class _tensor_descriptor_type_base(base_type):
+    """Base class for tensor descriptor types (tiled and im2col)."""
     block_type: ttgl.block_type
     shape_type: ttgl.tuple_type
     strides_type: ttgl.tuple_type
     layout: NVMMASharedLayout
 
+    # Subclasses must override these
+    _type_name: str = ""
+    _mangle_prefix: str = ""
+
     def __str__(self) -> str:
-        return f"tensor_descriptor<{self.block_type}, {self.layout}>"
+        return f"{self._type_name}<{self.block_type}, {self.layout}>"
 
     @property
     def nbytes_per_cta(self) -> int:
@@ -31,14 +55,32 @@ class tensor_descriptor_type(base_type):
         return self.block_type.nbytes // num_cta_splits
 
     def _to_ir(self, builder: ir.builder) -> ir.type:
-        is_signed = self.block_type.element_ty.is_int_signed()
-        return builder.get_tensor_descriptor_layout_type(
-            self.block_type.to_ir(builder),
-            is_signed,
-            self.layout._to_ir(builder),
-        )
+        raise NotImplementedError
 
-    def _unflatten_ir(self, handles: List[ir.value], cursor: int) -> Tuple[tensor_descriptor, int]:
+    def _unflatten_ir(self, handles: List[ir.value], cursor: int) -> Tuple[base_value, int]:
+        raise NotImplementedError
+
+    def _flatten_ir_types(self, builder: ir.builder, out: List[ir.type]) -> None:
+        out.append(self._to_ir(builder))
+        self.shape_type._flatten_ir_types(builder, out)
+        self.strides_type._flatten_ir_types(builder, out)
+
+    def mangle(self) -> str:
+        return f"{self._mangle_prefix}{self.block_type.mangle()}_{self.layout.mangle()}{self._mangle_prefix}"
+
+
+@dataclass(eq=True)
+class tensor_descriptor_type(_tensor_descriptor_type_base):
+    """Type for tiled tensor descriptors."""
+    _type_name: str = "tensor_descriptor"
+    _mangle_prefix: str = "TD"
+
+    def _to_ir(self, builder: ir.builder) -> ir.type:
+        is_signed = self.block_type.element_ty.is_int_signed()
+        return builder.get_tensor_descriptor_layout_type(self.block_type.to_ir(builder), is_signed,
+                                                         self.layout._to_ir(builder))
+
+    def _unflatten_ir(self, handles: List[ir.value], cursor: int) -> Tuple[base_value, int]:
         handle = handles[cursor]
         cursor += 1
         shape, cursor = self.shape_type._unflatten_ir(handles, cursor)
@@ -46,30 +88,40 @@ class tensor_descriptor_type(base_type):
         value = tensor_descriptor(handle, shape, strides, self.block_type, layout=self.layout)
         return value, cursor
 
-    def _flatten_ir_types(self, builder: ir.builder, out: List[ir.type]) -> None:
+
+@dataclass(eq=True)
+class tensor_descriptor_im2col_type(_tensor_descriptor_type_base):
+    """Type for im2col tensor descriptors (convolution-friendly access patterns)."""
+    _type_name: str = "tensor_descriptor_im2col"
+    _mangle_prefix: str = "TDI"
+
+    def _to_ir(self, builder: ir.builder) -> ir.type:
         is_signed = self.block_type.element_ty.is_int_signed()
-        ty = builder.get_tensor_descriptor_layout_type(
-            self.block_type.to_ir(builder),
-            is_signed,
-            self.layout._to_ir(builder),
-        )
-        out.append(ty)
-        self.shape_type._flatten_ir_types(builder, out)
-        self.strides_type._flatten_ir_types(builder, out)
+        return builder.get_tensor_descriptor_im2col_layout_type(self.block_type.to_ir(builder), is_signed,
+                                                                self.layout._to_ir(builder))
 
-    def mangle(self) -> str:
-        return f"TD{self.block_type.mangle()}_{self.layout.mangle()}TD"
+    def _unflatten_ir(self, handles: List[ir.value], cursor: int) -> Tuple[base_value, int]:
+        handle = handles[cursor]
+        cursor += 1
+        shape, cursor = self.shape_type._unflatten_ir(handles, cursor)
+        strides, cursor = self.strides_type._unflatten_ir(handles, cursor)
+        value = tensor_descriptor_im2col(handle, shape, strides, self.block_type, layout=self.layout)
+        return value, cursor
 
 
-class tensor_descriptor(base_value):
+class _tensor_descriptor_value_base(base_value):
 
     def __init__(self, handle, shape: List[ttgl.tensor], strides: List[ttgl.tensor], block_type: ttgl.block_type,
-                 layout: NVMMASharedLayout):
+                 layout: NVMMASharedLayout, type_cls):
         self.handle = handle
         self.shape = ttgl.tuple(shape)
         self.strides = ttgl.tuple(strides)
-        self.type = tensor_descriptor_type(block_type, shape_type=self.shape.type, strides_type=self.strides.type,
-                                           layout=layout)
+        self.type = type_cls(block_type, shape_type=self.shape.type, strides_type=self.strides.type, layout=layout)
+
+    def _set_name(self, builder: ir.builder, name: str) -> None:
+        self.handle.set_loc(builder.create_name_loc(name, self.handle.get_loc()))
+        self.shape._set_name(builder, name + ".shape")
+        self.strides._set_name(builder, name + ".stride")
 
     def _flatten_ir(self, handles: List[ir.value]) -> None:
         handles.append(self.handle)
@@ -97,6 +149,20 @@ class tensor_descriptor(base_value):
         return self.type.layout
 
 
+class tensor_descriptor(_tensor_descriptor_value_base):
+
+    def __init__(self, handle, shape: List[ttgl.tensor], strides: List[ttgl.tensor], block_type: ttgl.block_type,
+                 layout: NVMMASharedLayout):
+        super().__init__(handle, shape, strides, block_type, layout, tensor_descriptor_type)
+
+
+class tensor_descriptor_im2col(_tensor_descriptor_value_base):
+
+    def __init__(self, handle, shape: List[ttgl.tensor], strides: List[ttgl.tensor], block_type: ttgl.block_type,
+                 layout: NVMMASharedLayout):
+        super().__init__(handle, shape, strides, block_type, layout, tensor_descriptor_im2col_type)
+
+
 def _emit_alignment_check(desc, coord, fn_name: str, arg_name: str, _semantic=None):
     coord = list(coord)[-1]
     align_bytes = 16
@@ -120,15 +186,41 @@ def _emit_alignment_check(desc, coord, fn_name: str, arg_name: str, _semantic=No
         f"i.e. a multiple of {align} for dtype={dtype.codegen_name()}", _semantic=_semantic)
 
 
+def _convert_im2col_offsets(offsets, _semantic):
+    offsets_ir = []
+    for offset in offsets:
+        offset = _unwrap_if_constexpr(offset)
+        if isinstance(offset, int):
+            offsets_ir.append(_semantic.builder.get_int16(offset))
+        elif hasattr(offset, "handle"):
+            offsets_ir.append(offset.handle)
+        else:
+            raise ValueError(f"Unsupported offset type: {type(offset)}")
+    return offsets_ir
+
+
 @builtin
-def async_copy_global_to_shared(tensor_desc, coord, barrier, result, pred=True, multicast=False, _semantic=None):
+def async_load(tensor_desc, coord, barrier, result, pred=True, multicast=False, _semantic=None):
+    """
+    Load data from global memory to shared memory using TMA.
+
+    Args:
+        tensor_desc: Tensor descriptor (tiled)
+        coord: Coordinates in the source tensor
+        barrier: Barrier for synchronization. In a two-CTA kernel, use a
+            two-CTA barrier when this TMA load feeds a tcgen05 op; otherwise
+            use a barrier allocated with ``two_ctas=False``.
+        result: Destination memory descriptor
+        pred: Predicate for conditional execution
+        multicast: Enable multicast
+    """
     if _semantic.builder.options.enable_iisan:
-        _emit_alignment_check(tensor_desc, coord, "async_copy_global_to_shared", "innermost coordinate",
-                              _semantic=_semantic)
+        _emit_alignment_check(tensor_desc, coord, "async_load", "innermost coordinate", _semantic=_semantic)
 
     coord = _semantic._convert_to_ir_values(coord, require_i64=False)
     pred = _semantic.to_tensor(pred)
     multicast = _unwrap_if_constexpr(multicast)
+
     _semantic.builder.create_async_tma_copy_global_to_local(
         tensor_desc.handle,
         coord,
@@ -136,22 +228,180 @@ def async_copy_global_to_shared(tensor_desc, coord, barrier, result, pred=True, 
         result.handle,
         pred.handle,
         multicast,
+        None,
     )
 
 
 @builtin
-def async_copy_shared_to_global(tensor_desc, coord, src, _semantic=None):
+def async_load_im2col(tensor_desc, coord, offsets, barrier, result, pred=True, multicast=False, _semantic=None):
+    """
+    Load data from global memory to shared memory using TMA in im2col mode.
+
+    Args:
+        tensor_desc: Tensor descriptor (im2col)
+        coord: Coordinates in the source tensor
+        offsets: Im2col offsets (must be i16 values)
+            - For 3D tensors: 1 offset
+            - For 4D tensors: 2 offsets
+            - For 5D tensors: 3 offsets
+        barrier: Barrier for synchronization. In a two-CTA kernel, use a
+            two-CTA barrier when this TMA load feeds a tcgen05 op; otherwise
+            use a barrier allocated with ``two_ctas=False``.
+        result: Destination memory descriptor
+        pred: Predicate for conditional execution
+        multicast: Enable multicast
+    """
     if _semantic.builder.options.enable_iisan:
-        _emit_alignment_check(tensor_desc, coord, "async_copy_shared_to_global", "innermost coordinate",
-                              _semantic=_semantic)
+        _emit_alignment_check(tensor_desc, coord, "async_load", "innermost coordinate", _semantic=_semantic)
+
+    coord = _semantic._convert_to_ir_values(coord, require_i64=False)
+    pred = _semantic.to_tensor(pred)
+    multicast = _unwrap_if_constexpr(multicast)
+    offsets_ir = _convert_im2col_offsets(offsets, _semantic)
+
+    _semantic.builder.create_async_tma_copy_global_to_local(
+        tensor_desc.handle,
+        coord,
+        barrier.handle,
+        result.handle,
+        pred.handle,
+        multicast,
+        offsets_ir,
+    )
+
+
+@builtin
+def async_store(tensor_desc, coord, src, _semantic=None):
+    """
+    Store data from shared memory to global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    if _semantic.builder.options.enable_iisan:
+        _emit_alignment_check(tensor_desc, coord, "async_store", "innermost coordinate", _semantic=_semantic)
     coord = _semantic._convert_to_ir_values(coord, require_i64=False)
     _semantic.builder.create_async_tma_copy_local_to_global(tensor_desc.handle, coord, src.handle)
 
 
+# Backward-compatible aliases
+async_copy_global_to_shared = async_load
+async_copy_global_to_shared_im2col = async_load_im2col
+async_copy_shared_to_global = async_store
+
+
+def _async_atomic_shared_to_global(kind, tensor_desc, coord, src, fn_name: str, _semantic=None):
+    if _semantic.builder.options.enable_iisan:
+        _emit_alignment_check(tensor_desc, coord, fn_name, "innermost coordinate", _semantic=_semantic)
+    coord = _semantic._convert_to_ir_values(coord, require_i64=False)
+    _semantic.builder.create_async_tma_reduce(kind, tensor_desc.handle, coord, src.handle)
+
+
 @builtin
-def store_wait(pendings, _semantic=None):
+def async_atomic_add(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically add data from shared memory into global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.ADD, tensor_desc, coord, src, "async_atomic_add",
+                                   _semantic=_semantic)
+
+
+@builtin
+def async_atomic_min(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically compute the minimum of shared memory data and global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.MIN, tensor_desc, coord, src, "async_atomic_min",
+                                   _semantic=_semantic)
+
+
+@builtin
+def async_atomic_max(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically compute the maximum of shared memory data and global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.MAX, tensor_desc, coord, src, "async_atomic_max",
+                                   _semantic=_semantic)
+
+
+@builtin
+def async_atomic_and(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically bitwise-and data from shared memory into global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.AND, tensor_desc, coord, src, "async_atomic_and",
+                                   _semantic=_semantic)
+
+
+@builtin
+def async_atomic_or(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically bitwise-or data from shared memory into global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.OR, tensor_desc, coord, src, "async_atomic_or",
+                                   _semantic=_semantic)
+
+
+@builtin
+def async_atomic_xor(tensor_desc, coord, src, _semantic=None):
+    """
+    Atomically bitwise-xor data from shared memory into global memory using TMA.
+
+    Args:
+        tensor_desc (tensor_descriptor): Tensor descriptor (tiled).
+        coord (Sequence[int | ttgl.constexpr | ttgl.tensor]): Coordinates in the destination tensor.
+        src (ttgl.shared_memory_descriptor): Source memory descriptor.
+    """
+    _async_atomic_shared_to_global(ttgl.ir.DESCRIPTOR_REDUCE_KIND.XOR, tensor_desc, coord, src, "async_atomic_xor",
+                                   _semantic=_semantic)
+
+
+@builtin
+def store_wait(pendings, read_only=True, _semantic=None):
+    """
+    Wait for pending TMA stores.
+
+    Args:
+        pendings (int | ttgl.constexpr): Maximum number of TMA stores allowed to remain pending.
+        read_only (bool | ttgl.constexpr): If true, wait only until the pending stores have finished reading
+            their shared-memory sources, but writes may not be visible in HBM. Defaults to true.
+
+    Notes:
+        By default, ``tma.store_wait`` only waits for the TMA store to finish reading from the shared memory,
+        however this does not mean that the write has been fully flushed to HBM. If your kernel uses TMA to pass
+        messages between CTAs, or between nvlink devices then you will need to use ``read_only=False`` before any
+        release operation.
+    """
     pendings = _unwrap_if_constexpr(pendings)
-    _semantic.builder.create_async_tma_store_wait(pendings)
+    read_only = _unwrap_if_constexpr(read_only)
+    _semantic.builder.create_async_tma_store_wait(pendings, read_only)
 
 
 @builtin

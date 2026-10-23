@@ -1,17 +1,23 @@
-// RUN: triton-opt %s -split-input-file --allocate-shared-memory --convert-triton-amdgpu-to-llvm=arch=gfx1250 --convert-builtin-func-to-llvm | FileCheck %s --check-prefix=GFX1250
+// RUN: triton-opt %s -split-input-file --allocate-shared-memory --convert-triton-amdgpu-to-llvm=gfx-arch=gfx1250 --convert-builtin-func-to-llvm | FileCheck %s --enable-var-scope --check-prefix=GFX1250
+
+// GFX1250: [[$MMRA_TAG:#[A-Za-z0-9_]+]] = #llvm.mmra_tag<"amdgpu-synchronize-as":"local">
 
 #shared = #ttg.swizzled_shared<{vec = 1, perPhase = 1, maxPhase = 1, order = [0]}>
 #smem = #ttg.shared_memory
 module attributes {"ttg.target" = "hip:gfx1250", "ttg.num-ctas" = 1 : i32, "ttg.num-warps" = 4 : i32, "ttg.threads-per-warp" = 32 : i32} {
   // GFX1250-LABEL: init_barrier
   tt.func @init_barrier(%alloc: !ttg.memdesc<1xi64, #shared, #smem, mutable>) {
-    // GFX1250: %[[INIT_VAL1:.+]] = llvm.mlir.constant(4294967297 : i64) : i64
-    // GFX1250: %[[ALLOC_PTR:.+]] = llvm.extractvalue %arg0[0] : !llvm.struct<(ptr<3>, i32)>
-    // GFX1250: llvm.store %[[INIT_VAL1]], %[[ALLOC_PTR]] : i64, !llvm.ptr<3>
-    // GFX1250: llvm.fence syncscope("workgroup") release
-    // GFX1250: rocdl.s.barrier.signal{{.*}}
-    // GFX1250: rocdl.s.barrier.wait{{.*}}
-    // GFX1250: llvm.fence syncscope("workgroup") acquire
+    // GFX1250:   %[[INIT_VAL1:.+]] = llvm.mlir.constant(4294967297 : i64) : i64
+    // GFX1250:   %[[ALLOC_PTR:.+]] = llvm.extractvalue %arg0[0] : !llvm.struct<(ptr<3>, i32)>
+    // GFX1250:   llvm.cond_br %{{.+}}, ^[[BB0:.+]], ^[[BB1:.+]]
+    // GFX1250-NEXT: ^[[BB0]]:
+    // GFX1250-NEXT:   llvm.store %[[INIT_VAL1]], %[[ALLOC_PTR]] : i64, !llvm.ptr<3>
+    // GFX1250-NEXT:   llvm.br ^[[BB1]]
+    // GFX1250-NEXT: ^[[BB1]]:
+    // GFX1250-NEXT:   llvm.fence syncscope("workgroup") release {llvm.mmra = [[$MMRA_TAG]]}
+    // GFX1250-NEXT:   rocdl.s.barrier
+    // GFX1250-NEXT:   llvm.fence syncscope("workgroup") acquire {llvm.mmra = [[$MMRA_TAG]]}
+    // GFX1250-NEXT:   llvm.return
     amdg.init_barrier %alloc, 2 : !ttg.memdesc<1xi64, #shared, #smem, mutable>
     tt.return
   }

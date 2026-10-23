@@ -70,7 +70,7 @@ def test_makeblockptr_order(shape, permute_order):
         out0_bptr = tl.make_block_ptr(out0_ptr, (s0, s1, s2), (out0_stride0, out0_stride1, out0_stride2),
                                       (offset0, offset1, offset2), (tile_size0, tile_size1, tile_size2),
                                       order=(out0_stride_order0, out0_stride_order1, out0_stride_order2))
-        tl.store(out0_bptr, out0.to(out0_bptr.type.element_ty),
+        tl.store(out0_bptr, out0.to(out0_bptr.dtype.element_ty),
                  boundary_check=(out0_stride_order0, out0_stride_order1, out0_stride_order2))
 
     def triton_func(in0: torch.Tensor, permute_order):

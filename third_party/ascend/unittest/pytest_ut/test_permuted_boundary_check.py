@@ -23,6 +23,8 @@ def zj_fa_fwd_pattern(in_ptr0, in_ptr1, out_ptr, M, K, N, MBLOCK: tl.constexpr, 
     tl.store(c_ptr, c, boundary_check=(0, 1))
 
 
+@pytest.mark.skip(
+    reason="Transposed flattened store support reverted; to be re-enabled after follow-up design analysis")
 def test_permute_boundary_check():
     M = 8
     K = 3
@@ -33,6 +35,6 @@ def test_permute_boundary_check():
     a = torch.randn((M, K), device="npu")  # 8, 3
     b = torch.randn((N, K), device="npu")  # 8, 3
     c = torch.empty((N, M), device="npu")
-    zj_fa_fwd_pattern[(1, 1, 1)](a, b, c, M, K, N, MBLOCK, NBLOCK, KBLOCK)
+    zj_fa_fwd_pattern[(1, 1, 1)](a, b, c, M, K, N, MBLOCK=MBLOCK, NBLOCK=NBLOCK, KBLOCK=KBLOCK)
     std = a @ b.T
     torch.testing.assert_close(std, c.T, atol=1e-2, rtol=1e-2)

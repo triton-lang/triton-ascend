@@ -3,13 +3,13 @@ name: LLVM Build
 on:
   push:
     paths:
-      - cmake/llvm-hash.txt
+      - cmake/llvm-info.json
       - third_party/ascend/patch/llvm_patch_*.patch
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
   pull_request:
     paths:
-      - cmake/llvm-hash.txt
+      - cmake/llvm-info.json
       - third_party/ascend/patch/llvm_patch_*.patch
       - .github/workflows/llvm-build.yml
       - .github/workflows/build/almalinux.Dockerfile
@@ -66,7 +66,7 @@ jobs:
     - name: Fetch LLVM Commit Hash
       shell: bash
       run: |
-        LLVM_COMMIT_HASH="$(cat cmake/llvm-hash.txt)"
+        LLVM_COMMIT_HASH="$(python3 -c "import json; print(json.load(open('cmake/llvm-info.json'))['llvm_hash'])")"
         echo "Found LLVM commit hash: ${LLVM_COMMIT_HASH}"
         echo "llvm_commit_hash=${LLVM_COMMIT_HASH}" >> ${GITHUB_ENV}
 
@@ -229,7 +229,7 @@ jobs:
           ${{ github.workspace }}/llvm-*-${{ matrix.config.target-os }}-${{ matrix.config.arch }}.tar.gz
 
     - name: Setup obsutil and upload to OBS
-      if: github.event_name == 'push' && github.repository == 'triton-lang/triton-ascend'
+      if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
       shell: bash
       env:
         AK: ${{ secrets.OBS_AK }}

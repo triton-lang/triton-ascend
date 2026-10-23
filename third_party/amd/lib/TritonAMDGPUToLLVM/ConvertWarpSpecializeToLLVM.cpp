@@ -5,6 +5,7 @@
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include "mlir/Dialect/LLVMIR/ROCDLDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/ImplicitLocOpBuilder.h"
@@ -37,99 +38,80 @@ enum BarrierIndex {
   kNumBarriers = 17
 };
 
-static void createBarrier(TritonLLVMIRRewriter &b, unsigned barIdx,
-                          unsigned numWarps,
-                          const AMD::TargetInfo &targetInfo) {
-  assert(barIdx < kNumBarriers && "not enough barriers");
-  Location loc = b.getLoc();
-  auto moduleOp = b.getBlock()->getParent()->getParentOfType<ModuleOp>();
-  auto ctx = moduleOp.getContext();
-  const std::string namedBarrierName = "nbar" + std::to_string(barIdx);
-  auto nbarAttr = StringAttr::get(ctx, namedBarrierName);
-  auto nbarTy = LLVM::LLVMTargetExtType::get(
-      ctx, "amdgcn.named.barrier", ArrayRef<Type>{}, ArrayRef<unsigned>{0});
+class AMDWarpSpecializeBarrierHelper : public WarpSpecializeBarrierHelper {
+public:
+  AMDWarpSpecializeBarrierHelper(ModuleOp module,
+                                 const AMD::TargetInfo &targetInfo)
+      : module(module), targetInfo(targetInfo) {}
 
-  LLVM::GlobalOp nbarGV;
-  Operation *nbarGlobalOp = SymbolTable::lookupSymbolIn(moduleOp, nbarAttr);
-  if (!nbarGlobalOp) {
-    RewriterBase::InsertionGuard guard(b);
-    Location uloc = UnknownLoc::get(ctx);
-    b.setInsertionPointToStart(moduleOp.getBody());
-    nbarGV = LLVM::GlobalOp::create(b, uloc, nbarTy,
-                                    /*isConstant=*/false,
-                                    LLVM::Linkage::Internal, namedBarrierName,
-                                    /*value=*/Attribute(), /*alignment=*/0,
-                                    targetInfo.getSharedAddressSpace());
-    // Add initializer region that returns 'poison'
-    Block *initBlock = b.createBlock(&nbarGV.getInitializerRegion());
-    b.setInsertionPointToStart(initBlock);
-    Value poison = LLVM::PoisonOp::create(b, uloc, nbarTy);
-    LLVM::ReturnOp::create(b, uloc, poison);
-  } else {
-    nbarGV = cast<LLVM::GlobalOp>(*nbarGlobalOp);
+  bool isBarrierOp(Operation *op) const override {
+    return isa<ROCDL::BarrierOp, ROCDL::SBarrierOp>(op);
   }
 
-  auto nbarPtr = LLVM::AddressOfOp::create(b, loc, nbarGV);
-  auto smemObj = SharedMemoryObject(nbarPtr, nbarTy, 1, loc, b);
-  ROCDL::BarrierJoinOp::create(b, loc, smemObj.getBase());
-  ROCDL::BarrierSignalVarOp::create(b, loc, smemObj.getBase(), numWarps);
-  ROCDL::BarrierWaitOp::create(b, loc, 1);
-}
+  Type getBarrierHandleType(MLIRContext *ctx) const override {
+    return LLVM::LLVMPointerType::get(ctx, targetInfo.getSharedAddressSpace());
+  }
 
-static void createAllBarrier(TritonLLVMIRRewriter &b) {
-  Location loc = b.getLoc();
-  ROCDL::BarrierOp::create(b, loc);
-}
+  FailureOr<Value>
+  getBarrierHandle(TritonLLVMIRRewriter &b,
+                   std::optional<unsigned> partitionIdx) override {
+    unsigned barIdx;
+    if (!partitionIdx) {
+      barIdx = kDefaultWarpGroupBarrierIdx;
+    } else {
+      barIdx = *partitionIdx + kNumReservedBarriers;
+      if (barIdx >= kNumBarriers) {
+        return mlir::emitError(b.getLoc(), "cannot support more than ")
+               << (kNumBarriers - kNumReservedBarriers)
+               << " warp group partitions";
+      }
+    }
+
+    auto nbarAttr = b.getStringAttr("nbar" + Twine(barIdx));
+    auto nbarTy = LLVM::LLVMTargetExtType::get(b.getContext(),
+                                               "amdgcn.named.barrier", {}, {0});
+
+    LLVM::GlobalOp nbarGV;
+    Operation *nbarGlobalOp = SymbolTable::lookupSymbolIn(module, nbarAttr);
+    if (!nbarGlobalOp) {
+      RewriterBase::InsertionGuard guard(b);
+      Location uloc = b.getUnknownLoc();
+      b.setInsertionPointToStart(module.getBody());
+      nbarGV = LLVM::GlobalOp::create(
+          b, uloc, nbarTy, /*isConstant=*/false, LLVM::Linkage::Internal,
+          nbarAttr.getValue(), /*value=*/Attribute(), /*alignment=*/0,
+          targetInfo.getSharedAddressSpace());
+      // Add initializer region that returns 'poison'
+      Block *initBlock = b.createBlock(&nbarGV.getInitializerRegion());
+      b.setInsertionPointToStart(initBlock);
+      Value poison = LLVM::PoisonOp::create(b, uloc, nbarTy);
+      LLVM::ReturnOp::create(b, uloc, poison);
+    } else {
+      nbarGV = cast<LLVM::GlobalOp>(*nbarGlobalOp);
+    }
+
+    return Value(LLVM::AddressOfOp::create(b, b.getLoc(), nbarGV));
+  }
+
+  void createBarrier(TritonLLVMIRRewriter &b, unsigned numWarps,
+                     Value handle) override {
+    Location loc = b.getLoc();
+    auto nbarTy = LLVM::LLVMTargetExtType::get(b.getContext(),
+                                               "amdgcn.named.barrier", {}, {0});
+    auto smemObj = SharedMemoryObject(handle, nbarTy, 1, loc, b);
+    ROCDL::BarrierJoinOp::create(b, loc, smemObj.getBase());
+    ROCDL::BarrierSignalVarOp::create(b, loc, smemObj.getBase(), numWarps);
+    ROCDL::BarrierWaitOp::create(b, loc, 1);
+  }
+
+private:
+  ModuleOp module;
+  const AMD::TargetInfo &targetInfo;
+};
 
 //===----------------------------------------------------------------------===//
 // lowerWarpSpecialize
 //===----------------------------------------------------------------------===//
-
-// Assign hardware barriers to each warp group and rewrite warp group barriers
-// into named barrier instructions. There is a maximum number of named barriers.
-static LogicalResult rewriteWarpGroupBarriers(
-    LLVM::LLVMFuncOp func, ArrayRef<WarpSpecializeOp> wsOps,
-    unsigned defaultNumWarps, const AMD::TargetInfo &targetInfo) {
-  // HACK: Turn all `rocdl.barrier` ops into warp group barriers.
-  func.walk<mlir::WalkOrder::PreOrder>([&](Operation *op) {
-    // Walk into default regions but not partition regions.
-    if (isa<WarpSpecializePartitionsOp>(op))
-      return WalkResult::skip();
-
-    if (auto bar = dyn_cast<ROCDL::BarrierOp>(op)) {
-      TritonLLVMIRRewriter b(bar.getLoc(), bar);
-      createBarrier(b, kDefaultWarpGroupBarrierIdx, defaultNumWarps,
-                    targetInfo);
-      bar.erase();
-      return WalkResult::skip();
-    }
-    return WalkResult::advance();
-  });
-
-  // Each partition executes simultaneously, so each will get a different
-  // barrier ID, but note this means there is a maximum of 16 barriers.
-  for (WarpSpecializeOp op : wsOps) {
-    for (auto partitionTuple : llvm::enumerate(op.getPartitionRegions())) {
-      auto idx = partitionTuple.index();
-      auto partition = partitionTuple.value();
-      unsigned barIdx = idx + kNumReservedBarriers;
-      if (barIdx >= kNumBarriers) {
-        return func.emitError("cannot support more than ")
-               << (kNumBarriers - kNumReservedBarriers)
-               << " warp group partitions";
-      }
-
-      partition->walk([&](ROCDL::BarrierOp bar) {
-        TritonLLVMIRRewriter b(bar.getLoc(), bar);
-        unsigned partitionNumWarps = op.getPartitionNumWarps()[idx];
-        createBarrier(b, barIdx, partitionNumWarps, targetInfo);
-        bar.erase();
-      });
-    }
-  }
-
-  return success();
-}
 
 static LogicalResult lowerWarpSpecialize(LLVM::LLVMFuncOp func,
                                          const AMD::TargetInfo &targetInfo) {
@@ -140,11 +122,7 @@ static LogicalResult lowerWarpSpecialize(LLVM::LLVMFuncOp func,
     return success();
 
   auto module = cast<ModuleOp>(func->getParentOp());
-  unsigned threadsPerWarp = TritonGPUDialect::getThreadsPerWarp(module);
   unsigned defaultNumWarps = lookupNumWarps(func);
-  if (failed(
-          rewriteWarpGroupBarriers(func, wsOps, defaultNumWarps, targetInfo)))
-    return failure();
 
   auto totalNumWarpsAttr =
       module->getAttrOfType<IntegerAttr>("ttg.total-num-warps");
@@ -170,9 +148,7 @@ static LogicalResult lowerWarpSpecialize(LLVM::LLVMFuncOp func,
   b.setInsertionPointToStart(header);
 
   // This is the absolute warp ID.
-  auto warpIdOp = LLVM::createLLVMIntrinsicCallOp(
-      b, b.getLoc(), "llvm.amdgcn.wave.id", {i32_ty}, ValueRange{});
-  Value wid = warpIdOp.getResult(0);
+  Value wid = ROCDL::WaveId::create(b, b.getLoc(), i32_ty);
   Value isDefault = b.icmp_ult(wid, b.i32_val(defaultNumWarps));
   LLVM::CondBrOp::create(b, b.getLoc(), isDefault, entry, switchLoop);
 
@@ -184,7 +160,8 @@ static LogicalResult lowerWarpSpecialize(LLVM::LLVMFuncOp func,
 
   WarpSpecializeCallbacks callbacks;
   callbacks.createAllBarrier = [](TritonLLVMIRRewriter &b, unsigned) {
-    createAllBarrier(b);
+    Location loc = b.getLoc();
+    ROCDL::BarrierOp::create(b, loc);
   };
 
   callbacks.reallocRegisters = [](TritonLLVMIRRewriter &, WarpSpecializeOp,
@@ -204,10 +181,10 @@ struct TritonAMDGPUConvertWarpSpecializeToLLVM
     : public mlir::triton::impl::TritonAMDGPUConvertWarpSpecializeToLLVMBase<
           TritonAMDGPUConvertWarpSpecializeToLLVM> {
 
-  TritonAMDGPUConvertWarpSpecializeToLLVM(StringRef arch)
+  TritonAMDGPUConvertWarpSpecializeToLLVM(StringRef gfxArch)
       : TritonAMDGPUConvertWarpSpecializeToLLVMBase<
             TritonAMDGPUConvertWarpSpecializeToLLVM>() {
-    this->arch = arch;
+    this->gfxArch = gfxArch;
   }
 
   void runOnOperation() override {
@@ -224,7 +201,7 @@ struct TritonAMDGPUConvertWarpSpecializeToLLVM
       return;
 
     // Use the arch parameter if provided, otherwise get from module
-    std::string archStr = this->arch;
+    std::string archStr = this->gfxArch;
     if (archStr.empty()) {
       auto arch = getAMDArch(mod);
       if (!arch.has_value()) {
@@ -235,12 +212,12 @@ struct TritonAMDGPUConvertWarpSpecializeToLLVM
       archStr = arch->str();
     }
 
-    if (archStr != "gfx1250") {
+    AMD::TargetInfo targetInfo(archStr.c_str());
+    if (targetInfo.getISAFamily() != triton::amdgpu::ISAFamily::GFX1250) {
       mod.emitError("Warp specialization is only supported on gfx1250, got ")
           << archStr;
       return signalPassFailure();
     }
-    AMD::TargetInfo targetInfo(archStr.c_str());
 
     // Convert types and cleanup unrealized conversions.
     mlir::LowerToLLVMOptions option(&getContext());
@@ -255,9 +232,13 @@ struct TritonAMDGPUConvertWarpSpecializeToLLVM
     if (failed(runPipeline(pm, mod)))
       return signalPassFailure();
 
+    AMDWarpSpecializeBarrierHelper barrierHelper(mod, targetInfo);
+    if (failed(lowerWarpSpecializeBarriers(mod, barrierHelper)))
+      return signalPassFailure();
+
     SmallVector<LLVM::LLVMFuncOp> kernels;
     for (auto func : mod.getOps<LLVM::LLVMFuncOp>()) {
-      if (func.isPublic())
+      if (func.getLinkage() == LLVM::Linkage::External)
         kernels.push_back(func);
     }
     for (LLVM::LLVMFuncOp kernel : kernels)
@@ -270,8 +251,8 @@ struct TritonAMDGPUConvertWarpSpecializeToLLVM
 namespace mlir::triton::AMD {
 
 std::unique_ptr<OperationPass<ModuleOp>>
-createTritonAMDGPUConvertWarpSpecializeToLLVMPass(StringRef arch) {
-  return std::make_unique<TritonAMDGPUConvertWarpSpecializeToLLVM>(arch);
+createTritonAMDGPUConvertWarpSpecializeToLLVMPass(StringRef gfxArch) {
+  return std::make_unique<TritonAMDGPUConvertWarpSpecializeToLLVM>(gfxArch);
 }
 
 } // namespace mlir::triton::AMD

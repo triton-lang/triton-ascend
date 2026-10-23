@@ -24,8 +24,8 @@ jobs:
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     steps:
-      - name: Checkout branch
-        uses: actions/checkout@v6
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
           # Full history is required for PR runs: the checker diffs <base>...HEAD
           # to find the changed docs. (Harmless for full scans.)
@@ -165,7 +165,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
       - name: Download and install Bisheng compiler

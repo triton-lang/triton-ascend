@@ -316,6 +316,7 @@ def test_tensor_pointer_loop(steps):
 
 
 @pytest.mark.parametrize("steps,switch_at", [(0, -1), (3, -1), (3, 1)])
+@pytest.mark.skip(reason="Scope/block-ptr boundary support reverted; to be re-enabled after follow-up design analysis")
 def test_descriptor_boundary_scalar_regression(steps, switch_at):
     x0_cpu, x1_cpu, x0, x1 = _inputs()
     out = torch.empty(BLOCK, dtype=torch.float32, device="npu")

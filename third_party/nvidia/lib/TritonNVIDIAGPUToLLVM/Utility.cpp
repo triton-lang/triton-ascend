@@ -142,17 +142,53 @@ Value createElectPredicateWarp0(Location loc, OpBuilder &rewriter) {
 Value createTMAMulticastMask(Location loc, ConversionPatternRewriter &rewriter,
                              uint16_t broadcastBits) {
   int numCTAs = triton::gpu::lookupNumCTAs(rewriter);
-  int blockBits = llvm::Log2_32(numCTAs);
-  uint32_t fixedBits = (~broadcastBits) & (numCTAs - 1);
-  uint32_t pattern = 1;
-  for (int i = 0; i < blockBits; ++i) {
-    if ((fixedBits & (1u << i)) == 0)
-      pattern |= (pattern << (1u << i));
-  }
+  auto encoding =
+      triton::nvidia_gpu::getTMAMulticastMaskEncoding(numCTAs, broadcastBits);
   auto b = TritonLLVMOpBuilder(loc, rewriter);
   auto ctaId = nvgpu::ClusterCTAIdOp::create(rewriter, loc);
-  Value base = b.and_(ctaId, b.i32_val(fixedBits));
-  return b.shl(b.i32_val(pattern), base);
+  Value base = b.and_(ctaId, b.i32_val(encoding.fixedBits));
+  return b.shl(b.i32_val(encoding.pattern), base);
+}
+
+uint32_t getCGABroadcastMask(mlir::triton::gpu::MemDescType barrierTy) {
+  auto kBlock = StringAttr::get(barrierTy.getContext(), "block");
+  return toLinearLayout(barrierTy).getFreeVariableMasks().lookup(kBlock);
+}
+
+std::optional<Value>
+getLeaderCTAPredicate(Location loc, ConversionPatternRewriter &rewriter,
+                      mlir::triton::gpu::MemDescType barrierTy) {
+  auto b = TritonLLVMOpBuilder(loc, rewriter);
+  uint32_t maskCGABroadcast = getCGABroadcastMask(barrierTy);
+  if (!maskCGABroadcast)
+    return std::nullopt;
+
+  Value ctaId = nvgpu::ClusterCTAIdOp::create(rewriter, loc);
+  Value ctaIdInGroup = b.and_(ctaId, b.i32_val(maskCGABroadcast));
+  return std::optional<Value>(b.icmp_eq(ctaIdInGroup, b.i32_val(0)));
+}
+
+Value getLeaderAddress(Location loc, ConversionPatternRewriter &rewriter,
+                       Value barrierPtr,
+                       mlir::triton::gpu::MemDescType barrierTy) {
+  uint32_t barrierMask = getCGABroadcastMask(barrierTy);
+  if (!barrierMask)
+    return barrierPtr;
+
+  // Trick from cutlass to implement a faster `mapa` via a single and
+  auto b = TritonLLVMOpBuilder(loc, rewriter);
+  uint32_t fullMask = ~(barrierMask << 24);
+  Value barrierInt = b.ptrtoint(i32_ty, barrierPtr);
+  barrierInt = b.and_(barrierInt, b.i32_val(fullMask));
+  return b.inttoptr(barrierPtr.getType(), barrierInt);
+}
+
+Value createLeadCTAPredicate(Location loc, RewriterBase &rewriter) {
+  auto b = TritonLLVMOpBuilder(loc, rewriter);
+  Value leftClusterId = nvgpu::ClusterCTAIdOp::create(rewriter, loc);
+  leftClusterId = b.and_(leftClusterId, b.i32_val(1));
+  Value cluster0 = b.icmp_eq(leftClusterId, b.i32_val(0));
+  return cluster0;
 }
 
 LogicalResult lowerLdStMatrix(
@@ -176,7 +212,6 @@ LogicalResult lowerLdStMatrix(
   auto kReg = S("register");
   auto kLane = S("lane");
   auto kWarp = S("warp");
-  auto kBlock = S("block");
   auto kOffset = S("offset");
   auto kAddr = S("addr");
   auto smemPtrTy = ptr_ty(ctx, 3);
@@ -186,9 +221,6 @@ LogicalResult lowerLdStMatrix(
   if ((!transpose && bitwidth > 32) ||
       (transpose && !(bitwidth == 16 ||
                       (bitwidth == 8 && targetInfo.supportLdStMatrixB8()))))
-    return failure();
-  // Inter block stmatrix is not supported
-  if (cvt.hasInDim(kBlock))
     return failure();
 
   // Map onto offsets (contiguous part) and addr (non-contiguous part)
@@ -300,7 +332,7 @@ LogicalResult lowerLdStMatrix(
 
   // If we are lowering a subslice, the subslice offsets shall not touch the
   // contiguous part of the tile
-  if (maskSpanAffineOffset & (tile.getOutDimSizeLog2(kOffset) - 1)) {
+  if (maskSpanAffineOffset & (tile.getOutDimSize(kOffset) - 1)) {
     return failure();
   }
 
@@ -328,8 +360,8 @@ LogicalResult lowerLdStMatrix(
                    {{kOffset, reps.getOutDimSize(kOffset)}}, false);
   // Compute the bits that are moved by one instruction
   // Compute elements for which we can swap the xor by an add
-  auto [nAdditive, permStrides] =
-      actionAdditiveStrides(reps, addrLayout, maskSpanAffineOffset);
+  auto [nAdditive, permStrides] = actionAdditiveStrides(
+      reps, addrLayout, maskSpanAffineOffset, fullTileVec.getInDimSize(kReg));
   reps = permStrides.apply(reps);
   if (isStore) {
     vals = permStrides.apply(vals);

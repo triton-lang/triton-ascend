@@ -20,23 +20,98 @@ std::string key(llvm::StringRef family, ReductionMode mode, llvm::StringRef op,
          (mode == ReductionMode::SIMD ? "simd/" : "simt/") + op.str() + "/" +
          type.str();
 }
-llvm::Expected<ReductionExpression>
-parseExpression(const llvm::json::Value &v, unsigned depth, unsigned &nodes) {
-  if (depth > 32 || ++nodes > 1024)
-    return invalid("reduction expression is too large");
-  const auto *o = v.getAsObject();
-  if (!o)
-    return invalid("reduction expression must be an object");
-  ReductionExpression e;
-  if (auto n = o->getNumber("constant")) {
-    if (o->size() != 1 || !std::isfinite(*n))
-      return invalid("invalid reduction constant");
-    e.constant = *n;
+class ExpressionParser {
+  llvm::StringRef text;
+  unsigned nodes = 0;
+
+  void space() { text = text.ltrim(); }
+  bool consume(llvm::StringRef token) {
+    space();
+    return text.consume_front(token);
+  }
+  llvm::Expected<ReductionExpression>
+  operation(llvm::StringRef name, std::vector<ReductionExpression> args) {
+    unsigned arity =
+        llvm::StringSwitch<unsigned>(name)
+            .Cases("add", "mul", "max", "min", "and", "or", 0)
+            .Cases("sub", "div", "pow", "lt", "le", "gt", 2)
+            .Cases("ge", "eq", "ne", 2)
+            .Cases("neg", "not", "indicator", "ceil", "sqrt", "log2", 1)
+            .Default(99);
+    if (arity == 99 || args.empty() || args.size() > 16 ||
+        (arity && args.size() != arity))
+      return invalid("unsupported reduction operator or arity");
+    if (name == "pow" && (args[1].kind != ReductionExpression::Kind::Constant ||
+                          args[1].constant < -4 || args[1].constant > 4))
+      return invalid("reduction power requires a fixed exponent in [-4,4]");
+    ReductionExpression e;
+    e.kind = ReductionExpression::Kind::Operator;
+    e.name = name.str();
+    e.arguments = std::move(args);
     return e;
   }
-  if (auto f = o->getString("feature")) {
-    if (o->size() != 1 ||
-        !llvm::StringSwitch<bool>(*f)
+  llvm::Expected<ReductionExpression> primary(unsigned depth) {
+    if (depth > 32 || ++nodes > 1024)
+      return invalid("reduction expression is too large");
+    space();
+    if (consume("(")) {
+      auto e = expression(0, depth + 1);
+      if (!e)
+        return e.takeError();
+      if (!consume(")"))
+        return invalid("missing reduction closing parenthesis");
+      return std::move(*e);
+    }
+    // Negative literals remain constants, preserving fixed power exponents.
+    if (!text.empty() && (llvm::isDigit(text.front()) || text.front() == '.' ||
+                          text.front() == '-')) {
+      size_t n = text.starts_with("-") ? 1 : 0;
+      while (n < text.size() && (llvm::isDigit(text[n]) || text[n] == '.'))
+        ++n;
+      if (n < text.size() && (text[n] == 'e' || text[n] == 'E')) {
+        ++n;
+        if (n < text.size() && (text[n] == '+' || text[n] == '-'))
+          ++n;
+        while (n < text.size() && llvm::isDigit(text[n]))
+          ++n;
+      }
+      double value;
+      if (text.take_front(n).getAsDouble(value) || !std::isfinite(value))
+        return invalid("invalid reduction numeric literal");
+      text = text.drop_front(n);
+      ReductionExpression e;
+      e.constant = value;
+      return e;
+    }
+    size_t n = 0;
+    while (n < text.size() && (llvm::isAlnum(text[n]) || text[n] == '_'))
+      ++n;
+    if (!n)
+      return invalid("expected reduction literal, feature or function");
+    auto name = text.take_front(n);
+    text = text.drop_front(n);
+    if (consume("(")) {
+      std::vector<ReductionExpression> args;
+      if (!consume(")")) {
+        do {
+          auto a = expression(0, depth + 1);
+          if (!a)
+            return a.takeError();
+          args.push_back(std::move(*a));
+          if (args.size() > 16)
+            return invalid("too many reduction arguments");
+        } while (consume(","));
+        if (!consume(")"))
+          return invalid("missing reduction function parenthesis");
+      }
+      auto op = llvm::StringSwitch<llvm::StringRef>(name)
+                    .Case("all_of", "and")
+                    .Case("any_of", "or")
+                    .Case("logical_not", "not")
+                    .Default(name);
+      return operation(op, std::move(args));
+    }
+    if (!llvm::StringSwitch<bool>(name)
              .Cases("R", "G", "Q", "L", true)
              .Cases("W", "rank", "d1", "d2", true)
              .Cases("O", "K", "H", "N", "route_id", true)
@@ -49,36 +124,90 @@ parseExpression(const llvm::json::Value &v, unsigned depth, unsigned &nodes) {
              .Cases("packedTraffic", "r16To", "R3", true)
              .Default(false))
       return invalid("unknown reduction feature");
+    ReductionExpression e;
     e.kind = ReductionExpression::Kind::Feature;
-    e.name = f->str();
+    e.name = name.str();
     return e;
   }
-  auto op = o->getString("op");
-  const auto *args = o->getArray("args");
-  if (!op || !args || o->size() != 2 || args->empty() || args->size() > 16)
-    return invalid("invalid reduction expression operator");
-  unsigned arity =
-      llvm::StringSwitch<unsigned>(*op)
-          .Cases("add", "mul", "max", "min", "and", "or", 0)
-          .Cases("sub", "div", "pow", "lt", "le", "gt", 2)
-          .Cases("ge", "eq", "ne", 2)
-          .Cases("neg", "not", "indicator", "ceil", "sqrt", "log2", 1)
-          .Default(99);
-  if (arity == 99 || (arity != 0 && args->size() != arity))
-    return invalid("unsupported reduction operator or arity");
-  e.kind = ReductionExpression::Kind::Operator;
-  e.name = op->str();
-  for (const auto &a : *args) {
-    auto parsed = parseExpression(a, depth + 1, nodes);
-    if (!parsed)
-      return parsed.takeError();
-    e.arguments.push_back(std::move(*parsed));
+  llvm::Expected<ReductionExpression> expression(unsigned minimum,
+                                                 unsigned depth) {
+    auto lhs = primary(depth);
+    if (!lhs)
+      return lhs.takeError();
+    while (true) {
+      space();
+      llvm::StringRef token, name;
+      unsigned precedence = 0;
+      for (auto t :
+           {"**", "<=", ">=", "==", "!=", "+", "-", "*", "/", "<", ">"}) {
+        if (!text.starts_with(t))
+          continue;
+        token = t;
+        name = llvm::StringSwitch<llvm::StringRef>(token)
+                   .Case("**", "pow")
+                   .Case("+", "add")
+                   .Case("-", "sub")
+                   .Case("*", "mul")
+                   .Case("/", "div")
+                   .Case("<", "lt")
+                   .Case("<=", "le")
+                   .Case(">", "gt")
+                   .Case(">=", "ge")
+                   .Case("==", "eq")
+                   .Case("!=", "ne")
+                   .Default("");
+        precedence = token == "**"                  ? 4
+                     : token == "*" || token == "/" ? 3
+                     : token == "+" || token == "-" ? 2
+                                                    : 1;
+        break;
+      }
+      if (!precedence || precedence < minimum)
+        break;
+      if (depth > 32 || ++nodes > 1024)
+        return invalid("reduction expression is too large");
+      text = text.drop_front(token.size());
+      auto rhs = expression(precedence + (token == "**" ? 0 : 1), depth + 1);
+      if (!rhs)
+        return rhs.takeError();
+      std::vector<ReductionExpression> args;
+      args.push_back(std::move(*lhs));
+      args.push_back(std::move(*rhs));
+      lhs = operation(name, std::move(args));
+      if (!lhs)
+        return lhs.takeError();
+    }
+    return std::move(*lhs);
   }
-  if (*op == "pow" &&
-      (e.arguments[1].kind != ReductionExpression::Kind::Constant ||
-       e.arguments[1].constant < -4 || e.arguments[1].constant > 4))
-    return invalid("reduction power requires a fixed exponent in [0,4]");
-  return e;
+
+  static bool validDepth(const ReductionExpression &e, unsigned depth = 0) {
+    return depth <= 32 && llvm::all_of(e.arguments, [depth](const auto &arg) {
+             return validDepth(arg, depth + 1);
+           });
+  }
+
+public:
+  explicit ExpressionParser(llvm::StringRef input) : text(input) {}
+  llvm::Expected<ReductionExpression> parse() {
+    if (text.size() > 16384)
+      return invalid("reduction expression text is too long");
+    auto e = expression(0, 0);
+    if (!e)
+      return e.takeError();
+    space();
+    if (!text.empty())
+      return invalid("trailing reduction expression text");
+    if (!validDepth(*e))
+      return invalid("reduction expression tree is too deep");
+    return std::move(*e);
+  }
+};
+llvm::Expected<ReductionExpression>
+parseExpression(const llvm::json::Value &v) {
+  auto text = v.getAsString();
+  if (!text)
+    return invalid("reduction expression must be a string");
+  return ExpressionParser(*text).parse();
 }
 } // namespace
 
@@ -136,12 +265,10 @@ parseFirstAxisFunctions(const llvm::json::Array &functions) {
                  *expr = object->get("expression");
       if (!id || !lane || *lane <= 0 || !cond || !expr)
         return invalid("incomplete reduction segment");
-      unsigned nodes = 0;
-      auto c = parseExpression(*cond, 0, nodes);
+      auto c = parseExpression(*cond);
       if (!c)
         return c.takeError();
-      nodes = 0;
-      auto e = parseExpression(*expr, 0, nodes);
+      auto e = parseExpression(*expr);
       if (!e)
         return e.takeError();
       function.segments.push_back(

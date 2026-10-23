@@ -2129,9 +2129,9 @@ TEST(SimdSimtCostModelTest, CurrentFirstAxisAllSegmentFixtures) {
 TEST(SimdSimtCostModelTest, ReductionProfileHierarchyAndLegacyAreEquivalent) {
   using namespace mlir::ascend;
   const char *first =
-      R"({"supported_warps":[4],"segments":[{"id":"f","lane_width":1,"condition":{"constant":1},"expression":{"constant":42}}]})";
+      R"({"supported_warps":[4],"segments":[{"id":"f","lane_width":1,"condition":"1","expression":"42"}]})";
   const char *middle =
-      R"({"layout_policy_id":"row_major_128bit_v1","supported_warps":[4],"segments":[{"id":"m","lane_width":1,"condition":{"constant":1},"expression":{"constant":43}}]})";
+      R"({"layout_policy_id":"row_major_128bit_v1","supported_warps":[4],"segments":[{"id":"m","lane_width":1,"condition":"1","expression":"43"}]})";
   auto makeRecord = [](const char *text, llvm::StringRef family) {
     auto parsed = llvm::json::parse(text);
     if (!parsed) {
@@ -2197,4 +2197,82 @@ TEST(SimdSimtCostModelTest, ReductionProfileHierarchyAndLegacyAreEquivalent) {
     ASSERT_TRUE(cost);
     EXPECT_DOUBLE_EQ(*cost, 43);
   }
+}
+
+TEST(SimdSimtCostModelTest, StringReductionExpressions) {
+  using namespace mlir::ascend;
+  auto load = [](llvm::json::Value expression,
+                 llvm::StringRef condition = "1") {
+    llvm::json::Object segment{{"id", "test"},
+                               {"lane_width", 1},
+                               {"condition", condition.str()},
+                               {"expression", std::move(expression)}};
+    llvm::json::Object function{
+        {"supported_warps", llvm::json::Array{4}},
+        {"segments", llvm::json::Array{std::move(segment)}}};
+    llvm::json::Object root{
+        {"schema_version", 1},
+        {"target", "test"},
+        {"profile_version", "test"},
+        {"unit", "syscnt_cycle"},
+        {"families",
+         llvm::json::Object{
+             {"tail_axis", llvm::json::Object{{"simd", llvm::json::Object{}},
+                                              {"simt", llvm::json::Object{}}}},
+             {"first_axis",
+              llvm::json::Object{
+                  {"simd",
+                   llvm::json::Object{
+                       {"sum", llvm::json::Object{
+                                   {"f32", std::move(function)}}}}}}}}}};
+    int fd;
+    llvm::SmallString<128> path;
+    if (auto ec = llvm::sys::fs::createTemporaryFile("reduction-string", "json",
+                                                     fd, path))
+      return llvm::Expected<ReductionProfile>(llvm::errorCodeToError(ec));
+    {
+      llvm::raw_fd_ostream stream(fd, true);
+      stream << llvm::json::Value(std::move(root));
+    }
+    auto result = ReductionProfile::loadFromFile(path);
+    llvm::sys::fs::remove(path);
+    return result;
+  };
+  for (auto entry :
+       {std::make_pair("2 + 3 * 4", 14.), std::make_pair("(2 + 3) * 4", 20.),
+        std::make_pair("2 ** 3", 8.), std::make_pair("pow(2, -2) + 1e-3", .251),
+        std::make_pair("max(ceil(1.2), sqrt(9), log2(16))", 4.),
+        std::make_pair("neg(-2) + indicator(R >= 8)", 3.)}) {
+    auto p = load(entry.first,
+                  "all_of(R >= 8, any_of(G == 16, logical_not(W == 4)))");
+    ASSERT_TRUE(static_cast<bool>(p)) << llvm::toString(p.takeError());
+    ReductionWorkload work;
+    work.kind = "sum";
+    work.dataType = "f32";
+    work.shape = {8, 16};
+    work.axis = 0;
+    auto value =
+        estimateFirstAxisReductionCycles(work, *p, ReductionMode::SIMD, 4);
+    ASSERT_TRUE(value);
+    EXPECT_NEAR(*value, entry.second, 1e-12);
+  }
+  for (auto text :
+       {"", "R +", "unknown", "sqrt()", "pow(R, G)", "pow(R, 5)", "1e999", "(R",
+        "R)", "1;2", "max(1,)", "1..2", "sqrt(1,2)"}) {
+    auto p = load(text);
+    EXPECT_FALSE(static_cast<bool>(p)) << text;
+    if (!p)
+      llvm::consumeError(p.takeError());
+  }
+  for (auto text : {std::string(16385, '1'),
+                    std::string(40, '(') + "1" + std::string(40, ')')}) {
+    auto p = load(text);
+    EXPECT_FALSE(static_cast<bool>(p));
+    if (!p)
+      llvm::consumeError(p.takeError());
+  }
+  auto old = load(llvm::json::Object{{"constant", 42}});
+  EXPECT_FALSE(static_cast<bool>(old));
+  if (!old)
+    llvm::consumeError(old.takeError());
 }

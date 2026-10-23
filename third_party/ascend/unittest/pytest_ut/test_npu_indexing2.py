@@ -35,7 +35,7 @@ def foo(a, b, c):
 def triton_codegen2(in_ptr0, in_ptr1, in_ptr2, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr,
                     RBLOCK: tl.constexpr):
     ynumel = 8
-    rnumel = 2048
+    rnumel: tl.constexpr = 2048
     xnumel = 1024
     offset = tl.program_id(0) * XBLOCK
     base1 = tl.arange(0, XBLOCK_SUB)

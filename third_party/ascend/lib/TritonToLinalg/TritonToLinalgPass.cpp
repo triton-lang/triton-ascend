@@ -1520,7 +1520,7 @@ TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
   // operands/results use TensorDescType.
   target.addDynamicallyLegalDialect<
       mlir::arith::ArithDialect, mlir::scf::SCFDialect, triton::TritonDialect>(
-      [](mlir::Operation *op) {
+      [](mlir::Operation *op) -> std::optional<bool> {
         return !DescriptorConverter::hasATensorDescriptorType(
                    op->getOperandTypes()) &&
                !DescriptorConverter::hasATensorDescriptorType(
@@ -1528,12 +1528,13 @@ TritonToLinalgPass::processDescriptorOperations(ModuleOp moduleOp) {
       });
   // Function signature legality: Triton FuncOp is legal if its inputs/outputs
   // contain no TensorDescType.
-  target.addDynamicallyLegalOp<triton::FuncOp>([](triton::FuncOp funcOp) {
-    return !DescriptorConverter::hasATensorDescriptorType(
-               funcOp.getFunctionType().getInputs()) &&
-           !DescriptorConverter::hasATensorDescriptorType(
-               funcOp.getFunctionType().getResults());
-  });
+  target.addDynamicallyLegalOp<triton::FuncOp>(
+      [](triton::FuncOp funcOp) -> std::optional<bool> {
+        return !DescriptorConverter::hasATensorDescriptorType(
+                   funcOp.getFunctionType().getInputs()) &&
+               !DescriptorConverter::hasATensorDescriptorType(
+                   funcOp.getFunctionType().getResults());
+      });
   target.addLegalOp<triton::MakeTensorDescOp>();
   target.addIllegalOp<triton::DescriptorLoadOp, triton::DescriptorStoreOp,
                       triton::DescriptorScatterOp, triton::DescriptorGatherOp,

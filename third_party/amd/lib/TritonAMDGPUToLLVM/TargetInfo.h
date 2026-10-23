@@ -24,13 +24,17 @@ public:
 
   bool supportMaximumMinimum() const override;
 
+  bool supportDppBroadcast() const;
+
   Value getClusterCTAId(RewriterBase &rewriter, Location loc) const override;
 
   Value ballot(RewriterBase &rewriter, Location loc, Type type,
                Value cmp) const override;
 
   void barrier(Location loc, RewriterBase &rewriter,
-               bool isWarpSync = false) const override;
+               triton::gpu::AddrSpace targets) const override;
+
+  void warpSync(Location loc, RewriterBase &rewriter) const override;
 
   void storeDShared(RewriterBase &rewriter, Location loc, Value ptr,
                     std::optional<Value> ctaId, Value val,
@@ -47,6 +51,8 @@ public:
     unsigned instBitWidth;
     // Number of elements that the instruction needs to be contiguous in LDS
     unsigned tileSize;
+    // Whether B8 types require double contiguity (for certain architectures)
+    bool needsDoubleB8Contiguity;
   };
   // Get the ds_read_tr parameters for the instruction that operates on the
   // element granularty specified by bitWidth
@@ -100,9 +106,15 @@ public:
   // ttg.async_wait
   bool requiresAliasInfoForAsyncOps() const;
   bool supportsDirectToLdsLoadBitWidth(int bitWidth) const;
+  bool supportsDirectFromLdsStoreBitWidth(int bitWidth) const;
 
   bool supportsMultiCTALaunch() const;
+  bool supportsTDM() const;
   bool supportsClusterLoadBitWidth(int biwWidth) const;
+
+  bool supportsWaveId() const;
+  bool supportsPermlaneSwap() const;
+  bool supportsCvtPkScalePk8() const;
 
   void localLoadOpAnnotation(triton::gpu::LocalLoadOp localLoadOp,
                              Operation *llLoadOp) const override;

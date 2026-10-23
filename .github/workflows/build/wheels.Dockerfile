@@ -24,6 +24,36 @@ ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
 RUN dnf install -y clang lld ccache cmake
 
 # ---------------------------------------------------------------------------
+<<<<<<< HEAD
+=======
+# Build args — set by the workflow matrix
+# ---------------------------------------------------------------------------
+ARG PYTHON_VERSION=cp310
+ARG MAX_JOBS=4
+ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
+ARG BUILD_DATE=00000000
+
+# ---------------------------------------------------------------------------
+# Copy the full workspace.  Different branches keep setup.py in different
+# places (root vs python/), so the build step detects it below.
+# ---------------------------------------------------------------------------
+COPY . /project/
+WORKDIR /project
+
+# ---------------------------------------------------------------------------
+# Environment matching the original CIBW_ENVIRONMENT
+# ---------------------------------------------------------------------------
+ENV MAX_JOBS=${MAX_JOBS} \
+    TRITON_BUILD_WITH_CLANG_LLD=true \
+    TRITON_BUILD_PROTON=OFF \
+    TRITON_WHEEL_NAME=triton-ascend \
+    TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
+    TRITON_WHEEL_VERSION_SUFFIX=${TRITON_WHEEL_VERSION_SUFFIX}${BUILD_DATE} \
+    IS_MANYLINUX=TRUE \
+    SSL_CERT_FILE=/etc/pki/tls/certs/ca-bundle.crt
+
+# ---------------------------------------------------------------------------
+>>>>>>> upstream/dev/main-upgrade-3.7
 # Install setuptools + wheel for the target Python (not pre-installed in
 # minimal manylinux images). Source-independent: cacheable layer.
 # ---------------------------------------------------------------------------

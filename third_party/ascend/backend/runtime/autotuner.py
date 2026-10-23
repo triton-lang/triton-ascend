@@ -2568,6 +2568,9 @@ class AutoTilingTuner(Autotuner):
                                                          compile_key=compile_keys.get(config), **kwargs)
             except Exception as e:
                 # ignore exception from __exit__() of AsyncCompileMode
+                import traceback
+                exc = e
+                exc_stack = traceback.format_exc()
                 triton.runtime._async_compile.active_mode.set(None)
                 for pending in kernels_call:
                     if (pending not in run_fns and pending not in self._compile_failed_configs
@@ -2680,7 +2683,14 @@ class AutoTilingTuner(Autotuner):
                     )
                 if isinstance(res, tuple):
                     res = res[0]
-                packed_metadata = getattr(res, "packed_metadata", None)
+                # Prefer object.__getattribute__ over getattr: FutureKernel.__getattr__
+                # eagerly calls result() under AsyncCompileMode and can raise outside
+                # the per-config handler. Real CompiledKernel keeps packed_metadata
+                # as an instance attribute; FutureKernel does not.
+                try:
+                    packed_metadata = object.__getattribute__(res, "packed_metadata")
+                except AttributeError:
+                    packed_metadata = None
                 if isinstance(packed_metadata, dict):
                     kernel_call.target_kernel_name = packed_metadata.get("kernel_name")
             except Exception as e:

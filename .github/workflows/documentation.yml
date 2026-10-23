@@ -24,8 +24,8 @@ jobs:
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/modelfoundry/ascend/triton:github_action
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout branch
+        uses: actions/checkout@v6
         with:
           # Full history is required for PR runs: the checker diffs <base>...HEAD
           # to find the changed docs. (Harmless for full scans.)

@@ -1,6 +1,7 @@
 #include "TritonToLLVM/Passes.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Attributes.h"
@@ -8,6 +9,7 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Dialect/TritonGPU/IR/Dialect.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/LogicalResult.h"
 
@@ -250,14 +252,25 @@ struct ElementwiseInlineAsmOpConversion
   }
 };
 
+struct BarrierOpConversion : OpRewritePattern<triton::gpu::BarrierOp> {
+  using OpRewritePattern<triton::gpu::BarrierOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::gpu::BarrierOp op,
+                                PatternRewriter &rewriter) const final {
+    rewriter.replaceOpWithNewOp<mlir::gpu::BarrierOp>(op);
+    return success();
+  }
+};
+
 void TritonToLLVMPass::runOnOperation() {
   auto module = getOperation();
   ConversionTarget target(getContext());
   target.addLegalDialect<tensor::TensorDialect, LLVM::LLVMDialect,
-                         arith::ArithDialect>();
+                         arith::ArithDialect, mlir::gpu::GPUDialect>();
 
   RewritePatternSet patterns(&getContext());
   patterns.add<ElementwiseInlineAsmOpConversion>(patterns.getContext());
+  patterns.add<BarrierOpConversion>(patterns.getContext());
   if (failed(applyPartialConversion(module, target, std::move(patterns)))) {
     signalPassFailure();
   }

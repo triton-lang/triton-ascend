@@ -59,7 +59,7 @@ def triton_cdiv(in_ptr0, in_ptr1, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl
 
 
 @triton.jit
-def triton_cdiv_special(in_ptr0, div, out_ptr0, XBLOCK, XBLOCK_SUB: tl.constexpr):
+def triton_cdiv_special(in_ptr0, div, out_ptr0, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base1 = tl.arange(0, XBLOCK_SUB)
     loops1: tl.constexpr = tl.cdiv(XBLOCK, XBLOCK_SUB)

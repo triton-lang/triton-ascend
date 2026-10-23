@@ -14,7 +14,8 @@ constexpr const char *syncedViaAsyncWaitAttrName =
 // if all defining operations are an AsyncWait
 bool comesFromAsyncWait(Value token) {
   if (auto defOp = token.getDefiningOp()) {
-    return isa<triton::gpu::AsyncWaitOp, amdgpu::AsyncWaitOp>(defOp);
+    return isa<triton::gpu::AsyncWaitOp, amdgpu::AsyncWaitOp,
+               amdgpu::AsyncTDMWait>(defOp);
   }
 
   auto blockArg = dyn_cast<BlockArgument>(token);
@@ -50,22 +51,6 @@ bool comesFromAsyncWait(Value token) {
   return true;
 }
 } // namespace
-
-void addLocalBarrierAfterAmdGpuAsyncWait(ModuleOp mod) {
-  auto *ctx = mod->getContext();
-
-  SmallVector<amdgpu::AsyncWaitOp> waits;
-  mod->walk([&waits](amdgpu::AsyncWaitOp waitOp) { waits.push_back(waitOp); });
-
-  IRRewriter builder(mod.getContext());
-  for (auto waitOp : waits) {
-    if (isa<mlir::gpu::BarrierOp, gpu::LocalBarrierOp>(waitOp->getNextNode()))
-      continue;
-
-    builder.setInsertionPointAfter(waitOp);
-    builder.create<triton::gpu::LocalBarrierOp>(waitOp->getLoc());
-  }
-}
 
 void annotateLocalLoadsSyncedViaAsyncWait(ModuleOp mod) {
   auto *ctx = mod->getContext();

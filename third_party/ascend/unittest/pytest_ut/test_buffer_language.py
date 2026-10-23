@@ -144,6 +144,15 @@ def kernel_subview_operations(M: tl.constexpr, N: tl.constexpr):
     sub_int = bl.subview(buf, [0, 0], [M // 2, N // 2], [1, 1])
 
 
+@triton.jit
+def tensor_to_buffer(x_ptr, XBLOCK: tl.constexpr):
+    offsets = tl.arange(0, XBLOCK)
+    x = tl.load(x_ptr + offsets, mask=offsets < XBLOCK)
+    x_ub_buf = bl.to_buffer(x, space=al.ascend_address_space.UB)
+    y = bl.to_tensor(x_ub_buf)
+    tl.store(x_ptr + offsets, y, mask=offsets < XBLOCK)
+
+
 # Test function definitions
 def test_buffer_type_operations():
     print("=" * 60)
@@ -217,6 +226,20 @@ def test_subview_operations():
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
 
 
+def test_tensor_to_buffer_mlir():
+    """Guard against incorrect ToBufferOp usage.
+
+    LLVM 20 only recognizes bufferization.to_memref (ToMemrefOp); the legacy
+    bufferization.to_buffer (ToBufferOp) no longer compiles. compile_kernel
+    returns the raw ast_to_ttir module, so the emitted op name is observable
+    here. (The JIT's kernel.ttir.mlir dump won't show it for this kernel:
+    make_ttir's canonicalize/CSE/DCE folds the identity round trip away.)
+    """
+    mlir = compile_kernel(tensor_to_buffer, {"x_ptr": "*fp32"}, {"XBLOCK": 256})
+    assert "bufferization.to_memref" in mlir, mlir
+    assert "bufferization.to_buffer" not in mlir, mlir
+
+
 # ============== Main for manual testing ==============
 if __name__ == "__main__":
     test_buffer_type_operations()
@@ -225,3 +248,4 @@ if __name__ == "__main__":
     test_to_buffer_operations()
     test_to_tensor_operations()
     test_subview_operations()
+    test_tensor_to_buffer_mlir()

@@ -65,7 +65,7 @@ def torch_max_pr_index(x0):
 
 # x0_numel 128, r1_numel 65, 128, 128, 32
 @triton.jit
-def triton_kernel(in_ptr0, in_ptr1, out_ptr0, out_ptr1, x0_numel, r1_numel, XBLOCK: tl.constexpr,
+def triton_kernel(in_ptr0, in_ptr1, out_ptr0, out_ptr1, x0_numel, r1_numel: tl.constexpr, XBLOCK: tl.constexpr,
                   XBLOCK_SUB: tl.constexpr, RBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base1 = tl.arange(0, XBLOCK_SUB)

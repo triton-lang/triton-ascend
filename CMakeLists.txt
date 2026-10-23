@@ -20,6 +20,8 @@ option(TRITON_BUILD_PYTHON_MODULE "Build Python Triton bindings" OFF)
 option(TRITON_BUILD_PROTON "Build the Triton Proton profiler" ON)
 option(TRITON_BUILD_UT "Build C++ Triton Unit Tests" ON)
 option(TRITON_BUILD_WITH_CCACHE "Build with ccache (if available)" ON)
+option(LLVM_BUILD_SHARED_LIBS
+  "Build all libraries as shared libraries instead of static" OFF)
 set(TRITON_CODEGEN_BACKENDS "" CACHE STRING "Enable different codegen backends")
 
 if(TRITON_BUILD_WITH_CCACHE)
@@ -60,6 +62,7 @@ else()
   set(CMAKE_EXE_LINKER_FLAGS_TRITONRELBUILDWITHASSERTS "/debug:fastlink /INCREMENTAL")
   set(CMAKE_MODULE_LINKER_FLAGS_TRITONRELBUILDWITHASSERTS "/debug:fastlink /INCREMENTAL")
   set(CMAKE_SHARED_LINKER_FLAGS_TRITONRELBUILDWITHASSERTS "/debug:fastlink /INCREMENTAL")
+  set(LLVM_BUILD_SHARED_LIBS "0")
 endif()
 
 # Default build type
@@ -128,7 +131,7 @@ set_property(GLOBAL PROPERTY TRITON_LIBS "")
 function(add_triton_library name)
   set_property(GLOBAL APPEND PROPERTY TRITON_LIBS ${name})
   add_triton_object(${name} ${ARGN})
-  llvm_update_compile_flags(${name})
+  target_compile_options(${name} PRIVATE ${TRITON_DISABLE_EH_RTTI_FLAGS})
 endfunction()
 
 set_property(GLOBAL PROPERTY TRITON_PLUGINS "")
@@ -140,6 +143,7 @@ endfunction()
 
 # Disable warnings that show up in external code (gtest;pybind11)
 if(NOT MSVC)
+  set(TRITON_DISABLE_EH_RTTI_FLAGS "$<$<COMPILE_LANGUAGE:CXX>:-fno-exceptions;-fno-rtti>")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror -Wno-covered-switch-default -fvisibility=hidden")
 else()
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /wd4244 /wd4624 /wd4715 /wd4530")
@@ -233,6 +237,7 @@ if(TRITON_BUILD_PYTHON_MODULE)
     MLIRIndexToLLVM
     MLIRGPUToROCDLTransforms
     MLIRUBToLLVM
+    MLIRPluginsLib
 
     # LLVM
     LLVMPasses
@@ -340,6 +345,7 @@ find_package(Threads REQUIRED)
 add_subdirectory(third_party/f2reduce)
 add_subdirectory(bin)
 add_subdirectory(test)
+add_subdirectory(examples)
 
 if(TRITON_BUILD_UT)
   add_subdirectory(unittest)

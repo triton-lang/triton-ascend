@@ -736,7 +736,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -977,7 +977,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
     linalg, metadata = _parse_linalg_metadata(linalg, metadata)
     _finalize_program_launch_policy(metadata, opt)
     with tempfile.TemporaryDirectory() as tmpdir:
-        tmp_file_name = "kernel.mlir"
+        tmp_file_name = "kernel.ttadapter.mlir"
         ttadapter_path = os.path.join(tmpdir, tmp_file_name)
         Path(ttadapter_path).write_text(linalg)
         bin_file = os.path.join(tmpdir, "kernel")
@@ -1586,8 +1586,6 @@ class AscendBackend(BaseBackend):
         super().__init__(target)
         if target.backend == "npu":
             self.binary_ext = "npubin"
-            # Include all binary file extensions (mlirbc is always emitted for normal kernels).
-            self.binary_extensions = {"npubin", "mlirbc"}
 
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?
@@ -1666,9 +1664,6 @@ class AscendBackend(BaseBackend):
                 stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
                 return
             stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
-            # Normal kernels always convert Linalg IR to bytecode and back to MLIR text.
-            stages["mlirbc"] = lambda src, metadata: linalg_to_bc_by_triton_mlir_opt(src, metadata, options)
-            stages["bcmlir"] = lambda src, metadata: bc_to_linalg_by_bishengir_opt(src, metadata, options)
             if options.compile_on_910_95:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))

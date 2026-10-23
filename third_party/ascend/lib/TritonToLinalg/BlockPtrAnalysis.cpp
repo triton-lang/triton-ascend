@@ -56,6 +56,7 @@
 #include "llvm/Support/FormatVariadic.h"
 #include <cassert>
 #include <limits>
+#include <optional>
 #include <set>
 
 #define DEBUG_TYPE "triton-block-ptr-analysis"
@@ -1574,22 +1575,6 @@ BlockDataParser::rewriteAddPtr(triton::AddPtrOp op,
     inferedSize *= sizeConst.value();
   }
 
-  auto &offsets = data.getOffsetsRef();
-  for (size_t i = 0; i < offsets.size(); ++i) {
-    if (auto constVal = getConstantIntValue(offsets[i])) {
-      if (constVal.value() < 0) {
-        LLVM_DEBUG({
-          llvm::dbgs() << "[NegOffsetElim] Detected negative offset: "
-                       << constVal.value() << " at dim " << i << "\n";
-        });
-
-        Value negOffsetVal = rewriter.create<arith::ConstantIndexOp>(
-            op.getLoc(), constVal.value());
-        offsets[i] = negOffsetVal;
-      }
-    }
-  }
-
   if (auto intToPtrOp = dyn_cast_or_null<triton::IntToPtrOp>(
           data.getSourceRef().getDefiningOp())) {
     auto rtype = cast<triton::PointerType>(intToPtrOp.getResult().getType());
@@ -1598,6 +1583,77 @@ BlockDataParser::rewriteAddPtr(triton::AddPtrOp op,
     auto hivmPointCastOp = createScalarPointerCast(
         rewriter, intToPtrOp.getLoc(), memrefType, intToPtrOp.getSrc());
     data.setSource(hivmPointCastOp.getResult());
+  }
+
+  // Rebase when the *linear* cast offset (sum of BlockData offsets) is a
+  // negative constant: base+(i+(-N)) => (base advanced by -N elems)+i.
+  auto &offsets = data.getOffsetsRef();
+  std::optional<int64_t> linearOffset = 0;
+  for (OpFoldResult ofr : offsets) {
+    auto constVal = getConstantIntValue(ofr);
+    if (!constVal) {
+      linearOffset.reset();
+      break;
+    }
+    *linearOffset += *constVal;
+  }
+
+  if (linearOffset && *linearOffset < 0) {
+    int64_t negElems = *linearOffset;
+    LLVM_DEBUG({
+      llvm::dbgs() << "[NegOffsetRebase] Absorbing linear negative offset "
+                   << negElems << " into source\n";
+    });
+
+    Value src = data.getSourceRef();
+    auto baseMemrefType = dyn_cast<BaseMemRefType>(src.getType());
+    assert(baseMemrefType && "expected memref source before rebase");
+    Type elemType = baseMemrefType.getElementType();
+
+    unsigned bitWidth = 0;
+    if (auto intTy = dyn_cast<IntegerType>(elemType))
+      bitWidth = intTy.getWidth();
+    else if (auto floatTy = dyn_cast<FloatType>(elemType))
+      bitWidth = floatTy.getWidth();
+    else
+      llvm_unreachable("unsupported element type for negative offset rebase");
+    assert(bitWidth % 8 == 0 && "element type must be byte-aligned");
+    int64_t elemBytes = static_cast<int64_t>(bitWidth / 8);
+
+    Value addrI64;
+    if (auto ptrCast = src.getDefiningOp<hivm::PointerCastOp>()) {
+      addrI64 = ptrCast.getAddrs()[0];
+      Value deltaElemsV = rewriter.create<arith::ConstantOp>(
+          op.getLoc(), rewriter.getIntegerAttr(addrI64.getType(), negElems));
+      Value elemSizeV = rewriter.create<arith::ConstantOp>(
+          op.getLoc(), rewriter.getIntegerAttr(addrI64.getType(), elemBytes));
+      Value byteOffset =
+          rewriter.create<arith::MulIOp>(op.getLoc(), deltaElemsV, elemSizeV);
+      addrI64 =
+          rewriter.create<arith::AddIOp>(op.getLoc(), addrI64, byteOffset);
+    } else {
+      // Advance via pointer arithmetic.
+      Value basePtrAsIndex =
+          rewriter.create<memref::ExtractAlignedPointerAsIndexOp>(op.getLoc(),
+                                                                  src);
+      Value delta =
+          rewriter.create<arith::ConstantIndexOp>(op.getLoc(), negElems);
+      Value elemSize =
+          rewriter.create<arith::ConstantIndexOp>(op.getLoc(), elemBytes);
+      Value byteOffset =
+          rewriter.create<arith::MulIOp>(op.getLoc(), delta, elemSize);
+      Value newPtr = rewriter.create<arith::AddIOp>(op.getLoc(), basePtrAsIndex,
+                                                    byteOffset);
+      addrI64 = rewriter.create<arith::IndexCastOp>(
+          op.getLoc(), rewriter.getI64Type(), newPtr);
+    }
+
+    auto newMemrefType = MemRefType::get({ShapedType::kDynamic}, elemType);
+    auto newPtrCast = rewriter.create<hivm::PointerCastOp>(
+        op.getLoc(), newMemrefType, addrI64);
+    data.setSource(newPtrCast.getResult());
+    for (OpFoldResult &ofr : offsets)
+      ofr = rewriter.getIndexAttr(0);
   }
 
   if (data.hasResElemTy()) {

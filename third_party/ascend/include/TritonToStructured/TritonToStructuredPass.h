@@ -28,7 +28,8 @@
 #include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DECL_TRITONTOSTRUCTURED
+#define GEN_PASS_DEF_TRITONTOSTRUCTURED
 #include "ascend/include/TritonToStructured/Passes.h.inc"
 
 namespace mlir {
@@ -46,7 +47,7 @@ using namespace mlir;
 using namespace triton;
 
 class TritonToStructuredPass
-    : public TritonToStructuredBase<TritonToStructuredPass> {
+    : public ::impl::TritonToStructuredBase<TritonToStructuredPass> {
 public:
   TritonToStructuredPass() = default;
 

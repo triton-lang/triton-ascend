@@ -1,0 +1,115 @@
+{
+  "arch": {
+    "triton": "3.6.0",
+    "target": "GPUTarget(backend='npu', arch='Ascend910B4', warp_size=0)",
+    "device_name": "Ascend910B4",
+    "npu_count": 2
+  },
+  "results": [
+    {
+      "name": "debug=True jit",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "knobs.compilation dump_ir",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "knobs.language default_fp_fusion",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tl.gather",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tl.make_tensor_descriptor",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tl.atomic_add",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tl.dot_scaled (e4m3)",
+      "status": "FAIL",
+      "detail": "MLIRCompilationError: \n///------------------[ERROR][Triton][BEG]------------------\n[ConvertTritonIRToLinalgIR] encounters error:\nPassManager::run failed\n\n[INFO]: The compiled kernel cache is in /home/coder/.triton/cache/EYQHKY52BLD2A5FBKD5GOLB3GXBVCMLT7UXFL4VRVQ6ROQRITNLA\n\n///------------------[ERROR][Triton][END]------------------\n\nn.py\", line 175, in probe_dot_scaled_fp8\n    k[(1,)](a, a_scale, b, b_scale, out, M, N, K)\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/runtime/jit.py\", line 370, in <lambda>\n    return lambda *args, **kwargs: self.run(grid=grid, warmup=False, *args, **kwargs)\n                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/runtime/jit.py\", line 736, in run\n    kernel = self._do_compile(key, signature, device, constexprs, options, attrs, warmup)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/runtime/jit.py\", line 865, in _do_compile\n    kernel = self.compile(src, target=target, options=options.__dict__)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/compiler/compiler.py\", line 347, in compile\n    raise MLIRCompilationError(stage_name, error_detail) from e\ntriton.compiler.errors.MLIRCompilationError: \n///------------------[ERROR][Triton][BEG]------------------\n[ConvertTritonIRToLinalgIR] encounters error:\nPassManager::run failed\n\n[INFO]: The compiled kernel cache is in /home/coder/.triton/cache/EYQHKY52BLD2A5FBKD5GOLB3GXBVCMLT7UXFL4VRVQ6ROQRITNLA\n\n///------------------[ERROR][Triton][END]------------------\n\n"
+    },
+    {
+      "name": "tl.device_print",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tl.device_assert",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "fp8e4nv cast",
+      "status": "FAIL",
+      "detail": "MLIRCompilationError: \n///------------------[ERROR][Triton][BEG]------------------\n[ConvertLinalgIRToBinary] encounters error:\nLLVM ERROR: unsupported datatype for arith::TruncFOp to hfusion\nPLEASE submit a bug report to https://github.com/llvm/llvm-project/issues/ and include the crash backtrace.\nStack dump:\n0.\tProgram arguments: /home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile /tmp/tmpn09595qr/kernel.mlir --target=Ascend910B4 --enable-auto-multi-buffer=True --enable-auto-bind-sub-block=True --enable-auto-blockify-loop --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --mlir-print-ir-after-failure --mlir-print-stacktrace-on-diagnostic --bishengir-print-ir-after=hivm-graph-sync-solver --save-temps=/tmp/triton_dump_8eln9yp_/E4YBTAOQU7S5UHUBDWCVEHKYAT4RN46HUVVMQXZQWMBG24W73OEQ -o /tmp/tmpn09595qr/kernel\n #0 0x0000aaaaf0656cfc (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile+0x75e6cfc)\n #1 0x0000aaaaf0654870 (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile+0x75e4870)\n #2 0x0000aaaaf06574c4 (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile+0x75e74c4)\n #3 0x0000ffffa35197c0 (linux-vdso.so.1+0x7c0)\n #4 0x0000ffffa2f57608 (/lib/aarch64-linux-gnu/libc.so.6+0x87608)\n #5 0x0000ffffa2f0cb3c raise (/lib/aarch64-linux-gnu/libc.so.6+0x3cb3c)\n #6 0x0000ffffa2ef7e00 abort (/lib/aarch64-linux-gnu/libc.so.6+0x27e00)\n #7 0x0000aaaaf05fae88 (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile+0x758ae88)\n #8 0x0000aaaaf05fac98 (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/backends/ascend/bishengir/bin/bishengir-compile+0x758ac98)\n #9 0x0000aaaaeabacad8 "
+    },
+    {
+      "name": "tl.inline_asm_elementwise",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "multidim/trans+dot",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "triton.testing.do_bench",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "triton.profiler (proton)",
+      "status": "FAIL",
+      "detail": "ValueError: No backend is available for the current target.\nTraceback (most recent call last):\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 43, in run\n    fn()\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 294, in probe_proton\n    session = proton.start(\"probe_proton\", backend=None)\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/profiler/profile.py\", line 104, in start\n    backend = _select_backend() if backend is None else backend\n              ^^^^^^^^^^^^^^^^^\n  File \"/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/profiler/profile.py\", line 21, in _select_backend\n    raise ValueError(\"No backend is available for the current target.\")\nValueError: No backend is available for the current target.\n"
+    },
+    {
+      "name": "tools/compile via warmup",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tools.link import",
+      "status": "FAIL",
+      "detail": "AssertionError: \nTraceback (most recent call last):\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 43, in run\n    fn()\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 323, in probe_tools_link_import\n    assert hasattr(link, \"main\") or callable(link) or hasattr(link, \"link\")\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+    },
+    {
+      "name": "tools.build_extern import",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "tools.mxfp import",
+      "status": "FAIL",
+      "detail": "ImportError: cannot import name 'MXFP_BLOCK_SIZE' from 'triton.tools.mxfp' (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/tools/mxfp.py)\nTraceback (most recent call last):\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 43, in run\n    fn()\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 332, in probe_tools_mxfp\n    from triton.tools.mxfp import MXFP_BLOCK_SIZE\nImportError: cannot import name 'MXFP_BLOCK_SIZE' from 'triton.tools.mxfp' (/home/coder/miniconda/envs/triton36off/lib/python3.11/site-packages/triton/tools/mxfp.py)\n"
+    },
+    {
+      "name": "tools.tensor_descriptor host",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "instrumentation compile smoke",
+      "status": "PASS",
+      "detail": ""
+    },
+    {
+      "name": "AsyncCompileMode",
+      "status": "FAIL",
+      "detail": "TypeError: AsyncCompileMode.__init__() missing 1 required positional argument: 'executor'\nTraceback (most recent call last):\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 43, in run\n    fn()\n  File \"/home/coder/workspace/triton-ascend-temp/_feature_probe/probe_warn_question.py\", line 378, in probe_async_compile\n    with AsyncCompileMode():\n         ^^^^^^^^^^^^^^^^^^\nTypeError: AsyncCompileMode.__init__() missing 1 required positional argument: 'executor'\n"
+    }
+  ]
+}

@@ -31,7 +31,7 @@ import triton.language as tl
 
 
 @triton.jit
-def triton_unlign(in_ptr0, out_ptr0, x0_numel, r1_numel, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr,
+def triton_unlign(in_ptr0, out_ptr0, x0_numel, r1_numel: tl.constexpr, XBLOCK: tl.constexpr, XBLOCK_SUB: tl.constexpr,
                   RBLOCK: tl.constexpr):
     offset = tl.program_id(0) * XBLOCK
     base1 = tl.arange(0, XBLOCK_SUB)

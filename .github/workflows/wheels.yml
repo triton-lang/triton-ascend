@@ -80,7 +80,7 @@ jobs:
           fi
 
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.

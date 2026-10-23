@@ -1798,7 +1798,7 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
 
     auto memrefType = MemRefType::get(shape, elementType);
     Value inputMemRef =
-        rewriter.create<bufferization::ToBufferOp>(loc, memrefType, scanInput);
+        rewriter.create<bufferization::ToMemrefOp>(loc, memrefType, scanInput);
 
     // Wrap scan logic in a scope with UB address space for the output buffer.
     auto tensorResultType = RankedTensorType::get(shape, elementType);
@@ -1973,7 +1973,7 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     memRefTypes.push_back(memRefTy);
     // Convert input tensors to MemRefs
     inputMemRefs.push_back(
-        rewriter.create<bufferization::ToBufferOp>(loc, memRefTy, operands[i]));
+        rewriter.create<bufferization::ToMemrefOp>(loc, memRefTy, operands[i]));
     // Allocate MemRefs for outputs
     outputMemRefs.push_back(rewriter.create<memref::AllocOp>(loc, memRefTy));
   }
@@ -2357,10 +2357,11 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
         /*init=*/output,
         /*bodyBuilder=*/
         [&](OpBuilder &builder, Location loc, ValueRange regionArgs) {
-          auto elemOp = builder.create<func::CallOp>(loc,
-                                                     /*name=*/op.getSymbol(),
-                                                     /*resultType=*/dstElemTy,
-                                                     /*operands=*/regionArgs);
+          auto elemOp =
+              builder.create<func::CallOp>(loc,
+                                           /*name=*/op.getSymbol(),
+                                           /*resultType=*/dstElemTy,
+                                           /*operands=*/regionArgs.drop_back());
           builder.create<linalg::YieldOp>(loc, elemOp->getResults());
         });
     if (isDstScalar) {
@@ -2834,7 +2835,7 @@ static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
   } else {
     auto srcBufferTy = MemRefType::get(t.getShape(), elemTy);
     Value srcBuffer =
-        rewriter.create<bufferization::ToBufferOp>(loc, srcBufferTy, v);
+        rewriter.create<bufferization::ToMemrefOp>(loc, srcBufferTy, v);
     rewriter.create<memref::CopyOp>(loc, srcBuffer, subview);
   }
 

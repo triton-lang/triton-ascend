@@ -29,13 +29,13 @@
 namespace mlir {
 namespace triton {
 
-#define GEN_PASS_CLASSES
+#define GEN_PASS_DEF_TRITONCONTROLFLOWOPT
 #include "ascend/include/TritonControlFlowOpt/Passes.h.inc"
 
 std::unique_ptr<OperationPass<ModuleOp>> createTritonControlFlowOptPass();
 
 class TritonControlFlowOptPass
-    : public TritonControlFlowOptBase<TritonControlFlowOptPass> {
+    : public impl::TritonControlFlowOptBase<TritonControlFlowOptPass> {
 public:
   TritonControlFlowOptPass() = default;
 

@@ -597,8 +597,11 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     rewriter.setInsertionPoint(op);
     allocOp = rewriter.create<memref::SubViewOp>(
         loc, cast<MemRefType>(allocType), allocOp, offsets, sizes, strides);
-    rewriter.replaceAllUsesExcept(insertSliceOp.getResult(),
-                                  insertSliceOp.getDest(), insertSliceOp);
+    // Bypass the rewriter to avoid issues with the conversion framework's
+    // tracking of conditional replacements (LLVM PR #169606).
+    // replaceUsesWithIf triggers an assertion in rollback mode.
+    insertSliceOp.getResult().replaceAllUsesExcept(insertSliceOp.getDest(),
+                                                   insertSliceOp);
     rewriter.eraseOp(insertSliceOp);
   } else {
     allocOp = rewriter.create<memref::AllocOp>(
@@ -895,7 +898,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-    return rewriter.create<bufferization::ToBufferOp>(loc, ptrType, inputVal);
+    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());
@@ -977,7 +980,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       MemRefType maskTypeM =
           MemRefType::get(maskTypeT.getShape(), maskTypeT.getElementType());
       memrefMask =
-          rewriter.create<bufferization::ToBufferOp>(loc, maskTypeM, mask);
+          rewriter.create<bufferization::ToMemrefOp>(loc, maskTypeM, mask);
     }
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
@@ -1067,10 +1070,10 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   MemRefType dstType =
       MemRefType::get(dstOriType.getShape(), dstOriType.getElementType());
   Value inputMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, val);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, val);
 
   Value cmpMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, cmp);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, cmp);
 
   // create element-wise map
   int64_t rank = type.getRank();

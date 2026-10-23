@@ -8,6 +8,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
+#include "AscendModel/RouteModel/StageHistogramCosts.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
 #include "mlir/IR/Operation.h"
@@ -42,6 +43,7 @@ enum class StageCostModelKind {
   IndirectScalarMemory,
   IndirectGatherMemory,
   AtomicMemory,
+  Histogram,
   IndependentPipelinedLoop,
   LoopCarriedRecurrence,
   RowwiseReduction,
@@ -542,6 +544,9 @@ struct HardwareProfile {
   int64_t superblockUsefulFactorLimit = 1;
   int64_t superblockPersistentStatePressureFreeFactor = 1;
   double superblockPersistentStateBytesPerCycle = 1.0;
+  /// Calibrated `tt.histogram` rows; the op's cost lives inside the lowering
+  /// and is invisible to TTIR resource counting, so it has its own table.
+  StageHistogramRates histogram;
   StageModeProfile simd;
   StageModeProfile simt;
   ScopeHandoffCost scopeHandoff;

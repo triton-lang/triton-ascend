@@ -10,6 +10,10 @@
 #include <gtest/gtest.h>
 
 using mlir::ascend::HardwareProfile;
+using mlir::ascend::HistogramRateRow;
+using mlir::ascend::kHistogramSimdTemplateKeys;
+using mlir::ascend::kHistogramSimtOnlyKeys;
+using mlir::ascend::kHistogramSimtTemplateKeys;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
 using mlir::ascend::ScopeHandoffCost;
@@ -19,6 +23,7 @@ using mlir::ascend::StageCostEvaluator;
 using mlir::ascend::StageCostModelKind;
 using mlir::ascend::StageCostTable;
 using mlir::ascend::StageFeatureAnalysis;
+using mlir::ascend::StageHistogramRates;
 using mlir::ascend::StageImplementationCost;
 using mlir::ascend::StageMode;
 using mlir::ascend::StageModeLegalityAnalysis;
@@ -87,6 +92,44 @@ HardwareProfile hardwareProfile(ScopeHandoffCost scopeHandoff = {}) {
   profile.simt.vectorWidth = 1;
   profile.simt.vectorWidthBits = 1;
   profile.simt.issueWidth = 32;
+  // The histogram table has no compiled-in fallback, so the fixture must pass
+  // isValid() even though no test here exercises a histogram Stage.
+  StageHistogramRates &histogram = profile.histogram;
+  histogram.structure = {256, 32, 16, 8, 4, 2, 255, 65536.0};
+  auto fillRow =
+      [](HistogramRateRow &row,
+         std::initializer_list<std::pair<llvm::StringRef, double>> c) {
+        row.coefficients.clear();
+        for (const auto &kv : c)
+          row.coefficients[kv.first] = kv.second;
+      };
+  for (llvm::StringLiteral key : kHistogramSimdTemplateKeys)
+    fillRow(histogram.simdTemplate[key],
+            {{"intercept", 100.0}, {"per_chunk", 10.0}});
+  fillRow(histogram.simdTemplate["u16_bins_256_masked"],
+          {{"intercept", 100.0},
+           {"per_chunk", 5.0},
+           {"per_chunk_beyond_knee", 7.0},
+           {"knee_chunks", 32.0}});
+  fillRow(histogram.simdTemplate["u16_bins_gt_256"],
+          {{"intercept", 100.0},
+           {"per_chunk_per_segment", 7.0},
+           {"per_segment", 50.0}});
+  fillRow(histogram.simdTemplate["u32_bins_gt_256"],
+          {{"intercept", 100.0},
+           {"per_chunk_per_segment", 13.0},
+           {"per_segment", 86.0}});
+  for (llvm::StringLiteral key : kHistogramSimtTemplateKeys)
+    fillRow(histogram.simtTemplate[key], {{"intercept", 100.0},
+                                          {"scan_per_elem", 1.0},
+                                          {"count_per_elem", 1.0}});
+  for (llvm::StringLiteral key : kHistogramSimtOnlyKeys)
+    fillRow(histogram.simtOnly[key], {{"intercept", 100.0},
+                                      {"per_elem", 1.0},
+                                      {"per_iter", 1.0},
+                                      {"per_bin", 1.0},
+                                      {"per_thread", 1.0},
+                                      {"per_kink", 0.0}});
   profile.scopeHandoff = std::move(scopeHandoff);
   return profile;
 }
@@ -118,6 +161,57 @@ evaluateOneStage(LogicalStage stage,
 }
 
 } // namespace
+
+TEST(SimdSimtCostModelTest, HistogramMaskSelectsIndependentCalibration) {
+  auto rates = hardwareProfile().histogram;
+  rates.simdTemplate["u16_bins_lt_256_masked"].coefficients["per_chunk"] = 20.0;
+  EXPECT_DOUBLE_EQ(mlir::ascend::estimateHistogramCycles(
+                       1024, 64, 2, StageMode::SIMD, true, 4, rates),
+                   140.0);
+  EXPECT_DOUBLE_EQ(mlir::ascend::estimateHistogramCycles(
+                       1024, 64, 2, StageMode::SIMD, false, 4, rates),
+                   180.0);
+  rates.simtOnly["u16_masked"].coefficients["intercept"] = 300.0;
+  const double unmasked = mlir::ascend::estimateHistogramCycles(
+      1024, 64, 2, StageMode::SIMT, true, 4, rates);
+  const double masked = mlir::ascend::estimateHistogramCycles(
+      1024, 64, 2, StageMode::SIMT, false, 4, rates);
+  EXPECT_DOUBLE_EQ(masked - unmasked, 200.0);
+}
+
+TEST(SimdSimtCostModelTest, HistogramFallbackUsesWidthAndMask) {
+  auto rates = hardwareProfile().histogram;
+  auto &unmasked = rates.simtTemplate["u64"].coefficients;
+  unmasked.clear();
+  unmasked["intercept"] = 100.0;
+  unmasked["per_elem"] = 1.0;
+  auto &masked = rates.simtTemplate["u64_masked"].coefficients;
+  masked.clear();
+  masked["intercept"] = 100.0;
+  masked["per_elem"] = 0.5;
+  ASSERT_TRUE(rates.isValid());
+  EXPECT_DOUBLE_EQ(mlir::ascend::estimateHistogramCycles(
+                       2048, 512, 8, StageMode::SIMD, true, 4, rates),
+                   2148.0);
+  EXPECT_DOUBLE_EQ(mlir::ascend::estimateHistogramCycles(
+                       2048, 512, 8, StageMode::SIMD, false, 4, rates),
+                   1124.0);
+  // A missing masked row must fail validation rather than silently cost zero.
+  rates.simtTemplate.erase("u64_masked");
+  EXPECT_FALSE(rates.isValid());
+}
+
+TEST(SimdSimtCostModelTest, HistogramPricesReplicatedAtomicUpdates) {
+  auto rates = hardwareProfile().histogram;
+  const double baseline = mlir::ascend::estimateHistogramCycles(
+      512, 64, 4, StageMode::SIMT, true, 64, rates);
+  rates.simtOnly["u32"].coefficients["per_replicated_elem"] = 2.0;
+  EXPECT_DOUBLE_EQ(mlir::ascend::estimateHistogramCycles(
+                       512, 64, 4, StageMode::SIMT, true, 64, rates),
+                   baseline + 2.0 * (2048 - 512));
+  rates.simtOnly["u32"].coefficients["per_replicated_elem"] = -1.0;
+  EXPECT_FALSE(rates.isValid());
+}
 
 TEST(SimdSimtCostModelTest, StageHasOnlySimdOrSimtImplementations) {
   LogicalStage stage = logicalStage("scalar", StageCostModelKind::ScalarIssue);

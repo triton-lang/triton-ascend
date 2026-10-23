@@ -5,6 +5,8 @@ FROM ${CANN_BASE_IMAGE}
 # 2.7.1.post8, while CANN 9.1.0 (a5/Ascend 950) uses 2.10.0.post4. requirements.txt
 # is shared by every chip, so the version lives here instead — override at
 # build time with --build-arg TORCH_NPU_VERSION=2.10.0.post4 for the a5 image.
+# The CANN <-> torch-npu compatibility groups are tracked in
+# third_party/ascend/deps/runtime.json; keep this default in sync with it.
 ARG TORCH_NPU_VERSION=2.7.1.post8
 
 ARG APTMIRROR=http://mirrors.huaweicloud.com

@@ -1,0 +1,13 @@
+{
+  "llvm_hash": "f6ded0be897e2878612dd903f7e8bb85448269e5",
+  "build_number": 1,
+  "patches": [
+    "llvm_patch_f6ded0b.patch"
+  ],
+  "sha256sum": {
+    "ubuntu-x64": null,
+    "ubuntu-arm64": null,
+    "almalinux-x64": null,
+    "almalinux-arm64": null
+  }
+}

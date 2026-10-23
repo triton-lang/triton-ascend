@@ -26,12 +26,23 @@ permissions:
   actions: write
 
 jobs:
+  deps:
+    runs-on: ubuntu-latest
+    outputs:
+      cann: ${{ steps.deps.outputs.cann }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve pinned CANN version from the BOM
+        id: deps
+        run: echo "cann=$(jq -r .default_cann third_party/ascend/deps/runtime.json)" >> "$GITHUB_OUTPUT"
+
   build-images:
+    needs: deps
     name: Build ${{ matrix.cann_version }}-${{ matrix.chip_type }}-${{ matrix.os }}-py${{ matrix.python_version }}-${{ matrix.platforms }}
     # Use buildkit runner matching the target platform.
     runs-on: ${{ matrix.platforms == 'amd64' && 'linux-amd64-cpu-4' || 'linux-aarch64-cpu-4' }}
     container:
-      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:${{ needs.deps.outputs.cann }}-a3-ubuntu22.04-py3.12
     timeout-minutes: 360
 
     strategy:

@@ -1,0 +1,13 @@
+{
+  "bisheng": {
+    "x86_64": {
+      "file": "ascendnpu-ir_2.0.0_linux-x86-pr_3967.run",
+      "sha256": "535368A33AFA7A1E33DA5325066DF7C9F0CD95943AD7C04008B1C42EAEA92935"
+    },
+    "aarch64": {
+      "file": "ascendnpu-ir_2.0.0_linux-aarch64-pr_3967.run",
+      "sha256": "524385FDD6E570EEB7F92D789741BDFD7FDA49811B1A1CEE8155E7A16C25E10D"
+    }
+  },
+  "json": "v3.11.3"
+}

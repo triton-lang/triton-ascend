@@ -90,7 +90,6 @@ with proton.scope("test2", {"bytes": 3000}):
 Proton scopes coexist with NVTX ranges.
 NVTX pushes and pops (for example, `torch.cuda.nvtx.range_push`) appear as nested scopes in the Proton profile, letting you correlate custom NVTX annotations with Proton's aggregated metrics.
 
-
 ### Backend and mode
 
 Proton supports three profiling backends: `cupti`, `roctracer`, and `instrumentation`.
@@ -104,7 +103,7 @@ By default, Proton automatically selects either `cupti` or `roctracer` as the ba
 #### Instruction sampling
 
 Proton supports instruction sampling on NVIDIA GPUs.
-You may experience ~20x end-to-end overhead when using instruction sampling, although the overhead for each individual GPU kernel is negligible.
+You may experience ~20× end-to-end overhead when using instruction sampling, although the overhead for each individual GPU kernel is negligible.
 The overhead is mostly caused by data transfer and processing on the CPU.
 Additionally, the proton-viewer options `-i <regex> -d <depth> -t <threshold>` can be helpful for filtering out GPU kernels that are not of interest.
 The following example demonstrates how to use instruction sampling:
@@ -118,7 +117,7 @@ proton.start(name="profile_name", context="shadow", backend="cupti", mode="pcsam
 #### Instrumentation
 
 The instrumentation backend allows for detailed, fine-grained profiling of intra-kernel behavior, generating trace or tree views similar to those produced by coarse-grained profiling.
-By default, if no `mode` is specified, Proton profiles kernel cycles, which may require shared memory or global memory (depends on `buffer-type`). If there is insufficient profiling memory capacity, profiling will abort and a warning will be displayed. Future releases will introduce additional instrumentation modes. See the [tutorial](tutorials/intra_kernel) for more detailed information and examples.
+By default, if no `mode` is specified, Proton profiles kernel cycles, which may require shared memory or global memory (depends on `buffer_type`). If there is insufficient profiling memory capacity, profiling will abort and a warning will be displayed. Future releases will introduce additional instrumentation modes. See the [tutorial](tutorials/intra_kernel) for more detailed information and examples.
 
 **Host-side usage:**
 
@@ -169,10 +168,11 @@ def kernel(...):
 
 Advanced users can instrument either the `ttir` or `ttgir` intermediate representations for even finer-grained measurement. The relevant IR instructions are `proton.record start` and `proton.record end`. This can be combined with the environment variable `TRITON_KERNEL_OVERRIDE=1` for custom kernel overrides. For detailed steps, refer to the Triton [documentation](https://github.com/triton-lang/triton?tab=readme-ov-file#tips-for-hacking) under the **Kernel Override Steps** section. We have also assembled a [tutorial](tutorials/intra_kernel) that demonstrates how to use the IR-based instrumentation approach and the proton DSL approach.
 
-
 ### Hook
 
 ```python
+import triton
+import triton.language as tl
 import triton.profiler as proton
 from typing import NamedTuple
 

@@ -31,7 +31,7 @@ Triton-Ascend
 <details>
 <summary>更多最新消息</summary>
 
-- [2025.11.14]Triton-Ascend3.2.0rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
+- [2025.11.14]Triton-Ascend 3.2.0 rc4预发布版本上线：<br>- [扩展tt.fp_to_fp接口，新增对FP8的类型转换支持](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [新增scatter_ub_to_out接口，支持从UB到GM的高效数据分散操作](https://gitcode.com/Ascend/triton-ascend/pull/864)
 - [2025.09.30]完善Scan/Sort类Triton Python API，支持非连续访存，完成vLLM、SGLang开源仓中重点Triton算子适配
 - [2025.09.19]支持Triton-Ascend [nightly包](https://test.pypi.org/project/triton-ascend/#history)提取
 - [2025.08.15]完善Atomic类Triton Python API支持，完成Flaggems开源仓重点Triton算子适配，提供Matmul等简单算子高性能实现参考用例

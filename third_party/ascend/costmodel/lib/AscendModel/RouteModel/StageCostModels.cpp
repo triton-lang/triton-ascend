@@ -1,6 +1,7 @@
 //===- StageCostModels.cpp - Per-stage analytical models -----------------===//
 
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
@@ -984,7 +985,8 @@ static void mapCompositeDotPaths(StageWorkload &work,
 
 static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
-            StageMode mode, int64_t superblockFactor, bool wholeSimt) {
+            StageMode mode, int64_t superblockFactor, bool wholeSimt,
+            std::optional<double> calibratedReduction = std::nullopt) {
   StageResourceCycles resources;
   StageWorkload work = stage.workload;
   if (wholeSimt)
@@ -1911,192 +1913,207 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           count * instructions / profile.predicateOperationsPerCycle;
     }
   }
-  const double simdReductionStartupOwners =
-      std::min(1.0, std::max(0.0, work.reductionOperations));
-  resources.reduction =
-      simd && profile.reductionLaneStepsPerCycle > 0.0
-          ? simdReductionStartupOwners * profile.reductionOperationSetupCycles +
-                work.shuffleLaneSteps / profile.reductionLaneStepsPerCycle
-          : work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
-  if (simd && profile.scalarizedMultiResultReductionMinimumExtent > 0 &&
-      profile.scalarizedMultiResultReductionReferenceResults > 0 &&
-      profile.scalarizedMultiResultReductionElementsPerCycle > 0.0) {
-    for (const auto &[shape, count] :
-         work.scalarizedMultiResultReductionCounts) {
-      const int64_t rows = std::get<0>(shape);
-      const int64_t extent = std::get<1>(shape);
-      const int64_t results = std::get<2>(shape);
-      const int64_t bits = std::get<3>(shape);
-      if (count <= 0.0 ||
-          extent < profile.scalarizedMultiResultReductionMinimumExtent ||
-          results < profile.scalarizedMultiResultReductionReferenceResults ||
-          bits != 32)
-        continue;
-      const double resultScale =
-          static_cast<double>(results) /
-          profile.scalarizedMultiResultReductionReferenceResults;
-      resources.scalarizedMultiResultReduction +=
-          count * (profile.scalarizedMultiResultReductionSetupCycles +
-                   static_cast<double>(rows) * extent * resultScale /
-                       profile.scalarizedMultiResultReductionElementsPerCycle);
-    }
-    // The scalar loop is the concrete lowering of the same semantic reduction
-    // already priced above.
+  if (calibratedReduction && work.reductionOperations == 0.0) {
+    resources.reduction = *calibratedReduction;
+  } else {
+    const double simdReductionStartupOwners =
+        std::min(1.0, std::max(0.0, work.reductionOperations));
     resources.reduction =
-        std::max(resources.reduction, resources.scalarizedMultiResultReduction);
-  }
-  if (!simd && wholeSimt && superblockFactor == 1 &&
-      profile.multiResultReductionGroupBaseWarpCount > 0 &&
-      profile.activeWarpCount ==
-          profile.multiResultReductionGroupBaseWarpCount * superblockFactor &&
-      profile.multiResultReductionResultCount > 0 &&
-      profile.multiResultReductionElementBits > 0 &&
-      profile.multiResultReductionPaddedAxisExtent > 0) {
-    for (const auto &[shape, count] :
-         work.scalarizedMultiResultReductionCounts) {
-      const int64_t rows = std::get<0>(shape);
-      const int64_t extent = std::get<1>(shape);
-      const int64_t results = std::get<2>(shape);
-      const int64_t bits = std::get<3>(shape);
-      if (count <= 0.0 || rows <= 0 || extent <= 0 ||
-          results != profile.multiResultReductionResultCount ||
-          bits != profile.multiResultReductionElementBits ||
-          llvm::PowerOf2Ceil(static_cast<uint64_t>(extent)) !=
-              static_cast<uint64_t>(
-                  profile.multiResultReductionPaddedAxisExtent))
-        continue;
-      const llvm::StringRef tailClass = multiResultReductionTailClass(extent);
-      auto curve =
-          profile.multiResultReductionGroupCyclesByTailClassAndRows.find(
-              tailClass.str());
-      if (curve ==
-          profile.multiResultReductionGroupCyclesByTailClassAndRows.end())
-        continue;
-      auto body = lookupBoundedCeilingGroupCost(curve->second, rows);
-      if (body)
-        resources.multiResultReductionGroupBody += count * *body;
+        simd && profile.reductionLaneStepsPerCycle > 0.0
+            ? simdReductionStartupOwners *
+                      profile.reductionOperationSetupCycles +
+                  work.shuffleLaneSteps / profile.reductionLaneStepsPerCycle
+            : work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
+    if (simd && profile.scalarizedMultiResultReductionMinimumExtent > 0 &&
+        profile.scalarizedMultiResultReductionReferenceResults > 0 &&
+        profile.scalarizedMultiResultReductionElementsPerCycle > 0.0) {
+      for (const auto &[shape, count] :
+           work.scalarizedMultiResultReductionCounts) {
+        const int64_t rows = std::get<0>(shape);
+        const int64_t extent = std::get<1>(shape);
+        const int64_t results = std::get<2>(shape);
+        const int64_t bits = std::get<3>(shape);
+        if (count <= 0.0 ||
+            extent < profile.scalarizedMultiResultReductionMinimumExtent ||
+            results < profile.scalarizedMultiResultReductionReferenceResults ||
+            bits != 32)
+          continue;
+        const double resultScale =
+            static_cast<double>(results) /
+            profile.scalarizedMultiResultReductionReferenceResults;
+        resources.scalarizedMultiResultReduction +=
+            count *
+            (profile.scalarizedMultiResultReductionSetupCycles +
+             static_cast<double>(rows) * extent * resultScale /
+                 profile.scalarizedMultiResultReductionElementsPerCycle);
+      }
+      // The scalar loop is the concrete lowering of the same semantic reduction
+      // already priced above.
+      resources.reduction = std::max(resources.reduction,
+                                     resources.scalarizedMultiResultReduction);
     }
-  }
-  if (simd && profile.sortMinimumExtent > 0 &&
-      profile.sortMaximumExtent >= profile.sortMinimumExtent &&
-      profile.sortElementBits > 0 && profile.sortRowsPerCycle > 0.0) {
-    for (const auto &[shape, count] : work.sortCounts) {
-      const int64_t rows = std::get<0>(shape);
-      const int64_t extent = std::get<1>(shape);
-      const int64_t bits = std::get<2>(shape);
-      if (count <= 0.0 || extent < profile.sortMinimumExtent ||
-          extent > profile.sortMaximumExtent || bits != profile.sortElementBits)
-        continue;
-      resources.sort +=
-          count * (profile.sortSetupCycles + rows / profile.sortRowsPerCycle);
-    }
-    // ascend.sort previously contributed only to the generic issue floor.
-    resources.compute += resources.sort;
-  }
-  if (simd && !work.oneTripMaskedAccumulatorReductionExtents.empty()) {
-    resources.maskedAccumulatorReductionCompletionSetup =
-        profile.maskedAccumulatorReductionCompletionSetupCycles;
-    resources.setup += resources.maskedAccumulatorReductionCompletionSetup;
-  }
-  if (!simd && wholeSimt && profile.rowwiseReductionGroupBaseWarpCount > 0 &&
-      profile.activeWarpCount ==
-          profile.rowwiseReductionGroupBaseWarpCount * superblockFactor) {
-    const auto exactOperations =
-        exactNonNegativeWorkCount(work.reductionOperations);
-    const auto additionalSurface =
-        exactOperations
-            ? profile.rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
-                  .find(*exactOperations)
-            : profile.rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
-                  .end();
-    const auto *surfaces =
-        additionalSurface !=
-                profile
-                    .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
-                    .end()
-            ? &additionalSurface->second
-            : &profile.rowwiseReductionGroupCyclesByFactorRowsAndExtent;
-    const int64_t referenceOperations =
-        additionalSurface !=
-                profile
-                    .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
-                    .end()
-            ? additionalSurface->first
-            : profile.rowwiseReductionGroupReferenceOperations;
-    auto geometry = rowwiseReductionGeometry(stage, work, referenceOperations);
-    auto factorSurface = surfaces->find(superblockFactor);
-    if (geometry && factorSurface != surfaces->end()) {
-      auto body = interpolateBoundedRowExtentSurface(
-          factorSurface->second, geometry->first, geometry->second);
-      if (body)
-        resources.rowwiseReductionGroupBody = *body;
-    }
-  }
-  if (!simd && stage.costModelKind == StageCostModelKind::RowwiseReduction &&
-      resources.rowwiseReductionGroupBody == 0.0) {
-    // The generic shuffleLaneSteps workload counts source lanes at every
-    // reduction level.
-    std::optional<std::pair<int64_t, int64_t>> geometry;
-    if (work.reductionGeometryCounts.size() == 1) {
-      const auto &[shape, count] = *work.reductionGeometryCounts.begin();
-      if (std::get<2>(shape) == 32 && std::get<0>(shape) > 0 &&
-          std::get<1>(shape) > 1 && count > 0.0)
-        geometry = std::make_pair(std::get<0>(shape), std::get<1>(shape));
-    }
-    if (!geometry) {
-      const auto exactOperations =
-          exactNonNegativeWorkCount(work.reductionOperations);
-      if (exactOperations)
-        geometry = rowwiseReductionGeometry(stage, work, *exactOperations);
-    }
-    if (geometry) {
-      const int64_t rows = geometry->first;
-      const int64_t extent = geometry->second;
-      const int64_t warpWidth = 32;
-      auto add = profile.operationRates.find("f32.add");
-      if (rows > 0 && extent > 1 && add != profile.operationRates.end() &&
-          add->second.throughput > 0.0 && profile.shuffleLanesPerCycle > 0.0) {
-        const double scalarReductionOps = work.reductionOperations *
-                                          static_cast<double>(rows) *
-                                          static_cast<double>(extent - 1);
-        resources.reduction =
-            scalarReductionOps / add->second.throughput * add->second.factor;
-
-        const int64_t participatingLanes = std::min(extent, warpWidth);
-        int64_t shuffleDepth = 0;
-        for (int64_t lanes = participatingLanes; lanes > 1;
-             lanes = llvm::divideCeil(lanes, int64_t(2)))
-          ++shuffleDepth;
-        const double shuffleIssue =
-            work.reductionOperations * static_cast<double>(rows) *
-            static_cast<double>(participatingLanes - 1) /
-            profile.shuffleLanesPerCycle;
-        const double shuffleDependency = work.reductionOperations *
-                                         static_cast<double>(shuffleDepth) *
-                                         profile.prefixScanStepLatencyCycles;
-        resources.shuffle = std::max(shuffleIssue, shuffleDependency);
+    if (!calibratedReduction && !simd && wholeSimt && superblockFactor == 1 &&
+        profile.multiResultReductionGroupBaseWarpCount > 0 &&
+        profile.activeWarpCount ==
+            profile.multiResultReductionGroupBaseWarpCount * superblockFactor &&
+        profile.multiResultReductionResultCount > 0 &&
+        profile.multiResultReductionElementBits > 0 &&
+        profile.multiResultReductionPaddedAxisExtent > 0) {
+      for (const auto &[shape, count] :
+           work.scalarizedMultiResultReductionCounts) {
+        const int64_t rows = std::get<0>(shape);
+        const int64_t extent = std::get<1>(shape);
+        const int64_t results = std::get<2>(shape);
+        const int64_t bits = std::get<3>(shape);
+        if (count <= 0.0 || rows <= 0 || extent <= 0 ||
+            results != profile.multiResultReductionResultCount ||
+            bits != profile.multiResultReductionElementBits ||
+            llvm::PowerOf2Ceil(static_cast<uint64_t>(extent)) !=
+                static_cast<uint64_t>(
+                    profile.multiResultReductionPaddedAxisExtent))
+          continue;
+        const llvm::StringRef tailClass = multiResultReductionTailClass(extent);
+        auto curve =
+            profile.multiResultReductionGroupCyclesByTailClassAndRows.find(
+                tailClass.str());
+        if (curve ==
+            profile.multiResultReductionGroupCyclesByTailClassAndRows.end())
+          continue;
+        auto body = lookupBoundedCeilingGroupCost(curve->second, rows);
+        if (body)
+          resources.multiResultReductionGroupBody += count * *body;
       }
     }
+    if (simd && profile.sortMinimumExtent > 0 &&
+        profile.sortMaximumExtent >= profile.sortMinimumExtent &&
+        profile.sortElementBits > 0 && profile.sortRowsPerCycle > 0.0) {
+      for (const auto &[shape, count] : work.sortCounts) {
+        const int64_t rows = std::get<0>(shape);
+        const int64_t extent = std::get<1>(shape);
+        const int64_t bits = std::get<2>(shape);
+        if (count <= 0.0 || extent < profile.sortMinimumExtent ||
+            extent > profile.sortMaximumExtent ||
+            bits != profile.sortElementBits)
+          continue;
+        resources.sort +=
+            count * (profile.sortSetupCycles + rows / profile.sortRowsPerCycle);
+      }
+      // ascend.sort previously contributed only to the generic issue floor.
+      resources.compute += resources.sort;
+    }
+    if (simd && !work.oneTripMaskedAccumulatorReductionExtents.empty()) {
+      resources.maskedAccumulatorReductionCompletionSetup =
+          profile.maskedAccumulatorReductionCompletionSetupCycles;
+      resources.setup += resources.maskedAccumulatorReductionCompletionSetup;
+    }
+    if (!calibratedReduction && !simd && wholeSimt &&
+        profile.rowwiseReductionGroupBaseWarpCount > 0 &&
+        profile.activeWarpCount ==
+            profile.rowwiseReductionGroupBaseWarpCount * superblockFactor) {
+      const auto exactOperations =
+          exactNonNegativeWorkCount(work.reductionOperations);
+      const auto additionalSurface =
+          exactOperations
+              ? profile
+                    .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
+                    .find(*exactOperations)
+              : profile
+                    .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
+                    .end();
+      const auto *surfaces =
+          additionalSurface !=
+                  profile
+                      .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
+                      .end()
+              ? &additionalSurface->second
+              : &profile.rowwiseReductionGroupCyclesByFactorRowsAndExtent;
+      const int64_t referenceOperations =
+          additionalSurface !=
+                  profile
+                      .rowwiseReductionGroupCyclesByOperationFactorRowsAndExtent
+                      .end()
+              ? additionalSurface->first
+              : profile.rowwiseReductionGroupReferenceOperations;
+      auto geometry =
+          rowwiseReductionGeometry(stage, work, referenceOperations);
+      auto factorSurface = surfaces->find(superblockFactor);
+      if (geometry && factorSurface != surfaces->end()) {
+        auto body = interpolateBoundedRowExtentSurface(
+            factorSurface->second, geometry->first, geometry->second);
+        if (body)
+          resources.rowwiseReductionGroupBody = *body;
+      }
+    }
+    if (!simd && stage.costModelKind == StageCostModelKind::RowwiseReduction &&
+        resources.rowwiseReductionGroupBody == 0.0) {
+      // The generic shuffleLaneSteps workload counts source lanes at every
+      // reduction level.
+      std::optional<std::pair<int64_t, int64_t>> geometry;
+      if (work.reductionGeometryCounts.size() == 1) {
+        const auto &[shape, count] = *work.reductionGeometryCounts.begin();
+        if (std::get<2>(shape) == 32 && std::get<0>(shape) > 0 &&
+            std::get<1>(shape) > 1 && count > 0.0)
+          geometry = std::make_pair(std::get<0>(shape), std::get<1>(shape));
+      }
+      if (!geometry && !calibratedReduction) {
+        const auto exactOperations =
+            exactNonNegativeWorkCount(work.reductionOperations);
+        if (exactOperations)
+          geometry = rowwiseReductionGeometry(stage, work, *exactOperations);
+      }
+      if (geometry) {
+        const int64_t rows = geometry->first;
+        const int64_t extent = geometry->second;
+        const int64_t warpWidth = 32;
+        auto add = profile.operationRates.find("f32.add");
+        if (rows > 0 && extent > 1 && add != profile.operationRates.end() &&
+            add->second.throughput > 0.0 &&
+            profile.shuffleLanesPerCycle > 0.0) {
+          const double scalarReductionOps = work.reductionOperations *
+                                            static_cast<double>(rows) *
+                                            static_cast<double>(extent - 1);
+          resources.reduction =
+              scalarReductionOps / add->second.throughput * add->second.factor;
+
+          const int64_t participatingLanes = std::min(extent, warpWidth);
+          int64_t shuffleDepth = 0;
+          for (int64_t lanes = participatingLanes; lanes > 1;
+               lanes = llvm::divideCeil(lanes, int64_t(2)))
+            ++shuffleDepth;
+          const double shuffleIssue =
+              work.reductionOperations * static_cast<double>(rows) *
+              static_cast<double>(participatingLanes - 1) /
+              profile.shuffleLanesPerCycle;
+          const double shuffleDependency = work.reductionOperations *
+                                           static_cast<double>(shuffleDepth) *
+                                           profile.prefixScanStepLatencyCycles;
+          resources.shuffle = std::max(shuffleIssue, shuffleDependency);
+        }
+      }
+    }
+    if (stage.costModelKind == StageCostModelKind::LoopCarriedRecurrence &&
+        stage.features.hasReduction && work.shuffleLaneSteps > 0.0) {
+      auto factorCurve =
+          profile.recurrenceReductionGroupCyclesByFactorAndLaneSteps.find(
+              superblockFactor);
+      if (factorCurve !=
+          profile.recurrenceReductionGroupCyclesByFactorAndLaneSteps.end())
+        resources.recurrenceGroupCriticalPath = interpolateOperationCost(
+            factorCurve->second,
+            static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
+      auto startupCurve =
+          profile.recurrenceReductionGroupStartupCyclesByFactorAndLaneSteps
+              .find(superblockFactor);
+      if (startupCurve !=
+          profile.recurrenceReductionGroupStartupCyclesByFactorAndLaneSteps
+              .end())
+        resources.recurrenceGroupStartup = interpolateOperationCost(
+            startupCurve->second,
+            static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
+    }
   }
-  if (stage.costModelKind == StageCostModelKind::LoopCarriedRecurrence &&
-      stage.features.hasReduction && work.shuffleLaneSteps > 0.0) {
-    auto factorCurve =
-        profile.recurrenceReductionGroupCyclesByFactorAndLaneSteps.find(
-            superblockFactor);
-    if (factorCurve !=
-        profile.recurrenceReductionGroupCyclesByFactorAndLaneSteps.end())
-      resources.recurrenceGroupCriticalPath = interpolateOperationCost(
-          factorCurve->second,
-          static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
-    auto startupCurve =
-        profile.recurrenceReductionGroupStartupCyclesByFactorAndLaneSteps.find(
-            superblockFactor);
-    if (startupCurve !=
-        profile.recurrenceReductionGroupStartupCyclesByFactorAndLaneSteps.end())
-      resources.recurrenceGroupStartup = interpolateOperationCost(
-          startupCurve->second,
-          static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
-  }
+  if (calibratedReduction && work.reductionOperations > 0.0)
+    resources.reduction += *calibratedReduction;
   if (work.dotFlops > 0.0) {
     // A Stage can own multiple tiny dots.
     resources.dot = work.dotOperations * profile.dotSetupCycles +
@@ -2162,6 +2179,110 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
   }
   mapMaskedStridedCopyCompletion(stage, work, profile, resources);
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
+}
+
+// The calibration prices one reduction window, not an entire Stage body.
+struct OrdinaryReductionMapping {
+  StageResourceCycles resources;
+  bool first = false, middle = false, tail = false;
+  double fallbackInstances = 0;
+  std::map<std::string, double> fittedInstances;
+};
+static llvm::Expected<std::optional<OrdinaryReductionMapping>>
+mapOrdinaryReduction(const LogicalStage &stage,
+                     const StageImplementation &implementation,
+                     const HardwareProfile &hardware,
+                     const StageModeProfile &modeProfile,
+                     const StageResourceCycles &legacy) {
+  if (!hardware.reductionProfile || !stage.reductionExternalWorkload ||
+      implementation.aivSubblocks != 1 ||
+      stage.costModelKind != StageCostModelKind::RowwiseReduction ||
+      legacy.rowwiseReductionGroupBody > 0 ||
+      legacy.multiResultReductionGroupBody > 0 ||
+      !stage.workload.scalarizedMultiResultReductionCounts.empty() ||
+      !stage.workload.oneTripMaskedAccumulatorReductionExtents.empty() ||
+      !stage.workload.prefixScanCounts.empty() ||
+      stage.workload.reductionWorkloads.empty())
+    return std::nullopt;
+  OrdinaryReductionMapping result;
+  double cycles = 0, occurrences = 0;
+  LogicalStage residual = stage;
+  residual.workload = *stage.reductionExternalWorkload;
+  auto mode = implementation.mode == StageMode::SIMD ? ReductionMode::SIMD
+                                                     : ReductionMode::SIMT;
+  const bool decomposed = !stage.reductionContributions.empty();
+  const auto consume =
+      [&](const ReductionWorkload &work,
+          const StageWorkload *contribution) -> llvm::Expected<bool> {
+    occurrences += work.instances;
+    auto estimated = estimateReductionCycles(work, *hardware.reductionProfile,
+                                             mode, hardware.baseSimtWarpCount);
+    if (!estimated)
+      return estimated.takeError();
+    const auto &estimate = *estimated;
+    if (!estimate) {
+      if (!contribution)
+        return false;
+      mergeReductionResidualWorkload(residual.workload, *contribution);
+      result.fallbackInstances += work.instances;
+      return true;
+    }
+    cycles += work.instances * estimate->cycles;
+    std::string family = estimate->axis == ReductionAxisKind::First ? "first"
+                         : estimate->axis == ReductionAxisKind::Middle
+                             ? "middle"
+                             : "tail";
+    result.fittedInstances[family + "/" + work.kind + "/" + work.dataType] +=
+        work.instances;
+    result.first |= estimate->axis == ReductionAxisKind::First;
+    result.middle |= estimate->axis == ReductionAxisKind::Middle;
+    result.tail |= estimate->axis == ReductionAxisKind::Tail;
+    return true;
+  };
+  if (decomposed) {
+    for (const auto &contribution : stage.reductionContributions) {
+      if (contribution.reductionWorkloads.size() != 1 ||
+          std::abs(contribution.reductionOperations -
+                   contribution.reductionWorkloads.front().instances) > 1e-9)
+        return std::nullopt;
+      auto consumed =
+          consume(contribution.reductionWorkloads.front(), &contribution);
+      if (!consumed)
+        return consumed.takeError();
+      if (!*consumed)
+        return std::nullopt;
+    }
+  } else {
+    // Hand-built/native stages retain their former all-supported compatibility.
+    // Their external snapshot can still contain semantic reduction roots.
+    for (const auto &work : stage.workload.reductionWorkloads) {
+      auto consumed = consume(work, nullptr);
+      if (!consumed)
+        return consumed.takeError();
+      if (!*consumed)
+        return std::nullopt;
+    }
+    residual.workload.reductionOperations = 0;
+    residual.workload.shuffleLaneSteps = 0;
+    residual.workload.reductionWorkloads.clear();
+    residual.workload.reductionGeometryCounts.clear();
+    residual.workload.reductionCombineClassCounts.clear();
+  }
+  if (!(result.first || result.middle || result.tail) ||
+      !std::isfinite(cycles) ||
+      std::abs(occurrences - stage.workload.reductionOperations) > 1e-9)
+    return std::nullopt;
+  // Avoid deriving residual reduction geometry from the full Stage's input
+  // load. The residual reductionGeometryCounts are authoritative when present.
+  auto mapped = mapWorkload(residual, modeProfile, implementation.mode,
+                            implementation.superblockFactor,
+                            implementation.mode == StageMode::SIMT &&
+                                !implementation.localScope,
+                            cycles);
+  if (!mapped)
+    return std::nullopt;
+  result.resources = *mapped;
+  return result;
 }
 
 /// Balanced CV tensor partition on one AIV.
@@ -3569,8 +3690,22 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           implementation.mode == StageMode::SIMT && !implementation.localScope);
       if (!resources)
         continue;
+      auto mapping = mapOrdinaryReduction(executionStage, implementation,
+                                          profile, modeProfile, *resources);
+      if (!mapping)
+        return mapping.takeError();
+      const auto &calibrated = *mapping;
+      if (calibrated)
+        resources = calibrated->resources;
       StageImplementationCost cost;
       cost.implementation = implementation;
+      cost.calibratedTailReduction = calibrated && calibrated->tail;
+      cost.calibratedFirstReduction = calibrated && calibrated->first;
+      cost.calibratedMiddleReduction = calibrated && calibrated->middle;
+      cost.reductionFallbackInstances =
+          calibrated ? calibrated->fallbackInstances : 0;
+      if (calibrated)
+        cost.fittedReductionInstances = calibrated->fittedInstances;
       cost.resources = *resources;
       if (implementation.aivSubblocks > 1)
         cost.perAivWorkload = executionStage.workload;
@@ -3628,6 +3763,12 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       if (!stage.workload.segmentedIndirectStoreCounts.empty() &&
           resources->indirectMemoryAnalyticalFallback)
         cost.formulaEvidence += "+segmented_indirect_store_analytical_fallback";
+      if (cost.calibratedTailReduction)
+        cost.formulaEvidence += "+calibrated_tail_reduction_window";
+      if (cost.calibratedMiddleReduction)
+        cost.formulaEvidence += "+calibrated_middle_reduction_window";
+      if (cost.calibratedFirstReduction)
+        cost.formulaEvidence += "+calibrated_first_reduction_window";
       if (resources->scalarizedMultiResultReduction > 0.0)
         cost.formulaEvidence += "+scalarized_multi_result_reduction_surface";
       if (resources->multiResultReductionGroupBody > 0.0)

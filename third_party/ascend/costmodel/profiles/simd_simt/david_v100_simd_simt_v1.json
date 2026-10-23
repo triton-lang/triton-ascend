@@ -1,4 +1,5 @@
 {
+  "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "compatible_targets": [
     "Ascend950*",

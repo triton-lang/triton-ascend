@@ -7,6 +7,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGEROUTECOSTMODEL_H
 #define ASCENDMODEL_ROUTEMODEL_STAGEROUTECOSTMODEL_H
 
+#include "AscendModel/RouteModel/Reduction/ReductionWorkload.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -275,6 +276,7 @@ struct TensorOperationWorkload {
 /// Mode-independent work owned exactly once by one Stage.  Values are
 /// logical elements/bytes, not mode-specific instructions or cycles.
 struct StageWorkload {
+  std::vector<ReductionWorkload> reductionWorkloads;
   // Element count of one operation -> dynamic occurrences per Stage iteration.
   // Keep operation boundaries until mode-specific lane rounding is applied.
   llvm::StringMap<std::map<int64_t, double>> operationCounts;
@@ -458,6 +460,11 @@ struct StageResourceCycles {
 };
 
 struct StageImplementationCost {
+  bool calibratedTailReduction = false;
+  bool calibratedFirstReduction = false;
+  bool calibratedMiddleReduction = false;
+  double reductionFallbackInstances = 0;
+  std::map<std::string, double> fittedReductionInstances;
   StageImplementation implementation;
   double totalCycles = 0.0;
   /// A profiled semantic operation in this implementation already includes

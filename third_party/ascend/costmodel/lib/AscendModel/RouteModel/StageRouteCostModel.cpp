@@ -1163,6 +1163,17 @@ llvm::json::Object StageImplementationCost::toJSON() const {
       {"total_system_cycles", totalCycles},
       {"local_scope_completion_inclusive", localScopeCompletionInclusive},
       {"formula_evidence", formulaEvidence},
+      {"calibrated_tail_reduction", calibratedTailReduction},
+      {"calibrated_first_reduction", calibratedFirstReduction},
+      {"calibrated_middle_reduction", calibratedMiddleReduction},
+      {"reduction_fallback_instances", reductionFallbackInstances},
+      {"fitted_reduction_instances",
+       [&] {
+         llvm::json::Object entries;
+         for (const auto &[name, count] : fittedReductionInstances)
+           entries[name] = count;
+         return entries;
+       }()},
       {"resource_system_cycles", resources.toJSON()}};
   if (perAivWorkload)
     result["per_aiv_workload_before_superblock"] = perAivWorkload->toJSON();

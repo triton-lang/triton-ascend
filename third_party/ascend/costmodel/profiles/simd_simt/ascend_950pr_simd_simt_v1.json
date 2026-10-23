@@ -1,4 +1,5 @@
 {
+  "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
   "profile_version": "ascend-950pr-simd-simt-20261013-v142-clean-toolchain-refresh",

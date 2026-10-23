@@ -43,6 +43,8 @@ add_triton_ut(
   SRCS SimdSimtCostModelTest.cpp
   DEFS
     TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/../../costmodel/profiles/simd_simt/david_v100_simd_simt_v1.json"
+    TRITON_ASCEND_FIRST_TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/first_axis_current_numeric_fixture.json"
+    TRITON_ASCEND_MIDDLE_TEST_FIXTURE_PATH="${CMAKE_CURRENT_SOURCE_DIR}/middle_axis_numeric_fixture.json"
   LIBS
     AscendModelRouteModel
     TritonAnalysis

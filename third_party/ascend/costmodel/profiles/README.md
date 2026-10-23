@@ -42,3 +42,34 @@ The control and scan validators may finish successfully while printing
 but subtraction does not identify the independent non-negative parameter
 assumed by the current Stage formula. Such data is evidence for a formula gap,
 not permission to fit a convenient constant.
+
+### Reduction expression strings
+
+First- and middle-axis segment `condition` and `expression` values are strings.
+The loader validates metadata and segment structure, then parses expressions
+into `ReductionExpression` trees on the first lookup of each
+axis/mode/op/dtype group. Parsed groups are shared and initialized once,
+including when multiple threads query the same group. Object-form expressions
+are no longer accepted. Formula coefficients,
+conditions and evaluation order are unchanged by this encoding.
+
+Supported infix operators are `+`, `-`, `*`, `/`, `**`, `<`, `<=`, `>`, `>=`,
+`==`, and `!=`, with parentheses for grouping. Feature names are restricted to
+the evaluator's known workload features. Function calls support `add`, `sub`,
+`mul`, `div`, `pow`, `min`, `max`, `neg`, `indicator`, `ceil`, `sqrt`, `log2`,
+comparison names (`lt`, `le`, `gt`, `ge`, `eq`, `ne`), and logical operations
+`all_of`, `any_of`, `logical_not`. Logical aliases `and`, `or`, `not` are also
+accepted as function names. Negative numeric literals and scientific notation
+are supported; use `neg(expression)` to negate a nonliteral expression.
+
+Examples: `((12.193861 * R) * G)` and
+`all_of(W == 4, route_id == 2)`. Powers require a literal exponent in [-4, 4].
+Parsing limits are 16,384 input characters, 1,024 nodes, tree depth 32, and
+16 arguments per function. Invalid expression syntax is reported when the group
+is first used; it is
+propagated as a configuration error rather than treated as an unsupported
+workload. Metadata and field-type errors still reject the initial load.
+Call `ReductionProfile::validateAllFunctions()` before publishing a profile
+or in validation tools/tests to check every expression, including unused
+groups. This also warms every group, so normal compilation does not call it.
+The format does not execute arbitrary code.

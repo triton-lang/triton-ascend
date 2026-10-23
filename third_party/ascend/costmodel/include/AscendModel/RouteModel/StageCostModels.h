@@ -8,6 +8,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
+#include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
 #include "mlir/IR/Operation.h"
@@ -62,6 +63,8 @@ struct StageControlFlowRates {
   bool isFiniteAndNonNegative() const;
 };
 
+void mergeReductionResidualWorkload(StageWorkload &into, StageWorkload from);
+
 struct LogicalStage {
   std::string id;
   StageCostModelKind costModelKind = StageCostModelKind::ScalarIssue;
@@ -69,6 +72,11 @@ struct LogicalStage {
   int64_t iterationCount = 1;
   StageModelFeatures features;
   StageWorkload workload;
+  /// Work outside reduce roots and their nested regions, normalized per
+  /// iteration.
+  std::optional<StageWorkload> reductionExternalWorkload;
+  // Full per-reduce root and combine contributions, normalized per iteration.
+  std::vector<StageWorkload> reductionContributions;
   /// Exact TTIR ownership when StagePartition was built from an operation
   /// graph.
   std::vector<Operation *> operations;
@@ -526,6 +534,7 @@ struct StageModeProfile {
 };
 
 struct HardwareProfile {
+  std::optional<ReductionProfile> reductionProfile;
   std::string profileVersion;
   std::string target;
   /// Base warp count of one logical SIMT program.

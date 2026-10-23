@@ -1030,7 +1030,7 @@ llvm::json::Object StageModelFeatures::toJSON() const {
   return result;
 }
 
-std::array<std::pair<llvm::StringRef, double>, 51>
+std::array<std::pair<llvm::StringRef, double>, 53>
 StageResourceCycles::keyedValues() const {
   return {
       {{"setup", setup},
@@ -1096,6 +1096,10 @@ StageResourceCycles::keyedValues() const {
        {"indirect_load_group_startup_system_cycles", indirectLoadGroupStartup},
        {"grid_stride_startup_system_cycles", gridStrideStartup},
        {"store_layout_service_per_iteration", storeLayoutService},
+       {"strided_short_load_completion_per_iteration",
+        stridedShortLoadCompletion},
+       {"strided_short_store_completion_per_iteration",
+        stridedShortStoreCompletion},
        {"critical_path_per_iteration", criticalPath}}};
 }
 

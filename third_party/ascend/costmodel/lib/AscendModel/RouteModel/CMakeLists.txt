@@ -9,6 +9,7 @@ add_mlir_library(AscendModelRouteModel
   ../Analysis/StagePartitioner.cpp
   ../Analysis/SimtRegisterPressureAnalysis.cpp
   StageCostModels.cpp
+  Models/StridedShortCostModel.cpp
   StageRouteCostModel.cpp
   SimdSimtCostModel.cpp
   ../Transforms/SelectSimdSimtCostModel.cpp

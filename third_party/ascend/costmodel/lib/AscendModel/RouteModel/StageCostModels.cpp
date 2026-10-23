@@ -2,6 +2,8 @@
 
 #include "AscendModel/RouteModel/StageCostModels.h"
 
+#include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
+
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -15,8 +17,10 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <numeric>
 #include <optional>
+#include <set>
 #include <system_error>
 #include <type_traits>
 
@@ -249,10 +253,237 @@ accessShape(const StageMemoryAccess &access) {
   return std::make_pair(*elements * elementBytes, *elements);
 }
 
-static void mapMaskedStridedCopyCompletion(const LogicalStage &stage,
-                                           const StageWorkload &work,
-                                           const StageModeProfile &profile,
-                                           StageResourceCycles &resources) {
+static int64_t stridedElementAddress(const StridedAddressStats &stats,
+                                     int64_t flat) {
+  if (stats.cols <= 0)
+    return flat * stats.innerStrideBytes;
+  const int64_t row = flat / stats.cols;
+  const int64_t col = flat % stats.cols;
+  return row * stats.rowPitchBytes + col * stats.innerStrideBytes;
+}
+
+StridedAddressStats
+describeStridedShortAddresses(const StageMemoryAccess &access,
+                              llvm::ArrayRef<int64_t> windows) {
+  StridedAddressStats stats;
+  auto shape = accessShape(access);
+  if (!shape || access.elementBits <= 0 || access.elementBits % 8 != 0)
+    return stats;
+  stats.elementBytes = access.elementBits / 8;
+  stats.elements = shape->second;
+  // A rank-one access has exactly one shape axis; the rank-two geometry below
+  // is the only part that needs a second axis.  Requiring two axes here would
+  // reject the whole rank-one half of the calibrated domain.
+  if (stats.elements <= 0 || access.shape.empty() ||
+      access.strides.size() < access.shape.size())
+    return stats;
+
+  if (access.effectiveRank() <= 1) {
+    stats.rows = 1;
+    stats.cols = stats.elements;
+    // A trailing singleton axis has stride 0, so take the pitch from the axis
+    // that actually varies.
+    int64_t innerStride = 0;
+    for (size_t axis = 0; axis < access.shape.size(); ++axis)
+      if (access.shape[axis] > 1 && access.strides[axis] &&
+          (innerStride == 0 || *access.strides[axis] < innerStride))
+        innerStride = *access.strides[axis];
+    stats.innerStrideBytes =
+        innerStride > 0 ? innerStride * stats.elementBytes : stats.elementBytes;
+    stats.rowPitchBytes = 0;
+  } else {
+    if (access.shape.size() < 2)
+      return stats;
+    stats.rows = access.shape[0];
+    stats.cols = access.shape[1];
+    stats.innerStrideBytes = !access.strides[1]
+                                 ? stats.elementBytes
+                                 : *access.strides[1] * stats.elementBytes;
+    stats.rowPitchBytes =
+        !access.strides[0] ? 0 : *access.strides[0] * stats.elementBytes;
+  }
+  if (stats.innerStrideBytes <= 0 || stats.cols <= 0)
+    return stats;
+  stats.spanBytes =
+      (stats.elements - 1) * stats.innerStrideBytes + stats.elementBytes;
+
+  for (int64_t window : windows) {
+    if (window <= 0)
+      continue;
+    std::map<int64_t, int64_t> counts;
+    std::map<int64_t, std::set<int64_t>> blockRows;
+    std::map<int64_t, std::map<int64_t, int64_t>> perRowCounts;
+    for (int64_t flat = 0; flat < stats.elements; ++flat) {
+      const int64_t address = stridedElementAddress(stats, flat);
+      const int64_t block = address / window;
+      const int64_t row = stats.cols > 0 ? flat / stats.cols : 0;
+      ++counts[block];
+      blockRows[block].insert(row);
+      ++perRowCounts[block][row];
+    }
+    int64_t maximum = 0;
+    int64_t squares = 0;
+    int64_t rowBlocksTotal = 0;
+    int64_t shared = 0;
+    int64_t maxRow = 0;
+    for (const auto &entry : counts) {
+      maximum = std::max(maximum, entry.second);
+      squares += entry.second * entry.second;
+      rowBlocksTotal += static_cast<int64_t>(blockRows[entry.first].size());
+      if (blockRows[entry.first].size() >= 2)
+        ++shared;
+      for (const auto &rowEntry : perRowCounts[entry.first])
+        maxRow = std::max(maxRow, rowEntry.second);
+    }
+    stats.maxPerBlock[window] = maximum;
+    stats.sumSquaresPerBlock[window] = squares;
+    stats.distinctBlocks[window] = static_cast<int64_t>(counts.size());
+    stats.rowBlocksSum[window] = rowBlocksTotal;
+    stats.sharedBlocks[window] = shared;
+    stats.maxPerRowBlock[window] = maxRow;
+  }
+
+  {
+    std::map<int64_t, std::set<int64_t>> linesPerKilo;
+    std::map<int64_t, std::set<int64_t>> rowsPerKilo;
+    for (int64_t flat = 0; flat < stats.elements; ++flat) {
+      const int64_t address = stridedElementAddress(stats, flat);
+      linesPerKilo[address / 1024].insert(address / 128);
+      rowsPerKilo[address / 1024].insert(stats.cols > 0 ? flat / stats.cols
+                                                        : 0);
+    }
+    for (const auto &entry : linesPerKilo)
+      stats.maxConc1k =
+          std::max(stats.maxConc1k, static_cast<int64_t>(entry.second.size()));
+    for (const auto &entry : rowsPerKilo)
+      stats.maxRowsPerKilo = std::max(
+          stats.maxRowsPerKilo, static_cast<int64_t>(entry.second.size()));
+  }
+
+  const int64_t waves = llvm::divideCeil(stats.elements, int64_t(32));
+  if (waves > 0) {
+    int64_t total = 0;
+    for (int64_t wave = 0; wave < waves; ++wave) {
+      std::set<int64_t> lines;
+      for (int64_t lane = 0; lane < 32; ++lane) {
+        const int64_t flat = wave * 32 + lane;
+        if (flat >= stats.elements)
+          break;
+        lines.insert(stridedElementAddress(stats, flat) / 128);
+      }
+      total += static_cast<int64_t>(lines.size());
+    }
+    stats.meanWarpLines =
+        static_cast<double>(total) / static_cast<double>(waves);
+  }
+  return stats;
+}
+
+/// Claim the StridedShort direct accesses of one Stage with the closed-form
+/// completion formulas, recording the usual receipts so the analytical
+/// fallback does not price the same bytes twice.
+///
+/// Guards:
+///   * StridedShort - the calibrated layout class.
+///   * masked       - admitted, except a SIMD store, which pays a destination
+///                    read-back and therefore has its own two slots.
+///   * no sync      - a synchronised Stage is not the measured pipeline.
+///
+/// A straight-line Stage is admissible too: the fits are per-iteration slopes,
+/// which stay defined without a loop to amortise them over.
+static void mapStridedShortMemoryCompletion(
+    const LogicalStage &stage, const StageWorkload &work,
+    const StageModeProfile &profile, StageResourceCycles &resources, bool simd,
+    LayoutCoverage &layout, std::vector<const StageMemoryAccess *> &claimed) {
+  if (profile.stridedShortCompletionFits.empty())
+    return;
+  if (stage.features.synchronizationCount != 0)
+    return;
+  // Static storage: binding an ArrayRef to a braced temporary is -Wdangling
+  // and the tree builds with -Werror.
+  static constexpr int64_t windowSizes[] = {64, 128, 256, 512, 1024};
+  const llvm::ArrayRef<int64_t> windows = windowSizes;
+  for (const StageMemoryAccess &access : work.memoryAccesses) {
+    if (access.count <= 0.0)
+      continue;
+    if (access.layoutClass() != StageMemoryAccess::LayoutClass::StridedShort)
+      continue;
+    // Masked accesses are admitted: the load and SIMT store fits were measured
+    // to be mask-invariant (the compaction form shows -0.6% masked versus
+    // unmasked), and the two SIMD store fits are masked-only slots, so no
+    // access can be priced by a fit that was swept under the other mask state.
+    if (!access.hasStaticLayout())
+      continue;
+    if (access.addressDependsOnLoadedIndex ||
+        access.addressHasNonAffineTensorComputation ||
+        access.addressHasTensorControlFlowSelection)
+      continue;
+    if (access.effectiveRank() > 2)
+      continue;
+    if (access.elementBits / 8 <= 0)
+      continue;
+    // describeStridedShortAddresses owns the element pitch, so both the domain
+    // check and the fit read the same number.
+    const auto stats = describeStridedShortAddresses(access, windows);
+    if (stats.elements <= 0)
+      continue;
+    // A unit inner stride is contiguous, not strided: that regime belongs to
+    // the wide/contiguous path, which these formulas do not describe.
+    if (stats.innerStrideBytes <= stats.elementBytes)
+      continue;
+    const auto shape = accessShape(access);
+    if (!shape)
+      continue;
+    // Geometry decides the slot; the mode is the only non-geometry input and
+    // travels as a bool, never as a name prefix.  This is the whole dispatch:
+    // a slot that owns this geometry is priced, and a geometry that no slot
+    // owns keeps the analytical fallback.
+    const auto formula = selectStridedShortFormula(access, stats, simd);
+    if (!formula)
+      continue;
+    auto fit = profile.stridedShortCompletionFits.find(
+        stringifyStridedShortFormula(*formula).str());
+    // Missing coefficients are missing data, not a reason to price the access
+    // with a different formula: skip it and let the fallback own the bytes.
+    if (fit == profile.stridedShortCompletionFits.end())
+      continue;
+    auto cycles = evaluateStridedShortCompletionFormula(
+        *formula, fit->second, stats, profile.activeWarpCount);
+    if (!cycles || *cycles <= 0.0)
+      continue;
+    const double total = *cycles * access.count;
+    const double warpInstructions =
+        access.count * llvm::divideCeil(shape->second, int64_t(32));
+    // Receipt for the masked strided copy mechanism: it must yield on any
+    // access this formula already priced, so the two mechanisms cannot both
+    // charge the same bytes.
+    claimed.push_back(&access);
+    if (access.store) {
+      resources.store += total;
+      layout.storeBytes += access.count * shape->first;
+      layout.storeOperations += access.count;
+      layout.storeWarpInstructions += warpInstructions;
+      resources.stridedShortStoreCompletion += total;
+    } else {
+      resources.load += total;
+      layout.loadBytes += access.count * shape->first;
+      layout.loadOperations += access.count;
+      layout.loadWarpInstructions += warpInstructions;
+      resources.stridedShortLoadCompletion += total;
+    }
+  }
+}
+
+/// The single string form of a slot: the profile JSON key.
+
+} // namespace
+
+namespace {
+
+static void mapMaskedStridedCopyCompletion(
+    const LogicalStage &stage, const StageWorkload &work,
+    const StageModeProfile &profile, StageResourceCycles &resources,
+    llvm::ArrayRef<const StageMemoryAccess *> claimed) {
   if (stage.costModelKind != StageCostModelKind::IndependentPipelinedLoop ||
       stage.features.synchronizationCount != 0 ||
       stage.features.conditionalBranchCount != 0 ||
@@ -308,6 +539,12 @@ static void mapMaskedStridedCopyCompletion(const LogicalStage &stage,
 
   const auto curve = curves->find(stridedAccess->rowStrideBytes());
   if (curve == curves->end())
+    return;
+  // A strided access already priced by the closed-form strided-direct
+  // mechanism yields this floor: otherwise both charge the same bytes, and the
+  // measured absolute cost says the closed form is the more accurate of the
+  // two.  Accesses it did not claim keep the floor exactly as before.
+  if (llvm::is_contained(claimed, stridedAccess))
     return;
   const auto floor =
       curve->second.evaluate(stridedAccess->rowCount(), stage.iterationCount);
@@ -986,6 +1223,9 @@ static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             StageMode mode, int64_t superblockFactor, bool wholeSimt) {
   StageResourceCycles resources;
+  // Accesses priced by the closed-form strided-direct mechanism.  The masked
+  // strided copy floor yields on them and stays in force for everything else.
+  std::vector<const StageMemoryAccess *> stridedShortAlreadyClaimed;
   StageWorkload work = stage.workload;
   if (wholeSimt)
     mapCompositeDotPaths(work, profile, superblockFactor, resources);
@@ -1406,6 +1646,14 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
     const bool pipelinedSimd = simd && permitsSimdOverlap(stage) &&
                                stage.features.synchronizationCount == 0 &&
                                stage.features.conditionalBranchCount == 0;
+    // Runs before the load-group curve below, and before the masked-copy curve
+    // further down, so both can see which accesses this pass already priced.
+    mapStridedShortMemoryCompletion(stage, work, profile, resources, simd,
+                                    layout, stridedShortAlreadyClaimed);
+    // The store-group curve below must not price a store this pass already did.
+    const bool storesClaimedByClosedForm = std::any_of(
+        stridedShortAlreadyClaimed.begin(), stridedShortAlreadyClaimed.end(),
+        [](const StageMemoryAccess *access) { return access->store; });
     if (pipelinedSimd && profile.independentLoadGroupBytesPerCycle > 0.0) {
       std::vector<const StageMemoryAccess *> flatPrefix;
       bool reachedFirstLoad = false;
@@ -1473,7 +1721,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
       }
     }
 
-    if (pipelinedSimd &&
+    if (pipelinedSimd && !storesClaimedByClosedForm &&
         !profile.pipelinedStridedStoreGroupsByRowStrideBytes.empty()) {
       double operations = 0.0;
       double bytes = 0.0;
@@ -1529,6 +1777,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
         }
       }
     }
+
     // GM count curves contain no FMA-to-store shared-memory exchange.
     std::map<const StageMemoryLayoutCost *, double> exchanges;
     if (!simd && isContinuousMemoryStage(stage.costModelKind))
@@ -2160,7 +2409,8 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
     // old flat-throughput bound without charging those bytes a second time.
     resources.store = std::max(resources.store, resources.storeLayoutService);
   }
-  mapMaskedStridedCopyCompletion(stage, work, profile, resources);
+  mapMaskedStridedCopyCompletion(stage, work, profile, resources,
+                                 stridedShortAlreadyClaimed);
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 

@@ -237,7 +237,117 @@
       },
       "source": "Shared Ascend950PR contiguous-memory joint fit",
       "confidence": "high",
-      "note": "Uncovered operations retain startup-per-operation plus byte throughput. Proven uninterrupted independent-loop groups use the generic grouped envelopes above."
+      "note": "Uncovered operations retain startup-per-operation plus byte throughput. Proven uninterrupted independent-loop groups use the generic grouped envelopes above.",
+      "strided_short_completion": {
+        "description": "Closed-form strided load/store completion fits for the SIMD StridedShort direct-access domain. Each slot fixes a formula shape in StageCostModels.cpp and supplies only its fitted numbers. Calibrated from rotate-loop Event slopes (2000/8000 iterations), so a slot is a steady-state marginal per-iteration cost and requires an owning loop. Compile-time-constant stride, affine address, static shape and non-indirect provenance only. Load and SIMT slots price masked and unmasked alike (a runtime all-true mask measured free); the two simd_store_masked_* slots are the masked-only exception, because a mask forces the destination to be read back before the write.",
+        "simd_load_stride2_r1": {
+          "intercept_system_cycles": 65.1033,
+          "coefficient_system_cycles": [
+            0.00847947,
+            0.00478897
+          ],
+          "structural_constants": [
+            1536.0
+          ],
+          "evidence": "PHYS3_simd_load_stride2_r1.json; 21 rotate-loop points, ISB=2*eb, MAPE 1.22%"
+        },
+        "simd_load_stride2_r2": {
+          "intercept_system_cycles": 68.6263,
+          "coefficient_system_cycles": [
+            1.1068,
+            3.5929,
+            0.5032,
+            131.6284,
+            3.0088,
+            54.4293
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride2_r2.json; 120 points, branch A src>=32 (n=87, MAPE 2.95%) / branch B src<32 (n=33, MAPE 8.52%)"
+        },
+        "simd_load_stride_gt2_r1_dense": {
+          "intercept_system_cycles": 75.6117,
+          "coefficient_system_cycles": [
+            0.361835,
+            0.079356,
+            16.5852,
+            1.2845,
+            0.014506
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride_gt2_r1_dense.json; 136 points, n>=32 and ISB<=128, MAPE 8.70%. Dense regime ISB<=32 only; see simd_load_stride_gt2_r1_sparse."
+        },
+        "simd_load_stride_gt2_r1_sparse": {
+          "intercept_system_cycles": 52.0583686724,
+          "coefficient_system_cycles": [
+            0.5012607307,
+            0.0016325329,
+            49.6456048012
+          ],
+          "structural_constants": [],
+          "evidence": "ISB>32 B sparse segment, 45 points, four terms (intercept, n, n*eb, mx64), weighted least squares w=1/T, MAPE 8.88%. Rescanned 2026-10-18 with the probe AUTO rotate window (per-point step = tile span, 33-67 MB); the historical fixed step 8192 x mask 16383 streamed 262 MB per launch and inflated this regime up to 2.2x. K-marginal on the pytest_strided_compaction geometry (n=256, ISB=64 B, eb=4): 231.70 ns vs 221.78 measured, +4.5%."
+        },
+        "simd_load_stride_gt2_r2": {
+          "intercept_system_cycles": 96.769,
+          "coefficient_system_cycles": [
+            37.562,
+            0.15665,
+            2.6914,
+            52.53,
+            36.791,
+            0.00028649
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_load_stride_gt2_r2.json; 438 points, MAPE 8.44%"
+        },
+        "simd_store_r1": {
+          "intercept_system_cycles": 23.5488,
+          "coefficient_system_cycles": [
+            0.185763,
+            85.459976,
+            0.438898,
+            0.057264
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS3_simd_store_r1.json; 189 points, MAPE 5.33%"
+        },
+        "simd_store_r2": {
+          "intercept_system_cycles": 76.0485,
+          "coefficient_system_cycles": [
+            76.5708,
+            0.345843,
+            1.11529
+          ],
+          "structural_constants": [
+            128.0,
+            128.0
+          ],
+          "evidence": "PHYS3_simd_store_r2.json; 325 points, MAPE 8.12%"
+        },
+        "simd_store_masked_stride_gt2": {
+          "intercept_system_cycles": 233.13893010359232,
+          "coefficient_system_cycles": [
+            0.2451482631596979,
+            99.292319920040171,
+            0.6014874004037386,
+            0.026348222847080462,
+            0.038518219183032401
+          ],
+          "structural_constants": [],
+          "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride>=3 branch; 384 points (int8/float16/float32, n=4..512, stride=3/4/5/6/8/16/32/64/128, 15 rank-two shapes), MAPE 6.96%. Masked-only: a runtime mask makes the SIMD store read the destination back, so the fit carries an extra 1 KB aggregate term. Worst regime is stride>=32 with n<=16 (40-56%, 15/384 points), see README 3.5(a)."
+        },
+        "simd_store_masked_stride2": {
+          "intercept_system_cycles": 124.86862273081567,
+          "coefficient_system_cycles": [
+            0.8070970824984168,
+            87.96083138064083,
+            0.17780805823428358,
+            0.030050232829188506,
+            0.026088132016179322
+          ],
+          "structural_constants": [],
+          "evidence": "data_provider/strided_ldst/pre-explore/results/final/errors_masked_store.csv, stride==2 branch; 100 points, MAPE 7.08%. Same shape as simd_store_masked_stride_gt2 with its own numbers: stride 2 lowers through DeinterleaveStatusOptimization (block move plus extract_slice), so the fixed and read-modify-write terms are visibly cheaper. Masked-only."
+        }
+      }
     },
     "reduction": {
       "description": "Generic FP32 SIMD row-reduction envelope: one startup per semantic tt.reduce plus aggregate reduction lane-steps divided by the measured rate.",
@@ -740,7 +850,65 @@
           "evidence": "data_provider/950pr_simt_masked_strided_store_completion_debug0_20261011.json; fresh A5 production-mode (TRITON_DEBUG=0) whole-SIMT and Auto-selected whole-SIMT masked scatter controls at 128 and 256 rows per source iteration, eight static iterations, and a 64-byte FP32 row stride. The curve is a bounded strided-store resource floor selected from TTIR access direction and mask provenance."
         }
       },
-      "confidence": "low"
+      "confidence": "low",
+      "strided_short_completion": {
+        "description": "Closed-form strided load/store completion fits for the SIMT StridedShort direct-access domain. Each slot fixes a formula shape in StageCostModels.cpp and supplies only its fitted numbers. Calibrated from rotate-loop Event slopes (2000/8000 iterations), so a slot is a steady-state marginal per-iteration cost and requires an owning loop. Unmasked, compile-time-constant stride, affine address, static shape and non-indirect provenance only.",
+        "simt_load_r1": {
+          "intercept_system_cycles": 100.629,
+          "coefficient_system_cycles": [
+            2.33422,
+            0.770909,
+            5.98993,
+            9.13077,
+            16.74857,
+            0.2284797
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_wide_simtload.json; 506 points, MAPE 4.95%"
+        },
+        "simt_load_r2": {
+          "intercept_system_cycles": 109.283,
+          "coefficient_system_cycles": [
+            2.424697,
+            0.6631113,
+            7.55672,
+            9.524156,
+            6.493768
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_wide_simtload.json; 1211 points, MAPE 6.34%"
+        },
+        "simt_store_r1": {
+          "intercept_system_cycles": 13.811205455127958,
+          "coefficient_system_cycles": [
+            2.1903318691306617,
+            7.842195986302242,
+            4.980556635598631,
+            4.86433739755439,
+            1.4225379163283052,
+            1.9580158980672062
+          ],
+          "structural_constants": [],
+          "evidence": "PHYS2_simt_store.json; 960 points, MAPE 9.32%"
+        },
+        "simt_store_r2": {
+          "intercept_system_cycles": 0.0,
+          "coefficient_system_cycles": [
+            4.887541,
+            1.36564,
+            1.943535,
+            0.135207,
+            0.0456752,
+            0.0613001,
+            18.3383
+          ],
+          "structural_constants": [
+            2.0,
+            33.4824
+          ],
+          "evidence": "PHYS2_simt_store.json; 1210 points, MAPE 9.64%"
+        }
+      }
     },
     "stage_resources": {
       "description": "Generic SIMT front-end inputs. Unclassified scalar and control instructions contribute only to the measured shared issue lower bound. Prefix-scan issue accounting preserves operation boundaries. The loaded-index atomic rate is the common P1/P56 residual slope from fresh race-free i32 permutation probes; ordinary atomic addresses retain the default warp-parallel rate.",

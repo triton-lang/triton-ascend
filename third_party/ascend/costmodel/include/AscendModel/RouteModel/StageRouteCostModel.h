@@ -446,10 +446,15 @@ struct StageResourceCycles {
   /// Full-tile store service floor divided by F, like the analytical store
   /// resource. SuperBlock applies F once. Excludes first-round/sync costs.
   double storeLayoutService = 0.0;
+  /// Closed-form strided direct load/store completion claimed by
+  /// mapStridedShortMemoryCompletion.  Already included in load/store as a
+  /// separate receipt-owned term; diagnostic decomposition, not extra terms.
+  double stridedShortLoadCompletion = 0.0;
+  double stridedShortStoreCompletion = 0.0;
   double criticalPath = 0.0;
   bool indirectMemoryAnalyticalFallback = false;
 
-  std::array<std::pair<llvm::StringRef, double>, 51> keyedValues() const;
+  std::array<std::pair<llvm::StringRef, double>, 53> keyedValues() const;
   bool isFiniteAndNonNegative() const;
   llvm::json::Object toJSON() const;
   /// Preserve every non-zero resource while omitting default-valued

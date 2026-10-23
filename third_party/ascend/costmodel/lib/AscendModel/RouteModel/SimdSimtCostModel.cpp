@@ -1205,6 +1205,48 @@ static std::string resolveProfileReference(llvm::StringRef ownerPath,
   return resolved.str().str();
 }
 
+static void readStridedShortCompletionFits(
+    ProfileJSONReader &reader, const llvm::json::Object &memory,
+    llvm::StringRef context,
+    std::map<std::string, StridedShortCompletionFit> &out) {
+  const auto *object = memory.getObject("strided_short_completion");
+  if (!object)
+    return;
+  for (const auto &entry : *object) {
+    const llvm::StringRef slot = entry.first;
+    if (slot == "description")
+      continue;
+    const std::string path =
+        (context + ".strided_short_completion." + slot).str();
+    const auto *value = entry.second.getAsObject();
+    if (!value) {
+      reader.setError(path + " must be an object");
+      continue;
+    }
+    StridedShortCompletionFit fit;
+    fit.intercept = value->getNumber("intercept_system_cycles").value_or(0.0);
+    if (const auto *coefficients =
+            value->getArray("coefficient_system_cycles")) {
+      for (size_t index = 0;
+           index < coefficients->size() && index < fit.coefficient.size();
+           ++index)
+        fit.coefficient[index] =
+            (*coefficients)[index].getAsNumber().value_or(0.0);
+    }
+    if (const auto *structural = value->getArray("structural_constants"))
+      for (size_t index = 0;
+           index < structural->size() && index < fit.structural.size(); ++index)
+        fit.structural[index] =
+            (*structural)[index].getAsNumber().value_or(0.0);
+    fit.evidence = reader.string(*value, "evidence", path);
+    if (!fit.isValid()) {
+      reader.setError(path + " requires finite coefficients and evidence");
+      continue;
+    }
+    out[slot.str()] = fit;
+  }
+}
+
 static void
 readLayoutCostMap(ProfileJSONReader &reader,
                   const llvm::json::Object &resources, llvm::StringRef key,
@@ -2680,6 +2722,9 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
           *dot, "flops_per_system_cycle", "throughput_measurement",
           "flop/system_cycle", microbench, reader, "simd.dot");
     }
+    if (const auto *simdMemory = simd->getObject("memory"))
+      readStridedShortCompletionFits(reader, *simdMemory, "simd.memory",
+                                     simdProfile.stridedShortCompletionFits);
     readStageResources(reader, *simd, "simd", microbench, simdProfile);
     const auto predicate = simdProfile.operationRates.lookup("predicate.cmp");
     simdProfile.predicateOperationsPerCycle =
@@ -2826,6 +2871,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       readMaskedStridedCopyCompletion(
           *memory, "masked_strided_store_copy_completion", "simt.memory",
           reader, simtProfile.maskedStridedStoreCopyCompletionByStrideBytes);
+      readStridedShortCompletionFits(reader, *memory, "simt.memory",
+                                     simtProfile.stridedShortCompletionFits);
     }
     readStageResources(reader, *simt, "simt", microbench, simtProfile);
     if (const auto *resources = simt->getObject("stage_resources")) {

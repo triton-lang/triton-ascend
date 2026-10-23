@@ -10,12 +10,16 @@
 
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 
+#include "AscendModel/RouteModel/Models/StridedShortCostModel.h"
+
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 
+#include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -296,6 +300,8 @@ struct StageModeProfile {
   /// SIMD scalar-row store groups indexed by row stride in bytes.
   std::map<int64_t, PipelinedStridedStoreGroupCost>
       pipelinedStridedStoreGroupsByRowStrideBytes;
+  std::map<std::string, StridedShortCompletionFit>
+      stridedShortCompletionFits; // key: stringifyStridedShortFormula(slot)
   /// Directional completion floors for masked FP32 strided copies.  The key
   /// is the physical byte stride of the strided side.
   std::map<int64_t, MaskedStridedCopyCompletionCost>

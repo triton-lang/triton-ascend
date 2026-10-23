@@ -1,6 +1,8 @@
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
+#include <array>
+#include <thread>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -1819,6 +1821,13 @@ TEST(SimdSimtCostModelTest, IncompatibleDominantStructuresRequireStageSplit) {
 #include "AscendModel/RouteModel/Reduction/ReductionCostModel.h"
 
 namespace {
+template <typename T> T takeReductionResult(llvm::Expected<T> result) {
+  if (!result) {
+    ADD_FAILURE() << llvm::toString(result.takeError());
+    return T{};
+  }
+  return std::move(*result);
+}
 HardwareProfile tailMigrationProfile() {
   auto profile = hardwareProfile();
   auto path = std::string(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
@@ -1827,6 +1836,10 @@ HardwareProfile tailMigrationProfile() {
   auto reduction = mlir::ascend::ReductionProfile::loadFromFile(path);
   if (!reduction) {
     ADD_FAILURE() << llvm::toString(reduction.takeError());
+    return profile;
+  }
+  if (auto error = reduction->validateAllFunctions()) {
+    ADD_FAILURE() << llvm::toString(std::move(error));
     return profile;
   }
   profile.reductionProfile = std::move(*reduction);
@@ -1969,12 +1982,12 @@ TEST(SimdSimtCostModelTest, MiddleAxisFrozenNumericFixtures) {
     work.axis = 1;
     for (const auto &d : *o->getArray("shape"))
       work.shape.push_back(*d.getAsInteger());
-    auto estimate = mlir::ascend::estimateReductionCycles(
+    auto estimate = takeReductionResult(mlir::ascend::estimateReductionCycles(
         work, *hardware.reductionProfile,
         o->getString("mode") && *o->getString("mode") == "simd"
             ? mlir::ascend::ReductionMode::SIMD
             : mlir::ascend::ReductionMode::SIMT,
-        *o->getInteger("warps"));
+        *o->getInteger("warps")));
     ASSERT_TRUE(estimate) << work.kind << "/" << work.dataType;
     EXPECT_EQ(estimate->axis, mlir::ascend::ReductionAxisKind::Middle);
     EXPECT_NEAR(estimate->cycles, *o->getNumber("cycle"),
@@ -2008,9 +2021,9 @@ TEST(SimdSimtCostModelTest, PerReductionMixedAxesAndPartialFallback) {
         work.shape[work.axis], 32}] = work.instances;
     stage.reductionContributions.push_back(contribution);
     mlir::ascend::mergeReductionResidualWorkload(stage.workload, contribution);
-    auto estimate = mlir::ascend::estimateReductionCycles(
+    auto estimate = takeReductionResult(mlir::ascend::estimateReductionCycles(
         work, *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
-        profile.baseSimtWarpCount);
+        profile.baseSimtWarpCount));
     if (estimate)
       fitted += work.instances * estimate->cycles;
   }
@@ -2089,10 +2102,10 @@ TEST(SimdSimtCostModelTest, PartialReductionPreservesOnlyUnmatchedCombine) {
   EXPECT_EQ(cost.reductionFallbackInstances, 1);
   EXPECT_DOUBLE_EQ(cost.resources.compute, old.resources.compute);
   EXPECT_DOUBLE_EQ(cost.resources.issue, old.resources.issue);
-  auto estimate = mlir::ascend::estimateReductionCycles(
+  auto estimate = takeReductionResult(mlir::ascend::estimateReductionCycles(
       analyzed.reductionContributions[0].reductionWorkloads.front(),
       *profile.reductionProfile, mlir::ascend::ReductionMode::SIMD,
-      profile.baseSimtWarpCount);
+      profile.baseSimtWarpCount));
   ASSERT_TRUE(estimate);
   EXPECT_NEAR(cost.resources.reduction,
               old.resources.reduction + estimate->cycles, 1e-9);
@@ -2114,11 +2127,11 @@ TEST(SimdSimtCostModelTest, CurrentFirstAxisAllSegmentFixtures) {
     work.axis = 0;
     for (const auto &d : *o->getArray("shape"))
       work.shape.push_back(*d.getAsInteger());
-    auto c = mlir::ascend::estimateReductionCycles(
+    auto c = takeReductionResult(mlir::ascend::estimateReductionCycles(
         work, *hardware.reductionProfile,
         *o->getString("mode") == "simd" ? mlir::ascend::ReductionMode::SIMD
                                         : mlir::ascend::ReductionMode::SIMT,
-        *o->getInteger("W"));
+        *o->getInteger("W")));
     ASSERT_TRUE(c);
     EXPECT_EQ(c->axis, mlir::ascend::ReductionAxisKind::First);
     EXPECT_NEAR(c->cycles, *o->getNumber("expected"),
@@ -2186,14 +2199,14 @@ TEST(SimdSimtCostModelTest, ReductionProfileHierarchyAndLegacyAreEquivalent) {
     work.dataType = "f32";
     work.shape = {8, 16};
     work.axis = 0;
-    auto cost = estimateFirstAxisReductionCycles(work, *profile,
-                                                 ReductionMode::SIMD, 4);
+    auto cost = takeReductionResult(estimateFirstAxisReductionCycles(
+        work, *profile, ReductionMode::SIMD, 4));
     ASSERT_TRUE(cost);
     EXPECT_DOUBLE_EQ(*cost, 42);
     work.shape = {2, 8, 16};
     work.axis = 1;
-    cost = estimateMiddleAxisReductionCycles(work, *profile,
-                                             ReductionMode::SIMD, 4);
+    cost = takeReductionResult(estimateMiddleAxisReductionCycles(
+        work, *profile, ReductionMode::SIMD, 4));
     ASSERT_TRUE(cost);
     EXPECT_DOUBLE_EQ(*cost, 43);
   }
@@ -2236,6 +2249,9 @@ TEST(SimdSimtCostModelTest, StringReductionExpressions) {
     }
     auto result = ReductionProfile::loadFromFile(path);
     llvm::sys::fs::remove(path);
+    if (result)
+      if (auto error = result->validateAllFunctions())
+        return llvm::Expected<ReductionProfile>(std::move(error));
     return result;
   };
   for (auto entry :
@@ -2251,8 +2267,8 @@ TEST(SimdSimtCostModelTest, StringReductionExpressions) {
     work.dataType = "f32";
     work.shape = {8, 16};
     work.axis = 0;
-    auto value =
-        estimateFirstAxisReductionCycles(work, *p, ReductionMode::SIMD, 4);
+    auto value = takeReductionResult(
+        estimateFirstAxisReductionCycles(work, *p, ReductionMode::SIMD, 4));
     ASSERT_TRUE(value);
     EXPECT_NEAR(*value, entry.second, 1e-12);
   }
@@ -2275,4 +2291,209 @@ TEST(SimdSimtCostModelTest, StringReductionExpressions) {
   EXPECT_FALSE(static_cast<bool>(old));
   if (!old)
     llvm::consumeError(old.takeError());
+}
+
+namespace {
+llvm::Expected<mlir::ascend::ReductionProfile>
+loadLazyTestProfile(llvm::StringRef usedExpression = "42",
+                    llvm::StringRef unusedExpression = "43") {
+  auto function = [](llvm::StringRef expression, bool middle) {
+    llvm::json::Object result{
+        {"supported_warps", llvm::json::Array{4}},
+        {"segments", llvm::json::Array{llvm::json::Object{
+                         {"id", "segment"},
+                         {"lane_width", 1},
+                         {"condition", "1"},
+                         {"expression", expression.str()}}}}};
+    if (middle)
+      result["layout_policy_id"] = "row_major_128bit_v1";
+    return result;
+  };
+  llvm::json::Object root{
+      {"schema_version", 1},
+      {"target", "test"},
+      {"profile_version", "test"},
+      {"unit", "syscnt_cycle"},
+      {"families",
+       llvm::json::Object{
+           {"tail_axis", llvm::json::Object{{"simd", llvm::json::Object{}},
+                                            {"simt", llvm::json::Object{}}}},
+           {"first_axis",
+            llvm::json::Object{
+                {"simd",
+                 llvm::json::Object{
+                     {"sum", llvm::json::Object{{"f32", function(usedExpression,
+                                                                 false)}}}}}}},
+           {"middle_axis",
+            llvm::json::Object{
+                {"simt", llvm::json::Object{
+                             {"sum", llvm::json::Object{
+                                         {"f32", function(unusedExpression,
+                                                          true)}}}}}}}}}};
+  int fd;
+  llvm::SmallString<128> path;
+  if (auto ec = llvm::sys::fs::createTemporaryFile("lazy-reduction", "json", fd,
+                                                   path))
+    return llvm::errorCodeToError(ec);
+  {
+    llvm::raw_fd_ostream stream(fd, true);
+    stream << llvm::json::Value(std::move(root));
+  }
+  auto result = mlir::ascend::ReductionProfile::loadFromFile(path);
+  llvm::sys::fs::remove(path);
+  return result;
+}
+} // namespace
+
+TEST(SimdSimtCostModelTest, LazyReductionParsesOnlyRequestedGroups) {
+  using namespace mlir::ascend;
+  auto p = loadLazyTestProfile();
+  ASSERT_TRUE(bool(p)) << llvm::toString(p.takeError());
+  EXPECT_EQ(p->getParsedFunctionCount(), 0u);
+  // A valid tail miss and a missing group must not initialize any AST.
+  auto tail = estimateReductionCycles({"sum", "f32", {64}, 0, 1}, *p,
+                                      ReductionMode::SIMD, 4);
+  ASSERT_TRUE(bool(tail));
+  EXPECT_FALSE(bool(*tail));
+  auto missing = p->findFirstAxis(ReductionMode::SIMD, "prod", "i64");
+  ASSERT_TRUE(bool(missing));
+  EXPECT_EQ(*missing, nullptr);
+  EXPECT_EQ(p->getParsedFunctionCount(), 0u);
+  auto first = p->findFirstAxis(ReductionMode::SIMD, "sum", "f32");
+  ASSERT_TRUE(bool(first));
+  ASSERT_NE(*first, nullptr);
+  auto copy = *p;
+  auto moved = std::move(copy);
+  auto again = moved.findFirstAxis(ReductionMode::SIMD, "sum", "f32");
+  ASSERT_TRUE(bool(again));
+  EXPECT_EQ(*first, *again);
+  EXPECT_EQ(p->getParsedFunctionCount(), 1u);
+  auto middle = moved.findMiddleAxis(ReductionMode::SIMT, "sum", "f32");
+  ASSERT_TRUE(bool(middle));
+  ASSERT_NE(*middle, nullptr);
+  EXPECT_EQ(p->getParsedFunctionCount(), 2u);
+  auto error = p->validateAllFunctions();
+  EXPECT_FALSE(bool(error));
+  if (error)
+    llvm::consumeError(std::move(error));
+}
+
+TEST(SimdSimtCostModelTest, LazyReductionErrorsAreDeferredAndPropagated) {
+  using namespace mlir::ascend;
+  auto p = loadLazyTestProfile("42", "unknown + 1");
+  ASSERT_TRUE(bool(p));
+  auto valid = estimateFirstAxisReductionCycles({"sum", "f32", {8, 16}, 0, 1},
+                                                *p, ReductionMode::SIMD, 4);
+  ASSERT_TRUE(bool(valid));
+  ASSERT_TRUE(bool(*valid));
+  EXPECT_DOUBLE_EQ(**valid, 42);
+  EXPECT_EQ(p->getParsedFunctionCount(), 1u);
+  std::string message;
+  for (int i = 0; i < 2; ++i) {
+    auto result = estimateReductionCycles({"sum", "f32", {2, 8, 16}, 1, 1}, *p,
+                                          ReductionMode::SIMT, 4);
+    ASSERT_FALSE(bool(result));
+    auto error = llvm::toString(result.takeError());
+    EXPECT_NE(error.find("middle_axis/simt/sum/f32/segment"),
+              std::string::npos);
+    if (i == 0)
+      message = error;
+    else
+      EXPECT_EQ(message, error);
+  }
+  EXPECT_EQ(p->getParsedFunctionCount(), 1u);
+  auto error = p->validateAllFunctions();
+  ASSERT_TRUE(bool(error));
+  EXPECT_EQ(message, llvm::toString(std::move(error)));
+
+  // Invalid calibration is an error at the Stage boundary, not a fitted miss.
+  auto broken = loadLazyTestProfile("unknown");
+  ASSERT_TRUE(bool(broken));
+  auto hardware = hardwareProfile();
+  hardware.reductionProfile = std::move(*broken);
+  auto stage = ordinaryTailStage();
+  stage.workload.reductionWorkloads = {{"sum", "f32", {8, 16}, 0, 1}};
+  stage.workload.reductionGeometryCounts.clear();
+  stage.workload.reductionGeometryCounts[{8, 16, 32}] = 1;
+  stage.reductionExternalWorkload = StageWorkload{};
+  StagePartition partition;
+  partition.stages.push_back(std::move(stage));
+  auto table = StageCostEvaluator().evaluate(partition, hardware);
+  ASSERT_FALSE(bool(table));
+  EXPECT_NE(llvm::toString(table.takeError()).find("first_axis/simd/sum/f32"),
+            std::string::npos);
+}
+
+TEST(SimdSimtCostModelTest, LazyReductionConcurrentInitializationAndSnapshots) {
+  using namespace mlir::ascend;
+  auto p = loadLazyTestProfile();
+  ASSERT_TRUE(bool(p));
+  std::array<const ReductionFunction *, 16> pointers{};
+  std::array<std::string, 16> errors{};
+  std::vector<std::thread> threads;
+  for (size_t i = 0; i < pointers.size(); ++i)
+    threads.emplace_back([&, i] {
+      auto result = i % 2
+                        ? p->findFirstAxis(ReductionMode::SIMD, "sum", "f32")
+                        : p->findMiddleAxis(ReductionMode::SIMT, "sum", "f32");
+      if (!result)
+        errors[i] = llvm::toString(result.takeError());
+      else
+        pointers[i] = *result;
+    });
+  for (auto &thread : threads)
+    thread.join();
+  for (size_t i = 0; i < pointers.size(); ++i) {
+    EXPECT_TRUE(errors[i].empty());
+    ASSERT_NE(pointers[i], nullptr);
+    EXPECT_EQ(pointers[i], pointers[i % 2]);
+  }
+  EXPECT_EQ(p->getParsedFunctionCount(), 2u);
+  auto newer = loadLazyTestProfile("84");
+  ASSERT_TRUE(bool(newer));
+  auto n = newer->findFirstAxis(ReductionMode::SIMD, "sum", "f32");
+  ASSERT_TRUE(bool(n));
+  EXPECT_NE(*n, pointers[1]);
+  EXPECT_DOUBLE_EQ((*n)->segments[0].expression.constant, 84);
+  EXPECT_DOUBLE_EQ(pointers[1]->segments[0].expression.constant, 42);
+}
+
+TEST(SimdSimtCostModelTest, LazyReductionFullProductValidation) {
+  using namespace mlir::ascend;
+  auto path = std::string(TRITON_ASCEND_SIMD_SIMT_TEST_PROFILE_PATH);
+  path = path.substr(0, path.find_last_of('/')) +
+         "/../reduction/david_v100_reduction_v1.json";
+  auto p = ReductionProfile::loadFromFile(path);
+  ASSERT_TRUE(bool(p)) << llvm::toString(p.takeError());
+  EXPECT_EQ(p->getParsedFunctionCount(), 0u);
+  auto error = p->validateAllFunctions();
+  ASSERT_FALSE(bool(error)) << llvm::toString(std::move(error));
+  EXPECT_EQ(p->getParsedFunctionCount(), 252u);
+  // All cached trees remain valid after the original wrapper is destroyed.
+  auto shared = *p;
+  *p = ReductionProfile{};
+  auto result = shared.findMiddleAxis(ReductionMode::SIMT, "prod", "i64");
+  ASSERT_TRUE(bool(result));
+  ASSERT_NE(*result, nullptr);
+  EXPECT_EQ(shared.getParsedFunctionCount(), 252u);
+}
+
+TEST(SimdSimtCostModelTest, LazyReductionConcurrentErrorIsStable) {
+  using namespace mlir::ascend;
+  auto p = loadLazyTestProfile("sqrt()");
+  ASSERT_TRUE(bool(p));
+  std::array<std::string, 8> errors;
+  std::vector<std::thread> threads;
+  for (size_t i = 0; i < errors.size(); ++i)
+    threads.emplace_back([&, i] {
+      auto result = p->findFirstAxis(ReductionMode::SIMD, "sum", "f32");
+      if (!result)
+        errors[i] = llvm::toString(result.takeError());
+    });
+  for (auto &thread : threads)
+    thread.join();
+  ASSERT_FALSE(errors[0].empty());
+  for (const auto &error : errors)
+    EXPECT_EQ(error, errors[0]);
+  EXPECT_EQ(p->getParsedFunctionCount(), 0u);
 }

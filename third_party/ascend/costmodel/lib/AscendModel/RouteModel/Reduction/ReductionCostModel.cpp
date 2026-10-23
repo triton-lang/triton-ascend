@@ -357,12 +357,17 @@ std::optional<double> evaluate(const ReductionExpression &e,
   return std::isfinite(x) ? std::optional<double>(x) : std::nullopt;
 }
 } // namespace
-std::optional<double> mlir::ascend::estimateFirstAxisReductionCycles(
-    const ReductionWorkload &work, const ReductionProfile &profile,
-    ReductionMode mode, int64_t warps) {
+llvm::Expected<std::optional<double>>
+mlir::ascend::estimateFirstAxisReductionCycles(const ReductionWorkload &work,
+                                               const ReductionProfile &profile,
+                                               ReductionMode mode,
+                                               int64_t warps) {
   if (!work.isFiniteAndNonNegative() || work.axis != 0 || work.shape.size() < 2)
     return std::nullopt;
-  const auto *function = profile.findFirstAxis(mode, work.kind, work.dataType);
+  auto found = profile.findFirstAxis(mode, work.kind, work.dataType);
+  if (!found)
+    return found.takeError();
+  const auto *function = *found;
   if (!function || std::find(function->supportedWarps.begin(),
                              function->supportedWarps.end(),
                              warps) == function->supportedWarps.end())
@@ -406,13 +411,18 @@ std::optional<double> mlir::ascend::estimateFirstAxisReductionCycles(
   return cost;
 }
 
-std::optional<double> mlir::ascend::estimateMiddleAxisReductionCycles(
-    const ReductionWorkload &work, const ReductionProfile &profile,
-    ReductionMode mode, int64_t warps) {
+llvm::Expected<std::optional<double>>
+mlir::ascend::estimateMiddleAxisReductionCycles(const ReductionWorkload &work,
+                                                const ReductionProfile &profile,
+                                                ReductionMode mode,
+                                                int64_t warps) {
   auto g = normalizeMiddleAxis(work);
   if (!g)
     return std::nullopt;
-  auto fn = profile.findMiddleAxis(mode, work.kind, work.dataType);
+  auto found = profile.findMiddleAxis(mode, work.kind, work.dataType);
+  if (!found)
+    return found.takeError();
+  const auto *fn = *found;
   if (!fn || fn->layoutPolicy != "row_major_128bit_v1" ||
       std::find(fn->supportedWarps.begin(), fn->supportedWarps.end(), warps) ==
           fn->supportedWarps.end())
@@ -458,7 +468,7 @@ std::optional<double> mlir::ascend::estimateMiddleAxisReductionCycles(
   auto c = evaluate(matched->expression, features);
   return c && *c > 0 ? c : std::nullopt;
 }
-std::optional<FittedReductionEstimate>
+llvm::Expected<std::optional<FittedReductionEstimate>>
 mlir::ascend::estimateReductionCycles(const ReductionWorkload &work,
                                       const ReductionProfile &profile,
                                       ReductionMode mode, int64_t warps) {
@@ -472,10 +482,16 @@ mlir::ascend::estimateReductionCycles(const ReductionWorkload &work,
                                         mode, warps);
   } else if (work.axis == 0) {
     axis = ReductionAxisKind::First;
-    c = estimateFirstAxisReductionCycles(work, profile, mode, warps);
+    auto result = estimateFirstAxisReductionCycles(work, profile, mode, warps);
+    if (!result)
+      return result.takeError();
+    c = *result;
   } else {
     axis = ReductionAxisKind::Middle;
-    c = estimateMiddleAxisReductionCycles(work, profile, mode, warps);
+    auto result = estimateMiddleAxisReductionCycles(work, profile, mode, warps);
+    if (!result)
+      return result.takeError();
+    c = *result;
   }
   if (!c || !std::isfinite(*c) || *c < 0)
     return std::nullopt;

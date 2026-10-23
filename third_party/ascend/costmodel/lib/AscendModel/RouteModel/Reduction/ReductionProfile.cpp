@@ -5,7 +5,9 @@
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SHA256.h"
 #include <algorithm>
+#include <atomic>
 #include <cmath>
+#include <mutex>
 #include <system_error>
 using namespace mlir::ascend;
 
@@ -211,118 +213,172 @@ parseExpression(const llvm::json::Value &v) {
 }
 } // namespace
 
-static llvm::Expected<llvm::StringMap<ReductionFunction>>
-parseFirstAxisFunctions(const llvm::json::Array &functions) {
-  llvm::StringMap<ReductionFunction> result;
-  if (functions.size() > 1024)
-    return invalid("too many first-axis functions");
-  for (const auto &value : functions) {
-    const auto *f = value.getAsObject();
-    if (!f || !f->getString("family") ||
-        (*f->getString("family") != "first_axis" &&
-         *f->getString("family") != "middle_axis"))
-      return invalid("unsupported reduction family");
-    auto mode = f->getString("mode"), op = f->getString("op"),
-         dtype = f->getString("dtype");
-    const auto *warps = f->getArray("supported_warps"),
-               *segments = f->getArray("segments");
-    if (!mode || (*mode != "simd" && *mode != "simt") || !op || !dtype ||
-        !llvm::StringSwitch<bool>(*op)
+namespace {
+// Validate metadata and segment structure eagerly, without parsing expressions.
+llvm::Expected<ReductionFunction> validateFunction(const llvm::json::Object &f,
+                                                   llvm::StringRef family) {
+  const auto *warps = f.getArray("supported_warps");
+  const auto *segments = f.getArray("segments");
+  if (!warps || warps->empty() || !segments || segments->empty() ||
+      segments->size() > 128)
+    return invalid("invalid reduction function");
+  ReductionFunction function;
+  if (family == "middle_axis") {
+    auto policy = f.getString("layout_policy_id");
+    if (!policy || *policy != "row_major_128bit_v1")
+      return invalid("unsupported middle-axis layout policy");
+    function.layoutPolicy = policy->str();
+  }
+  for (const auto &w : *warps) {
+    auto n = w.getAsInteger();
+    if (!n || *n < 1 || *n > 64 || (*n & (*n - 1)) ||
+        llvm::is_contained(function.supportedWarps, *n))
+      return invalid("invalid reduction warp list");
+    function.supportedWarps.push_back(*n);
+  }
+  for (const auto &s : *segments) {
+    const auto *object = s.getAsObject();
+    if (!object)
+      return invalid("invalid reduction segment");
+    auto id = object->getString("id");
+    auto lane = object->getInteger("lane_width");
+    auto cond = object->getString("condition");
+    auto expr = object->getString("expression");
+    if (!id || !lane || *lane <= 0 || !cond || !expr)
+      return invalid("incomplete reduction segment or non-string expression");
+    if (cond->size() > 16384 || expr->size() > 16384)
+      return invalid("reduction expression text is too long");
+  }
+  return function;
+}
+struct LazyReductionFunction {
+  const llvm::json::Object *raw;
+  ReductionFunction function;
+  std::once_flag once;
+  std::string error;
+  LazyReductionFunction(const llvm::json::Object *raw,
+                        ReductionFunction function)
+      : raw(raw), function(std::move(function)) {}
+};
+} // namespace
+
+// The raw JSON never changes after indexing. Entries reference its leaves, and
+// copies of ReductionProfile share the same once-initialized immutable results.
+struct ReductionProfile::State {
+  llvm::json::Value raw = nullptr;
+  std::string path;
+  llvm::StringMap<std::unique_ptr<LazyReductionFunction>> functions;
+  std::atomic<size_t> parsed{0};
+
+  llvm::Error add(llvm::StringRef family, llvm::StringRef mode,
+                  llvm::StringRef op, llvm::StringRef dtype,
+                  const llvm::json::Object &leaf) {
+    if ((mode != "simd" && mode != "simt") ||
+        !llvm::StringSwitch<bool>(op)
              .Cases("sum", "max", "min", "prod", true)
              .Cases("xor", "and", "or", true)
              .Default(false) ||
-        !llvm::StringSwitch<bool>(*dtype)
+        !llvm::StringSwitch<bool>(dtype)
              .Cases("bool", "f16", "bf16", "f32", true)
              .Cases("i8", "i16", "i32", "i64", true)
              .Cases("u8", "u16", "u32", "u64", true)
-             .Default(false) ||
-        !warps || warps->empty() || !segments || segments->empty() ||
-        segments->size() > 128)
-      return invalid("invalid reduction function");
-    ReductionFunction function;
-    if (*f->getString("family") == "middle_axis") {
-      auto policy = f->getString("layout_policy_id");
-      if (!policy || *policy != "row_major_128bit_v1")
-        return invalid("unsupported middle-axis layout policy");
-      function.layoutPolicy = policy->str();
-    }
-    for (const auto &w : *warps) {
-      auto n = w.getAsInteger();
-      if (!n || *n < 1 || *n > 64 || (*n & (*n - 1)) ||
-          std::find(function.supportedWarps.begin(),
-                    function.supportedWarps.end(),
-                    *n) != function.supportedWarps.end())
-        return invalid("invalid reduction warp list");
-      function.supportedWarps.push_back(*n);
-    }
-    for (const auto &s : *segments) {
-      const auto *object = s.getAsObject();
-      if (!object)
-        return invalid("invalid reduction segment");
-      auto id = object->getString("id");
-      auto lane = object->getInteger("lane_width");
-      const auto *cond = object->get("condition"),
-                 *expr = object->get("expression");
-      if (!id || !lane || *lane <= 0 || !cond || !expr)
-        return invalid("incomplete reduction segment");
-      auto c = parseExpression(*cond);
-      if (!c)
-        return c.takeError();
-      auto e = parseExpression(*expr);
-      if (!e)
-        return e.takeError();
-      function.segments.push_back(
-          {id->str(), *lane, std::move(*c), std::move(*e)});
-    }
-    if (!result
-             .try_emplace(key(*f->getString("family"),
-                              *mode == "simd" ? ReductionMode::SIMD
-                                              : ReductionMode::SIMT,
-                              *op, *dtype),
-                          std::move(function))
+             .Default(false))
+      return invalid("invalid reduction mode, op or dtype");
+    auto function = validateFunction(leaf, family);
+    if (!function)
+      return function.takeError();
+    auto name =
+        key(family, mode == "simd" ? ReductionMode::SIMD : ReductionMode::SIMT,
+            op, dtype);
+    if (!functions
+             .try_emplace(name, std::make_unique<LazyReductionFunction>(
+                                    &leaf, std::move(*function)))
              .second)
       return invalid("duplicate reduction function");
+    return llvm::Error::success();
   }
-  return result;
-}
 
-// Accept the legacy record array as well as mode/op/dtype hierarchy.
-static llvm::Expected<llvm::StringMap<ReductionFunction>>
-parseAxisFunctions(const llvm::json::Value &value, llvm::StringRef family) {
-  if (const auto *array = value.getAsArray())
-    return parseFirstAxisFunctions(*array);
-  const auto *modes = value.getAsObject();
-  if (!modes)
-    return invalid("reduction family must be an array or mode/op/dtype object");
-  llvm::json::Array records;
-  for (const auto &mode : *modes) {
-    if (mode.first != "simd" && mode.first != "simt")
-      return invalid("unsupported reduction mode");
-    const auto *ops = mode.second.getAsObject();
-    if (!ops)
-      return invalid("reduction mode must contain op objects");
-    for (const auto &op : *ops) {
-      const auto *dtypes = op.second.getAsObject();
-      if (!dtypes)
-        return invalid("reduction op must contain dtype objects");
-      for (const auto &dtype : *dtypes) {
-        const auto *leaf = dtype.second.getAsObject();
-        if (!leaf || leaf->get("family") || leaf->get("mode") ||
-            leaf->get("op") || leaf->get("dtype"))
-          return invalid("reduction leaf must not repeat path fields");
-        llvm::json::Object record = *leaf;
-        record["family"] = family.str();
-        record["mode"] = mode.first.str();
-        record["op"] = op.first.str();
-        record["dtype"] = dtype.first.str();
-        records.push_back(std::move(record));
-        if (records.size() > 1024)
-          return invalid("too many reduction functions");
+  llvm::Error index(const llvm::json::Value &value, llvm::StringRef family) {
+    size_t count = 0;
+    if (const auto *array = value.getAsArray()) {
+      if (array->size() > 1024)
+        return invalid("too many reduction functions");
+      for (const auto &v : *array) {
+        const auto *f = v.getAsObject();
+        if (!f || f->getString("family") != family || !f->getString("mode") ||
+            !f->getString("op") || !f->getString("dtype"))
+          return invalid("invalid reduction function record");
+        if (auto error = add(family, *f->getString("mode"), *f->getString("op"),
+                             *f->getString("dtype"), *f))
+          return error;
+      }
+      return llvm::Error::success();
+    }
+    const auto *modes = value.getAsObject();
+    if (!modes)
+      return invalid(
+          "reduction family must be an array or mode/op/dtype object");
+    for (const auto &mode : *modes) {
+      if (mode.first != "simd" && mode.first != "simt")
+        return invalid("unsupported reduction mode");
+      const auto *ops = mode.second.getAsObject();
+      if (!ops)
+        return invalid("reduction mode must contain op objects");
+      for (const auto &op : *ops) {
+        const auto *dtypes = op.second.getAsObject();
+        if (!dtypes)
+          return invalid("reduction op must contain dtype objects");
+        for (const auto &dtype : *dtypes) {
+          const auto *leaf = dtype.second.getAsObject();
+          if (!leaf || leaf->get("family") || leaf->get("mode") ||
+              leaf->get("op") || leaf->get("dtype"))
+            return invalid("reduction leaf must not repeat path fields");
+          if (++count > 1024)
+            return invalid("too many reduction functions");
+          if (auto error =
+                  add(family, mode.first, op.first, dtype.first, *leaf))
+            return error;
+        }
       }
     }
+    return llvm::Error::success();
   }
-  return parseFirstAxisFunctions(records);
-}
+
+  llvm::Expected<const ReductionFunction *> get(llvm::StringRef name) {
+    auto it = functions.find(name);
+    if (it == functions.end())
+      return nullptr;
+    auto &entry = *it->second;
+    std::call_once(entry.once, [&] {
+      std::vector<ReductionSegment> segments;
+      for (const auto &v : *entry.raw->getArray("segments")) {
+        const auto &s = *v.getAsObject();
+        const auto id = *s.getString("id");
+        auto fail = [&](llvm::Error error) {
+          entry.error = path + ": " + name.str() + "/" + id.str() + ": " +
+                        llvm::toString(std::move(error));
+        };
+        auto condition = parseExpression(*s.get("condition"));
+        if (!condition) {
+          fail(condition.takeError());
+          return;
+        }
+        auto expression = parseExpression(*s.get("expression"));
+        if (!expression) {
+          fail(expression.takeError());
+          return;
+        }
+        segments.push_back({id.str(), *s.getInteger("lane_width"),
+                            std::move(*condition), std::move(*expression)});
+      }
+      entry.function.segments = std::move(segments);
+      parsed.fetch_add(1, std::memory_order_relaxed);
+    });
+    if (!entry.error.empty())
+      return invalid(entry.error);
+    return &entry.function;
+  }
+};
 
 bool ReductionCostProfile::isValid() const {
   // Missing calibration is a compatibility state: use legacy shuffle costs.
@@ -399,17 +455,15 @@ ReductionProfile::loadFromFile(llvm::StringRef path) {
   profile.target = root->getString("target")->str();
   profile.simd = std::move(*simdParameters);
   profile.simt = std::move(*simtParameters);
-  if (const auto *value = families->get("first_axis")) {
-    auto parsedFunctions = parseAxisFunctions(*value, "first_axis");
-    if (!parsedFunctions)
-      return parsedFunctions.takeError();
-    profile.firstAxisFunctions = std::move(*parsedFunctions);
-  }
-  if (const auto *value = families->get("middle_axis")) {
-    auto parsed = parseAxisFunctions(*value, "middle_axis");
-    if (!parsed)
-      return parsed.takeError();
-    profile.middleAxisFunctions = std::move(*parsed);
+  profile.state = std::make_shared<State>();
+  profile.state->path = path.str();
+  profile.state->raw = std::move(*parsed);
+  // Reacquire pointers after moving the owning JSON value.
+  families = profile.state->raw.getAsObject()->getObject("families");
+  for (llvm::StringRef family : {"first_axis", "middle_axis"}) {
+    if (const auto *value = families->get(family))
+      if (auto error = profile.state->index(*value, family))
+        return std::move(error);
   }
   auto bytes = buffer.get()->getBuffer();
   auto hash = llvm::SHA256::hash(llvm::ArrayRef<uint8_t>(
@@ -423,16 +477,37 @@ ReductionProfile::getModeProfile(ReductionMode mode) const {
   return mode == ReductionMode::SIMD ? simd : simt;
 }
 
-const ReductionFunction *
-ReductionProfile::findFirstAxis(ReductionMode mode, llvm::StringRef op,
-                                llvm::StringRef dtype) const {
-  auto it = firstAxisFunctions.find(key("first_axis", mode, op, dtype));
-  return it == firstAxisFunctions.end() ? nullptr : &it->second;
+llvm::Expected<const ReductionFunction *>
+ReductionProfile::findFunction(llvm::StringRef family, ReductionMode mode,
+                               llvm::StringRef op,
+                               llvm::StringRef dtype) const {
+  if (!state)
+    return nullptr;
+  return state->get(key(family, mode, op, dtype));
 }
 
-const ReductionFunction *
+llvm::Expected<const ReductionFunction *>
+ReductionProfile::findFirstAxis(ReductionMode mode, llvm::StringRef op,
+                                llvm::StringRef dtype) const {
+  return findFunction("first_axis", mode, op, dtype);
+}
+
+llvm::Expected<const ReductionFunction *>
 ReductionProfile::findMiddleAxis(ReductionMode mode, llvm::StringRef op,
                                  llvm::StringRef dtype) const {
-  auto it = middleAxisFunctions.find(key("middle_axis", mode, op, dtype));
-  return it == middleAxisFunctions.end() ? nullptr : &it->second;
+  return findFunction("middle_axis", mode, op, dtype);
+}
+
+llvm::Error ReductionProfile::validateAllFunctions() const {
+  if (state)
+    for (const auto &entry : state->functions) {
+      auto function = state->get(entry.first());
+      if (!function)
+        return function.takeError();
+    }
+  return llvm::Error::success();
+}
+
+size_t ReductionProfile::getParsedFunctionCount() const {
+  return state ? state->parsed.load(std::memory_order_relaxed) : 0;
 }

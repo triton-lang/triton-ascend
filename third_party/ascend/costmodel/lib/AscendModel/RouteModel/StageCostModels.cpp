@@ -2188,10 +2188,12 @@ struct OrdinaryReductionMapping {
   double fallbackInstances = 0;
   std::map<std::string, double> fittedInstances;
 };
-static std::optional<OrdinaryReductionMapping> mapOrdinaryReduction(
-    const LogicalStage &stage, const StageImplementation &implementation,
-    const HardwareProfile &hardware, const StageModeProfile &modeProfile,
-    const StageResourceCycles &legacy) {
+static llvm::Expected<std::optional<OrdinaryReductionMapping>>
+mapOrdinaryReduction(const LogicalStage &stage,
+                     const StageImplementation &implementation,
+                     const HardwareProfile &hardware,
+                     const StageModeProfile &modeProfile,
+                     const StageResourceCycles &legacy) {
   if (!hardware.reductionProfile || !stage.reductionExternalWorkload ||
       implementation.aivSubblocks != 1 ||
       stage.costModelKind != StageCostModelKind::RowwiseReduction ||
@@ -2209,11 +2211,15 @@ static std::optional<OrdinaryReductionMapping> mapOrdinaryReduction(
   auto mode = implementation.mode == StageMode::SIMD ? ReductionMode::SIMD
                                                      : ReductionMode::SIMT;
   const bool decomposed = !stage.reductionContributions.empty();
-  const auto consume = [&](const ReductionWorkload &work,
-                           const StageWorkload *contribution) {
+  const auto consume =
+      [&](const ReductionWorkload &work,
+          const StageWorkload *contribution) -> llvm::Expected<bool> {
     occurrences += work.instances;
-    auto estimate = estimateReductionCycles(work, *hardware.reductionProfile,
-                                            mode, hardware.baseSimtWarpCount);
+    auto estimated = estimateReductionCycles(work, *hardware.reductionProfile,
+                                             mode, hardware.baseSimtWarpCount);
+    if (!estimated)
+      return estimated.takeError();
+    const auto &estimate = *estimated;
     if (!estimate) {
       if (!contribution)
         return false;
@@ -2237,16 +2243,25 @@ static std::optional<OrdinaryReductionMapping> mapOrdinaryReduction(
     for (const auto &contribution : stage.reductionContributions) {
       if (contribution.reductionWorkloads.size() != 1 ||
           std::abs(contribution.reductionOperations -
-                   contribution.reductionWorkloads.front().instances) > 1e-9 ||
-          !consume(contribution.reductionWorkloads.front(), &contribution))
+                   contribution.reductionWorkloads.front().instances) > 1e-9)
+        return std::nullopt;
+      auto consumed =
+          consume(contribution.reductionWorkloads.front(), &contribution);
+      if (!consumed)
+        return consumed.takeError();
+      if (!*consumed)
         return std::nullopt;
     }
   } else {
     // Hand-built/native stages retain their former all-supported compatibility.
     // Their external snapshot can still contain semantic reduction roots.
-    for (const auto &work : stage.workload.reductionWorkloads)
-      if (!consume(work, nullptr))
+    for (const auto &work : stage.workload.reductionWorkloads) {
+      auto consumed = consume(work, nullptr);
+      if (!consumed)
+        return consumed.takeError();
+      if (!*consumed)
         return std::nullopt;
+    }
     residual.workload.reductionOperations = 0;
     residual.workload.shuffleLaneSteps = 0;
     residual.workload.reductionWorkloads.clear();
@@ -3675,8 +3690,11 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
           implementation.mode == StageMode::SIMT && !implementation.localScope);
       if (!resources)
         continue;
-      auto calibrated = mapOrdinaryReduction(executionStage, implementation,
-                                             profile, modeProfile, *resources);
+      auto mapping = mapOrdinaryReduction(executionStage, implementation,
+                                          profile, modeProfile, *resources);
+      if (!mapping)
+        return mapping.takeError();
+      const auto &calibrated = *mapping;
       if (calibrated)
         resources = calibrated->resources;
       StageImplementationCost cost;

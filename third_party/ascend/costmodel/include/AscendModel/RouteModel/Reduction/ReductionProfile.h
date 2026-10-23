@@ -3,6 +3,7 @@
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/JSON.h"
+#include <memory>
 #include <string>
 #include <vector>
 namespace mlir::ascend {
@@ -23,7 +24,7 @@ struct ReductionSegment {
   ReductionExpression expression;
 };
 /// A first- or middle-axis formula with its supported warps and conditional
-/// segments. Parsed when the profile is loaded; evaluated for each workload.
+/// segments. Parsed on first lookup of this mode/op/dtype; then immutable.
 struct ReductionFunction {
   std::vector<int64_t> supportedWarps;
   std::vector<ReductionSegment> segments;
@@ -47,18 +48,27 @@ class ReductionProfile {
 public:
   static llvm::Expected<ReductionProfile> loadFromFile(llvm::StringRef path);
   const ReductionCostProfile &getModeProfile(ReductionMode mode) const;
-  const ReductionFunction *findFirstAxis(ReductionMode mode, llvm::StringRef op,
-                                         llvm::StringRef dtype) const;
-  const ReductionFunction *findMiddleAxis(ReductionMode mode,
-                                          llvm::StringRef op,
-                                          llvm::StringRef dtype) const;
+  llvm::Expected<const ReductionFunction *>
+  findFirstAxis(ReductionMode mode, llvm::StringRef op,
+                llvm::StringRef dtype) const;
+  llvm::Expected<const ReductionFunction *>
+  findMiddleAxis(ReductionMode mode, llvm::StringRef op,
+                 llvm::StringRef dtype) const;
+  /// Parse every group, including ones unused by the current kernel.
+  llvm::Error validateAllFunctions() const;
+  /// Successfully initialized groups; excludes missing and failed lookups.
+  size_t getParsedFunctionCount() const;
   llvm::StringRef getTarget() const { return target; }
   llvm::StringRef getContentHash() const { return contentHash; }
 
 private:
   std::string target, contentHash;
   ReductionCostProfile simd, simt;
-  llvm::StringMap<ReductionFunction> firstAxisFunctions, middleAxisFunctions;
+  struct State;
+  std::shared_ptr<State> state;
+  llvm::Expected<const ReductionFunction *>
+  findFunction(llvm::StringRef family, ReductionMode mode, llvm::StringRef op,
+               llvm::StringRef dtype) const;
 };
 } // namespace mlir::ascend
 #endif

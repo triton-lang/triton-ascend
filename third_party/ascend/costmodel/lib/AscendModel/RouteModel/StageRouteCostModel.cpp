@@ -5,6 +5,7 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -14,6 +15,7 @@
 #include <limits>
 #include <numeric>
 #include <optional>
+#include <queue>
 #include <system_error>
 #include <tuple>
 
@@ -333,6 +335,38 @@ genericPredicatedDotTailCredit(const LogicalStageCost &stage,
 
 llvm::StringRef mlir::ascend::stringifyStageMode(StageMode mode) {
   return mode == StageMode::SIMD ? "simd" : "simt";
+}
+
+llvm::StringRef
+mlir::ascend::stringifyStageDependencyKind(StageDependencyKind kind) {
+  switch (kind) {
+  case StageDependencyKind::IntraIterationData:
+    return "intra_iteration_data";
+  case StageDependencyKind::LoopCarriedData:
+    return "loop_carried_data";
+  }
+  llvm_unreachable("unknown Stage dependency kind");
+}
+
+bool StageDependency::isValid() const {
+  if (sourceStage.empty() || targetStage.empty() || carriedValueIndex < 0 ||
+      carriedValueName.empty() || carriedValueBytes < 0)
+    return false;
+  if (kind == StageDependencyKind::IntraIterationData)
+    return iterationDistance == 0;
+  return !loopStage.empty() && iterationDistance > 0;
+}
+
+llvm::json::Object StageDependency::toJSON() const {
+  return llvm::json::Object{{"kind", stringifyStageDependencyKind(kind)},
+                            {"loop_stage", loopStage},
+                            {"source_stage", sourceStage},
+                            {"target_stage", targetStage},
+                            {"iteration_distance", iterationDistance},
+                            {"carried_value_index", carriedValueIndex},
+                            {"carried_value_name", carriedValueName},
+                            {"carried_value_bytes", carriedValueBytes},
+                            {"source_location", sourceLocation}};
 }
 
 static llvm::StringRef stringifyStageKernelRoute(StageKernelRouteKind kind) {
@@ -775,6 +809,15 @@ bool StageWorkload::isFiniteAndNonNegative() const {
         return !entry.first.empty() && entry.second.first > 0 &&
                std::isfinite(entry.second.second) && entry.second.second >= 0.0;
       });
+  const bool validDotShapes =
+      llvm::all_of(dotShapeCounts, [](const auto &entry) {
+        const auto &shape = entry.first;
+        return std::get<0>(shape) > 0 && std::get<1>(shape) > 0 &&
+               std::get<2>(shape) > 0 && std::get<3>(shape) > 0 &&
+               !std::get<4>(shape).empty() && !std::get<5>(shape).empty() &&
+               !std::get<6>(shape).empty() && !std::get<7>(shape).empty() &&
+               std::isfinite(entry.second) && entry.second >= 0.0;
+      });
   const bool validTensorOperations = llvm::all_of(
       tensorOperationWorkloads, [](const TensorOperationWorkload &tensor) {
         return tensor.isFiniteAndNonNegative();
@@ -783,10 +826,10 @@ bool StageWorkload::isFiniteAndNonNegative() const {
       llvm::all_of(atomicWorkloads, [](const AtomicWorkload &atomic) {
         return atomic.isFiniteAndNonNegative();
       });
-  return validAccesses && validDotPaths && validTensorOperations &&
-         validAtomicWorkloads && validCounts(predicateCounts) &&
-         validCounts(dotFlopCounts) && validPrefixScans &&
-         validMemoryCounts(indirectLoadCounts) &&
+  return validAccesses && validDotPaths && validDotShapes &&
+         validTensorOperations && validAtomicWorkloads &&
+         validCounts(predicateCounts) && validCounts(dotFlopCounts) &&
+         validPrefixScans && validMemoryCounts(indirectLoadCounts) &&
          validSegmentedIndirect(segmentedIndirectLoadCounts) &&
          validMemoryCounts(indirectStoreCounts) &&
          validSegmentedIndirect(segmentedIndirectStoreCounts) &&
@@ -984,6 +1027,21 @@ llvm::json::Object StageWorkload::toJSON() const {
     dotInstances.push_back(llvm::json::Object{{"flops_per_matrix", flops},
                                               {"matrix_instances", count}});
   result["dot_instances_per_iteration"] = std::move(dotInstances);
+  llvm::json::Array dotWorkloads;
+  for (const auto &[shape, count] : dotShapeCounts)
+    dotWorkloads.push_back(llvm::json::Object{
+        {"m", std::get<0>(shape)},
+        {"n", std::get<1>(shape)},
+        {"k", std::get<2>(shape)},
+        {"batch", std::get<3>(shape)},
+        {"lhs_type", std::get<4>(shape)},
+        {"rhs_type", std::get<5>(shape)},
+        {"accumulator_type", std::get<6>(shape)},
+        {"input_precision", std::get<7>(shape)},
+        {"logical_operation_instances_per_iteration", count},
+        {"matrix_instances_per_iteration", count * std::get<3>(shape)},
+    });
+  result["dot_workloads"] = std::move(dotWorkloads);
   llvm::json::Array dotPaths;
   for (const auto &[key, entry] : dotOperandPaths)
     dotPaths.push_back(
@@ -1113,6 +1171,8 @@ llvm::json::Object StageResourceCycles::toJSON() const {
       rowwiseAdditionalLoadSetupsOwnedOnce;
   result["dot_component_private_stack_floor_applied"] =
       dotComponentPrivateStackFloorApplied;
+  result["dot_physical_resource_formula_applied"] =
+      dotPhysicalResourceFormulaApplied;
   result["has_single_physical_program_atomic_rate"] =
       hasSinglePhysicalProgramAtomicRate;
   result["grid_stride_factor_specific_resource_body"] =
@@ -1318,6 +1378,10 @@ LogicalStageCost::toJSON(bool includeDiagnosticImplementations) const {
   llvm::json::Object result;
   result["id"] = id;
   result["model"] = model;
+  llvm::json::Array loopStages;
+  for (const std::string &loopStage : enclosingLoopStages)
+    loopStages.push_back(loopStage);
+  result["enclosing_loop_stages"] = std::move(loopStages);
   result["schedule_kind"] = stringifyStageSchedule(schedule);
   result["iteration_count"] = iterationCount;
   result["features"] = features.toJSON();
@@ -1630,6 +1694,10 @@ StageCostModelSummary::toJSON(bool includeDiagnosticImplementations) const {
   result["scope_handoff_cost"] = scopeHandoff.toJSON();
   if (includeDiagnosticImplementations)
     result["simt_cost_calibration"] = simtCalibrationToJSON(*this);
+  llvm::json::Array dependencyArray;
+  for (const StageDependency &dependency : dependencies)
+    dependencyArray.push_back(dependency.toJSON());
+  result["stage_dependencies"] = std::move(dependencyArray);
   llvm::json::Object routes;
   routes["all_simd"] = allSimd.toJSON();
   routes["all_simt_only"] = allSimt.toJSON();
@@ -3440,6 +3508,231 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
   return true;
 }
 
+struct DependencyScheduleEstimate {
+  std::string loopStage;
+  int64_t iterations = 0;
+  int64_t stageCount = 0;
+  int64_t dependencyCount = 0;
+  double fixedSetupCycles = 0.0;
+  double fillCycles = 0.0;
+  double initiationIntervalCycles = 0.0;
+  double scheduledLoopCycles = 0.0;
+  double originalLoopCycles = 0.0;
+  bool affine = false;
+};
+
+static std::string
+dependencyResourceDomain(const LogicalStageCost &stage,
+                         const StageImplementation &implementation) {
+  return implementation.mode == StageMode::SIMD && stage.features.hasDot
+             ? "aic"
+             : "aiv";
+}
+
+static std::optional<DependencyScheduleEstimate>
+estimateDependencySchedule(const StageRoutePlan &plan,
+                           const StageCostTable &costTable, size_t shellIndex) {
+  if (plan.runtimePhysicalProgramCount != 1 ||
+      plan.runtimeStages.size() != costTable.stages.size() ||
+      plan.logicalStageCycles.size() != costTable.stages.size() ||
+      plan.implementations.size() != costTable.stages.size())
+    return std::nullopt;
+  const LogicalStageCost &shell = costTable.stages[shellIndex];
+  if (shell.model != "loop_carried_recurrence" || shell.iterationCount <= 0 ||
+      shell.iterationCount > 64)
+    return std::nullopt;
+
+  llvm::SmallVector<size_t> members{shellIndex};
+  for (size_t index = 0; index < costTable.stages.size(); ++index) {
+    const LogicalStageCost &stage = costTable.stages[index];
+    if (!llvm::is_contained(stage.enclosingLoopStages, shell.id))
+      continue;
+    if (stage.enclosingLoopStages.size() != 1 ||
+        stage.iterationCount != shell.iterationCount)
+      return std::nullopt;
+    members.push_back(index);
+  }
+  if (members.size() == 1)
+    return std::nullopt;
+  llvm::sort(members);
+
+  llvm::DenseMap<size_t, size_t> localIndex;
+  std::vector<double> duration;
+  std::vector<std::string> resource;
+  duration.reserve(members.size());
+  resource.reserve(members.size());
+  DependencyScheduleEstimate estimate;
+  estimate.loopStage = shell.id;
+  estimate.iterations = shell.iterationCount;
+  estimate.stageCount = static_cast<int64_t>(members.size());
+  for (auto [position, index] : llvm::enumerate(members)) {
+    localIndex.try_emplace(index, position);
+    const StageImplementationCost *implementation = findImplementationCost(
+        costTable.stages[index], plan.implementations[index]);
+    if (!implementation)
+      return std::nullopt;
+    const double setup = implementation->resources.setup;
+    const double cycles = plan.logicalStageCycles[index];
+    if (!std::isfinite(cycles) || cycles < setup)
+      return std::nullopt;
+    estimate.fixedSetupCycles += setup;
+    estimate.originalLoopCycles += cycles;
+    duration.push_back((cycles - setup) /
+                       static_cast<double>(estimate.iterations));
+    resource.push_back(dependencyResourceDomain(costTable.stages[index],
+                                                plan.implementations[index]));
+  }
+
+  std::map<std::string, size_t> stageIndex;
+  for (auto [index, stage] : llvm::enumerate(costTable.stages))
+    stageIndex.try_emplace(stage.id, index);
+  struct Edge {
+    size_t source;
+    size_t target;
+    int64_t distance;
+  };
+  std::vector<Edge> dependencies;
+  for (const StageDependency &edge : costTable.dependencies) {
+    if (edge.loopStage != shell.id)
+      continue;
+    auto source = stageIndex.find(edge.sourceStage);
+    auto target = stageIndex.find(edge.targetStage);
+    if (source == stageIndex.end() || target == stageIndex.end())
+      return std::nullopt;
+    auto localSource = localIndex.find(source->second);
+    auto localTarget = localIndex.find(target->second);
+    if (localSource == localIndex.end() || localTarget == localIndex.end())
+      return std::nullopt;
+    dependencies.push_back(
+        {localSource->second, localTarget->second, edge.iterationDistance});
+  }
+  estimate.dependencyCount = static_cast<int64_t>(dependencies.size());
+  if (dependencies.empty())
+    return std::nullopt;
+
+  const auto schedule = [&](int64_t iterations) -> std::optional<double> {
+    const size_t stageCount = members.size();
+    const size_t nodeCount = stageCount * static_cast<size_t>(iterations);
+    std::vector<std::vector<size_t>> successors(nodeCount);
+    std::vector<int64_t> indegree(nodeCount, 0);
+    const auto addEdge = [&](size_t source, size_t target) {
+      if (source == target)
+        return;
+      successors[source].push_back(target);
+      ++indegree[target];
+    };
+    for (int64_t iteration = 0; iteration < iterations; ++iteration)
+      for (const Edge &edge : dependencies) {
+        const int64_t targetIteration = iteration + edge.distance;
+        if (targetIteration >= iterations)
+          continue;
+        addEdge(static_cast<size_t>(iteration) * stageCount + edge.source,
+                static_cast<size_t>(targetIteration) * stageCount +
+                    edge.target);
+      }
+    std::map<std::string, size_t> lastResourceNode;
+    for (int64_t iteration = 0; iteration < iterations; ++iteration)
+      for (size_t stage = 0; stage < stageCount; ++stage) {
+        const size_t node = static_cast<size_t>(iteration) * stageCount + stage;
+        auto previous = lastResourceNode.find(resource[stage]);
+        if (previous != lastResourceNode.end())
+          addEdge(previous->second, node);
+        lastResourceNode[resource[stage]] = node;
+      }
+
+    std::queue<size_t> ready;
+    for (size_t node = 0; node < nodeCount; ++node)
+      if (indegree[node] == 0)
+        ready.push(node);
+    std::vector<double> earliestStart(nodeCount, 0.0);
+    double makespan = 0.0;
+    size_t scheduled = 0;
+    while (!ready.empty()) {
+      const size_t node = ready.front();
+      ready.pop();
+      ++scheduled;
+      const double end = earliestStart[node] + duration[node % stageCount];
+      makespan = std::max(makespan, end);
+      for (size_t successor : successors[node]) {
+        earliestStart[successor] = std::max(earliestStart[successor], end);
+        if (--indegree[successor] == 0)
+          ready.push(successor);
+      }
+    }
+    if (scheduled != nodeCount)
+      return std::nullopt;
+    return makespan;
+  };
+
+  const auto one = schedule(1), two = schedule(2), three = schedule(3);
+  const auto actual = schedule(estimate.iterations);
+  if (!one || !two || !three || !actual)
+    return std::nullopt;
+  estimate.fillCycles = *one;
+  estimate.initiationIntervalCycles = *two - *one;
+  estimate.affine =
+      std::abs((*three - *two) - estimate.initiationIntervalCycles) <=
+      1.0e-8 * std::max(1.0, std::abs(estimate.initiationIntervalCycles));
+  estimate.scheduledLoopCycles = estimate.fixedSetupCycles + *actual;
+  return estimate;
+}
+
+static void analyzeStageDependencySchedules(StageRoutePlan &plan,
+                                            const StageCostTable &costTable) {
+  std::optional<DependencyScheduleEstimate> result;
+  int64_t recurrenceCount = 0;
+  bool unsupported = false;
+  for (size_t index = 0; index < costTable.stages.size(); ++index) {
+    if (costTable.stages[index].model != "loop_carried_recurrence")
+      continue;
+    ++recurrenceCount;
+    auto estimate = estimateDependencySchedule(plan, costTable, index);
+    if (!estimate) {
+      unsupported = true;
+      continue;
+    }
+    result = std::move(estimate);
+  }
+  if (recurrenceCount > 1 || unsupported) {
+    plan.diagnostic<std::string>("stage_dependency_schedule_status") =
+        "multiple_or_nested_recurrences_unsupported";
+    return;
+  }
+  if (!result) {
+    plan.diagnostic<std::string>("stage_dependency_schedule_status") =
+        "unavailable";
+    return;
+  }
+  const double scheduledTotal = plan.totalCycles - result->originalLoopCycles +
+                                result->scheduledLoopCycles;
+  plan.diagnostic<std::string>("stage_dependency_schedule_status") =
+      result->affine ? "affine" : "non_affine";
+  plan.diagnostic<std::string>("stage_dependency_schedule_loop_stage") =
+      result->loopStage;
+  plan.diagnostic<int64_t>("stage_dependency_schedule_iterations") =
+      result->iterations;
+  plan.diagnostic<int64_t>("stage_dependency_schedule_stage_count") =
+      result->stageCount;
+  plan.diagnostic<int64_t>("stage_dependency_schedule_edge_count") =
+      result->dependencyCount;
+  plan.diagnostic<double>("stage_dependency_schedule_fill_system_cycles") =
+      result->fillCycles;
+  plan.diagnostic<double>(
+      "stage_dependency_schedule_initiation_interval_system_cycles") =
+      result->initiationIntervalCycles;
+  plan.diagnostic<double>("stage_dependency_schedule_loop_system_cycles") =
+      result->scheduledLoopCycles;
+  plan.diagnostic<double>("stage_dependency_schedule_total_system_cycles") =
+      scheduledTotal;
+  plan.diagnostic<double>(
+      "stage_dependency_schedule_adjustment_system_cycles") =
+      scheduledTotal - plan.totalCycles;
+  const bool apply = costTable.stageDependencyScheduleEnabled && result->affine;
+  plan.diagnostic<bool>("stage_dependency_schedule_applied") = apply;
+  if (apply)
+    plan.totalCycles = scheduledTotal;
+}
+
 llvm::Expected<StageCostModelSummary>
 mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
                                const ScopeHandoffCost &scopeHandoff) {
@@ -3453,6 +3746,19 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
                                    "efficiency must be finite and in range, "
                                    "and handoff rates must be finite and "
                                    "positive");
+
+  llvm::StringSet<> stageIds;
+  for (const LogicalStageCost &stage : costTable.stages)
+    stageIds.insert(stage.id);
+  for (const StageDependency &dependency : costTable.dependencies)
+    if (!dependency.isValid() ||
+        (!dependency.loopStage.empty() &&
+         !stageIds.contains(dependency.loopStage)) ||
+        !stageIds.contains(dependency.sourceStage) ||
+        !stageIds.contains(dependency.targetStage))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "stage route model received an invalid Stage dependency");
 
   auto findImplementation = [](const LogicalStageCost &stage, StageMode mode,
                                int64_t factor, bool localScope,
@@ -3693,6 +3999,7 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
       invalid.candidate = kind;
       return invalid;
     }
+    analyzeStageDependencySchedules(plan, costTable);
     plan.legal = true;
     return plan;
   };
@@ -3723,6 +4030,7 @@ mlir::ascend::solveStageRoutes(const StageCostTable &costTable,
   result.profileVersion = costTable.profileVersion;
   result.stages = costTable.stages;
   result.scopeHandoff = scopeHandoff;
+  result.dependencies = costTable.dependencies;
   result.allSimd = buildPlan(StageKernelRouteKind::AllSIMD, 1);
   for (int64_t factor : {1, 2, 4}) {
     StageRoutePlan plan = buildPlan(StageKernelRouteKind::AllSIMT, factor);

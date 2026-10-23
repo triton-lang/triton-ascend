@@ -319,6 +319,101 @@
           "minLength": 1,
           "description": "Fresh structural evidence and admissible range for partial_composite_residual_scale."
         },
+        "physical_tile_resource_formula": {
+          "type": "object",
+          "description": "Qualified SIMD MMAD MAC/MTE1 resource formula; excludes FIX and ready latency.",
+          "required": [
+            "status",
+            "target",
+            "lowering_contract"
+          ],
+          "properties": {
+            "status": {
+              "const": "qualified_physical_resource_formula_v2"
+            },
+            "target": {
+              "const": "Ascend950PR_9579"
+            },
+            "lowering_contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "formula": {
+              "type": "object",
+              "description": "Physical SIMD MMAD resource roofline. MAC work uses a tile-occupancy-adjusted FLOP law, MTE1 work uses separate L0A/L0B byte rates, and the Dot resource is their maximum. It excludes FIX, ready, synchronization, and loop-control latency.",
+              "required": [
+                "tiny_mac_floor_system_cycles",
+                "cube_mac_system_cycles_per_sqrt_flop",
+                "cube_minimum_flops",
+                "mte1_startup_system_cycles",
+                "mte1_bytes_exponent",
+                "lhs_mte1_system_cycles_per_byte_power",
+                "rhs_mte1_system_cycles_per_byte_power",
+                "tile_size",
+                "narrow_n_reference_tiles",
+                "wide_n_reference_tiles",
+                "narrow_n_occupancy_exponent",
+                "wide_n_occupancy_exponent",
+                "evidence"
+              ],
+              "properties": {
+                "tiny_mac_floor_system_cycles": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "cube_mac_system_cycles_per_sqrt_flop": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "cube_minimum_flops": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "mte1_startup_system_cycles": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "mte1_bytes_exponent": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "lhs_mte1_system_cycles_per_byte_power": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "rhs_mte1_system_cycles_per_byte_power": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "tile_size": {
+                  "const": 16
+                },
+                "narrow_n_reference_tiles": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "wide_n_reference_tiles": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "narrow_n_occupancy_exponent": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "wide_n_occupancy_exponent": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                },
+                "evidence": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
         "source": {
           "type": "string",
           "description": "Origin and intended refinement path for the dot prior."
@@ -429,6 +524,57 @@
         "description": {
           "type": "string",
           "minLength": 1
+        },
+        "stage_dependency_completion": {
+          "type": "object",
+          "description": "Target-level task and DynamicCV completion terms composed after the generic Stage predecessor/resource schedule. Requested CV-on predictions require backend confirmation before qualification.",
+          "required": [
+            "status",
+            "target",
+            "lowering_contract",
+            "task_envelope_system_cycles",
+            "dynamic_cv_first_fill_system_cycles",
+            "dynamic_cv_per_iteration_delta_system_cycles",
+            "schedule_contract",
+            "full_kernel_validation_sha256",
+            "evidence"
+          ],
+          "properties": {
+            "status": {
+              "const": "qualified_stage_dependency_completion_v1"
+            },
+            "target": {
+              "const": "Ascend950PR_9579"
+            },
+            "lowering_contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "task_envelope_system_cycles": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "dynamic_cv_first_fill_system_cycles": {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            "dynamic_cv_per_iteration_delta_system_cycles": {
+              "type": "number"
+            },
+            "schedule_contract": {
+              "type": "string",
+              "minLength": 1
+            },
+            "full_kernel_validation_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         },
         "scalar_prologue_system_cycles": {
           "type": "number",

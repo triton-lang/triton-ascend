@@ -7,6 +7,7 @@ add_compile_definitions(
 add_mlir_library(AscendModelRouteModel
   ../Analysis/SimtAnchorAnalysis.cpp
   ../Analysis/StagePartitioner.cpp
+  ../Analysis/LoopWorkloadAnalysis.cpp
   ../Analysis/SimtRegisterPressureAnalysis.cpp
   StageCostModels.cpp
   StageRouteCostModel.cpp
@@ -24,6 +25,7 @@ add_mlir_library(AscendModelRouteModel
   LINK_LIBS PUBLIC
   AscendModelProfile
   TritonIR
+  MLIRArithDialect
   MLIRIR
   MLIRAnalysis
   MLIRPass

@@ -27,6 +27,7 @@ namespace mlir::ascend {
 
 enum class StageMode { SIMD, SIMT };
 enum class StageKernelRouteKind { AllSIMD, AllSIMT, Mixed };
+enum class StageDependencyKind { IntraIterationData, LoopCarriedData };
 enum class StageScheduleKind {
   StraightLine,
   IndependentPipelined,
@@ -135,6 +136,28 @@ struct WholeSimdCompletionCurve {
 };
 
 llvm::StringRef stringifyStageMode(StageMode mode);
+
+llvm::StringRef stringifyStageDependencyKind(StageDependencyKind kind);
+
+/// One explicit same-iteration or loop-carried data dependency between
+/// logical Stage instances. Stage IDs, rather than vector indices, keep
+/// reports stable after StageKindClassifier assigns final semantic names.
+struct StageDependency {
+  std::string loopStage;
+  std::string sourceStage;
+  std::string targetStage;
+  StageDependencyKind kind = StageDependencyKind::LoopCarriedData;
+  int64_t iterationDistance = 1;
+  /// Retained report keys for compatibility; same-iteration edges use the
+  /// synthetic name `inter_stage_ssa` and index zero.
+  int64_t carriedValueIndex = 0;
+  std::string carriedValueName;
+  int64_t carriedValueBytes = 0;
+  std::string sourceLocation;
+
+  bool isValid() const;
+  llvm::json::Object toJSON() const;
+};
 
 struct StageImplementation {
   StageMode mode = StageMode::SIMD;
@@ -272,6 +295,11 @@ struct TensorOperationWorkload {
   llvm::json::Object toJSON() const;
 };
 
+/// Semantic TTIR dot key. A physical resource observation may be used only
+/// after its lowering contract has been admitted for the current target.
+using DotShapeKey = std::tuple<int64_t, int64_t, int64_t, int64_t, std::string,
+                               std::string, std::string, std::string>;
+
 /// Mode-independent work owned exactly once by one Stage.  Values are
 /// logical elements/bytes, not mode-specific instructions or cycles.
 struct StageWorkload {
@@ -332,6 +360,10 @@ struct StageWorkload {
   double dotOperations = 0.0;
   /// Per-matrix FLOP shape -> dynamic matrix instances.
   std::map<int64_t, double> dotFlopCounts;
+  /// (M, N, K, batch, lhs type, rhs type, accumulator type, precision) ->
+  /// source-level dot invocations per Stage iteration. Diagnostic only: the
+  /// cost is still owned by dotFlopCounts/dotFlops exactly once.
+  std::map<DotShapeKey, double> dotShapeCounts;
   /// TTIR operand provenance/layout key -> (FLOPs per dot, occurrences).
   /// Does not assert a physical shared-memory instruction count.
   std::map<std::string, std::pair<int64_t, double>> dotOperandPaths;
@@ -402,6 +434,9 @@ struct StageResourceCycles {
   /// Portion of shuffle attributed to tt.scan dependency levels.
   double scanShuffle = 0.0;
   double dot = 0.0;
+  /// True when `dot` includes the qualified SIMD physical resource formula.
+  /// No completion or ready latency is implied.
+  bool dotPhysicalResourceFormulaApplied = false;
   /// Diagnostic attribution only: already included in dot, not additive.
   double dotOperandGroup = 0.0;
   double dotInputLoadsCovered = 0.0;
@@ -575,6 +610,8 @@ struct SimtRegisterPressure {
 struct LogicalStageCost {
   std::string id;
   std::string model;
+  /// Ordered outer-to-inner split-loop shells containing this Stage.
+  std::vector<std::string> enclosingLoopStages;
   StageScheduleKind schedule = StageScheduleKind::StraightLine;
   int64_t iterationCount = 1;
   StageModelFeatures features;
@@ -752,6 +789,9 @@ struct StageCostTable {
   double mixedParentMemoryCyclesPerExcessIteration = 0.0;
   std::string mixedParentMemoryCompletionEvidence;
   std::vector<LogicalStageCost> stages;
+  std::vector<StageDependency> dependencies;
+  /// Apply the generic predecessor/resource schedule to recurrence loops.
+  bool stageDependencyScheduleEnabled = false;
 };
 
 struct ScopeHandoffCost {
@@ -851,6 +891,7 @@ struct StageCostModelSummary {
   std::string profileVersion;
   std::vector<LogicalStageCost> stages;
   ScopeHandoffCost scopeHandoff;
+  std::vector<StageDependency> dependencies;
   StageRoutePlan allSimd;
   StageRoutePlan allSimt;
   /// Auditable pure-SIMT plans for each legal whole-kernel factor.

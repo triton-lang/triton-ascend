@@ -5,6 +5,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
+#include "AscendModel/Analysis/LoopWorkloadAnalysis.h"
 #include "AscendModel/Analysis/SimtAnchorAnalysis.h"
 #include "AscendModel/Analysis/SimtRegisterPressureAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
@@ -197,6 +198,28 @@ struct KernelTimingProfile {
     }
   };
 
+  struct StageDependencyCompletion {
+    bool enabled = false;
+    std::string target;
+    std::string loweringContract;
+    double taskEnvelopeSystemCycles = 0.0;
+    double dynamicCVFirstFillSystemCycles = 0.0;
+    double dynamicCVPerIterationDeltaSystemCycles = 0.0;
+    std::string scheduleContract;
+    std::string fullKernelValidationSHA256;
+    std::string evidence;
+
+    bool isValid() const {
+      return !enabled ||
+             (target == "Ascend950PR_9579" && !loweringContract.empty() &&
+              finitePositive(
+                  {taskEnvelopeSystemCycles, dynamicCVFirstFillSystemCycles}) &&
+              finiteValues({dynamicCVPerIterationDeltaSystemCycles}) &&
+              !scheduleContract.empty() &&
+              fullKernelValidationSHA256.size() == 64 && !evidence.empty());
+    }
+  };
+
   struct TinyStraightLineSimtMemoryCompletion {
     bool enabled = false;
     int64_t maximumElementsPerAccess = 0;
@@ -369,6 +392,7 @@ struct KernelTimingProfile {
   SimtNonAffineRank1MemoryCompletion simtNonAffineRank1MemoryCompletion;
   Rank2InterleavedPrefixScanCompletion rank2InterleavedPrefixScanCompletion;
   SimtStaticLoopDirectMemoryCompletion simtStaticLoopDirectMemoryCompletion;
+  StageDependencyCompletion stageDependencyCompletion;
   double systemCounterFrequencyMHz = 0.0;
   std::string evidence;
 
@@ -443,6 +467,7 @@ struct KernelTimingProfile {
            simtNonAffineRank1MemoryCompletion.isValid() &&
            rank2InterleavedPrefixScanCompletion.isValid() &&
            simtStaticLoopDirectMemoryCompletion.isValid() &&
+           stageDependencyCompletion.isValid() &&
            finiteNonNegative(
                {scalarPrologueSystemCycles, scalarEpilogueSystemCycles}) &&
            finitePositive({systemCounterFrequencyMHz}) && !evidence.empty();
@@ -2152,6 +2177,30 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     reader.setError("profile.kernel_timing must be an object for schema 19");
   if (kernelTiming) {
     auto &timing = profile.kernelTiming;
+    if (const auto *completion =
+            kernelTiming->getObject("stage_dependency_completion")) {
+      const std::string path =
+          "profile.kernel_timing.stage_dependency_completion";
+      auto &result = timing.stageDependencyCompletion;
+      result.enabled = reader.string(*completion, "status", path) ==
+                       "qualified_stage_dependency_completion_v1";
+      if (!result.enabled)
+        reader.setError(path + " has an unknown qualification status");
+      result.target = reader.string(*completion, "target", path);
+      result.loweringContract =
+          reader.string(*completion, "lowering_contract", path);
+      result.taskEnvelopeSystemCycles =
+          reader.number(*completion, "task_envelope_system_cycles", path);
+      result.dynamicCVFirstFillSystemCycles = reader.number(
+          *completion, "dynamic_cv_first_fill_system_cycles", path);
+      result.dynamicCVPerIterationDeltaSystemCycles = reader.number(
+          *completion, "dynamic_cv_per_iteration_delta_system_cycles", path);
+      result.scheduleContract =
+          reader.string(*completion, "schedule_contract", path);
+      result.fullKernelValidationSHA256 =
+          reader.string(*completion, "full_kernel_validation_sha256", path);
+      result.evidence = reader.string(*completion, "evidence", path);
+    }
     timing.scalarPrologueSystemCycles =
         reader.number(*kernelTiming, "scalar_prologue_system_cycles",
                       "profile.kernel_timing");
@@ -2679,6 +2728,55 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       simdProfile.dotFlopsPerCycle = resolveNumberOrMeasurement(
           *dot, "flops_per_system_cycle", "throughput_measurement",
           "flop/system_cycle", microbench, reader, "simd.dot");
+      if (const auto *resource =
+              dot->getObject("physical_tile_resource_formula")) {
+        const std::string context = "simd.dot.physical_tile_resource_formula";
+        const std::string resourceStatus =
+            reader.string(*resource, "status", context);
+        if (resourceStatus != "qualified_physical_resource_formula_v2")
+          reader.setError(context + " is not a qualified formula");
+        simdProfile.dotPhysicalResourceTarget =
+            reader.string(*resource, "target", context);
+        simdProfile.dotPhysicalResourceLoweringContract =
+            reader.string(*resource, "lowering_contract", context);
+        if (const auto *formula = resource->getObject("formula")) {
+          const std::string formulaContext = context + ".formula";
+          StageModeProfile::DotPhysicalResourceFormula value;
+          value.tinyMacFloorCycles = reader.number(
+              *formula, "tiny_mac_floor_system_cycles", formulaContext);
+          value.cubeMacCyclesPerSqrtFlop = reader.number(
+              *formula, "cube_mac_system_cycles_per_sqrt_flop", formulaContext);
+          value.cubeMinimumFlops =
+              reader.number(*formula, "cube_minimum_flops", formulaContext);
+          value.mte1StartupCycles = reader.number(
+              *formula, "mte1_startup_system_cycles", formulaContext);
+          value.mte1BytesExponent =
+              reader.number(*formula, "mte1_bytes_exponent", formulaContext);
+          value.lhsMte1CyclesPerBytePower =
+              reader.number(*formula, "lhs_mte1_system_cycles_per_byte_power",
+                            formulaContext);
+          value.rhsMte1CyclesPerBytePower =
+              reader.number(*formula, "rhs_mte1_system_cycles_per_byte_power",
+                            formulaContext);
+          value.tileSize =
+              reader.integer(*formula, "tile_size", formulaContext);
+          value.narrowNReferenceTiles = reader.number(
+              *formula, "narrow_n_reference_tiles", formulaContext);
+          value.wideNReferenceTiles =
+              reader.number(*formula, "wide_n_reference_tiles", formulaContext);
+          value.narrowNOccupancyExponent = reader.number(
+              *formula, "narrow_n_occupancy_exponent", formulaContext);
+          value.wideNOccupancyExponent = reader.number(
+              *formula, "wide_n_occupancy_exponent", formulaContext);
+          value.evidence = reader.string(*formula, "evidence", formulaContext);
+          if (!value.isValid())
+            reader.setError(formulaContext + " is invalid");
+          else
+            simdProfile.dotPhysicalResourceFormula = std::move(value);
+        }
+        if (!simdProfile.dotPhysicalResourceFormula)
+          reader.setError(context + " requires a valid formula");
+      }
     }
     readStageResources(reader, *simd, "simd", microbench, simdProfile);
     const auto predicate = simdProfile.operationRates.lookup("predicate.cmp");
@@ -2976,7 +3074,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     bool scopeSuperblockMaterializable, int64_t logicalProgramCountHint,
     int64_t physicalCoreCountHint, int64_t physicalAiCoreCountHint,
     int64_t kernelArgumentCount, ModuleOp module,
-    const SimtAnchorPlan *anchorPlan, const SimdSimtCostModelOptions &options) {
+    const SimtAnchorPlan *anchorPlan, const SimdSimtCostModelOptions &options,
+    const LoopTripCountMap *loopTripCounts = nullptr) {
   StagePartitionerOptions partitionerOptions;
   partitionerOptions.tinyDotFlopsMax = profile.structural.tinyDotFlopsMax;
   const auto largestFactor = [](llvm::ArrayRef<int64_t> factors,
@@ -3018,6 +3117,7 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   partitionerOptions.scopeSuperblockMaterializable =
       scopeSuperblockMaterializable;
   partitionerOptions.logicalProgramCountHint = logicalProgramCountHint;
+  partitionerOptions.counterfactualLoopTripCounts = loopTripCounts;
   StagePartitioner partitioner;
   if (!module || !anchorPlan)
     return llvm::createStringError(std::errc::invalid_argument,
@@ -3033,7 +3133,6 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   if (llvm::Error error = StageResourceLegalityAnalysis().applySimtUbCapacity(
           *partition, profile.hardware.simt.usableUbBytes))
     return std::move(error);
-
   for (LogicalStage &stage : partition->stages) {
     llvm::erase_if(stage.legalSimtFactors, [&](int64_t factor) {
       return !llvm::is_contained(options.wholeKernelSuperblockFactors, factor);
@@ -3360,6 +3459,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     subwarpIndirectCompositeOwner.reset();
 
   HardwareProfile hardwareProfile = profile.hardware;
+  if (hardwareProfile.simd.dotPhysicalResourceTarget != options.actualTarget)
+    hardwareProfile.simd.dotPhysicalResourceFormula.reset();
   hardwareProfile.baseSimtWarpCount = std::max<int64_t>(1, numWarps);
   hardwareProfile.maximumSimtEstimationFactor =
       partitionerOptions.maximumSuperblockFactor;
@@ -3380,6 +3481,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   costTable->physicalCoreCountHint = physicalCoreCountHint;
   costTable->physicalAiCoreCountHint = physicalAiCoreCountHint;
   costTable->routeCompletions = profile.kernelTiming.routeCompletions;
+  costTable->stageDependencyScheduleEnabled =
+      profile.kernelTiming.stageDependencyCompletion.enabled;
   auto &multiResultScan = costTable->routeCompletions.multiResultPrefixScan;
   if (multiResultScan.enabled) {
     int64_t argumentCount = 0;
@@ -3608,6 +3711,54 @@ static SimdSimtCandidateKind chooseBest(const SimdSimtCandidateScores &scores,
   return legalCandidates(scores, allSimdLegal, allSimtLegal, mixedLegal)
       .front()
       .second;
+}
+
+/// PreparedTTIR may replace logical program IDs with scheduling IDs. Keep
+/// workload expressions from the route-neutral module only if its algorithm
+/// loops can be correlated with the prepared analysis view.
+static std::string correlateLoopWorkloadExpressions(
+    const std::vector<LoopWorkloadExpression> &source,
+    const std::vector<LoopWorkloadExpression> &prepared) {
+  if (source.size() != prepared.size())
+    return "algorithm loop count differs between source and analysis modules";
+  llvm::StringSet<> ids;
+  auto algorithmParents = [](Operation *loop) {
+    llvm::SmallVector<Operation *> parents;
+    for (Operation *parent = loop->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      auto name = parent->getName().getStringRef();
+      if ((name == "scf.for" || name == "scf.while") &&
+          !parent->hasAttr("ta.auto_blockify_v1.loop"))
+        parents.push_back(parent);
+    }
+    return parents;
+  };
+  for (size_t index = 0; index < source.size(); ++index) {
+    const auto &before = source[index];
+    const auto &after = prepared[index];
+    if (!ids.insert(before.loopId).second)
+      return "ambiguous algorithm loop ID: " + before.loopId;
+    if (before.loopId != after.loopId ||
+        before.operation->getName() != after.operation->getName())
+      return "algorithm loop ID or kind differs: " + before.loopId;
+    if (before.operation->getLoc() != after.operation->getLoc())
+      return "algorithm loop source location differs: " + before.loopId;
+    auto beforeParents = algorithmParents(before.operation);
+    auto afterParents = algorithmParents(after.operation);
+    if (beforeParents.size() != afterParents.size())
+      return "algorithm loop nesting differs: " + before.loopId;
+    for (size_t parentIndex = 0; parentIndex < beforeParents.size();
+         ++parentIndex) {
+      auto parent = llvm::find_if(source, [&](const auto &expression) {
+        return expression.operation == beforeParents[parentIndex];
+      });
+      if (parent == source.end() ||
+          prepared[std::distance(source.begin(), parent)].operation !=
+              afterParents[parentIndex])
+        return "algorithm loop parent identity differs: " + before.loopId;
+    }
+  }
+  return {};
 }
 
 static bool hasGlobalLoad(const StageCostModelSummary &stageModel) {
@@ -3860,6 +4011,356 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
                                      prediction.systemCounterFrequencyMHz;
 }
 
+/// Samples hypothetical uniform trip counts, never a runtime observation or
+/// a feasible-range proof. The selected production route is not modified.
+static llvm::json::Object analyzeLoopSensitivity(
+    ModuleOp preparedModule, const SimtAnchorPlan *anchorPlan,
+    const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
+    const SimdSimtCostModelOptions &options, const SimdSimtCostReport &baseline,
+    const std::vector<LoopWorkloadExpression> &sourceExpressions,
+    const std::vector<LoopWorkloadExpression> &preparedExpressions) {
+  constexpr int64_t counts[] = {1, 2, 3, 4, 8, 16, 32};
+  constexpr unsigned maximumAnalyzedLoops = 8;
+  llvm::json::Object result;
+  result["status"] = "sampled_only";
+  result["global_invariance_proven"] = false;
+  result["sample_feasibility_proven"] = false;
+  result["binding_semantics"] = "counterfactual_uniform_per_invocation";
+  result["maximum_analyzed_loops"] = maximumAnalyzedLoops;
+  result["maximum_samples_per_loop"] = static_cast<int64_t>(std::size(counts));
+  result["score_basis"] = "candidate_elapsed_costs";
+  llvm::json::Array loops;
+  unsigned analyzedLoops = 0;
+  bool truncated = false;
+  for (size_t index = 0; index < sourceExpressions.size(); ++index) {
+    const auto &expression = sourceExpressions[index];
+    llvm::json::Object loop;
+    loop["loop_id"] = expression.loopId;
+    if (expression.constantTripCount) {
+      loop["status"] = "skipped_static";
+      loops.push_back(std::move(loop));
+      continue;
+    }
+    if (!expression.supported ||
+        expression.operation->getName().getStringRef() != "scf.for") {
+      loop["status"] = "skipped_unsupported";
+      loop["reason"] = "requires a supported dynamic scf.for expression";
+      loops.push_back(std::move(loop));
+      continue;
+    }
+    if (analyzedLoops == maximumAnalyzedLoops) {
+      loop["status"] = "skipped_limit";
+      truncated = true;
+      loops.push_back(std::move(loop));
+      continue;
+    }
+    ++analyzedLoops;
+    llvm::json::Array heldLoops;
+    for (const auto &other : sourceExpressions) {
+      if (other.loopId == expression.loopId || other.constantTripCount)
+        continue;
+      heldLoops.push_back(llvm::json::Object{
+          {"loop_id", other.loopId}, {"source", "nominal_model_estimate"}});
+    }
+    loop["conditional_on_other_dynamic_loops"] = !heldLoops.empty();
+    loop["held_dynamic_loops"] = std::move(heldLoops);
+    llvm::json::Array samples;
+    llvm::json::Array changes;
+    llvm::SmallVector<std::pair<int64_t, double>> selectedElapsedSamples;
+    std::optional<SimdSimtCandidateKind> previousWinner;
+    int64_t previousCount = 0;
+    bool failedSample = false;
+    bool selectedRouteStable = true;
+    for (int64_t count : counts) {
+      LoopTripCountMap counterfactual;
+      counterfactual.try_emplace(preparedExpressions[index].operation, count);
+      auto model = evaluateStageModel(
+          features, profile, options.numWarps,
+          options.wholeKernelSuperblockMaterializable,
+          options.scopeSuperblockMaterializable,
+          options.logicalProgramCountHint, options.physicalVectorCoreCountHint,
+          options.physicalAiCoreCountHint, baseline.kernelArgumentCount,
+          preparedModule, anchorPlan, options, &counterfactual);
+      llvm::json::Object sample;
+      sample["trip_count"] = count;
+      if (!model) {
+        sample["status"] = "evaluation_failed";
+        sample["reason"] = llvm::toString(model.takeError());
+        failedSample = true;
+        samples.push_back(std::move(sample));
+        continue;
+      }
+      SimdSimtCostReport scenario;
+      scenario.stageModel = std::move(*model);
+      scenario.logicalProgramCountHint = baseline.logicalProgramCountHint;
+      scenario.sourceLogicalProgramCountHint =
+          baseline.sourceLogicalProgramCountHint;
+      scenario.candidateCosts = {scenario.stageModel.allSimd.totalCycles,
+                                 scenario.stageModel.allSimt.totalCycles,
+                                 scenario.stageModel.mixed.totalCycles};
+      scenario.candidateElapsedCosts = completeCandidateCosts(
+          scenario, profile, baseline.kernelArgumentCount);
+      const bool simdLegal = features.simtAnchors.kernelLowerability.allSimd &&
+                             scenario.stageModel.allSimd.legal;
+      const bool simtLegal =
+          options.compileOn91095 && !features.hasExplicitScope &&
+          features.simtAnchors.kernelLowerability.allSimtOnly &&
+          scenario.stageModel.allSimt.legal;
+      const bool mixedLegal = options.compileOn91095 &&
+                              !features.hasExplicitScope &&
+                              features.simtAnchors.count > 0 &&
+                              features.simtAnchors.kernelLowerability.mixed &&
+                              scenario.stageModel.mixed.legal;
+      auto candidates = legalCandidates(scenario.candidateElapsedCosts,
+                                        simdLegal, simtLegal, mixedLegal);
+      sample["candidate_costs"] = scenario.candidateCosts.toJSON();
+      sample["candidate_elapsed_costs"] =
+          scenario.candidateElapsedCosts.toJSON();
+      llvm::json::Array legal;
+      for (const auto &candidate : candidates)
+        legal.push_back(stringifySimdSimtCandidate(candidate.second));
+      sample["legal_candidates"] = std::move(legal);
+      sample["route_factors"] = llvm::json::Object{
+          {kAllSimd, scenario.stageModel.allSimd.routeSuperblockFactor},
+          {kAllSimtOnly, scenario.stageModel.allSimt.routeSuperblockFactor},
+          {kMixedSimdSimt, scenario.stageModel.mixed.routeSuperblockFactor}};
+      const StageRoutePlan &dependencyPlan = scenario.stageModel.allSimd;
+      const std::string &dependencyStatus =
+          dependencyPlan.diagnostic<std::string>(
+              "stage_dependency_schedule_status");
+      if (!dependencyStatus.empty()) {
+        const double scheduledCore = dependencyPlan.diagnostic<double>(
+            "stage_dependency_schedule_total_system_cycles");
+        sample["all_simd_dependency_schedule"] = llvm::json::Object{
+            {"status", dependencyStatus},
+            {"loop_stage", dependencyPlan.diagnostic<std::string>(
+                               "stage_dependency_schedule_loop_stage")},
+            {"stage_count", dependencyPlan.diagnostic<int64_t>(
+                                "stage_dependency_schedule_stage_count")},
+            {"edge_count", dependencyPlan.diagnostic<int64_t>(
+                               "stage_dependency_schedule_edge_count")},
+            {"fill_system_cycles",
+             dependencyPlan.diagnostic<double>(
+                 "stage_dependency_schedule_fill_system_cycles")},
+            {"initiation_interval_system_cycles",
+             dependencyPlan.diagnostic<double>(
+                 "stage_dependency_schedule_initiation_interval_system_"
+                 "cycles")},
+            {"scheduled_core_system_cycles", scheduledCore},
+            {"route_system_cycles", scenario.candidateCosts.allSimd},
+            {"elapsed_system_cycles", scenario.candidateElapsedCosts.allSimd},
+            {"applied", dependencyPlan.diagnostic<bool>(
+                            "stage_dependency_schedule_applied")}};
+      }
+      if (candidates.empty()) {
+        sample["status"] = "no_legal_candidate";
+        failedSample = true;
+      } else {
+        sample["status"] = "evaluated";
+        const auto winner = candidates.front().second;
+        sample["winner"] = stringifySimdSimtCandidate(winner);
+        const int64_t selectedFactor =
+            winner == SimdSimtCandidateKind::AllSIMD
+                ? scenario.stageModel.allSimd.routeSuperblockFactor
+            : winner == SimdSimtCandidateKind::AllSIMTOnly
+                ? scenario.stageModel.allSimt.routeSuperblockFactor
+                : scenario.stageModel.mixed.routeSuperblockFactor;
+        if (winner != baseline.decision ||
+            selectedFactor != baseline.selectedRouteElapsed.superblockFactor)
+          selectedRouteStable = false;
+        else
+          selectedElapsedSamples.emplace_back(count, candidates.front().first);
+        if (candidates.size() > 1)
+          sample["runner_up_margin"] =
+              candidates[1].first - candidates[0].first;
+        if (previousWinner && *previousWinner != winner)
+          changes.push_back(llvm::json::Object{
+              {"previous_trip_count", previousCount},
+              {"trip_count", count},
+              {"previous_winner", stringifySimdSimtCandidate(*previousWinner)},
+              {"winner", stringifySimdSimtCandidate(winner)}});
+        previousWinner = winner;
+        previousCount = count;
+      }
+      llvm::json::Array dotStages;
+      for (const auto &stage : scenario.stageModel.stages)
+        if (stage.workload.dotFlops > 0)
+          dotStages.push_back(llvm::json::Object{
+              {"stage_id", stage.id},
+              {"iteration_count", stage.iterationCount},
+              {"dot_flops_per_iteration", stage.workload.dotFlops}});
+      sample["dot_stages"] = std::move(dotStages);
+      if (options.includeDiagnosticStageDetailsInJSON) {
+        const auto &stages = scenario.stageModel.stages;
+        const auto &plan = scenario.stageModel.allSimd;
+        if (plan.logicalStageCycles.size() != stages.size() ||
+            plan.scopeHandoffCycles.size() != stages.size()) {
+          sample["all_simd_stage_costs_status"] = "unavailable_size_mismatch";
+        } else {
+          llvm::json::Array stageCosts;
+          for (size_t stageIndex = 0; stageIndex < stages.size(); ++stageIndex)
+            stageCosts.push_back(llvm::json::Object{
+                {"stage_id", stages[stageIndex].id},
+                {"iteration_count", stages[stageIndex].iterationCount},
+                {"logical_stage_system_cycles",
+                 plan.logicalStageCycles[stageIndex]},
+                {"scope_handoff_system_cycles",
+                 plan.scopeHandoffCycles[stageIndex]}});
+          sample["all_simd_stage_costs_status"] = "available";
+          sample["all_simd_stage_costs"] = std::move(stageCosts);
+        }
+      }
+      samples.push_back(std::move(sample));
+    }
+    loop["status"] = failedSample ? "incomplete_samples" : "sampled_only";
+    loop["winner_stable_over_samples"] = !failedSample && changes.empty();
+    loop["sampled_changes"] = std::move(changes);
+    // This is a conditional report, not a runtime trip-count observation.
+    // Only publish an affine expression when every sampled winner matches the
+    // compiled route and the native complete-route scores agree on one line.
+    if (baseline.selectedRouteElapsed.applied && !failedSample &&
+        selectedRouteStable &&
+        selectedElapsedSamples.size() == std::size(counts)) {
+      const auto [firstCount, firstCost] = selectedElapsedSamples.front();
+      const auto [lastCount, lastCost] = selectedElapsedSamples.back();
+      const double perIteration =
+          (lastCost - firstCost) / (lastCount - firstCount);
+      const double offset = firstCost - firstCount * perIteration;
+      const bool affine =
+          llvm::all_of(selectedElapsedSamples, [&](const auto &point) {
+            const double expected = offset + point.first * perIteration;
+            return std::abs(point.second - expected) <=
+                   1.0e-8 * std::max(1.0, std::abs(point.second));
+          });
+      if (affine && std::isfinite(offset) && std::isfinite(perIteration) &&
+          perIteration >= 0.0) {
+        llvm::json::Array verifiedCounts;
+        for (const auto &[count, cost] : selectedElapsedSamples)
+          verifiedCounts.push_back(count);
+        loop["conditional_elapsed_prediction"] = llvm::json::Object{
+            {"status", "affine_on_sampled_counts"},
+            {"candidate", stringifySimdSimtCandidate(baseline.decision)},
+            {"offset_system_cycles", offset},
+            {"per_iteration_system_cycles", perIteration},
+            {"system_counter_frequency_mhz",
+             profile.kernelTiming.systemCounterFrequencyMHz},
+            {"verified_trip_counts", std::move(verifiedCounts)},
+            {"trip_count_source", "loop_workload_expressions"},
+            {"runtime_trip_count_observed", false},
+            {"selected_route_and_factor_unchanged", true}};
+      }
+    }
+    loop["samples"] = std::move(samples);
+    loops.push_back(std::move(loop));
+  }
+  result["truncated"] = truncated;
+  result["analyzed_loop_count"] = analyzedLoops;
+  result["loops"] = std::move(loops);
+  return result;
+}
+
+static bool admitsStageDependencyCompletion(const SimdSimtCostReport &report,
+                                            const CandidateProfile &profile) {
+  const auto &completion = profile.kernelTiming.stageDependencyCompletion;
+  const auto &model = report.stageModel;
+  if (!completion.enabled || report.actualTarget != completion.target ||
+      completion.loweringContract !=
+          profile.hardware.simd.dotPhysicalResourceLoweringContract ||
+      report.decision != SimdSimtCandidateKind::AllSIMD ||
+      !report.features.autoBlockifyV1Applied ||
+      !model.operationOwnershipComplete || !model.allSimd.legal ||
+      model.allSimd.routeSuperblockFactor != 1 ||
+      model.allSimd.runtimePhysicalProgramCount != 1 ||
+      !model.allSimd.diagnostic<bool>("stage_dependency_schedule_applied") ||
+      model.allSimd.diagnostic<std::string>(
+          "stage_dependency_schedule_status") != "affine" ||
+      report.loopWorkloadExpressions.size() != 1)
+    return false;
+
+  const auto *expression = report.loopWorkloadExpressions.front().getAsObject();
+  return expression && expression->getBoolean("supported") == true;
+}
+
+static void
+populateStageDependencyCompletion(SimdSimtCostReport &report,
+                                  const CandidateProfile &profile,
+                                  const SimdSimtCostModelOptions &options) {
+  if (!admitsStageDependencyCompletion(report, profile))
+    return;
+  auto *loops = report.loopSensitivity.getArray("loops");
+  if (!loops || loops->size() != 1)
+    return;
+  auto *loop = loops->front().getAsObject();
+  auto *native =
+      loop ? loop->getObject("conditional_elapsed_prediction") : nullptr;
+  if (!native || native->getString("status") != "affine_on_sampled_counts" ||
+      native->getString("candidate") != kAllSimd ||
+      native->getBoolean("selected_route_and_factor_unchanged") != true)
+    return;
+  const auto offset = native->getNumber("offset_system_cycles");
+  const auto perIteration = native->getNumber("per_iteration_system_cycles");
+  const auto *verified = native->getArray("verified_trip_counts");
+  if (!offset || !perIteration || !verified)
+    return;
+  for (int64_t count : {1, 2, 3, 4})
+    if (!llvm::any_of(*verified, [&](const llvm::json::Value &value) {
+          return value.getAsInteger() == count;
+        }))
+      return;
+  const auto &completion = profile.kernelTiming.stageDependencyCompletion;
+  const double correctedOffset = *offset -
+                                 report.selectedRouteElapsed.fixedSystemCycles +
+                                 completion.taskEnvelopeSystemCycles;
+  const double nonrecurrentRouteBody =
+      *offset - report.selectedRouteElapsed.fixedSystemCycles;
+  llvm::json::Object prediction{
+      {"prediction_scope", "complete_kernel_duration"},
+      {"candidate", kAllSimd},
+      {"offset_system_cycles", correctedOffset},
+      {"per_iteration_system_cycles", *perIteration},
+      {"system_counter_frequency_mhz",
+       profile.kernelTiming.systemCounterFrequencyMHz},
+      {"nonrecurrent_route_body_system_cycles", nonrecurrentRouteBody},
+      {"independent_task_envelope_system_cycles",
+       completion.taskEnvelopeSystemCycles},
+      {"generic_fixed_system_cycles_replaced",
+       report.selectedRouteElapsed.fixedSystemCycles},
+      {"valid_trip_counts", llvm::json::Array{1, 2, 3, 4}},
+      {"runtime_condition", "positive_trip_count_no_early_return"},
+      {"dependency_schedule_applied", true},
+      {"offline_schedule_calibration_certified", true},
+      {"schedule_contract", completion.scheduleContract},
+      {"full_kernel_validation_sha256", completion.fullKernelValidationSHA256},
+      {"runtime_trip_count_observed", false},
+      {"selected_route_unchanged", true},
+      {"dynamic_cv_requested", options.dynamicCVPipelineRequested},
+      {"evidence", completion.evidence}};
+  if (options.dynamicCVPipelineRequested) {
+    const double correctedPerIteration =
+        *perIteration + completion.dynamicCVPerIterationDeltaSystemCycles;
+    if (!std::isfinite(correctedPerIteration) || correctedPerIteration <= 0.0)
+      return;
+    prediction["status"] = "requested_on_requires_backend_confirmation";
+    prediction["offset_system_cycles"] =
+        correctedOffset + completion.dynamicCVFirstFillSystemCycles;
+    prediction["per_iteration_system_cycles"] = correctedPerIteration;
+    prediction["independent_dynamic_cv_first_fill_system_cycles"] =
+        completion.dynamicCVFirstFillSystemCycles;
+    prediction["independent_dynamic_cv_per_iteration_delta_system_cycles"] =
+        completion.dynamicCVPerIterationDeltaSystemCycles;
+    prediction["backend_effective_dynamic_cv_confirmed"] = false;
+    prediction["formula"] =
+        "(nonrecurrent_route_body + task_envelope + "
+        "dynamic_cv_first_fill + q * (route_per_iteration + "
+        "dynamic_cv_per_iteration_delta)) / system_counter_frequency";
+  } else {
+    prediction["status"] = "qualified_off_stage_dependency_prediction";
+    prediction["formula"] = "(dependency_scheduled_route + task_envelope) / "
+                            "system_counter_frequency";
+  }
+  (*loop)["stage_dependency_elapsed_prediction"] = std::move(prediction);
+}
+
 } // namespace
 
 llvm::StringRef
@@ -4004,6 +4505,12 @@ llvm::json::Object SimdSimtCostReport::toJSON() const {
       stageModel.toJSON(includeDiagnosticStageDetailsInJSON);
   result["stage_report_detail"] =
       includeDiagnosticStageDetailsInJSON ? "diagnostic" : "runtime_compact";
+  result["loop_workload_expressions"] =
+      llvm::json::Array(loopWorkloadExpressions);
+  result["loop_workload_correlation"] =
+      llvm::json::Object(loopWorkloadCorrelation);
+  if (!loopSensitivity.empty())
+    result["loop_sensitivity"] = llvm::json::Object(loopSensitivity);
 
   if (includeFeaturesInJSON)
     result["features"] = features.toJSON();
@@ -4169,6 +4676,46 @@ estimateSimdSimtCandidatesImpl(const SimdSimtFeatureSummary &features,
   }
   populateSelectedRouteElapsedPrediction(report, profile,
                                          report.kernelArgumentCount);
+  ModuleOp expressionModule =
+      options.loopWorkloadModule ? options.loopWorkloadModule : module;
+  auto expressions = analyzeLoopWorkloadExpressions(expressionModule);
+  const bool separateSource = expressionModule != module;
+  auto preparedExpressions =
+      separateSource ? analyzeLoopWorkloadExpressions(module) : expressions;
+  report.loopWorkloadCorrelation["source"] =
+      separateSource ? "route_neutral_module" : "analysis_module";
+  report.loopWorkloadCorrelation["status"] = "identity";
+  std::string correlationFailure;
+  if (separateSource) {
+    correlationFailure =
+        correlateLoopWorkloadExpressions(expressions, preparedExpressions);
+    report.loopWorkloadCorrelation["status"] =
+        correlationFailure.empty() ? "matched" : "mismatch";
+    report.loopWorkloadCorrelation["checked_identity"] =
+        "loop_id_kind_location_and_algorithm_nesting";
+    if (!correlationFailure.empty()) {
+      report.loopWorkloadCorrelation["reason"] = correlationFailure;
+      report.unsupported.push_back("loop workload correlation: " +
+                                   correlationFailure);
+    }
+  }
+  for (const auto &expression : expressions)
+    report.loopWorkloadExpressions.push_back(
+        llvm::json::Object(expression.description));
+  if (options.analyzeLoopSensitivity) {
+    if (correlationFailure.empty())
+      report.loopSensitivity =
+          analyzeLoopSensitivity(module, anchorPlan, features, profile, options,
+                                 report, expressions, preparedExpressions);
+    else
+      report.loopSensitivity =
+          llvm::json::Object{{"status", "correlation_mismatch"},
+                             {"global_invariance_proven", false},
+                             {"sample_feasibility_proven", false},
+                             {"analyzed_loop_count", 0},
+                             {"reason", correlationFailure}};
+  }
+  populateStageDependencyCompletion(report, profile, options);
   return report;
 }
 

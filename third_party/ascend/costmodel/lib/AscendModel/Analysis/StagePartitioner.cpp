@@ -7,6 +7,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
@@ -415,6 +416,14 @@ static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
   double batch = 1.0;
   for (int64_t dim : lhs.getShape().drop_back(2))
     batch *= static_cast<double>(dim);
+  int64_t batchShape = 1;
+  for (int64_t dim : lhs.getShape().drop_back(2)) {
+    if (dim <= 0 || dim > std::numeric_limits<int64_t>::max() / batchShape) {
+      batchShape = 0;
+      break;
+    }
+    batchShape *= dim;
+  }
   if (m > 0 && n > 0 && k > 0) {
     // Keep the shape key exact.  Do not let a malformed or merely enormous
     // static tensor wrap the FLOP key and turn a non-tiny dot into a tiny one.
@@ -425,6 +434,25 @@ static void accumulateDotWorkload(Operation *operation, StageWorkload &work) {
     work.dotOperations += batch;
     work.dotFlopCounts[flopsPerMatrix] += batch;
     work.dotFlops += static_cast<double>(flopsPerMatrix) * batch;
+    if (batchShape > 0) {
+      Type accumulatorType;
+      if (operation->getNumOperands() > 2)
+        accumulatorType =
+            getScalarElementType(operation->getOperand(2).getType());
+      else if (operation->getNumResults() > 0)
+        accumulatorType =
+            getScalarElementType(operation->getResult(0).getType());
+      std::string precision = "unknown";
+      if (auto dot = dyn_cast<triton::DotOp>(operation))
+        precision =
+            triton::stringifyInputPrecision(dot.getInputPrecision()).str();
+      const auto shape = std::make_tuple(
+          m, n, k, batchShape, typeToString(lhs.getElementType()),
+          typeToString(rhs.getElementType()),
+          accumulatorType ? typeToString(accumulatorType) : "unknown",
+          std::move(precision));
+      work.dotShapeCounts[shape] += 1.0;
+    }
     if (auto path = describeDotOperandPath(operation)) {
       auto &entry = work.dotOperandPaths[*path];
       entry.first = flopsPerMatrix;
@@ -1218,6 +1246,7 @@ static void scaleWorkload(StageWorkload &work, double scale) {
   scaleCounts(work.sortCounts, scale);
   scaleCounts(work.oneTripMaskedAccumulatorReductionExtents, scale);
   scaleCounts(work.dotFlopCounts, scale);
+  scaleCounts(work.dotShapeCounts, scale);
   for (auto &[key, entry] : work.dotOperandPaths)
     entry.second *= scale;
   for (auto &entry : work.operationCounts)
@@ -1242,7 +1271,7 @@ static std::optional<int64_t> getConstantInteger(Value value) {
   if (!definition)
     return std::nullopt;
   auto attribute = definition->getAttrOfType<IntegerAttr>("value");
-  if (!attribute)
+  if (!attribute || attribute.getValue().getBitWidth() > 64)
     return std::nullopt;
   return attribute.getInt();
 }
@@ -1906,12 +1935,20 @@ getGridStrideTripCount(Operation *operation, int64_t logicalProgramCountHint) {
   return static_cast<int64_t>(extent / programs + (extent % programs != 0));
 }
 
-static int64_t getLoopTripCount(Operation *operation,
-                                int64_t stageIterationCount,
-                                StageModelFeatures *estimates = nullptr,
-                                int64_t logicalProgramCountHint = 0) {
+static int64_t
+getLoopTripCount(Operation *operation, int64_t stageIterationCount,
+                 StageModelFeatures *estimates = nullptr,
+                 int64_t logicalProgramCountHint = 0,
+                 const LoopTripCountMap *loopTripCounts = nullptr) {
+  if (loopTripCounts) {
+    auto count = loopTripCounts->find(operation);
+    if (count != loopTripCounts->end())
+      return count->second;
+  }
   const llvm::StringRef name = operation->getName().getStringRef();
   if (name == "scf.for" && operation->getNumOperands() >= 3) {
+    if (operation->hasAttr("unsignedCmp"))
+      return std::max<int64_t>(1, stageIterationCount);
     const std::optional<int64_t> lower =
         getConstantInteger(operation->getOperand(0));
     const auto exactUpper = getConstantInteger(operation->getOperand(1));
@@ -1963,7 +2000,8 @@ static bool hasKnownAtMostOneIteration(Operation *operation) {
 static void accumulateDynamicOperationTree(
     Operation *operation, StageWorkload &work, double multiplicity,
     int64_t fallbackLoopTripCount, StageModelFeatures &estimates,
-    int64_t logicalProgramCountHint, RankedTensorType mappedTensor = {}) {
+    int64_t logicalProgramCountHint, const LoopTripCountMap *loopTripCounts,
+    RankedTensorType mappedTensor = {}) {
   if (!operation)
     return;
   StageWorkload local;
@@ -1974,7 +2012,7 @@ static void accumulateDynamicOperationTree(
                            ? 1.0
                            : static_cast<double>(getLoopTripCount(
                                  operation, fallbackLoopTripCount, &estimates,
-                                 logicalProgramCountHint));
+                                 logicalProgramCountHint, loopTripCounts));
   if (name == "scf.for" || name == "scf.while")
     local.loopBackedges = trips;
   if (name == "scf.if" || name == "cf.cond_br")
@@ -1986,9 +2024,11 @@ static void accumulateDynamicOperationTree(
 
   if (schedulingLoop)
     return;
-  // A split independent-loop shell owns only control overhead. Its body
-  // operations are separate semantic roots and must not be double-counted.
+  // A split loop shell owns only control and carried-state overhead; its body
+  // operations are separate roots and must not be double-counted.
   if (shouldSplitLoopBodyIntoStages(operation))
+    return;
+  if (trips == 0)
     return;
   const double childMultiplicity = multiplicity * trips;
   RankedTensorType childMappedTensor = mappedTensor;
@@ -1999,7 +2039,7 @@ static void accumulateDynamicOperationTree(
       for (Operation &nested : block.getOperations())
         accumulateDynamicOperationTree(
             &nested, work, childMultiplicity, fallbackLoopTripCount, estimates,
-            logicalProgramCountHint, childMappedTensor);
+            logicalProgramCountHint, loopTripCounts, childMappedTensor);
 }
 
 static int64_t countAlgorithmLoops(const LogicalStage &stage) {
@@ -2020,7 +2060,7 @@ static int64_t countAlgorithmLoops(const LogicalStage &stage) {
 static int64_t
 inferRuntimeGridStrideIterations(const LogicalStage &stage,
                                  int64_t logicalProgramCountHint) {
-  int64_t iterations = 1;
+  int64_t iterations = 0;
   if (logicalProgramCountHint <= 0)
     return iterations;
   for (Operation *root : stage.operations) {
@@ -2063,6 +2103,7 @@ static void mergeWorkload(StageWorkload &into, StageWorkload from) {
   mergeCounts(into.oneTripMaskedAccumulatorReductionExtents,
               from.oneTripMaskedAccumulatorReductionExtents);
   mergeCounts(into.dotFlopCounts, from.dotFlopCounts);
+  mergeCounts(into.dotShapeCounts, from.dotShapeCounts);
   for (const auto &[key, entry] : from.dotOperandPaths) {
     into.dotOperandPaths[key].first = entry.first;
     into.dotOperandPaths[key].second += entry.second;
@@ -2237,33 +2278,32 @@ static bool operationTreeContainsLoadedIndexMemory(Operation *root) {
   return found;
 }
 
+static bool loopHasTrueCarriedDataDependency(Operation *operation) {
+  if (!operation || operation->hasAttr("ta.auto_blockify_v1.loop"))
+    return false;
+  const llvm::StringRef name = operation->getName().getStringRef();
+  if ((name != "scf.for" && name != "scf.while") ||
+      operation->getNumRegions() == 0 || operation->getRegion(0).empty() ||
+      hasKnownAtMostOneIteration(operation))
+    return false;
+  Block &body = operation->getRegion(0).front();
+  const unsigned firstCarriedArgument = name == "scf.for" ? 1 : 0;
+  for (unsigned index = firstCarriedArgument; index < body.getNumArguments();
+       ++index) {
+    BlockArgument argument = body.getArgument(index);
+    if (!argument.use_empty() && !isPointerLikeType(argument.getType()) &&
+        !isAddressOnlyLoopValue(argument))
+      return true;
+  }
+  return false;
+}
+
 static bool operationTreeHasTrueLoopCarriedDependency(Operation *root) {
   bool found = false;
-  if (!root)
-    return found;
-  root->walk([&](Operation *operation) {
-    if (found || operation->hasAttr("ta.auto_blockify_v1.loop"))
-      return;
-    const llvm::StringRef name = operation->getName().getStringRef();
-    if ((name != "scf.for" && name != "scf.while") ||
-        operation->getNumRegions() == 0 || operation->getRegion(0).empty())
-      return;
-    // A statically known zero/one-trip loop has no dynamic backedge, so its
-    // iter_arg is ordinary straight-line state rather than a recurrence.
-    if (hasKnownAtMostOneIteration(operation))
-      return;
-    Block &body = operation->getRegion(0).front();
-    const unsigned firstCarriedArgument = name == "scf.for" ? 1 : 0;
-    for (unsigned index = firstCarriedArgument; index < body.getNumArguments();
-         ++index) {
-      BlockArgument argument = body.getArgument(index);
-      if (!argument.use_empty() && !isPointerLikeType(argument.getType()) &&
-          !isAddressOnlyLoopValue(argument)) {
-        found = true;
-        return;
-      }
-    }
-  });
+  if (root)
+    root->walk([&](Operation *operation) {
+      found |= loopHasTrueCarriedDataDependency(operation);
+    });
   return found;
 }
 
@@ -2420,9 +2460,51 @@ static bool isInsideGridStrideLoop(Operation *operation) {
   return false;
 }
 
+/// True when one structured loop owns dominant structures that cannot share a
+/// leaf Stage cost formula.  Real recurrence is kept on the loop shell while
+/// dot/reduction/memory work is exposed as body roots.  Restrict recurrence
+/// splitting to scf.for for now: scf.while has separate before/after regions
+/// whose execution order cannot be represented by the current flat root list.
+static bool loopRequiresDominantStructureSplit(Operation *operation) {
+  if (!operation || operation->hasAttr("ta.auto_blockify_v1.loop") ||
+      operation->getName().getStringRef() != "scf.for" ||
+      operation->getNumRegions() == 0 || operation->getRegion(0).empty())
+    return false;
+
+  const bool hasDot = operationTreeHasAnyName(
+      operation, {"tt.dot", "linalg.matmul", "linalg.batch_matmul"});
+  if (!hasDot)
+    return false;
+  const bool hasReduction = operationTreeHasAnyName(
+      operation, {"tt.reduce", "tt.scan", "linalg.reduce"});
+  const bool hasIndirectMemory =
+      operationTreeContainsLoadedIndexMemory(operation) ||
+      operationTreeHasAnyName(operation, {"tt.gather"});
+  const bool hasAtomicMemory =
+      operationTreeHasAnyName(operation, {"tt.atomic_rmw", "tt.atomic_cas"});
+  return operationTreeHasTrueLoopCarriedDependency(operation) || hasReduction ||
+         hasIndirectMemory || hasAtomicMemory;
+}
+
+/// PR #2112 splits independent loops only when a body SIMT anchor needs exact
+/// ownership.  Also split an scf.for whose transitive operation tree would
+/// otherwise fail StageKindClassifier with `requires_split`.  This is a
+/// structural, conservative split: cross-iteration overlap remains a later
+/// schedule-model concern.
 static bool shouldSplitLoopBodyIntoStages(Operation *operation) {
-  return isIndependentStructuredLoop(operation) &&
-         hasSimtAnchorInBody(operation);
+  return loopRequiresDominantStructureSplit(operation) ||
+         (isIndependentStructuredLoop(operation) &&
+          hasSimtAnchorInBody(operation));
+}
+
+static Operation *getEnclosingSplitLoop(Operation *operation) {
+  if (!operation)
+    return nullptr;
+  for (Operation *parent = operation->getParentOp(); parent;
+       parent = parent->getParentOp())
+    if (shouldSplitLoopBodyIntoStages(parent))
+      return parent;
+  return nullptr;
 }
 
 static Operation *getPartitionSemanticRoot(Operation *operation) {
@@ -2440,8 +2522,8 @@ static Operation *getPartitionSemanticRoot(Operation *operation) {
   return topLevelRoot;
 }
 
-static void appendIndependentLoopBodyRoots(Operation *operation,
-                                           std::vector<Operation *> &roots) {
+static void appendSplitLoopBodyRoots(Operation *operation,
+                                     std::vector<Operation *> &roots) {
   if (!shouldSplitLoopBodyIntoStages(operation) ||
       operation->hasAttr("ta.auto_blockify_v1.loop"))
     return;
@@ -2452,7 +2534,7 @@ static void appendIndependentLoopBodyRoots(Operation *operation,
         if (nested.hasTrait<OpTrait::IsTerminator>())
           continue;
         roots.push_back(&nested);
-        appendIndependentLoopBodyRoots(&nested, roots);
+        appendSplitLoopBodyRoots(&nested, roots);
       }
     }
   }
@@ -2463,13 +2545,25 @@ static std::vector<Operation *> collectPartitionSemanticRoots(ModuleOp module) {
   std::vector<Operation *> expandedRoots;
   for (Operation *root : roots) {
     expandedRoots.push_back(root);
-    appendIndependentLoopBodyRoots(root, expandedRoots);
+    appendSplitLoopBodyRoots(root, expandedRoots);
   }
   return expandedRoots;
 }
 
-/// Trip count of split independent structured loops enclosing `root`.
-static int64_t enclosingSplitLoopTripCount(Operation *root) {
+/// Trip count of the split structured loops enclosing `root`. Nested loop
+/// bodies execute by the product of their enclosing trip counts, not the
+/// maximum.
+static int64_t multiplyTripCounts(int64_t left, int64_t right) {
+  if (left == 0 || right == 0)
+    return 0;
+  if (left > std::numeric_limits<int64_t>::max() / right)
+    return std::numeric_limits<int64_t>::max();
+  return left * right;
+}
+
+static int64_t
+enclosingSplitLoopTripCount(Operation *root,
+                            const LoopTripCountMap *loopTripCounts) {
   int64_t trips = 1;
   if (!root)
     return trips;
@@ -2477,21 +2571,23 @@ static int64_t enclosingSplitLoopTripCount(Operation *root) {
        parent = parent->getParentOp()) {
     if (!shouldSplitLoopBodyIntoStages(parent))
       continue;
-    const int64_t factor = std::max<int64_t>(1, getLoopTripCount(parent, 1));
-    if (trips > std::numeric_limits<int64_t>::max() / factor)
-      return std::numeric_limits<int64_t>::max();
-    trips *= factor;
+    const int64_t factor =
+        getLoopTripCount(parent, 1, nullptr, 0, loopTripCounts);
+    trips = multiplyTripCounts(trips, factor);
   }
   return trips;
 }
 
 /// Entry multiplicity for one root when accumulating dynamic Stage work.
-static double semanticRootEntryMultiplicity(Operation *root) {
+static double
+semanticRootEntryMultiplicity(Operation *root,
+                              const LoopTripCountMap *loopTripCounts) {
   if (!root)
     return 1.0;
-  if (shouldSplitLoopBodyIntoStages(root))
-    return static_cast<double>(getLoopTripCount(root, 1));
-  return static_cast<double>(enclosingSplitLoopTripCount(root));
+  // A split loop shell is entered once per enclosing invocation. Its own
+  // backedges are already counted by accumulateDynamicOperationTree; adding
+  // its trip count here would charge a t-trip shell t² times.
+  return static_cast<double>(enclosingSplitLoopTripCount(root, loopTripCounts));
 }
 
 /// Classify one transitive semantic ownership unit.
@@ -2560,17 +2656,31 @@ static StageScheduleKind scheduleForSemanticRoot(Operation *root,
   return StageScheduleKind::StraightLine;
 }
 
-static int64_t semanticRootIterationCount(Operation *root) {
-  int64_t iterations = 1;
+static int64_t
+semanticRootIterationCount(Operation *root,
+                           const LoopTripCountMap *loopTripCounts) {
   if (!root || root->hasAttr("ta.auto_blockify_v1.loop"))
-    return iterations;
+    return 1;
+  const int64_t enclosingIterations =
+      enclosingSplitLoopTripCount(root, loopTripCounts);
+  if (shouldSplitLoopBodyIntoStages(root))
+    return multiplyTripCounts(
+        enclosingIterations,
+        getLoopTripCount(root, 1, nullptr, 0, loopTripCounts));
+  if (enclosingIterations == 0 ||
+      (loopTripCounts &&
+       getLoopTripCount(root, 1, nullptr, 0, loopTripCounts) == 0))
+    return 0;
+  int64_t iterations = 1;
   root->walk([&](Operation *operation) {
     if (!operation->hasAttr("ta.auto_blockify_v1.loop"))
-      iterations = std::max(iterations, getLoopTripCount(operation, 1));
+      iterations = std::max(iterations, getLoopTripCount(operation, 1, nullptr,
+                                                         0, loopTripCounts));
   });
-  // Body roots inherit the enclosing split loop's trip count.
-  iterations = std::max(iterations, enclosingSplitLoopTripCount(root));
-  return iterations;
+  // Exposed body roots inherit their enclosing split loops' trip counts.
+  if (!loopTripCounts)
+    return std::max(iterations, enclosingIterations);
+  return multiplyTripCounts(iterations, enclosingIterations);
 }
 
 static bool hasOrderedStageBoundary(Operation *root) {
@@ -2872,6 +2982,214 @@ static bool hasDataDependencyOnStage(ArrayRef<Operation *> stageOperations,
   });
 }
 
+static std::string getCarriedValueName(Location location) {
+  std::string name;
+  if (auto named = dyn_cast<NameLoc>(location))
+    name = named.getName().str();
+  else if (auto callsite = dyn_cast<CallSiteLoc>(location)) {
+    name = getCarriedValueName(callsite.getCallee());
+    if (name.empty())
+      name = getCarriedValueName(callsite.getCaller());
+  } else if (auto fused = dyn_cast<FusedLoc>(location)) {
+    for (Location child : fused.getLocations()) {
+      name = getCarriedValueName(child);
+      if (!name.empty())
+        break;
+    }
+  }
+  if (llvm::StringRef(name).ends_with("_new"))
+    name.resize(name.size() - 4);
+  return name;
+}
+
+static std::string printDependencySourceLocation(Location location) {
+  std::string result;
+  llvm::raw_string_ostream stream(result);
+  location.print(stream);
+  stream.flush();
+  return result;
+}
+
+static llvm::Error deriveStageLoopMembership(StagePartition &partition) {
+  llvm::DenseMap<Operation *, std::string> loopStages;
+  for (const LogicalStage &stage : partition.stages)
+    for (Operation *root : stage.operations)
+      if (shouldSplitLoopBodyIntoStages(root))
+        loopStages.try_emplace(root, stage.id);
+
+  for (LogicalStage &stage : partition.stages) {
+    std::optional<std::vector<std::string>> expected;
+    for (Operation *root : stage.operations) {
+      std::vector<std::string> enclosing;
+      for (Operation *parent = root->getParentOp(); parent;
+           parent = parent->getParentOp())
+        if (auto loop = loopStages.find(parent); loop != loopStages.end())
+          enclosing.push_back(loop->second);
+      std::reverse(enclosing.begin(), enclosing.end());
+      if (!expected)
+        expected = enclosing;
+      else if (*expected != enclosing)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Stage '%s' crosses split-loop membership", stage.id.c_str());
+    }
+    stage.enclosingLoopStages = expected.value_or(std::vector<std::string>{});
+  }
+  return llvm::Error::success();
+}
+
+static std::string innermostCommonLoop(const LogicalStage &source,
+                                       const LogicalStage &target) {
+  std::string common;
+  const size_t count = std::min(source.enclosingLoopStages.size(),
+                                target.enclosingLoopStages.size());
+  for (size_t index = 0; index < count; ++index) {
+    if (source.enclosingLoopStages[index] != target.enclosingLoopStages[index])
+      break;
+    common = source.enclosingLoopStages[index];
+  }
+  return common;
+}
+
+/// Convert inter-Stage SSA uses and scf.for iter-arg/yield semantics into
+/// explicit same-iteration and distance-one edges. Pointer-only induction
+/// remains a scheduling/address concern and is deliberately excluded.
+static llvm::Error deriveStageDependencies(StagePartition &partition) {
+  partition.dependencies.clear();
+  llvm::DenseMap<Operation *, size_t> operationOwners;
+  for (auto indexedStage : llvm::enumerate(partition.stages)) {
+    llvm::DenseSet<Operation *> owned;
+    for (Operation *root : indexedStage.value().operations)
+      collectOwnedOperationTree(root, owned);
+    for (Operation *operation : owned) {
+      auto inserted =
+          operationOwners.try_emplace(operation, indexedStage.index());
+      if (!inserted.second)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Stage dependency analysis found overlapping operation ownership");
+    }
+  }
+
+  llvm::StringSet<> intraStagePairs;
+  for (auto indexedStage : llvm::enumerate(partition.stages)) {
+    llvm::DenseSet<Operation *> owned;
+    for (Operation *root : indexedStage.value().operations)
+      collectOwnedOperationTree(root, owned);
+    for (Operation *consumer : owned) {
+      for (OpOperand &operand : consumer->getOpOperands()) {
+        Value value = operand.get();
+        Operation *producer = value.getDefiningOp();
+        if (!producer)
+          continue;
+        auto sourceOwner = operationOwners.find(producer);
+        if (sourceOwner == operationOwners.end() ||
+            sourceOwner->second == indexedStage.index())
+          continue;
+        const LogicalStage &source = partition.stages[sourceOwner->second];
+        const LogicalStage &target = indexedStage.value();
+        const std::string loopStage = innermostCommonLoop(source, target);
+        const std::string key =
+            (llvm::Twine(loopStage) + ":" + source.id + ":" + target.id).str();
+        if (!intraStagePairs.insert(key).second)
+          continue;
+        StageDependency dependency;
+        dependency.loopStage = loopStage;
+        dependency.sourceStage = source.id;
+        dependency.targetStage = target.id;
+        dependency.kind = StageDependencyKind::IntraIterationData;
+        dependency.iterationDistance = 0;
+        dependency.carriedValueName = "inter_stage_ssa";
+        dependency.carriedValueBytes = staticTensorBytes(value);
+        dependency.sourceLocation =
+            printDependencySourceLocation(producer->getLoc());
+        partition.dependencies.push_back(std::move(dependency));
+      }
+    }
+  }
+
+  for (auto indexedStage : llvm::enumerate(partition.stages)) {
+    const LogicalStage &loopShell = indexedStage.value();
+    for (Operation *root : loopShell.operations) {
+      if (!shouldSplitLoopBodyIntoStages(root) ||
+          root->getName().getStringRef() != "scf.for" ||
+          !loopHasTrueCarriedDataDependency(root) ||
+          root->getNumRegions() == 0 || root->getRegion(0).empty())
+        continue;
+
+      Block &body = root->getRegion(0).front();
+      Operation *terminator = body.getTerminator();
+      if (!terminator || terminator->getName().getStringRef() != "scf.yield")
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "split scf.for does not terminate with scf.yield");
+      const unsigned carriedCount =
+          body.getNumArguments() > 0 ? body.getNumArguments() - 1 : 0;
+      if (terminator->getNumOperands() != carriedCount)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "split scf.for iter-arg/yield arity mismatch");
+
+      for (unsigned carriedIndex = 0; carriedIndex < carriedCount;
+           ++carriedIndex) {
+        BlockArgument argument = body.getArgument(carriedIndex + 1);
+        if (argument.use_empty() || isPointerLikeType(argument.getType()) ||
+            isAddressOnlyLoopValue(argument))
+          continue;
+
+        Value yielded = terminator->getOperand(carriedIndex);
+        if (yielded == argument)
+          continue;
+        Operation *producer = yielded.getDefiningOp();
+        if (!producer)
+          continue;
+        auto producerOwner = operationOwners.find(producer);
+        if (producerOwner == operationOwners.end())
+          return llvm::createStringError(
+              std::errc::invalid_argument,
+              "loop-carried value producer has no owning Stage");
+        const size_t producerStageIndex = producerOwner->second;
+        const Location producerLocation = producer->getLoc();
+
+        llvm::DenseSet<size_t> consumerSet;
+        for (OpOperand &use : argument.getUses()) {
+          Operation *consumer = use.getOwner();
+          if (consumer == terminator ||
+              consumer->getName().getStringRef() == "scf.condition")
+            continue;
+          auto consumerOwner = operationOwners.find(consumer);
+          if (consumerOwner == operationOwners.end())
+            return llvm::createStringError(
+                std::errc::invalid_argument,
+                "loop-carried value consumer has no owning Stage");
+          consumerSet.insert(consumerOwner->second);
+        }
+
+        llvm::SmallVector<size_t, 4> consumers(consumerSet.begin(),
+                                               consumerSet.end());
+        llvm::sort(consumers);
+        std::string valueName = getCarriedValueName(producerLocation);
+        if (valueName.empty())
+          valueName = ("iter_arg_" + llvm::Twine(carriedIndex)).str();
+        for (size_t consumerIndex : consumers) {
+          StageDependency dependency;
+          dependency.loopStage = loopShell.id;
+          dependency.sourceStage = partition.stages[producerStageIndex].id;
+          dependency.targetStage = partition.stages[consumerIndex].id;
+          dependency.iterationDistance = 1;
+          dependency.carriedValueIndex = carriedIndex;
+          dependency.carriedValueName = valueName;
+          dependency.carriedValueBytes = staticTensorBytes(argument);
+          dependency.sourceLocation =
+              printDependencySourceLocation(producerLocation);
+          partition.dependencies.push_back(std::move(dependency));
+        }
+      }
+    }
+  }
+  return llvm::Error::success();
+}
+
 static llvm::Expected<std::vector<int64_t>>
 buildAnchorGroups(const ProgramStructure &structure,
                   const SimtAnchorPlan &anchorPlan) {
@@ -2927,7 +3245,8 @@ buildAnchorGroups(const ProgramStructure &structure,
 
 llvm::Expected<StagePartition>
 StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
-                               const SimtAnchorPlan &anchorPlan) const {
+                               const SimtAnchorPlan &anchorPlan,
+                               const LoopTripCountMap *loopTripCounts) const {
   if (structure.rootOperations.empty())
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -2947,14 +3266,18 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
 
     const int64_t anchorGroup = (*anchorGroups)[index];
     StageCostModelKind kind = classifySemanticRoot(root);
-    // A split loop shell owns control overhead only; do not classify it from
-    // anchors or reductions in its separately-owned body.
+    // A split loop's shell owns only control and carried-state semantics;
+    // classification must not reach into the body it no longer owns.  Keep a
+    // real recurrence on the shell, while independent PR #2112 loops retain
+    // their pipelined-loop kind.
     if (shouldSplitLoopBodyIntoStages(root))
-      kind = StageCostModelKind::IndependentPipelinedLoop;
+      kind = loopHasTrueCarriedDataDependency(root)
+                 ? StageCostModelKind::LoopCarriedRecurrence
+                 : StageCostModelKind::IndependentPipelinedLoop;
     StageScheduleKind schedule = scheduleForSemanticRoot(root, kind);
     LogicalStage stage;
     stage.operations.push_back(root);
-    stage.iterationCount = semanticRootIterationCount(root);
+    stage.iterationCount = semanticRootIterationCount(root, loopTripCounts);
     stage.localSimtMaterializable = anchorGroup >= 0;
     if (stage.localSimtMaterializable)
       stage.localSimtFactors = {1};
@@ -2977,8 +3300,11 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
           schedule == StageScheduleKind::StraightLine &&
           candidateSchedule == StageScheduleKind::StraightLine &&
           hasDataDependencyOnStage(stage.operations, candidate);
+      const bool sameSplitLoopRegion =
+          getEnclosingSplitLoop(stage.operations.back()) ==
+          getEnclosingSplitLoop(candidate);
       const bool mergePlainStage =
-          anchorGroup < 0 && candidateAnchorGroup < 0 &&
+          anchorGroup < 0 && candidateAnchorGroup < 0 && sameSplitLoopRegion &&
           ((candidateKind == kind && candidateSchedule == schedule) ||
            mergeStructuralSupportingWork) &&
           !hasOrderedStageBoundary(stage.operations.back()) &&
@@ -2991,7 +3317,8 @@ StageBoundaryAnalysis::analyze(const ProgramStructure &structure,
             "StageBoundaryAnalysis overlaps semantic root ownership");
       stage.operations.push_back(candidate);
       stage.iterationCount =
-          std::max(stage.iterationCount, semanticRootIterationCount(candidate));
+          std::max(stage.iterationCount,
+                   semanticRootIterationCount(candidate, loopTripCounts));
       if (semanticKindPriority(candidateKind) > semanticKindPriority(kind)) {
         kind = candidateKind;
         schedule = candidateSchedule;
@@ -3259,7 +3586,8 @@ llvm::Error StageKindClassifier::analyze(StagePartition &partition,
 
 llvm::Error
 StageWorkloadAnalysis::analyze(StagePartition &partition,
-                               int64_t logicalProgramCountHint) const {
+                               int64_t logicalProgramCountHint,
+                               const LoopTripCountMap *loopTripCounts) const {
   if (!partition.operationOwnershipComplete)
     return llvm::createStringError(
         std::errc::invalid_argument,
@@ -3267,9 +3595,10 @@ StageWorkloadAnalysis::analyze(StagePartition &partition,
   for (LogicalStage &stage : partition.stages) {
     StageWorkload work;
     work.paysKernelSetup = stage.workload.paysKernelSetup;
-    stage.iterationCount = std::max(
-        stage.iterationCount,
-        inferRuntimeGridStrideIterations(stage, logicalProgramCountHint));
+    if (stage.iterationCount > 0)
+      stage.iterationCount = std::max(
+          stage.iterationCount,
+          inferRuntimeGridStrideIterations(stage, logicalProgramCountHint));
     const int64_t loopCount = countAlgorithmLoops(stage);
     const int64_t fallbackLoopTripCount =
         loopCount > 0 ? std::max<int64_t>(1, stage.iterationCount / loopCount)
@@ -3278,8 +3607,9 @@ StageWorkloadAnalysis::analyze(StagePartition &partition,
     stage.features.unknownTripCountLoopCount = 0;
     for (Operation *root : stage.operations)
       accumulateDynamicOperationTree(
-          root, work, semanticRootEntryMultiplicity(root),
-          fallbackLoopTripCount, stage.features, logicalProgramCountHint);
+          root, work, semanticRootEntryMultiplicity(root, loopTripCounts),
+          fallbackLoopTripCount, stage.features, logicalProgramCountHint,
+          loopTripCounts);
     recomputeIssueElements(work);
     stage.workload = std::move(work);
     makePerIteration(stage);
@@ -3308,7 +3638,7 @@ StagePartitionVerifier::verify(const StagePartition &partition) const {
     if (stage.id.empty() || !stageIds.insert(stage.id).second)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "StagePartition has duplicate Stage id");
-    if (stage.iterationCount < 1)
+    if (stage.iterationCount < 0)
       return llvm::createStringError(std::errc::invalid_argument,
                                      "Stage '%s' has invalid iteration count",
                                      stage.id.c_str());
@@ -3336,6 +3666,62 @@ StagePartitionVerifier::verify(const StagePartition &partition) const {
           return llvm::createStringError(
               std::errc::invalid_argument,
               "StagePartition operation ownership overlaps");
+  }
+  for (const LogicalStage &stage : partition.stages)
+    for (const std::string &loopStage : stage.enclosingLoopStages)
+      if (!stageIds.contains(loopStage))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Stage '%s' references an unknown enclosing loop Stage",
+            stage.id.c_str());
+  llvm::StringSet<> dependencyKeys;
+  for (const StageDependency &dependency : partition.dependencies) {
+    if (!dependency.isValid() ||
+        (dependency.kind == StageDependencyKind::LoopCarriedData &&
+         dependency.iterationDistance != 1) ||
+        (!dependency.loopStage.empty() &&
+         !stageIds.contains(dependency.loopStage)) ||
+        !stageIds.contains(dependency.sourceStage) ||
+        !stageIds.contains(dependency.targetStage))
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "StagePartition has an invalid loop-carried dependency");
+    if (dependency.kind == StageDependencyKind::LoopCarriedData) {
+      auto loop =
+          llvm::find_if(partition.stages, [&](const LogicalStage &stage) {
+            return stage.id == dependency.loopStage;
+          });
+      if (loop == partition.stages.end() ||
+          !loop->features.hasLoopCarriedDataDependency)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "Stage dependency loop shell has no recurrence feature");
+      const auto belongsToLoop = [&](llvm::StringRef stageId) {
+        auto owner =
+            llvm::find_if(partition.stages, [&](const LogicalStage &stage) {
+              return stage.id == stageId;
+            });
+        return owner != partition.stages.end() &&
+               llvm::is_contained(owner->enclosingLoopStages,
+                                  dependency.loopStage);
+      };
+      if (!belongsToLoop(dependency.sourceStage) ||
+          !belongsToLoop(dependency.targetStage))
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "loop-carried dependency endpoints are outside its loop Stage");
+    }
+    std::string key = (llvm::Twine(static_cast<unsigned>(dependency.kind)) +
+                       ":" + dependency.loopStage + ":" +
+                       dependency.sourceStage + ":" + dependency.targetStage +
+                       ":" + llvm::Twine(dependency.carriedValueIndex) + ":" +
+                       llvm::Twine(dependency.iterationDistance) + ":" +
+                       dependency.carriedValueName)
+                          .str();
+    if (!dependencyKeys.insert(key).second)
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "StagePartition has duplicate loop-carried dependencies");
   }
   if (partition.operationOwnershipComplete &&
       static_cast<int64_t>(ownedOperations.size()) !=
@@ -3476,18 +3862,24 @@ StagePartitioner::partition(ModuleOp module, const SimtAnchorPlan &anchorPlan,
   auto structure = ProgramStructureAnalysis().analyze(module, anchorPlan);
   if (!structure)
     return structure.takeError();
-  auto result = StageBoundaryAnalysis().analyze(*structure, anchorPlan);
+  auto result = StageBoundaryAnalysis().analyze(
+      *structure, anchorPlan, options.counterfactualLoopTripCounts);
   if (!result)
     return result.takeError();
   StageWorkloadAnalysis workloadAnalysis;
   if (llvm::Error error =
-          workloadAnalysis.analyze(*result, options.logicalProgramCountHint))
+          workloadAnalysis.analyze(*result, options.logicalProgramCountHint,
+                                   options.counterfactualLoopTripCounts))
     return std::move(error);
   StageFeatureAnalysis featureAnalysis;
   if (llvm::Error error = featureAnalysis.analyze(*result))
     return std::move(error);
   if (llvm::Error error =
           StageKindClassifier().analyze(*result, options.tinyDotFlopsMax))
+    return std::move(error);
+  if (llvm::Error error = deriveStageLoopMembership(*result))
+    return std::move(error);
+  if (llvm::Error error = deriveStageDependencies(*result))
     return std::move(error);
   StageModeLegalityAnalysis legalityAnalysis;
   if (llvm::Error error =

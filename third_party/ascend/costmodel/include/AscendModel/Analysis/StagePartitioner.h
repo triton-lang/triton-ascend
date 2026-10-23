@@ -6,6 +6,7 @@
 #include "AscendModel/RouteModel/SimdSimtCostModel.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
@@ -14,12 +15,16 @@
 
 namespace mlir::ascend {
 
+/// Analysis-only counterfactual counts, keyed by prepared TTIR operations.
+using LoopTripCountMap = llvm::DenseMap<Operation *, int64_t>;
+
 struct StagePartitionerOptions {
   int64_t tinyDotFlopsMax = 16384;
   int64_t maximumSuperblockFactor = 1;
   int64_t maximumScopeSuperblockFactor = 4;
   int64_t logicalProgramCountHint = 0;
   bool scopeSuperblockMaterializable = false;
+  const LoopTripCountMap *counterfactualLoopTripCounts = nullptr;
 };
 
 /// Ordered post-transform TTIR semantic roots.
@@ -37,8 +42,8 @@ public:
 class StageBoundaryAnalysis {
 public:
   llvm::Expected<StagePartition>
-  analyze(const ProgramStructure &structure,
-          const SimtAnchorPlan &anchorPlan) const;
+  analyze(const ProgramStructure &structure, const SimtAnchorPlan &anchorPlan,
+          const LoopTripCountMap *loopTripCounts = nullptr) const;
 };
 
 /// Derives structural facts for every already-owned Stage.  It never chooses
@@ -58,7 +63,8 @@ public:
 class StageWorkloadAnalysis {
 public:
   llvm::Error analyze(StagePartition &partition,
-                      int64_t logicalProgramCountHint = 0) const;
+                      int64_t logicalProgramCountHint = 0,
+                      const LoopTripCountMap *loopTripCounts = nullptr) const;
 };
 
 /// Derives legal SIMD/SIMT implementations from structural Stage facts.

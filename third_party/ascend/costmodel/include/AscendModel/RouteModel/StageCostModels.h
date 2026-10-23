@@ -16,6 +16,7 @@
 #include "llvm/Support/Error.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -66,6 +67,8 @@ struct LogicalStage {
   std::string id;
   StageCostModelKind costModelKind = StageCostModelKind::ScalarIssue;
   StageScheduleKind scheduleKind = StageScheduleKind::StraightLine;
+  /// Ordered outer-to-inner split-loop shells containing this Stage.
+  std::vector<std::string> enclosingLoopStages;
   int64_t iterationCount = 1;
   StageModelFeatures features;
   StageWorkload workload;
@@ -103,6 +106,7 @@ struct StagePartition {
   bool operationOwnershipComplete = false;
   int64_t modeledOperationCount = 0;
   std::vector<LogicalStage> stages;
+  std::vector<StageDependency> dependencies;
 };
 
 struct StageOperationRate {
@@ -428,6 +432,26 @@ struct StageModeProfile {
   double prefixScanDependencyFactor = 1.0;
   double dotSetupCycles = 0.0;
   double dotFlopsPerCycle = 0.0;
+  struct DotPhysicalResourceFormula {
+    double tinyMacFloorCycles = 0.0;
+    double cubeMacCyclesPerSqrtFlop = 0.0;
+    double cubeMinimumFlops = 0.0;
+    double mte1StartupCycles = 0.0;
+    double mte1BytesExponent = 0.0;
+    double lhsMte1CyclesPerBytePower = 0.0;
+    double rhsMte1CyclesPerBytePower = 0.0;
+    int64_t tileSize = 0;
+    double narrowNReferenceTiles = 0.0;
+    double wideNReferenceTiles = 0.0;
+    double narrowNOccupancyExponent = 0.0;
+    double wideNOccupancyExponent = 0.0;
+    std::string evidence;
+
+    bool isValid() const;
+  };
+  std::optional<DotPhysicalResourceFormula> dotPhysicalResourceFormula;
+  std::string dotPhysicalResourceTarget;
+  std::string dotPhysicalResourceLoweringContract;
   /// Aggregate dependent-dot throughput selected by the physical active-warp
   /// count.
   std::map<int64_t, double> dotFlopsPerCycleByWarpCount;

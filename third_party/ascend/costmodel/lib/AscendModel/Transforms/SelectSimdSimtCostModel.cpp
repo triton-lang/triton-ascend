@@ -199,6 +199,7 @@ struct SelectSimdSimtCostModelPass
     }
 
     SimdSimtCostModelOptions options;
+    options.loopWorkloadModule = module;
     options.profilePath = profilePath.getValue();
     options.actualTarget = actualTarget.getValue();
     options.numWarps =
@@ -225,6 +226,21 @@ struct SelectSimdSimtCostModelPass
     if (auto capability =
             llvm::json::parse(routeTransformCapabilityJSON.getValue()))
       if (auto *object = capability->getAsObject()) {
+        if (auto requested = object->getBoolean("analyze_loop_sensitivity"))
+          options.analyzeLoopSensitivity = *requested;
+        else if (object->get("analyze_loop_sensitivity")) {
+          module.emitError("analyze_loop_sensitivity must be a boolean");
+          signalPassFailure();
+          return;
+        }
+        if (auto requested =
+                object->getBoolean("dynamic_cv_pipeline_requested"))
+          options.dynamicCVPipelineRequested = *requested;
+        else if (object->get("dynamic_cv_pipeline_requested")) {
+          module.emitError("dynamic_cv_pipeline_requested must be a boolean");
+          signalPassFailure();
+          return;
+        }
         if (failed(attachRuntimeScalarValues(analysisModule, *object))) {
           module.emitError("invalid runtime scalar values in route capability");
           signalPassFailure();
@@ -407,6 +423,7 @@ struct SelectSimdSimtCostModelPass
     reportJSON["analysis_ir_source"] = analysisModule == module
                                            ? "route_neutral_ttir"
                                            : "post_auto_blockify_v1_ttir";
+    reportJSON["loop_workload_ir_source"] = "route_neutral_ttir";
     if (auto capability =
             llvm::json::parse(routeTransformCapabilityJSON.getValue())) {
       reportJSON["route_transform_capability"] = std::move(*capability);

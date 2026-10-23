@@ -26,7 +26,7 @@ using namespace mlir::ascend;
 namespace {
 
 static double iterations(const LogicalStage &stage) {
-  return static_cast<double>(std::max<int64_t>(1, stage.iterationCount));
+  return static_cast<double>(std::max<int64_t>(0, stage.iterationCount));
 }
 
 /// Resolve an operation-specific rate first.
@@ -2098,9 +2098,67 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           static_cast<int64_t>(std::ceil(work.shuffleLaneSteps)));
   }
   if (work.dotFlops > 0.0) {
-    // A Stage can own multiple tiny dots.
-    resources.dot = work.dotOperations * profile.dotSetupCycles +
-                    work.dotFlops / profile.dotFlopsPerCycle;
+    // The physical formula contributes resource work, not independent
+    // completion latency. Leave unsupported dots on the existing law.
+    double unmatchedOperations = work.dotOperations;
+    double unmatchedFlops = work.dotFlops;
+    if (simd && (stage.costModelKind == StageCostModelKind::CubeRoofline ||
+                 stage.costModelKind == StageCostModelKind::TinyCubeRoofline)) {
+      for (const auto &[shape, count] : work.dotShapeCounts) {
+        if (profile.dotPhysicalResourceFormula && count > 0) {
+          const auto &formula = *profile.dotPhysicalResourceFormula;
+          const auto &[m, n, k, batch, lhsType, rhsType, accumulatorType,
+                       inputPrecision] = shape;
+          const bool supported =
+              batch == 1 && lhsType == "f16" && rhsType == "f16" &&
+              accumulatorType == "f32" && inputPrecision == "ieee" && m > 0 &&
+              n > 0 && k > 0 && m % formula.tileSize == 0 &&
+              n % formula.tileSize == 0 && k % formula.tileSize == 0 &&
+              (stage.costModelKind == StageCostModelKind::TinyCubeRoofline ||
+               2.0 * static_cast<double>(m) * n * k >=
+                   formula.cubeMinimumFlops);
+          if (supported) {
+            const double instances = count * static_cast<double>(batch);
+            const double flopsPerInstance = 2.0 * static_cast<double>(m) *
+                                            static_cast<double>(n) *
+                                            static_cast<double>(k);
+            const double nTiles =
+                static_cast<double>(n) / static_cast<double>(formula.tileSize);
+            double occupancyScale = 1.0;
+            if (nTiles < formula.narrowNReferenceTiles)
+              occupancyScale = std::pow(formula.narrowNReferenceTiles / nTiles,
+                                        formula.narrowNOccupancyExponent);
+            else if (nTiles > formula.wideNReferenceTiles)
+              occupancyScale = std::pow(formula.wideNReferenceTiles / nTiles,
+                                        formula.wideNOccupancyExponent);
+            const double mac =
+                stage.costModelKind == StageCostModelKind::TinyCubeRoofline
+                    ? formula.tinyMacFloorCycles
+                    : formula.cubeMacCyclesPerSqrtFlop *
+                          std::sqrt(flopsPerInstance * occupancyScale);
+            const double lhsBytes = 2.0 * static_cast<double>(m) * k;
+            const double rhsBytes = 2.0 * static_cast<double>(n) * k;
+            const double mte1 = formula.mte1StartupCycles +
+                                std::pow(lhsBytes, formula.mte1BytesExponent) *
+                                    formula.lhsMte1CyclesPerBytePower +
+                                std::pow(rhsBytes, formula.mte1BytesExponent) *
+                                    formula.rhsMte1CyclesPerBytePower;
+            const double flops = instances * flopsPerInstance;
+            if (instances > unmatchedOperations + 1e-9 ||
+                flops > unmatchedFlops + 1e-6)
+              return std::nullopt;
+            resources.dot += instances * std::max(mac, mte1);
+            unmatchedOperations -= instances;
+            unmatchedFlops -= flops;
+            resources.dotPhysicalResourceFormulaApplied = true;
+            continue;
+          }
+        }
+      }
+    }
+    resources.dot +=
+        std::max(0.0, unmatchedOperations) * profile.dotSetupCycles +
+        std::max(0.0, unmatchedFlops) / profile.dotFlopsPerCycle;
     if (stage.features.isGridStrideLoopShell ||
         stage.features.insideGridStrideLoopBody) {
       const auto factorBody =
@@ -2260,6 +2318,8 @@ static double applySuperBlock(const LogicalStage &stage,
                               const StageImplementation &implementation,
                               const HardwareProfile &profile,
                               double stageCycles) {
+  if (stage.iterationCount == 0)
+    return 0.0;
   if (implementation.mode != StageMode::SIMT ||
       implementation.superblockFactor == 1)
     return stageCycles;
@@ -2368,6 +2428,8 @@ static double estimateStageBase(const LogicalStage &stage,
                                 const HardwareProfile &profile, StageMode mode,
                                 const StageResourceCycles &r) {
   const double count = iterations(stage);
+  if (count == 0.0)
+    return 0.0;
   const double serial = r.setup + count * serialBody(r);
   switch (stage.costModelKind) {
   case StageCostModelKind::VectorIssue:
@@ -2871,6 +2933,21 @@ std::optional<double> StageMemoryLayoutCost::evaluate(double count) const {
   return std::isfinite(cost) ? std::optional<double>(cost) : std::nullopt;
 }
 
+bool StageModeProfile::DotPhysicalResourceFormula::isValid() const {
+  const auto positive = [](double value) {
+    return std::isfinite(value) && value > 0.0;
+  };
+  return tileSize > 0 && positive(tinyMacFloorCycles) &&
+         positive(cubeMacCyclesPerSqrtFlop) && positive(cubeMinimumFlops) &&
+         positive(mte1StartupCycles) && positive(mte1BytesExponent) &&
+         positive(lhsMte1CyclesPerBytePower) &&
+         positive(rhsMte1CyclesPerBytePower) &&
+         positive(narrowNReferenceTiles) && positive(wideNReferenceTiles) &&
+         narrowNReferenceTiles <= wideNReferenceTiles &&
+         positive(narrowNOccupancyExponent) &&
+         positive(wideNOccupancyExponent) && !evidence.empty();
+}
+
 namespace {
 
 static bool finitePositive(std::initializer_list<double> values) {
@@ -3271,6 +3348,12 @@ bool StageModeProfile::isValid(StageMode mode) const {
       validPositiveKeyTree(indirectStoreSystemCyclesBySegments, positiveLeaf);
   const bool validDotWarpCurve =
       validPositiveKeyTree(dotFlopsPerCycleByWarpCount, positiveLeaf);
+  if (dotPhysicalResourceFormula) {
+    if (mode != StageMode::SIMD || dotPhysicalResourceTarget.empty() ||
+        dotPhysicalResourceLoweringContract.empty() ||
+        !dotPhysicalResourceFormula->isValid())
+      return false;
+  }
   const bool validIndirectStartupCurve = validPositiveKeyTree(
       indirectLoadStartupSystemCyclesByWarpInstructions,
       [](double value) { return std::isfinite(value) && value >= 0.0; });
@@ -3400,6 +3483,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
   table.operationOwnershipComplete = partition.operationOwnershipComplete;
   table.modeledOperationCount = partition.modeledOperationCount;
   table.profileVersion = profile.profileVersion;
+  table.dependencies = partition.dependencies;
   table.cvAivSubblocks = profile.cvAivSubblocks;
   table.baseSimtWarpCount = profile.baseSimtWarpCount;
   table.simdLoadOperationStartupCycles = profile.simd.loadOperationSetupCycles;
@@ -3484,7 +3568,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
       return llvm::createStringError(
           std::errc::invalid_argument,
           "Stage ids must be non-empty and unique: '%s'", stage.id.c_str());
-    if (stage.iterationCount <= 0 || !stage.features.isValid() ||
+    if (stage.iterationCount < 0 || !stage.features.isValid() ||
         !stage.workload.isFiniteAndNonNegative())
       return llvm::createStringError(
           std::errc::invalid_argument,
@@ -3502,6 +3586,7 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     LogicalStageCost logicalCost;
     logicalCost.id = stage.id;
     logicalCost.model = stringifyStageCostModel(stage.costModelKind).str();
+    logicalCost.enclosingLoopStages = stage.enclosingLoopStages;
     logicalCost.schedule = stage.scheduleKind;
     logicalCost.iterationCount = stage.iterationCount;
     logicalCost.features = stage.features;
@@ -3606,6 +3691,8 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
         cost.formulaEvidence = "uncalibrated_superblock_fallback";
       else
         cost.formulaEvidence = "analytical_resource_formula";
+      if (resources->dotPhysicalResourceFormulaApplied)
+        cost.formulaEvidence += "+physical_tile_resource_formula";
       if (resources->indirectMemoryAnalyticalFallback &&
           cost.formulaEvidence.find(
               "analytical_indirect_memory_resource_fallback") ==

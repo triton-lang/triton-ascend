@@ -64,6 +64,14 @@ struct SimdSimtCostModelOptions {
   /// profile compiled into AscendModelRouteModel.
   std::string profilePath;
   std::string actualTarget;
+  /// Optional route-neutral module for logical loop-bound expressions.
+  /// Candidate costs still use the prepared module passed to analysis.
+  mlir::ModuleOp loopWorkloadModule;
+  /// Bounded diagnostic counterfactuals; never changes the selected route.
+  bool analyzeLoopSensitivity = false;
+  /// Selects the provisional off/on completion formula. The backend must
+  /// confirm that a requested DynamicCV transformation actually completed.
+  bool dynamicCVPipelineRequested = false;
   unsigned numWarps = 32;
   bool includeFeaturesInJSON = true;
   /// Full Stage implementation matrices are diagnostic-only.
@@ -157,6 +165,9 @@ struct SimdSimtCostReport {
   std::vector<std::string> unsupported;
   SimdSimtFeatureSummary features;
   StageCostModelSummary stageModel;
+  llvm::json::Array loopWorkloadExpressions;
+  llvm::json::Object loopWorkloadCorrelation;
+  llvm::json::Object loopSensitivity;
   bool includeFeaturesInJSON = true;
   bool includeDiagnosticStageDetailsInJSON = true;
 

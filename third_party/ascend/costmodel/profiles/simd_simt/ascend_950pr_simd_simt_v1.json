@@ -1,9 +1,9 @@
 {
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261013-v142-clean-toolchain-refresh",
+  "profile_version": "ascend-950pr-simd-simt-20261023-v147-stage-dependency-schedule",
   "target": "Ascend950PR/dav-c310",
-  "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction.",
+  "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
   "compatible_targets": [
     "Ascend950PR_*",
@@ -269,6 +269,26 @@
       "startup_measurement": "simd.dot.tiny.dependent.startup",
       "flops_per_system_cycle": 568.16419,
       "throughput_measurement": "simd.dot.tiny.dependent.throughput",
+      "physical_tile_resource_formula": {
+        "status": "qualified_physical_resource_formula_v2",
+        "target": "Ascend950PR_9579",
+        "lowering_contract": "CANN9.1_Ascend950PR9579_hivm_mmadL1_tile16_f16f16f32_v1",
+        "formula": {
+          "tiny_mac_floor_system_cycles": 56.484375,
+          "cube_mac_system_cycles_per_sqrt_flop": 0.09853173506205343,
+          "mte1_startup_system_cycles": 17.376507344755346,
+          "mte1_bytes_exponent": 1.1,
+          "lhs_mte1_system_cycles_per_byte_power": 0.0007762358350308137,
+          "rhs_mte1_system_cycles_per_byte_power": 0.0010645970697710496,
+          "tile_size": 16,
+          "cube_minimum_flops": 262144.0,
+          "narrow_n_reference_tiles": 2.0,
+          "wide_n_reference_tiles": 4.0,
+          "narrow_n_occupancy_exponent": 0.875,
+          "wide_n_occupancy_exponent": 0.875,
+          "evidence": "thirteen exact-binary 9579 tile classes including independent m128n32k32; five-process PipeUtilization resource slopes; resource envelope fit, leave-one-out, unseen-tile native, and Flash Attention native validation all below 10%; excludes FIX/ready/completion"
+        }
+      },
       "source": "Ascend950PR dependent N=16/N=32 dot-chain joint fit with one final store",
       "confidence": "medium"
     },
@@ -1250,6 +1270,17 @@
   },
   "kernel_timing": {
     "description": "Kernel-boundary residual after subtracting the minimal store-only kernel's modeled Stage work. A separate route-keyed residual is composed once when transformed TTIR contains a global load. A measured structural curve also completes the SIMD nested-scalar lowering of tiny rank-2 loaded-index tiles and participates in route ranking. Prologue/epilogue values are only an accounting split.",
+    "stage_dependency_completion": {
+      "status": "qualified_stage_dependency_completion_v1",
+      "target": "Ascend950PR_9579",
+      "lowering_contract": "CANN9.1_Ascend950PR9579_hivm_mmadL1_tile16_f16f16f32_v1",
+      "task_envelope_system_cycles": 288.9999999999999,
+      "dynamic_cv_first_fill_system_cycles": 395.0000000000002,
+      "dynamic_cv_per_iteration_delta_system_cycles": -21.66666666666606,
+      "schedule_contract": "CANN9.1_9579_stage_predecessor_aic_aiv_schedule_v1",
+      "full_kernel_validation_sha256": "81169cb5f51a5a6649c947ee898920df8b68d6ad17fa333dd39965cb0ed16642",
+      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. Frozen validation covers 12 original and QK32/V64 off/on full-kernel cases with maximum APE 3.63%; no kernel name, Stage count, carried-value name or dot geometry is part of admission."
+    },
     "scalar_prologue_system_cycles": 852.475,
     "scalar_epilogue_system_cycles": 852.475,
     "boundary_residual_system_cycles_by_physical_program_count": {

@@ -54,6 +54,22 @@ git checkout main
 pip install -e .
 ```
 
+预构建昇腾镜像（例如 `quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11`）已预装 `pyproject.toml` 中声明的全部构建依赖
+（`setuptools`、`cmake`、`ninja`、`pybind11`）。默认的 build isolation 会在临时环境中重新
+下载这些依赖，因此在镜像内建议加上 `--no-build-isolation` 以复用已安装的版本：
+
+```bash
+pip install -e . --no-build-isolation
+```
+
+### 验证安装
+
+```bash
+python3 -c "import triton.backends.ascend; print('ascend backend OK')"
+```
+
+若源码安装后无法导入 `triton.backends.ascend`，请检查是否有 PyPI 的 `triton` 分发包覆盖了 editable 安装（`pip show triton`），如有请先卸载（`pip uninstall -y triton`）后重试。
+
 ### 自定义LLVM构建（可选）
 
 如需自定义构建LLVM，可执行以下步骤编译Triton-Ascend。

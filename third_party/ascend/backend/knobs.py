@@ -61,6 +61,15 @@ class ascend_knobs(_knobs.base_knobs):
     enable_ubtuner: str = _knobs.env_str("TRITON_ENABLE_UBTUNER", "")
     autotune_parallel_compile: bool = _knobs.env_bool("TRITON_AUTOTUNE_PARALLEL_COMPILE", True)
     bench_method: str = _knobs.env_str("TRITON_BENCH_METHOD", "default")
+    bench_active: str | None = _knobs.env_opt_str("TRITON_NPU_BENCH_ACTIVE")
+    bench_stability_runs: int = _knobs.env_int("TRITON_NPU_BENCH_STABILITY_RUNS", 1)
+    bench_stability_tolerance: str = _knobs.env_str("TRITON_NPU_BENCH_STABILITY_TOLERANCE", "0.01")
+    bench_lower_quantile: str = _knobs.env_str("TRITON_NPU_BENCH_LOWER_QUANTILE", "0")
+    bench_upper_quantile: str = _knobs.env_str("TRITON_NPU_BENCH_UPPER_QUANTILE", "1")
+    bench_measure_budget_ms: str = _knobs.env_str("TRITON_NPU_BENCH_MEASURE_BUDGET_MS", "0")
+    bench_max_retries: int = _knobs.env_int("TRITON_NPU_BENCH_MAX_RETRIES", 0)
+    bench_cache_mode: str | None = _knobs.env_opt_str("TRITON_NPU_BENCH_CACHE_MODE")
+    bench_single_config: bool = _knobs.env_bool("TRITON_NPU_BENCH_SINGLE_CONFIG", False)
 
     # Launcher / runtime switches.
     compile_only: bool = _knobs.env_bool("TRITON_COMPILE_ONLY", False)

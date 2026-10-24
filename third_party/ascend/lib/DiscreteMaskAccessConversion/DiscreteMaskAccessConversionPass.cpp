@@ -30,6 +30,7 @@
 #include "ascend/include/TritonToUnstructure/OffsetAnalysis.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
@@ -638,7 +639,9 @@ struct DiscreteMaskAtomicConversion
     auto loc = op.getLoc();
     auto ptr = op.getPtr();
     llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
-    triton::parse(ptr, loc, rewriter, offsetMap);
+    // Each query owns its cache; greedy rewrites must not retain source facts.
+    triton::OffsetAnalysisContext context(rewriter, offsetMap, op);
+    triton::parse(ptr, loc, context);
     auto it = offsetMap.find(ptr);
     auto toSimd = it != offsetMap.end() &&
                   llvm::all_of(it->second.getStructuredRef(), [](auto dim) {
@@ -769,6 +772,14 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
     return;
   }
 
+  // Atomic routing uses the same stable input contract as Unstructure. Finish
+  // source normalization before the greedy patterns create analysis sessions.
+  if (compileOn91095Flag &&
+      triton::ascend::isSimtTemplateMode(compileModeFlag)) {
+    IRRewriter rewriter(&getContext());
+    triton::normalizePointerAnalysisInputs(moduleOp, rewriter);
+  }
+
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,
                DiscreteMaskAtomicConversion>(patterns.getContext());
@@ -798,7 +809,7 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
 void DiscreteMaskAccessConversionPass::getDependentDialects(
     DialectRegistry &registry) const {
   registry.insert<arith::ArithDialect, scf::SCFDialect, triton::TritonDialect,
-                  hivm::HIVMDialect>();
+                  tensor::TensorDialect, hivm::HIVMDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

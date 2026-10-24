@@ -27,6 +27,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/Interfaces/DataLayoutInterfaces.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 
 #include "llvm/Support/Casting.h"
@@ -411,8 +412,365 @@ bool getRecoverableCarrierAxes(const PtrOffsetInfo &carrierInfo, unsigned rank,
 
 } // namespace
 
-void parse(Value operand, const Location &loc, RewriterBase &rewriter,
-           llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void normalizePointerAnalysisInputs(Operation *scope, RewriterBase &rewriter) {
+  // Snapshot candidates: classification may insert pure helpers, but it must
+  // not change the traversal or the original operands until its context ends.
+  SmallVector<Operation *> candidates;
+  scope->walk([&](Operation *op) {
+    if (auto reshape = dyn_cast<triton::ReshapeOp>(op)) {
+      auto type = cast<RankedTensorType>(reshape.getType());
+      if (reshape.getAllowReorder() && !type.getEncoding() &&
+          isa<triton::PointerType>(type.getElementType()))
+        candidates.push_back(op);
+    } else if (isa<triton::AddPtrOp>(op) &&
+               op->hasAttr(controlflow::kPointerDescriptorRebuildAttr)) {
+      candidates.push_back(op);
+    }
+  });
+
+  for (Operation *op : candidates) {
+    if (auto reshape = dyn_cast<triton::ReshapeOp>(op)) {
+      bool hasScalarBase = false;
+      {
+        llvm::DenseMap<Value, PtrOffsetInfo> facts;
+        OffsetAnalysisContext context(rewriter, facts, scope);
+        parse(reshape.getSrc(), reshape.getLoc(), context);
+        const auto &info = facts.at(reshape.getSrc());
+        hasScalarBase =
+            info.getPtr() && isScalarPointer(info.getPtr()) && info.getOffset();
+      }
+      if (hasScalarBase)
+        rewriter.modifyOpInPlace(reshape,
+                                 [&] { reshape->removeAttr("allow_reorder"); });
+      continue;
+    }
+
+    auto add = cast<triton::AddPtrOp>(op);
+    auto axes = op->getAttrOfType<DenseI32ArrayAttr>(
+        controlflow::kPointerDescriptorStructuredAxesAttr);
+    auto resultType = dyn_cast<RankedTensorType>(add.getType());
+    auto offsetType = dyn_cast<RankedTensorType>(add.getOffset().getType());
+    auto splat = add.getPtr().getDefiningOp<triton::SplatOp>();
+    if (op->hasAttr(controlflow::kPointerDescriptorOffsetFormAttr) || !axes ||
+        !resultType || !offsetType || !splat ||
+        !isScalarPointer(splat.getSrc()) ||
+        axes.size() != static_cast<size_t>(resultType.getRank()) ||
+        axes.empty() ||
+        !llvm::all_of(axes.asArrayRef(), [](int32_t a) { return a == 0; }) ||
+        resultType.getShape() != offsetType.getShape() ||
+        resultType.getEncoding() != offsetType.getEncoding())
+      continue;
+    auto integer = dyn_cast<IntegerType>(offsetType.getElementType());
+    if (!integer || integer.getWidth() > 64)
+      continue;
+
+    SmallVector<PtrOffsetInfo::AxisInfo> recoveredAxes;
+    {
+      llvm::DenseMap<Value, PtrOffsetInfo> facts;
+      OffsetAnalysisContext context(rewriter, facts, scope);
+      parse(add.getOffset(), add.getLoc(), context);
+      if (!getRecoverableCarrierAxes(facts.at(add.getOffset()),
+                                     resultType.getRank(), recoveredAxes))
+        continue;
+    }
+    Value offset =
+        materializeAffineForOffsetCarrier(add.getOffset(), add, rewriter);
+    if (!offset)
+      continue;
+    rewriter.modifyOpInPlace(add, [&] {
+      add.getOffsetMutable().assign(offset);
+      add->setAttr(controlflow::kPointerDescriptorStructuredAxesAttr,
+                   rewriter.getDenseI32ArrayAttr(
+                       SmallVector<int32_t>(recoveredAxes.size(), 1)));
+    });
+  }
+}
+
+namespace {
+
+pointer::AnalysisOptions analysisOptions(Operation *scope) {
+  pointer::AnalysisOptions options;
+  options.addressBitWidth = 64;
+  options.indexBitWidth = DataLayout::closest(scope).getTypeSizeInBits(
+      IndexType::get(scope->getContext()));
+  return options;
+}
+
+PtrOffsetInfo importOffsetComponents(const pointer::OffsetComponents &offset) {
+  PtrOffsetInfo info;
+  SmallVector<PtrOffsetInfo::AxisInfo> axes;
+  bool uniform = true;
+  for (auto [size, axis] : llvm::zip_equal(offset.shape, offset.axes)) {
+    bool invariant = axis == pointer::AxisKind::Invariant || size == 1;
+    uniform &= invariant;
+    axes.push_back(size == 1   ? PtrOffsetInfo::AxisInfo::scalar
+                   : invariant ? PtrOffsetInfo::AxisInfo::scalarlike
+                   : axis == pointer::AxisKind::Structured
+                       ? PtrOffsetInfo::AxisInfo::structured
+                       : PtrOffsetInfo::AxisInfo::unstructured);
+  }
+  info.setStructured(axes);
+  info.setScalarLike(uniform);
+  return info;
+}
+
+Value materializeCompleteOffset(OpFoldResult offset, Value anchor,
+                                RewriterBase &rewriter) {
+  if (auto value = dyn_cast<Value>(offset))
+    return value;
+  OpBuilder::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPointAfterValue(anchor);
+  return rewriter.create<arith::ConstantOp>(
+      anchor.getLoc(), cast<TypedAttr>(cast<Attribute>(offset)));
+}
+
+bool isCommonIntegerProducer(Operation *op) {
+  return isa<arith::ConstantOp, arith::AddIOp, arith::SubIOp, arith::MulIOp,
+             arith::ExtSIOp, arith::ExtUIOp, arith::TruncIOp,
+             arith::IndexCastOp, arith::IndexCastUIOp, arith::SelectOp,
+             triton::MakeRangeOp, triton::SplatOp, triton::BroadcastOp,
+             triton::ExpandDimsOp>(op);
+}
+
+bool isCommonPointerProducer(Operation *op) {
+  return isa<triton::AddPtrOp, triton::SplatOp, triton::BroadcastOp,
+             triton::ExpandDimsOp, arith::SelectOp>(op);
+}
+
+} // namespace
+
+OffsetAnalysisContext::OffsetAnalysisContext(
+    RewriterBase &rewriter, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+    Operation *scope)
+    : rewriter(rewriter), offsetMap(offsetMap),
+      analysis(rewriter, analysisOptions(scope)) {}
+
+void OffsetAnalysisContext::resetPointerAnalysis() {
+  ++generation;
+  localPolicy.clear();
+  laneLoweringPolicy.clear();
+  // Imported facts are derived caches too. Keep only the caller-owned local
+  // boundaries; a new query must not short-circuit through stale public facts.
+  for (Value value : publicPointers)
+    offsetMap.erase(value);
+  for (Value value : publicOffsets)
+    offsetMap.erase(value);
+  publicOffsets.clear();
+  analysis.clear();
+  preparedOffsets.clear();
+  preparedPointers.clear();
+  publicPointers.clear();
+  pointerBoundaries.clear();
+  offsetBoundaries.clear();
+}
+
+// Dispatch by source provenance, before querying the public analysis. These
+// subsets still use Unstructure's historical classification policy: SCF values
+// and narrow tensor arithmetic (whose source-domain affine tags need not remain
+// affine after address widening). Never import those tags as public c/s proofs.
+bool OffsetAnalysisContext::requiresLocalAnalysis(Value value) {
+  auto cached = localPolicy.find(value);
+  if (cached != localPolicy.end())
+    return cached->second;
+  bool local = false;
+  Operation *op = value.getDefiningOp();
+  if (!op) {
+    auto arg = dyn_cast<BlockArgument>(value);
+    local = arg && !isa<FunctionOpInterface>(arg.getOwner()->getParentOp()) &&
+            (isa<ShapedType>(value.getType()) || isScalarPointer(value));
+  } else if (isa<scf::SCFDialect>(op->getDialect()) ||
+             op->hasAttr(controlflow::kPointerDescriptorRebuildAttr) ||
+             op->hasAttr(controlflow::kPointerDescriptorStructuredAxesAttr) ||
+             op->hasAttr(controlflow::kPointerDescriptorOffsetFormAttr)) {
+    local = true;
+  } else if (isa<arith::AddIOp, arith::SubIOp, arith::MulIOp>(op) &&
+             isa<ShapedType>(value.getType()) &&
+             getElementTypeOrSelf(value).isIntOrIndex() &&
+             !getElementTypeOrSelf(value).isIndex() &&
+             getElementTypeOrSelf(value).getIntOrFloatBitWidth() < 64) {
+    local = true;
+  } else if (isa<triton::BitcastOp>(op) || isDistributedTypeCustomOp(op) ||
+             (isa<RankedTensorType>(value.getType()) &&
+              !isTensorPointer(value) && !isCommonIntegerProducer(op) &&
+              !isa<triton::LoadOp>(op))) {
+    // Numeric reshapes, floating-point propagation and special producers retain
+    // their local classifications. A load is deliberately an opaque numeric
+    // leaf: its current SSA value is sufficient for public indirect addressing.
+    local = true;
+  } else if (isCommonIntegerProducer(op) || isa<triton::AddPtrOp>(op)) {
+    local = llvm::any_of(op->getOperands(), [&](Value input) {
+      return requiresLocalAnalysis(input);
+    });
+  }
+  localPolicy[value] = local;
+  return local;
+}
+
+// Public affine facts describe the address, not the capabilities of the next
+// conversion. BlockDataParser cannot in general parse tensor select, extui,
+// trunci or index casts. Consume their exact complete O here instead of leaving
+// the original expression to that parser. Scalar producers are opaque scalar
+// offsets downstream and do not need this restriction.
+bool OffsetAnalysisContext::requiresLaneLowering(Value value) {
+  auto cached = laneLoweringPolicy.find(value);
+  if (cached != laneLoweringPolicy.end())
+    return cached->second;
+  Operation *op = value.getDefiningOp();
+  bool required = op && isa<RankedTensorType>(value.getType()) &&
+                  isa<arith::SelectOp, arith::ExtUIOp, arith::TruncIOp,
+                      arith::IndexCastOp, arith::IndexCastUIOp>(op);
+  if (!required && op &&
+      (isCommonIntegerProducer(op) || isa<triton::AddPtrOp>(op)))
+    required = llvm::any_of(op->getOperands(), [&](Value input) {
+      return requiresLaneLowering(input);
+    });
+  laneLoweringPolicy[value] = required;
+  return required;
+}
+
+// Source normalization is complete before this stable parsing phase. Parsing a
+// later operand cannot reset earlier imported facts; callers use at() to make
+// missing inputs explicit instead of silently manufacturing default states.
+void OffsetAnalysisContext::parseOperands(ValueRange values) {
+  for (Value value : values)
+    parse(value, value.getLoc(), *this);
+}
+
+void OffsetAnalysisContext::bindLocalOffsetBoundary(Value value) {
+  if (!isa<IntegerType, IndexType>(getElementTypeOrSelf(value)))
+    return;
+  if (offsetBoundaries.contains(value))
+    return;
+  auto components = pointer::makeOpaqueOffset(value, rewriter);
+  if (succeeded(components) &&
+      succeeded(analysis.bindOffset(value, *components)))
+    offsetBoundaries.insert(value);
+}
+
+bool OffsetAnalysisContext::bindLocalPointerBoundary(Value value) {
+  auto it = offsetMap.find(value);
+  if (it == offsetMap.end())
+    return false;
+  const auto &info = it->second;
+  if (!info.getPtr() || !isScalarPointer(info.getPtr()) || !info.getOffset() ||
+      info.isPointerDescriptorOwned())
+    return false;
+  // Only explicitly modeled complete addresses/shape transformations qualify.
+  // Never bind a loop's copied init or a custom producer's classification.
+  // Bitcast chains also remain local: offset units can change with the pointee.
+  Operation *op = value.getDefiningOp();
+  if (info.getPtr() != value && (!op || !isa<triton::ReshapeOp>(op)))
+    return false;
+  auto ptrType = dyn_cast<triton::PointerType>(getElementTypeOrSelf(value));
+  if (!ptrType)
+    return false;
+  if (pointerBoundaries.contains(value))
+    return true;
+  pointer::PointerComponents result;
+  result.base = info.getPtr();
+  result.elementType = ptrType.getPointeeType();
+  result.addressSpace = ptrType.getAddressSpace();
+  auto offsets = pointer::makeOpaqueOffset(
+      info.getOffset(), rewriter, pointer::ArithmeticDomain::ElementAddress);
+  if (failed(offsets))
+    return false;
+  result.offsets = std::move(*offsets);
+  if (failed(analysis.bindPointer(value, result)))
+    return false;
+  pointerBoundaries.insert(value);
+  return true;
+}
+
+void OffsetAnalysisContext::prepareOffsetBoundaries(Value value) {
+  if (!isa<IntegerType, IndexType>(getElementTypeOrSelf(value)) ||
+      !preparedOffsets.insert(value).second)
+    return;
+  Operation *op = value.getDefiningOp();
+  if (op && isCommonIntegerProducer(op)) {
+    for (Value input : op->getOperands())
+      prepareOffsetBoundaries(input);
+    return;
+  }
+  parse(value, value.getLoc(), *this);
+  bindLocalOffsetBoundary(value);
+}
+
+// Prepare the whole public pointer chain before evaluating its first node.
+// Only local boundaries need local parsing here; public parents are evaluated
+// once by the shared driver rather than eagerly imported at each chain level.
+bool OffsetAnalysisContext::preparePointerBoundaries(Value value) {
+  auto cached = preparedPointers.find(value);
+  if (cached != preparedPointers.end())
+    return cached->second;
+  Operation *op = value.getDefiningOp();
+  bool supported =
+      op && isCommonPointerProducer(op) && !requiresLocalAnalysis(value);
+  if (!supported) {
+    parse(value, value.getLoc(), *this);
+    bool bound = bindLocalPointerBoundary(value);
+    preparedPointers[value] = bound;
+    return bound;
+  }
+  for (Value input : op->getOperands()) {
+    if (isScalarPointer(input) || isTensorPointer(input)) {
+      if (!preparePointerBoundaries(input)) {
+        preparedPointers[value] = false;
+        return false;
+      }
+    } else {
+      prepareOffsetBoundaries(input);
+    }
+  }
+  preparedPointers[value] = true;
+  return true;
+}
+
+bool OffsetAnalysisContext::parseCommonOffset(Value value) {
+  Operation *op = value.getDefiningOp();
+  if (!op || !isa<IntegerType, IndexType>(getElementTypeOrSelf(value)) ||
+      !isCommonIntegerProducer(op) || requiresLocalAnalysis(value))
+    return false;
+  prepareOffsetBoundaries(value);
+  auto result = analysis.analyzeOffset(value);
+  if (failed(result))
+    return false;
+  auto info = importOffsetComponents(*result);
+  if (requiresLaneLowering(value)) {
+    info.setUnstructured(info.getRank());
+    info.setScalarLike(false);
+  }
+  offsetMap[value] = info;
+  publicOffsets.insert(value);
+  return true;
+}
+
+bool OffsetAnalysisContext::parseCommonPointer(Value value) {
+  Operation *op = value.getDefiningOp();
+  if (!op || !isCommonPointerProducer(op) ||
+      (!isScalarPointer(value) && !isTensorPointer(value)) ||
+      requiresLocalAnalysis(value))
+    return false;
+  if (!preparePointerBoundaries(value))
+    return false;
+  auto result = analysis.analyzePointer(value);
+  if (failed(result))
+    return false;
+  PtrOffsetInfo info = importOffsetComponents(result->offsets);
+  if (requiresLaneLowering(value)) {
+    info.setUnstructured(info.getRank());
+    info.setScalarLike(false);
+  }
+  info.setPtr(result->base);
+  info.setOffset(materializeCompleteOffset(result->offsets.completeOffset,
+                                           value, rewriter));
+  offsetMap[value] = info;
+  publicPointers.insert(value);
+  LLVM_DEBUG(llvm::dbgs() << "[public-pointer] " << value << "\n");
+  return true;
+}
+
+void parse(Value operand, const Location &loc, OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   if (offsetMap.contains(operand)) {
     LLVM_DEBUG({
       auto &os = llvm::dbgs();
@@ -421,6 +779,9 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
     return;
   }
 
+  if (context.parseCommonOffset(operand) || context.parseCommonPointer(operand))
+    return;
+
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "parse\n" << operand << '\n';
@@ -428,29 +789,29 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
 
   if (auto *defOp = operand.getDefiningOp()) {
     if (isa<arith::ArithDialect>(defOp->getDialect())) {
-      parseArithOp(defOp, loc, rewriter, offsetMap);
+      parseArithOp(defOp, loc, context);
     } else if (isa<triton::TritonDialect>(defOp->getDialect())) {
-      parseTritonOp(defOp, loc, rewriter, offsetMap);
+      parseTritonOp(defOp, loc, context);
     } else {
       if (auto ifOp = dyn_cast<scf::IfOp>(defOp)) {
-        parseIf(ifOp, loc, rewriter, offsetMap, operand);
+        parseIf(ifOp, loc, context, operand);
       } else if (auto yieldOp = dyn_cast<scf::YieldOp>(defOp)) {
-        parseYield(yieldOp, loc, rewriter, offsetMap);
+        parseYield(yieldOp, loc, context);
       } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(defOp)) {
-        parseLoopOp(loopOp, loc, rewriter, offsetMap, operand);
+        parseLoopOp(loopOp, loc, context, operand);
       } else if (auto extractOp = dyn_cast<tensor::ExtractOp>(defOp)) {
-        parseExtract(extractOp, loc, rewriter, offsetMap);
+        parseExtract(extractOp, loc, context);
       } else if (auto insertOp = dyn_cast<tensor::InsertOp>(defOp)) {
-        parseInsert(insertOp, loc, rewriter, offsetMap);
+        parseInsert(insertOp, loc, context);
       } else if (auto extractSliceOp =
                      dyn_cast<tensor::ExtractSliceOp>(defOp)) {
-        parseExtractSlice(extractSliceOp, loc, rewriter, offsetMap);
+        parseExtractSlice(extractSliceOp, loc, context);
       } else if (auto insertSliceOp = dyn_cast<tensor::InsertSliceOp>(defOp)) {
-        parseInsertSlice(insertSliceOp, loc, rewriter, offsetMap);
+        parseInsertSlice(insertSliceOp, loc, context);
       } else if (isDistributedTypeCustomOp(defOp)) {
         auto opResult = dyn_cast<OpResult>(operand);
         assert(opResult && "Expected operand to be an OpResult");
-        parseStructuredCustomOp(defOp, loc, rewriter, offsetMap,
+        parseStructuredCustomOp(defOp, loc, context,
                                 opResult.getResultNumber());
       }
     }
@@ -476,7 +837,7 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
           offsetMap[operand].setUnstructured(tensorType.getRank());
       }
     } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
-      parseLoopRegionIterArg(loopOp, loc, rewriter, offsetMap, blockArgument);
+      parseLoopRegionIterArg(loopOp, loc, context, blockArgument);
     }
   } else {
     llvm_unreachable("Unreachable");
@@ -505,9 +866,9 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
 }
 
 void parseLoopRegionIterArg(LoopLikeOpInterface loopOp, const Location &loc,
-                            RewriterBase &rewriter,
-                            llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                            OffsetAnalysisContext &context,
                             BlockArgument regionIterArg) {
+  auto &offsetMap = context.offsetMap;
   // This argument is a dynamic relative offset created by T2U.  Do not copy
   // the loop init provenance here: doing so makes every backedge restart from
   // the initial offset and drops the accumulated delta.  Record the argument
@@ -540,7 +901,7 @@ void parseLoopRegionIterArg(LoopLikeOpInterface loopOp, const Location &loc,
       whileOp && whileOp.getAfterBody() == regionIterArg.getOwner()) {
     auto argNum = regionIterArg.getArgNumber();
     auto conditionArg = whileOp.getConditionOp().getArgs()[argNum];
-    parse(conditionArg, loc, rewriter, offsetMap);
+    parse(conditionArg, loc, context);
     auto tmp = offsetMap[conditionArg];
     offsetMap[regionIterArg] = tmp;
     return;
@@ -549,118 +910,143 @@ void parseLoopRegionIterArg(LoopLikeOpInterface loopOp, const Location &loc,
   if (!initArgOperand)
     return;
   Value initArg = initArgOperand->get();
-  parse(initArg, loc, rewriter, offsetMap);
+  parse(initArg, loc, context);
   auto tmp = offsetMap[initArg];
   offsetMap[regionIterArg] = tmp;
 }
 
+namespace {
+
+bool parseLocalInteger(Operation *op, OffsetAnalysisContext &context) {
+  if (!isa<arith::AddIOp, arith::SubIOp, arith::MulIOp, arith::ExtSIOp,
+           arith::IndexCastOp>(op) ||
+      !context.requiresLocalAnalysis(op->getResult(0)))
+    return false;
+  auto &map = context.offsetMap;
+  context.parseOperands(op->getOperands());
+  auto lhs = map.at(op->getOperand(0));
+  Value result = op->getResult(0);
+  if (op->getNumOperands() == 1) {
+    map[result] = lhs;
+    return true;
+  }
+  auto rhs = map.at(op->getOperand(1));
+  if (isa<arith::MulIOp>(op)) {
+    PtrOffsetInfo info;
+    info.setScalarLike(lhs.isScalarLike() && rhs.isScalarLike());
+    auto &axes = info.getStructuredRef();
+    axes.resize(std::max(lhs.getRank(), rhs.getRank()));
+    for (size_t i = 0; i < axes.size(); ++i)
+      axes[i] = lhs.isScalarLike()   ? rhs.getStructured()[i]
+                : rhs.isScalarLike() ? lhs.getStructured()[i]
+                                     : PtrOffsetInfo::AxisInfo::unstructured;
+    map[result] = info;
+  } else {
+    map[result] = combineInfo(lhs, rhs);
+    if (isa<arith::SubIOp>(op) && !(lhs.isStructured() && rhs.isScalarLike()))
+      map[result].setUnstructured(map[result].getRank());
+  }
+  return true;
+}
+
+} // namespace
+
 void parseArithOp(Operation *arithOp, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                  OffsetAnalysisContext &context) {
   assert(isa<arith::ArithDialect>(arithOp->getDialect()));
-  if (auto addIOp = dyn_cast<arith::AddIOp>(arithOp)) {
-    parseAddI(addIOp, loc, rewriter, offsetMap);
-  } else if (auto subIOp = dyn_cast<arith::SubIOp>(arithOp)) {
-    parseSubI(subIOp, loc, rewriter, offsetMap);
-  } else if (auto indexCastOp = dyn_cast<arith::IndexCastOp>(arithOp)) {
-    parseIndexCast(indexCastOp, loc, rewriter, offsetMap);
-  } else if (auto constantFloatOp = dyn_cast<arith::ConstantFloatOp>(arithOp)) {
-    parseConstantOp(constantFloatOp, loc, rewriter, offsetMap);
+  if (parseLocalInteger(arithOp, context))
+    return;
+  if (auto constantFloatOp = dyn_cast<arith::ConstantFloatOp>(arithOp)) {
+    parseConstantOp(constantFloatOp, loc, context);
   } else if (auto constantIntOp = dyn_cast<arith::ConstantIntOp>(arithOp)) {
-    parseConstantOp(constantIntOp, loc, rewriter, offsetMap);
+    parseConstantOp(constantIntOp, loc, context);
   } else if (auto constantOp = dyn_cast<arith::ConstantOp>(arithOp)) {
-    parseConstantOp(constantOp, loc, rewriter, offsetMap);
-  } else if (auto extSIOp = dyn_cast<arith::ExtSIOp>(arithOp)) {
-    parseExtSI(extSIOp, loc, rewriter, offsetMap);
-  } else if (auto mulIOp = dyn_cast<arith::MulIOp>(arithOp)) {
-    parseMulI(mulIOp, loc, rewriter, offsetMap);
+    parseConstantOp(constantOp, loc, context);
   } else if (auto remSIOp = dyn_cast<arith::RemSIOp>(arithOp)) {
-    parseBinaryOp(remSIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(remSIOp, loc, context);
   } else if (auto divSIOp = dyn_cast<arith::DivSIOp>(arithOp)) {
-    parseBinaryOp(divSIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(divSIOp, loc, context);
   } else if (auto selectOp = dyn_cast<arith::SelectOp>(arithOp)) {
-    parseSelect(selectOp, loc, rewriter, offsetMap);
+    parseSelect(selectOp, loc, context);
   } else if (auto fPToSIOp = dyn_cast<arith::FPToSIOp>(arithOp)) {
-    parseFPToSI(fPToSIOp, loc, rewriter, offsetMap);
+    parseFPToSI(fPToSIOp, loc, context);
   } else if (auto sIToFPOp = dyn_cast<arith::SIToFPOp>(arithOp)) {
-    parseSIToFP(sIToFPOp, loc, rewriter, offsetMap);
+    parseSIToFP(sIToFPOp, loc, context);
   } else if (auto mulFOp = dyn_cast<arith::MulFOp>(arithOp)) {
-    parseBinaryOp(mulFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(mulFOp, loc, context);
   } else if (auto divFOp = dyn_cast<arith::DivFOp>(arithOp)) {
-    parseBinaryOp(divFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(divFOp, loc, context);
   } else if (auto addFOp = dyn_cast<arith::AddFOp>(arithOp)) {
-    parseBinaryOp(addFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(addFOp, loc, context);
   } else if (auto subFOp = dyn_cast<arith::SubFOp>(arithOp)) {
-    parseBinaryOp(subFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(subFOp, loc, context);
   } else if (auto minNumFOp = dyn_cast<arith::MinNumFOp>(arithOp)) {
-    parseBinaryOp(minNumFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(minNumFOp, loc, context);
   } else if (auto maxNumFOp = dyn_cast<arith::MaxNumFOp>(arithOp)) {
-    parseBinaryOp(maxNumFOp, loc, rewriter, offsetMap);
+    parseBinaryOp(maxNumFOp, loc, context);
   } else if (auto maxSIOp = dyn_cast<arith::MaxSIOp>(arithOp)) {
-    parseBinaryOp(maxSIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(maxSIOp, loc, context);
   } else if (auto minSIOp = dyn_cast<arith::MinSIOp>(arithOp)) {
-    parseBinaryOp(minSIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(minSIOp, loc, context);
   } else if (auto cmpIOp = dyn_cast<arith::CmpIOp>(arithOp)) {
-    parseBinaryOp(cmpIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(cmpIOp, loc, context);
   } else if (auto andIOp = dyn_cast<arith::AndIOp>(arithOp)) {
-    parseBinaryOp(andIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(andIOp, loc, context);
   } else if (auto orIOp = dyn_cast<arith::OrIOp>(arithOp)) {
-    parseBinaryOp(orIOp, loc, rewriter, offsetMap);
+    parseBinaryOp(orIOp, loc, context);
   }
 }
 
 void parseTritonOp(Operation *tritonOp, const Location &loc,
-                   RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                   OffsetAnalysisContext &context) {
   assert(isa<triton::TritonDialect>(tritonOp->getDialect()));
   if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(tritonOp)) {
-    parseAddPtr(addPtrOp, loc, rewriter, offsetMap);
+    parseAddPtr(addPtrOp, loc, context);
   } else if (auto splatOp = dyn_cast<triton::SplatOp>(tritonOp)) {
-    parseSplat(splatOp, loc, rewriter, offsetMap);
+    parseSplat(splatOp, loc, context);
   } else if (auto getProgramIdOp = dyn_cast<triton::GetProgramIdOp>(tritonOp)) {
-    parseConstantOp(getProgramIdOp, loc, rewriter, offsetMap);
+    parseConstantOp(getProgramIdOp, loc, context);
   } else if (auto getNumProgramsOp =
                  dyn_cast<triton::GetNumProgramsOp>(tritonOp)) {
-    parseConstantOp(getNumProgramsOp, loc, rewriter, offsetMap);
-  } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(tritonOp)) {
-    parseMakeRange(makeRangeOp, loc, rewriter, offsetMap);
+    parseConstantOp(getNumProgramsOp, loc, context);
   } else if (auto bitcastOp = dyn_cast<triton::BitcastOp>(tritonOp)) {
-    parseBitcast(bitcastOp, loc, rewriter, offsetMap);
+    parseBitcast(bitcastOp, loc, context);
   } else if (auto loadOp = dyn_cast<triton::LoadOp>(tritonOp)) {
-    parseLoad(loadOp, loc, rewriter, offsetMap);
+    parseLoad(loadOp, loc, context);
   } else if (auto broadcastOp = dyn_cast<triton::BroadcastOp>(tritonOp)) {
-    parseBroadcast(broadcastOp, loc, rewriter, offsetMap);
+    parseBroadcast(broadcastOp, loc, context);
   } else if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(tritonOp)) {
-    parseExpandDims(expandDimsOp, loc, rewriter, offsetMap);
+    parseExpandDims(expandDimsOp, loc, context);
   } else if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(tritonOp)) {
-    parseReshape(reshapeOp, loc, rewriter, offsetMap);
+    parseReshape(reshapeOp, loc, context);
   } else if (auto clampFOp = dyn_cast<triton::ClampFOp>(tritonOp)) {
-    parseClampF(clampFOp, loc, rewriter, offsetMap);
+    parseClampF(clampFOp, loc, context);
   }
   // FIXME:Z|wait triton version upgrade to 3.4
   // else if (auto makeTensorDescOp =
   //                dyn_cast<triton::MakeTensorDescOp>(tritonOp)) {
-  //   parseMakeTensorDesc(makeTensorDescOp, loc, rewriter, offsetMap);
+  //   parseMakeTensorDesc(makeTensorDescOp, loc, context);
   // }
   else if (auto makeTensorPtrOp = dyn_cast<triton::MakeTensorPtrOp>(tritonOp)) {
-    parseMakeTensorPtr(makeTensorPtrOp, loc, rewriter, offsetMap);
+    parseMakeTensorPtr(makeTensorPtrOp, loc, context);
   } else if (auto reduceOp = dyn_cast<triton::ReduceOp>(tritonOp)) {
-    parseReduce(reduceOp, loc, rewriter, offsetMap);
+    parseReduce(reduceOp, loc, context);
   } else if (auto reduceReturnOp = dyn_cast<triton::ReduceReturnOp>(tritonOp)) {
-    parseReduceReturn(reduceReturnOp, loc, rewriter, offsetMap);
+    parseReduceReturn(reduceReturnOp, loc, context);
   } else if (auto advanceOp = dyn_cast<triton::AdvanceOp>(tritonOp)) {
-    parseAdvance(advanceOp, loc, rewriter, offsetMap);
+    parseAdvance(advanceOp, loc, context);
   } else if (auto intToPtrOp = dyn_cast<triton::IntToPtrOp>(tritonOp)) {
-    parseIntToPtr(intToPtrOp, loc, rewriter, offsetMap);
+    parseIntToPtr(intToPtrOp, loc, context);
   }
 }
 
 void parseAddPtr(triton::AddPtrOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get addPtr base_ptr
   Value ptr = op.getPtr();
-  parse(ptr, op.getLoc(), rewriter, offsetMap);
+  parse(ptr, op.getLoc(), context);
   auto ptrInfo = offsetMap.find(ptr);
   if (ptrInfo == offsetMap.end()) {
     op.emitOpError("could not analyze the pointer base");
@@ -675,9 +1061,6 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   auto structuredAxes = dyn_cast_or_null<DenseI32ArrayAttr>(
       op->getAttr(controlflow::kPointerDescriptorStructuredAxesAttr));
   auto resultType = dyn_cast<RankedTensorType>(op.getType());
-  auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
-  bool hasScalarPointerSplatBase =
-      baseSplat && isa<triton::PointerType>(baseSplat.getSrc().getType());
   SmallVector<PtrOffsetInfo::AxisInfo> descriptorAxes;
   if (structuredAxes) {
     if (!isRebuild || !resultType ||
@@ -733,11 +1116,6 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   bool isCompleteOffsetCarrier = isRebuild && !isStridedRankOne;
   bool isDescriptorOwned =
       isRebuild || ptrOffsetInfo.isPointerDescriptorOwned();
-  bool descriptorIsOpaque =
-      !descriptorAxes.empty() &&
-      llvm::all_of(descriptorAxes, [](PtrOffsetInfo::AxisInfo axis) {
-        return axis == PtrOffsetInfo::AxisInfo::unstructured;
-      });
 
   if (isCompleteOffsetCarrier) {
     // The carrier is complete relative to the descriptor base, but parsing
@@ -757,29 +1135,6 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     if (offsetElementType.getWidth() > 64) {
       op.emitOpError("complete-offset carrier wider than i64 is unsupported");
       return;
-    }
-
-    SmallVector<PtrOffsetInfo::AxisInfo> recoveredAxes;
-    Value materializedOffset;
-    if (descriptorIsOpaque && hasScalarPointerSplatBase) {
-      parse(offsetValue, op.getLoc(), rewriter, offsetMap);
-      auto carrierInfo = offsetMap.find(offsetValue);
-      if (carrierInfo != offsetMap.end() &&
-          getRecoverableCarrierAxes(carrierInfo->second, resultType.getRank(),
-                                    recoveredAxes)) {
-        materializedOffset =
-            materializeAffineForOffsetCarrier(offsetValue, op, rewriter);
-        if (!materializedOffset)
-          recoveredAxes.clear();
-      }
-    }
-
-    if (materializedOffset) {
-      offsetValue = materializedOffset;
-      op->setOperand(1, offsetValue);
-      SmallVector<int32_t> structuredAxes(recoveredAxes.size(), 1);
-      op->setAttr(controlflow::kPointerDescriptorStructuredAxesAttr,
-                  rewriter.getDenseI32ArrayAttr(structuredAxes));
     }
 
     RewriterBase::InsertionGuard guard(rewriter);
@@ -808,9 +1163,7 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     // is no proof that all lanes address the same element. Keep this state
     // conservative and force the lane-wise memory-access path.
     ptrOffsetInfo.setScalarLike(false);
-    if (!recoveredAxes.empty())
-      ptrOffsetInfo.setStructured(recoveredAxes);
-    else if (!descriptorAxes.empty())
+    if (!descriptorAxes.empty())
       ptrOffsetInfo.setStructured(descriptorAxes);
     else
       ptrOffsetInfo.setUnstructured(resultType.getRank());
@@ -819,7 +1172,7 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     return;
   }
 
-  parse(offsetValue, op.getLoc(), rewriter, offsetMap);
+  parse(offsetValue, op.getLoc(), context);
   // Modify IR
 
   RewriterBase::InsertionGuard guard(rewriter);
@@ -888,11 +1241,13 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   });
 }
 
-void parseSplat(triton::SplatOp op, const Location &loc, RewriterBase &rewriter,
-                llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void parseSplat(triton::SplatOp op, const Location &loc,
+                OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get splat src
   auto src = op.getSrc();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto dst = op.getResult();
   auto dstType = cast<RankedTensorType>(dst.getType());
@@ -926,14 +1281,15 @@ void parseSplat(triton::SplatOp op, const Location &loc, RewriterBase &rewriter,
 }
 
 template <typename BinOpTy>
-void parseBinaryOp(BinOpTy op, const Location &loc, RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void parseBinaryOp(BinOpTy op, const Location &loc,
+                   OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   auto lhs = op.getLhs();
-  parse(lhs, op.getLoc(), rewriter, offsetMap);
+  parse(lhs, op.getLoc(), context);
   PtrOffsetInfo lhsOffsetInfo = offsetMap.at(lhs);
   auto &lhsStructured = lhsOffsetInfo.getStructuredRef();
   auto rhs = op.getRhs();
-  parse(rhs, op.getLoc(), rewriter, offsetMap);
+  parse(rhs, op.getLoc(), context);
   PtrOffsetInfo rhsOffsetInfo = offsetMap.at(rhs);
   auto &rhsStructured = rhsOffsetInfo.getStructuredRef();
   auto dst = op->getResult(0);
@@ -948,54 +1304,10 @@ void parseBinaryOp(BinOpTy op, const Location &loc, RewriterBase &rewriter,
   offsetMap[dst] = dstOffsetInfo;
 }
 
-void parseAddI(arith::AddIOp op, const Location &loc, RewriterBase &rewriter,
-               llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Get addi lhs
-  auto lhs = op.getLhs();
-  parse(lhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo lhsOffsetInfo = offsetMap.at(lhs);
-  // Get addi rhs
-  auto rhs = op.getRhs();
-  parse(rhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo rhsOffsetInfo = offsetMap.at(rhs);
-  // Set addi offset map
-  auto dst = op.getResult();
-  offsetMap[dst] = combineInfo(lhsOffsetInfo, rhsOffsetInfo);
-}
-
-void parseSubI(arith::SubIOp op, const Location &loc, RewriterBase &rewriter,
-               llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Get addi lhs
-  auto lhs = op.getLhs();
-  parse(lhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo lhsOffsetInfo = offsetMap.at(lhs);
-  // Get addi rhs
-  auto rhs = op.getRhs();
-  parse(rhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo rhsOffsetInfo = offsetMap.at(rhs);
-  // Set addi offset map
-  auto dst = op.getResult();
-  offsetMap[dst] = combineInfo(lhsOffsetInfo, rhsOffsetInfo);
-  if (!(lhsOffsetInfo.isStructured() && rhsOffsetInfo.isScalarLike())) {
-    offsetMap[dst].setUnstructured(offsetMap[dst].getRank());
-  }
-}
-
-void parseIndexCast(arith::IndexCastOp op, const Location &loc,
-                    RewriterBase &rewriter,
-                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Get indexCast input
-  auto src = op.getIn();
-  parse(src, op.getLoc(), rewriter, offsetMap);
-  // Set indexCast offset map
-  auto dst = op.getOut();
-  auto srcOffsetInfo = offsetMap.at(src);
-  offsetMap[dst] = srcOffsetInfo;
-}
-
 template <typename ConstOpTy>
-void parseConstantOp(ConstOpTy dst, const Location &loc, RewriterBase &rewriter,
-                     llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void parseConstantOp(ConstOpTy dst, const Location &loc,
+                     OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Set constant offset map
   offsetMap[dst] = PtrOffsetInfo();
   offsetMap[dst].setScalarLike(true);
@@ -1008,32 +1320,13 @@ void parseConstantOp(ConstOpTy dst, const Location &loc, RewriterBase &rewriter,
   }
 }
 
-void parseMakeRange(triton::MakeRangeOp op, const Location &loc,
-                    RewriterBase &rewriter,
-                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Set makeRange offset map
-  auto dst = op.getResult();
-  offsetMap[dst] = PtrOffsetInfo();
-  offsetMap[dst].setStructured(1);
-}
-
-void parseExtSI(arith::ExtSIOp op, const Location &loc, RewriterBase &rewriter,
-                llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Get extSI input
-  auto src = op.getIn();
-  parse(src, op.getLoc(), rewriter, offsetMap);
-  // Set extSI offset map
-  auto dst = op.getOut();
-  auto srcOffsetInfo = offsetMap.at(src);
-  offsetMap[dst] = srcOffsetInfo;
-}
-
 void parseBitcast(triton::BitcastOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                  OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get bitcast src
   auto src = op.getSrc();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto &srcStructured = srcOffsetInfo.getStructuredRef();
   // Set extSI offset map
@@ -1054,11 +1347,12 @@ void parseBitcast(triton::BitcastOp op, const Location &loc,
       srcOffsetInfo.isPointerDescriptorOwned());
 }
 
-void parseLoad(triton::LoadOp op, const Location &loc, RewriterBase &rewriter,
-               llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void parseLoad(triton::LoadOp op, const Location &loc,
+               OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get load ptr
   auto ptr = op.getPtr();
-  parse(ptr, op.getLoc(), rewriter, offsetMap);
+  parse(ptr, op.getLoc(), context);
   // Set load offset map
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo();
@@ -1069,42 +1363,13 @@ void parseLoad(triton::LoadOp op, const Location &loc, RewriterBase &rewriter,
   offsetMap[dst].setUnstructured(tensorType.getRank());
 }
 
-void parseMulI(arith::MulIOp op, const Location &loc, RewriterBase &rewriter,
-               llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
-  // Get muli lhs
-  auto lhs = op.getLhs();
-  parse(lhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo lhsOffsetInfo = offsetMap.at(lhs);
-  auto &lhsStructured = lhsOffsetInfo.getStructuredRef();
-  bool lhsScalarLike = lhsOffsetInfo.isScalarLike();
-  // Get muli rhs
-  auto rhs = op.getRhs();
-  parse(rhs, op.getLoc(), rewriter, offsetMap);
-  PtrOffsetInfo rhsOffsetInfo = offsetMap.at(rhs);
-  auto &rhsStructured = rhsOffsetInfo.getStructuredRef();
-  bool rhsScalarLike = rhsOffsetInfo.isScalarLike();
-  // Set muli offset map
-  size_t maxSize = std::max(lhsStructured.size(), rhsStructured.size());
-  auto dst = op.getResult();
-  offsetMap[dst] = PtrOffsetInfo();
-  offsetMap[dst].setScalarLike(lhsScalarLike && rhsScalarLike);
-  auto &dstStructured = offsetMap[dst].getStructuredRef();
-  dstStructured.resize(maxSize);
-  for (size_t i = 0; i < maxSize; i++)
-    if (lhsScalarLike)
-      dstStructured[i] = rhsStructured[i];
-    else if (rhsScalarLike)
-      dstStructured[i] = lhsStructured[i];
-    else
-      dstStructured[i] = PtrOffsetInfo::AxisInfo::unstructured;
-}
-
 void parseBroadcast(triton::BroadcastOp op, const Location &loc,
-                    RewriterBase &rewriter,
-                    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                    OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get broadcast src
   auto src = op.getSrcMutable().get();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto &srcStructured = srcOffsetInfo.getStructuredRef();
   // Get broadcast dim
@@ -1147,11 +1412,12 @@ void parseBroadcast(triton::BroadcastOp op, const Location &loc,
 }
 
 void parseExpandDims(triton::ExpandDimsOp op, const Location &loc,
-                     RewriterBase &rewriter,
-                     llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                     OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get expandDims src
   auto src = op.getSrc();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto &srcStructured = srcOffsetInfo.getStructuredRef();
   // Set expandDims offset map
@@ -1182,18 +1448,19 @@ void parseExpandDims(triton::ExpandDimsOp op, const Location &loc,
 }
 
 void parseReshape(triton::ReshapeOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                  OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   auto dst = op.getResult();
   auto dstType = cast<RankedTensorType>(dst.getType());
   // Numeric reshapes retain the existing conservative classification.
   if (!isa<triton::PointerType>(dstType.getElementType()))
     return;
 
-  parse(op.getSrc(), op.getLoc(), rewriter, offsetMap);
+  parse(op.getSrc(), op.getLoc(), context);
   PtrOffsetInfo info = offsetMap.at(op.getSrc());
   if (!info.getPtr() || !isScalarPointer(info.getPtr()) ||
-      (op.getAllowReorder() && dstType.getEncoding())) {
+      op.getAllowReorder()) {
     // Without a common scalar base (or a fixed lane mapping), keep the
     // actual result pointers. Never choose one lane's base for every lane.
     recordOpaqueTensorPointer(dst, offsetMap);
@@ -1202,11 +1469,6 @@ void parseReshape(triton::ReshapeOp op, const Location &loc,
 
   RewriterBase::InsertionGuard guard(rewriter);
   rewriter.setInsertionPoint(op);
-  if (op.getAllowReorder()) {
-    // Choose the order-preserving realization permitted by allow_reorder.
-    // Remaining pointer users and the derived offset must share this mapping.
-    rewriter.modifyOpInPlace(op, [&] { op->removeAttr("allow_reorder"); });
-  }
   auto offsetType = cast<RankedTensorType>(info.getOffset().getType());
   auto reshapedOffsetType = RankedTensorType::get(
       dstType.getShape(), offsetType.getElementType(), dstType.getEncoding());
@@ -1223,19 +1485,19 @@ void parseReshape(triton::ReshapeOp op, const Location &loc,
 }
 
 void parseClampF(triton::ClampFOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get clampF src
   auto src = op.getX();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   // Get clampF min
   auto clampMin = op.getMin();
-  parse(clampMin, op.getLoc(), rewriter, offsetMap);
+  parse(clampMin, op.getLoc(), context);
   PtrOffsetInfo minOffsetInfo = offsetMap.at(clampMin);
   // Get clampF max
   auto clampMax = op.getMax();
-  parse(clampMax, op.getLoc(), rewriter, offsetMap);
+  parse(clampMax, op.getLoc(), context);
   PtrOffsetInfo maxOffsetInfo = offsetMap.at(clampMax);
   // Set clampF offset map
   auto dst = op.getResult();
@@ -1250,8 +1512,8 @@ void parseClampF(triton::ClampFOp op, const Location &loc,
 }
 
 void parseSelect(arith::SelectOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   if (isScalarPointer(op.getResult())) {
     recordOpaqueScalarPointer(op.getResult(), offsetMap);
     return;
@@ -1264,18 +1526,18 @@ void parseSelect(arith::SelectOp op, const Location &loc,
 
   // Get select condition
   auto condition = op.getCondition();
-  parse(condition, op.getLoc(), rewriter, offsetMap);
+  parse(condition, op.getLoc(), context);
   PtrOffsetInfo conditionOffsetInfo = offsetMap.at(condition);
   bool conditionScalarLike = conditionOffsetInfo.isScalarLike();
   // Get select trueValue
   auto trueValue = op.getTrueValue();
-  parse(trueValue, op.getLoc(), rewriter, offsetMap);
+  parse(trueValue, op.getLoc(), context);
   PtrOffsetInfo trueValueOffsetInfo = offsetMap.at(trueValue);
   auto &trueValueStructured = trueValueOffsetInfo.getStructuredRef();
   bool trueValueScalarLike = trueValueOffsetInfo.isScalarLike();
   // Get select falseValue
   auto falseValue = op.getFalseValue();
-  parse(falseValue, op.getLoc(), rewriter, offsetMap);
+  parse(falseValue, op.getLoc(), context);
   PtrOffsetInfo falseValueOffsetInfo = offsetMap.at(falseValue);
   auto &falseValueStructured = falseValueOffsetInfo.getStructuredRef();
   bool falseValueScalarLike = falseValueOffsetInfo.isScalarLike();
@@ -1298,11 +1560,11 @@ void parseSelect(arith::SelectOp op, const Location &loc,
 }
 
 void parseFPToSI(arith::FPToSIOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get FPToSI src
   auto src = op.getIn();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   // Set FPToSI offset map
   auto dst = op.getResult();
@@ -1319,11 +1581,11 @@ void parseFPToSI(arith::FPToSIOp op, const Location &loc,
 }
 
 void parseSIToFP(arith::SIToFPOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get SIToFP src
   auto src = op.getIn();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   // Set SIToFP offset map
   auto dst = op.getResult();
@@ -1353,8 +1615,8 @@ void parseSIToFP(arith::SIToFPOp op, const Location &loc,
 // }
 
 void parseMakeTensorPtr(triton::MakeTensorPtrOp op, const Location &loc,
-                        RewriterBase &rewriter,
-                        llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                        OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Set MakeTensorPtr offset map
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo(dst);
@@ -1367,11 +1629,12 @@ void parseMakeTensorPtr(triton::MakeTensorPtrOp op, const Location &loc,
 }
 
 void parseAdvance(triton::AdvanceOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                  OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Set Advance offset map
   auto ptr = op.getPtr();
-  parse(ptr, op.getLoc(), rewriter, offsetMap);
+  parse(ptr, op.getLoc(), context);
   auto dst = op.getResult();
   auto ptrOffsetInfo = offsetMap.at(ptr);
   offsetMap[dst] = ptrOffsetInfo;
@@ -1391,11 +1654,11 @@ void parseAdvance(triton::AdvanceOp op, const Location &loc,
 }
 
 void parseReduce(triton::ReduceOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get reduce src
   Value src = op->getOperand(0);
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto &srcStructured = srcOffsetInfo.getStructuredRef();
   // Set reduce offset map
@@ -1416,11 +1679,11 @@ void parseReduce(triton::ReduceOp op, const Location &loc,
 }
 
 void parseReduceReturn(triton::ReduceReturnOp op, const Location &loc,
-                       RewriterBase &rewriter,
-                       llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                       OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   // Get reduce src
   Value src = op->getOperand(0);
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   PtrOffsetInfo srcOffsetInfo = offsetMap.at(src);
   auto &srcStructured = srcOffsetInfo.getStructuredRef();
   // Set reduce offset map
@@ -1440,8 +1703,9 @@ void parseReduceReturn(triton::ReduceReturnOp op, const Location &loc,
       dstStructured[i] = srcStructured[i];
 }
 
-void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
-             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+void parseIf(scf::IfOp op, const Location &loc, OffsetAnalysisContext &context,
+             Value dst) {
+  auto &offsetMap = context.offsetMap;
   if (isScalarPointer(dst)) {
     recordOpaqueScalarPointer(dst, offsetMap);
     return;
@@ -1451,7 +1715,7 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   // Get if then region
   Block &thenBlock = op.getThenRegion().front();
   Value thenYieldedValue = thenBlock.getTerminator()->getOperand(index);
-  parse(thenYieldedValue, op.getLoc(), rewriter, offsetMap);
+  parse(thenYieldedValue, op.getLoc(), context);
   PtrOffsetInfo thenOffsetInfo = offsetMap.at(thenYieldedValue);
   auto &thenStructured = thenOffsetInfo.getStructuredRef();
   auto thenSrcPtr = thenOffsetInfo.getPtr();
@@ -1462,7 +1726,7 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   if (op.elseBlock()) {
     Block &elseBlock = op.getElseRegion().front();
     Value elseYieldedValue = elseBlock.getTerminator()->getOperand(index);
-    parse(elseYieldedValue, op.getLoc(), rewriter, offsetMap);
+    parse(elseYieldedValue, op.getLoc(), context);
     PtrOffsetInfo elseOffsetInfo = offsetMap.at(elseYieldedValue);
     elseStructured = elseOffsetInfo.getStructuredRef();
     dstIsScalar = dstIsScalar && elseOffsetInfo.isScalarLike();
@@ -1496,16 +1760,15 @@ void parseIf(scf::IfOp op, const Location &loc, RewriterBase &rewriter,
   }
 }
 
-void parseYield(scf::YieldOp op, const Location &loc, RewriterBase &rewriter,
-                llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void parseYield(scf::YieldOp op, const Location &loc,
+                OffsetAnalysisContext &context) {
   // Get yield src
-  for (auto src : op->getOperands())
-    parse(src, op.getLoc(), rewriter, offsetMap);
+  context.parseOperands(op->getOperands());
 }
 
 void parseLoopOp(LoopLikeOpInterface op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, Value dst) {
+                 OffsetAnalysisContext &context, Value dst) {
+  auto &offsetMap = context.offsetMap;
   if (isScalarPointer(dst) && isPointerDescriptorBoundaryResult(op, dst)) {
     recordOpaqueScalarPointer(dst, offsetMap);
     return;
@@ -1525,17 +1788,18 @@ void parseLoopOp(LoopLikeOpInterface op, const Location &loc,
   } else {
     yieldedValue = op.getYieldedValues()[resNum];
   }
-  parse(yieldedValue, op.getLoc(), rewriter, offsetMap);
+  parse(yieldedValue, op.getLoc(), context);
   auto yieldOffsetInfo = offsetMap.at(yieldedValue);
   offsetMap[dst] = yieldOffsetInfo;
 }
 
 void parseExtractSlice(tensor::ExtractSliceOp op, const Location &loc,
-                       RewriterBase &rewriter,
-                       llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                       OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get extractSlice src
   auto src = op.getSource();
-  parse(src, op.getLoc(), rewriter, offsetMap);
+  parse(src, op.getLoc(), context);
   // Set extractSlice offset map
   auto dst = op.getResult();
   auto srcPtrInfo = offsetMap.at(src);
@@ -1563,13 +1827,13 @@ void parseExtractSlice(tensor::ExtractSliceOp op, const Location &loc,
 }
 
 void parseInsertSlice(tensor::InsertSliceOp op, const Location &loc,
-                      RewriterBase &rewriter,
-                      llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                      OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   // Get insertSlice src and dst
   auto src = op.getSource();
-  parse(src, op.getLoc(), rewriter, offsetMap);
   auto dst = op.getDest();
-  parse(dst, op.getLoc(), rewriter, offsetMap);
+  context.parseOperands(ValueRange{src, dst});
   // Set insertSlice offset map
   auto res = op.getResult();
   auto srcPtrInfo = offsetMap.at(src);
@@ -1608,10 +1872,10 @@ void parseInsertSlice(tensor::InsertSliceOp op, const Location &loc,
 }
 
 void parseExtract(tensor::ExtractOp op, const Location &loc,
-                  RewriterBase &rewriter,
-                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                  OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   auto parentValue = op.getTensor();
-  parse(parentValue, op.getLoc(), rewriter, offsetMap);
+  parse(parentValue, op.getLoc(), context);
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo();
   if (isa<triton::PointerType>(dst.getType())) {
@@ -1622,12 +1886,12 @@ void parseExtract(tensor::ExtractOp op, const Location &loc,
 }
 
 void parseInsert(tensor::InsertOp op, const Location &loc,
-                 RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                 OffsetAnalysisContext &context) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   auto src = op.getScalar();
-  parse(src, op.getLoc(), rewriter, offsetMap);
   auto dst = op.getDest();
-  parse(dst, op.getLoc(), rewriter, offsetMap);
+  context.parseOperands(ValueRange{src, dst});
 
   auto res = op.getResult();
   auto srcPtrInfo = offsetMap.at(src);
@@ -1651,8 +1915,8 @@ void parseInsert(tensor::InsertOp op, const Location &loc,
 }
 
 void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
-                   RewriterBase &rewriter,
-                   llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+                   OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   auto dst = op.getResult();
   offsetMap[dst] = PtrOffsetInfo(dst);
   offsetMap[dst].setScalarLike(true);
@@ -1660,12 +1924,12 @@ void parseIntToPtr(triton::IntToPtrOp op, const Location &loc,
 
 namespace {
 template <typename CustomOpT>
-void parseStructuredCustomOpImpl(
-    CustomOpT op, const Location &loc, RewriterBase &rewriter,
-    llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap, unsigned int resultIdx) {
-  for (auto operand : op.getInputs()) {
-    parse(operand, op->getLoc(), rewriter, offsetMap);
-  }
+void parseStructuredCustomOpImpl(CustomOpT op, const Location &loc,
+                                 OffsetAnalysisContext &context,
+                                 unsigned int resultIdx) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
+  context.parseOperands(op.getInputs());
   auto dst = op->getResult(resultIdx);
   offsetMap[dst] = PtrOffsetInfo();
   auto tensorType = dyn_cast<RankedTensorType>(dst.getType());
@@ -1690,7 +1954,7 @@ void parseStructuredCustomOpImpl(
       auto srcValArray = srcValArrayAttr.asArrayRef();
       assert(srcValArray[resultIdx] != -1 &&
              "tensor<tt.ptr> result should map to src tensor<tt.ptr>");
-      auto srcOffsetInfo = offsetMap[op->getOperand(srcValArray[resultIdx])];
+      auto srcOffsetInfo = offsetMap.at(op->getOperand(srcValArray[resultIdx]));
       offsetMap[dst] = srcOffsetInfo;
       return;
     }
@@ -1703,13 +1967,12 @@ void parseStructuredCustomOpImpl(
 } // namespace
 
 void parseStructuredCustomOp(Operation *op, const Location &loc,
-                             RewriterBase &rewriter,
-                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+                             OffsetAnalysisContext &context,
                              unsigned int resultIdx) {
   if (auto customOp = dyn_cast<hivm::CustomOp>(op)) {
-    parseStructuredCustomOpImpl(customOp, loc, rewriter, offsetMap, resultIdx);
+    parseStructuredCustomOpImpl(customOp, loc, context, resultIdx);
   } else if (auto macroOp = dyn_cast<hivm::CustomMacroOp>(op)) {
-    parseStructuredCustomOpImpl(macroOp, loc, rewriter, offsetMap, resultIdx);
+    parseStructuredCustomOpImpl(macroOp, loc, context, resultIdx);
   } else {
     llvm_unreachable("expected hivm custom op");
   }

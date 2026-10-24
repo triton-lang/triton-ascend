@@ -130,14 +130,14 @@ public:
   void runOnOperation() override;
 
 private:
-  void runPreparse(LoopLikeOpInterface op);
+  void runPreparse(LoopLikeOpInterface op, OffsetAnalysisContext &context);
   template <typename MemAccOpTy,
             typename = std::enable_if_t<
                 std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                 std::is_same_v<MemAccOpTy, triton::StoreOp> ||
                 std::is_same_v<MemAccOpTy, triton::AtomicRMWOp> ||
                 std::is_same_v<MemAccOpTy, triton::AtomicCASOp>>>
-  void runParse(MemAccOpTy op);
+  void runParse(MemAccOpTy op, OffsetAnalysisContext &context);
   llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
   llvm::DenseMap<Value, PtrOffsetInfo> offsetMapForLoopArgs;
   llvm::SmallDenseMap<Value, bool> fromTensorArg;

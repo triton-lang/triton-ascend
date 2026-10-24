@@ -145,13 +145,13 @@ static bool isOpaqueScalarPointerIfResult(Value value) {
 // example a control-flow phi).  A function argument is the one exception when
 // it is examined as the init anchor of an ordinary loop; the loop conversion
 // must then materialize a zero offset for that anchor.
-static bool
-canRewriteScalarPointer(Value value, RewriterBase &rewriter,
-                        llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+static bool canRewriteScalarPointer(Value value,
+                                    OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   if (!isScalarPointerType(value.getType()))
     return true;
 
-  parse(value, value.getLoc(), rewriter, offsetMap);
+  parse(value, value.getLoc(), context);
   auto it = offsetMap.find(value);
   if (it == offsetMap.end())
     return false;
@@ -163,15 +163,14 @@ canRewriteScalarPointer(Value value, RewriterBase &rewriter,
 // passes this same decision to every init, region argument, yield, condition
 // operand, and result rewrite.  Thus a failed proof falls back atomically to
 // the pointer representation instead of producing a mixed-type boundary.
-static bool
-shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
-                             llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+static bool shouldPreserveScalarPointers(Operation *op,
+                                         OffsetAnalysisContext &context) {
   auto canRewriteBoundary = [&](Value value, bool allowStableBase) {
     if (!isScalarPointerType(value.getType()))
       return true;
     if (allowStableBase && isStableFunctionScalarPointerBase(value))
       return true;
-    return canRewriteScalarPointer(value, rewriter, offsetMap);
+    return canRewriteScalarPointer(value, context);
   };
 
   if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
@@ -259,8 +258,11 @@ static void markOpaqueScalarPointerBoundary(Operation *op) {
 // cached entries describe the old pointer-typed boundary and must be removed
 // before replaceArgs/replaceOperands rebuild the boundary.  Keeping even one
 // stale yield or result entry is enough to bypass the live backedge analysis.
-static void invalidateScalarPointerBoundaryAnalysis(
-    Operation *op, llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+static void
+invalidateScalarPointerBoundaryAnalysis(Operation *op,
+                                        OffsetAnalysisContext &context) {
+  context.resetPointerAnalysis();
+  auto &offsetMap = context.offsetMap;
   auto eraseScalarPointers = [&](ValueRange values) {
     for (Value value : values)
       if (isScalarPointerType(value.getType()))
@@ -293,16 +295,19 @@ static void invalidateScalarPointerBoundaryAnalysis(
 
 } // namespace
 
-void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
-                     llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+void replaceOperands(MutableArrayRef<OpOperand> oprs,
+                     OffsetAnalysisContext &context,
                      bool preserveScalarPointers,
                      bool allowStableBaseInit = false) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   for (auto it = oprs.begin(); it != oprs.end(); ++it) {
+    context.resetPointerAnalysis();
     auto &opr = *it;
     auto operand = opr.get();
     if (auto tensorType = dyn_cast<RankedTensorType>(operand.getType());
         tensorType && isa<triton::PointerType>(tensorType.getElementType())) {
-      parse(operand, operand.getLoc(), rewriter, offsetMap);
+      parse(operand, operand.getLoc(), context);
       const PtrOffsetInfo &info = offsetMap.at(operand);
       // A complete opaque tensor base cannot be represented as an offset from
       // one scalar source. Keep this structural edge unchanged instead of
@@ -316,7 +321,7 @@ void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
       // operand to a relative offset and invalidating the parent operation.
       if (preserveScalarPointers && isScalarPointerType(operand.getType()))
         continue;
-      parse(operand, operand.getLoc(), rewriter, offsetMap);
+      parse(operand, operand.getLoc(), context);
       if (allowStableBaseInit && isStableFunctionScalarPointerBase(operand)) {
         OpBuilder::InsertionGuard guard(rewriter);
         rewriter.setInsertionPoint(opr.getOwner());
@@ -342,16 +347,19 @@ void replaceOperands(MutableArrayRef<OpOperand> oprs, RewriterBase &rewriter,
       }
     }
   }
+  context.resetPointerAnalysis();
 }
 
-void replaceArgs(ValueRange args, RewriterBase &rewriter,
-                 llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap,
+void replaceArgs(ValueRange args, OffsetAnalysisContext &context,
                  bool preserveScalarPointers) {
+  auto &rewriter = context.rewriter;
+  auto &offsetMap = context.offsetMap;
   for (auto it = args.begin(); it != args.end(); ++it) {
+    context.resetPointerAnalysis();
     auto arg = *it;
     if (auto tensorType = dyn_cast<RankedTensorType>(arg.getType());
         tensorType && isa<triton::PointerType>(tensorType.getElementType())) {
-      parse(arg, arg.getLoc(), rewriter, offsetMap);
+      parse(arg, arg.getLoc(), context);
       const PtrOffsetInfo &info = offsetMap.at(arg);
       // The relative-offset representation is legal only with one scalar
       // element-pointer base. Opaque tensor bases remain pointer values and
@@ -382,7 +390,7 @@ void replaceArgs(ValueRange args, RewriterBase &rewriter,
       // corresponding init/condition/yield operands.
       if (preserveScalarPointers && isScalarPointerType(arg.getType()))
         continue;
-      parse(arg, arg.getLoc(), rewriter, offsetMap);
+      parse(arg, arg.getLoc(), context);
       if (!isa<RankedTensorType>(ptrType.getPointeeType()) &&
           offsetMap.at(arg).getPtr() == arg)
         continue;
@@ -421,18 +429,19 @@ void replaceArgs(ValueRange args, RewriterBase &rewriter,
       }
     }
   }
+  context.resetPointerAnalysis();
 }
 
-void convertTensorPtrPre(Operation *op, RewriterBase &rewriter,
-                         llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void convertTensorPtrPre(Operation *op, OffsetAnalysisContext &context) {
+  auto &offsetMap = context.offsetMap;
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "[convertTensorPtr]: Preorder start\n" << *op << "\n";
   });
-  bool preserveScalarPointers =
-      shouldPreserveScalarPointers(op, rewriter, offsetMap);
+  bool preserveScalarPointers = shouldPreserveScalarPointers(op, context);
   if (!preserveScalarPointers)
-    invalidateScalarPointerBoundaryAnalysis(op, offsetMap);
+    invalidateScalarPointerBoundaryAnalysis(op, context);
+  context.resetPointerAnalysis();
   SmallVector<Value> scalarPointerOffsetArgs;
   if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
     if (!preserveScalarPointers)
@@ -440,37 +449,30 @@ void convertTensorPtrPre(Operation *op, RewriterBase &rewriter,
                     std::back_inserter(scalarPointerOffsetArgs), [](Value arg) {
                       return isScalarPointerType(arg.getType());
                     });
-    replaceArgs(whileOp.getBeforeArguments(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceOperands(whileOp.getInitsMutable(), rewriter, offsetMap,
-                    preserveScalarPointers,
+    replaceArgs(whileOp.getBeforeArguments(), context, preserveScalarPointers);
+    replaceOperands(whileOp.getInitsMutable(), context, preserveScalarPointers,
                     /*allowStableBaseInit=*/true);
-    replaceArgs(whileOp.getAfterArguments(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceArgs(whileOp->getResults(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceOperands(whileOp.getConditionOp().getArgsMutable(), rewriter,
-                    offsetMap, preserveScalarPointers);
+    replaceArgs(whileOp.getAfterArguments(), context, preserveScalarPointers);
+    replaceArgs(whileOp->getResults(), context, preserveScalarPointers);
+    replaceOperands(whileOp.getConditionOp().getArgsMutable(), context,
+                    preserveScalarPointers);
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
     if (!preserveScalarPointers)
       llvm::copy_if(loopOp.getRegionIterArgs(),
                     std::back_inserter(scalarPointerOffsetArgs), [](Value arg) {
                       return isScalarPointerType(arg.getType());
                     });
-    replaceArgs(loopOp.getRegionIterArgs(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceOperands(loopOp.getInitsMutable(), rewriter, offsetMap,
-                    preserveScalarPointers,
+    replaceArgs(loopOp.getRegionIterArgs(), context, preserveScalarPointers);
+    replaceOperands(loopOp.getInitsMutable(), context, preserveScalarPointers,
                     /*allowStableBaseInit=*/true);
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
     if (preserveScalarPointers && hasScalarPointerResult(ifOp))
       ifOp->setAttr(kScalarPointerCarrierBoundaryAttr,
                     UnitAttr::get(ifOp.getContext()));
-    replaceArgs(ifOp->getResults(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceOperands(ifOp.thenYield().getResultsMutable(), rewriter, offsetMap,
+    replaceArgs(ifOp->getResults(), context, preserveScalarPointers);
+    replaceOperands(ifOp.thenYield().getResultsMutable(), context,
                     preserveScalarPointers);
-    replaceOperands(ifOp.elseYield().getResultsMutable(), rewriter, offsetMap,
+    replaceOperands(ifOp.elseYield().getResultsMutable(), context,
                     preserveScalarPointers);
   }
   // Publish the offset-carrier schema only after every structural edge has
@@ -490,29 +492,28 @@ void convertTensorPtrPre(Operation *op, RewriterBase &rewriter,
     auto &os = llvm::dbgs();
     os << "[convertTensorPtr]: Preorder end\n" << *op << "\n";
   });
+  context.resetPointerAnalysis();
 }
 
-void convertTensorPtrPost(Operation *op, RewriterBase &rewriter,
-                          llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+void convertTensorPtrPost(Operation *op, OffsetAnalysisContext &context) {
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "[convertTensorPtr]: Postorder start\n" << *op << "\n";
   });
-  bool preserveScalarPointers =
-      shouldPreserveScalarPointers(op, rewriter, offsetMap);
+  bool preserveScalarPointers = shouldPreserveScalarPointers(op, context);
   if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
-    replaceOperands(whileOp.getYieldOp()->getOpOperands(), rewriter, offsetMap,
+    replaceOperands(whileOp.getYieldOp()->getOpOperands(), context,
                     preserveScalarPointers);
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
-    replaceArgs(loopOp->getResults(), rewriter, offsetMap,
-                preserveScalarPointers);
-    replaceOperands(*loopOp.getYieldedValuesMutable(), rewriter, offsetMap,
+    replaceArgs(loopOp->getResults(), context, preserveScalarPointers);
+    replaceOperands(*loopOp.getYieldedValuesMutable(), context,
                     preserveScalarPointers);
   }
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "[convertTensorPtr]: Postorder end\n" << *op << "\n";
   });
+  context.resetPointerAnalysis();
 }
 
 int getPtrTensorRank(Type type) {
@@ -566,12 +567,17 @@ void replacePtrArguments(triton::FuncOp funcOp,
   // This detached block owns the retired operations without revisiting them.
   Block retiredOps;
   IRRewriter rewriter(funcOp.getContext());
+  // Normalize source pointer producers before creating any analysis cache.
+  offsetMap.clear();
+  normalizePointerAnalysisInputs(funcOp, rewriter);
+  OffsetAnalysisContext context(rewriter, offsetMap, funcOp);
   rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   Value tempVar = rewriter
                       .create<UnrealizedConversionCastOp>(
                           funcOp.getLoc(), rewriter.getI32Type(), ValueRange{})
                       ->getResult(0);
   std::function<WalkResult(Operation *)> convertTensorPtr = [&](Operation *op) {
+    context.resetPointerAnalysis();
     IRMapping mapping;
     Operation *newOp = nullptr;
     // Address carriers used by the replacement op must dominate it. Build the
@@ -584,8 +590,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
       // slot to a complete i64 address before constructing the replacement
       // loop, so the loop signature is pointer-free and T2L never has to
       // materialize a pointer from an unresolved SCF value.
-      if (shouldPreserveScalarPointers(forOp.getOperation(), rewriter,
-                                       offsetMap))
+      if (shouldPreserveScalarPointers(forOp.getOperation(), context))
         markOpaqueScalarPointerBoundary(forOp.getOperation());
       SmallVector<Value> newInitArgs = constructOperands(
           forOp.getInitArgs(), tempVar, mapping, rewriter, forOp);
@@ -619,8 +624,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
       // path. If any boundary edge has no stable base-plus-offset form, switch
       // all scalar pointer edges atomically to complete i64 addresses so the
       // before/after regions cannot acquire a mixed pointer/integer contract.
-      if (shouldPreserveScalarPointers(whileOp.getOperation(), rewriter,
-                                       offsetMap))
+      if (shouldPreserveScalarPointers(whileOp.getOperation(), context))
         markOpaqueScalarPointerBoundary(whileOp.getOperation());
       SmallVector<Value> newInits = constructOperands(
           whileOp.getInits(), tempVar, mapping, rewriter, whileOp);
@@ -718,10 +722,11 @@ void replacePtrArguments(triton::FuncOp funcOp,
       }
       rewriter.moveOpBefore(op, &retiredOps, retiredOps.end());
       op = newOp;
-      convertTensorPtrPre(op, rewriter, offsetMap);
+      context.resetPointerAnalysis();
+      convertTensorPtrPre(op, context);
       for (auto &region : op->getRegions())
         region.walk<WalkOrder::PreOrder>(convertTensorPtr);
-      convertTensorPtrPost(op, rewriter, offsetMap);
+      convertTensorPtrPost(op, context);
       return WalkResult::skip();
     }
     return WalkResult::advance();
@@ -729,5 +734,6 @@ void replacePtrArguments(triton::FuncOp funcOp,
 
   funcOp->walk<WalkOrder::PreOrder>(convertTensorPtr);
   // Drop all cached references before retiredOps destroys the old IR.
+  context.resetPointerAnalysis();
   offsetMap.clear();
 }

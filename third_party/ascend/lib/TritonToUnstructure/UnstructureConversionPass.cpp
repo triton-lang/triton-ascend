@@ -1196,8 +1196,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   return success();
 }
 
-void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
-  IRRewriter rewriter(&getContext());
+void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op,
+                                          OffsetAnalysisContext &context) {
   auto loc = op.getLoc();
 
   LLVM_DEBUG({
@@ -1217,7 +1217,7 @@ void TritonToUnstructurePass::runPreparse(LoopLikeOpInterface op) {
 
   for (auto [arg, yield] : llvm::zip_equal(args, yields)) {
     if (auto tensorType = dyn_cast<RankedTensorType>(yield.getType())) {
-      parse(yield, loc, rewriter, offsetMapForLoopArgs);
+      parse(yield, loc, context);
       offsetMap[arg] = offsetMapForLoopArgs.at(yield);
       LLVM_DEBUG({
         auto &os = llvm::dbgs();
@@ -1250,13 +1250,13 @@ static bool isFromTensorArg(Value v,
 }
 
 template <typename MemAccOpTy, typename>
-void TritonToUnstructurePass::runParse(MemAccOpTy op) {
-  IRRewriter rewriter(&getContext());
+void TritonToUnstructurePass::runParse(MemAccOpTy op,
+                                       OffsetAnalysisContext &context) {
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "Parsing " << op->getName() << "\n" << op << "\n";
   });
-  parse(op.getPtr(), op.getLoc(), rewriter, offsetMap);
+  parse(op.getPtr(), op.getLoc(), context);
   isFromTensorArg(op.getPtr(), fromTensorArg);
 }
 
@@ -1295,6 +1295,9 @@ void TritonToUnstructurePass::runOnOperation() {
     os << "  compileMode: " << this->compileMode << "\n";
   });
 
+  offsetMap.clear();
+  offsetMapForLoopArgs.clear();
+  fromTensorArg.clear();
   ModuleOp moduleOp = getOperation();
   MLIRContext *ctx = &getContext();
 
@@ -1309,18 +1312,29 @@ void TritonToUnstructurePass::runOnOperation() {
     moduleOp.emitWarning("Failed to process IfYieldAddHoist operations");
   }
 
-  moduleOp->walk([this](LoopLikeOpInterface op) { runPreparse(op); });
-  moduleOp->walk([this](Operation *op) {
-    if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
-      runParse(loadOp);
-    } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
-      runParse(storeOp);
-    } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
-      runParse(atomicRMWOp);
-    } else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op)) {
-      runParse(atomicCASOp);
-    }
-  });
+  IRRewriter analysisRewriter(ctx);
+  // Hoisting and argument replacement can introduce new carrier expressions.
+  // Complete their source normalization before either stable parsing phase.
+  normalizePointerAnalysisInputs(moduleOp, analysisRewriter);
+  {
+    OffsetAnalysisContext context(analysisRewriter, offsetMapForLoopArgs,
+                                  moduleOp);
+    moduleOp->walk([&](LoopLikeOpInterface op) { runPreparse(op, context); });
+  }
+  {
+    OffsetAnalysisContext context(analysisRewriter, offsetMap, moduleOp);
+    moduleOp->walk([&](Operation *op) {
+      if (auto loadOp = dyn_cast<triton::LoadOp>(op)) {
+        runParse(loadOp, context);
+      } else if (auto storeOp = dyn_cast<triton::StoreOp>(op)) {
+        runParse(storeOp, context);
+      } else if (auto atomicRMWOp = dyn_cast<triton::AtomicRMWOp>(op)) {
+        runParse(atomicRMWOp, context);
+      } else if (auto atomicCASOp = dyn_cast<triton::AtomicCASOp>(op)) {
+        runParse(atomicCASOp, context);
+      }
+    });
+  }
 
   RewritePatternSet patterns(ctx);
 
@@ -1340,6 +1354,12 @@ void TritonToUnstructurePass::runOnOperation() {
     signalPassFailure();
     return;
   }
+
+  // All public sessions ended before rewriting. Drop consumer references
+  // before cleaning abandoned pure numeric helpers.
+  offsetMap.clear();
+  offsetMapForLoopArgs.clear();
+  pointer::eraseDeadPointerArithmetic(moduleOp, analysisRewriter);
 
   bool unsupportedLoopMask = false;
   moduleOp.walk([&](Operation *op) {

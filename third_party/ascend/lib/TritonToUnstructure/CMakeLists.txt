@@ -18,6 +18,8 @@ add_triton_library(TritonToUnstructure
   MLIRSupport
   TritonIR
   TritonAnalysis
+  TritonPointerAnalysis
+  MLIRDataLayoutInterfaces
   TritonMemoryAccessAnalysis
   MLIRSCFTransforms
 )

@@ -9,10 +9,11 @@ add_triton_library(DiscreteMaskAccessConversion
   MLIRIR
   MLIRPass
   MLIRSCFDialect
+  MLIRTensorDialect
   MLIRTransforms
   MLIRSupport
   TritonIR
   TritonToLinalg
   TritonMemoryAccessAnalysis
-  TritonToLinalg
+  TritonToUnstructure
 )

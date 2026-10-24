@@ -36,9 +36,6 @@ bool DependencyCycleDetector::detectCycleFrom(Operation *cur) {
   bool createsCycle = false;
 
   depHelper.forEachUserInSameBlock(cur, [&](Operation *user) {
-    if (isExternalSyncOp(user)) {
-      return;
-    }
     if (createsCycle)
       return;
     createsCycle =

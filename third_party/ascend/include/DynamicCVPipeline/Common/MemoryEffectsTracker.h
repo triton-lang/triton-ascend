@@ -23,7 +23,6 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMMON_MEMORY_EFFECTS_TRACKER_H
 
-#include "DynamicCVPipeline/Common/SyncWall.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/Operation.h"
@@ -68,6 +67,7 @@ private:
 
   void analyzeOp(Operation *op);
   void analyzeRegionsOf(Operation *op);
+  void buildSyncEdges();
 
   SmallVector<MemoryEffects::EffectInstance>
   collectOuterEffects(Operation *op, bool &unknown, bool recursive = true);
@@ -90,13 +90,13 @@ private:
 
   void recordEdges(Operation *op, ArrayRef<Operation *> defs,
                    ArrayRef<Operation *> preds);
+
   AliasResult queryAlias(Value lhs, Value rhs);
 
   // True when a synchronization op sits strictly between @p a and @p b in the
   // block they share. Memory edges that cross a sync are dropped so the graph
   // never spans a barrier.
   bool isSyncSeparated(Operation *a, Operation *b);
-  SyncWall &getWall(Block *block);
 
   Operation *root;
   AliasAnalysis &aa;
@@ -111,9 +111,6 @@ private:
 
   SmallVector<std::unique_ptr<MemSlot>> slots;
   DenseMap<Value, MemSlot *> valueToSlot;
-
-  // Per-block sync walls
-  DenseMap<Block *, SyncWall> walls;
 };
 
 } // namespace CVPipeline

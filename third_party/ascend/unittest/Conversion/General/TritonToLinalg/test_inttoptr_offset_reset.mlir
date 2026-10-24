@@ -16,7 +16,7 @@
 // CHECK: %[[OFFSET_VIEW:.*]] = memref.reinterpret_cast %[[POINTER]] to offset: [4], sizes: [8], strides: [1]
 // CHECK-SAME: to memref<8xi32, strided<[1], offset: 4>>
 // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<8xi32>
-// CHECK: memref.copy %[[OFFSET_VIEW]], %[[ALLOC]] : memref<8xi32, strided<[1], offset: 4>> to memref<8xi32>
+// CHECK: memref.copy %[[OFFSET_VIEW]], %[[ALLOC]] {isVolatile = false} : memref<8xi32, strided<[1], offset: 4>> to memref<8xi32>
 
 module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
   tt.func public @test_inttoptr_offset_reset(%addr_ptr: !tt.ptr<i64> {tt.divisibility = 16 : i32}, %out_ptr: !tt.ptr<i32> {tt.divisibility = 16 : i32}) attributes {noinline = false} {

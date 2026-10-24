@@ -3,7 +3,7 @@
 // CHECK: %4 = hivm.hir.custom
 // CHECK: %reinterpret_cast = memref.reinterpret_cast %4 to offset: [0], sizes: [32], strides: [1] : memref<?xf16> to memref<32xf16, strided<[1]>>
 // CHECK: %alloc = memref.alloc() : memref<32xf16>
-// CHECK: memref.copy %reinterpret_cast, %alloc : memref<32xf16, strided<[1]>> to memref<32xf16>
+// CHECK: memref.copy %reinterpret_cast, %alloc {isVolatile = false} : memref<32xf16, strided<[1]>> to memref<32xf16>
 
 module {
   tt.func public @parse_custom(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>, %arg2: i32, %arg3: i32) {
@@ -38,7 +38,7 @@ module {
 // CHECK: %[[FOO3:.*]] = hivm.hir.custom {{.*}} "foo3" ins(%[[FOO2_VIEW]], %[[FOO1]] : memref<32xf16, strided<[1]>>, i32) -> memref<32xf16>
 // CHECK: %[[FOO3_VIEW:.*]] = memref.reinterpret_cast %[[FOO3]] to offset: [0], sizes: [32], strides: [1] : memref<32xf16> to memref<32xf16, strided<[1]>>
 // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<32xf16>
-// CHECK: memref.copy %[[FOO3_VIEW]], %[[ALLOC]] : memref<32xf16, strided<[1]>> to memref<32xf16>
+// CHECK: memref.copy %[[FOO3_VIEW]], %[[ALLOC]] {isVolatile = false} : memref<32xf16, strided<[1]>> to memref<32xf16>
 module {
   tt.func public @parse_custom(%arg0: !tt.ptr<f16>, %arg1: !tt.ptr<f16>, %arg2: i32, %arg3: i32, %arg4: !tt.ptr<i64>) {
     %c0_i64 = arith.constant 0 : i64

@@ -695,6 +695,9 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
         return success();
       }
       auto copyOp = rewriter.create<memref::CopyOp>(loc, ptr, allocOp);
+      // Preserve the source read's volatility for scaled-dot load tiling.
+      // Only this unmasked copy is eligible to be replaced with tile reads.
+      copyOp->setAttr("isVolatile", rewriter.getBoolAttr(op.getIsVolatile()));
       propagateWasBoolToInt8Attr(op.getOperation(), copyOp.getOperation(),
                                  rewriter);
       if (mayImplicitTransposeWithLastAxis &&

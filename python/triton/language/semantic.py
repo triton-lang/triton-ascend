@@ -1594,19 +1594,18 @@ class TritonSemantic(Generic[TensorTy]):
             assert val.dtype == unsigned_ty, f"Unexpected dtype for {float_format}. Got {val.dtype}"
             return self.bitcast(val, triton_ty)
 
-    def verify_scaled_shape(self, M, N, K, lhs_scale, rhs_scale):
+    def verify_scaled_shape(self, M, N, K, lhs_scale, rhs_scale, batch=None):
+        prefix = [] if batch is None else [batch]
         if lhs_scale is not None:
             scale_factor = 16 if lhs_scale.dtype.is_fp8e4nv() else 32
             lhs_scale_shape = lhs_scale.type.shape
-            assert lhs_scale_shape == [
-                M, K // scale_factor
-            ], f"lhs_scale must be a tensor of shape [{M}, {K // scale_factor}]. Got {lhs_scale_shape}"
+            expected_shape = prefix + [M, K // scale_factor]
+            assert lhs_scale_shape == expected_shape, f"lhs_scale must be a tensor of shape {expected_shape}. Got {lhs_scale_shape}"
         if rhs_scale is not None:
             scale_factor = 16 if rhs_scale.dtype.is_fp8e4nv() else 32
             rhs_scale_shape = rhs_scale.type.shape
-            assert rhs_scale_shape == [
-                N, K // scale_factor
-            ], f"rhs_scale must be a tensor of shape [{N}, {K // scale_factor}]. Got {rhs_scale_shape}"
+            expected_shape = prefix + [N, K // scale_factor]
+            assert rhs_scale_shape == expected_shape, f"rhs_scale must be a tensor of shape {expected_shape}. Got {rhs_scale_shape}"
 
     def dot_scaled(self, lhs: TensorTy, lhs_scale: TensorTy, lhs_format: str, rhs: TensorTy,
                    rhs_scale: Optional[TensorTy], rhs_format: str, acc: TensorTy | None, fast_math: bool,
@@ -1616,6 +1615,9 @@ class TritonSemantic(Generic[TensorTy]):
         lhs_rank = len(lhs.shape)
         rhs_rank = len(rhs.shape)
         assert lhs_rank == rhs_rank == 2 or lhs_rank == rhs_rank == 3, f"Both inputs must be either 2D or 3D; (lhs: {lhs.shape} vs rhs: {rhs.shape})"
+        if lhs_rank == 3:
+            assert lhs.type.shape[0] == rhs.type.shape[
+                0], f"Both inputs must have the same batch size; (lhs: {lhs.shape} vs rhs: {rhs.shape})"
         lhs_format: str = lhs_format.value
         rhs_format: str = rhs_format.value
         lhs_format_enum = self._str_to_fp_type(lhs_format)
@@ -1656,7 +1658,7 @@ class TritonSemantic(Generic[TensorTy]):
         rhs_scale_handle = None if rhs_scale_is_none else rhs_scale.handle
         lhs_scale_handle = None if lhs_scale_is_none else lhs_scale.handle
         self.verify_scaled_shape(M, N, K, None if lhs_scale_is_none else lhs_scale,
-                                 None if rhs_scale_is_none else rhs_scale)
+                                 None if rhs_scale_is_none else rhs_scale, batch=B)
         return self.tensor(
             self.builder.create_dot_scaled(lhs.handle, lhs_scale_handle, lhs_format_enum, rhs.handle, rhs_scale_handle,
                                            rhs_format_enum, fast_math, lhs_k_pack, rhs_k_pack, acc_handle), ret_ty)

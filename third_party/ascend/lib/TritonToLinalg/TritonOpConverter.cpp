@@ -42,6 +42,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cstdlib>
+#include <functional>
 #include <utility>
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -53,10 +54,12 @@
 #include "mlir/Dialect/MemRef/Transforms/Passes.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
+#include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/CallInterfaces.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
@@ -3057,6 +3060,472 @@ SortOpConverter::matchAndRewrite(triton::ascend::SortOp op, OpAdaptor adaptor,
   return success();
 }
 
+namespace {
+static bool isNonvolatileScaledDotCopy(memref::CopyOp copy) {
+  auto volatility = copy->getAttrOfType<BoolAttr>("isVolatile");
+  return volatility && !volatility.getValue();
+}
+
+struct ScaledDotRowCopy {
+  memref::AllocOp allocation;
+  scf::ForOp loop;
+  memref::CopyOp copy;
+  memref::ReinterpretCastOp source;
+  memref::SubViewOp destination;
+};
+
+// Only recognize the exact unmasked row-copy load emitted by memory lowering.
+// No padding, partial rows, additional users, or observable writes may hide in
+// the copy loop; everything other than its copy must be a pure scalar address.
+static std::optional<ScaledDotRowCopy>
+matchScaledDotRowCopy(bufferization::ToTensorOp tensor) {
+  auto allocation = tensor.getBuffer().getDefiningOp<memref::AllocOp>();
+  if (!allocation || allocation.getType().getRank() != 2 ||
+      !allocation.getType().hasStaticShape() ||
+      !allocation.getType().getLayout().isIdentity() ||
+      allocation.getType().getMemorySpace())
+    return std::nullopt;
+  memref::SubViewOp destination;
+  for (Operation *user : allocation->getUsers()) {
+    if (user == tensor)
+      continue;
+    if (destination || !(destination = dyn_cast<memref::SubViewOp>(user)))
+      return std::nullopt;
+  }
+  if (!destination || !destination->hasOneUse())
+    return std::nullopt;
+  auto copy = dyn_cast<memref::CopyOp>(*destination->getUsers().begin());
+  auto loop = destination->getParentOfType<scf::ForOp>();
+  if (!copy || !isNonvolatileScaledDotCopy(copy) || !loop ||
+      copy.getTarget() != destination.getResult() ||
+      loop->getBlock() != tensor->getBlock() ||
+      !loop->hasAttr("ExtractedLoadOrStore") ||
+      loop.getNumRegionIterArgs() != 0 ||
+      getConstantIntValue(loop.getLowerBound()) != 0 ||
+      getConstantIntValue(loop.getStep()) != 1 ||
+      getConstantIntValue(loop.getUpperBound()) !=
+          allocation.getType().getDimSize(0))
+    return std::nullopt;
+  int64_t cols = allocation.getType().getDimSize(1);
+  if (destination.getMixedOffsets().size() != 2 ||
+      dyn_cast<Value>(destination.getMixedOffsets()[0]) !=
+          loop.getInductionVar() ||
+      getConstantIntValue(destination.getMixedOffsets()[1]) != 0 ||
+      destination.getStaticSizes() != ArrayRef<int64_t>({1, cols}) ||
+      destination.getStaticStrides() != ArrayRef<int64_t>({1, 1}))
+    return std::nullopt;
+  auto source = copy.getSource().getDefiningOp<memref::ReinterpretCastOp>();
+  if (!source || !source->hasOneUse() ||
+      source.getStaticSizes() != ArrayRef<int64_t>({1, cols}) ||
+      source.getStaticStrides() != ArrayRef<int64_t>({cols, 1}) ||
+      source.getMixedOffsets().size() != 1 ||
+      source.getSource().getParentBlock() == loop.getBody())
+    return std::nullopt;
+  auto baseType = dyn_cast<MemRefType>(source.getSource().getType());
+  if (!baseType || baseType.getRank() != 1 ||
+      !baseType.getLayout().isIdentity() || baseType.getMemorySpace())
+    return std::nullopt;
+  for (Operation &nested : loop.getBody()->without_terminator()) {
+    if (&nested == copy || &nested == source || &nested == destination)
+      continue;
+    if (nested.getNumRegions() != 0 || !isMemoryEffectFree(&nested) ||
+        llvm::any_of(nested.getResultTypes(),
+                     [](Type type) { return !type.isIntOrIndex(); }))
+      return std::nullopt;
+  }
+  return ScaledDotRowCopy{allocation, loop, copy, source, destination};
+}
+
+// HFusion accepts signed i32 indirect offsets. Recover that representation
+// only when the entire original i64 offset is a sign extension of i32; all
+// arithmetic (including i32 overflow), masks and read ordering stay unchanged.
+static void narrowNativeScaledDotOffsets(ArrayRef<Value> roots,
+                                         ConversionPatternRewriter &rewriter) {
+  llvm::SmallPtrSet<Operation *, 16> visited;
+  std::function<void(Value)> visit = [&](Value value) {
+    Operation *def = value ? value.getDefiningOp() : nullptr;
+    if (!def || !visited.insert(def).second)
+      return;
+    if (auto call = dyn_cast<func::CallOp>(def)) {
+      if (!call.getCallee().starts_with("triton_indirect_load") ||
+          call.getNumOperands() < 2 || call.getNumResults() != 1)
+        return;
+      auto function = SymbolTable::lookupNearestSymbolFrom<func::FuncOp>(
+          call, call.getCalleeAttr());
+      if (!function || !function.isPrivate() || !function.isExternal() ||
+          function.getFunctionType() !=
+              rewriter.getFunctionType(call.getOperandTypes(),
+                                       call.getResultTypes()))
+        return;
+      auto extend = call.getOperand(1).getDefiningOp<arith::ExtSIOp>();
+      if (!extend)
+        return;
+      auto inputType = dyn_cast<RankedTensorType>(extend.getIn().getType());
+      auto offsetType = dyn_cast<RankedTensorType>(extend.getType());
+      if (!inputType || !offsetType ||
+          !inputType.getElementType().isInteger(32) ||
+          !offsetType.getElementType().isInteger(64) ||
+          inputType.getShape() != offsetType.getShape())
+        return;
+      SmallVector<Value> operands(call.getOperands());
+      operands[1] = extend.getIn();
+      auto module = call->getParentOfType<ModuleOp>();
+      auto name = generateUniqueFuncName(module, "triton_indirect_load");
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToEnd(module.getBody());
+      auto narrowedFunction = rewriter.create<func::FuncOp>(
+          call.getLoc(), name.str(),
+          rewriter.getFunctionType(TypeRange(ValueRange(operands)),
+                                   call.getResultTypes()));
+      for (NamedAttribute attr : function->getAttrs())
+        if (attr.getName() != "sym_name" && attr.getName() != "function_type")
+          narrowedFunction->setAttr(attr.getName(), attr.getValue());
+      rewriter.setInsertionPoint(call);
+      auto narrowed = rewriter.create<func::CallOp>(
+          call.getLoc(), narrowedFunction.getSymNameAttr(),
+          call.getResultTypes(), operands);
+      for (NamedAttribute attr : call->getAttrs())
+        if (attr.getName() != "callee")
+          narrowed->setAttr(attr.getName(), attr.getValue());
+      rewriter.replaceOp(call, narrowed.getResults());
+      return;
+    }
+    if (isMemoryEffectFree(def))
+      for (Value operand : def->getOperands())
+        visit(operand);
+  };
+  for (Value root : roots)
+    visit(root);
+}
+
+// Tile only nonvolatile indirect reads whose original snapshot can be moved
+// to the dot. In particular, a store between the load and dot must not change
+// the value observed by the dot, even when the load has only one user.
+class ScaledDotLoadTiler {
+public:
+  ScaledDotLoadTiler(triton::DotScaledOp dot,
+                     ConversionPatternRewriter &rewriter)
+      : dot(dot), rewriter(rewriter) {}
+
+  void prepare(ArrayRef<Value> sources) {
+    llvm::SmallPtrSet<Operation *, 16> visited;
+    std::function<void(Value)> visit = [&](Value value) {
+      Operation *def = value ? value.getDefiningOp() : nullptr;
+      if (!def || !value.hasOneUse() || !visited.insert(def).second)
+        return;
+      if (auto tensor = dyn_cast<bufferization::ToTensorOp>(def)) {
+        auto rowCopy = matchScaledDotRowCopy(tensor);
+        if (rowCopy && tensor->getBlock() == dot->getBlock() &&
+            canCrossToDot(rowCopy->loop))
+          eligibleCopies.insert(tensor);
+        return;
+      }
+      if (auto call = dyn_cast<func::CallOp>(def)) {
+        if (canTileLoad(call))
+          eligibleLoads.insert(call);
+        return;
+      }
+      if (isMemoryEffectFree(def))
+        for (Value operand : def->getOperands())
+          visit(operand);
+    };
+    for (Value source : sources)
+      visit(source);
+  }
+
+  Value slice(OpBuilder &builder, Value source, ArrayRef<OpFoldResult> offsets,
+              ArrayRef<OpFoldResult> sizes) {
+    auto type = cast<RankedTensorType>(source.getType());
+    SmallVector<int64_t> shape;
+    for (OpFoldResult size : sizes)
+      shape.push_back(cast<IntegerAttr>(cast<Attribute>(size)).getInt());
+    auto resultType = type.clone(shape);
+    Operation *def = source.getDefiningOp();
+    if (auto tensor = dyn_cast_or_null<bufferization::ToTensorOp>(def);
+        tensor && eligibleCopies.contains(tensor)) {
+      auto rowCopy = *matchScaledDotRowCopy(tensor);
+      auto loc = tensor.getLoc();
+      Value tile = builder.create<memref::AllocOp>(
+          loc, MemRefType::get(shape, type.getElementType()));
+      Value zero = builder.create<arith::ConstantIndexOp>(loc, 0);
+      Value one = builder.create<arith::ConstantIndexOp>(loc, 1);
+      Value rows = builder.create<arith::ConstantIndexOp>(loc, shape[0]);
+      Value rowOffset =
+          getValueOrCreateConstantIndexOp(builder, loc, offsets[0]);
+      Value colOffset =
+          getValueOrCreateConstantIndexOp(builder, loc, offsets[1]);
+      auto loop = builder.create<scf::ForOp>(
+          loc, zero, rows, one, ValueRange{},
+          [&](OpBuilder &nested, Location, Value row, ValueRange) {
+            IRMapping mapping;
+            Value originalRow =
+                nested.create<arith::AddIOp>(loc, row, rowOffset);
+            mapping.map(rowCopy.loop.getInductionVar(), originalRow);
+            for (Operation &operation :
+                 rowCopy.loop.getBody()->without_terminator()) {
+              if (&operation == rowCopy.copy || &operation == rowCopy.source ||
+                  &operation == rowCopy.destination)
+                continue;
+              nested.clone(operation, mapping);
+            }
+            OpFoldResult originalOffset = rowCopy.source.getMixedOffsets()[0];
+            if (auto value = dyn_cast<Value>(originalOffset))
+              originalOffset = mapping.lookupOrDefault(value);
+            Value offset =
+                getValueOrCreateConstantIndexOp(nested, loc, originalOffset);
+            offset = nested.create<arith::AddIOp>(loc, offset, colOffset);
+            SmallVector<OpFoldResult> copySizes{nested.getIndexAttr(1),
+                                                nested.getIndexAttr(shape[1])};
+            SmallVector<OpFoldResult> sourceStrides{
+                nested.getIndexAttr(shape[1]), nested.getIndexAttr(1)};
+            auto viewType = MemRefType::get(
+                {1, shape[1]}, type.getElementType(),
+                StridedLayoutAttr::get(nested.getContext(),
+                                       ShapedType::kDynamic, {shape[1], 1}));
+            Value input = nested.create<memref::ReinterpretCastOp>(
+                loc, viewType, rowCopy.source.getSource(), offset, copySizes,
+                sourceStrides);
+            SmallVector<OpFoldResult> destinationOffsets{
+                row, nested.getIndexAttr(0)};
+            SmallVector<OpFoldResult> strides(2, nested.getIndexAttr(1));
+            Value output = nested.create<memref::SubViewOp>(
+                loc, tile, destinationOffsets, copySizes, strides);
+            nested.create<memref::CopyOp>(loc, input, output);
+            nested.create<scf::YieldOp>(loc);
+          });
+      loop->setAttrs(rowCopy.loop->getAttrs());
+      replacedCopies.insert(tensor);
+      return builder.create<bufferization::ToTensorOp>(
+          loc, resultType, tile, /*restrict=*/true, /*writable=*/true);
+    }
+    if (auto call = dyn_cast_or_null<func::CallOp>(def);
+        call && eligibleLoads.contains(call)) {
+      SmallVector<Value> operands{call.getOperand(0)};
+      for (Value operand : call.getOperands().drop_front())
+        operands.push_back(slice(builder, operand, offsets, sizes));
+      auto module = dot->getParentOfType<ModuleOp>();
+      auto functionType = builder.getFunctionType(
+          TypeRange(ValueRange(operands)), TypeRange{resultType});
+      auto name = generateUniqueFuncName(module, "triton_indirect_load");
+      func::FuncOp function;
+      {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPointToEnd(module.getBody());
+        function = rewriter.create<func::FuncOp>(call.getLoc(), name.str(),
+                                                 functionType);
+        function.setPrivate();
+        function->setAttr("isVolatile", builder.getBoolAttr(false));
+      }
+      auto tiled =
+          builder.create<func::CallOp>(call.getLoc(), function.getSymNameAttr(),
+                                       TypeRange{resultType}, operands);
+      tiled->setAttr("isVolatile", builder.getBoolAttr(false));
+      replacedLoads.insert(call);
+      return tiled.getResult(0);
+    }
+    if (def && def->getNumResults() == 1 && def->getNumRegions() == 0 &&
+        def->hasTrait<OpTrait::Elementwise>() && isMemoryEffectFree(def)) {
+      IRMapping mapping;
+      for (Value operand : def->getOperands()) {
+        auto operandType = dyn_cast<RankedTensorType>(operand.getType());
+        if (!operandType)
+          continue;
+        if (operandType.getShape() != type.getShape())
+          return extract(builder, source, offsets, sizes);
+        mapping.map(operand, slice(builder, operand, offsets, sizes));
+      }
+      Operation *tiled = builder.clone(*def, mapping);
+      tiled->getResult(0).setType(resultType);
+      return tiled->getResult(0);
+    }
+    if (auto broadcast = dyn_cast_or_null<triton::BroadcastOp>(def)) {
+      auto inputType = cast<RankedTensorType>(broadcast.getSrc().getType());
+      SmallVector<OpFoldResult> inputOffsets(offsets), inputSizes(sizes);
+      for (int64_t dim = 0; dim < type.getRank(); ++dim) {
+        if (inputType.getDimSize(dim) == 1) {
+          inputOffsets[dim] = builder.getIndexAttr(0);
+          inputSizes[dim] = builder.getIndexAttr(1);
+        }
+      }
+      return builder.create<triton::BroadcastOp>(
+          def->getLoc(), resultType,
+          slice(builder, broadcast.getSrc(), inputOffsets, inputSizes));
+    }
+    if (auto expand = dyn_cast_or_null<triton::ExpandDimsOp>(def)) {
+      SmallVector<OpFoldResult> inputOffsets(offsets), inputSizes(sizes);
+      inputOffsets.erase(inputOffsets.begin() + expand.getAxis());
+      inputSizes.erase(inputSizes.begin() + expand.getAxis());
+      return builder.create<triton::ExpandDimsOp>(
+          def->getLoc(), resultType,
+          slice(builder, expand.getSrc(), inputOffsets, inputSizes),
+          expand.getAxis());
+    }
+    if (auto splat = dyn_cast_or_null<triton::SplatOp>(def))
+      return builder.create<triton::SplatOp>(def->getLoc(), resultType,
+                                             splat.getSrc());
+    return extract(builder, source, offsets, sizes);
+  }
+
+  void markOriginalLoads() {
+    // Conversion rewriting defers the old dot's erasure. A post-conversion
+    // pattern removes a marked call only after all its users are gone.
+    for (Operation *load : replacedLoads)
+      load->setAttr("tt.scaled_dot_tiled", rewriter.getUnitAttr());
+    for (Operation *tensor : replacedCopies) {
+      auto rowCopy =
+          matchScaledDotRowCopy(cast<bufferization::ToTensorOp>(tensor));
+      rowCopy->loop->setAttr("tt.scaled_dot_tiled", rewriter.getUnitAttr());
+    }
+  }
+
+private:
+  static bool isNonvolatileIndirectLoad(func::CallOp call) {
+    auto volatility = call->getAttrOfType<BoolAttr>("isVolatile");
+    return call.getCallee().starts_with("triton_indirect_load") && volatility &&
+           !volatility.getValue();
+  }
+
+  // A fresh allocation made after the original load cannot alias its source.
+  bool isFreshPrivateBuffer(Value value, Operation *load) const {
+    while (Operation *def = value.getDefiningOp()) {
+      if (auto view = dyn_cast<ViewLikeOpInterface>(def)) {
+        value = view.getViewSource();
+        continue;
+      }
+      if (isa<memref::CastOp>(def)) {
+        value = def->getOperand(0);
+        continue;
+      }
+      auto alloc = dyn_cast<memref::AllocOp>(def);
+      return alloc && alloc->getBlock() == load->getBlock() &&
+             load->isBeforeInBlock(alloc) && alloc->isBeforeInBlock(dot);
+    }
+    return false;
+  }
+
+  bool canCross(Operation *operation, Operation *load) const {
+    if (auto call = dyn_cast<func::CallOp>(operation))
+      return isNonvolatileIndirectLoad(call);
+    if (isa<memref::AllocOp, bufferization::ToTensorOp>(operation))
+      return true;
+    // An op can expose both its own effects and recursive region effects.
+    // For example, a linalg.generic writing a private output may also write
+    // an alias of the load source from inside its region.
+    bool recursive = operation->hasTrait<OpTrait::HasRecursiveMemoryEffects>();
+    if (operation->getNumRegions() && !recursive)
+      return false;
+    if (recursive)
+      for (Region &region : operation->getRegions())
+        for (Block &block : region)
+          for (Operation &nested : block)
+            if (!canCross(&nested, load))
+              return false;
+    if (auto effects = dyn_cast<MemoryEffectOpInterface>(operation)) {
+      SmallVector<MemoryEffects::EffectInstance> instances;
+      effects.getEffects(instances);
+      return llvm::all_of(instances, [&](const auto &effect) {
+        return isa<MemoryEffects::Read>(effect.getEffect()) ||
+               (isa<MemoryEffects::Write>(effect.getEffect()) &&
+                effect.getValue() &&
+                isFreshPrivateBuffer(effect.getValue(), load));
+      });
+    }
+    return recursive || isMemoryEffectFree(operation);
+  }
+
+  bool canTileLoad(func::CallOp call) const {
+    if (!isNonvolatileIndirectLoad(call) || call.getNumResults() != 1 ||
+        !call.getResult(0).hasOneUse() || call->getBlock() != dot->getBlock() ||
+        call.getNumOperands() < 2 ||
+        !isa<MemRefType>(call.getOperand(0).getType()))
+      return false;
+    auto resultType = dyn_cast<RankedTensorType>(call.getResult(0).getType());
+    if (!resultType)
+      return false;
+    for (Value operand : call.getOperands().drop_front()) {
+      auto operandType = dyn_cast<RankedTensorType>(operand.getType());
+      if (!operandType || operandType.getShape() != resultType.getShape())
+        return false;
+    }
+    return canCrossToDot(call);
+  }
+
+  bool canCrossToDot(Operation *load) const {
+    for (Operation *next = load->getNextNode(); next != dot;
+         next = next->getNextNode()) {
+      if (!next || !canCross(next, load))
+        return false;
+    }
+    return true;
+  }
+
+  Value extract(OpBuilder &builder, Value source,
+                ArrayRef<OpFoldResult> offsets,
+                ArrayRef<OpFoldResult> sizes) const {
+    SmallVector<OpFoldResult> strides(sizes.size(), builder.getIndexAttr(1));
+    return builder.create<tensor::ExtractSliceOp>(dot->getLoc(), source,
+                                                  offsets, sizes, strides);
+  }
+
+  triton::DotScaledOp dot;
+  ConversionPatternRewriter &rewriter;
+  llvm::SmallPtrSet<Operation *, 2> eligibleLoads;
+  llvm::SmallPtrSet<Operation *, 2> replacedLoads;
+  llvm::SmallPtrSet<Operation *, 2> eligibleCopies;
+  llvm::SmallPtrSet<Operation *, 2> replacedCopies;
+};
+
+struct EraseTiledScaledDotLoad : OpRewritePattern<func::CallOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(func::CallOp call,
+                                PatternRewriter &rewriter) const override {
+    auto volatility = call->getAttrOfType<BoolAttr>("isVolatile");
+    if (!call->hasAttr("tt.scaled_dot_tiled") || !call->use_empty() ||
+        !call.getCallee().starts_with("triton_indirect_load") || !volatility ||
+        volatility.getValue())
+      return failure();
+    rewriter.eraseOp(call);
+    return success();
+  }
+};
+struct EraseTiledScaledDotCopy : OpRewritePattern<scf::ForOp> {
+  using OpRewritePattern::OpRewritePattern;
+  LogicalResult matchAndRewrite(scf::ForOp loop,
+                                PatternRewriter &rewriter) const override {
+    if (!loop->hasAttr("tt.scaled_dot_tiled") || loop.getNumResults() != 0)
+      return failure();
+    memref::AllocOp allocation;
+    for (auto copy : loop.getBody()->getOps<memref::CopyOp>()) {
+      auto view = copy.getTarget().getDefiningOp<memref::SubViewOp>();
+      if (!view || allocation)
+        return failure();
+      allocation = view.getSource().getDefiningOp<memref::AllocOp>();
+    }
+    if (!allocation)
+      return failure();
+    SmallVector<Operation *> deadTensors;
+    for (Operation *user : allocation->getUsers()) {
+      if (loop->isProperAncestor(user))
+        continue;
+      if (!isa<bufferization::ToTensorOp>(user) || !user->use_empty())
+        return failure();
+      deadTensors.push_back(user);
+    }
+    for (Operation *tensor : deadTensors)
+      rewriter.eraseOp(tensor);
+    rewriter.eraseOp(loop);
+    if (allocation->use_empty())
+      rewriter.eraseOp(allocation);
+    return success();
+  }
+};
+} // namespace
+
+void populateScaledDotCanonicalizationPatterns(RewritePatternSet &patterns) {
+  patterns.add<EraseTiledScaledDotLoad, EraseTiledScaledDotCopy>(
+      patterns.getContext());
+}
+
 LogicalResult
 DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                                     ConversionPatternRewriter &rewriter) const {
@@ -3072,18 +3541,270 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   auto lhsElemType = op.getAElemType();
   auto rhsElemType = op.getBElemType();
 
+  if (dstType.getRank() == 3) {
+    // Carry each batch's accumulator through the supported 2D dot path.
+    // Cast the i32 batch counter to index for the tensor slice offsets.
+    Value lower = rewriter.create<arith::ConstantIntOp>(loc, 0, 32);
+    Value upper =
+        rewriter.create<arith::ConstantIntOp>(loc, dstType.getDimSize(0), 32);
+    Value step = rewriter.create<arith::ConstantIntOp>(loc, 1, 32);
+    auto loop = rewriter.create<scf::ForOp>(
+        loc, lower, upper, step, ValueRange{c},
+        [&](OpBuilder &builder, Location, Value batch, ValueRange iterArgs) {
+          Value batchIndex = builder.create<arith::IndexCastOp>(
+              loc, builder.getIndexType(), batch);
+          SmallVector<OpFoldResult> offsets{batchIndex, builder.getIndexAttr(0),
+                                            builder.getIndexAttr(0)};
+          SmallVector<OpFoldResult> strides(3, builder.getIndexAttr(1));
+          auto sizes = [&](Value value) {
+            auto type = cast<RankedTensorType>(value.getType());
+            return SmallVector<OpFoldResult>{
+                builder.getIndexAttr(1),
+                builder.getIndexAttr(type.getDimSize(1)),
+                builder.getIndexAttr(type.getDimSize(2))};
+          };
+          auto slice = [&](Value value) -> Value {
+            if (!value)
+              return {};
+            auto type = cast<RankedTensorType>(value.getType());
+            auto sliceType = RankedTensorType::get(type.getShape().drop_front(),
+                                                   type.getElementType());
+            return builder.create<tensor::ExtractSliceOp>(
+                loc, sliceType, value, offsets, sizes(value), strides);
+          };
+          Value batchAcc = slice(iterArgs[0]);
+          Value dot = builder.create<triton::DotScaledOp>(
+              loc, batchAcc.getType(), slice(lhs), slice(rhs), batchAcc,
+              slice(lhsScale), slice(rhsScale), lhsElemType, rhsElemType,
+              op.getFastMath(), op.getLhsKPack(), op.getRhsKPack());
+          Value result = builder.create<tensor::InsertSliceOp>(
+              loc, dot, iterArgs[0], offsets, sizes(c), strides);
+          builder.create<scf::YieldOp>(loc, result);
+        });
+    rewriter.replaceOp(op, loop.getResults());
+    return success();
+  }
+
   bool isFP8Input = (lhsElemType == triton::ScaleDotElemType::E4M3 ||
                      lhsElemType == triton::ScaleDotElemType::E5M2) &&
                     (rhsElemType == triton::ScaleDotElemType::E4M3 ||
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
-  if (isFP8Input || isFP4Input) {
+  // MatMulMx accepts E8M0 scales and K-packed low precision operands only.
+  // In particular, NVFP4 uses floating E4M3 scales and cannot use this ABI.
+  auto hasE8M0Scale = [](Value scale) {
+    return !scale || cast<RankedTensorType>(scale.getType())
+                         .getElementType()
+                         .isInteger(8);
+  };
+  // Small packed FP4 cannot use MatMulMx: storage K=32 is decomposed
+  // as ordinary i8, while smaller K violates the native CUBE constraints.
+  // Decode logical K below 128 in TA, including recursively created tiles.
+  bool needsFp4Decomposition =
+      isFP4Input &&
+      cast<RankedTensorType>(lhs.getType()).getShape().back() < 64;
+  bool useNativeMx = (isFP8Input || isFP4Input) && !needsFp4Decomposition &&
+                     dstType.getRank() == 2 &&
+                     dstType.getElementType().isF32() && op.getLhsKPack() &&
+                     op.getRhsKPack() && hasE8M0Scale(lhsScale) &&
+                     hasE8M0Scale(rhsScale);
+  // Native MX retains its complete product and accumulator. Its indirect
+  // reads may use their exact signed i32 offsets without materializing i64.
+  if (useNativeMx) {
+    narrowNativeScaledDotOffsets({lhs, rhs}, rewriter);
+    lhs = rewriter.getRemappedValue(lhs);
+    rhs = rewriter.getRemappedValue(rhs);
+  }
+  // Bound M, N and K before the software path decodes inputs to f32.
+  auto lhsTy = cast<RankedTensorType>(lhs.getType());
+  int64_t logicalK = lhsTy.getShape().back();
+  if (lhsElemType == triton::ScaleDotElemType::E2M1 && op.getLhsKPack())
+    logicalK *= 2;
+  constexpr int64_t fallbackTile = 32;
+  constexpr int64_t tileLimit = fallbackTile;
+  auto tileSize = [&](int64_t dim) {
+    int64_t size = std::min(dim, tileLimit);
+    while (dim % size)
+      size /= 2;
+    return size;
+  };
+  if (!useNativeMx && dstType.getRank() == 2 &&
+      (dstType.getDimSize(0) > tileLimit || dstType.getDimSize(1) > tileLimit ||
+       logicalK > fallbackTile)) {
+    int64_t tileM = tileSize(dstType.getDimSize(0));
+    int64_t tileN = tileSize(dstType.getDimSize(1));
+    ScaledDotLoadTiler loadTiler(op, rewriter);
+    loadTiler.prepare({lhs, rhs, lhsScale, rhsScale});
+    int64_t tileK = tileSize(logicalK);
+    auto f32Type = dstType.clone(rewriter.getF32Type());
+    if (c.getType() != f32Type)
+      c = rewriter.create<arith::ExtFOp>(loc, f32Type, c);
+    Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+    Value mEnd =
+        rewriter.create<arith::ConstantIndexOp>(loc, dstType.getDimSize(0));
+    Value nEnd =
+        rewriter.create<arith::ConstantIndexOp>(loc, dstType.getDimSize(1));
+    Value kEnd = rewriter.create<arith::ConstantIndexOp>(loc, logicalK);
+    Value mStep = rewriter.create<arith::ConstantIndexOp>(loc, tileM);
+    Value nStep = rewriter.create<arith::ConstantIndexOp>(loc, tileN);
+    Value kStep = rewriter.create<arith::ConstantIndexOp>(loc, tileK);
+    auto divideIndex = [&](OpBuilder &builder, Value index,
+                           int64_t divisor) -> Value {
+      if (divisor == 1)
+        return index;
+      Value factor = builder.create<arith::ConstantIndexOp>(loc, divisor);
+      return builder.create<arith::DivUIOp>(loc, index, factor);
+    };
+    auto slice = [&](OpBuilder &builder, Value source, Value row, Value col,
+                     int64_t rows, int64_t cols) -> Value {
+      SmallVector<OpFoldResult> offsets{row, col};
+      SmallVector<OpFoldResult> sizes{builder.getIndexAttr(rows),
+                                      builder.getIndexAttr(cols)};
+      return loadTiler.slice(builder, source, offsets, sizes);
+    };
+    auto operandSlice = [&](OpBuilder &builder, Value operand, Value row,
+                            Value col, int64_t rows, int64_t cols, bool fp4,
+                            bool packRows) -> Value {
+      if (fp4) {
+        if (packRows) {
+          row = divideIndex(builder, row, 2);
+          rows /= 2;
+        } else {
+          col = divideIndex(builder, col, 2);
+          cols /= 2;
+        }
+      }
+      return slice(builder, operand, row, col, rows, cols);
+    };
+    auto scaleSlice = [&](OpBuilder &builder, Value scale, Value nonK, Value k,
+                          int64_t nonKSize) -> Value {
+      if (!scale)
+        return {};
+      auto type = cast<RankedTensorType>(scale.getType());
+      int64_t groupSize = logicalK / type.getShape().back();
+      return slice(builder, scale, nonK, divideIndex(builder, k, groupSize),
+                   nonKSize, tileK / groupSize);
+    };
+    auto computeTile = [&](OpBuilder &tileBuilder, Value m, Value n,
+                           Value fullAcc) -> Value {
+      Value tileAcc = slice(tileBuilder, fullAcc, m, n, tileM, tileN);
+      auto kLoop = tileBuilder.create<scf::ForOp>(
+          loc, zero, kEnd, kStep, ValueRange{tileAcc},
+          [&](OpBuilder &builder, Location, Value k, ValueRange kAcc) {
+            Value a =
+                operandSlice(builder, lhs, m, k, tileM, tileK,
+                             lhsElemType == triton::ScaleDotElemType::E2M1,
+                             !op.getLhsKPack());
+            Value b =
+                operandSlice(builder, rhs, k, n, tileK, tileN,
+                             rhsElemType == triton::ScaleDotElemType::E2M1,
+                             op.getRhsKPack());
+            Value sa = scaleSlice(builder, lhsScale, m, k, tileM);
+            Value sb = scaleSlice(builder, rhsScale, n, k, tileN);
+            auto dot = builder.create<triton::DotScaledOp>(
+                loc, kAcc[0].getType(), a, b, kAcc[0], sa, sb, lhsElemType,
+                rhsElemType, op.getFastMath(), op.getLhsKPack(),
+                op.getRhsKPack());
+            builder.create<scf::YieldOp>(loc, dot.getResult());
+          });
+      return kLoop.getResult(0);
+    };
+    Value result;
+    if (!compileOn91095) {
+      // A2/A3's dynamic tensor insertion lowers to padded prefix/suffix
+      // concatenations. Write each disjoint output tile once instead. Read C
+      // from its original snapshot; this fresh buffer never aliases it.
+      auto outputType =
+          MemRefType::get(f32Type.getShape(), rewriter.getF32Type());
+      Value output = rewriter.create<memref::AllocOp>(loc, outputType);
+      rewriter.create<scf::ForOp>(
+          loc, zero, mEnd, mStep, ValueRange{},
+          [&](OpBuilder &mBuilder, Location, Value m, ValueRange) {
+            mBuilder.create<scf::ForOp>(
+                loc, zero, nEnd, nStep, ValueRange{},
+                [&](OpBuilder &nBuilder, Location, Value n, ValueRange) {
+                  Value tile = computeTile(nBuilder, m, n, c);
+                  SmallVector<OpFoldResult> offsets{m, n};
+                  SmallVector<OpFoldResult> sizes{nBuilder.getIndexAttr(tileM),
+                                                  nBuilder.getIndexAttr(tileN)};
+                  SmallVector<OpFoldResult> strides(2,
+                                                    nBuilder.getIndexAttr(1));
+                  Value destination = nBuilder.create<memref::SubViewOp>(
+                      loc, output, offsets, sizes, strides);
+                  auto write =
+                      nBuilder
+                          .create<bufferization::MaterializeInDestinationOp>(
+                              loc, tile, destination);
+                  write.setWritable(true);
+                  nBuilder.create<scf::YieldOp>(loc);
+                });
+            mBuilder.create<scf::YieldOp>(loc);
+          });
+      result = rewriter.create<bufferization::ToTensorOp>(
+          loc, f32Type, output, /*restrict=*/true, /*writable=*/true);
+    } else {
+      auto mLoop = rewriter.create<scf::ForOp>(
+          loc, zero, mEnd, mStep, ValueRange{c},
+          [&](OpBuilder &mBuilder, Location, Value m, ValueRange mAcc) {
+            auto nLoop = mBuilder.create<scf::ForOp>(
+                loc, zero, nEnd, nStep, mAcc,
+                [&](OpBuilder &nBuilder, Location, Value n, ValueRange nAcc) {
+                  Value tile = computeTile(nBuilder, m, n, nAcc[0]);
+                  SmallVector<OpFoldResult> offsets{m, n};
+                  SmallVector<OpFoldResult> sizes{nBuilder.getIndexAttr(tileM),
+                                                  nBuilder.getIndexAttr(tileN)};
+                  SmallVector<OpFoldResult> strides(2,
+                                                    nBuilder.getIndexAttr(1));
+                  Value result = nBuilder.create<tensor::InsertSliceOp>(
+                      loc, tile, nAcc[0], offsets, sizes, strides);
+                  nBuilder.create<scf::YieldOp>(loc, result);
+                });
+            mBuilder.create<scf::YieldOp>(loc, nLoop.getResults());
+          });
+      result = mLoop.getResult(0);
+    }
+    if (result.getType() != dstType) {
+      auto trunc = rewriter.create<arith::TruncFOp>(loc, dstType, result);
+      trunc->setAttr("round_mode",
+                     hfusion::RoundModeAttr::get(rewriter.getContext(),
+                                                 hfusion::RoundMode::RINT));
+      result = trunc;
+    }
+    rewriter.replaceOp(op, result);
+    loadTiler.markOriginalLoads();
+    return success();
+  }
+
+  if (useNativeMx && !lhsScale) {
+    auto lhsTy = cast<RankedTensorType>(lhs.getType());
+    int64_t k = lhsTy.getShape().back();
+    if (lhsElemType == triton::ScaleDotElemType::E2M1 && op.getLhsKPack())
+      k *= 2;
+    auto defaultScaleTy = RankedTensorType::get(
+        {dstType.getDimSize(dstType.getRank() - 2), (k + 31) / 32},
+        rewriter.getI8Type());
+    // The native MX path uses E8M0, whose encoding of one is 127.
+    Value defaultScaleVal =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(127));
+    Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
+        loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
+    lhsScale = rewriter
+                   .create<linalg::FillOp>(loc, ValueRange{defaultScaleVal},
+                                           ValueRange{defaultScaleEmpty})
+                   .getResult(0);
+  }
+  if (useNativeMx) {
     if (!rhsScale) {
-      RankedTensorType defaultScaleTy =
-          RankedTensorType::get({1}, rewriter.getI8Type());
-      Value defaultScaleVal =
-          rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(1));
+      auto rhsTy = cast<RankedTensorType>(rhs.getType());
+      int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
+      if (rhsElemType == triton::ScaleDotElemType::E2M1 && op.getRhsKPack())
+        k *= 2;
+      auto defaultScaleTy = RankedTensorType::get(
+          {dstType.getShape().back(), (k + 31) / 32}, rewriter.getI8Type());
+      // E8M0 encodes a scale factor of one with exponent bias 127.
+      Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI8IntegerAttr(127));
       Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
           loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
       rhsScale = rewriter
@@ -3120,326 +3841,189 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         /*lhsFormat(optional)*/ convertFormat(lhsElemType),
         /*rhsFormat(optional)*/ convertFormat(rhsElemType));
 
-    Value finalResult = matmulMxResult;
-    if (dstType.getElementType().isBF16()) {
-      finalResult =
-          rewriter.create<arith::TruncFOp>(loc, dstType, matmulMxResult);
-    }
-    rewriter.replaceOp(op, finalResult);
+    rewriter.replaceOp(op, matmulMxResult);
     return success();
   }
 
-  if (!lhsScale) {
-    return op.emitError("lhsScale is required for non-FP8 input");
-  }
-
-  RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());
-  RankedTensorType lhsScaleTy = cast<RankedTensorType>(lhsScale.getType());
-  RankedTensorType rhsScaleTy =
-      rhsScale ? cast<RankedTensorType>(rhsScale.getType()) : nullptr;
-  RankedTensorType rhsTy = cast<RankedTensorType>(rhs.getType());
-
-  Value lhsScaleOut;
-  Value rhsScaleOut;
-  Value c127 = rewriter.create<arith::ConstantOp>(
-      op.getLoc(), rewriter.getI16Type(), rewriter.getI16IntegerAttr(127));
-  Value c7 = rewriter.create<arith::ConstantOp>(
-      op.getLoc(), rewriter.getI16Type(), rewriter.getI16IntegerAttr(7));
-  Type i16Ty = rewriter.getI16Type();
-  Type bf16Ty = rewriter.getBF16Type();
-  Type fp16Ty = rewriter.getF16Type();
-  Type fp32Ty = rewriter.getF32Type();
-  bool fastMath = op.getFastMath();
-
-  auto createNanSplat = [&](RankedTensorType tensorTy) -> Value {
-    auto floatTy = cast<FloatType>(tensorTy.getElementType());
-    auto nanAttr = rewriter.getFloatAttr(
-        floatTy, APFloat::getNaN(floatTy.getFloatSemantics()));
-    Value empty = rewriter.create<tensor::EmptyOp>(loc, tensorTy.getShape(),
-                                                   tensorTy.getElementType());
-    return rewriter
-        .create<linalg::FillOp>(
-            loc, ValueRange{rewriter.create<arith::ConstantOp>(loc, nanAttr)},
-            ValueRange{empty})
-        .getResult(0);
+  auto tensorI32 = [&](ArrayRef<int64_t> shape, uint32_t value) -> Value {
+    auto type = RankedTensorType::get(shape, rewriter.getI32Type());
+    return rewriter.create<arith::ConstantOp>(
+        loc, type, DenseElementsAttr::get(type, APInt(32, value)));
+  };
+  auto toFloat32 = [&](Value value) -> Value {
+    auto type = cast<RankedTensorType>(value.getType());
+    if (type.getElementType().isF32())
+      return value;
+    return rewriter.create<arith::ExtFOp>(
+        loc, type.clone(rewriter.getF32Type()), value);
   };
 
-  auto createNaNMask = [&](Value scaleTensor,
-                           RankedTensorType scaleTy) -> Value {
-    if (scaleTy.getElementType().isIntOrIndex()) {
-      auto bitWidth = scaleTy.getElementTypeBitWidth();
-      auto allOnes = APInt::getAllOnes(bitWidth);
-      auto sentinel = rewriter.create<arith::ConstantOp>(
-          loc, scaleTy, DenseElementsAttr::get(scaleTy, allOnes));
-      return rewriter
-          .create<arith::CmpIOp>(loc, arith::CmpIPredicate::eq, scaleTensor,
-                                 sentinel)
-          .getResult();
+  // A byte contains consecutive low/high E2M1 values along the selected
+  // packing axis, which can be K, M or N. Decode before applying scales or
+  // NaN handling: the packed i8 tensor is not a floating point tensor.
+  auto unpackFp4 = [&](Value packed, unsigned axis) -> Value {
+    auto type = cast<RankedTensorType>(packed.getType());
+    auto shape = type.getShape();
+    Value bits = rewriter.create<arith::ExtUIOp>(
+        loc, type.clone(rewriter.getI32Type()), packed);
+    auto decodeNibble = [&](Value nibble) -> Value {
+      Value magnitude =
+          rewriter.create<arith::AndIOp>(loc, nibble, tensorI32(shape, 7));
+      Value sign =
+          rewriter.create<arith::AndIOp>(loc, nibble, tensorI32(shape, 8));
+      sign = rewriter.create<arith::ShLIOp>(loc, sign, tensorI32(shape, 28));
+      Value normal =
+          rewriter.create<arith::ShLIOp>(loc, magnitude, tensorI32(shape, 22));
+      normal = rewriter.create<arith::AddIOp>(loc, normal,
+                                              tensorI32(shape, 0x3f000000));
+      Value subnormal = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::ult, magnitude, tensorI32(shape, 2));
+      Value zero = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, magnitude, tensorI32(shape, 0));
+      Value subnormalBits = rewriter.create<arith::SelectOp>(
+          loc, zero, tensorI32(shape, 0), tensorI32(shape, 0x3f000000));
+      Value fpBits = rewriter.create<arith::SelectOp>(loc, subnormal,
+                                                      subnormalBits, normal);
+      fpBits = rewriter.create<arith::OrIOp>(loc, fpBits, sign);
+      return rewriter.create<arith::BitcastOp>(
+          loc, type.clone(rewriter.getF32Type()), fpBits);
+    };
+    Value lowBits =
+        rewriter.create<arith::AndIOp>(loc, bits, tensorI32(shape, 15));
+    Value highBits =
+        rewriter.create<arith::ShRUIOp>(loc, bits, tensorI32(shape, 4));
+    Value low = decodeNibble(lowBits);
+    Value high = decodeNibble(highBits);
+    SmallVector<int64_t> joinedShape(shape);
+    joinedShape.push_back(2);
+    Value joined = rewriter.create<triton::JoinOp>(
+        loc, RankedTensorType::get(joinedShape, rewriter.getF32Type()), low,
+        high);
+    unsigned rank = type.getRank();
+    SmallVector<int32_t> order;
+    SmallVector<int64_t> interleavedShape;
+    SmallVector<ReassociationIndices> reassociation;
+    unsigned expandedAxis = 0;
+    for (unsigned i = 0; i < rank; ++i) {
+      order.push_back(i);
+      interleavedShape.push_back(shape[i]);
+      ReassociationIndices group{expandedAxis++};
+      if (i == axis) {
+        order.push_back(rank);
+        interleavedShape.push_back(2);
+        group.push_back(expandedAxis++);
+      }
+      reassociation.push_back(group);
     }
-
-    return rewriter
-        .create<arith::CmpFOp>(loc, arith::CmpFPredicate::UNO, scaleTensor,
-                               scaleTensor)
-        .getResult();
+    if (axis != rank - 1)
+      joined = rewriter.create<triton::TransOp>(
+          loc, RankedTensorType::get(interleavedShape, rewriter.getF32Type()),
+          joined, rewriter.getDenseI32ArrayAttr(order));
+    SmallVector<int64_t> unpackedShape(shape);
+    unpackedShape[axis] *= 2;
+    return rewriter.create<tensor::CollapseShapeOp>(
+        loc, RankedTensorType::get(unpackedShape, rewriter.getF32Type()),
+        joined, reassociation);
   };
 
-  auto applyNaNMask = [&](Value valueTensor, Value maskTensor) -> Value {
-    auto valueTy = cast<RankedTensorType>(valueTensor.getType());
-    Value nanTensor = createNanSplat(valueTy);
-    return rewriter
-        .create<arith::SelectOp>(loc, maskTensor, nanTensor, valueTensor)
-        .getResult();
-  };
+  auto scaleOperand = [&](Value value, Value scale,
+                          triton::ScaleDotElemType format, bool kPacked,
+                          bool isLhs) -> Value {
+    auto type = cast<RankedTensorType>(value.getType());
+    unsigned rank = type.getRank();
+    unsigned kAxis = isLhs ? rank - 1 : rank - 2;
+    unsigned packedAxis = kPacked ? kAxis : (isLhs ? rank - 2 : rank - 1);
+    value = format == triton::ScaleDotElemType::E2M1
+                ? unpackFp4(value, packedAxis)
+                : toFloat32(value);
+    if (!scale)
+      return value;
 
-  if (lhsScaleTy.getElementType().isIntOrIndex()) {
-    RankedTensorType lhsScaleI16Ty =
-        RankedTensorType::get(lhsScaleTy.getShape(), i16Ty);
-    Value lhsScaleI16;
-    lhsScaleI16 =
-        rewriter.create<arith::ExtUIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
-
-    Value lhsShift7Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
-    Value lhsShift7 = rewriter
-                          .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
-                                                  ValueRange{lhsShift7Empty})
-                          .getResult(0);
-    Value lhsScaleI16Shifted =
-        rewriter.create<arith::ShLIOp>(op.getLoc(), lhsScaleI16, lhsShift7);
-
-    RankedTensorType lhsScaleBF16Ty =
-        RankedTensorType::get(lhsScaleTy.getShape(), bf16Ty);
-    Value lhsScaleBF16 = rewriter.create<arith::BitcastOp>(
-        op.getLoc(), lhsScaleBF16Ty, lhsScaleI16Shifted);
-    if (lhsTy.getElementType() == fp16Ty) {
-      RankedTensorType lhsScaleFp32Ty =
-          RankedTensorType::get(lhsScaleTy.getShape(), fp32Ty);
-      Value lhsScaleFp32 = rewriter.create<arith::ExtFOp>(
-          op.getLoc(), lhsScaleFp32Ty, lhsScaleBF16);
-      RankedTensorType lhsScaleFp16Ty =
-          RankedTensorType::get(lhsScaleTy.getShape(), fp16Ty);
-      lhsScaleOut = rewriter.create<arith::TruncFOp>(
-          op.getLoc(), lhsScaleFp16Ty, lhsScaleFp32);
+    auto scaleType = cast<RankedTensorType>(scale.getType());
+    auto scaleShape = scaleType.getShape();
+    Value decodedScale;
+    if (scaleType.getElementType().isInteger(8)) {
+      Value exponent = rewriter.create<arith::ExtUIOp>(
+          loc, scaleType.clone(rewriter.getI32Type()), scale);
+      Value scaleBits = rewriter.create<arith::ShLIOp>(
+          loc, exponent, tensorI32(scaleShape, 23));
+      // E8M0 zero is 2^-127 (an f32 subnormal), not floating zero.
+      Value isZero = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, exponent, tensorI32(scaleShape, 0));
+      scaleBits = rewriter.create<arith::SelectOp>(
+          loc, isZero, tensorI32(scaleShape, 0x00400000), scaleBits);
+      // 0xff is the E8M0 NaN sentinel, not positive infinity.
+      Value isNaN = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, exponent, tensorI32(scaleShape, 255));
+      scaleBits = rewriter.create<arith::SelectOp>(
+          loc, isNaN, tensorI32(scaleShape, 0x7fc00000), scaleBits);
+      decodedScale = rewriter.create<arith::BitcastOp>(
+          loc, scaleType.clone(rewriter.getF32Type()), scaleBits);
     } else {
-      lhsScaleOut = lhsScaleBF16;
-    }
-  } else {
-    lhsScaleOut =
-        rewriter
-            .create<arith::ExtFOp>(
-                op.getLoc(),
-                RankedTensorType::get(lhsScaleTy.getShape(), fp32Ty), lhsScale)
-            .getResult();
-  }
-
-  if (rhsScale && rhsScaleTy.getElementType().isIntOrIndex()) {
-    if (rhsScaleTy.getRank() != 2) {
-      return op.emitError("rhsScale must be 2D for transpose");
+      decodedScale = toFloat32(scale);
     }
 
-    SmallVector<int64_t> transposedShape = {rhsScaleTy.getShape()[1],
-                                            rhsScaleTy.getShape()[0]};
-    RankedTensorType transposedRhsScaleTy =
-        RankedTensorType::get(transposedShape, rhsScaleTy.getElementType());
-
-    Value transposedRhsScale = rewriter.create<triton::TransOp>(
-        op.getLoc(), transposedRhsScaleTy, rhsScale,
-        DenseI32ArrayAttr::get(rewriter.getContext(), ArrayRef<int32_t>{1, 0}));
-    RankedTensorType rhsScaleI16Ty =
-        RankedTensorType::get(transposedShape, i16Ty);
-    Value rhsScaleI16;
-    rhsScaleI16 = rewriter.create<arith::ExtUIOp>(op.getLoc(), rhsScaleI16Ty,
-                                                  transposedRhsScale);
-
-    Value rhsShift7Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
-    Value rhsShift7 = rewriter
-                          .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
-                                                  ValueRange{rhsShift7Empty})
-                          .getResult(0);
-    Value rhsScaleI16Shifted =
-        rewriter.create<arith::ShLIOp>(op.getLoc(), rhsScaleI16, rhsShift7);
-
-    RankedTensorType rhsScaleBF16Ty =
-        RankedTensorType::get(transposedShape, bf16Ty);
-    Value rhsScaleBF16 = rewriter.create<arith::BitcastOp>(
-        op.getLoc(), rhsScaleBF16Ty, rhsScaleI16Shifted);
-
-    if (rhsTy.getElementType() == fp16Ty) {
-      RankedTensorType rhsScaleFp32Ty =
-          RankedTensorType::get(transposedShape, fp32Ty);
-      Value rhsScaleFp32 = rewriter.create<arith::ExtFOp>(
-          op.getLoc(), rhsScaleFp32Ty, rhsScaleBF16);
-      RankedTensorType rhsScaleFp16Ty =
-          RankedTensorType::get(transposedShape, fp16Ty);
-      rhsScaleOut = rewriter.create<arith::TruncFOp>(
-          op.getLoc(), rhsScaleFp16Ty, rhsScaleFp32);
-    } else {
-      rhsScaleOut = rhsScaleBF16;
+    // Both scale operands have [..., non-K, K/group] shape. Repeat each
+    // scale along logical K, then transpose the last two axes for RHS.
+    auto valueType = cast<RankedTensorType>(value.getType());
+    int64_t groupSize = valueType.getDimSize(kAxis) / scaleShape.back();
+    SmallVector<int64_t> expandedShape(scaleShape);
+    expandedShape.push_back(1);
+    Value expanded = rewriter.create<triton::ExpandDimsOp>(
+        loc, RankedTensorType::get(expandedShape, rewriter.getF32Type()),
+        decodedScale, rewriter.getI32IntegerAttr(scaleType.getRank()));
+    expandedShape.back() = groupSize;
+    Value broadcast = rewriter.create<triton::BroadcastOp>(
+        loc, RankedTensorType::get(expandedShape, rewriter.getF32Type()),
+        expanded);
+    SmallVector<int64_t> broadcastShape(scaleShape);
+    broadcastShape.back() *= groupSize;
+    SmallVector<ReassociationIndices> reassociation;
+    for (unsigned i = 0; i < rank; ++i) {
+      ReassociationIndices group{i};
+      if (i == rank - 1)
+        group.push_back(rank);
+      reassociation.push_back(group);
     }
-    int64_t rhsD0 = rhsScaleTy.getShape()[1];
-    int64_t rhsD1 = rhsScaleTy.getShape()[0];
-    SmallVector<int64_t> rhsExpandedShape1 = {rhsD0, rhsD1, 1};
-    RankedTensorType rhsExpandedTy1 =
-        RankedTensorType::get(rhsExpandedShape1, rhsTy.getElementType());
-    Value rhsExpanded1 = rewriter
-                             .create<triton::ExpandDimsOp>(
-                                 op.getLoc(), rhsExpandedTy1, rhsScaleOut,
-                                 rewriter.getI32IntegerAttr(2))
-                             .getResult();
-
-    int64_t rhsDim1 = rhsTy.getShape()[0];
-    if (rhsDim1 % rhsD0 != 0) {
-      return op.emitError(
-          "rhs dim0 must be an integer multiple of rhsScale dim0");
+    Value broadcastScale = rewriter.create<tensor::CollapseShapeOp>(
+        loc, RankedTensorType::get(broadcastShape, rewriter.getF32Type()),
+        broadcast, reassociation);
+    if (!isLhs) {
+      SmallVector<int32_t> order;
+      for (unsigned i = 0; i < rank; ++i)
+        order.push_back(i);
+      std::swap(order[rank - 2], order[rank - 1]);
+      broadcastScale = rewriter.create<triton::TransOp>(
+          loc, valueType, broadcastScale, rewriter.getDenseI32ArrayAttr(order));
     }
-    int64_t rhsD2 = rhsDim1 / rhsD0;
-    SmallVector<int64_t> rhsBroadcastShape = {rhsD0, rhsD1, rhsD2};
-    RankedTensorType rhsBroadcastTy =
-        RankedTensorType::get(rhsBroadcastShape, rhsTy.getElementType());
-    Value rhsBroadcasted = rewriter
-                               .create<triton::BroadcastOp>(
-                                   op.getLoc(), rhsBroadcastTy, rhsExpanded1)
-                               .getResult();
+    return rewriter.create<arith::MulFOp>(loc, value, broadcastScale);
+  };
 
-    SmallVector<int32_t> transposeOrder = {0, 2, 1};
-    Value transposedBroadcasted = rewriter.create<triton::TransOp>(
-        op.getLoc(),
-        RankedTensorType::get({rhsD0, rhsD2, rhsD1}, rhsTy.getElementType()),
-        rhsBroadcasted,
-        DenseI32ArrayAttr::get(rewriter.getContext(), transposeOrder));
-    SmallVector<ReassociationIndices> rhsReassociation;
-    rhsReassociation.push_back({0, 1});
-    rhsReassociation.push_back({2});
-
-    Value scaledRhs = rewriter
-                          .create<tensor::CollapseShapeOp>(
-                              op.getLoc(),
-                              RankedTensorType::get({rhsD0 * rhsD2, rhsD1},
-                                                    rhsTy.getElementType()),
-                              transposedBroadcasted, rhsReassociation)
-                          .getResult();
-
-    rhs =
-        rewriter.create<arith::MulFOp>(op.getLoc(), rhs, scaledRhs).getResult();
-
-    if (!fastMath) {
-      Value rhsScaleNaNMask =
-          createNaNMask(transposedRhsScale, transposedRhsScaleTy);
-      Value rhsExpandedMask =
-          rewriter
-              .create<triton::ExpandDimsOp>(
-                  op.getLoc(),
-                  RankedTensorType::get(rhsExpandedShape1,
-                                        rewriter.getI1Type()),
-                  rhsScaleNaNMask, rewriter.getI32IntegerAttr(2))
-              .getResult();
-      Value rhsBroadcastMask =
-          rewriter
-              .create<triton::BroadcastOp>(
-                  op.getLoc(),
-                  RankedTensorType::get(rhsBroadcastShape,
-                                        rewriter.getI1Type()),
-                  rhsExpandedMask)
-              .getResult();
-      Value transposedBroadcastMask =
-          rewriter
-              .create<triton::TransOp>(
-                  op.getLoc(),
-                  RankedTensorType::get({rhsD0, rhsD2, rhsD1},
-                                        rewriter.getI1Type()),
-                  rhsBroadcastMask,
-                  DenseI32ArrayAttr::get(rewriter.getContext(), transposeOrder))
-              .getResult();
-      Value collapsedRhsMask =
-          rewriter
-              .create<tensor::CollapseShapeOp>(
-                  op.getLoc(),
-                  RankedTensorType::get({rhsD0 * rhsD2, rhsD1},
-                                        rewriter.getI1Type()),
-                  transposedBroadcastMask, rhsReassociation)
-              .getResult();
-      rhs = applyNaNMask(rhs, collapsedRhsMask);
-    }
-  }
-
-  int64_t D0 = lhsScaleTy.getShape()[0];
-  int64_t D1 = lhsScaleTy.getShape()[1];
-  SmallVector<int64_t> expandedShape1 = {D0, D1, 1};
-  RankedTensorType expandedTy1 =
-      RankedTensorType::get(expandedShape1, lhsTy.getElementType());
-  Value expanded1 =
-      rewriter
-          .create<triton::ExpandDimsOp>(op.getLoc(), expandedTy1, lhsScaleOut,
-                                        rewriter.getI32IntegerAttr(2))
-          .getResult();
-
-  int64_t lhsDim1 = lhsTy.getShape()[1];
-  if (lhsDim1 % D1 != 0) {
-    return op.emitError(
-        "lhs dim1 must be an integer multiple of lhsScale dim1");
-  }
-  int64_t D2 = lhsDim1 / D1;
-  SmallVector<int64_t> broadcastShape = {D0, D1, D2};
-  RankedTensorType broadcastTy =
-      RankedTensorType::get(broadcastShape, lhsTy.getElementType());
-  Value broadcasted =
-      rewriter.create<triton::BroadcastOp>(op.getLoc(), broadcastTy, expanded1)
-          .getResult();
-
-  SmallVector<ReassociationIndices> reassociation;
-  reassociation.push_back({0});
-  reassociation.push_back({1, 2});
-
-  Value scaledLhs =
-      rewriter
-          .create<tensor::CollapseShapeOp>(
-              op.getLoc(),
-              RankedTensorType::get({D0, D1 * D2}, lhsTy.getElementType()),
-              broadcasted, reassociation)
-          .getResult();
-
-  Value scaledLhsFinal =
-      rewriter.create<arith::MulFOp>(op.getLoc(), lhs, scaledLhs).getResult();
-
-  if (!fastMath) {
-    Value lhsScaleNaNMask = createNaNMask(lhsScale, lhsScaleTy);
-    Value lhsExpandedMask =
-        rewriter
-            .create<triton::ExpandDimsOp>(
-                op.getLoc(),
-                RankedTensorType::get(expandedShape1, rewriter.getI1Type()),
-                lhsScaleNaNMask, rewriter.getI32IntegerAttr(2))
-            .getResult();
-    Value lhsBroadcastMask =
-        rewriter
-            .create<triton::BroadcastOp>(
-                op.getLoc(),
-                RankedTensorType::get(broadcastShape, rewriter.getI1Type()),
-                lhsExpandedMask)
-            .getResult();
-    Value collapsedLhsMask =
-        rewriter
-            .create<tensor::CollapseShapeOp>(
-                op.getLoc(),
-                RankedTensorType::get({D0, D1 * D2}, rewriter.getI1Type()),
-                lhsBroadcastMask, reassociation)
-            .getResult();
-    scaledLhsFinal = applyNaNMask(scaledLhsFinal, collapsedLhsMask);
-  }
-
+  lhs = scaleOperand(lhs, lhsScale, lhsElemType, op.getLhsKPack(), true);
+  rhs = scaleOperand(rhs, rhsScale, rhsElemType, op.getRhsKPack(), false);
+  c = toFloat32(c);
   Operation *matmulOp;
-  if (dstType.getRank() == 2) {
-    matmulOp = rewriter.create<linalg::MatmulOp>(
-        op.getLoc(), ValueRange{scaledLhsFinal, rhs}, ValueRange{c});
-  } else if (dstType.getRank() == 3) {
-    matmulOp = rewriter.create<linalg::BatchMatmulOp>(
-        op.getLoc(), ValueRange{scaledLhsFinal, rhs}, ValueRange{c});
-  } else {
-    return op.emitError("DotScaledOp only support 2D or 3D tensor");
+  if (dstType.getRank() == 2)
+    matmulOp = rewriter.create<linalg::MatmulOp>(loc, ValueRange{lhs, rhs},
+                                                 ValueRange{c});
+  else if (dstType.getRank() == 3)
+    matmulOp = rewriter.create<linalg::BatchMatmulOp>(loc, ValueRange{lhs, rhs},
+                                                      ValueRange{c});
+  else
+    return op.emitError("DotScaledOp only supports 2D or 3D tensors");
+  // Scaling in the operand's original half precision loses values and can
+  // overflow before accumulation. Keep exact f32 products and IEEE matmul.
+  matmulOp->setAttr("input_precision", rewriter.getStringAttr("ieee"));
+  Value result = matmulOp->getResult(0);
+  if (!dstType.getElementType().isF32()) {
+    auto trunc = rewriter.create<arith::TruncFOp>(loc, dstType, result);
+    trunc->setAttr("round_mode",
+                   hfusion::RoundModeAttr::get(rewriter.getContext(),
+                                               hfusion::RoundMode::RINT));
+    result = trunc;
   }
 
-  rewriter.replaceOp(op, matmulOp->getResults());
+  rewriter.replaceOp(op, result);
   return success();
 }
 

@@ -90,6 +90,64 @@ inline bool isTensorComputeOpLegacy(Operation *op) {
   return allOperandsTensor && allResultsTensor;
 }
 
+// Keep this whitelist aligned with NPUIR ArithToHFusion and InlineBrc.
+// The dynamic CV pipeline targets regbase; do not look through casts here.
+static bool isDirectInlineBrcArithUser(Operation *op) {
+  if (!llvm::all_of(op->getOperandTypes(),
+                    [](Type type) { return isa<RankedTensorType>(type); }) ||
+      op->getNumResults() != 1) {
+    return false;
+  }
+  auto resultType = dyn_cast<RankedTensorType>(op->getResult(0).getType());
+  // Static shapes guarantee a fresh tensor.empty destination during lowering.
+  if (!resultType || !resultType.hasStaticShape()) {
+    return false;
+  }
+
+  if (auto cmp = dyn_cast<arith::CmpFOp>(op)) {
+    switch (cmp.getPredicate()) {
+    case arith::CmpFPredicate::ORD:
+    case arith::CmpFPredicate::UNO:
+    case arith::CmpFPredicate::AlwaysTrue:
+    case arith::CmpFPredicate::AlwaysFalse:
+      return false;
+    default:
+      return true;
+    }
+  }
+  if (auto cmp = dyn_cast<arith::CmpIOp>(op)) {
+    // Ordered i1 comparisons introduce casts; only accept direct lowering.
+    // Since we disscuss about fill's user, operands in op are allways
+    // RankedTensorType, so we can safely use getElementTypeOrSelf to get the
+    // element type.
+    return !getElementTypeOrSelf(cmp.getLhs().getType()).isInteger(1) ||
+           cmp.getPredicate() == arith::CmpIPredicate::eq ||
+           cmp.getPredicate() == arith::CmpIPredicate::ne;
+  }
+  return isa<arith::AddFOp, arith::AddIOp, arith::SubFOp, arith::SubIOp,
+             arith::MulFOp, arith::MulIOp, arith::DivFOp, arith::DivSIOp,
+             arith::DivUIOp, arith::MaxSIOp, arith::MaxUIOp, arith::MinSIOp,
+             arith::MinUIOp, arith::NegFOp, arith::AndIOp, arith::OrIOp,
+             arith::XOrIOp, arith::MinNumFOp, arith::MinimumFOp,
+             arith::MaxNumFOp, arith::MaximumFOp, arith::RemFOp, arith::RemSIOp,
+             arith::RemUIOp, arith::ShLIOp, arith::ShRSIOp, arith::ShRUIOp,
+             arith::FloorDivSIOp, arith::CeilDivSIOp, arith::CeilDivUIOp,
+             arith::SelectOp>(op);
+}
+
+static bool isFillEliminableByInlineBrc(linalg::FillOp fillOp) {
+  if (fillOp->getNumResults() != 1 || fillOp.getInputs().size() != 1 ||
+      !fillOp.getInputs().front().getType().isIntOrFloat() ||
+      !isa<RankedTensorType>(fillOp->getResult(0).getType())) {
+    return false;
+  }
+
+  // Every use must disappear before the fill can be excluded from the count.
+  // Arith users have no DPS inits and lower to fresh destinations above.
+  return llvm::all_of(fillOp->getResult(0).getUsers(),
+                      isDirectInlineBrcArithUser);
+}
+
 inline bool isTensorComputeOp(Operation *op) {
   auto funcOp = op->getParentOfType<func::FuncOp>();
   if (funcOp) {
@@ -99,15 +157,15 @@ inline bool isTensorComputeOp(Operation *op) {
     }
   }
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp))
+    if (linalg::isaCopyOpInterface(linalgOp)) {
       return false;
+    }
     auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
+    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
       return false;
+    }
     if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
-      auto input = fillOp.getInputs()[0];
-      auto constantOp = input.getDefiningOp<arith::ConstantOp>();
-      if (constantOp) {
+      if (isFillEliminableByInlineBrc(fillOp)) {
         return false;
       }
     }

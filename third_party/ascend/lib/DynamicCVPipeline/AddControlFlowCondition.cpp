@@ -25,6 +25,7 @@
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/CreateIfOps.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/ProcessArgs.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/SplittedIfWrapSsbufIf.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateConditionInfo.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopOps.h"
@@ -134,6 +135,12 @@ void AddControlFlowConditionPass::runOnOperation() {
       new UpdateLoopIterTimesPass());
   updateLoopIterTimesPass->setConditionInfo(&info);
   pm.addPass(std::move(updateLoopIterTimesPass));
+
+  // Step7: Use the splitted_if condition to wrap each ssbuffer.if.
+  std::unique_ptr<SplittedIfWrapSsbufIfPass> splittedIfWrapSsbufIfPass(
+      new SplittedIfWrapSsbufIfPass());
+  splittedIfWrapSsbufIfPass->setConditionInfo(&info);
+  pm.addPass(std::move(splittedIfWrapSsbufIfPass));
 
   if (failed(runPipeline(pm, module))) {
     LDBG("Pass failed!");

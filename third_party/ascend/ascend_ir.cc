@@ -40,6 +40,7 @@
 #include "mlir/AsmParser/AsmParser.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Arith/Utils/Utils.h"
+#include "mlir/Dialect/Func/Extensions/InlinerExtension.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
@@ -56,32 +57,8 @@
 using namespace mlir;
 namespace py = pybind11;
 
-struct AscendNPUIROpBuilder : public TritonOpBuilder {
-  std::string target;
-  std::string compile_mode;
-  static constexpr char kTarget910_95[] = "Ascend910_95";
-  static constexpr char kTarget950[] = "Ascend950";
-
-  explicit AscendNPUIROpBuilder(MLIRContext *context, std::string target = "",
-                                std::string compile_mode = "simd")
-      : TritonOpBuilder(context), target(target), compile_mode(compile_mode) {}
-
-  bool isSimtMode() const { return compile_mode == "simt"; }
-
-  bool is_910_95() const {
-    // TODO: Use enum instead of strings after enabling HACC in satandalone
-    // build
-    constexpr size_t kLen910 = sizeof(kTarget910_95) - 1;
-    bool match_910 = target.size() >= kLen910 &&
-                     target.compare(0, kLen910, kTarget910_95) == 0;
-
-    constexpr size_t kLen950 = sizeof(kTarget950) - 1;
-    bool match_950 =
-        target.size() >= kLen950 && target.compare(0, kLen950, kTarget950) == 0;
-
-    return match_910 || match_950;
-  }
-};
+// Shared IR OpBuilder; subclasses inherit it across TUs.
+#include "Utils/AscendNPUIROpBuilder.h"
 
 namespace {
 MLIRContext *gDefaultAscendContext = nullptr;
@@ -606,6 +583,7 @@ void init_ascend_ir(py::module &&m) {
   m.def("load_dialects", [](MLIRContext &context) {
     gDefaultAscendContext = &context;
     DialectRegistry registry;
+    mlir::func::registerInlinerExtension(registry);
     registry.insert<annotation::AnnotationDialect, mlir::hivm::HIVMDialect,
                     scope::ScopeDialect>();
     context.appendDialectRegistry(registry);

@@ -134,6 +134,7 @@ add_triton_plugin(TritonAscend
   TritonToLinalg
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
+  MLIRFuncInlinerExtension
 )
 
 option(TRITON_ENABLE_COVERAGE_LLVM_COV "Enable code llvm-cov coverage tool for Ascend plugin " OFF)

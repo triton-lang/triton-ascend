@@ -48,6 +48,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/DenseSet.h"
@@ -65,6 +66,82 @@ using namespace hivm;
 
 static constexpr int kIntegerBitWidth = 32;
 static constexpr int iniNzDimWidth = 16;
+
+/// The innermost scf.for/scf.while strictly enclosing `op`, or nullptr.
+static Operation *getEnclosingLoop(Operation *op) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (isa<scf::ForOp, scf::WhileOp>(parent)) {
+      return parent;
+    }
+  }
+  return nullptr;
+}
+
+/// Values aliasing `roots` through views, casts and to_tensor.
+static void collectBufferAliases(ArrayRef<Value> roots,
+                                 llvm::DenseSet<Value> &aliases) {
+  SmallVector<Value> workList(roots.begin(), roots.end());
+  while (!workList.empty()) {
+    Value currVal = workList.pop_back_val();
+    if (!aliases.insert(currVal).second) {
+      continue;
+    }
+    for (Operation *user : currVal.getUsers()) {
+      if (isa<ViewLikeOpInterface, memref::MemorySpaceCastOp,
+              bufferization::ToTensorOp>(user)) {
+        llvm::append_range(workList, user->getResults());
+      }
+    }
+  }
+}
+
+/// Whether `op` names a transfer buffer without touching its data.
+static bool isHarmlessBufferUse(Operation *op) {
+  return isa<memref::AllocOp, memref::DeallocOp, annotation::MarkOp,
+             memref::MemorySpaceCastOp, bufferization::ToTensorOp,
+             SyncBlockSetOp, SyncBlockWaitOp, ViewLikeOpInterface>(op);
+}
+
+/// Whether the initial grant and the final drain of one transfer may bracket
+/// `outerLoop` instead of `mainLoopOp`.
+static bool isGrantHoistSafe(Operation *outerLoop, Operation *mainLoopOp,
+                             ArrayRef<Operation *> transferAllocs) {
+  if (transferAllocs.empty()) {
+    return false;
+  }
+  SmallVector<Value> roots;
+  for (Operation *allocOp : transferAllocs) {
+    if (!allocOp || allocOp->getNumResults() == 0) {
+      return false;
+    }
+    roots.push_back(allocOp->getResult(0));
+  }
+
+  llvm::DenseSet<Value> aliases;
+  collectBufferAliases(roots, aliases);
+
+  bool isSafe = true;
+  // Pre-order, so skipping the main loop skips its body with it.
+  outerLoop->walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (op == mainLoopOp) {
+      return WalkResult::skip();
+    }
+    if (op == outerLoop || isHarmlessBufferUse(op)) {
+      return WalkResult::advance();
+    }
+    if (llvm::any_of(op->getOperands(), [&](Value operand) {
+          return aliases.contains(operand);
+        })) {
+      LOG_DEBUG(op->getName()
+                << " uses a transfer buffer outside the main loop\n");
+      isSafe = false;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return isSafe;
+}
 
 static uint64_t getElemBytesForAlign(Type t) {
   static constexpr uint64_t kBitsPerByte = 8;
@@ -718,6 +795,7 @@ InterCoreTransferAndSyncPass::createTransferAllocs(
     attachTransferTags(markConsOp, prodBlockId, consTag, transferIndex);
   }
   markAllocIndex++;
+  transferAllocsByIndex[transferIndex] = {prodAllocOp, consAllocOp};
 
   return {prodAllocOp, consAllocOp};
 }
@@ -1158,16 +1236,28 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     attachTransferTags(setOpForWrite, consumerBlockId, config.dstCoreType,
                        transferIndex);
 
-    builder.setInsertionPoint(mainLoopOp);
+    // Bracket the enclosing loop when safe, so the credit is carried across
+    // its iterations instead of being reset at every boundary.
+    Operation *grantLoopOp = mainLoopOp;
+    if (!hasStartEndSyncWhitelistKernel(module)) {
+      if (Operation *outerLoop = getEnclosingLoop(mainLoopOp)) {
+        if (isGrantHoistSafe(outerLoop, mainLoopOp,
+                             transferAllocsByIndex.lookup(transferIndex))) {
+          grantLoopOp = outerLoop;
+        }
+      }
+    }
+
+    builder.setInsertionPoint(grantLoopOp);
     auto setOpForStart = builder.create<SyncBlockSetOp>(
         loc, config.dstCoreAttr, config.forWriteTPipe, config.forWritePipe,
         flagId);
-    builder.setInsertionPointAfter(mainLoopOp);
+    builder.setInsertionPointAfter(grantLoopOp);
     auto waitOpForEnd = builder.create<SyncBlockWaitOp>(
         loc, config.srcCoreAttr, config.forWriteTPipe, config.forWritePipe,
         flagId);
 
-    int startEndBlockId = CVPipeline::getOpBlockId(mainLoopOp).value_or(-1);
+    int startEndBlockId = CVPipeline::getOpBlockId(grantLoopOp).value_or(-1);
     attachTransferTags(setOpForStart, startEndBlockId, config.dstCoreType,
                        transferIndex);
     attachTransferTags(waitOpForEnd, startEndBlockId, config.srcCoreType,

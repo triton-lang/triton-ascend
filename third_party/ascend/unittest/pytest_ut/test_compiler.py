@@ -41,6 +41,25 @@ def _write_acl_config(cfg_dir, config):
     return cfg_path
 
 
+@pytest.mark.parametrize(
+    "arch, filename",
+    [
+        ("Ascend910B1", "libdevice.220.bc"),
+        ("Ascend910_9391", "libdevice.220.bc"),
+        ("Ascend910_9581", "libdevice.10.bc"),
+        ("Ascend950PR_9579", "libdevice.10.bc"),
+    ],
+)
+def test_get_libdevice_selects_architecture_specific_bitcode(arch, filename):
+    assert Path(compiler.get_libdevice(arch)).name == filename
+
+
+@pytest.mark.parametrize("arch", ["Ascend910_9691", "Ascend960", "unknown"])
+def test_get_libdevice_rejects_unsupported_architecture(arch):
+    with pytest.raises(ValueError, match="unsupported Ascend architecture"):
+        compiler.get_libdevice(arch)
+
+
 def test_get_simt_stack_limit_default(monkeypatch):
     """Without torch_npu installed, should return default 1152."""
     monkeypatch.setitem(sys.modules, "torch_npu", None)
@@ -249,7 +268,7 @@ def test_legacy_bisheng_options_launch_uses_backend_defaults(backend, value):
         options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
 
     assert kwargs == {"bisheng_options": value}
-    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice()
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice(options.target_arch)
     assert options.__dict__ == baseline.__dict__
     assert options.hash() == baseline.hash()
     assert signature == constexprs == attrs == {}

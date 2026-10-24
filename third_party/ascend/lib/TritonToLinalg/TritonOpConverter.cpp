@@ -2259,9 +2259,17 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
 
       std::string sym =
           llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
+      SmallVector<Value> customOperands(collapsedInputs);
+      customOperands.push_back(outputTensor);
+      NamedAttrList customOpAttrs;
+      customOpAttrs.set("name", rewriter.getStringAttr(sym));
+      customOpAttrs.set(
+          "operandSegmentSizes",
+          rewriter.getDenseI32ArrayAttr(
+              {static_cast<int32_t>(collapsedInputs.size()), 1, 0}));
       auto customOp = rewriter.create<hivm::CustomOp>(
-          op.getLoc(), sym, ValueRange{collapsedInputs},
-          ValueRange{outputTensor});
+          op.getLoc(), TypeRange{customOutputType}, ValueRange{customOperands},
+          customOpAttrs.getAttrs());
 
       auto argAttrsArray = mlir::ArrayAttr::get(customOp->getContext(), {});
       auto pipeAttr =
@@ -2280,6 +2288,12 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
       customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
+
+      // The frontend owns the libdevice workspace ABI and size calculation.
+      for (StringRef name : {"extra_buffers_types", "extra_buffers_sizes"}) {
+        if (Attribute attr = op->getAttr(name))
+          customOp->setAttr(name, attr);
+      }
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();

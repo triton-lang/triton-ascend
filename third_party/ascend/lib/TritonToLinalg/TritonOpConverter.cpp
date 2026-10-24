@@ -1667,6 +1667,25 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
     return rewriter.notifyMatchFailure(op, "meaningless reduce operation");
   } else if (params->withIndexType != ReduceWithIndexType::None) {
     addReduceWithIndexAttr(*params, rewriter, linalgOp);
+
+    // Keep the index operand of a max/min-with-index reduction alive across
+    // the TritonToLinalg -> LinalgToHFusion boundary. LinalgToHFusion only
+    // forwards the index input when it carries the `UseIndexInput`
+    // annotation; without it the index tensor is dropped and the downstream
+    // reduce_*_with_index template synthesises 0..chunk-1 local indices,
+    // which is wrong as soon as the reduction axis is split
+    // (R0_BLOCK < rnumel): values are correct but indices become chunk-local.
+    // InsertionGuard keeps the rewriter position unchanged for the rest of
+    // this conversion.
+    if (linalgOp.getInputs().size() >= 2) {
+      Value indexInput = linalgOp.getInputs()[1];
+      if (!indexInput.getDefiningOp<annotation::MarkOp>()) {
+        OpBuilder::InsertionGuard guard(rewriter);
+        rewriter.setInsertionPoint(linalgOp);
+        auto indexMarkOp = rewriter.create<annotation::MarkOp>(loc, indexInput);
+        indexMarkOp->setAttr("UseIndexInput", rewriter.getUnitAttr());
+      }
+    }
   }
 
   insertDebugNop(loc, rewriter);

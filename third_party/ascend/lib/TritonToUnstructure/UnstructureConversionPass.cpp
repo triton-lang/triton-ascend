@@ -381,6 +381,88 @@ static bool canUseIndirectFastPath(Value srcPtr, Value ptrOffset) {
   return isa<RankedTensorType>(ptrOffset.getType());
 }
 
+// Bound the temporary address tensors of a large indirect load without
+// changing the program's data tile. Slicing before BubbleUpOperation also
+// slices the address producers, so full-tile i32/i64 intermediates need not
+// remain live across the load. Keep volatile accesses on their original path.
+static bool rewriteChunkedIndirectLoad(triton::LoadOp op, Value srcPtr,
+                                       Value ptrOffset,
+                                       PatternRewriter &rewriter) {
+  constexpr int64_t kMinChunkedElements = 16384;
+  constexpr int64_t kMaxChunkElements = 8192;
+  auto resultType = dyn_cast<RankedTensorType>(op.getType());
+  auto offsetType = dyn_cast<RankedTensorType>(ptrOffset.getType());
+  if (!resultType || !resultType.hasStaticShape() ||
+      resultType.getRank() != 2 || !offsetType ||
+      offsetType.getShape() != resultType.getShape() ||
+      resultType.getNumElements() < kMinChunkedElements || op.getIsVolatile() ||
+      ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op))
+    return false;
+
+  // Preserve each lane of mask/other with the same slice as the address.
+  for (Value value : {op.getMask(), op.getOther()}) {
+    if (!value)
+      continue;
+    auto type = dyn_cast<RankedTensorType>(value.getType());
+    if (!type || type.getShape() != resultType.getShape())
+      return false;
+  }
+
+  int64_t rows = resultType.getDimSize(0);
+  int64_t columns = resultType.getDimSize(1);
+  if (rows <= 1 || columns <= 0 || columns > kMaxChunkElements)
+    return false;
+  int64_t chunkRows = rows;
+  while (chunkRows > kMaxChunkElements / columns) {
+    if (chunkRows % 2 != 0)
+      return false;
+    chunkRows /= 2;
+  }
+
+  Location loc = op.getLoc();
+  Value initial = rewriter.create<tensor::EmptyOp>(loc, resultType.getShape(),
+                                                   resultType.getElementType());
+  Value lower = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  Value upper = rewriter.create<arith::ConstantIndexOp>(loc, rows);
+  Value step = rewriter.create<arith::ConstantIndexOp>(loc, chunkRows);
+  auto loop =
+      rewriter.create<scf::ForOp>(loc, lower, upper, step, ValueRange{initial});
+  // This is a generated load loop: each iteration fills a disjoint row
+  // interval of the original tile. Preserve that iteration domain for later
+  // memory lowering and sub-block distribution, just as extracted DMA loads
+  // do, rather than treating the accumulator as an arbitrary loop recurrence.
+  loop->setAttr("ExtractedLoadOrStore", rewriter.getUnitAttr());
+  loop->setAttr("hivm.parallel_loop", rewriter.getUnitAttr());
+  {
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPointToStart(loop.getBody());
+    SmallVector<OpFoldResult> offsets{loop.getInductionVar(),
+                                      rewriter.getIndexAttr(0)};
+    SmallVector<OpFoldResult> sizes{rewriter.getIndexAttr(chunkRows),
+                                    rewriter.getIndexAttr(columns)};
+    SmallVector<OpFoldResult> strides(2, rewriter.getIndexAttr(1));
+    auto slice = [&](Value value) -> Value {
+      if (!value)
+        return {};
+      return rewriter.create<tensor::ExtractSliceOp>(loc, value, offsets, sizes,
+                                                     strides);
+    };
+    Value slicedOffsets = slice(ptrOffset);
+    Value mask = slice(op.getMask());
+    Value other = slice(op.getOther());
+    auto chunkType = RankedTensorType::get({chunkRows, columns},
+                                           resultType.getElementType());
+    auto loaded = rewriter.create<triton::ascend::IndirectLoadOp>(
+        loc, chunkType, srcPtr, slicedOffsets, mask, other,
+        /*isVolatile=*/false);
+    Value inserted = rewriter.create<tensor::InsertSliceOp>(
+        loc, loaded, loop.getRegionIterArg(0), offsets, sizes, strides);
+    rewriter.create<scf::YieldOp>(loc, inserted);
+  }
+  rewriter.replaceOp(op, loop.getResults());
+  return true;
+}
+
 template <typename MemAccOpTy>
 LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
                                          Value srcPtr, Value ptrOffset,
@@ -408,6 +490,9 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
       return failure();
     }
 
+    if (rewriteChunkedIndirectLoad(op, srcPtr, ptrOffset, rewriter))
+      return success();
+
     assert(isa<triton::PointerType>(srcPtr.getType()) &&
            "src must be ptr type");
     Value mask = op.getMask();
@@ -415,7 +500,8 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
     auto resultType = op.getType();
     auto indirect = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, srcPtr, ptrOffset, mask, other,
-        ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
+        op.getIsVolatile() ||
+            ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     rewriter.replaceOp(op, indirect.getResult());
     LLVM_DEBUG({
       auto &os = llvm::dbgs();

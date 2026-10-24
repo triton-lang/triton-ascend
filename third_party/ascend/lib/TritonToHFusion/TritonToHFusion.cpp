@@ -127,7 +127,7 @@ struct TritonFpToFpToHFusionConversion : OpRewritePattern<triton::FpToFpOp> {
     // Create the HFusion cast operation with round_mode attribute
     auto roundModeAttr =
         hfusion::RoundModeAttr::get(rewriter.getContext(), hfusionRoundMode);
-    auto modeAttr = rewriter.getNamedAttr("mode", roundModeAttr);
+    auto modeAttr = rewriter.getNamedAttr("round_mode", roundModeAttr);
 
     rewriter.replaceOpWithNewOp<hfusion::CastOp>(
         op, ValueRange{input}, ValueRange{dsts}, ArrayRef{modeAttr});

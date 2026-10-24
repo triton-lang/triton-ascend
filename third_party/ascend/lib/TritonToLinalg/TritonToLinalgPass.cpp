@@ -47,6 +47,7 @@
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/TypeRange.h"
@@ -1228,6 +1229,128 @@ public:
   }
 };
 
+static LogicalResult matchExpandToTwos(RankedTensorType srcTy,
+                                       RankedTensorType resTy, int64_t &numTwos,
+                                       int64_t &flipDim) {
+  if (resTy.getRank() <= srcTy.getRank())
+    return failure(); // Expand only.
+  auto reassoc = getReassociationIndicesForReshape(srcTy, resTy);
+  if (!reassoc)
+    return failure();
+  ArrayRef<int64_t> resShape = resTy.getShape();
+  for (int64_t d = 0; d < static_cast<int64_t>(reassoc->size()); ++d) {
+    ArrayRef<int64_t> group = (*reassoc)[d];
+    if (group.size() < 2)
+      continue; // This source dim didn't split.
+    bool allTwos = true;
+    for (int64_t idx : group)
+      if (resShape[idx] != 2) {
+        allTwos = false;
+        break;
+      }
+    if (allTwos) {
+      flipDim = d;
+      numTwos = static_cast<int64_t>(group.size());
+      return success();
+    }
+  }
+  return failure();
+}
+
+template <typename OpTy> static OpTy getSingleUser(Value value) {
+  if (!value.hasOneUse())
+    return OpTy();
+  return dyn_cast<OpTy>(*value.user_begin());
+}
+
+static bool isXorReduce(triton::ReduceOp op) {
+  if (!op->getNumRegions() || op->getRegion(0).getBlocks().size() != 1)
+    return false;
+  for (Operation &inner : op->getRegion(0).front().without_terminator())
+    if (!isa<arith::XOrIOp>(inner))
+      return false;
+  return true;
+}
+
+static triton::ReduceOp findReduceXorUser(Value value, int64_t axis) {
+  triton::ReduceOp found;
+  for (auto *user : value.getUsers()) {
+    auto reduce = dyn_cast<triton::ReduceOp>(user);
+    if (reduce && static_cast<int64_t>(reduce.getAxis()) == axis &&
+        isXorReduce(reduce)) {
+      if (found)
+        return triton::ReduceOp(); // Ambiguous: bail out.
+      found = reduce;
+    }
+  }
+  return found;
+}
+
+// `tl.flip` lowers to a bit-reversal idiom: reshape 2^k -> [2]^k, then a
+// reduce-xor/expand_dims/broadcast/xori chain, then a collapse reshape. That
+// first reshape becomes an unalignable memref.expand_shape (see #1638), so we
+// recognize the idiom and rewrite it into the backend's existing (orphaned)
+// native ascend.flip, which lowers via @triton_flip -> hfusion.flip ->
+// hivm.vflip. vflip only flips the last (innermost) dim, so this pattern only
+// fires for last-dim flips; any other dim keeps the bit-reversal idiom.
+struct BitReversalFlipToAscendFlipPattern
+    : public OpRewritePattern<triton::ReshapeOp> {
+  using OpRewritePattern<triton::ReshapeOp>::OpRewritePattern;
+
+  LogicalResult matchAndRewrite(triton::ReshapeOp op,
+                                PatternRewriter &rewriter) const override {
+    auto srcTy = cast<RankedTensorType>(op.getSrc().getType());
+    auto resTy = cast<RankedTensorType>(op.getResult().getType());
+    int64_t numTwos = 0, flipDim = -1;
+    if (failed(matchExpandToTwos(srcTy, resTy, numTwos, flipDim)))
+      return failure();
+    // hivm.vflip only flips the innermost dim; keep the bit-reversal idiom for
+    // any other dim so non-last-dim tl.flip still compiles.
+    if (flipDim != srcTy.getRank() - 1)
+      return failure();
+
+    Value cur = op.getResult();
+    SmallVector<Operation *> toErase{op};
+    for (int64_t i = 0; i < numTwos; ++i) {
+      int64_t axis = flipDim + i;
+      auto reduce = findReduceXorUser(cur, axis);
+      if (!reduce)
+        return failure();
+      auto expand = getSingleUser<triton::ExpandDimsOp>(reduce->getResult(0));
+      if (!expand || static_cast<int64_t>(expand.getAxis()) != axis)
+        return failure();
+      auto broadcast = getSingleUser<triton::BroadcastOp>(expand->getResult(0));
+      if (!broadcast)
+        return failure();
+      auto xori = getSingleUser<arith::XOrIOp>(broadcast->getResult(0));
+      if (!xori)
+        return failure();
+      bool lhsCur = (xori.getLhs() == cur), rhsCur = (xori.getRhs() == cur);
+      if (lhsCur == rhsCur)
+        return failure(); // Exactly one operand == cur.
+      cur = xori->getResult(0);
+      toErase.push_back(reduce);
+      toErase.push_back(expand);
+      toErase.push_back(broadcast);
+      toErase.push_back(xori);
+    }
+
+    auto finalReshape = getSingleUser<triton::ReshapeOp>(cur);
+    if (!finalReshape || finalReshape.getResult().getType() != srcTy)
+      return failure();
+
+    rewriter.setInsertionPoint(op);
+    auto flip = rewriter.create<triton::ascend::FlipOp>(
+        op.getLoc(), srcTy, op.getSrc(), static_cast<uint64_t>(flipDim));
+    // replaceOp redirects the final reshape's uses to the flip and erases it.
+    rewriter.replaceOp(finalReshape, flip.getResult());
+    // Erase bottom-up (consumers before producers) since erasure is immediate.
+    for (auto it = toErase.rbegin(); it != toErase.rend(); ++it)
+      rewriter.eraseOp(*it);
+    return success();
+  }
+};
+
 } // namespace
 
 // Version only the small, bufferized row-copy loops emitted for mixed-axis
@@ -1338,6 +1461,7 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
                LoadStoreConverter::LoadStoreCanonicalizer<triton::AtomicCASOp>>(
       patterns.getContext());
   patterns.add<FoldScanOffsetAddPtrChain>(patterns.getContext());
+  patterns.add<BitReversalFlipToAscendFlipPattern>(patterns.getContext());
   patterns.add<TTOpConverters::BitcastCanonicalizer>(patterns.getContext());
   patterns.add<TTOpConverters::FpToFpCanonicalizer>(patterns.getContext());
   patterns.add<LoadStoreConverter::ScalarStoreCanonicalizer>(

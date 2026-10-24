@@ -982,57 +982,6 @@ static Value createPollingCondition(scf::ForOp forOp, OpBuilder &builder,
   return cmpOp.getResult();
 }
 
-/// Wrap a sync op (wait/set) in scf.if: then=clone original, else=create
-/// alternative
-template <typename OpTy>
-static Operation *wrapSyncOpWithScfIf(
-    Operation *op, Value cond, int outputFlag, OpBuilder &builder,
-    std::function<Operation *(OpBuilder &, Location)> createAltFn) {
-  static_assert(std::is_same<OpTy, hivm::SyncBlockWaitOp>::value ||
-                    std::is_same<OpTy, hivm::SyncBlockSetOp>::value,
-                "OpTy must be SyncBlockWaitOp or SyncBlockSetOp");
-
-  OpBuilder::InsertionGuard guard(builder);
-  builder.setInsertionPoint(op);
-
-  Location loc = op->getLoc();
-  auto ifOp = builder.create<scf::IfOp>(loc, TypeRange{}, cond,
-                                        true /* withElseRegion */);
-  ifOp->setAttr(mlir::CVPipeline::kBlockId,
-                builder.getI32IntegerAttr(getBlockId(op)));
-  ifOp->setAttr("ssbuffer.cross_buffer", builder.getI32IntegerAttr(1));
-
-  // then branch: clone original op
-  auto thenBuilder = ifOp.getThenBodyBuilder();
-  Operation *cloned = thenBuilder.clone(*op);
-
-  // else branch: create alternative op
-  auto elseBuilder = ifOp.getElseBodyBuilder();
-  Operation *altOp = createAltFn(elseBuilder, loc);
-
-  // Copy ssbuffer tags
-  int bid = getBlockId(op);
-  int tid = getTransferId(op);
-  if (bid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-    altOp->setAttr(mlir::CVPipeline::kBlockId, builder.getI32IntegerAttr(bid));
-  }
-  if (tid >= 0) {
-    cloned->setAttr(mlir::CVPipeline::kTransferId,
-                    builder.getI32IntegerAttr(tid));
-    altOp->setAttr(mlir::CVPipeline::kTransferId,
-                   builder.getI32IntegerAttr(tid));
-  }
-  if (op->hasAttr("ssbuffer.analyze_flag_id")) {
-    cloned->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
-    altOp->setAttr("ssbuffer.analyze_flag_id", builder.getUnitAttr());
-  }
-
-  op->replaceAllUsesWith(ifOp.getOperation());
-  op->erase();
-  return ifOp.getOperation();
-}
-
 /// Wrap transfer op (with external uses) in scf.if with yield:
 /// - then: clone with the original buffer operand
 /// - else: clone with bufferOperand remapped to the spare buffer
@@ -1245,23 +1194,30 @@ static Operation *wrapReceiverChainWithScfIf(Operation *transferOp,
 static LogicalResult processTransferChain(TransferOpChain &chain, Value cond,
                                           Value outputBuffer, int outputFlag,
                                           bool isProducer, OpBuilder &builder) {
-  if (!chain.waitOp) {
+  if (!chain.waitOp)
     return failure();
-  }
 
+  int originalFlag = getFlagFromSyncOp(chain.waitOp);
+  if (originalFlag < 0 ||
+      (chain.setOp && getFlagFromSyncOp(chain.setOp) != originalFlag))
+    return failure();
+
+  OpBuilder::InsertionGuard guard(builder);
+  builder.setInsertionPoint(chain.waitOp);
   Location loc = chain.waitOp->getLoc();
+  auto first = builder.create<arith::ConstantIntOp>(loc, originalFlag, 64);
+  auto second = builder.create<arith::ConstantIntOp>(loc, outputFlag, 64);
+  auto selectedFlag = builder.create<arith::SelectOp>(loc, cond, first, second);
+  for (Operation *op : {first.getOperation(), second.getOperation(),
+                        selectedFlag.getOperation()})
+    setSsbufferTags(op, builder, getBlockId(chain.waitOp),
+                    getTransferId(chain.waitOp));
 
-  // 1. Wrap waitOp in polling if
-  chain.waitOp = wrapSyncOpWithScfIf<hivm::SyncBlockWaitOp>(
-      chain.waitOp, cond, outputFlag, builder,
-      [&](OpBuilder &b, Location l) -> Operation * {
-        auto waitOp = cast<hivm::SyncBlockWaitOp>(chain.waitOp);
-        return b
-            .create<hivm::SyncBlockWaitOp>(l, waitOp.getTcoreType(),
-                                           waitOp.getTpipe(), waitOp.getPipe(),
-                                           b.getI64IntegerAttr(outputFlag))
-            .getOperation();
-      });
+  // Reuse the original parity and share one flag value between wait and set.
+  // Keep the existing sync operations, including their pipe/core attributes.
+  auto waitOp = cast<hivm::SyncBlockWaitOp>(chain.waitOp);
+  waitOp.removeStaticFlagIdAttr();
+  waitOp.getDynamicFlagIdMutable().assign(selectedFlag.getResult());
 
   // 2. Wrap transferOp in polling if (then=original buffer, else=outputBuffer)
   if (chain.transferOp) {
@@ -1294,18 +1250,12 @@ static LogicalResult processTransferChain(TransferOpChain &chain, Value cond,
     }
   }
 
-  // 3. Wrap setOp in polling if
+  // 3. Use the same selected flag for the matching set. Buffer selection
+  // and the transfer/receiver chains above retain their original if/else.
   if (chain.setOp) {
-    chain.setOp = wrapSyncOpWithScfIf<hivm::SyncBlockSetOp>(
-        chain.setOp, cond, outputFlag, builder,
-        [&](OpBuilder &b, Location l) -> Operation * {
-          auto setOp = cast<hivm::SyncBlockSetOp>(chain.setOp);
-          return b
-              .create<hivm::SyncBlockSetOp>(l, setOp.getTcoreType(),
-                                            setOp.getTpipe(), setOp.getPipe(),
-                                            b.getI64IntegerAttr(outputFlag))
-              .getOperation();
-        });
+    auto setOp = cast<hivm::SyncBlockSetOp>(chain.setOp);
+    setOp.removeStaticFlagIdAttr();
+    setOp.getDynamicFlagIdMutable().assign(selectedFlag.getResult());
   }
   return success();
 }

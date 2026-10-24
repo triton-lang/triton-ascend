@@ -415,7 +415,37 @@ public:
   LogicalResult
   matchAndRewrite(CustomOpT op, typename CustomOpT::Adaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    llvm::errs()
+        << "\n>>> StructuredCustomOpConverter::matchAndRewrite CALLED <<<\n";
+    llvm::errs() << "Op type: " << op->getName() << "\n";
+    llvm::errs() << "Op: " << *op << "\n";
+
+    // Check if operand types are already legal
+    bool typesLegal = true;
+    for (auto operandType : op->getOperandTypes()) {
+      if (isa<triton::PointerType>(operandType)) {
+        typesLegal = false;
+        llvm::errs() << "  Found tt.ptr operand type (needs conversion)\n";
+        break;
+      }
+      if (auto shapedType = dyn_cast<ShapedType>(operandType)) {
+        if (isa<triton::PointerType>(shapedType.getElementType())) {
+          typesLegal = false;
+          llvm::errs()
+              << "  Found tensor<tt.ptr> operand type (needs conversion)\n";
+          break;
+        }
+      }
+    }
+
+    if (typesLegal) {
+      llvm::errs() << "  WARNING: All operand types are already legal! This "
+                      "shouldn't be called.\n";
+    }
+
     BlockDataParser::rewriteStructuredCustomOp(op, adaptor, rewriter);
+    llvm::errs()
+        << ">>> StructuredCustomOpConverter::matchAndRewrite FINISHED <<<\n\n";
     return success();
   }
 };

@@ -255,11 +255,47 @@ def _make_align_dim_attrs(op, builder, arg_attrs):
             assert False, f"{name}'s keys should be string or int"
 
 
+def _make_data_layout_attrs(op, builder, arg_attrs):
+    # Find op argument by name using op.data_layout's key
+    # data_layout should be a dict mapping argument name/index to a DataLayout enum value
+    # Only apply for CUBE core type
+    name = 'data_layout'
+    if not hasattr(op, name):
+        return
+
+    # To find argument indices matching each data_layout key, check the op.signature parameters
+    # and map data_layout key (argument name) to its index position.
+    data_layout_arg_indices = {}
+    if hasattr(op, "signature"):
+        param_names = list(op.signature.parameters.keys())
+        for arg_name in op.data_layout.keys():
+            if arg_name in param_names:
+                data_layout_arg_indices[arg_name] = param_names.index(arg_name)
+
+    for arg, layout in op.data_layout.items():
+        # Extract the actual DataLayout enum value (handle nested enums)
+        layout_value = layout.value if hasattr(layout, 'value') else layout
+
+        if isinstance(arg, str) and arg in data_layout_arg_indices:
+            arg_idx = data_layout_arg_indices[arg]
+            if arg_idx not in arg_attrs:
+                arg_attrs[arg_idx] = {}
+            arg_attrs[arg_idx][name] = builder.get_data_layout_attr(layout_value)
+        elif isinstance(arg, int):
+            if arg not in arg_attrs:
+                arg_attrs[arg] = {}
+            arg_attrs[arg][name] = builder.get_data_layout_attr(layout_value)
+        else:
+            assert False, f"{name}'s keys should be string or int"
+
+
 def _make_arg_attrs(op, builder):
     num_args = len(op.signature.parameters) if hasattr(op, "signature") else 0
     arg_attrs = [{} for _ in range(num_args)]
 
     _make_align_dim_attrs(op, builder, arg_attrs)
+    if op.core == core.CORE.CUBE:
+        _make_data_layout_attrs(op, builder, arg_attrs)
     return arg_attrs
 
 
@@ -408,7 +444,11 @@ def custom_semantic(name: str, *args, _semantic=None, **kwargs):
     arg_attrs = _make_arg_attrs(op, builder)
     # Build IR for the custom op.
     if is_macro:
+        import traceback
+        print(f"DEBUG: custom_semantic calling create_custom_macro_op for '{name}'")
+        print(f"DEBUG: Call stack:\n{''.join(traceback.format_stack()[-5:-1])}")
         res = builder.create_custom_macro_op(name, attrs, inputs, outputs, arg_attrs)
+        print(f"DEBUG: create_custom_macro_op returned {len(res)} results")
     else:
         res = builder.create_custom_op(name, attrs, inputs, outputs, arg_attrs)
     # Results with same types as outputs.

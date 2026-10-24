@@ -1307,7 +1307,16 @@ template <typename CustomOpT>
 void rewriteStructuredCustomOpImpl(CustomOpT op,
                                    typename CustomOpT::Adaptor &adaptor,
                                    ConversionPatternRewriter &rewriter) {
+  llvm::errs() << "=== rewriteStructuredCustomOpImpl CALLED ===\n";
+  llvm::errs() << "Op: " << *op << "\n";
+  llvm::errs() << "Op name: " << op.getName() << "\n";
+  llvm::errs() << "isDistributedTypeCustomOp: " << isDistributedTypeCustomOp(op)
+               << "\n";
+  llvm::errs() << "Num operands: " << op->getNumOperands() << "\n";
+  llvm::errs() << "Num results: " << op->getNumResults() << "\n";
+
   if (isDistributedTypeCustomOp(op)) {
+    llvm::errs() << "Taking distributed path\n";
     auto ip = rewriter.saveInsertionPoint();
     rewriter.setInsertionPoint(op);
     auto loc = op.getLoc();
@@ -1336,23 +1345,36 @@ void rewriteStructuredCustomOpImpl(CustomOpT op,
       }
       resultTypes.emplace_back(ty);
     }
+    llvm::errs() << "Creating new op (distributed path)...\n";
+    llvm::errs() << "  newOutputs size: " << newOutputs.size() << "\n";
+    llvm::errs() << "  resultTypes size: " << resultTypes.size() << "\n";
     auto newOp = createRewrittenStructuredCustomOp(rewriter, loc, resultTypes,
                                                    op, adaptor, newOutputs);
+    llvm::errs() << "New op created: " << *newOp << "\n";
     auto operandSegmentSizesAttr = newOp->getAttr("operandSegmentSizes");
     newOp->setAttrs(op->getAttrs());
     newOp->setAttr("operandSegmentSizes", operandSegmentSizesAttr);
+    llvm::errs() << "Calling replaceOp with " << newOp.getResults().size()
+                 << " results\n";
     rewriter.replaceOp(op, newOp.getResults());
+    llvm::errs() << "replaceOp completed\n";
     rewriter.restoreInsertionPoint(ip);
   } else {
+    llvm::errs() << "Taking non-distributed path\n";
     SmallVector<Type> resultTypes(op->getResultTypes().begin(),
                                   op->getResultTypes().end());
+    llvm::errs() << "Creating new op (non-distributed path)...\n";
     auto newOp = createRewrittenStructuredCustomOp(
         rewriter, op.getLoc(), resultTypes, op, adaptor, adaptor.getOutputs());
+    llvm::errs() << "New op created: " << *newOp << "\n";
     auto operandSegmentSizesAttr = newOp->getAttr("operandSegmentSizes");
     newOp->setAttrs(op->getAttrs());
     newOp->setAttr("operandSegmentSizes", operandSegmentSizesAttr);
+    llvm::errs() << "Calling replaceOp...\n";
     rewriter.replaceOp(op, newOp);
+    llvm::errs() << "replaceOp completed\n";
   }
+  llvm::errs() << "=== rewriteStructuredCustomOpImpl FINISHED ===\n\n";
 }
 } // namespace
 

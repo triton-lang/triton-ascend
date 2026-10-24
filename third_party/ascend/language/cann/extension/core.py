@@ -21,7 +21,7 @@
 # THE SOFTWARE.
 
 __all__ = [
-    "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
+    "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "DataLayout", "debug_barrier", "fixpipe",
     "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
     "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
     "sync_block_wait", "SYNC_IN_VF", "conv1d", "dot", "conv2d"
@@ -125,6 +125,15 @@ class IteratorType(enum.Enum):
     Gather = ascend_ir.IteratorType.Gather
     Cumulative = ascend_ir.IteratorType.Cumulative
     Opaque = ascend_ir.IteratorType.Opaque
+
+
+class DataLayout(enum.Enum):
+    DOTA_ND = ascend_ir.DataLayout.DOTA_ND
+    DOTB_ND = ascend_ir.DataLayout.DOTB_ND
+    DOTC_ND = ascend_ir.DataLayout.DOTC_ND
+    nZ = ascend_ir.DataLayout.nZ
+    zN = ascend_ir.DataLayout.zN
+    Fractal = ascend_ir.DataLayout.Fractal
 
 
 class ascend_address_space_base(bl.address_space):

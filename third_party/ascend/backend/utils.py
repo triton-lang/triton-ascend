@@ -681,8 +681,27 @@ def _npu_ext_build_command(obj_name: str, header_or_src_path, src_path=None, *, 
         cc_cmd.insert(5, f"-I{os.path.dirname(header_path)}")
     cc_cmd += list(extra_cflags)
     cc_cmd += cann_version_compile_args()
-    cc_cmd += ["-std=c++17", "-shared", "-fPIC", "-o", so_path]
+    std_flag = "-std=c++17"
+    if kernel_launcher == "torch":
+        std_flag = f"-std={_get_torch_cxx_standard()}"
+
+    cc_cmd += [std_flag, "-shared", "-fPIC", "-o", so_path]
     return cc_cmd, so_path
+
+
+@functools.lru_cache(maxsize=4)
+def _get_torch_cxx_standard() -> str:
+    try:
+        import torch
+        ver_str = torch.__version__.split("+")[0]
+        from packaging.version import Version
+        torch_ver = Version(ver_str)
+        if torch_ver >= Version("2.14.0"):
+            return "c++20"
+        else:
+            return "c++17"
+    except Exception:
+        return "c++17"
 
 
 @functools.lru_cache(maxsize=32)

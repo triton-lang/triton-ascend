@@ -1,7 +1,7 @@
 // RUN: triton-opt --add-block-id-for-control-ops --data-dependency-analysis --inter-core-transfer-and-sync --mark-main-loop %s | FileCheck %s
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  func.func @test_bidirectional_transfer(%arg0: memref<256x256xf16>) {
+  func.func @test_c2v2c_transfer(%arg0: memref<256x256xf16>) {
     %c0_i32 = arith.constant {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} 0 : index
     %c1_i32 = arith.constant {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} 1 : index
     %c4_i32 = arith.constant {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE"} 4 : index
@@ -24,7 +24,7 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   }
 }
 
-// CHECK-LABEL: func.func @test_bidirectional_transfer
+// CHECK-LABEL: func.func @test_c2v2c_transfer
 // CHECK: hivm.hir.sync_block_wait {{.*}}[<CUBE>, <PIPE_V>, <PIPE_FIX>] flag = [[FLAG_1:[0-9]+]]
 // CHECK: hivm.hir.fixpipe
 // CHECK: hivm.hir.sync_block_set {{.*}}[<CUBE>, <PIPE_FIX>, <PIPE_V>] flag = [[FLAG_1]]
@@ -32,10 +32,10 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: memref.memory_space_cast
 // CHECK: bufferization.to_tensor
 
+// CHECK: hivm.hir.sync_block_set {{.*}}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = [[FLAG_1:[0-9]+]]
 // CHECK: hivm.hir.sync_block_wait {{.*}}[<VECTOR>, <PIPE_MTE1>, <PIPE_MTE3>] flag = [[FLAG_2:[0-9]+]]
 // CHECK: hivm.hir.copy
 // CHECK: hivm.hir.sync_block_set {{.*}}[<VECTOR>, <PIPE_MTE3>, <PIPE_MTE1>] flag = [[FLAG_2]]
-// CHECK: hivm.hir.sync_block_set {{.*}}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = [[FLAG_1:[0-9]+]]
 
 // CHECK: hivm.hir.sync_block_wait {{.*}}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = [[FLAG_2]]
 // CHECK: hivm.hir.convert_layout

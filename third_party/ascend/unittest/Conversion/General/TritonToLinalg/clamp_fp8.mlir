@@ -59,17 +59,17 @@ module {
 
 // CHECK: %[[CAST_F8:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg2 to offset: [%9], sizes: [2, 29, 4], strides: [116, 4, 1] : memref<?xf8E4M3FN> to memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>>
 // CHECK: %[[ALLOC_F8:[A-Za-z0-9_]+]] = memref.alloc() : memref<2x29x4xf8E4M3FN>
-// CHECK: memref.copy %[[CAST_F8]], %[[ALLOC_F8]] : memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf8E4M3FN>
+// CHECK: memref.copy %[[CAST_F8]], %[[ALLOC_F8]] {isVolatile = false} : memref<2x29x4xf8E4M3FN, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf8E4M3FN>
 // CHECK: %[[TENSOR_F8:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC_F8]] restrict writable : memref<2x29x4xf8E4M3FN>
 
 // CHECK: %[[CAST_F32_MIN:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg4 to offset: [%9], sizes: [2, 29, 4], strides: [116, 4, 1] : memref<?xf32> to memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>>
 // CHECK: %[[ALLOC_F32_MIN:[A-Za-z0-9_]+]] = memref.alloc() : memref<2x29x4xf32>
-// CHECK: memref.copy %[[CAST_F32_MIN]], %[[ALLOC_F32_MIN]] : memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf32>
+// CHECK: memref.copy %[[CAST_F32_MIN]], %[[ALLOC_F32_MIN]] {isVolatile = false} : memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf32>
 // CHECK: %[[TENSOR_F32_MIN:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC_F32_MIN]] restrict writable : memref<2x29x4xf32>
 
 // CHECK: %[[CAST_F32_MAX:[A-Za-z0-9_]+]] = memref.reinterpret_cast %arg5 to offset: [%9], sizes: [2, 29, 4], strides: [116, 4, 1] : memref<?xf32> to memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>>
 // CHECK: %[[ALLOC_F32_MAX:[A-Za-z0-9_]+]] = memref.alloc() : memref<2x29x4xf32>
-// CHECK: memref.copy %[[CAST_F32_MAX]], %[[ALLOC_F32_MAX]] : memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf32>
+// CHECK: memref.copy %[[CAST_F32_MAX]], %[[ALLOC_F32_MAX]] {isVolatile = false} : memref<2x29x4xf32, strided<[116, 4, 1], offset: ?>> to memref<2x29x4xf32>
 // CHECK: %[[TENSOR_F32_MAX:[A-Za-z0-9_]+]] = bufferization.to_tensor %[[ALLOC_F32_MAX]] restrict writable : memref<2x29x4xf32>
 
 // CHECK: %[[F8_TO_F32:[A-Za-z0-9_]+]] = arith.extf %[[TENSOR_F8]] {round_mode = #hfusion.round_mode<rint>} : tensor<2x29x4xf8E4M3FN> to tensor<2x29x4xf32>

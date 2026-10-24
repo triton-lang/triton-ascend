@@ -625,6 +625,11 @@ static bool mayWriteRoot(Operation *op, Value loadRootPtr) {
 // ops, and loop-carried writes where a later store in the loop body may feed a
 // following iteration.
 bool requiresVolatileIndirectLoad(Value srcPtr, Operation *loadOp) {
+  // An explicit volatile read must survive conversion to an indirect call,
+  // regardless of whether dependency analysis finds a preceding write.
+  if (auto load = dyn_cast<triton::LoadOp>(loadOp);
+      load && load.getIsVolatile())
+    return true;
   auto loadRootPtr = getRootPointer(srcPtr);
   if (!loadRootPtr) {
     return true;

@@ -2032,8 +2032,8 @@ static void insertWhileCounterOps(const MainLoop &mainLoop) {
   builder.setInsertionPointAfter(lastWithBlockId);
   IntegerAttr blockIdAttr = builder.getI32IntegerAttr(*counterBlockId);
 
-  Value one = builder.create<arith::ConstantIntOp>(
-      loc, 1, mainLoop.iterCounter.getType().getIntOrFloatBitWidth());
+  Value one = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(mainLoop.iterCounter.getType(), 1));
   one.getDefiningOp()->setAttr(kBlockId, blockIdAttr);
 
   Value nextCounter =

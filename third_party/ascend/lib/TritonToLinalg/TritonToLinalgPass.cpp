@@ -1467,7 +1467,8 @@ void TritonToLinalgPass::populateTritonToLinalgConversionPatterns(
   patterns.add<TTOpConverters::DevicePrintConverter>(patterns.getContext());
   patterns.add<TTOpConverters::MatmulConverter>(patterns.getContext());
   patterns.add<TTOpConverters::DotConverter>(patterns.getContext());
-  patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext());
+  patterns.add<TTOpConverters::DotScaledConverter>(patterns.getContext(),
+                                                   compileOn91095Flag);
   patterns.add<TTOpConverters::PtrToIntConverter>(patterns.getContext());
   patterns.add<TTOpConverters::IntToPtrConverter>(typeConverter,
                                                   patterns.getContext());
@@ -1911,6 +1912,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
     RewritePatternSet foldPatterns(&getContext());
     TTOpConverters::populatePostConversionCanonicalizationPatterns(
         foldPatterns);
+    TTOpConverters::populateScaledDotCanonicalizationPatterns(foldPatterns);
 
     if (failed(applyPatternsGreedily(moduleOp, std::move(foldPatterns)))) {
       moduleOp->emitError("failed to fold one-hot gather after max_with_index");

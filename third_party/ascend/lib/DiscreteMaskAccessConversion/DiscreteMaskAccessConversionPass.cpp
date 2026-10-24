@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "StoreOwnershipAnalysis.h"
 #include "Utils/Utils.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 
@@ -30,6 +31,7 @@
 #include "ascend/include/TritonToUnstructure/OffsetAnalysis.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Attributes.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/Pass/Pass.h"
@@ -59,7 +61,6 @@ using namespace hivm;
 static bool compileOn91095Flag = false;
 static triton::ascend::CompileMode compileModeFlag =
     triton::ascend::CompileMode::Simd;
-static bool useSyncBlockLockFlag = true;
 
 // Only signed comparisons against the same fixed, zero-based range are
 // accepted. Preserve the original bound's integer semantics, including
@@ -260,119 +261,6 @@ static void markSyncBlockLockUnordered(Operation *op) {
               UnitAttr::get(op->getContext()));
 }
 
-static bool traceUserToTargetOp(Value val) {
-  llvm::SmallVector<Value, 32> worklist;
-  llvm::SmallPtrSet<Value, 32> visited;
-  worklist.push_back(val);
-
-  while (!worklist.empty()) {
-    Value currVal = worklist.pop_back_val();
-    if (!visited.insert(currVal).second)
-      continue;
-
-    for (Operation *user : currVal.getUsers()) {
-      if (auto mulOp = dyn_cast<arith::MulIOp>(user)) {
-        Value lhs = mulOp.getLhs();
-        Value rhs = mulOp.getRhs();
-        Value constVal;
-        if (lhs.getDefiningOp<arith::ConstantOp>()) {
-          constVal = lhs;
-        } else if (rhs.getDefiningOp<arith::ConstantOp>()) {
-          constVal = rhs;
-        } else {
-          continue;
-        }
-
-        auto constDef = constVal.getDefiningOp<arith::ConstantOp>();
-        int64_t blockSize = 0;
-        if (auto intAttr = mlir::dyn_cast<IntegerAttr>(constDef.getValue())) {
-          blockSize = intAttr.getInt();
-        }
-
-        llvm::SmallVector<Value, 8> searchQueue;
-        llvm::SmallPtrSet<Value, 8> searchVis;
-        for (Value mulRes : mulOp->getResults()) {
-          searchQueue.push_back(mulRes);
-          searchVis.insert(mulRes);
-        }
-
-        bool findMatch = false;
-        while (!searchQueue.empty()) {
-          Value checkVal = searchQueue.pop_back_val();
-          for (Operation *subUser : checkVal.getUsers()) {
-            if (auto addOp = dyn_cast<arith::AddIOp>(subUser)) {
-              Value otherOperand = (addOp.getLhs() == checkVal)
-                                       ? addOp.getRhs()
-                                       : addOp.getLhs();
-
-              Value curSrc = otherOperand;
-              bool hitRange = false;
-              int depth = 0;
-              while (curSrc.getDefiningOp() && depth < 5) {
-                Operation *defOp = curSrc.getDefiningOp();
-                if (auto rangeOp = dyn_cast<triton::MakeRangeOp>(defOp)) {
-                  if (rangeOp.getEnd() == blockSize) {
-                    hitRange = true;
-                    break;
-                  }
-                }
-
-                if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-                        triton::BroadcastOp>(defOp)) {
-                  curSrc = defOp->getOperand(0);
-                  depth++;
-                  continue;
-                }
-                break;
-              }
-              if (hitRange) {
-                findMatch = true;
-                break;
-              }
-            }
-            if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-                    triton::BroadcastOp>(subUser)) {
-              for (Value subRes : subUser->getResults()) {
-                if (!searchVis.count(subRes)) {
-                  searchVis.insert(subRes);
-                  searchQueue.push_back(subRes);
-                }
-              }
-            }
-          }
-          if (findMatch)
-            break;
-        }
-        if (findMatch) {
-          return true;
-        }
-
-        for (Value mulRes : mulOp->getResults()) {
-          worklist.push_back(mulRes);
-        }
-      }
-
-      if (isa<arith::ExtSIOp, triton::SplatOp, triton::ExpandDimsOp,
-              triton::BroadcastOp>(user)) {
-        for (Value res : user->getResults()) {
-          worklist.push_back(res);
-        }
-      }
-    }
-  }
-  return false;
-}
-
-static bool checkAllProgramIdNonOverlap(ModuleOp module) {
-  bool allNonOverlap = true;
-  module.walk([&](triton::GetProgramIdOp pidOp) {
-    if (!traceUserToTargetOp(pidOp.getResult())) {
-      allNonOverlap = false;
-    }
-  });
-  return allNonOverlap;
-}
-
 LogicalResult isDiscreteMask(Operation *op, Value mask,
                              PatternRewriter &rewriter) {
   if (!mask || op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName)) {
@@ -497,56 +385,64 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
     // discMask to select the final per-element value. This prevents the
     // unguarded full-load from reading past the tail-block boundary.
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
-    if (contMask && discMask) {
-      // insert sync_block_lock (unordered: see markSyncBlockLockUnordered)
-      auto lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
-      markSyncBlockLockUnordered(lockVar.getOperation());
-      if (useSyncBlockLockFlag) {
-        rewriter.create<hivm::PipeBarrierOp>(
-            loc,
-            hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_ALL));
-        auto lockOp = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
-        markSyncBlockLockUnordered(lockOp.getOperation());
-      }
-      auto safeLoad = rewriter.create<triton::LoadOp>(
-          loc, dst, contMask, op.getCache(), op.getEvict(), false);
-      auto selOp = rewriter.create<arith::SelectOp>(loc, discMask, src,
-                                                    safeLoad.getResult());
-      auto newStore = rewriter.create<triton::StoreOp>(
-          loc, dst, selOp, contMask, op.getCache(), op.getEvict());
-      newStore->setAttr(ConverterUtils::discreteMaskAttrName,
-                        UnitAttr::get(rewriter.getContext()));
-      if (useSyncBlockLockFlag) {
-        auto unlockOp = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
-        markSyncBlockLockUnordered(unlockOp.getOperation());
-      }
-      rewriter.replaceOp(op, newStore);
-      return success();
-    }
+    Value accessMask = contMask && discMask ? contMask : Value();
+    Value selectMask = accessMask ? discMask : mask;
 
-    // SIMD fallback: original full load + select (contMask absent, pure
-    // discrete). Has DDR OOB risk but no better option in pure simd mode.
-    // insert sync_block_lock to serialize the read-modify-write window.
-    auto lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
-    markSyncBlockLockUnordered(lockVar.getOperation());
-    if (useSyncBlockLockFlag) {
+    Value trueValue =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getBoolAttr(true));
+    Value needsLock = trueValue;
+    if (auto ownership = triton::buildStoreOwnershipGuard(op, rewriter);
+        succeeded(ownership))
+      needsLock =
+          rewriter.createOrFold<arith::XOrIOp>(loc, *ownership, trueValue);
+
+    bool alwaysLocks = matchPattern(needsLock, m_One());
+    bool neverLocks = matchPattern(needsLock, m_Zero());
+    Value lockVar;
+    if (!neverLocks) {
+      lockVar = MemOpConverter::createSyncBlockLockVar(rewriter, loc);
+      markSyncBlockLockUnordered(lockVar.getDefiningOp());
+      // Keep the pipeline ordering independently of whether the launch takes
+      // the lock-free path.
       rewriter.create<hivm::PipeBarrierOp>(
           loc,
           hivm::PipeAttr::get(rewriter.getContext(), hivm::PIPE::PIPE_ALL));
-      auto lockOp = rewriter.create<hivm::SyncBlockLockOp>(loc, lockVar);
-      markSyncBlockLockUnordered(lockOp.getOperation());
+      auto acquire = [&](OpBuilder &builder, Location location) {
+        auto lock = builder.create<hivm::SyncBlockLockOp>(location, lockVar);
+        markSyncBlockLockUnordered(lock.getOperation());
+      };
+      if (alwaysLocks)
+        acquire(rewriter, loc);
+      else
+        rewriter.create<scf::IfOp>(loc, needsLock,
+                                   [&](OpBuilder &builder, Location location) {
+                                     acquire(builder, location);
+                                     builder.create<scf::YieldOp>(location);
+                                   });
     }
-    auto loadFromDstOp = rewriter.create<triton::LoadOp>(
-        loc, dst, op.getCache(), op.getEvict(), false);
-    auto selOp = rewriter.create<arith::SelectOp>(loc, mask, src,
-                                                  loadFromDstOp.getResult());
+
+    auto previous = rewriter.create<triton::LoadOp>(
+        loc, dst, accessMask, op.getCache(), op.getEvict(), false);
+    auto selected = rewriter.create<arith::SelectOp>(loc, selectMask, src,
+                                                     previous.getResult());
     auto newStore = rewriter.create<triton::StoreOp>(
-        loc, dst, selOp, op.getCache(), op.getEvict());
+        loc, dst, selected, accessMask, op.getCache(), op.getEvict());
     newStore->setAttr(ConverterUtils::discreteMaskAttrName,
-                      UnitAttr::get(rewriter.getContext()));
-    if (useSyncBlockLockFlag) {
-      auto unlockOp = rewriter.create<hivm::SyncBlockUnlockOp>(loc, lockVar);
-      markSyncBlockLockUnordered(unlockOp.getOperation());
+                      rewriter.getUnitAttr());
+    if (!neverLocks) {
+      auto release = [&](OpBuilder &builder, Location location) {
+        auto unlock =
+            builder.create<hivm::SyncBlockUnlockOp>(location, lockVar);
+        markSyncBlockLockUnordered(unlock.getOperation());
+      };
+      if (alwaysLocks)
+        release(rewriter, loc);
+      else
+        rewriter.create<scf::IfOp>(loc, needsLock,
+                                   [&](OpBuilder &builder, Location location) {
+                                     release(builder, location);
+                                     builder.create<scf::YieldOp>(location);
+                                   });
     }
     rewriter.replaceOp(op, newStore);
     return success();
@@ -752,9 +648,6 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
   }
   markRuntimeLoopMasks(moduleOp);
 
-  bool tileNonOverlap = checkAllProgramIdNonOverlap(moduleOp);
-  useSyncBlockLockFlag = !tileNonOverlap;
-
   // Restore floating-point atomic max/min expanded by semantic.py before
   // discrete-mask rewriting changes the atomic value into arith.select.
   // Run this in a separate greedy-rewrite phase so that
@@ -797,8 +690,8 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
 
 void DiscreteMaskAccessConversionPass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry.insert<arith::ArithDialect, scf::SCFDialect, triton::TritonDialect,
-                  hivm::HIVMDialect>();
+  registry.insert<arith::ArithDialect, scf::SCFDialect, tensor::TensorDialect,
+                  triton::TritonDialect, hivm::HIVMDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

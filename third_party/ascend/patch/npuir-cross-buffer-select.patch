@@ -1,0 +1,241 @@
+diff --git a/bishengir/lib/Conversion/ArithToHIVMLLVM/ArithToHIVMLLVM.cpp b/bishengir/lib/Conversion/ArithToHIVMLLVM/ArithToHIVMLLVM.cpp
+index 8655ca3..83269ff
+--- a/bishengir/lib/Conversion/ArithToHIVMLLVM/ArithToHIVMLLVM.cpp
++++ b/bishengir/lib/Conversion/ArithToHIVMLLVM/ArithToHIVMLLVM.cpp
+@@ -88,11 +88,17 @@ SelectOpLowering::matchAndRewrite(arith::SelectOp op, OpAdaptor adaptor,
+
+   resDescr.setAllocatedPtr(rewriter, loc, resAllocatedPtr);
+   resDescr.setAlignedPtr(rewriter, loc, resAlignedPtr);
+-  auto offset = trueDescriptor.offset(rewriter, loc);
++  auto offset = rewriter.create<LLVM::SelectOp>(
++      loc, condition, trueDescriptor.offset(rewriter, loc),
++      falseDescriptor.offset(rewriter, loc));
+   resDescr.setOffset(rewriter, loc, offset);
+   for (int64_t i = 0, e = memrefResult.getRank(); i != e; ++i) {
+-    auto size = trueDescriptor.size(rewriter, loc, i);
+-    auto stride = trueDescriptor.stride(rewriter, loc, i);
++    auto size = rewriter.create<LLVM::SelectOp>(
++        loc, condition, trueDescriptor.size(rewriter, loc, i),
++        falseDescriptor.size(rewriter, loc, i));
++    auto stride = rewriter.create<LLVM::SelectOp>(
++        loc, condition, trueDescriptor.stride(rewriter, loc, i),
++        falseDescriptor.stride(rewriter, loc, i));
+     resDescr.setSize(rewriter, loc, i, size);
+     resDescr.setStride(rewriter, loc, i, stride);
+   }
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
+index e124d46..7540e33
+--- a/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/AlignBuffer/PropagateAlignUtil.cpp
+@@ -1270,6 +1270,45 @@ propagateUnrealizedConversionCastOp(RewriterBase &rewriter,
+   return FailureOrCastVec{};
+ }
+
++FailureOrCastVec
++propagateSelectMemRefType(RewriterBase &rewriter,
++                          UnrealizedConversionCastOp conversion,
++                          arith::SelectOp select) {
++  Value from = conversion.getResult(0);
++  Value to = conversion.getInputs()[0];
++  auto alignedType = dyn_cast<MemRefType>(to.getType());
++  if (!alignedType ||
++      (select.getTrueValue() != from && select.getFalseValue() != from))
++    return failure();
++  Type oldType = select.getType();
++  rewriter.setInsertionPoint(select);
++  auto alignAlternative = [&](Value value) -> Value {
++    if (value == from)
++      return to;
++    if (value.getType() == alignedType)
++      return value;
++    // Both roots receive the same align marks. The peer allocation is
++    // rewritten later; its producer/consumer UCC pair then cancels.
++    auto peer = rewriter.create<UnrealizedConversionCastOp>(select.getLoc(),
++                                                            alignedType, value);
++    peer->setAttr(propagateFailureName, rewriter.getUnitAttr());
++    return peer.getResult(0);
++  };
++  Value first = alignAlternative(select.getTrueValue());
++  Value second = alignAlternative(select.getFalseValue());
++  rewriter.modifyOpInPlace(select, [&]() {
++    select.getTrueValueMutable().assign(first);
++    select.getFalseValueMutable().assign(second);
++    select.getResult().setType(alignedType);
++  });
++  rewriter.setInsertionPointAfter(select);
++  auto result = rewriter.create<UnrealizedConversionCastOp>(
++      select.getLoc(), oldType, select.getResult());
++  rewriter.replaceAllUsesExcept(select.getResult(), result.getResult(0),
++                                result);
++  return UnrealizedCastOpVec{result};
++}
++
+ FailureOrCastVec propagateDefaultOp(RewriterBase &rewriter,
+                                     UnrealizedConversionCastOp conversionOp,
+                                     Operation *op, Operation *user) {
+@@ -1430,6 +1469,14 @@ mlir::LogicalResult propagateAlignUpFromResult(
+         return propagateAlignUp(rewriter, bitcastOp, alignDims, alignBytes,
+                                 alignDimAttrName, alignBytesAttrName);
+       })
++      .Case([&](arith::SelectOp select) {
++        if (!isa<MemRefType>(select.getType()))
++          return failure();
++        for (Value value : {select.getTrueValue(), select.getFalseValue()})
++          createAlignMarkOp(rewriter, select.getLoc(), value, alignDims,
++                            alignBytes, alignDimAttrName, alignBytesAttrName);
++        return success();
++      })
+       .Case([&](scf::ForOp scfForOp) {
+         return propagateAlignUp(rewriter, scfForOp, result, alignDims,
+                                 alignBytes, alignDimAttrName,
+@@ -1888,6 +1935,9 @@ LogicalResult mlir::hivm::replaceAndPropagateMemRefType(RewriterBase &rewriter,
+               .Case([&rewriter, &conversion](memref::ReshapeOp reshapeOp) {
+                 return propagateReshapeOp(rewriter, conversion, reshapeOp);
+               })
++              .Case([&](arith::SelectOp select) {
++                return propagateSelectMemRefType(rewriter, conversion, select);
++              })
+               .Case([&rewriter, &conversion](memref::CastOp castOp) {
+                 return propagateCastOp(rewriter, conversion, castOp);
+               })
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/BubbleUpExtractSlice/BufferizationPropagateOp.cpp b/bishengir/lib/Dialect/HIVM/Transforms/BubbleUpExtractSlice/BufferizationPropagateOp.cpp
+index a899535..1167b33
+--- a/bishengir/lib/Dialect/HIVM/Transforms/BubbleUpExtractSlice/BufferizationPropagateOp.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/BubbleUpExtractSlice/BufferizationPropagateOp.cpp
+@@ -545,6 +545,46 @@ LogicalResult BufferizationPropagateDownPattern::propagateDownMemorySpaceCast(
+   return success();
+ }
+
++static LogicalResult propagateDownMemrefSelect(arith::SelectOp select,
++                                               UnrealizedConversionCastOp down,
++                                               PatternRewriter &rewriter) {
++  Value oldValue = down.getResult(0);
++  Value newValue = down.getInputs()[0];
++  auto slicedType = dyn_cast<MemRefType>(newValue.getType());
++  if (!slicedType ||
++      (select.getTrueValue() != oldValue && select.getFalseValue() != oldValue))
++    return failure();
++  auto info = getTilingDimInfo(down);
++  rewriter.setInsertionPoint(select);
++  auto sliceAlternative = [&](Value value) -> Value {
++    if (value == oldValue)
++      return newValue;
++    if (auto otherDown = value.getDefiningOp<UnrealizedConversionCastOp>()) {
++      if (otherDown->hasAttr(kBubbleUpPropagateDown) &&
++          otherDown.getInputs()[0].getType() == slicedType) {
++        auto otherInfo = getTilingDimInfo(otherDown);
++        if (otherInfo.tilingDim == info.tilingDim &&
++            otherInfo.offset == info.offset && otherInfo.size == info.size)
++          return otherDown.getInputs()[0];
++      }
++    }
++    return createBubblePropagatorUpLink(value, slicedType, info.offset,
++                                        info.size, info.tilingDim, rewriter)
++        .getResult(0);
++  };
++  Value first = sliceAlternative(select.getTrueValue());
++  Value second = sliceAlternative(select.getFalseValue());
++  auto replacement = rewriter.create<arith::SelectOp>(
++      select.getLoc(), select.getCondition(), first, second);
++  replacement->setAttrs(select->getAttrs());
++  insertDownPropagators(select, replacement, info.offset, info.size,
++                        info.tilingDim, rewriter);
++  rewriter.eraseOp(select);
++  if (down->use_empty())
++    rewriter.eraseOp(down);
++  return success();
++}
++
+ // PropagateDown pattern should be written here.
+ LogicalResult BufferizationPropagateDownPattern::matchAndRewrite(
+     UnrealizedConversionCastOp propagateOp, PatternRewriter &rewriter) const {
+@@ -586,6 +626,9 @@ LogicalResult BufferizationPropagateDownPattern::matchAndRewrite(
+             .Case([&](memref::MemorySpaceCastOp op) {
+               return propagateDownMemorySpaceCast(op, propagateOp, rewriter);
+             })
++            .Case([&](arith::SelectOp op) {
++              return propagateDownMemrefSelect(op, propagateOp, rewriter);
++            })
+             .Default([&](Operation *) { return failure(); });
+     if (succeeded(result))
+       changed = true;
+diff --git a/bishengir/lib/Dialect/HIVM/Transforms/TileAndBindSubBlock/TileUtils.cpp b/bishengir/lib/Dialect/HIVM/Transforms/TileAndBindSubBlock/TileUtils.cpp
+index 798f385..c8224d8
+--- a/bishengir/lib/Dialect/HIVM/Transforms/TileAndBindSubBlock/TileUtils.cpp
++++ b/bishengir/lib/Dialect/HIVM/Transforms/TileAndBindSubBlock/TileUtils.cpp
+@@ -145,6 +145,29 @@ public:
+   }
+ };
+
++// A selected destination has two allocation roots with the same physical
++// shape. Use their common type for split inference; propagateUpSelect then
++// pushes the split into both alternatives, including both TCB annotations.
++static std::optional<Operation *> traceFixpipeAlloc(Value value) {
++  if (auto root = traceDefOp<memref::AllocOp>(value))
++    return root;
++  if (auto select = value.getDefiningOp<arith::SelectOp>()) {
++    auto first = traceFixpipeAlloc(select.getTrueValue());
++    auto second = traceFixpipeAlloc(select.getFalseValue());
++    if (first && second &&
++        (*first)->getResult(0).getType() == (*second)->getResult(0).getType())
++      return first;
++    return std::nullopt;
++  }
++  if (auto *def = value.getDefiningOp()) {
++    if (auto view = dyn_cast<ViewLikeOpInterface>(def))
++      return traceFixpipeAlloc(view.getViewSource());
++    if (auto cast = dyn_cast<memref::MemorySpaceCastOp>(def))
++      return traceFixpipeAlloc(cast.getSource());
++  }
++  return std::nullopt;
++}
++
+ struct DetachFixpipeDstReadView : public OpRewritePattern<FixpipeOp> {
+ public:
+   explicit DetachFixpipeDstReadView(MLIRContext *context)
+@@ -152,7 +175,7 @@ public:
+
+   LogicalResult matchAndRewrite(FixpipeOp op,
+                                 PatternRewriter &rewriter) const override {
+-    auto dstAlloc = traceDefOp<memref::AllocOp>(op.getDst());
++    auto dstAlloc = traceFixpipeAlloc(op.getDst());
+     if (!dstAlloc)
+       return failure();
+
+@@ -248,7 +271,7 @@ LogicalResult InsertFixpipeDstPropagateUp::matchAndRewrite(
+     if (!dstMemrefType)
+       return failure();
+
+-    auto maybeAllocOp = traceDefOp<memref::AllocOp>(dst);
++    auto maybeAllocOp = traceFixpipeAlloc(dst);
+     if (!maybeAllocOp)
+       return failure();
+
+@@ -410,6 +433,27 @@ static LogicalResult tileAndSliceOpAIC(
+   if (failed(applyPatternsGreedily(func, std::move(patterns)))) {
+     return failure();
+   }
++  bool invalidSelect = false;
++  OpBuilder selectBuilder(func.getContext());
++  func.walk([&](arith::SelectOp select) {
++    auto operandType = dyn_cast<MemRefType>(select.getTrueValue().getType());
++    if (!operandType || select.getType() == operandType)
++      return;
++    Type oldType = select.getType();
++    if (select.getFalseValue().getType() != operandType ||
++        !memref::CastOp::areCastCompatible(TypeRange{operandType},
++                                           TypeRange{oldType})) {
++      invalidSelect = true;
++      return;
++    }
++    select.getResult().setType(operandType);
++    selectBuilder.setInsertionPointAfter(select);
++    auto cast = selectBuilder.create<memref::CastOp>(select.getLoc(), oldType,
++                                                     select.getResult());
++    select.getResult().replaceAllUsesExcept(cast.getResult(), cast);
++  });
++  if (invalidSelect)
++    return failure();
+   if (hasUnpropagatedBubblePropagator(func)) {
+     return failure();
+   }

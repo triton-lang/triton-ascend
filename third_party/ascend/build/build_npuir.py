@@ -227,6 +227,20 @@ def _create_clang_wrapper():
     return wrapper
 
 
+def _apply_cross_buffer_select_patch(repo_dir):
+    """Apply the matching buffer select support to the private NPU-IR tree."""
+    patch = _REPO_ROOT / "third_party" / "ascend" / "patch" / "npuir-cross-buffer-select.patch"
+    command = ["git", "apply", "--check", str(patch)]
+    already_applied = subprocess.run(
+        ["git", "apply", "--reverse", "--check", str(patch)],
+        cwd=str(repo_dir), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ).returncode == 0
+    if already_applied:
+        return
+    subprocess.check_call(command, cwd=str(repo_dir))
+    subprocess.check_call(["git", "apply", str(patch)], cwd=str(repo_dir))
+
+
 def _build_and_package_bisheng(repo_dir, bisheng_compiler_path, build_type="Release", rebuild=True):
     """Configure, build and install AscendNPU-IR via its build.sh script."""
     repo_dir = Path(repo_dir)
@@ -320,6 +334,7 @@ def build_npuir():
 
     _log("Step 3/5: initializing code repositories ...")
     _init_npuir_repo()
+    _apply_cross_buffer_select_patch(_NPUIR_DIR)
 
     _log("Step 4/5: building and packaging ...")
     _build_and_package_bisheng(
@@ -331,4 +346,6 @@ def build_npuir():
 
     _log("Step 5/5: copying artifacts ...")
     _copy_artifacts()
+    capability = _REPO_ROOT / "third_party" / "ascend" / "backend" / "bishengir" / "lib" / "cross-buffer-select-v1"
+    capability.write_text("1\n", encoding="utf-8")
     _log("All done.")

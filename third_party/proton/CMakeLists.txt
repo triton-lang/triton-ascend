@@ -3,13 +3,31 @@ project(Proton LANGUAGES CXX)
 set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
 set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
-# ============ Check for includes =============
-if(NOT CUPTI_INCLUDE_DIR)
-  message(FATAL_ERROR "CUPTI include directory not defined")
+# ============ Detect optional backends =============
+set(PROTON_BUILD_CUDA OFF)
+if(DEFINED CUPTI_INCLUDE_DIR
+   AND EXISTS "${CUPTI_INCLUDE_DIR}/cupti.h"
+   AND EXISTS "${CUPTI_INCLUDE_DIR}/cuda.h")
+  set(PROTON_BUILD_CUDA ON)
 endif()
-if(NOT ROCTRACER_INCLUDE_DIR)
-  message(FATAL_ERROR "ROCTRACER include directory not defined")
+
+set(PROTON_BUILD_HIP OFF)
+if(DEFINED ROCTRACER_INCLUDE_DIR
+   AND EXISTS "${ROCTRACER_INCLUDE_DIR}/roctracer/roctracer.h"
+   AND EXISTS "${ROCTRACER_INCLUDE_DIR}/hip/hip_runtime_api.h")
+  set(PROTON_BUILD_HIP ON)
 endif()
+
+set(PROTON_BUILD_MSPTI OFF)
+if(DEFINED MSPTI_INCLUDE_DIR AND EXISTS "${MSPTI_INCLUDE_DIR}/mspti.h")
+  set(PROTON_BUILD_MSPTI ON)
+endif()
+
+set(PROTON_BUILD_CANN OFF)
+if(DEFINED CANN_INCLUDE_DIR AND EXISTS "${CANN_INCLUDE_DIR}/acl/acl.h")
+  set(PROTON_BUILD_CANN ON)
+endif()
+
 if(NOT JSON_INCLUDE_DIR)
   message(FATAL_ERROR "JSON include directory not defined")
 endif()
@@ -27,23 +45,33 @@ function(add_proton_library name)
 
   target_link_libraries(${name} PRIVATE Python3::Module pybind11::headers)
 
-  # Use system to skip warnings caused by legacy clang compilers
-  target_include_directories(${name}
-    SYSTEM PRIVATE
-      "${ROCTRACER_INCLUDE_DIR}"
-  )
-
   target_include_directories(${name}
     PRIVATE
-      "${CUPTI_INCLUDE_DIR}"
       "${JSON_INCLUDE_DIR}"
       "${PROTON_COMMON_DIR}/include"
       "${PROTON_SRC_DIR}/include"
   )
 
-  # If HIP is AMD-based
-  target_compile_definitions(${name} PRIVATE __HIP_PLATFORM_AMD__)
-
+  if(PROTON_BUILD_CUDA)
+    target_include_directories(${name} PRIVATE "${CUPTI_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CUDA)
+  endif()
+  if(PROTON_BUILD_HIP)
+    # Use system to skip warnings caused by legacy clang compilers.
+    target_include_directories(${name} SYSTEM PRIVATE "${ROCTRACER_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_HIP __HIP_PLATFORM_AMD__)
+  endif()
+  if(PROTON_BUILD_MSPTI)
+    target_include_directories(${name} PRIVATE "${MSPTI_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_MSPTI)
+    if(DEFINED MSPTI_LIB_DIR)
+      target_compile_definitions(${name} PRIVATE MSPTI_LIB_DIR=${MSPTI_LIB_DIR})
+    endif()
+  endif()
+  if(PROTON_BUILD_CANN)
+    target_include_directories(${name} PRIVATE "${CANN_INCLUDE_DIR}")
+    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CANN)
+  endif()
   # Append this library name to the GLOBAL property "PROTON_LIBS"
   set_property(GLOBAL APPEND PROPERTY PROTON_LIBS ${name})
 endfunction()

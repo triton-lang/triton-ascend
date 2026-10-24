@@ -1,9 +1,13 @@
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
 #include "TraceDataIO/CircularLayoutParser.h"
 
+#ifdef PROTON_BUILD_CUDA
 #include "Driver/GPU/CudaApi.h"
 #include "Profiler/Instrumentation/CudaRuntime.h"
+#endif
+#ifdef PROTON_BUILD_HIP
 #include "Profiler/Instrumentation/HipRuntime.h"
+#endif
 #include "Utility/Numeric.h"
 #include "Utility/String.h"
 #include <algorithm>
@@ -56,10 +60,18 @@ void InstrumentationProfiler::doSetMode(
   }
   if (proton::toLower(modeAndOptions[0]) ==
       proton::toLower(DeviceTraits<DeviceType::CUDA>::name)) {
+#ifdef PROTON_BUILD_CUDA
     runtime = std::make_unique<CudaRuntime>();
+#else
+    throw std::runtime_error("CUDA instrumentation support is not built");
+#endif
   } else if (proton::toLower(modeAndOptions[0]) ==
              proton::toLower(DeviceTraits<DeviceType::HIP>::name)) {
+#ifdef PROTON_BUILD_HIP
     runtime = std::make_unique<HipRuntime>();
+#else
+    throw std::runtime_error("HIP instrumentation support is not built");
+#endif
   } else {
     throw std::runtime_error("Unknown device type: " + modeAndOptions[0]);
   }

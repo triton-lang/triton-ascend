@@ -29,19 +29,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 
-namespace mlir::triton::CVSplit {
-
-class SplitMatmulPattern : public mlir::OpRewritePattern<linalg::MatmulOp> {
-public:
-  explicit SplitMatmulPattern(mlir::MLIRContext *context, bool needSplitAll)
-      : OpRewritePattern<linalg::MatmulOp>(context),
-        needSplitAll(needSplitAll) {}
-  llvm::LogicalResult matchAndRewrite(linalg::MatmulOp matmulOp,
-                                      PatternRewriter &rewriter) const override;
-
-private:
-  bool needSplitAll;
-};
+namespace mlir::CVPipeline {
 
 class FoldExpandExtCollapse
     : public mlir::OpRewritePattern<mlir::tensor::CollapseShapeOp> {
@@ -71,6 +59,6 @@ public:
 
 std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass();
 
-} // namespace mlir::triton::CVSplit
+} // namespace mlir::CVPipeline
 
 #endif // TRITON_ADAPTER_DYNAMIC_CVPIPELINE_PATTERN_MATCH_REWRITES_H

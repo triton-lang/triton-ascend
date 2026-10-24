@@ -32,14 +32,11 @@
 #include "DynamicCVPipeline/Common/Utils.h"
 
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
-
-static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
 
 void PatternMatchRewritePass::runOnOperation() {
   auto moduleOp = getOperation();
@@ -50,23 +47,10 @@ void PatternMatchRewritePass::runOnOperation() {
 
   LOG_DEBUG("Input mlir:\n" << moduleOp);
 
-  bool needSplitAll = false;
-  moduleOp.walk([&](func::FuncOp funcOp) -> WalkResult {
-    if (!llvm::is_contained(needSplitAllFuncNme, funcOp.getSymName())) {
-      return WalkResult::advance();
-    }
-    LOG_DEBUG("[INFO] Matmul should split anyway: " << funcOp.getSymName());
-    needSplitAll = true;
-    return WalkResult::interrupt();
-  });
-
   auto *ctx = &getContext();
   RewritePatternSet patterns(ctx);
-  patterns.add<SplitMatmulPattern>(ctx, needSplitAll);
   patterns.add<FoldExpandExtCollapse>(ctx);
 
-  // the way we handle matmul dependencies across for blocks
-  // requres the patternmatching to go top-down
   GreedyRewriteConfig config = GreedyRewriteConfig().setUseTopDownTraversal();
   if (llvm::failed(
           applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
@@ -77,10 +61,10 @@ void PatternMatchRewritePass::runOnOperation() {
   LOG_DEBUG("Output mlir:\n" << moduleOp);
 }
 
-namespace mlir::triton::CVSplit {
+namespace mlir::CVPipeline {
 
 std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass() {
   return std::make_unique<PatternMatchRewritePass>();
 }
 
-} // namespace mlir::triton::CVSplit
+} // namespace mlir::CVPipeline

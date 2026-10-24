@@ -697,7 +697,7 @@ index d4872a463..86348211d 100644
                  src=src,
                  metadata=res.metadata._asdict(),
                  metadata_group=metadata_group,
-@@ -321,7 +346,29 @@ def compile(src, target=None, options=None, _env_vars=None):
+@@ -321,7 +346,25 @@ def compile(src, target=None, options=None, _env_vars=None):
      if compilation_listener:
          timer.finished_ir_initialization()
      for ext, compile_ir in list(stages.items())[first_stage:]:
@@ -709,10 +709,6 @@ index d4872a463..86348211d 100644
 +                stage_name = "ConvertTritonIRToLinalgIR"
 +            elif (ext == "npubin"):
 +                stage_name = "ConvertLinalgIRToBinary"
-+            elif (ext == "bcmlir"):
-+                stage_name = "BytecodeToLinalgIRByBishengirOpt"
-+            elif (ext == "mlirbc"):
-+                stage_name = "LinalgIRToBytecodeByTritonMLIROpt"
 +            else:
 +                stage_name = "MLIRCompile"
 +            if hasattr(e, 'stderr') and e.stderr:
@@ -761,18 +757,6 @@ index d4872a463..86348211d 100644
      def __init__(self, src, metadata_group, hash):
          from collections import namedtuple
          metadata_path = next((Path(p) for c, p in metadata_group.items() if c.endswith(".json")))
-@@ -420,8 +469,10 @@ class CompiledKernel:
-         # stores the text of each level of IR that was generated during compilation
-         asm_files = [Path(p) for c, p in metadata_group.items() if not c.endswith(".json")]
-         binary_ext = backend.binary_ext
-+        binary_extensions = getattr(backend, 'binary_extensions', {binary_ext})
-         self.asm = AsmDict({
--            file.suffix[1:]: file.read_bytes() if file.suffix[1:] == binary_ext else file.read_text()
-+            file.suffix[1:]:
-+            file.read_bytes() if file.suffix[1:] in binary_extensions else file.read_text()
-             for file in asm_files
-         })
-         self.metadata_group = metadata_group
 @@ -432,8 +483,33 @@ class CompiledKernel:
          self.module = None
          self.function = None
@@ -862,19 +846,6 @@ index 39e6c4dfb..c72ca65c2 100644
 +
 +    def format_line_delim(self, keyword):
 +        return f"///------------------{keyword}------------------\n"
-diff --git a/python/triton/extension/buffer/src/buffer_ir.cc b/python/triton/extension/buffer/src/buffer_ir.cc
-index 9ff1e4df9..7e2a4cdff 100644
---- a/python/triton/extension/buffer/src/buffer_ir.cc
-+++ b/python/triton/extension/buffer/src/buffer_ir.cc
-@@ -78,7 +78,7 @@ void init_buffer_ir(py::module &&m) {
-              // TODO: We need to add a pass before OneShotBufferize to generate
-              // MemorySpaceCastOp
-              Operation *memref =
--                 self.create<bufferization::ToBufferOp>(memrefType, src);
-+                 self.create<bufferization::ToMemrefOp>(memrefType, src);
-              if (addressSpace) {
-                memref = self.create<memref::MemorySpaceCastOp>(
-                    MemRefType::get(memrefType.getShape(),
 diff --git a/python/triton/language/math.py b/python/triton/language/math.py
 index 582cd876c..034fe0f87 100644
 --- a/python/triton/language/math.py

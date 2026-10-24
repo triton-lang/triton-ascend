@@ -1520,7 +1520,6 @@ class AscendBackend(BaseBackend):
         super().__init__(target)
         if target.backend == "npu":
             self.binary_ext = "npubin"
-            self.binary_extensions = {"npubin"}
 
     def parse_options(self, opts) -> Any:
         # TODO: get available targets when building options?

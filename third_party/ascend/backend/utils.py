@@ -491,32 +491,6 @@ def _get_triton_opt_path() -> str:
     return _get_tool_path("triton-opt")
 
 
-def _get_triton_mlir_opt_path() -> str:
-    """
-    Get the path to triton-mlir-opt tool.
-    This tool is used to convert MLIR to Bytecode format, supporting both
-    MLIR native ops and AscendNPU-IR custom ops.
-    """
-    return _get_tool_path("triton-mlir-opt")
-
-
-def _get_bishengir_opt_path() -> str:
-    ascend_dir = os.path.dirname(os.path.abspath(__file__))
-    env = os.environ.copy()
-    bishengir_opt_path = os.path.join(ascend_dir, "bishengir", "bin", "bishengir-opt")
-    if os.path.exists(bishengir_opt_path):
-        npuir_env_path = os.path.dirname(bishengir_opt_path)
-        env["PATH"] = npuir_env_path + ":" + env["PATH"]
-    else:
-        bishengir_opt_path = shutil.which("bishengir-opt")
-        if bishengir_opt_path is None:
-            bishengir_opt_root = knobs.ascend.npu_compiler_path or ""
-            if bishengir_opt_root is None:
-                raise EnvironmentError("Couldn't find executable bishengir-opt or TRITON_NPU_COMPILER_PATH")
-            bishengir_opt_path = os.path.join(bishengir_opt_root, "bishengir-opt")
-    return bishengir_opt_path, env
-
-
 def _get_npucompiler_path() -> str:
     ascend_dir = os.path.dirname(os.path.abspath(__file__))
     env = os.environ.copy()

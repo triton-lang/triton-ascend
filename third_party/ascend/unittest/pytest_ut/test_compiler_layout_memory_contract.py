@@ -132,9 +132,7 @@ def compiler_module():
     for name in (
             "_get_kernel_target",
             "_get_triton_adapter_opt_path",
-            "_get_triton_mlir_opt_path",
             "_get_triton_opt_path",
-            "_get_bishengir_opt_path",
     ):
         setattr(utils_stub, name, lambda *_args, **_kwargs: "")
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})

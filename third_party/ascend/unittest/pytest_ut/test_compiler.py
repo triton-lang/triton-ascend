@@ -168,7 +168,6 @@ def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
     stages = {}
     backend.add_stages(stages, options, language=None)
     assert list(stages) == ["ttir", "ttadapter", "npubin"]
-    assert backend.binary_extensions == {"npubin"}
 
     def no_bridge(*args, **kwargs):
         pytest.fail("text compatibility stage must not launch a subprocess")

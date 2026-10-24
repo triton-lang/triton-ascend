@@ -553,6 +553,104 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   }
 };
 
+// A discrete vector broadcast across a matrix is uniform along the broadcast
+// axis. Keep a structured row/column as a block load, guarded by the scalar
+// predicate for that row/column, instead of making every element indirect.
+// This is deliberately narrower than a general two-dimensional mask: arbitrary
+// element masks, or a conjunction with a separate column mask, still use the
+// existing masked-indirect path.
+static LogicalResult rewriteBroadcastMatrixLoad(triton::LoadOp op,
+                                                PatternRewriter &rewriter) {
+  auto broadcast = op.getMask().getDefiningOp<triton::BroadcastOp>();
+  auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
+  if (!broadcast || !ptrType || ptrType.getRank() != 2 ||
+      !ptrType.hasStaticShape() || ptrType.getEncoding())
+    return failure();
+  auto maskType = cast<RankedTensorType>(broadcast.getSrc().getType());
+  auto shape = ptrType.getShape();
+  if (maskType.getShape() == shape)
+    return failure();
+  auto axes = ConverterUtils::getBroadcastDims(maskType, ptrType);
+  // TODO: Support higher-rank masks with multiple broadcast axes when a
+  // concrete workload requires it.
+  if (axes.size() != 1)
+    return failure();
+  unsigned blockAxis = axes.front();
+  unsigned loopAxis = 1 - blockAxis;
+  // Use the same minimum block size as the unstructured access converter.
+  auto elementType = cast<RankedTensorType>(op.getType()).getElementType();
+  if (!elementType.isIntOrFloat() || shape[loopAxis] <= 1 ||
+      shape[blockAxis] * (elementType.getIntOrFloatBitWidth() / 8) < 64)
+    return failure();
+
+  llvm::DenseMap<Value, PtrOffsetInfo> offsetMap;
+  triton::parse(op.getPtr(), op.getLoc(), rewriter, offsetMap);
+  auto info = offsetMap.find(op.getPtr());
+  if (info == offsetMap.end() || !info->second.isStructured(blockAxis))
+    return failure();
+
+  auto loc = op.getLoc();
+  Value other = op.getOther();
+  if (!other) {
+    // Masked-off values without an explicit 'other' are undefined; zero is a
+    // valid choice and provides the initial value for the assembled matrix.
+    other = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getZeroAttr(op.getType()));
+  }
+  Value zero = rewriter.create<arith::ConstantIndexOp>(loc, 0);
+  Value one = rewriter.create<arith::ConstantIndexOp>(loc, 1);
+  Value upper = rewriter.create<arith::ConstantIndexOp>(loc, shape[loopAxis]);
+  // Vector predicates are bit-packed by the backend, whereas scalar loads
+  // address bytes. Materialize byte values before extracting a row predicate.
+  auto byteMaskType = maskType.clone(rewriter.getI8Type());
+  Value byteMask =
+      rewriter.create<arith::ExtUIOp>(loc, byteMaskType, broadcast.getSrc());
+  Value byteZero = rewriter.create<arith::ConstantIntOp>(loc, 0, 8);
+  auto loop =
+      rewriter.create<scf::ForOp>(loc, zero, upper, one, ValueRange{other});
+  {
+    OpBuilder::InsertionGuard guard(rewriter);
+    rewriter.setInsertionPointToStart(loop.getBody());
+    SmallVector<Value> indices(2, zero);
+    indices[loopAxis] = loop.getInductionVar();
+    Value predicate =
+        rewriter.create<tensor::ExtractOp>(loc, byteMask, indices);
+    Value condition = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::ne, predicate, byteZero);
+    SmallVector<OpFoldResult> offsets(2, rewriter.getIndexAttr(0));
+    SmallVector<OpFoldResult> sizes(2, rewriter.getIndexAttr(1));
+    SmallVector<OpFoldResult> strides(2, rewriter.getIndexAttr(1));
+    offsets[loopAxis] = loop.getInductionVar();
+    sizes[blockAxis] = rewriter.getIndexAttr(shape[blockAxis]);
+    auto rowType = RankedTensorType::get({shape[blockAxis]}, elementType);
+    auto guarded = rewriter.create<scf::IfOp>(
+        loc, condition,
+        [&](OpBuilder &builder, Location loc) {
+          // Drop the selected axis, so offset analysis sees only the proven
+          // structured axis of the pointer slice.
+          auto rowPtrType = rowType.clone(ptrType.getElementType());
+          auto ptr = builder.create<tensor::ExtractSliceOp>(
+              loc, rowPtrType, op.getPtr(), offsets, sizes, strides);
+          auto loaded = builder.create<triton::LoadOp>(
+              loc, ptr, op.getCache(), op.getEvict(), op.getIsVolatile());
+          builder.create<scf::YieldOp>(loc, loaded.getResult());
+        },
+        [&](OpBuilder &builder, Location loc) {
+          auto otherRow = builder.create<tensor::ExtractSliceOp>(
+              loc, rowType, loop.getRegionIterArg(0), offsets, sizes, strides);
+          builder.create<scf::YieldOp>(loc, otherRow.getResult());
+        });
+    // Keep the matrix accumulator outside the conditional. Yielding it through
+    // scf.if can become a select between UB and L1 buffers for a dot consumer.
+    auto inserted = rewriter.create<tensor::InsertSliceOp>(
+        loc, guarded.getResult(0), loop.getRegionIterArg(0), offsets, sizes,
+        strides);
+    rewriter.create<scf::YieldOp>(loc, inserted.getResult());
+  }
+  rewriter.replaceOp(op, loop.getResults());
+  return success();
+}
+
 struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
   using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
 
@@ -575,6 +673,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
         rankWithinIndirectFastPathLimit) {
+      if (succeeded(rewriteBroadcastMatrixLoad(op, rewriter)))
+        return success();
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();
@@ -797,8 +897,8 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
 
 void DiscreteMaskAccessConversionPass::getDependentDialects(
     DialectRegistry &registry) const {
-  registry.insert<arith::ArithDialect, scf::SCFDialect, triton::TritonDialect,
-                  hivm::HIVMDialect>();
+  registry.insert<arith::ArithDialect, scf::SCFDialect, tensor::TensorDialect,
+                  triton::TritonDialect, hivm::HIVMDialect>();
 }
 
 std::unique_ptr<OperationPass<ModuleOp>>

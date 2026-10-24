@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 #include <cstdint>
+#include <initializer_list>
 #include <optional>
 
 #include "llvm/ADT/ArrayRef.h"
@@ -33,6 +34,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -46,9 +48,11 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
@@ -1707,6 +1711,355 @@ public:
 
 } // namespace
 
+/// Returns true when `val` is defined inside `ifOp`, either by an operation
+/// nested in one of its regions or as a block argument of such a region.
+static bool isInternalValue(Value val, scf::IfOp ifOp) {
+  if (!val) {
+    return false;
+  }
+
+  // Produced by an operation nested inside the if.
+  if (Operation *defOp = val.getDefiningOp()) {
+    return ifOp->isAncestor(defOp);
+  }
+  // Block argument of a region nested inside the if.
+  Region *parentRegion = val.getParentRegion();
+  return parentRegion && ifOp->isAncestor(parentRegion->getParentOp());
+}
+
+/// Operation kinds a placeholder builder may emit: scalars, empty tensors,
+/// tensor fills, local allocations (`memref.alloc` / `memref.alloca`), and any
+/// view-like op over them (a view may be a placeholder view over an internal
+/// allocation or a clone of a real view; isDisposablePlaceholder checks that
+/// provenance).
+static bool isPlaceholderOp(Operation *op) {
+  return isa<arith::ConstantOp, tensor::EmptyOp, linalg::FillOp,
+             memref::AllocOp, memref::AllocaOp>(op) ||
+         isa<ViewLikeOpInterface>(op);
+}
+
+/// Returns true when `val` lives inside `ifOp` and is provably a disposable
+/// else-branch placeholder emitted by createPlaceholderValue (a constant,
+/// tensor.empty, linalg.fill, memref.alloc(a), or a view whose source
+/// recursively satisfies this predicate).
+///
+/// Values that merely happen to live inside the if are rejected: clones of real
+/// views introduced by ensureLocalValue, and real ops absorbed from the other
+/// side of the if, both carry else-branch semantics and must not be dropped.
+///
+/// Preconditions: `val` may be null (returns false); `ifOp` is valid.
+static bool isDisposablePlaceholder(Value val, scf::IfOp ifOp) {
+  if (!val || !isInternalValue(val, ifOp)) {
+    return false;
+  }
+  Operation *defOp = val.getDefiningOp();
+  if (!defOp) {
+    // Block argument of a nested region: never a placeholder.
+    return false;
+  }
+  // A view over a real (external) source is not a placeholder; recurse to tell
+  // it apart from a view over an internal placeholder allocation.
+  if (auto viewOp = dyn_cast<ViewLikeOpInterface>(defOp)) {
+    return isDisposablePlaceholder(viewOp.getViewSource(), ifOp);
+  }
+  return isPlaceholderOp(defOp);
+}
+
+/// Returns true when the else-yield of `upstreamIfOp` may be patched in place
+/// to carry `elseVal` for result `upResIdx`.
+///
+/// Safety boundary:
+///   - both ifs must belong to the same split batch (same enclosing block,
+///     condition and kSplittedIf tag), otherwise the substitution would mix
+///     unrelated control flow;
+///   - `elseVal` must dominate the upstream else-yield and match its type,
+///     otherwise the substitution would create invalid SSA;
+///   - an existing upstream else operand is only overwritten when it already is
+///     `elseVal` or is a disposable placeholder; overwriting a real computation
+///     would silently drop it.
+///
+/// Preconditions: `upstreamIfOp` and `elseVal` are non-null.
+static bool canSafelyRedirectToUpstreamIf(scf::IfOp upstreamIfOp,
+                                          unsigned upResIdx, scf::IfOp curIfOp,
+                                          Value elseVal,
+                                          DominanceInfo &domInfo) {
+  if (upstreamIfOp == curIfOp || curIfOp->isAncestor(upstreamIfOp) ||
+      upstreamIfOp.getElseRegion().empty()) {
+    return false;
+  }
+  if (upstreamIfOp->getBlock() != curIfOp->getBlock() ||
+      upstreamIfOp.getCondition() != curIfOp.getCondition()) {
+    return false;
+  }
+  auto upTag =
+      upstreamIfOp->getAttrOfType<IntegerAttr>(CVPipeline::kSplittedIf);
+  auto curTag = curIfOp->getAttrOfType<IntegerAttr>(CVPipeline::kSplittedIf);
+  if (!upTag || !curTag || upTag.getInt() != curTag.getInt()) {
+    return false;
+  }
+  scf::YieldOp upElseYield = upstreamIfOp.elseYield();
+  if (!upElseYield || upResIdx >= upstreamIfOp.getNumResults() ||
+      upResIdx >= upElseYield.getNumOperands()) {
+    return false;
+  }
+  if (elseVal.getType() != upstreamIfOp.getResult(upResIdx).getType() ||
+      !domInfo.properlyDominates(elseVal, upElseYield.getOperation())) {
+    return false;
+  }
+  Value current = upElseYield.getOperand(upResIdx);
+  return current == elseVal || isDisposablePlaceholder(current, upstreamIfOp);
+}
+
+/// Returns true when an if-op's then/else bodies still contain operations other
+/// than the terminator and disposable placeholders, i.e. work that must not be
+/// erased by a Case-B full hoist.
+static bool ifBodiesHaveRealWork(scf::IfOp ifOp) {
+  auto blockHasWork = [](Block *block) {
+    if (!block) {
+      return false;
+    }
+    for (Operation &op : block->without_terminator()) {
+      if (isPlaceholderOp(&op)) {
+        continue;
+      }
+      return true;
+    }
+    return false;
+  };
+  return blockHasWork(ifOp.thenBlock()) || blockHasWork(ifOp.elseBlock());
+}
+
+/// Safety gate for hoistAndUnifyRedirectedOutput.
+///
+/// Returns whether every result slot that the hoist would redirect can be
+/// rewritten without changing semantics or producing invalid SSA. When this
+/// returns false the caller must skip hoisting and leave the IR untouched.
+///
+/// Preconditions: `thenYield`/`elseYield` are the terminators of `ifOp`'s
+/// regions.
+static bool canSafelyHoistRedirectedOutput(scf::IfOp ifOp,
+                                           scf::YieldOp thenYield,
+                                           scf::YieldOp elseYield) {
+  size_t numResults = ifOp.getNumResults();
+  if (thenYield.getNumOperands() != numResults ||
+      elseYield.getNumOperands() != numResults) {
+    return false;
+  }
+
+  DominanceInfo domInfo(ifOp->getParentOp());
+  size_t hoistable = 0;
+  for (size_t i = 0; i < numResults; ++i) {
+    Value thenVal = thenYield.getOperand(i);
+    Value elseVal = elseYield.getOperand(i);
+    if (!thenVal || !elseVal ||
+        thenVal.getType() != ifOp.getResult(i).getType() ||
+        elseVal.getType() != ifOp.getResult(i).getType()) {
+      return false;
+    }
+    // Slot is produced inside the if and is kept verbatim.
+    if (isInternalValue(thenVal, ifOp)) {
+      continue;
+    }
+
+    ++hoistable;
+    if (isInternalValue(elseVal, ifOp)) {
+      // Dropping an internal else value is only valid for a disposable
+      // placeholder.
+      if (!isDisposablePlaceholder(elseVal, ifOp)) {
+        return false;
+      }
+      continue;
+    }
+
+    // The slot is redirected from an earlier split-if; the original else value
+    // must be safe to substitute into that if's else-yield.
+    auto upstreamIfOp =
+        llvm::dyn_cast_or_null<scf::IfOp>(thenVal.getDefiningOp());
+    if (!upstreamIfOp ||
+        !canSafelyRedirectToUpstreamIf(
+            upstreamIfOp, llvm::cast<OpResult>(thenVal).getResultNumber(), ifOp,
+            elseVal, domInfo)) {
+      return false;
+    }
+  }
+
+  // Case B erases the if-op entirely, so its bodies must not hold real work.
+  if (hoistable != 0 && hoistable == numResults && ifBodiesHaveRealWork(ifOp)) {
+    return false;
+  }
+  return true;
+}
+
+/// Hoist the "redirected" outputs of a materialized last split-if.
+///
+/// In Case B the last split-if carries every original result slot. A slot whose
+/// `then` operand is produced by an earlier split-if is a redundant
+/// pass-through: consumers can read the earlier if's result directly, and the
+/// original else value must be back-propagated into that earlier if's else
+/// branch ("unify").
+///
+/// Safety boundary:
+///   The rewrite only runs when canSafelyHoistRedirectedOutput() proves every
+///   hoisted slot is safe. Otherwise the function returns without touching the
+///   IR; the pass then keeps the pass-through form, which is always valid (if
+///   less optimal). It must never drop a real else-branch computation or
+///   produce invalid SSA.
+///
+/// Preconditions:
+///   - `ifOp` is an scf::IfOp with a non-empty else region.
+///   - Called after materialization and before downstream provenance analyses.
+static void hoistAndUnifyRedirectedOutput(scf::IfOp ifOp) {
+  if (ifOp.getElseRegion().empty()) {
+    return;
+  }
+
+  scf::YieldOp thenYield = ifOp.thenYield();
+  scf::YieldOp elseYield = ifOp.elseYield();
+  if (!thenYield || !elseYield) {
+    return;
+  }
+
+  // Refuse (leave the IR untouched) when any slot falls into a shape the
+  // rewrite cannot handle safely.
+  if (!canSafelyHoistRedirectedOutput(ifOp, thenYield, elseYield)) {
+    return;
+  }
+
+  mlir::IRRewriter rewriter(ifOp.getContext());
+  Location loc = ifOp.getLoc();
+  size_t numResults = ifOp.getNumResults();
+
+  struct OutputStatus {
+    bool isHoisted = false;
+    Value replacement = nullptr;
+  };
+
+  SmallVector<OutputStatus> statuses(numResults);
+
+  SmallVector<Type> newResultTypes;
+  SmallVector<Value> keptThenYieldOperands;
+  SmallVector<Value> keptElseYieldOperands;
+
+  size_t hoistedCount = 0;
+
+  // =========================================================================
+  // Step 1: classify every result slot as hoisted or kept.
+  // =========================================================================
+  for (size_t i = 0; i < numResults; ++i) {
+    Value thenVal = thenYield.getOperand(i);
+    Value elseVal = elseYield.getOperand(i);
+
+    // thenVal is computed inside this if: keep the slot verbatim.
+    if (isInternalValue(thenVal, ifOp)) {
+      newResultTypes.push_back(ifOp.getResult(i).getType());
+      keptThenYieldOperands.push_back(thenVal);
+      keptElseYieldOperands.push_back(elseVal);
+      continue;
+    }
+
+    // elseVal is a disposable placeholder (gate-approved): drop it and read
+    // thenVal directly.
+    if (isInternalValue(elseVal, ifOp)) {
+      statuses[i].isHoisted = true;
+      statuses[i].replacement = thenVal;
+      ++hoistedCount;
+      continue;
+    }
+
+    // elseVal is a real value: back-propagate it into the producing upstream
+    // split-if so the redirected result stays correct. The safety gate has
+    // already verified upstreamIfOp, upResIdx and the substitution.
+    auto upstreamIfOp =
+        llvm::dyn_cast_or_null<scf::IfOp>(thenVal.getDefiningOp());
+    unsigned upResIdx = llvm::cast<OpResult>(thenVal).getResultNumber();
+    scf::YieldOp upElseYield = upstreamIfOp.elseYield();
+    rewriter.startOpModification(upElseYield);
+    upElseYield.setOperand(upResIdx, elseVal);
+    rewriter.finalizeOpModification(upElseYield);
+
+    statuses[i].isHoisted = true;
+    statuses[i].replacement = thenVal;
+    ++hoistedCount;
+  }
+
+  // =========================================================================
+  // Step 2: apply the classification.
+  // =========================================================================
+
+  // Case A: nothing to hoist, the if-op is already minimal.
+  if (hoistedCount == 0) {
+    return;
+  }
+
+  // Case B: every result is hoisted, so the whole if-op can be dropped. The
+  // safety gate guarantees the bodies hold no real work here.
+  if (hoistedCount == numResults) {
+    SmallVector<Value> finalReplacements;
+    for (const auto &status : statuses) {
+      finalReplacements.push_back(status.replacement);
+    }
+    rewriter.replaceOp(ifOp, finalReplacements);
+    return;
+  }
+
+  // Case C: partial hoist. Rebuild the if-op around the kept slots.
+  rewriter.setInsertionPoint(ifOp);
+  auto newIfOp = rewriter.create<scf::IfOp>(
+      loc, newResultTypes, ifOp.getCondition(), /*withElseRegion=*/true);
+
+  if (!newIfOp.getThenRegion().empty()) {
+    rewriter.eraseBlock(&newIfOp.getThenRegion().front());
+  }
+  if (!newIfOp.getElseRegion().empty()) {
+    rewriter.eraseBlock(&newIfOp.getElseRegion().front());
+  }
+
+  // Inline the original bodies to preserve every internal computation.
+  rewriter.inlineRegionBefore(ifOp.getThenRegion(), newIfOp.getThenRegion(),
+                              newIfOp.getThenRegion().end());
+  rewriter.inlineRegionBefore(ifOp.getElseRegion(), newIfOp.getElseRegion(),
+                              newIfOp.getElseRegion().end());
+
+  // Update the yields of the rebuilt if-op with the kept slots.
+  auto newThenYield = newIfOp.thenYield();
+  rewriter.startOpModification(newThenYield);
+  newThenYield->setOperands(keptThenYieldOperands);
+  rewriter.finalizeOpModification(newThenYield);
+
+  auto newElseYield = newIfOp.elseYield();
+  rewriter.startOpModification(newElseYield);
+  newElseYield->setOperands(keptElseYieldOperands);
+  rewriter.finalizeOpModification(newElseYield);
+
+  // Build the replacement mapping for the original if-op results.
+  SmallVector<Value> finalReplacements;
+  unsigned newIfResultIdx = 0;
+  for (size_t i = 0; i < numResults; ++i) {
+    if (statuses[i].isHoisted) {
+      finalReplacements.push_back(statuses[i].replacement);
+    } else {
+      finalReplacements.push_back(newIfOp.getResult(newIfResultIdx++));
+    }
+  }
+  std::string joinedAttr =
+      llvm::join(llvm::map_range(newThenYield.getOperands(),
+                                 [](Value value) {
+                                   CVPipeline::CoreType ct =
+                                       CVPipeline::getValueCoreType(value);
+                                   return CVPipeline::coreTypeToString(ct);
+                                 }),
+                 ", ");
+  auto coreTypeAttr = rewriter.getStringAttr(joinedAttr);
+  // Keep the pre-existing behaviour: only the two yields carry the recomputed
+  // core_type; newIfOp is intentionally left without inherited attributes.
+  // Inheriting ifOp's block_id/splitted_if is a known follow-up, deferred for
+  // now to avoid changing the produced IR (see the pass notes, FI-4).
+  newThenYield->setAttr(kCoreType, coreTypeAttr);
+  newElseYield->setAttr(kCoreType, coreTypeAttr);
+
+  rewriter.replaceOp(ifOp, finalReplacements);
+}
+
 void SplitIfByBlockIdPass::runOnOperation() {
   SplittedIfTagGenerator tagGen;
   ModuleOp module = getOperation();
@@ -1756,11 +2109,16 @@ void SplitIfByBlockIdPass::runOnOperation() {
 
   auto &aa = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memGraph{module, aa};
+  SmallVector<scf::IfOp> splittedIfs;
   module->walk([&](scf::IfOp ifOp) {
     if (ifOp->hasAttr(CVPipeline::kSplittedIf)) {
-      rearrangeIfOp(ifOp, memGraph);
+      splittedIfs.push_back(ifOp);
     }
   });
+  for (auto ifOp : splittedIfs) {
+    rearrangeIfOp(ifOp, memGraph);
+    hoistAndUnifyRedirectedOutput(ifOp);
+  }
 
   LDBG("After: \n" << module << "\n----------");
 }

@@ -89,6 +89,50 @@ module {
   }
 }
 
+// -----
+
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "different_block_ids_keep_adjacent_ifs_separate"
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32} : (i1) -> ()
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32} : (i1) -> ()
+
+module {
+  func.func @different_block_ids_keep_adjacent_ifs_separate(%cond: i1, %lhs: memref<1xi32>, %rhs: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    %c2_i32 = arith.constant 2 : i32
+    scf.if %cond {
+      memref.store %c1_i32, %lhs[%c0] : memref<1xi32>
+    } {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32}
+    scf.if %cond {
+      memref.store %c2_i32, %rhs[%c0] : memref<1xi32>
+    } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
+    return
+  }
+}
+
+// -----
+
+// CHECK-LABEL: "func.func"() <{{.*}}sym_name = "different_block_ids_keep_nested_ifs_separate"
+// CHECK: "scf.if"
+// CHECK: "scf.if"
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32} : (i1) -> ()
+// CHECK: }) {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32} : (i1) -> ()
+
+module {
+  func.func @different_block_ids_keep_nested_ifs_separate(%cond: i1, %buf: memref<1xi32>) {
+    %c0 = arith.constant 0 : index
+    %c1_i32 = arith.constant 1 : i32
+    scf.if %cond {
+      scf.if %cond {
+        memref.store %c1_i32, %buf[%c0] : memref<1xi32>
+      } {hivm.unlikely_condition, ssbuffer.block_id = 8 : i32}
+    } {hivm.unlikely_condition, ssbuffer.block_id = 7 : i32}
+    return
+  }
+}
+
 
 // -----
 

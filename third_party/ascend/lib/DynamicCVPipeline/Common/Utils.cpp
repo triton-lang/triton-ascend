@@ -1,6 +1,7 @@
 #include <cstdint>
 #include <optional>
 
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -31,6 +32,7 @@
 #include "mlir/Interfaces/ViewLikeInterface.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 
@@ -450,35 +452,61 @@ scf::YieldOp MainLoop::getLoopYieldOp(Operation *loopOp) {
 }
 
 int getLoopCarriedArgIndex(Value operand, Block *block) {
-  if (!block || !block->mightHaveTerminator()) {
+  auto arg = dyn_cast_if_present<BlockArgument>(operand);
+  if (!block || !arg || arg.getOwner() != block) {
     return -1;
   }
 
-  auto barg = dyn_cast_if_present<BlockArgument>(operand);
-  if (!barg || barg.getOwner() != block) {
-    return -1;
+  Operation *parent = block->getParentOp();
+  if (auto forOp = dyn_cast_if_present<scf::ForOp>(parent)) {
+    unsigned index = arg.getArgNumber();
+    if (block != forOp.getBody() || index == 0 ||
+        index - 1 >= forOp.getRegionIterArgs().size()) {
+      return -1;
+    }
+    return index - 1;
+  }
+  if (auto whileOp = dyn_cast_if_present<scf::WhileOp>(parent)) {
+    if (block == whileOp.getBeforeBody() || block == whileOp.getAfterBody()) {
+      return arg.getArgNumber();
+    }
+  }
+  return -1;
+}
+
+OpOperand *getLoopCarriedUpdateOperand(Value value, Block *loopBlock) {
+  int index = getLoopCarriedArgIndex(value, loopBlock);
+  if (index < 0) {
+    return nullptr;
   }
 
-  auto *parentOp = block->getParentOp();
-  if (!isa<scf::ForOp, scf::WhileOp>(parentOp)) {
-    return -1;
+  Operation *parent = loopBlock->getParentOp();
+  Block *yieldBlock = loopBlock;
+  if (auto whileOp = dyn_cast<scf::WhileOp>(parent)) {
+    if (loopBlock == whileOp.getAfterBody()) {
+      Block *before = whileOp.getBeforeBody();
+      if (!before->mightHaveTerminator()) {
+        return nullptr;
+      }
+      auto condition = dyn_cast<scf::ConditionOp>(before->getTerminator());
+      if (!condition ||
+          static_cast<unsigned>(index) >= condition.getArgs().size()) {
+        return nullptr;
+      }
+      // Operand zero is the condition, not a forwarded loop value.
+      return &condition->getOpOperand(index + 1);
+    }
+    yieldBlock = whileOp.getAfterBody();
   }
 
-  auto *terminator = block->getTerminator();
-  if (!llvm::isa_and_present<scf::YieldOp>(terminator)) {
-    return -1;
+  if (!yieldBlock->mightHaveTerminator()) {
+    return nullptr;
   }
-
-  int numArgs = block->getNumArguments();
-  int numYieldOperands = terminator->getNumOperands();
-  int offset = numArgs - numYieldOperands;
-  int argIdx = barg.getArgNumber() - offset;
-
-  if (argIdx < 0 || argIdx >= numYieldOperands) {
-    return -1;
+  auto yield = dyn_cast<scf::YieldOp>(yieldBlock->getTerminator());
+  if (!yield || static_cast<unsigned>(index) >= yield.getNumOperands()) {
+    return nullptr;
   }
-
-  return argIdx;
+  return &yield->getOpOperand(index);
 }
 
 int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
@@ -543,6 +571,183 @@ CoreType getValueCoreType(Value value) {
     return UNDETERMINED;
   }
   return fromStrCoreType(coreTypeStrs[resultIdx]);
+}
+
+/// Finds the nearest enclosing scf::ForOp or scf::WhileOp and returns
+/// the block in that loop's region that contains the input block.
+///
+/// @param block The block from which to start walking up the parent hierarchy.
+///              May be nullptr.
+/// @return The enclosing loop's body block. For scf::WhileOp, this is the
+///         block in either the before or after region, depending on where
+///         the input block is nested. Returns std::nullopt if block is nullptr
+///         or no enclosing loop is found.
+std::optional<Block *> getFirstLoopBlock(Block *block) {
+  while (block) {
+    Region *parentRegion = block->getParent();
+    if (!parentRegion) {
+      return std::nullopt;
+    }
+
+    Operation *parentOp = parentRegion->getParentOp();
+    if (!parentOp) {
+      return std::nullopt;
+    }
+
+    if (isa<scf::ForOp, scf::WhileOp>(parentOp)) {
+      return block;
+    }
+
+    // Move to the block containing the parent operation.
+    block = parentOp->getBlock();
+  }
+
+  return std::nullopt;
+}
+
+namespace {
+
+// Append only a valid forwarding edge; malformed/unsupported edges fail closed.
+bool appendOperand(Operation *op, unsigned index,
+                   SmallVectorImpl<Value> &work) {
+  if (!op || index >= op->getNumOperands()) {
+    return false;
+  }
+  work.push_back(op->getOperand(index));
+  return true;
+}
+
+Operation *getCommonAncestor(Operation *lhs, Operation *rhs) {
+  for (Operation *ancestor = lhs; ancestor;
+       ancestor = ancestor->getParentOp()) {
+    for (Operation *other = rhs; other; other = other->getParentOp()) {
+      if (ancestor == other) {
+        return ancestor;
+      }
+    }
+  }
+  return nullptr;
+}
+
+// Follow SCF forwarding edges, stopping at ordinary defining operations.
+// Revisiting a value contributes no new producer, including unchanged
+// iter_args.
+Operation *getLoopCarriedOrigin(Value value, Value incoming) {
+  Operation *loop = cast<BlockArgument>(value).getOwner()->getParentOp();
+  SmallVector<Value> work{incoming};
+  llvm::DenseSet<Value> visited;
+  visited.insert(value);
+  Operation *origin = nullptr;
+  while (!work.empty()) {
+    Value current = work.pop_back_val();
+    if (!visited.insert(current).second) {
+      continue;
+    }
+
+    if (auto arg = dyn_cast<BlockArgument>(current)) {
+      Block *owner = arg.getOwner();
+      Operation *parent = owner->getParentOp();
+      unsigned index = arg.getArgNumber();
+      if (auto forOp = dyn_cast_if_present<scf::ForOp>(parent)) {
+        // The induction variable is not a forwarded iter_arg.
+        if (index == 0 || index - 1 >= forOp.getInitArgs().size()) {
+          return nullptr;
+        }
+        work.push_back(forOp.getInitArgs()[index - 1]);
+        if (!appendOperand(owner->getTerminator(), index - 1, work)) {
+          return nullptr;
+        }
+      } else if (auto whileOp = dyn_cast_if_present<scf::WhileOp>(parent)) {
+        if (owner == whileOp.getBeforeBody()) {
+          if (index >= whileOp.getInits().size()) {
+            return nullptr;
+          }
+          // For the queried loop, trace only the backedge, not its initial
+          // value.
+          if (parent != loop) {
+            work.push_back(whileOp.getInits()[index]);
+          }
+          if (!appendOperand(whileOp.getAfterBody()->getTerminator(), index,
+                             work)) {
+            return nullptr;
+          }
+        } else if (owner == whileOp.getAfterBody()) {
+          auto condition = dyn_cast<scf::ConditionOp>(
+              whileOp.getBeforeBody()->getTerminator());
+          if (!condition || index >= condition.getArgs().size()) {
+            return nullptr;
+          }
+          work.push_back(condition.getArgs()[index]);
+        } else {
+          return nullptr;
+        }
+      } else {
+        // Function arguments and unsupported region arguments have no def op.
+        return nullptr;
+      }
+      continue;
+    }
+
+    auto result = dyn_cast<OpResult>(current);
+    if (!result) {
+      return nullptr;
+    }
+    Operation *def = result.getOwner();
+    unsigned index = result.getResultNumber();
+    if (auto ifOp = dyn_cast<scf::IfOp>(def)) {
+      for (Region &region : ifOp->getRegions()) {
+        if (region.empty() ||
+            !appendOperand(region.front().getTerminator(), index, work)) {
+          return nullptr;
+        }
+      }
+    } else if (auto forOp = dyn_cast<scf::ForOp>(def)) {
+      if (!appendOperand(forOp.getBody()->getTerminator(), index, work)) {
+        return nullptr;
+      }
+    } else if (auto whileOp = dyn_cast<scf::WhileOp>(def)) {
+      auto condition =
+          dyn_cast<scf::ConditionOp>(whileOp.getBeforeBody()->getTerminator());
+      if (!condition || index >= condition.getArgs().size()) {
+        return nullptr;
+      }
+      work.push_back(condition.getArgs()[index]);
+    } else if (auto executeOp = dyn_cast<scf::ExecuteRegionOp>(def)) {
+      // Multi-block CFG forwarding is outside this helper's scope.
+      if (!llvm::hasSingleElement(executeOp.getRegion()) ||
+          !appendOperand(executeOp.getRegion().front().getTerminator(), index,
+                         work)) {
+        return nullptr;
+      }
+    } else {
+      if (isScfOp(def)) {
+        return nullptr;
+      }
+      origin = origin ? getCommonAncestor(origin, def) : def;
+      if (!origin) {
+        return nullptr;
+      }
+    }
+  }
+  return origin;
+}
+
+} // namespace
+
+Operation *getLoopCarriedDefOp(Value value, Block *block) {
+  auto arg = dyn_cast_if_present<BlockArgument>(value);
+  auto loopBlock = getFirstLoopBlock(block);
+  if (!arg || !loopBlock || arg.getOwner() != *loopBlock) {
+    return nullptr;
+  }
+
+  OpOperand *updateOperand = getLoopCarriedUpdateOperand(value, *loopBlock);
+  if (!updateOperand) {
+    return nullptr;
+  }
+
+  Operation *origin = getLoopCarriedOrigin(value, updateOperand->get());
+  return origin ? getAncestorInBlock(origin, block) : nullptr;
 }
 
 } // namespace CVPipeline

@@ -29,6 +29,7 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/AliasAnalysis.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
@@ -36,6 +37,7 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Operation.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -151,6 +153,37 @@ int64_t UBUsageOptPass::getValueSizeInBytes(Value value) {
   return 0;
 }
 
+static std::optional<Block *> getParentForBlock(Block *block) {
+  if (!block) {
+    return std::nullopt;
+  }
+
+  // Get the parent operation of the block's region.
+  Region *parentRegion = block->getParent();
+  if (!parentRegion) {
+    return std::nullopt;
+  }
+
+  auto ifOp = dyn_cast<scf::IfOp>(parentRegion->getParentOp());
+  if (!ifOp) {
+    return std::nullopt;
+  }
+
+  // Get the parent operation of the if.
+  Operation *ifParentOp = ifOp->getParentOp();
+  if (!ifParentOp) {
+    return std::nullopt;
+  }
+
+  auto forOp = dyn_cast<scf::ForOp>(ifParentOp);
+  if (!forOp) {
+    return std::nullopt;
+  }
+
+  // Return the body block of the for operation.
+  return forOp.getBody();
+}
+
 void UBUsageOptPass::buildUBUsageGraph(
     Block *block, DenseMap<Operation *, int> &op2nodeId,
     DenseMap<int, Operation *> &nodeId2op,
@@ -196,9 +229,22 @@ void UBUsageOptPass::buildUBUsageGraph(
   };
 
   DenseMap<std::pair<int, int>, bool> visited;
-  auto addEdge = [&](int src, int dst, int64_t sizeInBytes) {
-    if (visited.contains(std::make_pair(src, dst))) {
+  auto addEdge = [&](int src, int dst, int64_t sizeInBytes,
+                     bool isArgDep = false) {
+    if (visited.contains(std::make_pair(src, dst)) && !isArgDep) {
       return;
+    }
+    if (visited.contains(std::make_pair(src, dst)) && isArgDep) {
+      // llvm::errs() << "update!!!!!!!!!!!!!!!!\n";
+      // llvm::errs() << "src" << src << *nodeId2op[src] << "\n";
+      // llvm::errs() << "dst" << *nodeId2op[dst] <<"\n";
+      int linkNum = linkSize.size();
+      for (auto i = 0; i < linkNum; i++) {
+        if (linkEnd[i] == dst && linkStart[i] == src) {
+          linkSize[i] = sizeInBytes;
+          return;
+        }
+      }
     }
     if (src == dst) {
       // self-cycle can only be args dependency.
@@ -216,9 +262,15 @@ void UBUsageOptPass::buildUBUsageGraph(
     visited[std::make_pair(src, dst)] = true;
   };
 
-  Operation *terminator = block->getTerminator();
+  // for{if} situation
+  Block *argBlock = block;
+  if (auto opt = getParentForBlock(block)) {
+    argBlock = opt.value();
+  }
+
+  Operation *terminator = argBlock->getTerminator();
   if (terminator && isa<scf::YieldOp>(terminator)) {
-    unsigned maxArgIdx = std::min<unsigned>(block->getNumArguments(),
+    unsigned maxArgIdx = std::min<unsigned>(argBlock->getNumArguments(),
                                             terminator->getNumOperands());
     for (unsigned argIdx = 0; argIdx < maxArgIdx; ++argIdx) {
       Value yielded = terminator->getOperand(argIdx);
@@ -235,8 +287,16 @@ void UBUsageOptPass::buildUBUsageGraph(
   }
 
   for (Operation &blockOp : *block) {
+    // Yield only forwards values. Loop-carried edges are modeled at their
+    // users.
+    if (isa<scf::YieldOp>(blockOp)) {
+      continue;
+    }
     int dstNode = getOrCreateNodeId(&blockOp);
     blockOp.walk([&](Operation *op) {
+      if (isa<scf::YieldOp>(op)) {
+        return;
+      }
       for (Value operand : op->getOperands()) {
         Operation *srcInBlock = nullptr;
         bool fromArgEdge = false;
@@ -249,9 +309,9 @@ void UBUsageOptPass::buildUBUsageGraph(
             continue;
           }
         } else if (auto blockArg = dyn_cast<BlockArgument>(operand)) {
-          if (blockArg.getOwner() == block && terminator &&
+          if (blockArg.getOwner() == argBlock && terminator &&
               isa<scf::YieldOp>(terminator)) {
-            unsigned numArgs = block->getNumArguments();
+            unsigned numArgs = argBlock->getNumArguments();
             unsigned numYieldOperands = terminator->getNumOperands();
             // for op offset=1, while op offset=0
             int offset = (int)numArgs - (int)numYieldOperands;
@@ -260,7 +320,26 @@ void UBUsageOptPass::buildUBUsageGraph(
             if (argIdx >= 0 && argIdx < (int)numYieldOperands) {
               Value yielded = terminator->getOperand(argIdx);
               if (Operation *yieldDefOp = yielded.getDefiningOp()) {
-                srcInBlock = CVPipeline::getAncestorInBlock(yieldDefOp, block);
+                srcInBlock =
+                    CVPipeline::getAncestorInBlock(yieldDefOp, argBlock);
+                if (argBlock != block && isa<scf::IfOp>(yieldDefOp)) {
+                  auto ifOp = dyn_cast<scf::IfOp>(yieldDefOp);
+                  auto resultIt = llvm::find(ifOp->getResults(), yielded);
+                  if (resultIt == ifOp->getResults().end()) {
+                    return;
+                  }
+                  unsigned resultIdx =
+                      std::distance(ifOp->getResults().begin(), resultIt);
+                  // Get the yield in the then block.
+                  Block &thenBlock = ifOp.getThenRegion().front();
+                  auto thenYield =
+                      dyn_cast<scf::YieldOp>(thenBlock.getTerminator());
+                  Value thenYielded = thenYield.getOperand(resultIdx);
+                  if (thenYielded.getDefiningOp()) {
+                    srcInBlock = thenYielded.getDefiningOp();
+                    // llvm::errs() <<"srcInBlock = " << *srcInBlock<< "\n";
+                  }
+                }
                 fromArgEdge = true;
               }
             }
@@ -283,11 +362,16 @@ void UBUsageOptPass::buildUBUsageGraph(
         if (fromArgEdge) {
           edgeSize *= 2;
         }
+        // if (isa<arith::SubFOp>(blockOp)) {
+        // llvm::errs() << "Add SSA edage from " << *srcInBlock << " to " <<
+        // blockOp
+        //                                 << "\nweight = " << edgeSize << "\n";
+        // }
         if (!visited.contains(std::make_pair(srcNode, dstNode))) {
           LOG_DEBUG("Add SSA edage from " << *srcInBlock << " to " << blockOp
                                           << "\nweight = " << edgeSize << "\n");
         }
-        addEdge(srcNode, dstNode, edgeSize);
+        addEdge(srcNode, dstNode, edgeSize, fromArgEdge);
       }
 
       for (auto memDef : memGraph.getExecBefore(op)) {
@@ -355,16 +439,20 @@ static bool isActiveEndNode(int srcNode, int endNode,
                             const SmallVector<int> &nodeBlockId,
                             const SmallVector<int> &nodeCoreType,
                             DenseMap<int, Operation *> nodeId2op) {
-  int nodeNum = static_cast<int>(nodeBlockId.size());
+  // llvm::errs() << "endNode = " << *nodeId2op[endNode] << "\t";
+  // llvm::errs() << "srcNode = " << *nodeId2op[srcNode] << "\n";
   if (nodeCoreType[endNode] != nodeCoreType[srcNode]) {
+    // llvm::errs() << "exit 1\n";
     return false;
   }
   if (nodeBlockId[endNode] == -1) {
     // meet scf.yield/return..
+    // llvm::errs() << "exit 2\n";
     return false;
   }
   if (nodeBlockId[srcNode] == nodeBlockId[endNode]) {
     // same cmpute block not leaf
+    // llvm::errs() << "exit 3\n";
     return false;
   }
   // To avoid cycles: we only collect 2 kind node:
@@ -499,9 +587,11 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
         int64_t minUBSize = originUBSize;
         SmallVector<int> chain;
         chain.push_back(activateNode);
+        DenseSet<int> chainNodes;
+        chainNodes.insert(activateNode);
         int bestCutPointIdx = -1;
 
-        // find the activate chain.
+        // Follow each node once: loop-carried edges can close a cycle.
         while (true) {
           int curNode = chain.back();
           int uniqueNextNode = -1;
@@ -511,6 +601,11 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             break;
           }
 
+          if (!chainNodes.insert(uniqueNextNode).second) {
+            LOG_DEBUG("Stop activate chain at revisited node " << uniqueNextNode
+                                                               << "\n");
+            break;
+          }
           chain.push_back(uniqueNextNode);
         }
         for (auto i = 0; i < chain.size(); i++) {
@@ -591,7 +686,8 @@ llvm::LogicalResult UBUsageOptPass::UBUsageOptimization(
     Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
     CVPipeline::ComputeBlockIdManager &bm) {
   if (!(isa<scf::ForOp>(block->getParentOp()) ||
-        isa<scf::WhileOp>(block->getParentOp()))) {
+        isa<scf::WhileOp>(block->getParentOp()) ||
+        isa<scf::IfOp>(block->getParentOp()))) {
     return llvm::success();
   }
   DenseMap<Operation *, int> op2nodeId;

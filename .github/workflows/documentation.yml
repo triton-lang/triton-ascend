@@ -140,8 +140,8 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {name: a3, runs_on: linux-aarch64-a3-4, cann_version: '8.5.0', chip_type: a3, os: ubuntu22.04, python_version: '3.10'}
-          - {name: a5, runs_on: linux-amd64-a5-4, cann_version: '9.1.0', chip_type: '950', os: ubuntu22.04, python_version: '3.12'}
+          - {name: a3, runs_on: ['linux-aarch64-a3-800i-4', 'cn12-001'], cann_version: '8.5.0', chip_type: a3, os: ubuntu22.04, python_version: '3.10'}
+          - {name: a5, runs_on: linux-amd64-a5-2, cann_version: '9.1.0', chip_type: '950', os: ubuntu22.04, python_version: '3.12'}
     env:
       PYTHON: "python${{ matrix.config.python_version }}"
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"

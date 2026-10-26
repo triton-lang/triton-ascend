@@ -163,6 +163,55 @@ def kernel_extra_buf_wide(x_ptr, out_ptr, n, BLOCK: tl.constexpr):
     tl.store(out_ptr + i, r, mask=i < n)
 
 
+@al.register_custom_op
+class my_custom_op_cube_data_layout:
+    core = al.CORE.CUBE
+    pipe = al.PIPE.PIPE_M
+    symbol = "my_cube_func_with_layout"
+    bitcode = os.path.abspath(__file__)
+
+    def __init__(self, a, b, out=None):
+        self.indexing_map = [al.affine_map.get_identity(1)]
+        # Set data layout for CUBE operations
+        self.data_layout = {"a": al.DataLayout.DOTA_ND, "b": al.DataLayout.DOTB_ND, "out": al.DataLayout.Fractal}
+
+
+@triton.jit
+def kernel_cube_data_layout(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    a = tl.load(a_ptr + i, mask=i < n)
+    b = tl.load(b_ptr + i, mask=i < n)
+    result = al.custom("my_custom_op_cube_data_layout", a, b, out=b)
+    tl.store(out_ptr + i, result, mask=i < n)
+
+
+@al.register_custom_op
+class my_custom_op_cube_address_space:
+    core = al.CORE.CUBE
+    pipe = al.PIPE.PIPE_M
+    symbol = "my_cube_func_with_address_space"
+    bitcode = os.path.abspath(__file__)
+
+    def __init__(self, a, b, out=None):
+        self.indexing_map = [al.affine_map.get_identity(1)]
+        # Set address space for CUBE operations, mixing argument-name keys
+        # (a/out) and argument-index keys (1 -> b).
+        self.address_space = {
+            "a": al.AddressSpace.UB,
+            1: al.AddressSpace.L1,
+            "out": al.AddressSpace.L0C,
+        }
+
+
+@triton.jit
+def kernel_cube_address_space(a_ptr, b_ptr, out_ptr, n, BLOCK: tl.constexpr):
+    i = tl.program_id(0) * BLOCK + tl.arange(0, BLOCK)
+    a = tl.load(a_ptr + i, mask=i < n)
+    b = tl.load(b_ptr + i, mask=i < n)
+    result = al.custom("my_custom_op_cube_address_space", a, b, out=b)
+    tl.store(out_ptr + i, result, mask=i < n)
+
+
 # ============== Pytest tests ==============
 
 
@@ -285,6 +334,45 @@ def test_custom_op_without_extra_buffers_has_no_extra_buffer_attrs():
         assert "extra_buffers_sizes" not in line
 
 
+def test_custom_op_cube_with_data_layout():
+    """CUBE custom ops with data_layout should emit data_layout attributes on operands."""
+    mlir = compile_kernel(
+        kernel_cube_data_layout,
+        {"a_ptr": "*fp32", "b_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+        {"BLOCK": 256},
+    )
+    assert mlir and len(mlir) > 0
+    lines = _custom_lines(mlir, "my_custom_op_cube_data_layout")
+    assert lines, "expected at least one hivm.hir.custom line for my_custom_op_cube_data_layout"
+    line = lines[0]
+    # Check that data_layout attribute is present
+    assert "data_layout" in line
+    # Check for the specific data layout values we set
+    assert "DOTA_ND" in line or "dota_nd" in line.lower()
+    assert "DOTB_ND" in line or "dotb_nd" in line.lower()
+
+
+def test_custom_op_cube_with_address_space():
+    """CUBE custom ops with address_space should emit hivm.address_space attrs on operands."""
+    mlir = compile_kernel(
+        kernel_cube_address_space,
+        {"a_ptr": "*fp32", "b_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
+        {"BLOCK": 256},
+    )
+    assert mlir and len(mlir) > 0
+    lines = _custom_lines(mlir, "my_custom_op_cube_address_space")
+    assert lines, "expected at least one hivm.hir.custom line for my_custom_op_cube_address_space"
+    line = lines[0]
+    # Check that address_space attribute is present
+    assert "address_space" in line
+    # Check for the specific address space values we set, keyed by argument
+    # name (UB on a, L0C on out) and by argument index (L1 on b).
+    # The hivm enum prints its mnemonic: UB->ub, L1->cbuf, L0C->cc.
+    assert "#hivm.address_space<ub>" in line
+    assert "#hivm.address_space<cbuf>" in line
+    assert "#hivm.address_space<cc>" in line
+
+
 # ============== Main for manual testing ==============
 
 if __name__ == "__main__":
@@ -293,6 +381,8 @@ if __name__ == "__main__":
     test_custom_op_extra_buffers_integer_variants()
     test_custom_op_extra_buffers_mixed_scalar_types()
     test_custom_op_extra_buffers_single_buffer()
+    test_custom_op_cube_with_data_layout()
+    test_custom_op_cube_with_address_space()
     mlir = compile_kernel(my_kernel, {"x_ptr": "*fp32", "y_ptr": "*fp32", "out_ptr": "*fp32", "n": "i32"},
                           {"BLOCK": 256})
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")

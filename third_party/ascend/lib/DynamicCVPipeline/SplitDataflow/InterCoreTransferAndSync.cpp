@@ -572,6 +572,28 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   SmallVector<int64_t> expectedShape =
       computeExpectedShape(origValue, NzDimWidth);
   int originBlockId = dep.iniProducerBlockId;
+  // A fractal dot operand is already NZ. Reuse its physical tensor instead
+  // of materializing NZ->ND->NZ on Vector before the L1 transfer.
+  if (auto convert = origValue.getDefiningOp<hivm::ConvertLayoutOp>()) {
+    auto sourceType = dyn_cast<RankedTensorType>(convert.getSource().getType());
+    auto ndType = cast<RankedTensorType>(origValue.getType());
+    if (sourceType && ndType.getRank() == 2 &&
+        ndType.getShape() == ArrayRef<int64_t>(expectedShape) &&
+        !convert.getSrcLayout().getTransposeValue().value_or(false) &&
+        !convert.getDstLayout().getTransposeValue().value_or(false) &&
+        convert.getSrcLayout().getFractalSizes() &&
+        convert.getSrcLayout().getFractalSizes().asArrayRef() ==
+            ArrayRef<int64_t>({NzDimWidth, blk}) &&
+        convert.getSrcLayout().getDataLayout() == hivm::DataLayout::Fractal &&
+        convert.getDstLayout().getDataLayout() == hivm::DataLayout::ND &&
+        sourceType.getShape() ==
+            ArrayRef<int64_t>({expectedShape[1] / blk,
+                               expectedShape[0] / NzDimWidth, NzDimWidth,
+                               blk})) {
+      ndnzValueMapping[origValue] = convert.getSource();
+      return;
+    }
+  }
   // Step 2: If shapes match, return original value
   bool isEqualedShape = isExpectedShape(origValue, expectedShape);
   LOG_DEBUG("newValue" << newValue << "\n");
@@ -927,35 +949,67 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   LOG_DEBUG("Inserting [Cube->Vector] transfer for value: " << srcValue
                                                             << "\n");
   auto srcTensorType = cast<RankedTensorType>(srcValue.getType());
-  int64_t M = srcTensorType.getDimSize(0);
-  int64_t N = srcTensorType.getDimSize(1);
   Type elemType = srcTensorType.getElementType();
 
   int cubeBlockId =
       CVPipeline::getOpBlockId(srcValue.getDefiningOp()).value_or(-1);
   int vecBlockId = CVPipeline::getOpBlockId(vectorStartOp).value_or(-1);
 
-  auto targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
-                                         : std::vector<int64_t>{M, N};
+  // OpClassifier keeps a FIXPIPE-representable output cast on CUBE. Reuse the
+  // same capability matcher here so classification, dependency analysis, and
+  // transfer folding cannot disagree about the supported producer chain.
+  Operation *foldedTruncOp = nullptr;
+  Operation *foldedScaleOp = nullptr;
+  Operation *foldedScaleSplatOp = nullptr;
+  Operation *foldedConvertOp = nullptr;
+  std::optional<FixpipePreQuantMode> quantMode;
+  Value quantScale;
+  Value fixpipeSrcValue = dep.realValue ? dep.realValue : srcValue;
+  bool foldedNzOutput = false;
+  std::vector<int64_t> targetShape;
+  if (!dep.realValue) {
+    if (auto info =
+            CVPipeline::matchFixpipeOutputCast(srcValue.getDefiningOp())) {
+      quantMode = info->preQuantMode;
+      fixpipeSrcValue = info->matmulOp.getResult(0);
+      targetShape.assign(srcTensorType.getShape().begin(),
+                         srcTensorType.getShape().end());
+      foldedTruncOp = info->castOp;
+      foldedScaleOp = info->scaleOp;
+      foldedScaleSplatOp = info->scaleSplatOp;
+      foldedConvertOp = info->layoutOp;
+      quantScale = info->quantScale;
+      foldedNzOutput = info->layoutOp != nullptr;
+    }
+  }
+
+  if (!foldedTruncOp) {
+    int64_t M = srcTensorType.getDimSize(0);
+    int64_t N = srcTensorType.getDimSize(1);
+    targetShape = dep.isAllTranspoesd ? std::vector<int64_t>{N, M}
+                                      : std::vector<int64_t>{M, N};
+  }
+
   auto targetTensorType = RankedTensorType::get(targetShape, elemType);
   auto [cubeAllocOp, vecAllocOp] = createTransferAllocs(
       builder, loc, targetShape, elemType, hivm::AddressSpace::UB, cubeEndOp,
       vectorStartOp, cubeBlockId, vecBlockId, CVPipeline::kCoreTypeCube,
       CVPipeline::kCoreTypeVector, transferIndex);
   auto dmaModeAttr = FixpipeDMAModeAttr::get(
-      builder.getContext(),
-      dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN : FixpipeDMAMode::NZ2ND);
+      builder.getContext(), foldedNzOutput        ? FixpipeDMAMode::NZ2NZ
+                            : dep.isAllTranspoesd ? FixpipeDMAMode::NZ2DN
+                                                  : FixpipeDMAMode::NZ2ND);
+  FixpipePreQuantModeAttr quantModeAttr = nullptr;
+  if (quantMode)
+    quantModeAttr =
+        FixpipePreQuantModeAttr::get(builder.getContext(), *quantMode);
 
-  auto realValue = dep.value;
-  if (dep.realValue) {
-    realValue = dep.realValue;
-  }
   auto fixpipeOp = builder.create<hivm::FixpipeOp>(
       loc, mlir::TypeRange{},    // No return value
-      realValue,                 // src
+      fixpipeSrcValue,           // src
       cubeAllocOp->getResult(0), // dst
-      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, nullptr, nullptr,
-      nullptr, nullptr, nullptr, mlir::ArrayAttr{}, nullptr);
+      mlir::ValueRange{}, dmaModeAttr, nullptr, nullptr, quantModeAttr, nullptr,
+      nullptr, nullptr, quantScale, mlir::ArrayAttr{}, nullptr);
   attachTransferTags(fixpipeOp, cubeBlockId, CVPipeline::kCoreTypeCube,
                      transferIndex);
   attachCrossCoreDeps(fixpipeOp, transferIndex, CVPipeline::crossCoreProducerId,
@@ -1009,6 +1063,14 @@ Operation *InterCoreTransferAndSyncPass::insertCubeToVectorTransfer(
   if (consumedDataOp) {
     *consumedDataOp = toTensorOp;
   }
+  SmallVector<Operation *> foldedOps{foldedTruncOp, foldedScaleOp,
+                                     foldedConvertOp, foldedScaleSplatOp};
+  if (foldedScaleOp && foldedConvertOp &&
+      foldedConvertOp->getOperand(0).getDefiningOp() == foldedScaleOp)
+    std::swap(foldedOps[1], foldedOps[2]);
+  for (Operation *op : foldedOps)
+    if (op && op->use_empty())
+      op->erase();
   return fixpipeOp;
 }
 
@@ -1781,6 +1843,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   Operation *transferOp =
       insertCubeToVectorTransfer(builder, srcValue, prodEnd, consStart, loc,
                                  transferIndex, dep, &consumedDataOp);
+  // The original layout consumer may have been folded into the transfer.
+  consumerPoint = consumedDataOp;
 
   auto [newProdStart, newProdEnd] =
       getBlockStartEnd(dep.producerBlockId, module); // C Block

@@ -26,6 +26,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/GPU/IR/GPUDialect.h"
@@ -169,6 +170,23 @@ bool DataDependencyAnalysisPass::isValid1DValueForDependency(
   return false;
 }
 
+// A FIXPIPE output cast may produce a non-ND tensor. Accept it as a dependency
+// only when the shared capability matcher proves the full producer chain and
+// OpClassifier kept every folded operation on CUBE.
+static bool isFixpipeOutputCastValue(mlir::Value value) {
+  auto info = CVPipeline::matchFixpipeOutputCast(value.getDefiningOp());
+  if (!info || getSsbufferCoreType(info->castOp) != ssbufferCoreTypeCubeAttr ||
+      getSsbufferCoreType(info->matmulOp) != ssbufferCoreTypeCubeAttr ||
+      (info->layoutOp &&
+       getSsbufferCoreType(info->layoutOp) != ssbufferCoreTypeCubeAttr) ||
+      (info->scaleSplatOp &&
+       getSsbufferCoreType(info->scaleSplatOp) != ssbufferCoreTypeCubeAttr) ||
+      (info->scaleOp &&
+       getSsbufferCoreType(info->scaleOp) != ssbufferCoreTypeCubeAttr))
+    return false;
+  return true;
+}
+
 // Check if a value is only used by transpose ops whose users are all vector
 // ops. Returns whether the condition holds and, if so, the yield op that uses
 // the transposed value (nullptr if there is none).
@@ -203,6 +221,9 @@ bool DataDependencyAnalysisPass::isValidValueForDependency(mlir::Value value) {
     return true;
   }
   if (isValid1DValueForDependency(value)) {
+    return true;
+  }
+  if (isFixpipeOutputCastValue(value)) {
     return true;
   }
   if (!isValidShapeForDependency(value)) {

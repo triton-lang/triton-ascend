@@ -17,6 +17,7 @@ target_link_libraries(triton-mlir-opt PRIVATE
   BiShengIRHACCDialect
   BiShengIRHFusionDialect
   BiShengIRHIVMDialect
+  MLIRAVEDialect
   BiShengIRMathExtDialect
   BiShengIRMemRefExtDialect
   BiShengIRScopeDialect

@@ -70,10 +70,12 @@ git rebase upstream/main # Rebase onto the latest upstream trunk
 
 5、代码推送到远程仓库
 
-代码更新&测试完成后，推送您的commit到您的远程仓库。
+代码更新&测试完成&代码静态检查后，推送您的commit到您的远程仓库。
 
 ```shell
 git add .
+# pip install pre-commit
+pre-commit run --files {file1} {file2}
 git status #Check the updated files
 git commit -s -m "your commit message"
 git push origin {your_new_branch_name}

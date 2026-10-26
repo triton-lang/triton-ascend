@@ -41,88 +41,22 @@ def _is_a3_target(_semantic) -> bool:
     return isinstance(arch, str) and arch.startswith(("Ascend910B", "Ascend910_93"))
 
 
-# A2/A3 CCE workspace ABI: (row count, storage dtype, operation-sized rows).
+# A2/A3 CCE workspace ABI tuples contain:
+# (row count, storage dtype, operation-sized rows).
 # Sizes are element counts. Fixed rows contain 64 lanes; operation-sized
 # rows are rounded to 8 elements to keep 32-bit row starts 32-byte aligned.
-_A2A3_LIBDEVICE_WORKSPACE_SPECS = {
-    "__hmf_tgamma_fp32": (9, core.float32, False),
-    "__hmf_brev_i32": (4, core.int32, True),
-    "__hmf_byte_perm_i32": (5, core.int32, True),
-    "__hmf_clz_i32": (9, core.int32, True),
-    "__hmf_cospi_fp32": (1, core.float32, True),
-    "__hmf_cyl_bessel_i1_fp32": (8, core.float32, True),
-    "__hmf_erfc_fp32": (4, core.float32, True),
-    "__hmf_erfcinv_fp32": (5, core.float32, True),
-    "__hmf_erfcx_fp32": (5, core.float32, True),
-    "__hmf_fast_cos_fp32": (4, core.float32, True),
-    "__hmf_fast_pow_fp32": (8, core.float32, False),
-    "__hmf_fast_sin_fp32": (4, core.float32, True),
-    "__hmf_fast_tan_fp32": (8, core.float32, True),
-    "__hmf_fast_tanh_fp32": (3, core.float32, True),
-    "__hmf_fdim_fp32": (1, core.float32, True),
-    "__hmf_float2uint_rd_fp32": (2, core.int32, True),
-    "__hmf_float2uint_rn_fp32": (2, core.int32, True),
-    "__hmf_float2uint_ru_fp32": (2, core.int32, True),
-    "__hmf_float2uint_rz_fp32": (2, core.int32, True),
-    "__hmf_float2ull_rd_fp32": (5, core.int32, False),
-    "__hmf_float2ull_rn_fp32": (5, core.int32, False),
-    "__hmf_float2ull_ru_fp32": (5, core.int32, False),
-    "__hmf_float2ull_rz_fp32": (5, core.int32, False),
-    "__hmf_j0_fp32": (4, core.float32, True),
-    "__hmf_j1_fp32": (4, core.float32, True),
-    "__hmf_jn_fp32": (7, core.float32, True),
-    "__hmf_logb_fp32": (3, core.float32, True),
-    "__hmf_norm3d_fp32": (1, core.float32, True),
-    "__hmf_norm4d_fp32": (1, core.float32, True),
-    "__hmf_normcdf_fp32": (3, core.float32, True),
-    "__hmf_normcdfinv_fp32": (10, core.float32, True),
-    "__hmf_popc_i32": (2, core.int32, True),
-    "__hmf_rcbrt_fp32": (1, core.float32, True),
-    "__hmf_remainder_fp32": (8, core.float32, True),
-    "__hmf_rhypot_fp32": (2, core.float32, True),
-    "__hmf_rnorm3d_fp32": (1, core.float32, True),
-    "__hmf_rnorm4d_fp32": (1, core.float32, True),
-    "__hmf_rsqrt_rn_fp32": (1, core.float32, True),
-    "__hmf_sinpi_fp32": (1, core.float32, True),
-    "__hmf_uint2float_rd_fp32": (1, core.int32, True),
-    "__hmf_uint2float_rz_fp32": (1, core.int32, True),
-    "__hmf_uint2float_ru_fp32": (1, core.int32, True),
-    "__hmf_uint2float_rn_fp32": (1, core.int32, True),
-    "__hmf_ull2float_rd_fp32": (1, core.int32, True),
-    "__hmf_ull2float_ru_fp32": (1, core.int32, True),
-    "__hmf_ull2float_rn_fp32": (1, core.int32, True),
-    "__hmf_ull2float_rz_fp32": (1, core.int32, True),
-    "__hmf_y0_fp32": (12, core.float32, True),
-    "__hmf_y1_fp32": (12, core.float32, True),
-    "__hmf_yn_fp32": (14, core.float32, True),
-}
+def _libdevice_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure, workspace, _semantic=None):
+    if _is_a3_target(_semantic):
+        return _extern_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure, workspace, _semantic)
+    return core.extern_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure=is_pure, _semantic=_semantic)
 
 
-def _libdevice_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure, _semantic=None):
-    if _is_a5_target(_semantic):
-        extern = core.extern_elementwise
-    elif _is_a3_target(_semantic):
-        extern = _extern_elementwise
-    else:
-        extern = core.extern_elementwise
-    return extern(lib_name, lib_path, args, arg_type_symbol_dict, is_pure=is_pure, _semantic=_semantic)
-
-
-def _extern_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure, _semantic=None):
+def _extern_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure, workspace, _semantic=None):
     args = [_semantic.to_tensor(arg) for arg in args]
-    symbol = arg_type_symbol_dict[tuple(arg.dtype for arg in args)][0]
-    spec = _A2A3_LIBDEVICE_WORKSPACE_SPECS.get(symbol)
     result = core.extern_elementwise(lib_name, lib_path, args, arg_type_symbol_dict, is_pure=is_pure,
                                      _semantic=_semantic)
-    # Keep the helper safe if a call site selects a symbol outside the retained
-    # A2/A3 libdevice set.
-    if spec is None:
-        return result
-    arch = _semantic.builder.options.arch
-    if not isinstance(arch, str) or not arch.startswith(("Ascend910B", "Ascend910_93")):
-        return result
 
-    rows, dtype, operation_sized = spec
+    rows, dtype, operation_sized = workspace
     extent = 64
     if operation_sized:
         # Frontend block shapes are static, and include the broadcasted result.
@@ -452,7 +386,7 @@ def logb(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_logb_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -612,7 +546,7 @@ def clz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("int32"), ): ("__hmf_clz_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(9, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -630,7 +564,7 @@ def popc(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("int32"), ): ("__hmf_popc_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -652,7 +586,7 @@ def byte_perm(arg0, arg1, arg2, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1, arg2], {
         (core.dtype("int32"), core.dtype("int32"), core.dtype("int32")): ("__hmf_byte_perm_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -718,7 +652,7 @@ def brev(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("int32"), ): ("__hmf_brev_i32", core.dtype("int32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -853,7 +787,7 @@ def fdim(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fdim_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1337,7 +1271,7 @@ def rsqrt_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_rsqrt_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1505,7 +1439,7 @@ def fast_sinf(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_fast_sin_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
 
 @core.builtin
@@ -1523,7 +1457,7 @@ def fast_cosf(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_fast_cos_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
 
 @core.builtin
@@ -1541,7 +1475,7 @@ def fast_tanf(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_fast_tan_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(8, core.float32, True), _semantic=_semantic)
 
 
 @core.builtin
@@ -1559,7 +1493,7 @@ def fast_tanhf(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_fast_tanh_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.float32, True), _semantic=_semantic)
 
 
 @core.builtin
@@ -1633,7 +1567,7 @@ def fast_powf(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_fast_pow_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(8, core.float32, False), _semantic=_semantic)
 
 
 @core.extern
@@ -1675,7 +1609,7 @@ def remainder(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_remainder_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(8, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1911,7 +1845,7 @@ def float2uint_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2uint_rn_fp32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1929,7 +1863,7 @@ def float2uint_rz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2uint_rz_fp32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1947,7 +1881,7 @@ def float2uint_rd(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2uint_rd_fp32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1965,7 +1899,7 @@ def float2uint_ru(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2uint_ru_fp32", core.dtype("uint32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -1983,7 +1917,7 @@ def uint2float_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint32"), ): ("__hmf_uint2float_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2001,7 +1935,7 @@ def uint2float_rz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint32"), ): ("__hmf_uint2float_rz_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2019,7 +1953,7 @@ def uint2float_rd(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint32"), ): ("__hmf_uint2float_rd_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2037,7 +1971,7 @@ def uint2float_ru(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint32"), ): ("__hmf_uint2float_ru_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2199,7 +2133,7 @@ def float2ull_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rn_fp32", core.dtype("uint64")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
 
 
 @core.extern
@@ -2217,7 +2151,7 @@ def float2ull_rz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rz_fp32", core.dtype("uint64")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
 
 
 @core.extern
@@ -2235,7 +2169,7 @@ def float2ull_rd(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_rd_fp32", core.dtype("uint64")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
 
 
 @core.extern
@@ -2253,7 +2187,7 @@ def float2ull_ru(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_float2ull_ru_fp32", core.dtype("uint64")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.int32, False), _semantic=_semantic)
 
 
 @core.extern
@@ -2271,7 +2205,7 @@ def ull2float_rn(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint64"), ): ("__hmf_ull2float_rn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2289,7 +2223,7 @@ def ull2float_rz(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint64"), ): ("__hmf_ull2float_rz_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2307,7 +2241,7 @@ def ull2float_rd(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint64"), ): ("__hmf_ull2float_rd_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2325,7 +2259,7 @@ def ull2float_ru(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("uint64"), ): ("__hmf_ull2float_ru_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.int32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2758,7 +2692,7 @@ def rcbrt(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_rcbrt_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2778,7 +2712,7 @@ def rhypot(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("fp32"), core.dtype("fp32")): ("__hmf_rhypot_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(2, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2800,7 +2734,7 @@ def norm3d(arg0, arg1, arg2, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1, arg2], {
         (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_norm3d_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2822,7 +2756,7 @@ def rnorm3d(arg0, arg1, arg2, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1, arg2], {
         (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")): ("__hmf_rnorm3d_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2848,7 +2782,7 @@ def norm4d(arg0, arg1, arg2, arg3, _semantic=None):
         "", "", [arg0, arg1, arg2, arg3], {
             (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")):
             ("__hmf_norm4d_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2874,7 +2808,7 @@ def rnorm4d(arg0, arg1, arg2, arg3, _semantic=None):
         "", "", [arg0, arg1, arg2, arg3], {
             (core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32"), core.dtype("fp32")):
             ("__hmf_rnorm4d_fp32", core.dtype("fp32")),
-        }, is_pure=True, _semantic=_semantic)
+        }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2892,7 +2826,7 @@ def j0(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_j0_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2910,7 +2844,7 @@ def j1(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_j1_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2930,7 +2864,7 @@ def jn(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("fp32")): ("__hmf_jn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(7, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2948,7 +2882,7 @@ def y0(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_y0_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(12, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2966,7 +2900,7 @@ def y1(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_y1_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(12, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -2986,7 +2920,7 @@ def yn(arg0, arg1, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0, arg1], {
         (core.dtype("int32"), core.dtype("fp32")): ("__hmf_yn_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(14, core.float32, True), _semantic=_semantic)
 
 
 # This function is derived from the Cephes Math Library release 2.8: June, 2000
@@ -3116,7 +3050,7 @@ def cyl_bessel_i1(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_cyl_bessel_i1_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(8, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -3190,7 +3124,7 @@ def erfc(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_erfc_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(4, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -3208,7 +3142,7 @@ def erfcx(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_erfcx_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -3226,7 +3160,7 @@ def erfcinv(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_erfcinv_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(5, core.float32, True), _semantic=_semantic)
 
 
 # Note:
@@ -3365,7 +3299,7 @@ def normcdf(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_normcdf_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(3, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -3383,7 +3317,7 @@ def normcdfinv(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_normcdfinv_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(10, core.float32, True), _semantic=_semantic)
 
 
 # Note:
@@ -3470,7 +3404,7 @@ def tgamma(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_tgamma_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(9, core.float32, False), _semantic=_semantic)
 
 
 # Note:
@@ -3589,7 +3523,7 @@ def sinpi(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_sinpi_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.extern
@@ -3607,7 +3541,7 @@ def cospi(arg0, _semantic=None):
         core.static_assert(False)
     return _libdevice_elementwise("", "", [arg0], {
         (core.dtype("fp32"), ): ("__hmf_cospi_fp32", core.dtype("fp32")),
-    }, is_pure=True, _semantic=_semantic)
+    }, is_pure=True, workspace=(1, core.float32, True), _semantic=_semantic)
 
 
 @core.builtin

@@ -573,6 +573,8 @@ class dtype(base_type):
             if hasattr(builder, "options") and self.name not in builder.options.supported_fp8_dtypes:
                 raise ValueError(f'type {self} not supported in this architecture. '
                                  f'The supported fp8 dtypes are {builder.options.supported_fp8_dtypes}')
+            if self.name in getattr(getattr(builder, "options", None), "software_fp8_dtypes", ()):
+                return builder.get_int8_ty()
 
         if self.name == 'void':
             return builder.get_void_ty()

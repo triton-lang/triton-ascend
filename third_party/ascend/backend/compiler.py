@@ -1231,6 +1231,7 @@ class NPUOptions:
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
+    software_fp8_dtypes: Tuple[str] = ("fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
@@ -1641,9 +1642,14 @@ class AscendBackend(BaseBackend):
         }
 
     def get_codegen_implementation(self, options):
+        from .custom_types import convert_custom_float8
+
         # Note: a dict of functions is required to generate vendor-specific code piecies
         #       e.g. convert custom types like fp8e4b15
-        codegen_fns = {"min_dot_size": min_dot_size(self.target)}
+        codegen_fns = {
+            "min_dot_size": min_dot_size(self.target),
+            "convert_custom_types": convert_custom_float8,
+        }
         return codegen_fns
 
     def load_dialects(self, ctx):

@@ -98,7 +98,10 @@ struct PtrState {
   LogicalResult addState(PtrState &lhsState, PtrState &rhsState, Operation *op,
                          OpBuilder &builder);
 
-  triton::AddPtrOp createAddPtrOp(OpBuilder &builder, Location loc);
+  // Loads may drop zero-stride axes and broadcast the loaded value back.
+  // Stores must preserve those axes together with their values and masks.
+  triton::AddPtrOp createAddPtrOp(OpBuilder &builder, Location loc,
+                                  bool preserveZeroStrideAxes = false);
 
   triton::MakeTensorPtrOp createMakeTensorPtrOp(OpBuilder &builder,
                                                 Location loc);

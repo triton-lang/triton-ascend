@@ -31,6 +31,7 @@ enum class SimtAnchorKind {
   PlainOneDimensionalCumsum,
   TensorAtomic,
   TriangularSolveLoop,
+  UnstructuredMemory,
 };
 
 llvm::StringRef stringifySimtAnchorKind(SimtAnchorKind kind);
@@ -109,6 +110,12 @@ LogicalResult materializeSimtAnchorPlan(ModuleOp module,
 /// a loaded/gathered index.  This is a real data-dependence test and must not
 /// be confused with the legacy rank-based laneDependentPointerOps proxy.
 bool isLoadedIndexDependentMemoryOp(Operation *op);
+
+/// Load/store operations with at least one unstructured pointer axis, using
+/// the same analysis and proven uniform-branch refinement as Stage
+/// partitioning. Analysis runs on a detached module clone; returned operations
+/// belong to root.
+llvm::SmallVector<Operation *> collectUnstructuredMemoryOps(Operation *root);
 
 /// True when a proper descendant matches a shared SIMT anchor pattern.
 /// This checks structural presence, independent of target materializability.

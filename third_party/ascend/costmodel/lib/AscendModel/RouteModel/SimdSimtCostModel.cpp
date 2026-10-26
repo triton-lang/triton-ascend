@@ -9,6 +9,7 @@
 #include "AscendModel/Analysis/SimtRegisterPressureAnalysis.h"
 #include "AscendModel/Analysis/StagePartitioner.h"
 #include "AscendModel/Profile/MicrobenchmarkProfile.h"
+#include "AscendModel/RouteModel/Models/IndirectGatherMemoryCostModel.h"
 #include "AscendModel/RouteModel/StageCostModels.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
 
@@ -2069,7 +2070,7 @@ static void readSetupCycleCurve(ProfileJSONReader &reader,
 
 static llvm::Expected<CandidateProfile>
 loadCandidateProfileUncached(llvm::StringRef pathRef,
-                             std::string *microbenchmarkPath) {
+                             std::vector<std::string> *dependencies) {
   std::string path = pathRef.str();
   auto buffer = llvm::MemoryBuffer::getFile(path);
   if (!buffer)
@@ -2099,8 +2100,8 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
   std::optional<MicrobenchmarkProfile> microbenchmarkProfile;
   if (auto reference = root->getString("microbenchmark_profile")) {
     std::string resolved = resolveProfileReference(path, *reference);
-    if (microbenchmarkPath)
-      *microbenchmarkPath = resolved;
+    if (dependencies)
+      dependencies->push_back(resolved);
     auto loaded = MicrobenchmarkProfile::loadFromFile(resolved);
     if (!loaded)
       return llvm::createStringError(
@@ -2121,6 +2122,60 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
   HardwareProfile &hardware = profile.hardware;
   hardware.profileVersion = reader.string(*root, "profile_version", "profile");
   hardware.target = reader.string(*root, "target", "profile");
+  if (auto reference = root->getString("indirect_memory_profile")) {
+    std::string resolved = resolveProfileReference(path, *reference);
+    auto parameters = IndirectMemoryParameters::load(resolved);
+    if (!parameters)
+      return parameters.takeError();
+    hardware.indirectMemoryParameters = std::move(*parameters);
+    if (dependencies)
+      dependencies->push_back(resolved);
+  } else if (root->get("simt_indirect_load_model") ||
+             root->get("simd_indirect_load_model") ||
+             root->get("simt_indirect_store_model") ||
+             root->get("simd_indirect_store_model")) {
+    reader.setError("fitted indirect models require indirect_memory_profile");
+  }
+  if (root->get("partial_structured_memory_model")) {
+    hardware.partialStructuredMemoryModel =
+        reader.string(*root, "partial_structured_memory_model", "profile");
+    if (hardware.partialStructuredMemoryModel != "ttir_static_partial_20261020")
+      reader.setError("unsupported partial_structured_memory_model");
+  }
+  if (root->get("simt_indirect_load_model")) {
+    hardware.simtIndirectLoadModel =
+        reader.string(*root, "simt_indirect_load_model", "profile");
+    if (hardware.simtIndirectLoadModel != "unmasked_complete_factor_20261020" &&
+        hardware.simtIndirectLoadModel != "prefix_mask_rank_factor_20261017" &&
+        hardware.simtIndirectLoadModel != "random_mask_rank_factor_20261017")
+      reader.setError("unsupported simt_indirect_load_model");
+  }
+  if (root->get("simd_indirect_load_model")) {
+    hardware.simdIndirectLoadModel =
+        reader.string(*root, "simd_indirect_load_model", "profile");
+    if (hardware.simdIndirectLoadModel != "random_dtype_matched_ab_20261008" &&
+        hardware.simdIndirectLoadModel != "simd_mask_envelope_20261019")
+      reader.setError("unsupported simd_indirect_load_model");
+  }
+  if (root->get("simt_indirect_store_model")) {
+    hardware.simtIndirectStoreModel =
+        reader.string(*root, "simt_indirect_store_model", "profile");
+    if (hardware.simtIndirectStoreModel !=
+            "unmasked_complete_factor_20261020" &&
+        hardware.simtIndirectStoreModel != "prefix_mask_rank_factor_20261017" &&
+        hardware.simtIndirectStoreModel != "random_mask_rank_factor_20261017")
+      reader.setError("unsupported simt_indirect_store_model");
+  }
+  if (root->get("simd_indirect_store_model")) {
+    hardware.simdIndirectStoreModel =
+        reader.string(*root, "simd_indirect_store_model", "profile");
+    if (hardware.simdIndirectStoreModel !=
+            "random_store_no_fill_first_20261008" &&
+        hardware.simdIndirectStoreModel !=
+            "random_store_no_fill_reuse_20261008" &&
+        hardware.simdIndirectStoreModel != "simd_mask_envelope_20261019")
+      reader.setError("unsupported simd_indirect_store_model");
+  }
   if (const auto *targets = root->getArray("compatible_targets")) {
     for (const llvm::json::Value &target : *targets) {
       auto pattern = target.getAsString();
@@ -2884,6 +2939,9 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
     std::string combinedAssets =
         canonicalProfile +
         "\nshared_microbenchmark_sha256=" + profile.microbenchmarkContentSha256;
+    if (hardware.indirectMemoryParameters)
+      combinedAssets += "\nindirect_memory_sha256=" +
+                        hardware.indirectMemoryParameters->contentSha256;
     llvm::ArrayRef<uint8_t> combinedBytes(
         reinterpret_cast<const uint8_t *>(combinedAssets.data()),
         combinedAssets.size());
@@ -2912,8 +2970,7 @@ static std::optional<ProfileFileStamp> profileFileStamp(llvm::StringRef path) {
 
 struct CachedCandidateProfile {
   ProfileFileStamp selectionStamp;
-  std::string microbenchmarkPath;
-  ProfileFileStamp microbenchmarkStamp;
+  std::vector<std::pair<std::string, ProfileFileStamp>> dependencies;
   std::shared_ptr<const CandidateProfile> profile;
 };
 
@@ -2934,23 +2991,30 @@ loadCandidateProfile(llvm::StringRef requestedPath) {
     auto cached = cache.find(path);
     if (cached != cache.end() &&
         cached->second.selectionStamp == *selectionStamp) {
-      const auto microbenchmarkStamp =
-          profileFileStamp(cached->second.microbenchmarkPath);
-      if (microbenchmarkStamp &&
-          cached->second.microbenchmarkStamp == *microbenchmarkStamp)
+      if (llvm::all_of(cached->second.dependencies, [](const auto &dependency) {
+            return profileFileStamp(dependency.first) == dependency.second;
+          }))
         return cached->second.profile;
     }
   }
 
-  std::string microbenchmarkPath;
-  auto loaded = loadCandidateProfileUncached(path, &microbenchmarkPath);
+  std::vector<std::string> dependencies;
+  auto loaded = loadCandidateProfileUncached(path, &dependencies);
   if (!loaded)
     return loaded.takeError();
   auto profile = std::make_shared<const CandidateProfile>(std::move(*loaded));
-  const auto microbenchmarkStamp = profileFileStamp(microbenchmarkPath);
-  if (selectionStamp && microbenchmarkStamp)
-    cache[path] = CachedCandidateProfile{*selectionStamp, microbenchmarkPath,
-                                         *microbenchmarkStamp, profile};
+  CachedCandidateProfile entry;
+  entry.profile = profile;
+  for (const auto &dependency : dependencies) {
+    auto stamp = profileFileStamp(dependency);
+    if (!stamp)
+      return profile;
+    entry.dependencies.emplace_back(dependency, *stamp);
+  }
+  if (selectionStamp) {
+    entry.selectionStamp = *selectionStamp;
+    cache[path] = std::move(entry);
+  }
   return profile;
 }
 
@@ -3412,7 +3476,27 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     if (best)
       routes->allSimt = std::move(*best);
   };
-  if (scalarizedRank2IndirectOwner && routes->allSimd.legal) {
+  auto usesFittedIndirectLoad = [&](const StageRoutePlan &plan, size_t owner) {
+    if (owner >= plan.implementations.size() ||
+        owner >= costTable->stages.size())
+      return false;
+    const StageImplementation &selected = plan.implementations[owner];
+    return llvm::any_of(
+        costTable->stages[owner].implementations,
+        [&](const StageImplementationCost &cost) {
+          const auto &impl = cost.implementation;
+          return impl.mode == selected.mode &&
+                 impl.superblockFactor == selected.superblockFactor &&
+                 impl.localScope == selected.localScope &&
+                 impl.aivSubblocks == selected.aivSubblocks &&
+                 !cost.indirectLoadPricing.empty() &&
+                 cost.indirectLoadPricing != "generic_resource_model";
+        });
+  };
+  // Rank-2 residuals calibrate the generic model, not the fitted fragment.
+  // Test the selected implementation independently for each route/factor.
+  if (scalarizedRank2IndirectOwner && routes->allSimd.legal &&
+      !usesFittedIndirectLoad(routes->allSimd, *scalarizedRank2IndirectOwner)) {
     const double residual =
         profile.kernelTiming.scalarizedRank2IndirectLoadResidualSystemCycles(
             routes->allSimd.runtimePhysicalProgramCount);
@@ -3570,6 +3654,7 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
             simtRank2IndirectElementBits, simtRank2IndirectElements);
     auto applyResidual = [&](StageRoutePlan &plan) {
       if (!plan.legal || plan.runtimePhysicalProgramCount != 1 ||
+          usesFittedIndirectLoad(plan, *simtRank2IndirectOwner) ||
           std::abs(residual) <= 1.0e-12)
         return;
       plan.totalCycles = std::max(0.0, plan.totalCycles + residual);
@@ -3580,6 +3665,48 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     applyResidual(routes->allSimt);
     for (auto &[factor, plan] : routes->allSimtFactorPlans)
       applyResidual(plan);
+  }
+  bool nativeChain = false;
+  for (auto &[factor, plan] : routes->allSimtFactorPlans) {
+    // Frozen native labels use profiler microseconds * 1000.
+    if (profile.kernelTiming.systemCounterFrequencyMHz != 1000)
+      continue;
+    if (auto elapsed = IndirectGatherMemoryCostModel::nativeChainCost(
+            *partition, hardwareProfile, plan)) {
+      plan.diagnostic<bool>("native_indirect_chain_applied") = true;
+      plan.diagnostic<double>("native_indirect_chain_elapsed_system_cycles") =
+          *elapsed;
+      plan.diagnostic<int64_t>("native_indirect_chain_warp_count") = numWarps;
+      nativeChain = true;
+    }
+  }
+  if (nativeChain) {
+    // Compare complete elapsed costs for factors; the native envelope already
+    // includes fixed/setup/helper costs and supersedes old route residuals.
+    const StageRoutePlan *best = nullptr;
+    double bestElapsed = 0;
+    for (const auto &[factor, plan] : routes->allSimtFactorPlans) {
+      if (!plan.legal)
+        continue;
+      double elapsed =
+          plan.diagnostic<bool>("native_indirect_chain_applied")
+              ? plan.diagnostic<double>(
+                    "native_indirect_chain_elapsed_system_cycles")
+              : plan.totalCycles +
+                    profile.kernelTiming.boundarySystemCycles(
+                        kAllSimtOnly, factor,
+                        plan.runtimePhysicalProgramCount) +
+                    profile.kernelTiming.globalLoadBoundarySystemCycles(
+                        kAllSimtOnly) +
+                    profile.kernelTiming.runtimeArgumentSetupSystemCycles(
+                        kAllSimtOnly, kernelArgumentCount);
+      if (!best || elapsed < bestElapsed) {
+        best = &plan;
+        bestElapsed = elapsed;
+      }
+    }
+    if (best)
+      routes->allSimt = *best;
   }
   return std::move(*routes);
 }
@@ -3758,6 +3885,10 @@ completeCandidateCosts(const SimdSimtCostReport &report,
   scores.mixedSimdSimt +=
       routeFixedSystemCycles(profile, kMixedSimdSimt, report.stageModel.mixed,
                              kernelArgumentCount, routeHasGlobalLoad);
+  if (report.stageModel.allSimt.diagnostic<bool>(
+          "native_indirect_chain_applied"))
+    scores.allSimtOnly = report.stageModel.allSimt.diagnostic<double>(
+        "native_indirect_chain_elapsed_system_cycles");
   return scores;
 }
 
@@ -3858,6 +3989,22 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
       prediction.fixedSystemCycles + prediction.baseSelectionScore;
   prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
                                      prediction.systemCounterFrequencyMHz;
+  if (plan->diagnostic<bool>("native_indirect_chain_applied")) {
+    prediction.reason = prediction.calibrationName =
+        "native_indirect_chain_20261021";
+    prediction.formula = "native_chain_including_fixed_and_helpers / "
+                         "system_counter_frequency_mhz";
+    prediction.evidence = "Frozen native single-AIV load/store chain; "
+                          "uncovered operations retain resource prices";
+    prediction.baseWarpCount =
+        plan->diagnostic<int64_t>("native_indirect_chain_warp_count");
+    prediction.fixedSystemCycles = prediction.scalarPrologueSystemCycles =
+        prediction.scalarEpilogueSystemCycles = 0;
+    prediction.baseSelectionScore = prediction.predictedSystemCounterCycles =
+        plan->diagnostic<double>("native_indirect_chain_elapsed_system_cycles");
+    prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
+                                       prediction.systemCounterFrequencyMHz;
+  }
 }
 
 } // namespace

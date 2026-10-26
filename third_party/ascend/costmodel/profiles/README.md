@@ -6,6 +6,17 @@ This directory is the canonical source for target-specific Cost Model data.
   absolute/autotune model and the SIMD/SIMT Route Model.
 - `simd_simt/` contains Route Model policy, calibration, and schema
   feedback data.
+- `indirect_memory/` contains frozen fitted parameters, referenced by the
+  selection profile's `indirect_memory_profile`. They are not measurements.
+  Schema 1 uses SYS_CNT/system-cycle units and flat named numeric arrays;
+  `*Nodes` stores `[feature, value, left, right]` tuples, one tree per row,
+  and `*Roots` stores node indices. Mask coefficients have 17 entries per
+  model, including zero padding. Feature definitions remain in C++.
+  The loader validates dimensions, versions, finite values and tree bounds.
+  Both profile-cache invalidation and the compiler asset hash include this
+  dependency; changing coefficients does not require rebuilding the compiler.
+  Profiles enabling fitted indirect models must supply this reference;
+  copies of earlier selection profiles need the same relative/absolute path.
 
 Python packaging copies these files to
 `triton/backends/ascend/costmodel_profiles/`. That installed directory is a

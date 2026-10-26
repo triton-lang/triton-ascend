@@ -1551,22 +1551,24 @@ def _auto_simt_asset_hash(path: str, default_name: str) -> str:
     digest.update(selection_bytes)
     try:
         profile = json.loads(selection_bytes)
-        shared_ref = (profile.get("microbenchmark_profile") if isinstance(profile, dict) else None)
     except (TypeError, ValueError, UnicodeError):
-        shared_ref = None
-    if shared_ref is not None and not isinstance(shared_ref, str):
-        digest.update(b"\0invalid-shared-microbenchmark-reference\0")
-        digest.update(repr(shared_ref).encode())
-        return digest.hexdigest()
-    if shared_ref:
-        shared_asset = Path(shared_ref)
-        if not shared_asset.is_absolute():
-            shared_asset = asset.parent / shared_asset
-        digest.update(b"\0shared-microbenchmark\0")
+        profile = {}
+    for key, label in [("microbenchmark_profile", b"shared-microbenchmark"),
+                       ("indirect_memory_profile", b"indirect-memory")]:
+        reference = profile.get(key) if isinstance(profile, dict) else None
+        if reference is None:
+            continue
+        digest.update(b"\0" + label + b"\0")
+        if not isinstance(reference, str) or not reference:
+            digest.update(b"invalid-reference\0" + repr(reference).encode())
+            continue
+        dependency = Path(reference)
+        if not dependency.is_absolute():
+            dependency = asset.parent / dependency
         try:
-            digest.update(shared_asset.read_bytes())
+            digest.update(dependency.read_bytes())
         except OSError:
-            digest.update(f"missing:{shared_asset}".encode())
+            digest.update(f"missing:{dependency}".encode())
     return digest.hexdigest()
 
 

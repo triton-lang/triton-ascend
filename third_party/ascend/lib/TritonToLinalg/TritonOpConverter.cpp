@@ -2259,17 +2259,9 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
 
       std::string sym =
           llvm::join(llvm::split(op.getSymbol().str(), "__hmf_"), "");
-      SmallVector<Value> customOperands(collapsedInputs);
-      customOperands.push_back(outputTensor);
-      NamedAttrList customOpAttrs;
-      customOpAttrs.set("name", rewriter.getStringAttr(sym));
-      customOpAttrs.set(
-          "operandSegmentSizes",
-          rewriter.getDenseI32ArrayAttr(
-              {static_cast<int32_t>(collapsedInputs.size()), 1, 0}));
       auto customOp = rewriter.create<hivm::CustomOp>(
-          op.getLoc(), TypeRange{customOutputType}, ValueRange{customOperands},
-          customOpAttrs.getAttrs());
+          op.getLoc(), sym, ValueRange{collapsedInputs},
+          ValueRange{outputTensor});
 
       auto argAttrsArray = mlir::ArrayAttr::get(customOp->getContext(), {});
       auto pipeAttr =

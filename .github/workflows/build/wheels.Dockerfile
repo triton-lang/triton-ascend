@@ -54,6 +54,17 @@ COPY . /project/
 WORKDIR /project
 
 # ---------------------------------------------------------------------------
+# Wheel builds track the AscendNPU-IR stable branch, NOT the pinned submodule
+# gitlink (local developer builds use the pin): fetch the stable sources here
+# so the product build code just sees an existing tree and never reaches into
+# the CI workflow scripts itself. Needed both for the C++ plugin build
+# (add_subdirectory(third_party/ascend/AscendNPU-IR)) and for the
+# TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
+# submodules (llvm-project / torch-mlir / shmem).
+# ---------------------------------------------------------------------------
+RUN bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR
+
+# ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.
 # Put the pip-installed ninja/cmake ahead of the system ones on PATH.
 # ---------------------------------------------------------------------------
@@ -96,6 +107,15 @@ RUN --mount=type=cache,target=/root/.cache/ccache \
        else \
          echo "No .npuir-payload in the build context; building without a bundled BishengIR"; \
        fi \
+    # CXX workaround for the TRITON_BUILD_NPUIR=ON in-image fallback only
+    # (build_npuir.py reads NPUIR_CXX_COMPILER): same wrapper as
+    # npuir-build.yml — the Ascend LLVM fork excludes <cstdint> under
+    # BSPUB_DAVINCI_BISHENGIR_A5 while this image's libstdc++ no longer
+    # provides stdint.h transitively, and clang 21's new -Wall warnings
+    # trip -Werror on LLVM 19 code.
+    && printf '#!/bin/bash\nexec /usr/bin/clang++ -include cstdint "$@" -Wno-error\n' > /tmp/clang++-cstdint \
+    && chmod +x /tmp/clang++-cstdint \
+    && export NPUIR_CXX_COMPILER=/tmp/clang++-cstdint \
     && python3 ${SETUP_PY} bdist_wheel \
     && ccache -s \
     && mkdir -p /out \

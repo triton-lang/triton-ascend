@@ -322,34 +322,55 @@ def _npuir_build_enabled():
 
 
 def _ensure_npuir_payload():
-    """ON mode: build the BishengIR payload in-image via build_npuir.py
-    (which fetches the AscendNPU-IR stable branch itself)."""
+    """ON mode: build the BishengIR payload via build_npuir.py (which uses
+    the pinned AscendNPU-IR submodule unless a source tree is already
+    present — the wheel CI pre-fetches its own sources)."""
     if not _npuir_build_enabled():
         return
     build_npuir()
 
 
 def _ensure_npuir_sources():
-    """OFF mode: fetch the AscendNPU-IR stable sources when they are missing.
+    """OFF mode: initialize the pinned AscendNPU-IR submodule when missing.
 
-    The prebuilt payload from npuir-build.yml only provides the runtime
+    The prebuilt payload from the wheel CI only provides the runtime
     binaries bundled into the wheel; the C++ plugin build still compiles the
     BiShengIR dialects via
     ``add_subdirectory(third_party/ascend/AscendNPU-IR)``, so the source tree
-    must be present. The CI docker context carries no submodule checkout, so
-    fetch stable HEAD — the same source the payload was built from — via the
-    shared workflow script (nested third-party submodules included; trimming
-    those is a possible follow-up once the standalone-IR build is confirmed
-    not to need them). An existing checkout (a local developer's initialized
-    submodule, or a previous fetch) is left untouched.
+    must be present. Local builds get the version pinned by the submodule
+    gitlink (the relatively stable, tested revision); the wheel CI images
+    pre-fetch their own (stable-branch) sources before running setup.py, so
+    any existing checkout is left untouched here.
     """
     if _npuir_build_enabled():
-        return  # build_npuir() fetches the sources itself
+        return  # build_npuir() initializes the sources itself
     npuir_dir = _REPO_ROOT / "third_party" / "ascend" / "AscendNPU-IR"
     if (npuir_dir / "CMakeLists.txt").exists():
         return
-    script = _REPO_ROOT / ".github" / "workflows" / "build" / "fetch-npuir-stable.sh"
-    subprocess.check_call(["bash", str(script), str(npuir_dir)])
+    if not _is_git_repo():
+        print(f"WARNING: {_REPO_ROOT} is not a git repository and {npuir_dir} has no "
+              "source tree; cannot initialize the AscendNPU-IR submodule.")
+        return
+    _git_check_call_with_retry([
+        "git",
+        "submodule",
+        "update",
+        "--init",
+        "--depth",
+        "1",
+        "--",
+        "third_party/ascend/AscendNPU-IR",
+    ], cwd=_REPO_ROOT)
+    if (npuir_dir / "CMakeLists.txt").exists():
+        # Nested submodules (LLVM, Torch-MLIR, shmem) recorded by the pinned
+        # AscendNPU-IR revision.
+        _git_check_call_with_retry([
+            "git",
+            "submodule",
+            "update",
+            "--init",
+            "--recursive",
+        ], cwd=npuir_dir)
 
 
 def _ensure_distributed_submodule():

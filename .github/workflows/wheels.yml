@@ -2,17 +2,26 @@ name: Wheels
 
 on:
   workflow_dispatch:
+    inputs:
+      pinned_wheel:
+        description: Also build the pinned-submodule verification wheel (Build-Pinned-Wheels)
+        type: boolean
+        default: false
   push:
     branches: [release/**]
   pull_request:
     paths:
       - .github/workflows/wheels.yml
       - .github/workflows/build/wheels.Dockerfile
+      - .github/workflows/build/fetch-npuir-stable.sh
       - setup.py
       - pyproject.toml
       - version.txt
       - cmake/llvm-hash.txt
       - cmake/json-version.txt
+      # AscendNPU-IR submodule pin bumps: trigger the Build-Pinned-Wheels job
+      # so the PR that moves the pin proves the pinned combination builds.
+      - third_party/ascend/AscendNPU-IR
   schedule:
     - cron: "0 8 * * *"
 
@@ -282,6 +291,131 @@ jobs:
           path: ./wheelhouse/*.whl
           # Wheels are already zip-compressed; skip the re-compress pass.
           compression-level: 0
+
+  # Verification wheel for PRs that move the AscendNPU-IR submodule pin:
+  # builds "this PR's triton-ascend + the pinned npuir revision" — exactly the
+  # combination local users get — by compiling npuir in-image
+  # (TRITON_BUILD_NPUIR=ON) against the gitlink SHA passed via NPUIR_REF.
+  # The wheel is uploaded as a run artifact and linked from the job summary
+  # only; it is never published (nightly wheels keep tracking the stable
+  # branch). A full npuir compile takes hours, so the job runs only for pin
+  # changes — PRs triggered by the other paths exit early (green) — or on
+  # demand via workflow_dispatch with pinned_wheel=true.
+  Build-Pinned-Wheels:
+    name: Build pinned-submodule wheel (${{ matrix.config.arch }}-cp312)
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.pinned_wheel)
+    runs-on: ${{ matrix.config.runs_on }}
+    container:
+      image: swr.cn-north-12.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+      # PYTHON under container.env: same ARC postStart-hook (buildkitd node
+      # pinning) requirement as Build-Wheels.
+      env:
+        PYTHON: cp312
+    # The in-image npuir compile is far slower than Build-Wheels' prebuilt-
+    # payload path, so allow more headroom than its 360 minutes.
+    timeout-minutes: 480
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+        - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
+        - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
+    permissions:
+      contents: read
+    steps:
+
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Add git safe directory
+        run: git config --global --add safe.directory "*"
+
+      - name: Check for submodule pin change
+        id: pin
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            # workflow_dispatch with pinned_wheel=true: always build.
+            echo "Manual dispatch; building pinned wheel."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # This workflow also triggers on other paths; only PRs that actually
+          # move the gitlink need the (expensive) pinned wheel. Shallow-fetch
+          # the recorded base commit and diff just the submodule path.
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          git fetch --depth=1 origin "${BASE_SHA}"
+          if git diff --quiet "${BASE_SHA}" HEAD -- third_party/ascend/AscendNPU-IR; then
+            echo "AscendNPU-IR pin unchanged by this PR; skipping pinned wheel."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "AscendNPU-IR pin changed; building pinned wheel."
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve pinned AscendNPU-IR SHA
+        id: npuir-sha
+        if: steps.pin.outputs.build == 'true'
+        shell: bash
+        run: |
+          set -eu
+          PINNED_SHA=$(git ls-tree HEAD third_party/ascend/AscendNPU-IR | awk '{print $3}')
+          if ! printf '%s' "${PINNED_SHA}" | grep -qE '^[0-9a-f]{40}$'; then
+            echo "::error::could not resolve the AscendNPU-IR gitlink SHA (got '${PINNED_SHA}')"
+            exit 1
+          fi
+          echo "Pinned AscendNPU-IR SHA: ${PINNED_SHA}"
+          echo "sha=${PINNED_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build pinned wheel
+        if: steps.pin.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: .github/workflows/build/wheels.Dockerfile
+          build-args: |
+            MANYLINUX_IMAGE=swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/manylinux:9.2.0-beta.2-a3-manylinux_2_34-py3.12
+            PYTHON_VERSION=cp312
+            # Full in-image npuir compile at the exact pinned revision: the
+            # Dockerfile pre-fetches NPUIR_REF (the gitlink SHA), build_npuir
+            # sees the existing tree, compiles it and bundles the payload.
+            TRITON_BUILD_NPUIR=ON
+            NPUIR_REF=${{ steps.npuir-sha.outputs.sha }}
+            TRITON_WHEEL_VERSION_SUFFIX=+pinned
+            BUILD_DATE=
+          cache-from: type=registry,ref=swr.cn-north-12.myhuaweicloud.com/modelfoundry/triton-wheel-buildcache:${{ matrix.config.arch }}
+          outputs: type=local,dest=./wheelhouse
+
+      - name: Upload pinned wheel
+        id: upload
+        if: steps.pin.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          # Distinct from the nightly cibw-wheels-* artifacts: this wheel
+          # bundles the pinned-submodule npuir and is for PR verification only.
+          name: pinned-wheel-manylinux_2_34_${{ matrix.config.arch }}-cp312
+          path: ./wheelhouse/*.whl
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Write job summary
+        if: steps.pin.outputs.build == 'true'
+        shell: bash
+        run: |
+          set -eu
+          WHL=$(basename "$(ls wheelhouse/*.whl | head -1)")
+          {
+            echo "## Pinned-submodule verification wheel"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Wheel | \`${WHL}\` |"
+            echo "| Arch / Python | ${{ matrix.config.arch }} / cp312 |"
+            echo "| triton-ascend | \`${GITHUB_SHA}\` |"
+            echo "| AscendNPU-IR (submodule pin) | [\`${{ steps.npuir-sha.outputs.sha }}\`](https://gitcode.com/Ascend/AscendNPU-IR/commit/${{ steps.npuir-sha.outputs.sha }}) |"
+            echo "| Download | [pinned-wheel-manylinux_2_34_${{ matrix.config.arch }}-cp312](${{ steps.upload.outputs.artifact-url }}) |"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # Installs the built wheels on real NPU pods and runs a representative
   # subset of the Ascend unit tests (vector add / softmax / matmul / layer

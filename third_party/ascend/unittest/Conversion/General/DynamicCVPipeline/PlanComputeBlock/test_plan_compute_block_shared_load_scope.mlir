@@ -9,6 +9,24 @@
 // copy under a rare-branch `scf.if` that pre-fills the alloc, reading the GM
 // through subviews of both sides.
 module {
+  // CHECK-LABEL: func.func @shared_load_scope_unstamped
+  // CHECK: %[[VEC:.*]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR", ssbuffer.load}
+  // CHECK: %[[ADD:.*]] = arith.addf %[[VEC]], %[[VEC]] {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[CUBE:.*]] = scope.scope : () -> tensor<4x4xf16> {
+  // CHECK: } {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE", ssbuffer.load}
+  // CHECK: linalg.matmul {ssbuffer.block_id = {{[0-9]+}} : i32, ssbuffer.core_type = "CUBE"} ins(%[[CUBE]],
+  func.func @shared_load_scope_unstamped(%gm: memref<4x4xf16>, %arg0: tensor<4x4xf16>, %arg1: tensor<4x4xf32>) -> (tensor<4x4xf32>, tensor<4x4xf16>) {
+    %0 = scope.scope : () -> tensor<4x4xf16> {
+      %alloc = memref.alloc() : memref<4x4xf16>
+      memref.copy %gm, %alloc : memref<4x4xf16> to memref<4x4xf16>
+      %t = bufferization.to_tensor %alloc restrict writable : memref<4x4xf16> to tensor<4x4xf16>
+      scope.return %t : tensor<4x4xf16>
+    } {ssbuffer.load}
+    %1 = linalg.matmul ins(%0, %arg0 : tensor<4x4xf16>, tensor<4x4xf16>) outs(%arg1 : tensor<4x4xf32>) -> tensor<4x4xf32>
+    %2 = arith.addf %0, %0 : tensor<4x4xf16>
+    return %1, %2 : tensor<4x4xf32>, tensor<4x4xf16>
+  }
 
   // A pre-classified CUBE scope stays CUBE: a single-core marker is
   // authoritative and is not duplicated. The VECTOR addf consumes it through

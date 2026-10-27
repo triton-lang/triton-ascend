@@ -2,7 +2,37 @@
 
 module {
   // ============================================================================
-  // 1. pack_custom_op
+  // 1. pack_extracted_load_unit
+  // An ExtractedLoadOrStore load unit (alloc -> copy loop -> to_tensor) is
+  // packed into a single `ssbuffer.load` scope stamped VECTOR.
+  // ============================================================================
+  // CHECK-LABEL: func.func @pack_extracted_load_unit(
+  // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<32x64xf16> {
+  // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<32x64xf16>
+  // CHECK:   scf.for
+  // CHECK:     %[[SUBVIEW:.*]] = memref.subview %[[ALLOC]]
+  // CHECK:     memref.copy {{.*}}, %[[SUBVIEW]]
+  // CHECK:   } {ExtractedLoadOrStore}
+  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<32x64xf16>
+  // CHECK:   scope.return %[[T]] : tensor<32x64xf16>
+  // CHECK: } {ssbuffer.core_type = "VECTOR", ssbuffer.load}
+  // CHECK: return %[[SCOPE]]
+  func.func @pack_extracted_load_unit(%arg0: memref<?xf16>) -> tensor<32x64xf16> {
+    %c0 = arith.constant 0 : index
+    %c1 = arith.constant 1 : index
+    %c32 = arith.constant 32 : index
+    %alloc = memref.alloc() : memref<32x64xf16>
+    scf.for %i = %c0 to %c32 step %c1 {
+      %subview = memref.subview %alloc[%i, 0] [1, 64] [1, 1] : memref<32x64xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+      %src = memref.reinterpret_cast %arg0 to offset: [0], sizes: [1, 64], strides: [64, 1] : memref<?xf16> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+      memref.copy %src, %subview : memref<1x64xf16, strided<[64, 1], offset: ?>> to memref<1x64xf16, strided<[64, 1], offset: ?>>
+    } {ExtractedLoadOrStore}
+    %lhs = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+    return %lhs : tensor<32x64xf16>
+  }
+
+  // ============================================================================
+  // 2. pack_custom_op
   // A custom op unit is entered through its local alloc and packed into a scope
   // carrying the analyzed core type.
   // ============================================================================
@@ -22,7 +52,97 @@ module {
   }
 
   // ============================================================================
-  // 2. custom_op_core_or_vector_leaves_core_type_open
+  // 3. skip_plain_alloc
+  // An allocation that is not part of a custom op or a load unit is left as-is.
+  // ============================================================================
+  // CHECK-LABEL: func.func @skip_plain_alloc(
+  // CHECK-NOT: scope.scope
+  // CHECK: %[[ALLOC:.*]] = memref.alloc() : memref<64xf32>
+  // CHECK: memref.copy %arg0, %[[ALLOC]]
+  // CHECK: return
+  func.func @skip_plain_alloc(%arg0: memref<64xf32>) {
+    %alloc = memref.alloc() : memref<64xf32>
+    memref.copy %arg0, %alloc : memref<64xf32> to memref<64xf32>
+    return
+  }
+
+  // ============================================================================
+  // 4. skip_compute_unit
+  // The `alloc -> ops -> to_tensor` shape alone is not a load unit: the unit has
+  // to read from GM, otherwise it is a compute pattern and stays unpacked.
+  // ============================================================================
+  // CHECK-LABEL: func.func @skip_compute_unit(
+  // CHECK-NOT: scope.scope
+  // CHECK: %[[ALLOC_C:.*]] = memref.alloc() : memref<64xf32>
+  // CHECK: linalg.fill ins(%{{.*}} : f32) outs(%[[ALLOC_C]] : memref<64xf32>)
+  // CHECK: %{{.*}} = bufferization.to_tensor %[[ALLOC_C]] restrict writable : memref<64xf32>
+  // CHECK: return
+  func.func @skip_compute_unit() -> tensor<64xf32> {
+    %alloc = memref.alloc() : memref<64xf32>
+    %cst = arith.constant 0.000000e+00 : f32
+    linalg.fill ins(%cst : f32) outs(%alloc : memref<64xf32>)
+    %t = bufferization.to_tensor %alloc restrict writable : memref<64xf32> to tensor<64xf32>
+    return %t : tensor<64xf32>
+  }
+
+  // ============================================================================
+  // 5. skip_nested_to_tensor
+  // The closing to_tensor lives in a nested region, so it cannot move into a
+  // scope together with the allocation: the unit is left unpacked instead of
+  // being ordered across block boundaries.
+  // ============================================================================
+  // CHECK-LABEL: func.func @skip_nested_to_tensor(
+  // CHECK-NOT: scope.scope
+  // CHECK: %[[ALLOC_N:.*]] = memref.alloc() : memref<32x64xf16>
+  // CHECK: %{{.*}} = scf.if
+  // CHECK:   memref.copy
+  // CHECK:   %{{.*}} = bufferization.to_tensor %[[ALLOC_N]] restrict writable : memref<32x64xf16>
+  // CHECK:   scf.yield
+  // CHECK: return
+  func.func @skip_nested_to_tensor(%arg0: memref<32x64xf16>, %cond: i1)
+      -> tensor<32x64xf16> {
+    %alloc = memref.alloc() : memref<32x64xf16>
+    %empty = tensor.empty() : tensor<32x64xf16>
+    %res = scf.if %cond -> (tensor<32x64xf16>) {
+      memref.copy %arg0, %alloc : memref<32x64xf16> to memref<32x64xf16>
+      %t = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+      scf.yield %t : tensor<32x64xf16>
+    } else {
+      scf.yield %empty : tensor<32x64xf16>
+    }
+    return %res : tensor<32x64xf16>
+  }
+  // ============================================================================
+  // 6. pack_guarded_load_unit
+  // A load unit whose alloc is pre-filled under a rare-branch guard and then
+  // copied into from GM through subviews. The guard stays inside the scope.
+  // ============================================================================
+  // CHECK-LABEL: func.func @pack_guarded_load_unit(
+  // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<32x64xf16> {
+  // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<32x64xf16>
+  // CHECK:   scf.if
+  // CHECK:     linalg.fill
+  // CHECK:   memref.copy {{.*}}, {{.*}} : memref<32x64xf16, strided<[64, 1]>> to memref<32x64xf16, strided<[64, 1]>>
+  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<32x64xf16>
+  // CHECK:   scope.return %[[T]] : tensor<32x64xf16>
+  // CHECK: } {ssbuffer.load}
+  // CHECK: return %[[SCOPE]]
+  func.func @pack_guarded_load_unit(%gm: memref<32x64xf16>, %cond: i1) -> tensor<32x64xf16> {
+    %alloc = memref.alloc() : memref<32x64xf16>
+    %cst = arith.constant 0.0 : f16
+    %zero = memref.subview %alloc[0, 0] [32, 64] [1, 1] : memref<32x64xf16> to memref<32x64xf16, strided<[64, 1]>>
+    scf.if %cond {
+      linalg.fill ins(%cst : f16) outs(%zero : memref<32x64xf16, strided<[64, 1]>>)
+    }
+    %src = memref.subview %gm[0, 0] [32, 64] [1, 1] : memref<32x64xf16> to memref<32x64xf16, strided<[64, 1]>>
+    %dst = memref.subview %alloc[0, 0] [32, 64] [1, 1] : memref<32x64xf16> to memref<32x64xf16, strided<[64, 1]>>
+    memref.copy %src, %dst : memref<32x64xf16, strided<[64, 1]>> to memref<32x64xf16, strided<[64, 1]>>
+    %t = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+    return %t : tensor<32x64xf16>
+  }
+
+  // ============================================================================
+  // 7. custom_op_core_or_vector_leaves_core_type_open
   // `CUBE_OR_VECTOR` does not pin a core, so the packed scope must not stamp
   // `ssbuffer.core_type`: OpClassifierPass then chooses a single core instead of
   // splitting the op into a CUBE and a VECTOR copy.
@@ -41,8 +161,9 @@ module {
     %1 = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<CUBE_OR_VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, symbol = "or_vector_custom"} "or_vector_custom" ins(%arg0 : tensor<2048xf32>) outs(%0 : tensor<2048xf32>) -> tensor<2048xf32>
     return %1 : tensor<2048xf32>
   }
+
   // ============================================================================
-  // 3. custom_op_cube_and_vector_keeps_both_cores
+  // 8. custom_op_cube_and_vector_keeps_both_cores
   // `CUBE_AND_VECTOR` pins both cores: the scope must carry it so that
   // OpClassifierPass splits the op into a CUBE copy and a VECTOR copy.
   // ============================================================================
@@ -60,9 +181,8 @@ module {
     %1 = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<CUBE_AND_VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, symbol = "both_custom"} "both_custom" ins(%arg0 : tensor<2048xf32>) outs(%0 : tensor<2048xf32>) -> tensor<2048xf32>
     return %1 : tensor<2048xf32>
   }
-
   // ============================================================================
-  // 4. pack_custom_op_filling_local_buffer
+  // 9. pack_custom_op_filling_local_buffer
   // The custom op writes the local buffer itself, so the alloc has two users:
   // the custom op and the to_tensor. The unit is still packed and the
   // to_tensor follows the custom op inside the scope.
@@ -83,7 +203,7 @@ module {
   }
 
   // ============================================================================
-  // 5. pack_custom_op_with_convert_layout
+  // 10. pack_custom_op_with_convert_layout
   // A to_tensor whose single user is a layout conversion drags that conversion
   // into the unit, so the packed scope returns the converted tensor.
   // ============================================================================
@@ -105,7 +225,7 @@ module {
   }
 
   // ============================================================================
-  // 6. no_pack_with_second_to_tensor
+  // 11. no_pack_with_second_to_tensor
   // A buffer read through two to_tensor ops cannot be packed: the scope would
   // tear a live value apart, so the unit is left untouched.
   // ============================================================================
@@ -125,7 +245,7 @@ module {
   }
 
   // ============================================================================
-  // 7. no_pack_inside_loop_iter_arg
+  // 12. no_pack_inside_loop_iter_arg
   // The buffer resolves to a block argument of a non-function op, which has no
   // home of its own; the analysis fails and nothing is packed.
   // ============================================================================

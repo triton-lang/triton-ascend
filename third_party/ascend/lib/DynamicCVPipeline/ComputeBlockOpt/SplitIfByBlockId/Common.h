@@ -23,17 +23,13 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_COMPUTE_OPT_SPLIT_IF_BY_BLOCK_ID_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_COMPUTE_OPT_SPLIT_IF_BY_BLOCK_ID_COMMON_H
 
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/LogicalResult.h"
 
 #include "mlir/Dialect/SCF/IR/SCF.h"
-#include "mlir/IR/Block.h"
-#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 
-#include "DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
 namespace mlir::CVPipeline::SplitIf {
 
@@ -43,30 +39,6 @@ struct BlockGroup {
   int blockId;
   SmallVector<Operation *, 0> ops;     // ops in this group (original order)
   SmallVector<scf::IfOp, 0> nestedIfs; // nested ifs that belong to this group
-};
-
-// Logic: find until the first tensor dependency
-class ScalarClosure {
-private:
-  mlir::Block *block = nullptr;
-  mlir::Block *parentBlock = nullptr;
-  bool includeParent = true;
-  llvm::ArrayRef<Operation *> ops;
-
-  void collectScalarClosure(Value val);
-  void collectOuterDependency(Operation *op);
-
-public:
-  static constexpr size_t kExpectedMaxScalarOps = 4;
-  llvm::SmallPtrSet<Operation *, kExpectedMaxScalarOps> scalarOps;
-  ScalarClosure(BlockGroup &group, ArrayRef<Operation *> ops);
-  ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent);
-  void collect();
-
-  // Safety: both operations must be in scalarOps
-  bool isBefore(Operation *a, Operation *b);
-
-  std::pair<SmallVector<Operation *>, IRMapping> capture(int blockId);
 };
 
 struct WalkMainLoopResult {

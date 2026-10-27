@@ -588,7 +588,9 @@ def _full_row_copy_compile_options(metadata, compiler_path):
     # A shared noinline load helper loses constant-width specialization when
     # the masked tail also calls it. Scope this to compiler-versioned A5 SIMD
     # loads; other kernels retain the NPU compiler's default inlining policy.
-    if (metadata.get("has_full_row_copy", False) and metadata["target"].arch.startswith("Ascend950")
+    from triton.backends.ascend.utils import is_register_based_arch
+
+    if (metadata.get("has_full_row_copy", False) and is_register_based_arch(metadata["target"].arch)
             and metadata.get("mix_mode") == "aiv" and metadata.get("parallel_mode") == "simd"
             and _supports_full_row_copy_inlining(compiler_path)):
         return ["--enable-lib-call-no-inline=false"]
@@ -1125,9 +1127,14 @@ def get_libdevice(arch: str):
 
 
 def _is_register_based_target_arch(arch: str) -> bool:
-    # A6 shares the register-based lowering and launch ABI with A5.
-    return isinstance(arch, str) and (arch.startswith(("Ascend910_96", "Ascend960")) or arch.startswith(
-        ("Ascend910_95", "Ascend950")))
+    """Delegate to the arch table in utils.
+
+    Imported lazily to avoid an import cycle: ``utils`` is imported during
+    backend registration and still loading when this module is first pulled
+    in, so the helper is not yet bound at import time.
+    """
+    from triton.backends.ascend.utils import is_register_based_arch
+    return is_register_based_arch(arch)
 
 
 def _get_libdevice_compile_state() -> bool:
@@ -1386,6 +1393,15 @@ def _get_npu_options_arch(options: NPUOptions) -> str:
 
 
 NPUOptions.arch = property(_get_npu_options_arch)
+
+
+def _get_compile_on_register_based(options) -> bool:
+    """Modern accessor for the register-based (A5/A6) compile pipeline."""
+    from triton.backends.ascend.utils import is_register_based_arch
+    return is_register_based_arch(options.target_arch)
+
+
+NPUOptions.compile_on_register_based = property(_get_compile_on_register_based)
 
 _INTERNAL_NPU_OPTION_MARKERS = frozenset({
     "target_arch",

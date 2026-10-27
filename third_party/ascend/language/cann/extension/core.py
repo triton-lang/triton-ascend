@@ -38,6 +38,7 @@ import triton.language.core as tl
 import triton.extension.buffer.language as bl
 from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
+from triton.backends.ascend.utils import is_register_based_arch
 
 from . import semantic as semantic
 
@@ -353,8 +354,8 @@ def fixpipe(
     :return: If dst is None, returns the created tensor; otherwise returns None.
     :rtype: tl.tensor | None
     """
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if not isinstance(src, tl.tensor):
         raise TypeError("src is not of tensor type")
 

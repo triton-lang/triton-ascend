@@ -28,13 +28,14 @@ from dataclasses import dataclass, field
 from typing import Optional, Dict, Any
 
 from .. import utils as runtime_utils
+from triton.backends.ascend.utils import is_register_based_arch
 
 
-def _arch_default(legacy_value: int, a5_value: int) -> int:
+def _arch_default(legacy_value: int, register_based_value: int) -> int:
     # Only called for an omitted constructor argument, never during import.
     arch = runtime_utils.target.arch
-    if arch.startswith(("Ascend910_95", "Ascend950")):
-        return a5_value
+    if is_register_based_arch(arch):
+        return register_based_value
     return legacy_value
 
 

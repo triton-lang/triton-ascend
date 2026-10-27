@@ -48,7 +48,8 @@ from triton._C.libtriton import get_cache_invalidating_env_vars
 from triton.runtime.autotuner import Autotuner, Config
 from triton.runtime.jit import MockTensor, compute_cache_key
 from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
-                                          _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95, _multibuffer_mode_to_tuple)
+                                          _RESERVED_NPU_OPTION_NAMES, _multibuffer_mode_to_tuple,
+                                          is_register_based_arch)
 
 from .autoparser import (LowDimsAxesParser, PtrNumsParser, ReductionAxesParser, SplitAxesParser, TilingAxesParser)
 from .dsl_analysis.cv_param_parser import parse_cv_params
@@ -409,7 +410,7 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_multibuffer_mode = None
         self.user_specified_multibuffer = None
         target_arch = triton.runtime.driver.active.get_current_target().arch
-        self.default_multibuffer = not is_compile_on_910_95(target_arch)
+        self.default_multibuffer = not is_register_based_arch(target_arch)
 
         # Mark the original function so ubtuner can detect autotune was applied
         ori_fn = get_origin_fn(fn)

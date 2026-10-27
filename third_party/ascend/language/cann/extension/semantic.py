@@ -33,6 +33,7 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 import triton.language.core as tl
 import triton.language.extra.cann.extension as al
 import triton.extension.buffer.language as bl
+from triton.backends.ascend.utils import is_register_based_arch
 
 T = TypeVar('T')
 
@@ -99,8 +100,8 @@ def sub_vec_id(_semantic=None) -> tl.tensor:
 
 
 def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _semantic=None):
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
     if src.shape != dst.shape:
@@ -118,8 +119,8 @@ def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, b
 
 
 def copy(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _semantic=None):
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
     if src.shape != dst.shape:

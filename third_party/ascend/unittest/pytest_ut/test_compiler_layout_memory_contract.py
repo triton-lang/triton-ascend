@@ -211,6 +211,71 @@ def compiler_module():
     return module
 
 
+@pytest.mark.parametrize("arch",
+                         ["Ascend950PR_9579", "Ascend950DT_9579", "Ascend910_9581", "Ascend910B4", "Ascend910_9363"])
+@pytest.mark.parametrize("device_limit", [None, "14,28"])
+@pytest.mark.parametrize("pure_simt", [False, True])
+def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, pure_simt):
+    compiler = compiler_module
+    driver_path = Path(__file__).resolve().parents[2] / "backend" / "driver.py"
+    driver_class = next(node for node in ast.parse(driver_path.read_text()).body
+                        if isinstance(node, ast.ClassDef) and node.name == "NPUUtils")
+    namespace = {name: importlib.import_module(name) for name in ("functools", "os", "re")}
+    exec(compile(ast.Module(body=[driver_class], type_ignores=[]), str(driver_path), "exec"), namespace)
+    npu_utils = object.__new__(namespace["NPUUtils"])
+    npu_utils.get_device_core = lambda: (28, 56)
+    npu_utils.get_arch = lambda: arch
+    monkeypatch.setattr(compiler, "NPUUtils", lambda: npu_utils)
+    if device_limit is None:
+        monkeypatch.delenv("NPU_DEVICE_LIMIT", raising=False)
+    else:
+        monkeypatch.setenv("NPU_DEVICE_LIMIT", device_limit)
+
+    expected_cores = (28, 56) if device_limit is None else (14, 28)
+    assert npu_utils.get_device_core() == (28, 56)
+    assert (npu_utils.get_aicore_num(), npu_utils.get_aivector_core_num()) == expected_cores
+
+    options = _parse_options(compiler, arch)
+    metadata = dict(options.__dict__, target=SimpleNamespace(arch=arch), hash="device-info-test", mix_mode="aiv",
+                    bitcodes=None, auto_blockify_enabled=False)
+    monkeypatch.setattr(compiler, "_parse_linalg_metadata", lambda source, meta: (source, meta))
+    monkeypatch.setattr(compiler, "_parse_ttir_metadata", lambda _source, meta: meta)
+    monkeypatch.setattr(compiler, "_export_program_grid_metadata", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(compiler, "_finalize_program_launch_policy", lambda *_args: None)
+    monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/compiler", {}))
+    monkeypatch.setattr(compiler, "get_simt_stack_limit", lambda: 1152)
+    monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
+
+    commands = []
+
+    class CommandCaptured(Exception):
+        pass
+
+    def capture(command, **_kwargs):
+        commands.append(command)
+        raise CommandCaptured
+
+    monkeypatch.setattr(compiler.subprocess, "run", capture)
+    if pure_simt:
+        options = SimpleNamespace(**{**options.__dict__, "is_pure_simt": True})
+        compile_fn = compiler.ttir_to_npubin
+    else:
+        compile_fn = (compiler.linalg_to_bin_enable_npu_compile_910_95
+                      if options.compile_on_910_95 else compiler.linalg_to_bin_enable_npu_compile_A2_A3)
+    with pytest.raises(CommandCaptured):
+        compile_fn("module {}", metadata, options)
+
+    is_a5 = arch.startswith(("Ascend950", "Ascend910_95"))
+    expected = [f"--target={'Ascend950' if is_a5 else arch}"]
+    if is_a5:
+        aic, aiv = (28, 56) if device_limit is None else (14, 28)
+        expected += [f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"]
+    assert len(commands) == 1
+    assert [
+        arg for arg in commands[0] if arg.startswith(("--target=", "--custom-aic-number=", "--custom-aiv-number="))
+    ] == expected
+
+
 def _parse_options(compiler, arch, opts=None):
     backend = compiler.AscendBackend(SimpleNamespace(backend="npu", arch=arch))
     return backend.parse_options({} if opts is None else opts)
@@ -940,16 +1005,18 @@ def test_multibuffer_legacy_options_are_preserved_without_ta_warnings(compiler_m
 
 def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derived=None):
     options = _parse_options(compiler, "Ascend950PR" if is_a5 else "Ascend910B4", requested)
-    metadata = dict(options.__dict__, hash="layout-memory-contract-test", mix_mode="mix", bitcodes=None,
-                    auto_blockify_enabled=False)
+    metadata = dict(options.__dict__, target=SimpleNamespace(arch=options.target_arch),
+                    hash="layout-memory-contract-test", mix_mode="mix", bitcodes=None, auto_blockify_enabled=False)
     metadata.update(derived or {})
     monkeypatch.setattr(compiler, "_parse_linalg_metadata", lambda source, meta: (source, meta))
     monkeypatch.setattr(compiler, "_finalize_program_launch_policy", lambda *_args: None)
     monkeypatch.setattr(compiler, "get_common_bishengir_compile_options", lambda _meta: [])
     monkeypatch.setattr(compiler, "get_auto_bind_sub_block_option", lambda _meta: True)
     monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/compiler", {}))
-    monkeypatch.setattr(compiler, "NPUUtils",
-                        lambda: SimpleNamespace(has_device_limit=lambda: False, get_arch=lambda: options.target_arch))
+    monkeypatch.setattr(
+        compiler, "NPUUtils",
+        lambda: SimpleNamespace(has_device_limit=lambda: False, get_arch=lambda: options.target_arch, get_aicore_num=
+                                lambda: 28, get_aivector_core_num=lambda: 56))
     monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
 
     class CommandCaptured(BaseException):

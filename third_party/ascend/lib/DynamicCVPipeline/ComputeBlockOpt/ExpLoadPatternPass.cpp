@@ -20,13 +20,10 @@
  * IN THE SOFTWARE.
  */
 
-#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
 
-#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -36,9 +33,15 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
 
 static constexpr const char *DEBUG_TYPE = "extract-exp-load-pattern";
 #define LOG_DEBUG(...)                                                         \
@@ -193,15 +196,15 @@ public:
                                           info.toTensorOp, info.copyOp,
                                           info.allocOp};
 
-      CVPipeline::SplitIf::ScalarClosure closure{info.broadcastOp->getBlock(),
-                                                 coreOps, false};
+      CVPipeline::ScalarClosure closure{info.broadcastOp->getBlock(), coreOps,
+                                        false};
       closure.collect();
 
       llvm::SetVector<Operation *> matchedOps;
       for (auto *op : coreOps) {
         matchedOps.insert(op);
       }
-      for (Operation *op : closure.scalarOps) {
+      for (Operation *op : closure.getScalarOps()) {
         matchedOps.insert(op);
       }
       CVPipeline::cloneScalarOpsForCrossBlockUses(bm, matchedOps,

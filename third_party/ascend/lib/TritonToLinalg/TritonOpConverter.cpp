@@ -33,6 +33,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SmallVectorExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/TypeSwitch.h"
@@ -65,6 +66,34 @@
 namespace TTOpConverters {
 using namespace mlir;
 using namespace triton;
+
+llvm::SmallVector<Operation *> collectRealReductionOps(Block *body) {
+  // Only the backward slice of the yielded values contributes to the
+  // reduction result. Overflow checks inserted by TRITON_DEBUG are not in
+  // this slice, and must not change either lowering or SIMT classification.
+  llvm::DenseSet<Operation *> liveOps;
+  llvm::SmallVector<Value> worklist(body->getTerminator()->getOperands());
+  while (!worklist.empty()) {
+    Value val = worklist.pop_back_val();
+    if (auto *defOp = val.getDefiningOp()) {
+      if (defOp->getBlock() == body && liveOps.insert(defOp).second) {
+        for (auto operand : defOp->getOperands())
+          worklist.push_back(operand);
+      }
+    }
+  }
+
+  // Preserve the lowering's treatment of floating-point precision casts.
+  llvm::SmallVector<Operation *> realOps;
+  for (Operation &bodyOp : body->without_terminator()) {
+    if (!liveOps.contains(&bodyOp))
+      continue;
+    if (isa<arith::ExtFOp, arith::TruncFOp, arith::BitcastOp>(&bodyOp))
+      continue;
+    realOps.push_back(&bodyOp);
+  }
+  return realOps;
+}
 
 /**
  * Retrieves a boolean environment variable.

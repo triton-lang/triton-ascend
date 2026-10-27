@@ -17,6 +17,10 @@ ARG TRITON_WHEEL_VERSION_SUFFIX=+dev
 ARG BUILD_DATE=00000000
 ARG TRITON_BUILD_NPUIR=OFF
 ARG ASCEND_HOME_PATH=/usr/local/Ascend/cann-9.2.0-beta.2
+# AscendNPU-IR revision to build against: "stable" (branch HEAD — nightly /
+# regular PR wheels) or an exact 40-hex commit SHA (the Build-Pinned-Wheels
+# job passes the submodule gitlink so the wheel matches what local users get).
+ARG NPUIR_REF=stable
 
 # ---------------------------------------------------------------------------
 # Build dependencies (matching CIBW_BEFORE_ALL)
@@ -60,9 +64,10 @@ WORKDIR /project
 # the CI workflow scripts itself. Needed both for the C++ plugin build
 # (add_subdirectory(third_party/ascend/AscendNPU-IR)) and for the
 # TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
-# submodules (llvm-project / torch-mlir / shmem).
+# submodules (llvm-project / torch-mlir / shmem). NPUIR_REF overrides the
+# branch with an exact SHA for the pinned-submodule verification wheel.
 # ---------------------------------------------------------------------------
-RUN bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR
+RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.

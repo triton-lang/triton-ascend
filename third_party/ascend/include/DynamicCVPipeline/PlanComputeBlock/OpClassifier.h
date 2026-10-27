@@ -115,7 +115,7 @@ private:
   int patternMatchCUBE();
 
   // Upstream pattern matching helpers
-  void matchToTensorPattern(Operation *def);
+  void matchLoadPattern(Operation *def);
   void matchTransposePattern(Operation *def);
   void matchFillPattern(Operation *def);
   void matchEmptyPattern(Operation *def);
@@ -197,8 +197,9 @@ private:
   // Step 6: Handle CUBE_AND_VECTOR operations
   int handleCubeAndVector();
 
-  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions
-  void splitOperationForCubeAndVector(
+  // Helper: split CUBE_AND_VECTOR operation into CUBE and VECTOR versions.
+  // Returns true when a split was actually performed.
+  bool splitOperationForCubeAndVector(
       Operation *op, llvm::DenseSet<Operation *> &processedOps,
       llvm::DenseMap<Operation *, Operation *> &opToVectorClone);
 

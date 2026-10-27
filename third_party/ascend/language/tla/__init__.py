@@ -30,11 +30,11 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
-from .core import buffer, buffer_type
-from .vf import scope
+from .core import buffer, buffer_type, vector, vector_type
+from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
-from .view import view
+from .view import view, reshape
 from .aux_ops import annotate_buffer_versions
 from . import math
 from .math import compensated_rstd
@@ -44,15 +44,21 @@ from .device_assert import device_assert
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
+# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+from . import cube
+
 __all__ = [
     "buffer",
     "buffer_type",
+    "vector",
+    "vector_type",
 
     # buffer alloc / copy / view
     "alloc_buffer",
     "alloc",
     "copy",
     "view",
+    "reshape",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
@@ -67,4 +73,7 @@ __all__ = [
 
     # simd ops
     "simd",
+
+    # cube ops
+    "cube",
 ]

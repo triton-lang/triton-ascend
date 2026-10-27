@@ -37,7 +37,6 @@ from triton.compiler.code_generator import (
     CodeGenerator,
     get_jit_fn_file_line,
 )
-from .core import buffer_type
 
 
 def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_template", output_dir=None,
@@ -100,10 +99,47 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     pm.run(module, "module")
     if not module.verify():
         raise RuntimeError("triton_to_linalg produced invalid IR")
+    _infer_kernel_mode(module, context)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
     return module
+
+
+def _kernel_entries(module):
+    """All non-private func.func ops: the ttadapter kernel entry candidates."""
+    operations = []
+    module.walk(operations.append)
+    return [op for op in operations if op.get_name() == "func.func" and op.get_str_attr("sym_visibility") != "private"]
+
+
+def _infer_kernel_mode(module, context):
+    """Set the kernel entry mix_mode from the module's cube-work markers.
+
+    TritonToLinalgPass tags the entry "aiv" unless it finds TTIR dot /
+    hivm CustomOps; TLA cube kernels emit the cube op hivm.hir.mmadL1
+    directly (inside an inline scope.scope that outline-scope later marks
+    #hivm.func_core_type<AIC>, mirroring code_generator._vf_scope_attrs),
+    so they would reach npuir tagged "aiv". Correct the tag here so kernel
+    mode and the scope-level AIC/AIV tagging stay consistent: any cube work
+    -> "mix", otherwise keep the pass default "aiv".
+    """
+    has_cube = False
+
+    def _collect(op):
+        nonlocal has_cube
+        if not has_cube and op.get_name() == "hivm.hir.mmadL1":
+            has_cube = True
+
+    module.walk(_collect)
+    if not has_cube:
+        return
+    from triton._C.libtriton.ascend import ir as ascend_ir
+    entries = _kernel_entries(module)
+    if len(entries) != 1:
+        raise ValueError("expected exactly one public func.func kernel entry")
+    builder = ascend_ir.tla_builder(context, "")
+    builder.set_op_attr(entries[0], "mix_mode", builder.get_string_attr("mix"))
 
 
 def check_ttadapter(module):
@@ -120,15 +156,16 @@ def check_ttadapter(module):
     forbidden = [op.get_name() for op in operations if op.get_name().startswith("tt.")]
     if forbidden:
         raise ValueError(f"TTIR operations must not reach npuir: {forbidden}")
-    entries = [
-        op for op in operations if op.get_name() == "func.func" and op.get_str_attr("sym_visibility") != "private"
-    ]
+    entries = _kernel_entries(module)
     if len(entries) != 1:
         raise ValueError("expected exactly one public func.func kernel entry")
     entry = entries[0]
-    for key, value in (("global_kernel", "local"), ("mix_mode", "aiv"), ("parallel_mode", "simd")):
+    for key, value in (("global_kernel", "local"), ("parallel_mode", "simd")):
         if entry.get_str_attr(key) != value:
             raise ValueError(f"kernel entry must have {key} = {value!r}")
+    mix = entry.get_str_attr("mix_mode")
+    if mix not in ("aiv", "mix"):
+        raise ValueError(f"kernel entry mix_mode must be 'aiv' or 'mix', got {mix!r}")
     name = entry.get_str_attr("sym_name")
     header = next((line for line in str(module).splitlines()
                    if re.match(r"\s*func\.func (?:public )?@" + re.escape(name) + r"\(", line)), "")
@@ -150,13 +187,8 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
             constants[(index, )] = constexprs[name]
         else:
             ty = signature[name]
-            if not isinstance(ty, buffer_type):
-                if isinstance(ty, str):
-                    ty = str_to_ty(ty, None)
-                if ty.is_block():
-                    raise TypeError("TLA runtime memory arguments must be buffer_type "
-                                    "or pointer; the entry should tla.view pointers "
-                                    "into GM buffers")
+            if isinstance(ty, str):
+                ty = str_to_ty(ty, None)
             types.append(ty)
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
@@ -167,6 +199,17 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     generator.visit(fn.parse())
     module = generator.module
     module.context = context
+    # Mirror the runtime Ascend patch (backend._apply_ascend_patch) and inject
+    # #hacc.target<arch> so target-aware verifiers (e.g. FixpipeOp::verify,
+    # which rejects dst=UB / NZ2DN fixpipe unless isAscend950(moduleOp))
+    # behave like the on-device path. The arch string passes through as-is and
+    # must be a TargetDevice enum symbol (e.g. Ascend910_9589): its parse
+    # matches exactly, so family names such as "Ascend950" resolve nowhere.
+    arch = getattr(options, "arch", None)
+    if arch:
+        from triton._C.libtriton.ascend import ir as ascend_ir
+        builder = ascend_ir.ascendnpu_ir_builder(context, arch)
+        module.set_attr("hacc.target", builder.parse_attr(f'#hacc.target<"{arch}">'))
     if not module.verify():
         raise RuntimeError("TLA module verification failed")
     return module

@@ -7,7 +7,7 @@ The Triton compiler patch merges ``TLA_WITH_DISPATCH`` into
 """
 
 from .code_generator import handle_scope_with
-from .vf import simd, cube
+from .scope import simd, cube
 
 __all__ = ["TLA_WITH_DISPATCH"]
 

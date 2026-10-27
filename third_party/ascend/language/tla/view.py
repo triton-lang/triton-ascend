@@ -35,6 +35,14 @@ from triton.language.core import builtin, tensor, int64, _unwrap_if_constexpr
 from .core import buffer, buffer_type, _shape, _row_major_strides
 
 
+def _numel(sizes):
+    """Total element count of a static shape (positive ints)."""
+    n = 1
+    for size in sizes:
+        n *= size
+    return n
+
+
 def _check_scalar_int(offset):
     """Return a scalar-integer offset as an int or tensor; reject everything else."""
     offset = _unwrap_if_constexpr(offset)
@@ -110,3 +118,41 @@ def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
         return _entry(src, sizes, strides, offsets, space, _semantic)
     raise TypeError("tla.view expects a tla.buffer or a pointer tensor, "
                     f"got {type(src).__name__}")
+
+
+@builtin
+def reshape(src, shape, _semantic=None):
+    """Rank-only reshape of a contiguous row-major buffer.
+
+    Lowers to static ``memref.collapse_shape`` / ``memref.expand_shape`` ops
+    with explicit reassociation indices (mirrors npuir's
+    CanonicalizeTensorReshape): first flatten the source to 1-D when its rank
+    is > 1, then unflatten to the target shape when its rank is > 1, so a pure
+    flatten/unflatten emits a single op.  The source must be an
+    identity-layout buffer (alloc or reshape result), so strided tiles need
+    ``tla.view`` first and are rejected here.  The element count is preserved
+    exactly.
+    """
+    if not isinstance(src, buffer):
+        raise TypeError("tla.reshape expects a tla.buffer, "
+                        f"got {type(src).__name__}")
+    sizes = _shape(shape)
+    numel = _numel(sizes)
+    if numel != _numel(src.shape):
+        raise ValueError(f"tla.reshape element count mismatch: "
+                         f"{src.shape} -> {sizes}")
+    if src.strides != _row_major_strides(src.shape) or src.offset != 0:
+        raise ValueError("tla.reshape requires a contiguous row-major buffer; "
+                         "use tla.view for strided tiles")
+    if sizes == src.shape:
+        return src  # no-op reshape
+    b = _semantic.builder
+    ty = buffer_type(sizes, src.dtype, src.space)
+    dst_ty = ty.to_ir(b)
+    handle = src.handle
+    if len(src.shape) > 1:  # flatten to 1-D
+        flat_ty = buffer_type((numel, ), src.dtype, src.space).to_ir(b)
+        handle = b.create_tla_collapse_shape(handle, flat_ty, [list(range(len(src.shape)))])
+    if len(sizes) > 1:  # unflatten from 1-D to the target shape
+        handle = b.create_tla_expand_shape(handle, dst_ty, [list(range(len(sizes)))])
+    return buffer(handle, ty)

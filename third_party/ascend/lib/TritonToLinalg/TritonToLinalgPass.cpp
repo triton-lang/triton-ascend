@@ -1993,8 +1993,8 @@ LogicalResult TritonToLinalgPass::finalizePointerCasts(ModuleOp moduleOp) {
     IRRewriter rewriter(&getContext());
     rewriter.setInsertionPointAfter(op);
     Value addr = op.getAddrs()[0];
-    auto elementType =
-        cast<MemRefType>(op.getResult().getType()).getElementType();
+    auto castType = cast<MemRefType>(op.getResult().getType());
+    auto elementType = castType.getElementType();
 
     for (memref::ReinterpretCastOp reinterpretCastOp : reinterpretCastOps) {
       auto sizes = reinterpretCastOp.getStaticSizes();
@@ -2043,7 +2043,9 @@ LogicalResult TritonToLinalgPass::finalizePointerCasts(ModuleOp moduleOp) {
             op.getLoc(), rewriter.getIntegerAttr(targetType, staticOffset));
       };
 
-      auto memrefType = MemRefType::get({ShapedType::kDynamic}, elementType);
+      auto memrefType = MemRefType::get({ShapedType::kDynamic}, elementType,
+                                        MemRefLayoutAttrInterface{},
+                                        castType.getMemorySpace());
       auto createPointerCast = [&](Value address, Value capacity) {
         auto cast = rewriter.create<hivm::PointerCastOp>(
             op.getLoc(), memrefType, address, capacity);

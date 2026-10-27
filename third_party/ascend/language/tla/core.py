@@ -17,7 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""TLA memory values: memrefs, independent of the buffer language extension."""
+"""TLA memory and vector-register values, independent of Triton tensors."""
 from triton.language import core as tl
 
 
@@ -90,6 +90,7 @@ class buffer(tl.base_value):
     def __init__(self, handle, ty):
         self.handle, self.type = handle, ty
         self.shape, self.dtype, self.space, self.strides = ty.shape, ty.element_ty, ty.space, ty.strides
+        self.offset = ty.offset
 
     def _flatten_ir(self, handles):
         handles.append(self.handle)
@@ -98,3 +99,66 @@ class buffer(tl.base_value):
         if len(indices) == 1 and isinstance(indices[0], tl.tuple):
             indices = tuple(indices[0].values)
         return buffer_access(self, indices)
+
+
+class vector_type(tl.base_type):
+    """A one-dimensional MLIR vector, including i1 predicate vectors.
+
+    Register-width and operation-specific restrictions belong to SIMD ops,
+    not to the structural type.
+    """
+
+    def __init__(self, lanes, element_ty):
+        lanes = tl._unwrap_if_constexpr(lanes)
+        element_ty = tl._unwrap_if_constexpr(element_ty)
+        if type(lanes) is not int or lanes <= 0:
+            raise ValueError("vector lanes must be a positive compile-time integer")
+        if type(element_ty) is not tl.dtype or not (element_ty.is_int() or element_ty.is_floating()):
+            raise TypeError("vector element type must be a scalar integer or floating-point dtype")
+        self.lanes = lanes
+        self.element_ty = element_ty
+
+    @property
+    def shape(self):
+        return (self.lanes, )
+
+    def to_ir(self, builder):
+        return builder.create_tla_vector_type(self.lanes, self.element_ty.to_ir(builder))
+
+    def _flatten_ir_types(self, builder, out):
+        out.append(self.to_ir(builder))
+
+    def _unflatten_ir(self, handles, cursor):
+        return vector(handles[cursor], self), cursor + 1
+
+    def mangle(self):
+        return f"TLA_vec_{self.lanes}_{self.element_ty.mangle()}"
+
+    def __eq__(self, other):
+        return isinstance(other, vector_type) and self.lanes == other.lanes and self.element_ty == other.element_ty
+
+    def __str__(self):
+        return f"vector<{self.lanes}x{self.element_ty}>"
+
+
+class vector(tl.base_value):
+    """A SIMD register value; tensor operations and implicit conversion are unsupported."""
+
+    def __init__(self, handle, ty):
+        if not isinstance(ty, vector_type):
+            raise TypeError("tla.vector requires a tla.vector_type")
+        self.handle, self.type = handle, ty
+
+    @property
+    def shape(self):
+        return self.type.shape
+
+    @property
+    def dtype(self):
+        return self.type.element_ty
+
+    def _flatten_ir(self, handles):
+        handles.append(self.handle)
+
+    def __bool__(self):
+        raise TypeError("a tla.vector cannot be used as a scalar condition")

@@ -28,7 +28,7 @@ class Options:
     enable_fp_fusion = True
     debug = False
     sanitize_overflow = True
-    arch = "Ascend950"
+    arch = "Ascend910_9589"
     supported_fp8_dtypes = ("fp8e5", "fp8e4nv", "fp8e4b8", "fp8e4b15", "fp8e5b16")
 
 

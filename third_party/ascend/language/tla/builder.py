@@ -40,12 +40,18 @@ def setup_unified_builder(main_builder, ascend_builder):
     main_builder._ascend_builder = ascend_builder
     ascend_methods = [
         'create_tla_buffer_type',
+        'create_tla_vector_type',
         'create_tla_alloc',
         'create_tla_bind',
         'create_tla_subview',
         'create_tla_reinterpret_cast',
+        'create_tla_collapse_shape',
+        'create_tla_expand_shape',
         'create_hivm_load',
         'create_hivm_store',
+        'create_hivm_nd2nz',
+        'create_hivm_fixpipe',
+        'create_hivm_mmadl1',
         'create_annotation_mark',
         'get_array_attr',
         'parse_attr',
@@ -72,6 +78,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vdintlv',
         'create_simd_bitcast',
         'create_scope_op',
+        'get_scope_entry_block',
         'scope_return',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

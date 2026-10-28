@@ -33,17 +33,9 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager, default_cache_dir
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (
-    _build_npu_ext,
-    _check_cxx11_abi,
-    convert_sigtype_to_int,
-    _is_auto_map_parallel_blocks_enabled,
-    get_ascend_arch_from_env,
-    is_ffts_supported,
-    force_disable_ffts,
-    get_backend_func,
-    get_cann_version
-)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
+                                          _is_auto_map_parallel_blocks_enabled, get_ascend_arch_from_env,
+                                          is_ffts_supported, force_disable_ffts, get_backend_func, get_cann_version)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -74,6 +66,7 @@ def _cache_build_lock(cache):
 
 
 class NPUUtils(object):
+
     def __new__(cls):
         if not hasattr(cls, 'instance'):
             cls.instance = super(NPUUtils, cls).__new__(cls)
@@ -148,7 +141,7 @@ class NPUUtils(object):
         prop = torch.npu.get_device_properties(device)
         cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
         return cube_core_num, vector_core_num
-    
+
     @functools.lru_cache()
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
@@ -172,9 +165,11 @@ class NPUUtils(object):
 
 
 class NPULauncher(object):
+
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
-        self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
+        self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF",
+                                                       'false').lower() in ('true', '1')
         self.src = src
         self.metadata = metadata
         self.so_launcher_path = self._make_launcher_stub_path()
@@ -213,11 +208,13 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
-  
+
             profiler_registered = self.launch(*args, **kwargs)
             _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
+
 class NPUDriver(DriverBase):
+
     def __init__(self):
         self.utils = NPUUtils()
         self.launcher_cls = NPULauncher
@@ -225,11 +222,13 @@ class NPUDriver(DriverBase):
 
     @classmethod
     def is_active(cls):
+
         def test_npucompiler():
             from triton.backends.ascend.utils import _get_bisheng_path
             npucompiler = _get_bisheng_path()
             targets = subprocess.check_output([npucompiler, "-print-targets"]).decode().strip().split()
             return "hiipu64" in targets
+
         try:
             return test_npucompiler()
         except Exception as e_npucompiler:
@@ -297,7 +296,7 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
         print(f"Dumping precompiled.h to {dump_manager.cache_dir}")
         dump_manager.put(header_src, "precompiled.h", binary=False)
         print(f"Dumping {name}.cxx to {dump_manager.cache_dir}")
-        dump_manager.put(wrapper_src, f"{name}.cxx", binary = False)
+        dump_manager.put(wrapper_src, f"{name}.cxx", binary=False)
 
     cache_path = so_cache_manager.get_file(so_name)
     if cache_path is not None:
@@ -399,8 +398,7 @@ def extract_device_print_code_from_cann():
 
 
 def generate_npu_header_src():
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     return f"""
 #ifndef TRITON_NPU_HEADERS
 #define TRITON_NPU_HEADERS
@@ -533,11 +531,8 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
-    lock_init_value = int(
-        metadata.lock_init_value if hasattr(metadata, 'lock_init_value')
-        else metadata.lock_init_val if hasattr(metadata, 'lock_init_val')
-        else 0
-    )
+    lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
+                          lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
     sync_block_lock_layout = int(getattr(metadata, "sync_block_lock_layout", 0))
     ordered_sync_block_lock_count = sync_block_lock_layout & 0xFFFFFFFF
     unordered_sync_block_lock_count = (sync_block_lock_layout >> 32) & 0xFFFFFFFF
@@ -672,23 +667,17 @@ def generate_npu_wrapper_src(constants, signature, metadata):
 
     arch = get_ascend_arch_from_env()
     target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts())
-    enable_device_print = os.getenv(
-        "TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
-    enable_grid_warn_print = os.getenv(
-        "TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
+    enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
     has_auto_blockify_blacklist_op = getattr(
-      metadata,
-      "has_auto_blockify_blacklist_op",
-      False,
+        metadata,
+        "has_auto_blockify_blacklist_op",
+        False,
     )
-    enable_auto_map_parallel_blocks = (
-      _is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
-    )
+    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op)
     npu_utils = NPUUtils()
-    num_physical_blocks = npu_utils.get_aivector_core_num(
-    ) if mix_mode == "aiv" else npu_utils.get_aicore_num()
+    num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
     is_mix_task_type = "true" if ("MIX" in task_type) else "false"
     LINE_CHANGE_CHAR = chr(10)  # it is \n
@@ -697,12 +686,8 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
     launch_signature_items = [(i, ty) for i, ty in signature.items() if i not in constants]
     launch_arg_count = len(launch_signature_items)
-    launch_arg_ptrs = ', '.join(
-        f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items
-    )
-    launch_arg_sizes = ', '.join(
-        f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
-    )
+    launch_arg_ptrs = ', '.join(f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items)
+    launch_arg_sizes = ', '.join(f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items)
 
     npu_utils_so_path = NPUUtils().get_so_path()
     cpp_npu_utils_dlopen = f"""
@@ -757,11 +742,9 @@ static void release_npu_tensor_handle(void* handle) {{
     coalesce_axis = int(getattr(metadata, "coalesce_axis", -1))
     if coalesce_factor > 1 and coalesce_axis in (0, 1, 2):
         _coalesce_grid_var = {0: "gridX", 1: "gridY", 2: "gridZ"}[coalesce_axis]
-        coalesce_grid_div = (
-            f"// coalescing: each program covers {coalesce_factor} tiles along "
-            f"axis {coalesce_axis}; shrink that grid dim.\n"
-            f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};"
-        )
+        coalesce_grid_div = (f"// coalescing: each program covers {coalesce_factor} tiles along "
+                             f"axis {coalesce_axis}; shrink that grid dim.\n"
+                             f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};")
     else:
         coalesce_grid_div = ""
 

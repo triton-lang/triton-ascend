@@ -24,6 +24,8 @@
 #include "TritonToUnstructure/UnstructureConversionPass.h"
 #include "Utils/Utils.h"
 
+#include "mlir/IR/Block.h"
+
 #include "llvm/Support/Debug.h"
 
 #define DEBUG_TYPE "triton-replace-arguments"
@@ -128,13 +130,13 @@ static bool isStableFunctionScalarPointerBase(Value value) {
 }
 
 // Offset analysis deliberately represents a scalar pointer selected by
-// scf.if as an opaque complete address. If such a value is a loop backedge,
-// the loop must choose the complete-address protocol before any edge is
-// rewritten; otherwise the init/region argument can become i64 while the
+// scf.if or arith.select as an opaque complete address. If it is a loop
+// backedge, the loop must choose the complete-address protocol before any edge
+// is rewritten; otherwise the init/region argument can become i64 while the
 // yield remains a pointer.
-static bool isOpaqueScalarPointerIfResult(Value value) {
+static bool isOpaqueScalarPointerSelection(Value value) {
   return isScalarPointerType(value.getType()) &&
-         value.getDefiningOp<scf::IfOp>();
+         isa_and_nonnull<scf::IfOp, arith::SelectOp>(value.getDefiningOp());
 }
 
 // A scalar pointer can use the established T2U offset representation only if
@@ -182,6 +184,9 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
     for (Value arg : whileOp.getAfterArguments())
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
+    for (Value value : whileOp.getYieldOp().getOperands())
+      if (isOpaqueScalarPointerSelection(value))
+        return true;
     return false;
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
     for (Value init : loopOp.getInits())
@@ -191,7 +196,7 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
     for (Value value : loopOp.getYieldedValues())
-      if (isOpaqueScalarPointerIfResult(value))
+      if (isOpaqueScalarPointerSelection(value))
         return true;
     return false;
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
@@ -557,6 +562,9 @@ SmallVector<Type> constructTypes(TypeRange types, Operation *loop) {
 
 void replacePtrArguments(triton::FuncOp funcOp,
                          llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  // Keep replaced values alive until the analysis cache is no longer used.
+  // This detached block owns the retired operations without revisiting them.
+  Block retiredOps;
   IRRewriter rewriter(funcOp.getContext());
   rewriter.setInsertionPointToStart(&funcOp.getBody().front());
   Value tempVar = rewriter
@@ -567,7 +575,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
     IRMapping mapping;
     Operation *newOp = nullptr;
     // Address carriers used by the replacement op must dominate it. Build the
-    // replacement immediately before the old op and erase the old op last.
+    // replacement immediately before the old op and unlink the old op last.
     rewriter.setInsertionPoint(op);
     if (auto forOp = dyn_cast<scf::ForOp>(op)) {
       // An opaque scalar-pointer boundary cannot be represented by the
@@ -708,7 +716,7 @@ void replacePtrArguments(triton::FuncOp funcOp,
         rewriter.replaceAllUsesWith(res, replacement);
         std::advance(resIter, std::max(getPtrTensorRank(res.getType()), 1));
       }
-      rewriter.eraseOp(op);
+      rewriter.moveOpBefore(op, &retiredOps, retiredOps.end());
       op = newOp;
       convertTensorPtrPre(op, rewriter, offsetMap);
       for (auto &region : op->getRegions())
@@ -720,4 +728,6 @@ void replacePtrArguments(triton::FuncOp funcOp,
   };
 
   funcOp->walk<WalkOrder::PreOrder>(convertTensorPtr);
+  // Drop all cached references before retiredOps destroys the old IR.
+  offsetMap.clear();
 }

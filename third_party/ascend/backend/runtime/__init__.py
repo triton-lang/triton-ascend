@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
+from triton import knobs
 
 from .autotuner import get_max_configs, max_autotune
 
@@ -46,9 +46,18 @@ def _patch_config_init():
     from triton.runtime.autotuner import Config
 
     _original_config_init = Config.__init__
+    _default_num_stages = object()
 
-    def _patched_config_init(self, kwargs, num_warps=4, num_stages=3, num_ctas=1, maxnreg=None, pre_hook=None,
-                             ir_override=None, **extra):
+    def _patched_config_init(self, kwargs, num_warps=4, num_stages=_default_num_stages, num_ctas=1, maxnreg=None,
+                             pre_hook=None, ir_override=None, **extra):
+        has_mode = kwargs.get("multibuffer_mode") is not None
+        if num_stages is _default_num_stages:
+            num_stages = None if has_mode else 3
+        if has_mode:
+            if num_stages is not None:
+                raise ValueError("num_stages and multibuffer_mode cannot be specified together")
+            from triton.backends.ascend.utils import _multibuffer_mode_to_tuple
+            kwargs = dict(kwargs, multibuffer_mode=_multibuffer_mode_to_tuple(kwargs["multibuffer_mode"]))
         _original_config_init(self, kwargs, num_warps, num_stages, num_ctas, maxnreg, pre_hook, ir_override)
         if "ubtune_cfg" in extra:
             setattr(self, "ubtune_cfg", extra["ubtune_cfg"])
@@ -70,7 +79,7 @@ def _patch_cache_invalidating_env_vars():
 
     def _patched_get_env_vars():
         env_vars = _original_get_env_vars()
-        ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+        ubtuner_mode = knobs.ascend.enable_ubtuner
         if ubtuner_mode:
             env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
         return env_vars
@@ -81,3 +90,9 @@ def _patch_cache_invalidating_env_vars():
 _patch_autotune()
 _patch_config_init()
 _patch_cache_invalidating_env_vars()
+
+# ``triton.backends.ascend.runtime.autotuner`` was imported above, after the
+# backend-level install ran; hook its cache-key binding now as well.
+from triton.backends.ascend.knobs import install_ascend_knobs as _install_ascend_knobs
+
+_install_ascend_knobs()

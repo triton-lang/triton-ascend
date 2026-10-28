@@ -21,10 +21,12 @@
  */
 
 #include "TritonMemoryAccess/LoadStoreMaskAnalysis.h"
+#include "TritonMemoryAccess/MemoryAccessTags.h"
 #include "TritonMemoryAccess/OpFoldResultUtils.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -71,6 +73,64 @@ bool isZeroMaskConstant(const OpFoldResult &value) {
   return false;
 }
 
+static Value unwrapRuntimeExtentUnsignedOperand(Value operand,
+                                                const Location &loc,
+                                                OpBuilder &builder) {
+  if (auto extend = operand.getDefiningOp<arith::ExtUIOp>())
+    return extend.getIn();
+
+  auto splat = operand.getDefiningOp<triton::SplatOp>();
+  if (!splat)
+    return Value();
+  auto extend = splat.getSrc().getDefiningOp<arith::ExtUIOp>();
+  if (!extend)
+    return Value();
+
+  auto resultType = dyn_cast<RankedTensorType>(splat.getType());
+  if (!resultType || !isa<IntegerType>(extend.getIn().getType()))
+    return Value();
+  auto narrowedType =
+      RankedTensorType::get(resultType.getShape(), extend.getIn().getType(),
+                            resultType.getEncoding());
+  return builder.create<triton::SplatOp>(loc, narrowedType, extend.getIn());
+}
+
+// Follow an i1 tensor to its init only when all corresponding loop edges
+// forward the same value. A while may permute condition/result slots, so do
+// not assume its before and after argument numbers are interchangeable.
+Value getInvariantLoopMaskInit(BlockArgument argument) {
+  Operation *parent = argument.getOwner()->getParentOp();
+  if (auto loop = dyn_cast<scf::ForOp>(parent)) {
+    if (argument == loop.getInductionVar())
+      return {};
+    unsigned slot = argument.getArgNumber() - 1;
+    auto yield = cast<scf::YieldOp>(loop.getBody()->getTerminator());
+    return yield.getOperand(slot) == argument ? loop.getInitArgs()[slot]
+                                              : Value();
+  }
+  if (auto loop = dyn_cast<scf::WhileOp>(parent)) {
+    auto condition = loop.getConditionOp();
+    auto yield = loop.getYieldOp();
+    BlockArgument before, after;
+    if (argument.getOwner() == &loop.getBefore().front()) {
+      before = argument;
+      after = dyn_cast<BlockArgument>(yield.getOperand(before.getArgNumber()));
+      if (!after || after.getOwner() != &loop.getAfter().front() ||
+          condition.getArgs()[after.getArgNumber()] != before)
+        return {};
+    } else {
+      after = argument;
+      before =
+          dyn_cast<BlockArgument>(condition.getArgs()[after.getArgNumber()]);
+      if (!before || before.getOwner() != &loop.getBefore().front() ||
+          yield.getOperand(before.getArgNumber()) != after)
+        return {};
+    }
+    return loop.getInits()[before.getArgNumber()];
+  }
+  return {};
+}
+
 } // namespace
 
 OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
@@ -92,17 +152,127 @@ OpFoldResult MaskState::clampToNonNegativeIndex(const OpFoldResult value,
 
 LogicalResult MaskState::parse(Value operand, const Location &loc,
                                OpBuilder &builder) {
-  if (isa<IntegerType>(operand.getType())) {
+  Type operandType = operand.getType();
+  if (isa<IntegerType>(operandType) || operandType.isIndex()) {
     return parseIntScalar(operand, loc, builder);
   }
 
   if (auto blockArgument = dyn_cast<BlockArgument>(operand)) {
     auto parentOp = blockArgument.getOwner()->getParentOp();
     if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
+      auto type = dyn_cast<RankedTensorType>(operand.getType());
+      if (type && type.getElementType().isInteger(1)) {
+        Value init = getInvariantLoopMaskInit(blockArgument);
+        return init ? parse(init, loc, builder) : failure();
+      }
       OpOperand *initArgOperand = loopOp.getTiedLoopInit(blockArgument);
       if (initArgOperand) {
-        Value initArg = initArgOperand->get();
-        return parse(initArg, loc, builder);
+        if (!isa<ShapedType>(operand.getType()))
+          return failure();
+
+        // Parse the init value to get the base range structure
+        if (failed(parse(initArgOperand->get(), loc, builder)))
+          return failure();
+
+        // Only scf.for loops are handled
+        auto forOp = dyn_cast<scf::ForOp>(parentOp);
+        if (!forOp)
+          return failure();
+
+        unsigned slot = blockArgument.getArgNumber() - 1;
+        if (slot >= forOp.getYieldedValues().size())
+          return failure();
+        Value yielded = forOp.getYieldedValues()[slot];
+        if (yielded == operand) {
+          // iter_arg is unchanged across iterations: the init value is the
+          // current value, so the parsed state needs no adjustment.
+          return success();
+        }
+
+        // Detect yield == iter_arg + const_tensor (or const_tensor + iter_arg).
+        auto addOp = yielded.getDefiningOp<arith::AddIOp>();
+        if (!addOp)
+          return failure();
+        Value incrementValue;
+        if (addOp.getLhs() == operand)
+          incrementValue = addOp.getRhs();
+        else if (addOp.getRhs() == operand)
+          incrementValue = addOp.getLhs();
+        else
+          return failure();
+
+        // The increment must be a splat integer constant tensor or a scalar
+        // integer constant (i.e. iteration-independent).
+        auto constOp = incrementValue.getDefiningOp<arith::ConstantOp>();
+        if (!constOp)
+          return failure();
+        int64_t increment = 0;
+        if (auto denseAttr = dyn_cast<DenseElementsAttr>(constOp.getValue())) {
+          if (!denseAttr.isSplat() ||
+              !isa<IntegerType>(denseAttr.getElementType()))
+            return failure();
+          increment = denseAttr.getSplatValue<IntegerAttr>().getInt();
+        } else if (auto intAttr = dyn_cast<IntegerAttr>(constOp.getValue())) {
+          increment = intAttr.getInt();
+        } else {
+          return failure();
+        }
+
+        // The iteration count n = (iv - lb) / step relates the induction
+        // variable to the per-iteration increment: current = init + n*delta.
+        // lb/step may be dynamic; cast to index and compute at runtime.
+        FailureOr<Value> ivIndex = castIntegerLike(
+            builder, loc, forOp.getInductionVar(), builder.getIndexType());
+        if (failed(ivIndex))
+          return failure();
+
+        Value iterCount = *ivIndex;
+
+        // iterCount = iv - lb  (handle dynamic or constant lb)
+        auto lb = getConstantIntValue(forOp.getLowerBound());
+        if (!lb || *lb != 0) {
+          FailureOr<Value> lbIndex = castIntegerLike(
+              builder, loc, forOp.getLowerBound(), builder.getIndexType());
+          if (failed(lbIndex))
+            return failure();
+          iterCount = builder.create<arith::SubIOp>(loc, iterCount, *lbIndex);
+        }
+
+        // iterCount = (iv - lb) / step  (handle dynamic or constant step)
+        auto stepCst = getConstantIntValue(forOp.getStep());
+        if (stepCst && *stepCst == 0)
+          return failure();
+        if (!stepCst || *stepCst != 1) {
+          FailureOr<Value> stepIndex = castIntegerLike(
+              builder, loc, forOp.getStep(), builder.getIndexType());
+          if (failed(stepIndex))
+            return failure();
+          iterCount =
+              builder.create<arith::DivSIOp>(loc, iterCount, *stepIndex);
+        }
+
+        OpFoldResult offset =
+            mulOpFoldResult(iterCount, builder.getIndexAttr(increment), loc,
+                            builder, builder.getIndexType());
+        if (!offset)
+          return failure();
+
+        if (this->start && this->end) {
+          this->start = addOpFoldResult(this->start, offset, loc, builder,
+                                        builder.getIndexType());
+          this->end = addOpFoldResult(this->end, offset, loc, builder,
+                                      builder.getIndexType());
+          if (!this->start || !this->end)
+            return failure();
+        } else if (this->scalar) {
+          this->scalar = addOpFoldResult(this->scalar, offset, loc, builder,
+                                         builder.getIndexType());
+          if (!this->scalar)
+            return failure();
+        } else {
+          return failure();
+        }
+        return success();
       }
     }
   }
@@ -120,6 +290,8 @@ LogicalResult MaskState::parse(Value operand, const Location &loc,
           [&](auto op) { return this->parseConstant(op, loc, builder); })
       .Case<arith::AddIOp>(
           [&](auto op) { return this->parseAdd(op, loc, builder); })
+      .Case<arith::SubIOp>(
+          [&](auto op) { return this->parseSub(op, loc, builder); })
       .Case<arith::AndIOp>(
           [&](auto op) { return this->parseAnd(op, loc, builder); })
       .Case<arith::CmpIOp>(
@@ -305,6 +477,42 @@ LogicalResult MaskState::addStates(const MaskState &lhsState,
   }
 }
 
+LogicalResult MaskState::subStateScalar(const MaskState &state,
+                                        const OpFoldResult scalar,
+                                        const Location &loc,
+                                        OpBuilder &builder) {
+  start = subOpFoldResult(state.start, scalar, loc, builder);
+  end = subOpFoldResult(state.end, scalar, loc, builder);
+  if (!start || !end)
+    return failure();
+  dims = state.dims;
+  offsets = state.offsets;
+
+  bool allDimsOne = llvm::all_of(state.dims, [](OpFoldResult dim) {
+    return getConstantIntValue(dim).value() == std::optional<int64_t>(1);
+  });
+  if (allDimsOne) {
+    this->scalar = this->start;
+  }
+
+  return success();
+}
+
+LogicalResult MaskState::subStates(const MaskState &lhsState,
+                                   const MaskState &rhsState,
+                                   const Location &loc, OpBuilder &builder) {
+  // Contiguous mask indices only keep a monotonic range when subtracting a
+  // scalar from a range: (arange - C). scalar - range is rejected.
+  if (!lhsState.scalar && rhsState.scalar)
+    return subStateScalar(lhsState, rhsState.scalar, loc, builder);
+
+  InFlightDiagnostic diag =
+      emitWarning(loc)
+      << "Unsupported subi for continuous mask: only (range - scalar) is "
+         "supported";
+  return failure();
+}
+
 LogicalResult MaskState::divStateScalar(const MaskState &state,
                                         const OpFoldResult scalar,
                                         const Location &loc,
@@ -421,6 +629,21 @@ LogicalResult MaskState::parseAdd(arith::AddIOp addOp, const Location &loc,
   return this->addStates(lhsState, rhsState, loc, builder);
 }
 
+LogicalResult MaskState::parseSub(arith::SubIOp subOp, const Location &loc,
+                                  OpBuilder &builder) {
+  assert(this->isEmpty());
+  MaskState lhsState;
+  if (failed(lhsState.parse(subOp.getLhs(), loc, builder))) {
+    return failure();
+  }
+
+  MaskState rhsState;
+  if (failed(rhsState.parse(subOp.getRhs(), loc, builder))) {
+    return failure();
+  }
+  return this->subStates(lhsState, rhsState, loc, builder);
+}
+
 LogicalResult MaskState::parseDiv(arith::DivSIOp divOp, const Location &loc,
                                   OpBuilder &builder) {
   assert(this->isEmpty());
@@ -506,12 +729,19 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
                                   OpBuilder &builder) {
   assert(this->isEmpty());
   auto predicate = cmpOp.getPredicate();
-  // Only support <, <=, >=, =, !=
+  bool isProvenRuntimeExtentUnsignedMask =
+      cmpOp->hasAttr(
+          mlir::triton::memory_access::IATRuntimeExtentUnsignedMaskTAG) ||
+      cmpOp->hasAttr(
+          mlir::triton::memory_access::PTSMRuntimeExtentUnsignedMaskTAG);
+  bool isTaggedUnsignedUpperBound = isProvenRuntimeExtentUnsignedMask &&
+                                    (predicate == arith::CmpIPredicate::ult ||
+                                     predicate == arith::CmpIPredicate::ule);
   if (predicate != arith::CmpIPredicate::slt &&
       predicate != arith::CmpIPredicate::sle &&
       predicate != arith::CmpIPredicate::sge &&
       predicate != arith::CmpIPredicate::eq &&
-      predicate != arith::CmpIPredicate::ne) {
+      predicate != arith::CmpIPredicate::ne && !isTaggedUnsignedUpperBound) {
     LLVM_DEBUG({ llvm::dbgs() << "Unsupported cmpi predicate\n"; });
     return failure();
   }
@@ -520,6 +750,16 @@ LogicalResult MaskState::parseCmp(arith::CmpIOp cmpOp, const Location &loc,
   MaskState rhsState;
   auto lhs = cmpOp.getLhs();
   auto rhs = cmpOp.getRhs();
+
+  if (isTaggedUnsignedUpperBound) {
+    lhs = unwrapRuntimeExtentUnsignedOperand(lhs, loc, builder);
+    rhs = unwrapRuntimeExtentUnsignedOperand(rhs, loc, builder);
+    if (!lhs || !rhs)
+      return failure();
+    predicate = predicate == arith::CmpIPredicate::ult
+                    ? arith::CmpIPredicate::slt
+                    : arith::CmpIPredicate::sle;
+  }
 
   if (predicate == arith::CmpIPredicate::ne) {
     auto selOp = lhs.getDefiningOp<arith::SelectOp>();
@@ -693,24 +933,10 @@ LogicalResult MaskState::parseSplat(triton::SplatOp splatOp,
   if (failed(this->parse(src, loc, builder)))
     return failure();
 
-  auto splatAsMask = [&](Operation *userOp) -> bool {
-    return TypeSwitch<Operation *, bool>(userOp)
-        .Case<arith::AndIOp>([&](arith::AndIOp andOp) { return true; })
-        .Case<arith::SelectOp>([&](arith::SelectOp selectOp) {
-          return selectOp.getCondition() == dst;
-        })
-        .Case<triton::LoadOp>(
-            [&](triton::LoadOp loadOp) { return loadOp.getMask() == dst; })
-        .Case<triton::StoreOp>(
-            [&](triton::StoreOp storeOp) { return storeOp.getMask() == dst; })
-        .Case<triton::AtomicRMWOp>([&](triton::AtomicRMWOp atomicOp) {
-          return atomicOp.getMask() == dst;
-        })
-        .Default([&](Operation *op) { return false; });
-  };
-
-  if (src.getType().isInteger(1) && !splatOp->use_empty() &&
-      llvm::all_of(splatOp->getUsers(), splatAsMask)) {
+  // A uniform boolean mask covers either the whole tensor or no elements.
+  // Its other uses (including numerical and indirect-memory consumers) must
+  // not change the active extent of the memory access being analyzed.
+  if (src.getType().isInteger(1)) {
     for (auto s : dstShape) {
       auto currentDim = mulOpFoldResult(builder.getIndexAttr(s), this->scalar,
                                         loc, builder, builder.getIndexType());

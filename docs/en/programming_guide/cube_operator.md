@@ -51,7 +51,7 @@ When tuning a simple Cube operator, prioritize the following:
 
 ## Complex Cube Operator Development
 
-Complex Cube cases often come from attention, batched matmul, grouped matmul, or irregular shapes. In the current main branch of [Ascend/triton-ascend-ops](https://github.com/Ascend/triton-ascend-ops), complex cases are mainly in `tutorial/best_practice/`. [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) is a useful reference for the Cube core because it contains QK and PV `tl.dot` stages and shows how to reorganize K/V memory access under discrete KV-cache indices.
+Complex Cube cases often come from attention, batched matmul, grouped matmul, or irregular shapes. In the current main branch of [`Ascend/triton-ascend-ops`](https://github.com/Ascend/triton-ascend-ops), complex cases are mainly in `tutorial/best_practice/`. [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) is a useful reference for the Cube core because it contains QK and PV `tl.dot` stages and shows how to reorganize K/V memory access under discrete KV-cache indices.
 
 Recommended decomposition:
 
@@ -61,4 +61,4 @@ Recommended decomposition:
 4. **Design inner loops for long K or long sequences**: the K-dimension loop should control the on-chip footprint of each A/B tile, and the sequence-dimension loop should avoid loading an oversized K/V block at once.
 5. **Use Autotune to manage candidate tiles**: prepare multiple `BLOCK_M/N/K` and `multibuffer` configurations for common shapes and let the runtime choose the optimal combination.
 
-A common migration risk is directly keeping a GPU-style large grid. If the output tile count is far larger than the physical Cube Core count, let each program process multiple tiles in an inner loop, or set `TRITON_ALL_BLOCKS_PARALLEL=1` when logical programs are independent.
+A common migration risk is directly keeping a GPU-style large grid. For eligible kernels whose logical programs are independent, the backend automatically maps the logical grid onto the available physical cores; its IR safety analysis skips unsupported kernels. If the kernel has ordering dependencies or is rejected by that analysis, let each program process multiple tiles in an inner loop.

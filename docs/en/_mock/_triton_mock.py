@@ -256,6 +256,19 @@ def install() -> None:
             _stub_cls = type(_name, (), {"__doc__": f"MLIR {_name} type."})
             setattr(_cann_ext, _name, _stub_cls)
 
+    # ascend_address_space is a module-level instance (ascend_address_space_group()),
+    # which the AST parser above doesn't extract. Attach a stub instance whose
+    # repr matches the real object and which carries the real group docstring,
+    # so the autodata page renders the same as in real-triton builds.
+    if not hasattr(_cann_ext, "ascend_address_space"):
+        _aas_group = getattr(_cann_ext, "ascend_address_space_group", None)
+        _aas_cls = type(
+            "ascend_address_space_group", (), {
+                "__module__": "triton.language.extra.cann.extension.core",
+                "__doc__": getattr(_aas_group, "__doc__", "Ascend hardware address space constants."),
+            })
+        setattr(_cann_ext, "ascend_address_space", _aas_cls())
+
     # ------------------------------------------------------------------ #
     # Optional runtime deps                                               #
     # ------------------------------------------------------------------ #
@@ -266,7 +279,7 @@ def install() -> None:
 
     try:
         import torch  # noqa: F401
-    except ImportError:
+    except Exception:
         sys.modules["torch"] = MagicMock(name="torch")
         sys.modules["torch.nn"] = MagicMock(name="torch.nn")
         sys.modules["torch._C"] = MagicMock(name="torch._C")

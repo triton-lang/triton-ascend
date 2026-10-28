@@ -53,7 +53,7 @@ def kernel_randint(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.co
     for inner_idx in range(block_size):
         global_offset = block_offset + inner_idx
         rand_vals = tl.randint(5, 10 + global_offset, n_rounds)  # 对每个索引生成一个随机数
-        tl.store(x_ptr + global_offset, rand_vals)  # 存储随机数
+        tl.store(x_ptr + global_offset, rand_vals.to(tl.int32))  # 存储随机数（store 不支持 uint32）
 
 
 @triton.jit
@@ -65,7 +65,7 @@ def kernel_randint4x(x_ptr, n_rounds: tl.constexpr, N: tl.constexpr, XBLOCK: tl.
         global_offset = block_offset + inner_idx
         rand_vals, _, _, _ = tl.randint4x(5, 10 + global_offset, n_rounds)  # 对每个索引生成一个随机数
         mask = (global_offset + indices) < N
-        tl.store(x_ptr + global_offset + indices, rand_vals, mask)  # 存储随机数
+        tl.store(x_ptr + global_offset + indices, rand_vals.to(tl.int32), mask)  # 存储随机数
 
 
 shapes = [(1, 3)]

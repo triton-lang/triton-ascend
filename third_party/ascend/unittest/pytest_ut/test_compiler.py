@@ -1,9 +1,29 @@
 import json
 import os
 import sys
+import warnings
+from pathlib import Path
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
+import pytest
+
+import triton
 import triton.backends.ascend.compiler as compiler
+from triton.backends.ascend import utils
+from triton.backends.compiler import GPUTarget
+
+pytestmark = pytest.mark.backend("native")
+
+
+@pytest.fixture(autouse=True)
+def reset_option_warnings(monkeypatch):
+    monkeypatch.setattr(utils, "_WARNED_DEPRECATED_NPU_OPTIONS", set())
+
+
+@pytest.fixture(params=["Ascend910B1", "Ascend910_9581"])
+def backend(request):
+    return compiler.AscendBackend(GPUTarget("npu", request.param, 32))
 
 
 def _make_torch_npu_mock(cfg_dir):
@@ -19,6 +39,26 @@ def _write_acl_config(cfg_dir, config):
     with open(cfg_path, "w") as f:
         json.dump(config, f)
     return cfg_path
+
+
+@pytest.mark.parametrize(
+    "arch, filename",
+    [
+        ("Ascend910B1", "libdevice.220.bc"),
+        ("Ascend910_9391", "libdevice.220.bc"),
+        ("Ascend910_9581", "libdevice.10.bc"),
+        ("Ascend950PR_9579", "libdevice.10.bc"),
+        ("Ascend910_9691", "libdevice.9201.bc"),
+        ("Ascend960", "libdevice.9201.bc"),
+    ],
+)
+def test_get_libdevice_selects_architecture_specific_bitcode(arch, filename):
+    assert Path(compiler.get_libdevice(arch)).name == filename
+
+
+def test_get_libdevice_rejects_unsupported_architecture():
+    with pytest.raises(ValueError, match="unsupported Ascend architecture"):
+        compiler.get_libdevice("unknown")
 
 
 def test_get_simt_stack_limit_default(monkeypatch):
@@ -121,3 +161,210 @@ def test_get_simt_stack_limit_config_overrides_default(monkeypatch, tmp_path):
     result = compiler.get_simt_stack_limit()
     assert result == 9999
     assert result != 1152
+
+
+def test_empty_options_expose_all_legacy_names(backend):
+    options = backend.parse_options({})
+
+    assert utils._DEPRECATED_NPU_OPTIONS <= options.__dict__.keys()
+    assert options.__dict__["arch"] == options.arch == backend.target.arch
+    assert options.__dict__["warp_size"] == 32
+    assert options.__dict__["use_bytecode"] is False
+    assert options.__dict__["enable_vf_fusion"] is None
+
+
+def test_active_options_keep_explicit_values(backend):
+    raw = {"enable_mixed_cv": True, "enable_dynamic_cv_pipeline": False, "num_warps": 16}
+
+    options = backend.parse_options(raw)
+
+    assert options.enable_mixed_cv is True
+    assert options.enable_dynamic_cv_pipeline is False
+    assert options.num_warps == 16
+
+
+def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
+    options = backend.parse_options({})
+    stages = {}
+    backend.add_stages(stages, options, language=None)
+    assert list(stages) == ["ttir", "ttadapter", "npubin"]
+
+    def no_bridge(*args, **kwargs):
+        pytest.fail("text compatibility stage must not launch a subprocess")
+
+    monkeypatch.setattr(compiler.subprocess, "run", no_bridge)
+    text = "module { /* overridden BishengIR text */ }"
+    monkeypatch.setattr(compiler, "ttir_to_linalg", lambda *args, **kwargs: text)
+    assert stages["ttadapter"](object(), {"hash": "text-export-test"}) == text
+    consumed = []
+
+    def compile_text(src, metadata, options):
+        consumed.append(src)
+        return b"npubin"
+
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_910_95", compile_text)
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_A2_A3", compile_text)
+    monkeypatch.setattr(compiler, "rewrite_debug_line", lambda artifact, **kwargs: artifact)
+    assert stages["npubin"](text, {}) == b"npubin"
+    assert consumed == [text]
+
+
+@pytest.mark.parametrize("extension", ["mlirbc", "bcmlir"])
+def test_reject_retired_bridge_override(backend, extension):
+    with pytest.raises(ValueError, match="stages have been removed"):
+        backend.parse_options({"ir_override": f"kernel.{extension}"})
+
+
+def test_ubtuner_uses_ttadapter_without_bridge_stage(monkeypatch):
+    from triton.backends.ascend.runtime.ubtuner import UBConfig, UBTuner
+
+    text = "module { /* directly consumable ttadapter */ }"
+    compiled = SimpleNamespace(asm={"ttadapter": text})
+    tuner = object.__new__(UBTuner)
+    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: compiled)
+    monkeypatch.setattr(tuner, "_create_npu_options", lambda metadata: object())
+    monkeypatch.setattr(tuner, "_get_benefit_cost", lambda *args: {})
+    expected = UBConfig()
+    consumed = []
+
+    def try_algorithms(algorithms, benefit_cost, available_options, linalg_ir, metadata, options):
+        consumed.append(linalg_ir)
+        yield expected
+
+    monkeypatch.setattr(tuner, "_try_algorithms", try_algorithms)
+    assert tuner._find_best_config() is expected
+    assert consumed == [text]
+
+
+_IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -
+                          utils._DEPRECATED_NPU_OPTION_ALIASES.keys() - {"stream"})
+
+
+@pytest.mark.parametrize("name", _IGNORED_OPTIONS)
+def test_ignored_values_preserve_defaults_and_input(backend, name):
+    baseline = backend.parse_options({})
+    raw = {name: object()}
+    original = dict(raw)
+
+    with pytest.warns(FutureWarning, match=name):
+        options = backend.parse_options(raw)
+
+    assert raw == original
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+
+
+@pytest.mark.parametrize("value", [None, "", "--unsupported-bisheng-option"])
+def test_legacy_bisheng_options_launch_uses_backend_defaults(backend, value):
+
+    @triton.jit
+    def kernel():
+        pass
+
+    baseline = backend.parse_options({})
+    kwargs = {"bisheng_options": value}
+
+    with pytest.warns(FutureWarning, match="bisheng_options.*backend-managed"):
+        options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
+
+    assert kwargs == {"bisheng_options": value}
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice(options.target_arch)
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+    assert signature == constexprs == attrs == {}
+
+
+@pytest.mark.parametrize("stream", [None, 0, object()], ids=["none", "zero", "unused-object"])
+def test_legacy_stream_is_consumed_without_losing_option_discovery(backend, stream):
+    baseline = backend.parse_options({"num_warps": 16})
+    raw = {"stream": stream, "num_warps": 16, "kernel_arg": 42}
+
+    with pytest.warns(FutureWarning, match="stream"):
+        options = backend.parse_options(raw)
+
+    assert raw == {"num_warps": 16, "kernel_arg": 42}
+    assert options.__dict__["stream"] is None
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ({"force_simt_only": True, "compile_mode": "simd"}, {"compile_mode": "simt_only"}),
+        ({"force_simt_only": True, "force_simt_template": True}, {"compile_mode": "simt_only"}),
+        ({"force_simt_template": True}, {"compile_mode": "simd_simt_template"}),
+        ({"force_simt_only": False, "compile_mode": "simd"}, {"compile_mode": "simd"}),
+        ({"intra_cache_num": 4}, {"buf_slot_num_of_veccore": 4}),
+        ({"inter_cache_num": 3}, {"buf_slot_num_of_crosscore": 3}),
+        ({"load_cache_num": 2}, {"buf_slot_num_of_gm": 2}),
+        ({"intra_cache_num": 4, "buf_slot_num_of_veccore": 6}, {"buf_slot_num_of_veccore": 6}),
+        ({"enable_bishengir_simt_optimization": 101, "compile_mode": "simt_only"
+          }, {"simt_optimization_mode": 101, "compile_mode": "simt_only"}),
+        ({"enable_bishengir_simt_optimization": 101, "simt_optimization_mode": 100, "compile_mode": "simt_only"
+          }, {"simt_optimization_mode": 100, "compile_mode": "simt_only"}),
+    ],
+)
+def test_legacy_routes_preserve_precedence_and_input(raw, expected):
+    backend = compiler.AscendBackend(GPUTarget("npu", "Ascend910_9581", 32))
+    original = dict(raw)
+    baseline = backend.parse_options(expected)
+
+    with pytest.warns(FutureWarning):
+        options = backend.parse_options(raw)
+
+    assert raw == original
+    assert options.__dict__ == baseline.__dict__
+    assert options.hash() == baseline.hash()
+
+
+def test_simt_alias_obeys_target_and_mode_restrictions(backend):
+    raw = {"enable_bishengir_simt_optimization": 101}
+
+    with pytest.warns((FutureWarning, UserWarning)) as caught:
+        options = backend.parse_options(raw)
+
+    assert any("only takes effect" in str(warning.message) for warning in caught)
+    assert options.simt_optimization_mode == 0
+    assert raw == {"enable_bishengir_simt_optimization": 101}
+
+
+def test_internal_grid_value_survives_serialization_and_reparse(backend):
+    raw = {"grid_num_tiles": utils._InternalNPUOptionInt(8)}
+    options = backend.parse_options(raw)
+    serialized = json.loads(json.dumps(options.__dict__))
+    # JITFunction.preload restores tuple-valued options after JSON decoding.
+    restored = {name: tuple(value) if isinstance(value, list) else value for name, value in serialized.items()}
+    original = dict(restored)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        reparsed = backend.parse_options(restored)
+
+    assert not caught
+    assert restored == original
+    assert reparsed.grid_num_tiles == options.grid_num_tiles == 8
+    assert reparsed.__dict__ == options.__dict__
+    assert reparsed.hash() == options.hash()
+
+
+def test_unknown_options_remain_available_for_jit_validation(backend):
+    raw = {"unknown_compile_option": True}
+
+    options = backend.parse_options(raw)
+
+    assert raw == {"unknown_compile_option": True}
+    assert "unknown_compile_option" not in options.__dict__
+
+
+def test_save_temps_isolates_same_hash_compilations(monkeypatch, tmp_path):
+    monkeypatch.setattr(compiler, "get_dump_manager", lambda key: MagicMock(cache_dir=str(tmp_path)))
+    first = Path(compiler._get_save_temps_dir("same-hash"))
+    (first / "kernel.ll").write_text("first compilation")
+    second = Path(compiler._get_save_temps_dir("same-hash"))
+    (second / "kernel.ll").write_text("second compilation")
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+    assert (first / "kernel.ll").read_text() == "first compilation"
+    assert (second / "kernel.ll").read_text() == "second compilation"

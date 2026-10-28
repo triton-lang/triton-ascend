@@ -1,0 +1,100 @@
+# Copyright (c) Huawei Technologies Co., Ltd. 2025. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+"""TLA memory values: memrefs, independent of the buffer language extension."""
+from triton.language import core as tl
+
+
+def _shape(values):
+    values = tuple(tl._unwrap_if_constexpr(v) for v in values)
+    if not values or any(type(v) is not int or v <= 0 for v in values):
+        raise ValueError("buffer shape must contain positive compile-time integers")
+    return values
+
+
+def _row_major_strides(sizes):
+    strides, stride = [], 1
+    for size in reversed(sizes):
+        strides.insert(0, stride)
+        stride *= size
+    return tuple(strides)
+
+
+class buffer_type(tl.base_type):
+
+    def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
+        self.shape = _shape(shape)
+        self.element_ty = tl._unwrap_if_constexpr(dtype)
+        self.space = tl._unwrap_if_constexpr(space)
+        if self.space not in ("gm", "ub", "l1", "l0a", "l0b", "l0c"):
+            raise ValueError(f"unsupported buffer space: {self.space}")
+        if strides is None:
+            strides = _row_major_strides(self.shape)
+        self.strides = _shape(strides)
+        if len(self.strides) != len(self.shape):
+            raise ValueError("strides must match buffer rank")
+        self.offset = offset  # None denotes a dynamic subview offset.
+
+    def to_ir(self, builder):
+        return builder.create_tla_buffer_type(list(self.shape), self.element_ty.to_ir(builder), self.space,
+                                              list(self.strides), self.offset)
+
+    def _flatten_ir_types(self, builder, out):
+        out.append(self.to_ir(builder))
+
+    def _unflatten_ir(self, handles, cursor):
+        return buffer(handles[cursor], self), cursor + 1
+
+    def mangle(self):
+        return f"TLA_{self.space}_{self.element_ty.mangle()}_{self.shape}_{self.strides}_{self.offset}"
+
+    def __eq__(self, other):
+        return isinstance(other, buffer_type) and vars(self) == vars(other)
+
+    def __str__(self):
+        return self.mangle()
+
+
+class buffer_access:
+    """Concrete buffer element range addressed by ``buf[i0, i1, ...]``.
+
+    Produced by :meth:`buffer.__getitem__`; carries the buffer plus the index
+    tuple until a ``vlds``/``vsts`` op unpacks it.
+    """
+
+    __slots__ = ("buffer", "indices")
+
+    def __init__(self, buffer, indices):
+        self.buffer = buffer
+        self.indices = indices
+
+
+class buffer(tl.base_value):
+
+    def __init__(self, handle, ty):
+        self.handle, self.type = handle, ty
+        self.shape, self.dtype, self.space, self.strides = ty.shape, ty.element_ty, ty.space, ty.strides
+
+    def _flatten_ir(self, handles):
+        handles.append(self.handle)
+
+    def __getitem__(self, *indices):
+        if len(indices) == 1 and isinstance(indices[0], tl.tuple):
+            indices = tuple(indices[0].values)
+        return buffer_access(self, indices)

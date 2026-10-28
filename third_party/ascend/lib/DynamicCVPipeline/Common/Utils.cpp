@@ -9,9 +9,11 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/GPU/IR/GPUDialect.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/Math/IR/Math.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -39,12 +41,7 @@ static constexpr const char *DEBUG_TYPE = "dynamic-cv-pipeline-utils";
 namespace mlir {
 namespace CVPipeline {
 
-static bool g_enableCubeBlockMerge = false;
 static bool g_enableUBRefineOpt = false;
-
-void setEnableCubeBlockMerge(bool enable) { g_enableCubeBlockMerge = enable; }
-
-bool isCubeBlockMergeEnabled() { return g_enableCubeBlockMerge; }
 
 CoreType getOpCoreType(Operation *op) {
   if (!op) {
@@ -131,6 +128,21 @@ bool isVectorOnlyOp(Operation *op) {
       .Default([](auto) { return false; });
 }
 
+bool isSyncOp(Operation *op) {
+  return isa<gpu::BarrierOp, hivm::SyncBlockOp, hivm::SyncBlockWaitOp,
+             hivm::SyncBlockSetOp>(op);
+}
+
+bool isExternalSyncOp(Operation *op) {
+  return isSyncOp(op) &&
+         op->getAttrOfType<IntegerAttr>(CVPipeline::kExternalSync);
+}
+
+void setSubBlockId(Operation *op, int subBlockId) {
+  OpBuilder builder(op->getContext());
+  op->setAttr(CVPipeline::kSubBlock, builder.getI32IntegerAttr(subBlockId));
+}
+
 bool isScfOp(Operation *op) {
   return llvm::isa<scf::SCFDialect>(op->getDialect());
 }
@@ -207,13 +219,7 @@ CoreType getCoreTypeOfSimpleOpOrCf(Operation *op) {
   }
   auto funcOp = op->getParentOfType<func::FuncOp>();
   if (funcOp) {
-    constexpr llvm::StringLiteral regionalDisabledOps[]{
-        "chunk_gated_delta_rule_bwd_kernel_dhu_blockdim64",
-        "chunk_gated_delta_rule_fwd_kernel_h_blockdim64",
-        "backward_dkdv",
-        "pcb10_tc01_kernel",
-        "chunk_ttt_linear_fwd_kernel_h",
-        "chunk_ttt_linear_bwd_kernel_h"};
+    constexpr llvm::StringLiteral regionalDisabledOps[1]{""};
     if (llvm::is_contained(regionalDisabledOps, funcOp.getSymName())) {
       return CoreType::UNDETERMINED;
     }
@@ -475,6 +481,15 @@ int getLoopCarriedArgIndex(Value operand, Block *block) {
   return argIdx;
 }
 
+int getTensorIterArgIndex(Value v, ArrayRef<Value> iterArgs) {
+  for (unsigned i = 0; i < iterArgs.size(); ++i) {
+    if (v == iterArgs[i] && isa<RankedTensorType>(iterArgs[i].getType())) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
   if (!isa<arith::TruncFOp, arith::TruncIOp>(op))
     return std::nullopt;
@@ -496,6 +511,18 @@ std::optional<hivm::FixpipePreQuantMode> getFixpipePreQuantMode(Operation *op) {
     return hivm::FixpipePreQuantMode::S322I8;
   return std::nullopt;
 }
+
+Operation *getSourceThroughCIntermediateOps(Value operand) {
+  auto isIntermediateOp = [](Operation *op) {
+    return getFixpipePreQuantMode(op).has_value();
+  };
+  Operation *defOp = operand.getDefiningOp();
+  while (defOp && isIntermediateOp(defOp)) {
+    defOp = defOp->getOperand(0).getDefiningOp();
+  }
+  return defOp;
+}
+
 CoreType getValueCoreType(Value value) {
   auto result = llvm::dyn_cast_if_present<OpResult>(value);
   if (!result) {

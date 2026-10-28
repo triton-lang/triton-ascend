@@ -271,6 +271,44 @@ module {
 // -----
 
 module {
+  tt.func public @if_tensor_ptr_same_base_chained_addptr(
+      %base: !tt.ptr<f32>, %output: !tt.ptr<f32>, %cond: i1) {
+    %then_offset = arith.constant dense<2> : tensor<16xi32>
+    %else_offset = arith.constant dense<5> : tensor<16xi32>
+    %lane = tt.make_range {end = 16 : i32, start = 0 : i32} : tensor<16xi32>
+    %selected = scf.if %cond -> (tensor<16x!tt.ptr<f32>>) {
+      %base_tensor = tt.splat %base : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+      %lane_ptr = tt.addptr %base_tensor, %lane : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+      %then_ptr = tt.addptr %lane_ptr, %then_offset : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+      scf.yield %then_ptr : tensor<16x!tt.ptr<f32>>
+    } else {
+      %base_tensor = tt.splat %base : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+      %lane_ptr = tt.addptr %base_tensor, %lane : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+      %else_ptr = tt.addptr %lane_ptr, %else_offset : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+      scf.yield %else_ptr : tensor<16x!tt.ptr<f32>>
+    }
+    %output_tensor = tt.splat %output : !tt.ptr<f32> -> tensor<16x!tt.ptr<f32>>
+    %output_ptr = tt.addptr %output_tensor, %lane : tensor<16x!tt.ptr<f32>>, tensor<16xi32>
+    %loaded = tt.load %selected : tensor<16x!tt.ptr<f32>>
+    tt.store %output_ptr, %loaded : tensor<16x!tt.ptr<f32>>
+    tt.return
+  }
+}
+
+// CHECK-LABEL: tt.func public @if_tensor_ptr_same_base_chained_addptr
+// CHECK:       %[[CHAINED_OFF:.*]] = scf.if %{{.*}} -> (i32) {
+// CHECK:         scf.yield %{{.*}} : i32
+// CHECK:       } else {
+// CHECK:         scf.yield %{{.*}} : i32
+// CHECK:       }
+// CHECK:       %[[CHAINED_PTR:.*]] = tt.addptr
+// CHECK-SAME:  PointerDescriptorOffsetForm = "strided_1d"
+// CHECK-SAME:  PointerDescriptorRebuild
+// CHECK:       tt.load %[[CHAINED_PTR]] : tensor<16x!tt.ptr<f32>>
+
+// -----
+
+module {
   tt.func public @while_block_ptr_large_step(%base: !tt.ptr<f16>, %n: i32) -> !tt.ptr<tensor<32xf16>> {
     %c0_i32 = arith.constant 0 : i32
     %c1_i32 = arith.constant 1 : i32

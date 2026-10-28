@@ -75,6 +75,10 @@ def test_add(size: int):
     output_triton = add_autotune(x, y)
     assert torch.allclose(output_triton, output_torch)
     print(f"Vector Add {size} PASSED!")
+    triton_us = do_bench_npu(lambda: add_autotune(x, y))
+    torch_us = do_bench_npu(lambda: add_torch(x, y))
+    print(f"Triton kernel execution time: {triton_us:.4f} ms")
+    print(f"PyTorch kernel execution time: {torch_us:.4f} ms")
 
 
 if __name__ == "__main__":
@@ -247,6 +251,28 @@ In this mode:
 - the framework still handles benchmarking, best-config selection, and cache reuse;
 - the usage pattern remains consistent with community Triton autotune.
 
+### Inspecting Autotuning Logs
+
+Set `TRITON_PRINT_AUTOTUNING=1` to view autotuning logs. When benchmarking completes, the output shows the tuning time, the best configuration, and the benchmark results for each successful configuration. The following output is illustrative (`...` indicates omitted configuration parameters):
+
+```text
+Triton autotuning for function kernel finished after 0.12s; best config selected: BLOCK_M: 128, BLOCK_N: 128, ...;
+Triton autotuning benchmark results for function kernel:
+  config=BLOCK_M: 128, BLOCK_N: 128, ...; p50=0.0100 ms, p20=0.0090 ms, p80=0.0110 ms [selected]
+  config=BLOCK_M: 64, BLOCK_N: 256, ...; p50=0.0140 ms, p20=0.0130 ms, p80=0.0150 ms
+```
+
+`[selected]` marks the best configuration. `p50`, `p20`, and `p80` are the 50th, 20th, and 80th percentile execution times in milliseconds. If the benchmark returns a mean time, it is shown as `mean=... ms` instead.
+
+If a user-provided configuration (`configs`, including configurations expanded through `hints`) fails, or an exception interrupts autotuning, the logs report the affected configuration's status and reason. The following examples illustrate a compilation failure and interrupted autotuning, respectively:
+
+```text
+Triton autotuning: config=BLOCK_M: 128, BLOCK_N: 128, ...; compile_failed; reason=CompileTimeAssertionFailure: <error message>
+Triton autotuning: config=BLOCK_M: 64, BLOCK_N: 256, ...; not_evaluated; reason=No benchmark result was produced. Autotuning interrupted: RuntimeError: <error message>
+```
+
+Here, `compile_failed` indicates a compilation failure, `not_evaluated` means the configuration's evaluation did not complete, and `reason` describes the failure or interruption.
+
 ## Advanced Usage: Combine Automatic Tiling with Other Tunable Parameters
 
 The following content is advanced usage and should only be considered when you want to continue tuning non-tiling kernel parameters or compilation parameters together with automatic tiling.
@@ -327,6 +353,7 @@ def matmul_kernel(a, b, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, GROUP_SIZE_M):
     ...
 
 
+grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]) * meta["GROUP_SIZE_M"], triton.cdiv(N, meta["BLOCK_N"]))
 matmul_kernel[grid](a, b, M, N, K)
 ```
 

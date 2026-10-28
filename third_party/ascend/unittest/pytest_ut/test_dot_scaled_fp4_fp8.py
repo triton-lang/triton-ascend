@@ -92,7 +92,7 @@ testlist = [
 
 @pytest.mark.skipif(
     not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
-    reason="only support in A5",
+    reason="only support in Ascend 950",
 )
 @pytest.mark.parametrize("dtype", ["fp8e4m3", "fp8e5m2"])
 @pytest.mark.parametrize("M, N, K", testlist)
@@ -171,7 +171,7 @@ def dequant_e2m1(packed_uint8, scale_uint8, rows, K):
     return out * scale_expanded
 
 
-@pytest.mark.skip(reason="to be supported in A5")
+@pytest.mark.skip(reason="to be supported in Ascend 950")
 def test_dot_scaled_fp4():
     M, N, K = 16, 16, 64
     K_PACKED = K // 2

@@ -7,6 +7,7 @@ Overview: This document introduces debugging methods and performance profiling t
 - [Debugging Guide](./debugging.md) — Methods for debugging Triton-Ascend operators
 - [Performance Profiling](./profiling.md) — Using profiling tools to identify performance bottlenecks
 - [Precision Analysis](./precision.md) — Analyzing and resolving operator precision issues
+- [do_bench_npu guide](./do_bench_npu_guide.md) — Methods for using do_bench_npu
 
 ```{toctree}
 :maxdepth: 3
@@ -16,4 +17,5 @@ debugging.md
 profiling.md
 precision.md
 ub_overflow.md
+do_bench_npu_guide.md
 ```

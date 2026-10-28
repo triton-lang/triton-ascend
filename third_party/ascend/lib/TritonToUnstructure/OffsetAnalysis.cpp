@@ -320,6 +320,95 @@ bool isPointerDescriptorBoundaryResult(LoopLikeOpInterface loopOp,
                                          opResult.getResultNumber());
 }
 
+// Materialize the current value of an ordinary tensor offset carried beside a
+// CFO pointer descriptor. T2L cannot recover layout from an scf.for block
+// argument, but it can analyze the equivalent affine expression. Keep this
+// deliberately narrow: the backedge must be an additive, constant-splat
+// recurrence, and the carrier slot itself must not belong to the descriptor.
+Value materializeAffineForOffsetCarrier(Value value, triton::AddPtrOp addPtr,
+                                        RewriterBase &rewriter) {
+  auto blockArg = dyn_cast<BlockArgument>(value);
+  if (!blockArg || blockArg.getArgNumber() == 0)
+    return nullptr;
+  auto forOp = dyn_cast_or_null<scf::ForOp>(blockArg.getOwner()->getParentOp());
+  if (!forOp || blockArg.getOwner() != forOp.getBody())
+    return nullptr;
+
+  unsigned slot = blockArg.getArgNumber() - 1;
+  if (!forOp->hasAttr(controlflow::kPointerDescriptorBoundaryAttr) ||
+      isPointerDescriptorBoundarySlot(forOp, slot) ||
+      slot >= forOp.getInitArgs().size() ||
+      slot >= forOp.getYieldedValues().size())
+    return nullptr;
+
+  auto carrierType = dyn_cast<RankedTensorType>(value.getType());
+  auto elementType = carrierType
+                         ? dyn_cast<IntegerType>(carrierType.getElementType())
+                         : IntegerType();
+  if (!carrierType || !elementType || elementType.getWidth() > 64 ||
+      forOp.getInitArgs()[slot].getType() != carrierType)
+    return nullptr;
+
+  auto backedgeAdd =
+      forOp.getYieldedValues()[slot].getDefiningOp<arith::AddIOp>();
+  if (!backedgeAdd)
+    return nullptr;
+  Value carrierStep;
+  if (backedgeAdd.getLhs() == value)
+    carrierStep = backedgeAdd.getRhs();
+  else if (backedgeAdd.getRhs() == value)
+    carrierStep = backedgeAdd.getLhs();
+  else
+    return nullptr;
+
+  auto constant = carrierStep.getDefiningOp<arith::ConstantOp>();
+  auto elements = constant ? dyn_cast<DenseElementsAttr>(constant.getValue())
+                           : DenseElementsAttr();
+  if (!elements || !elements.isSplat() ||
+      !isa<IntegerType>(elements.getElementType()) ||
+      carrierStep.getType() != carrierType)
+    return nullptr;
+
+  RewriterBase::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(addPtr);
+  Value iterationDistance = rewriter.create<arith::SubIOp>(
+      addPtr.getLoc(), forOp.getInductionVar(), forOp.getLowerBound());
+  Value iteration = rewriter.create<arith::DivUIOp>(
+      addPtr.getLoc(), iterationDistance, forOp.getStep());
+  Value typedIteration = rewriter.create<arith::IndexCastOp>(
+      addPtr.getLoc(), elementType, iteration);
+  Value splatIteration = rewriter.create<triton::SplatOp>(
+      addPtr.getLoc(), carrierType, typedIteration);
+  Value materializedStep =
+      rewriter.create<arith::ConstantOp>(addPtr.getLoc(), elements);
+  Value displacement = rewriter.create<arith::MulIOp>(
+      addPtr.getLoc(), splatIteration, materializedStep);
+  return rewriter.create<arith::AddIOp>(
+      addPtr.getLoc(), forOp.getInitArgs()[slot], displacement);
+}
+
+// Recover structured axes only when the carrier's own provenance proves that
+// every lane is either affine, uniform, or a singleton axis. Complete
+// carriers without that proof remain opaque and keep the existing indirect
+// access fallback.
+bool getRecoverableCarrierAxes(const PtrOffsetInfo &carrierInfo, unsigned rank,
+                               SmallVectorImpl<PtrOffsetInfo::AxisInfo> &axes) {
+  if (carrierInfo.getRank() != static_cast<int>(rank) ||
+      !carrierInfo.isStructured())
+    return false;
+
+  axes.clear();
+  axes.reserve(rank);
+  for (PtrOffsetInfo::AxisInfo axis : carrierInfo.getStructured()) {
+    if (axis == PtrOffsetInfo::AxisInfo::unstructured)
+      return false;
+    axes.push_back(axis == PtrOffsetInfo::AxisInfo::scalarlike
+                       ? PtrOffsetInfo::AxisInfo::structured
+                       : axis);
+  }
+  return true;
+}
+
 } // namespace
 
 void parse(Value operand, const Location &loc, RewriterBase &rewriter,
@@ -383,6 +472,8 @@ void parse(Value operand, const Location &loc, RewriterBase &rewriter,
         recordOpaqueTensorPointer(operand, offsetMap);
       } else {
         offsetMap[operand] = PtrOffsetInfo();
+        if (auto tensorType = dyn_cast<RankedTensorType>(operand.getType()))
+          offsetMap[operand].setUnstructured(tensorType.getRank());
       }
     } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(parentOp)) {
       parseLoopRegionIterArg(loopOp, loc, rewriter, offsetMap, blockArgument);
@@ -541,6 +632,8 @@ void parseTritonOp(Operation *tritonOp, const Location &loc,
     parseBroadcast(broadcastOp, loc, rewriter, offsetMap);
   } else if (auto expandDimsOp = dyn_cast<triton::ExpandDimsOp>(tritonOp)) {
     parseExpandDims(expandDimsOp, loc, rewriter, offsetMap);
+  } else if (auto reshapeOp = dyn_cast<triton::ReshapeOp>(tritonOp)) {
+    parseReshape(reshapeOp, loc, rewriter, offsetMap);
   } else if (auto clampFOp = dyn_cast<triton::ClampFOp>(tritonOp)) {
     parseClampF(clampFOp, loc, rewriter, offsetMap);
   }
@@ -582,6 +675,9 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   auto structuredAxes = dyn_cast_or_null<DenseI32ArrayAttr>(
       op->getAttr(controlflow::kPointerDescriptorStructuredAxesAttr));
   auto resultType = dyn_cast<RankedTensorType>(op.getType());
+  auto baseSplat = ptr.getDefiningOp<triton::SplatOp>();
+  bool hasScalarPointerSplatBase =
+      baseSplat && isa<triton::PointerType>(baseSplat.getSrc().getType());
   SmallVector<PtrOffsetInfo::AxisInfo> descriptorAxes;
   if (structuredAxes) {
     if (!isRebuild || !resultType ||
@@ -637,6 +733,11 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
   bool isCompleteOffsetCarrier = isRebuild && !isStridedRankOne;
   bool isDescriptorOwned =
       isRebuild || ptrOffsetInfo.isPointerDescriptorOwned();
+  bool descriptorIsOpaque =
+      !descriptorAxes.empty() &&
+      llvm::all_of(descriptorAxes, [](PtrOffsetInfo::AxisInfo axis) {
+        return axis == PtrOffsetInfo::AxisInfo::unstructured;
+      });
 
   if (isCompleteOffsetCarrier) {
     // The carrier is complete relative to the descriptor base, but parsing
@@ -656,6 +757,29 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     if (offsetElementType.getWidth() > 64) {
       op.emitOpError("complete-offset carrier wider than i64 is unsupported");
       return;
+    }
+
+    SmallVector<PtrOffsetInfo::AxisInfo> recoveredAxes;
+    Value materializedOffset;
+    if (descriptorIsOpaque && hasScalarPointerSplatBase) {
+      parse(offsetValue, op.getLoc(), rewriter, offsetMap);
+      auto carrierInfo = offsetMap.find(offsetValue);
+      if (carrierInfo != offsetMap.end() &&
+          getRecoverableCarrierAxes(carrierInfo->second, resultType.getRank(),
+                                    recoveredAxes)) {
+        materializedOffset =
+            materializeAffineForOffsetCarrier(offsetValue, op, rewriter);
+        if (!materializedOffset)
+          recoveredAxes.clear();
+      }
+    }
+
+    if (materializedOffset) {
+      offsetValue = materializedOffset;
+      op->setOperand(1, offsetValue);
+      SmallVector<int32_t> structuredAxes(recoveredAxes.size(), 1);
+      op->setAttr(controlflow::kPointerDescriptorStructuredAxesAttr,
+                  rewriter.getDenseI32ArrayAttr(structuredAxes));
     }
 
     RewriterBase::InsertionGuard guard(rewriter);
@@ -684,10 +808,12 @@ void parseAddPtr(triton::AddPtrOp op, const Location &loc,
     // is no proof that all lanes address the same element. Keep this state
     // conservative and force the lane-wise memory-access path.
     ptrOffsetInfo.setScalarLike(false);
-    if (descriptorAxes.empty())
-      ptrOffsetInfo.setUnstructured(resultType.getRank());
-    else
+    if (!recoveredAxes.empty())
+      ptrOffsetInfo.setStructured(recoveredAxes);
+    else if (!descriptorAxes.empty())
       ptrOffsetInfo.setStructured(descriptorAxes);
+    else
+      ptrOffsetInfo.setUnstructured(resultType.getRank());
     ptrOffsetInfo.setPointerDescriptorOwned(true);
     offsetMap[op.getResult()] = ptrOffsetInfo;
     return;
@@ -1053,6 +1179,47 @@ void parseExpandDims(triton::ExpandDimsOp op, const Location &loc,
       dstStructured[i] = srcStructured[j];
       j++;
     }
+}
+
+void parseReshape(triton::ReshapeOp op, const Location &loc,
+                  RewriterBase &rewriter,
+                  llvm::DenseMap<Value, PtrOffsetInfo> &offsetMap) {
+  auto dst = op.getResult();
+  auto dstType = cast<RankedTensorType>(dst.getType());
+  // Numeric reshapes retain the existing conservative classification.
+  if (!isa<triton::PointerType>(dstType.getElementType()))
+    return;
+
+  parse(op.getSrc(), op.getLoc(), rewriter, offsetMap);
+  PtrOffsetInfo info = offsetMap.at(op.getSrc());
+  if (!info.getPtr() || !isScalarPointer(info.getPtr()) ||
+      (op.getAllowReorder() && dstType.getEncoding())) {
+    // Without a common scalar base (or a fixed lane mapping), keep the
+    // actual result pointers. Never choose one lane's base for every lane.
+    recordOpaqueTensorPointer(dst, offsetMap);
+    return;
+  }
+
+  RewriterBase::InsertionGuard guard(rewriter);
+  rewriter.setInsertionPoint(op);
+  if (op.getAllowReorder()) {
+    // Choose the order-preserving realization permitted by allow_reorder.
+    // Remaining pointer users and the derived offset must share this mapping.
+    rewriter.modifyOpInPlace(op, [&] { op->removeAttr("allow_reorder"); });
+  }
+  auto offsetType = cast<RankedTensorType>(info.getOffset().getType());
+  auto reshapedOffsetType = RankedTensorType::get(
+      dstType.getShape(), offsetType.getElementType(), dstType.getEncoding());
+  Value offset = rewriter.create<triton::ReshapeOp>(
+      op.getLoc(), reshapedOffsetType, info.getOffset(),
+      /*allowReorder=*/false, op.getEfficientLayout());
+  info.setOffset(offset);
+  // Reshaping complete offsets preserves addresses, but the old per-axis
+  // structure does not describe the new shape. Scalar-like state must also
+  // be cleared: setUnstructured alone does not force the lane-wise path.
+  info.setUnstructured(dstType.getRank());
+  info.setScalarLike(false);
+  offsetMap[dst] = info;
 }
 
 void parseClampF(triton::ClampFOp op, const Location &loc,

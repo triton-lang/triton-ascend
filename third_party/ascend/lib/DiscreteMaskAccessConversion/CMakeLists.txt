@@ -8,6 +8,7 @@ add_triton_library(DiscreteMaskAccessConversion
   BiShengIRHIVMDialect
   MLIRIR
   MLIRPass
+  MLIRSCFDialect
   MLIRTransforms
   MLIRSupport
   TritonIR

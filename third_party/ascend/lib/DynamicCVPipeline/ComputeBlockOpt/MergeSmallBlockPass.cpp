@@ -720,12 +720,64 @@ static void getBlockIdsInProgramOrder(Block *block,
   }
 }
 
+/// Match the pattern inside a small VECTOR block:
+///   %m = arith.sitofp %mask
+///   %b = arith.subf %_, %m
+///   %r = arith.mulf %b, %_
+static bool matchSIToFPSubMulPattern(llvm::ArrayRef<Operation *> ops) {
+  arith::SIToFPOp sitofpOp;
+  arith::SubFOp subfOp;
+  arith::MulFOp mulfOp;
+  for (Operation *op : ops) {
+    if (auto sitofp = dyn_cast<arith::SIToFPOp>(op)) {
+      sitofpOp = sitofp;
+    } else if (auto subf = dyn_cast<arith::SubFOp>(op)) {
+      subfOp = subf;
+    } else if (auto mulf = dyn_cast<arith::MulFOp>(op)) {
+      mulfOp = mulf;
+    }
+  }
+  if (!sitofpOp || !subfOp || !mulfOp) {
+    return false;
+  }
+  Value sitofpResult = sitofpOp.getResult();
+  if (subfOp.getLhs() != sitofpResult && subfOp.getRhs() != sitofpResult) {
+    return false;
+  }
+  Value subfResult = subfOp.getResult();
+  if (mulfOp.getLhs() != subfResult && mulfOp.getRhs() != subfResult) {
+    return false;
+  }
+  return true;
+}
+
+/// Tag every op in the source block and the target block with its original
+/// block id via kSubBlock, before updateBlockId rewrites the block_id
+/// attribute.
+static void markSubBlockOps(int nowBlockId, int targetBlockId,
+                            CVPipeline::ComputeBlockIdManager &bm) {
+  auto mark = [&](int blockId) {
+    for (Operation *op : bm.getOpsByBlockId(blockId)) {
+      CVPipeline::setSubBlockId(op, blockId);
+    }
+  };
+  mark(nowBlockId);
+  mark(targetBlockId);
+}
+
 void MergeSmallBlockPass::runOnOperation() {
   ModuleOp module = getOperation();
 
   if (CVPipeline::hasFallbackAttr(module)) {
     return;
   }
+
+  // The pass is scheduled twice in the pipeline. The sitofp-subf-mulf pattern
+  // merge should only be applied on the second run.
+  bool firstRun = !module->getAttrOfType<BoolAttr>(
+      CVPipeline::kMergeSmallBlockFirstRunDone);
+  module->setAttr(CVPipeline::kMergeSmallBlockFirstRunDone,
+                  BoolAttr::get(module.getContext(), true));
 
   LOG_DEBUG("Before: " << *module);
   auto &aa = getAnalysis<AliasAnalysis>();
@@ -777,6 +829,14 @@ void MergeSmallBlockPass::runOnOperation() {
                                              memGraph, id2order, nowBlockId);
 
       if (targetBlockId.has_value()) {
+        if (matchSIToFPSubMulPattern(ops)) {
+          if (firstRun) {
+            LOG_DEBUG("Defer sitofp-subf-mulf pattern merge for block "
+                      << nowBlockId << " to second run");
+            continue;
+          }
+          markSubBlockOps(nowBlockId, targetBlockId.value(), bm);
+        }
         LOG_DEBUG("Merging block " << nowBlockId << " into block "
                                    << targetBlockId.value());
         for (Operation *op : ops) {

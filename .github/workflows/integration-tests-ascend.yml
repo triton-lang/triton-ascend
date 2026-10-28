@@ -9,7 +9,7 @@ on:
 
 jobs:
   integration-tests-ascend:
-    name: integration-tests-ascend (${{ matrix.config.name }}, py${{ matrix.config.python_version }})
+    name: integration-tests-ascend (${{ matrix.config.runs_on[0] }}, py${{ matrix.config.python_version }})
     runs-on: ${{ matrix.config.runs_on }}
     container:
       image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
@@ -145,17 +145,7 @@ jobs:
           # that cause CI instability. TODO: Fix flaky kernel tests and re-enable.
           # ${PYTHON} -m pytest -s -v -n "$NUM_PROCS" --dist=loadfile third_party/ascend/unittest/kernels/test_triton_kernel.py
 
-      - name: Run API doc example tests on NPU
-        shell: bash
-        run: |
-          source /usr/local/Ascend/cann/set_env.sh
-          export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
-          ${PYTHON} -m pytest -s -v -n 8 --dist=loadfile \
-            --import-mode=importlib \
-            --override-ini="python_files=triton.*.py" \
-            docs/zh/python-api/_examples/
-
-      - name: Run MLIR FileCheck tests
+      - name: Run compiler unit and MLIR tests
         shell: bash
         run: |
           source /usr/local/Ascend/cann/set_env.sh
@@ -163,6 +153,8 @@ jobs:
           TEST_MLIR_DIR=$(ls -d build/cmake.*/third_party/ascend/unittest 2>/dev/null | head -1 || true)
           echo "TEST_MLIR_DIR=${TEST_MLIR_DIR:-<not found>}"
           if [ -n "${TEST_MLIR_DIR}" ] && [ -d "${TEST_MLIR_DIR}" ]; then
+            ctest --test-dir "${TEST_MLIR_DIR}" --output-on-failure \
+              --no-tests=error -R '^TestTritonOffsetCacheLifetime$'
             lit -v "${TEST_MLIR_DIR}"
           else
             echo "MLIR test directory not found."

@@ -6,9 +6,9 @@ In this process, you will learn:
 - The basic programming model of Triton.
 - The `triton.jit` decorator used to define Triton kernels.
 
-Compute kernel:
+## Compute Kernel
 
-```bash
+```python
 import torch
 import torch_npu
 
@@ -46,7 +46,7 @@ Create a helper function to:
 - Generate the z tensor;
 - Enqueue the above kernel with the appropriate grid/block sizes.
 
-```Python
+```python
 def add(x: torch.Tensor, y: torch.Tensor):
     # The output needs to be pre-allocated.
     z = torch.empty_like(x)
@@ -58,7 +58,7 @@ def add(x: torch.Tensor, y: torch.Tensor):
     # NOTE:
     #  - Each torch.tensor object is implicitly converted into a pointer to its first element.
     #  - The `triton.jit` function can be indexed with a launch grid to obtain a callable GPU kernel.
-    #  - Pass meta-parameters as keywords.
+    #  - Meta-parameters must be passed as keyword arguments.
     add_kernel[grid](x, y, z, n_elements, BLOCK_SIZE=1024)
     # Returns the handle to z.
     return z
@@ -66,7 +66,7 @@ def add(x: torch.Tensor, y: torch.Tensor):
 
 Use the above function to compute the element-wise sum of two `torch.tensor` objects and test its correctness:
 
-```Python
+```python
 torch.manual_seed(0)
 size = 98432
 x = torch.rand(size, device='npu')
@@ -79,9 +79,9 @@ print(f'The maximum difference between torch and triton is '
       f'{torch.max(torch.abs(output_torch - output_triton))}')
 ```
 
-Output:
+## Output
 
-```bash
+```text
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0

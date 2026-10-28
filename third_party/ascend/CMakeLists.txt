@@ -31,7 +31,6 @@ set_property(DIRECTORY PROPERTY RULE_LAUNCH_LINK ${_saved_launch_link})
 include_directories(${ASCENDNPU_IR_SRC_DIR}/bishengir/include)
 include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd files
 
-add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -114,6 +113,18 @@ else()
   set(TRITON_ASCEND_HAS_INPROC_COSTMODEL 0)
 endif()
 
+if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
+  target_include_directories(TritonToGraph PRIVATE
+    "${_costmodel_gen_include}"
+    "${CMAKE_BINARY_DIR}/third_party/ascend/costmodel_build/include_AscendModel"
+    "${TRITON_ASCEND_COSTMODEL_SOURCE_DIR}/include"
+  )
+  target_compile_definitions(TritonToGraph PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=1)
+  target_link_libraries(TritonToGraph PUBLIC AscendModelAnalysis)
+else()
+  target_compile_definitions(TritonToGraph PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=0)
+endif()
+
 add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc
@@ -157,6 +168,9 @@ if(TRITON_BUILD_UT)
   add_subdirectory(unittest)
 endif()
 
+if(TRITON_BUILD_TD)
+  add_subdirectory(Triton-distributed-ascend/csrc)
+endif()
 
 if(TRITON_ASCEND_HAS_INPROC_COSTMODEL)
   target_compile_definitions(TritonAscend PRIVATE TRITON_ASCEND_HAS_INPROC_COSTMODEL=1)

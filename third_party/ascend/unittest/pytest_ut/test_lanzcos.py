@@ -70,8 +70,8 @@ def lanczos_resize_kernel(
     for ii in range(4):
         for jj in range(4):
             src_offsets = (block_id_c[None, None] * stride_in_c + (tl.clamp(
-                (sy + ii - 1), 0, src_rows - 1)).to(tl.int32)[:, None] * stride_in_h + (tl.clamp(
-                    (sx + jj - 1), 0, src_cols - 1)).to(tl.int32)[None, :] * stride_in_w)
+                (sy + ii - 1), 0.0, (src_rows - 1).to(tl.float32)).to(tl.int32))[:, None] * stride_in_h + (tl.clamp(
+                    (sx + jj - 1), 0.0, (src_cols - 1).to(tl.float32)).to(tl.int32))[None, :] * stride_in_w)
             src_val = tl.load(img_src_ptr + src_offsets)
             coeffs_offs = tableIndex[:, :] * 16 + (ii * 4 + jj)[None, None]
             coeffs = tl.load(img_coeffs_ptr + coeffs_offs)

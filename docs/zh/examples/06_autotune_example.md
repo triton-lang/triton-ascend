@@ -9,7 +9,7 @@
 
 ## 社区 autotune 使用示例
 
-```Python
+```python
 import torch, torch_npu
 import triton
 import triton.language as tl
@@ -73,7 +73,7 @@ if __name__ == "__main__":
 
 ## 进阶 autotune 使用示例
 
-```Python
+```python
 # 下面说明进阶 autotune 与社区版的参数使用要点
 #
 # configs：
@@ -105,20 +105,22 @@ if __name__ == "__main__":
 #     2. 用户定义了Config,且auto_gen_config=False,则框架不自动生成Config,只使用用户定义的Config；
 #     3. 用户定义了Config,且auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
 #
-# key（list[str]/Dict[str,str]）：
+# key（list[str]）：
 # - 传入运行时参数名列表；列表中任一参数值变化会触发候选配置的重新生成与评估
-# 注意：1.若hints传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为Dict[str,str],如示例1：
-#      2.若hints不传递切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）参数信息，key类型需为list[str]，轴信息会按参数顺序进行分配，如示例2：
+# 注意：1. key 类型始终为 list[str]，不能为 dict 或 set。
+#      2. 若需要将切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes）与具体参数名建立映射，应通过 hints["axes"] 指定 axis name 到 argument name 的对应关系，如示例1：
+#      3. 若未在 hints["axes"] 中指定映射，则轴信息会按 key 中参数顺序进行分配，如示例2：
 
 示例1:
 @triton.autotune(
     configs=[],
-    key={"x":"n_elements"},
+    key=["n_elements"],
     hints={
         "split_params":{"x":"BLOCK_SIZE"},
         "tiling_params":{},
         "low_dim_axes":["x"],
         "reduction_axes":[],
+        "axes": {"x": "n_elements"},
     }
 )
 示例2:
@@ -155,13 +157,13 @@ def add_kernel(
 说明：
 
 1. Triton-Ascend默认采取benchmark的方式取片上计算时间，当设置环境变量`export TRITON_BENCH_METHOD="npu"`后，会通过`torch_npu.profiler.profile`的方式获取每个kernel配置下的片上计算时间，对于一些triton kernel计算快速的情况，例如小shape算子，相较于默认方式能够获取更准确的计算时间，但是会显著增加整体autotune的时间，请谨慎开启
-2. 目前该进阶用法针对的是 Vector 类算子，不支持 Cube 类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/)。
+2. 目前该进阶用法支持 Vector 类、Cube 类以及 CV 融合类算子。更多进阶使用示例可以参考[autotune进阶使用示例](https://gitcode.com/Ascend/triton-ascend/tree/main/third_party/ascend/unittest/autotune_ut/)。
 
 ### 参数自动解析
 
 执行参数自动解析前首先会获取`kernel`函数调用时未传入的参数，**将未传入的参数作为切分轴和分块轴参数的候选项**。
 
-```Python
+```python
 @triton.jit
 def kernel_func(
     outputptr,
@@ -186,12 +188,12 @@ kernel_func[grid](y, x, n_rows, n_cols, BLOCK_SIZE=block_size)
 
 最后通过掩码比较和 `autotune` 中传入的 `key` 确认当前参数对应的切分轴。
 
-注意：1. 分割轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的分割轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
+注意：1. 切分轴参数必须要与 `tl.program_id()` 相乘。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的切分轴，否则会导致参数解析失败。3. 识别出的切分轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
-```Python
+```python
 @triton.autotune(
     configs=[],
-    key={"n_elements"} # 需要指定
+    key=["n_elements"] # 需要指定
     ...
 )
 @triton.jit
@@ -223,9 +225,9 @@ def triton_func(...):
 
 注意：1. 分块轴参数必须出现在 `tl.arange()` 的调用中，并且需在 `for` 循环中通过 `tl.range()`、`range()` 或整除运算（`//`）参与循环范围的计算。 2. 必须要进行掩码比较，且该轴对应的key需要直接作为右值或以key为参数的min函数作为右值，才能对应到具体的分块轴，否则会导致参数解析失败。3. 识别出的分块轴参数仅限于候选参数列表，确保只有那些可以通过自动调优动态调整的参数才会被考虑。
 
-```Python
+```python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # 需要指定
+    key=["n_rows", "n_cols"] # 需要指定
     ...
 )
 @triton.jit
@@ -259,9 +261,9 @@ def triton_func(...):
 
 注意：1. 低维轴必须要通过`tl.arange()`进行计算，并进行切片。并在非最低维进行维度扩充或不参与切片，才会被识别。 2. 若不进行掩码比较则无法对应到具体的低维轴，会导致参数解析失败。
 
-```Python
+```python
 @triton.autotune(
-    key={"n_rows", "n_cols"} # 会按顺序自动分配成 {"x": "n_rows", "y": "n_cols"}
+    key=["n_rows", "n_cols"] # 会按顺序自动分配成 {"x": "n_rows", "y": "n_cols"}
     ...
 )
 @triton.jit
@@ -288,7 +290,7 @@ def triton_func(...):
 
 注意：1. 使用 `tl.constexpr` 修饰的变量不会是指针类型的变量，不进行后续解析 2. 只计算参数直接参与或参数经过一次计算得到的中间变量间接参与的访存类语句，若参数进行两次以上计算得到的中间变量不进行统计。
 
-```Python
+```python
 @triton.autotune(...)
 @triton.jit
 def triton_func(input_ptr, output_ptr, ...):
@@ -310,11 +312,11 @@ def triton_func(input_ptr, output_ptr, ...):
 
 ### 自动生成最优配置的 Profiling 结果
 
-```Python
-# 自动在`auto_profile_dir`目录中生成当前autotune最优kernel配置的profiling结果，即利用`torch_npu.profiler.profile`采集的性能数据
+```python
+# 自动在`auto_prof_dir`目录中生成当前autotune最优kernel配置的profiling结果，即利用`torch_npu.profiler.profile`采集的性能数据
 # 在社区autotune用法和进阶autotune用法中均可生效
 @triton.autotune(
-    auto_profile_dir="./profile_result",
+    auto_prof_dir="./profile_result",
     ...
 )
 ```

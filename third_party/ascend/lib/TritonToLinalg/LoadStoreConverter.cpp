@@ -475,26 +475,39 @@ LoadConverter::matchAndRewrite(triton::LoadOp op, OpAdaptor adaptor,
     auto resTy = op.getResult().getType();
     auto idxZero =
         rewriter.create<arith::ConstantOp>(loc, rewriter.getIndexAttr(0));
-    auto loadedValue = rewriter
-                           .create<memref::LoadOp>(loc, resTy, scalarMemref,
-                                                   idxZero.getResult())
-                           .getResult();
-    propagateWasBoolToInt8Attr(op.getOperation(), loadedValue.getDefiningOp(),
-                               rewriter);
-    if (mask && other) {
-      mask = rewriter.create<triton::SplatOp>(
-          loc, RankedTensorType::get({1}, mask.getType()), mask);
-      loadedValue = rewriter.create<triton::SplatOp>(
-          loc, RankedTensorType::get({1}, loadedValue.getType()), loadedValue);
-      other = rewriter.create<triton::SplatOp>(
-          loc, RankedTensorType::get({1}, other.getType()), other);
-      loadedValue =
-          rewriter.create<arith::SelectOp>(loc, mask, loadedValue, other);
-      rewriter.replaceOpWithNewOp<tensor::ExtractOp>(op, loadedValue,
-                                                     ValueRange({idxZero}));
-    } else {
-      rewriter.replaceOp(op, loadedValue);
+    auto createScalarLoad = [&]() -> Value {
+      auto load = rewriter.create<memref::LoadOp>(loc, resTy, scalarMemref,
+                                                  idxZero.getResult());
+      propagateWasBoolToInt8Attr(op.getOperation(), load.getOperation(),
+                                 rewriter);
+      return load.getResult();
+    };
+    if (!mask) {
+      rewriter.replaceOp(op, createScalarLoad());
+      return success();
     }
+
+    // Keep scalar results scalar, and guard the access itself: a select after
+    // an unconditional load would still read a masked-off, possibly invalid
+    // address.
+    auto ifOp = rewriter.create<scf::IfOp>(loc, TypeRange{resTy},
+                                           adaptor.getMask(), true);
+    {
+      OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToStart(&ifOp.getThenRegion().front());
+      rewriter.create<scf::YieldOp>(loc, createScalarLoad());
+
+      rewriter.setInsertionPointToStart(&ifOp.getElseRegion().front());
+      Value inactiveValue = adaptor.getOther();
+      if (!inactiveValue) {
+        // Without `other`, the inactive value is undefined. Choose zero
+        // without accessing memory or introducing a tensor temporary.
+        inactiveValue = rewriter.create<arith::ConstantOp>(
+            loc, resTy, rewriter.getZeroAttr(resTy));
+      }
+      rewriter.create<scf::YieldOp>(loc, inactiveValue);
+    }
+    rewriter.replaceOp(op, ifOp.getResults());
     return success();
   }
 
@@ -882,7 +895,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
   auto getInputMemref = [&]() -> Value {
     if (isa<MemRefType>(inputVal.getType()))
       return inputVal;
-    return rewriter.create<bufferization::ToBufferOp>(loc, ptrType, inputVal);
+    return rewriter.create<bufferization::ToMemrefOp>(loc, ptrType, inputVal);
   };
   auto inputMemref = getInputMemref();
   auto inputMemrefType = cast<MemRefType>(inputMemref.getType());
@@ -964,7 +977,7 @@ AtomicRMWConverter::matchAndRewrite(triton::AtomicRMWOp op, OpAdaptor adaptor,
       MemRefType maskTypeM =
           MemRefType::get(maskTypeT.getShape(), maskTypeT.getElementType());
       memrefMask =
-          rewriter.create<bufferization::ToBufferOp>(loc, maskTypeM, mask);
+          rewriter.create<bufferization::ToMemrefOp>(loc, maskTypeM, mask);
     }
     rewriter.create<hfusion::AtomicXchgOp>(op.getLoc(), TypeRange(),
                                            inputMemref, dstMemref, memrefMask);
@@ -1054,10 +1067,10 @@ AtomicCASConverter::matchAndRewrite(triton::AtomicCASOp op, OpAdaptor adaptor,
   MemRefType dstType =
       MemRefType::get(dstOriType.getShape(), dstOriType.getElementType());
   Value inputMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, val);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, val);
 
   Value cmpMemref =
-      rewriter.create<bufferization::ToBufferOp>(loc, dstType, cmp);
+      rewriter.create<bufferization::ToMemrefOp>(loc, dstType, cmp);
 
   // create element-wise map
   int64_t rank = type.getRank();

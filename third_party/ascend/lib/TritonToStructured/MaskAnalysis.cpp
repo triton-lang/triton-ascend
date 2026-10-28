@@ -130,6 +130,8 @@ LogicalResult MaskState::parse(Value operand, const Location loc,
     return this->parseConstant(op, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::AddIOp>()) {
     return this->parseAdd(op, loc, builder);
+  } else if (auto op = operand.getDefiningOp<arith::SubIOp>()) {
+    return this->parseSub(op, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::AndIOp>()) {
     return this->parseAnd(op, loc, builder);
   } else if (auto op = operand.getDefiningOp<arith::CmpIOp>()) {
@@ -370,6 +372,27 @@ LogicalResult MaskState::parseAdd(arith::AddIOp addOp, const Location loc,
   return this->addStates(lhsState, rhsState, loc, builder);
 }
 
+LogicalResult MaskState::parseSub(arith::SubIOp subOp, const Location loc,
+                                  OpBuilder &builder) {
+  if (!this->isEmpty()) {
+    LLVM_DEBUG({
+      subOp.emitError(
+          "MaskAnalysis: MaskState should be empty when visiting sub");
+    });
+    return failure();
+  }
+
+  MaskState lhsState;
+  if (failed(lhsState.parse(subOp.getLhs(), loc, builder)))
+    return failure();
+
+  MaskState rhsState;
+  if (failed(rhsState.parse(subOp.getRhs(), loc, builder)))
+    return failure();
+
+  return this->subStates(lhsState, rhsState, loc, builder);
+}
+
 LogicalResult MaskState::addStates(const MaskState &lhsState,
                                    const MaskState &rhsState, Location loc,
                                    OpBuilder &builder) {
@@ -405,6 +428,35 @@ LogicalResult MaskState::addStateScalar(const MaskState &state,
   for (auto info : state.stateInfo) {
     info.offset = addOpFoldResult(info.offset, scalar, loc, builder,
                                   builder.getIndexType());
+    this->stateInfo.emplace_back(info);
+  }
+  return success();
+}
+
+LogicalResult MaskState::subStates(const MaskState &lhsState,
+                                   const MaskState &rhsState, Location loc,
+                                   OpBuilder &builder) {
+  // Only (range - scalar) keeps a contiguous increasing index range.
+  if (!lhsState.scalar && rhsState.scalar)
+    return subStateScalar(lhsState, rhsState.scalar, loc, builder);
+
+  LLVM_DEBUG(
+      {
+        InFlightDiagnostic diag =
+            emitWarning(loc)
+            << "Unsupported subi for continuous mask: only (range - scalar) is "
+               "supported";
+      });
+  return failure();
+}
+
+LogicalResult MaskState::subStateScalar(const MaskState &state,
+                                        const OpFoldResult scalar, Location loc,
+                                        OpBuilder &builder) {
+  for (auto info : state.stateInfo) {
+    info.offset = subOpFoldResult(info.offset, scalar, loc, builder);
+    if (!info.offset)
+      return failure();
     this->stateInfo.emplace_back(info);
   }
   return success();

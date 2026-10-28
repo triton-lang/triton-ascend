@@ -66,9 +66,9 @@ def _apply_ascend_patch():
                 module = _ir.parse_mlir_module(full_name, context)
                 module.context = context
                 return module
-            if ext in ("llir", "ptx", "amdgcn", "ttadapter", "bcmlir"):
+            if ext in ("llir", "ptx", "amdgcn", "ttadapter"):
                 return _Path(full_name).read_text()
-            if ext in ("cubin", "hsaco", "mlirbc", "npubin"):
+            if ext in ("cubin", "hsaco", "npubin"):
                 return _Path(full_name).read_bytes()
 
         _compiler_module.parse = _patched_parse
@@ -107,5 +107,21 @@ def _apply_ascend_patch():
         TritonSemantic.dot = _patched_dot
         TritonSemantic._ascend_dot_patch_applied = True
 
+    # Install the unified, non-intrusive dtype interception for operators
+    # whose dtypes are unsupported on Ascend. The rules live in
+    # triton.backends.ascend.op_dtype_config, next to this backend.
+    if not getattr(CodeGenerator, "_ascend_dtype_guard_applied", False):
+        try:
+            from triton.backends.ascend.dtype_guard import install_dtype_guard
+
+            install_dtype_guard()
+            CodeGenerator._ascend_dtype_guard_applied = True
+        except Exception as e:
+            logging.warning(f"[Ascend Patch] Failed to install dtype guard: {e}")
+
+
+from .knobs import install_ascend_knobs as _install_ascend_knobs
+
+_install_ascend_knobs()
 
 __all__ = ["do_bench_npu"]

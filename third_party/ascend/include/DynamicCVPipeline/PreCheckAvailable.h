@@ -84,9 +84,28 @@ public:
   ::llvm::StringRef getName() const override { return "PreCheckAvailablePass"; }
 };
 
+class PreCheckDisablePreload
+    : public PassWrapper<PreCheckDisablePreload, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PreCheckDisablePreload)
+
+  PreCheckDisablePreload() = default;
+
+  void runOnOperation() override;
+
+  ::llvm::StringRef getArgument() const override {
+    return "pre-disable-tuple-preload";
+  }
+  ::llvm::StringRef getDescription() const override {
+    return "Check whether the input module should disable the 3-preload "
+           "feature";
+  }
+};
+
 std::unique_ptr<OperationPass<ModuleOp>> createPreCheckBlacklistPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPreCheckMatmulPass();
 std::unique_ptr<OperationPass<ModuleOp>> createPreCheckAvailablePass();
+std::unique_ptr<OperationPass<ModuleOp>> createPreCheckDisablePreloadPass();
 void registerPreCheckAvailablePasses();
 
 } // namespace triton

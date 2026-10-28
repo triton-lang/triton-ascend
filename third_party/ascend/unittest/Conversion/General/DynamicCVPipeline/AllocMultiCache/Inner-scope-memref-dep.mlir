@@ -1,9 +1,9 @@
 // RUN: triton-opt --add_multi_buffer_inner_scope %s 2>&1 | FileCheck %s
-// Pass signals fallback via triton_ascend.dynamic_cv_pipeline.rc = 1
-// (ERRCODE_FAILED); the IR is otherwise unchanged.
+// Pass signals fallback via triton_ascend.dynamic_cv_pipeline.rc = 2
+// (ERRCODE_IGNORED); the IR is otherwise unchanged.
 
 // CHECK-LABEL: module attributes
-// CHECK-SAME: triton_ascend.dynamic_cv_pipeline.rc = 1
+// CHECK-SAME: triton_ascend.dynamic_cv_pipeline.rc = 2
 
 // T26: Memref Type Dependency Triggers Fallback
 // Test: When memref.alloc with block_id=X produces a memref, and later

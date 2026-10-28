@@ -36,6 +36,12 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
+enum class RewritePlanApplyResult {
+  Applied,
+  NotApplicable,
+  Failed,
+};
+
 // A plan is created for one immutable GraphOptimizationContext epoch. Its
 // apply() implementation must be transactional: on failure it leaves the IR
 // unchanged.
@@ -51,6 +57,11 @@ public:
   // Failure means this plan is no longer applicable to the current epoch.
   virtual LogicalResult revalidate(GraphOptimizationContext &context) const = 0;
   virtual LogicalResult apply(IRRewriter &rewriter) = 0;
+
+  virtual RewritePlanApplyResult applyWithResult(IRRewriter &rewriter) {
+    return succeeded(apply(rewriter)) ? RewritePlanApplyResult::Applied
+                                      : RewritePlanApplyResult::Failed;
+  }
 };
 
 class GraphOptimizationRule {
@@ -72,13 +83,41 @@ void populateBuiltinGraphOptimizationRules(
     const GraphOptimizationOptions &options,
     SmallVectorImpl<std::unique_ptr<GraphOptimizationRule>> &rules);
 
+struct ReservedGraphOptimizationRuleOptions {
+  GraphOptimizationRuleId id;
+  const char *optionNamespace;
+};
+
+std::unique_ptr<GraphOptimizationRule> createReservedGraphOptimizationRule(
+    ReservedGraphOptimizationRuleOptions options);
+
 std::unique_ptr<GraphOptimizationRule> createTransposePointwiseReorderRule();
 std::unique_ptr<GraphOptimizationRule> createLoadStoreTransposeRule();
 std::unique_ptr<GraphOptimizationRule>
-createStoreCoalescingRule(unsigned ubCapacityBytes);
-std::unique_ptr<GraphOptimizationRule> createRowCoalescingRule();
+createStoreCoalescingRule(unsigned ubCapacityBytes,
+                          const StoreCoalescingRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule>
+createRowCoalescingRule(bool enableLegacy = true);
 std::unique_ptr<GraphOptimizationRule> createDiagonalMaskRemovalRule();
 std::unique_ptr<GraphOptimizationRule> createConvertModuloToMaskRule();
+std::unique_ptr<GraphOptimizationRule> createIndependentAxisTensorizeRule(
+    const IndependentAxisTensorizeRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule> createPersistentTaskStripMiningRule(
+    const PersistentTaskStripMiningRuleOptions &options);
+
+LogicalResult materializePersistentTaskStripMiningCandidate(
+    ModuleOp module, triton::FuncOp function, const ResourceSnapshot &resources,
+    unsigned requestedBlockT, CandidateEvaluation *evaluation = nullptr,
+    bool deferIntermediateResourceRejection = false);
+std::unique_ptr<GraphOptimizationRule> createResidentLoadForwardingRule(
+    const ResidentLoadForwardingRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule>
+createIntermediatePrecisionBoundaryElisionRule(
+    const IntermediatePrecisionBoundaryElisionRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule> createStoreCoveragePlanningRule(
+    const StoreCoveragePlanningRuleOptions &options);
+std::unique_ptr<GraphOptimizationRule> createContiguousBlockAccessFormationRule(
+    const ContiguousBlockAccessFormationRuleOptions &options);
 
 } // namespace cfg
 } // namespace triton

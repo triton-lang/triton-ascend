@@ -1,9 +1,4 @@
 <!-- markdownlint-disable-file MD041 -->
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/vllm-project/vllm-ascend/main/docs/source/logos/vllm-ascend-logo-text-dark.png">
-  </picture>
-</p>
 
 <h3 align="center"><font size="68">
 Triton-Ascend
@@ -20,13 +15,14 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/zh-cn/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/developer/operator?tag=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Huawei Ascend</b></a> |
 </p>
 
 ---
 
 ## 🔥 Latest News
 
+- [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available
 - [2026.04.30] Triton-Ascend 3.2.1 official release is now available
 - [2026.01.20] Triton-Ascend 3.2.0 official release is now available
@@ -36,7 +32,7 @@ Triton-Ascend
 <summary>More latest news</summary>
 
 - [2025.11.14] Triton-Ascend 3.2.0rc4 pre-release is now available:<br>- [Extended the tt.fp_to_fp interface to add FP8 type conversion support](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [Added the scatter_ub_to_out interface to support efficient data scatter operations from UB to GM](https://gitcode.com/Ascend/triton-ascend/pull/864)
-- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and sglang open-source repositories
+- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and SGlang open-source repositories
 - [2025.09.19] Supported Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history) extraction
 - [2025.08.15] Improved Atomic-class Triton Python API support, completed adaptation of key Triton operators in the Flaggems open-source repository, and provided reference examples for high-performance implementations of simple operators such as Matmul
 - [2025.06.30] Supported 85% of Triton Python APIs, supporting contiguous memory access, covering basic usage scenarios
@@ -53,9 +49,9 @@ Triton-Ascend
 
 #### Hardware Requirements
 
-Supported operating systems: linux (aarch64/x86_64)
+Supported operating systems: Linux (aarch64/x86_64)
 
-Supported Ascend products: Atlas A2/A3/950 series
+Supported Huawei Ascend products: Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products
 
 Minimum hardware configuration: single card with 32GB memory (recommended)
 
@@ -63,20 +59,20 @@ Minimum hardware configuration: single card with 32GB memory (recommended)
 
 Determine and install the Python, CANN, and TorchNPU software versions. This step must be completed before both package installation and source code compilation installation.
 
-- Python version selection: py3.9-py3.11 are all supported.
+- Python version selection: py3.10-py3.13 are all supported.
 
-- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.1.0.
+- CANN version selection: You can visit the Huawei Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
 
-- TorchNPU version selection: The currently bundled TorchNPU version is 2.7.1.post8.
+- TorchNPU version selection: The currently bundled TorchNPU version is 2.10.0.post7.
 
-### Accessing Ascend NPU
+### Accessing Huawei Ascend NPU
 
-If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
+If you need to access Huawei Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
 
 ### Quick Installation
 
 ```bash
-# Taking the installation of triton-ascend 3.2.2 as an example
+# Taking the installation of triton-ascend 3.6.0 as an example
 pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/ascend/repos/pypi
 ```
 
@@ -90,6 +86,7 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 
 ```bash
 apt update
+# Supported clang versions: clang-15, clang-17, clang-20.1.8
 apt install zlib1g-dev clang-15 lld-15
 apt install ccache # optional
 update-alternatives --install /usr/bin/clang clang /usr/bin/clang-15 100
@@ -112,9 +109,9 @@ pip install -e .
 # Check out the specified version of LLVM source code and apply patches
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout fad3272286528b8a491085183434c5ad4b59ab92
-wget https://raw.gitcode.com/Ascend/triton-ascend/blobs/2b0a06eb21438359d6d0576b622e3bb5e0292d17/fad3272.patch
-git apply fad3272.patch
+git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
+wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
+git apply llvm_patch_f6ded0b.patch
 
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 
@@ -144,7 +141,7 @@ TRITON_BUILD_WITH_CLANG_LLD=true \
 TRITON_BUILD_PROTON=OFF \
 TRITON_WHEEL_NAME="triton-ascend" \
 TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
-python3 setup_ascend.py install
+python3 setup.py install
 ```
 
 </details>
@@ -203,25 +200,25 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## ✏️ Documentation Entry
 
-- [Quick Start](./docs/zh/quick_start.md)
+- [Quick Start](./docs/en/quick_start.md)
 
-- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/zh-cn/latest/index.html)
+- [Complete Online Documentation (Recommended)](https://triton-ascend.readthedocs.io/en/latest/index.html)
 
-- [Installation Guide](./docs/zh/installation_guide.md)
+- [Installation Guide](./docs/en/installation_guide.md)
 
-- [Architecture Design and Core Features](./docs/zh/architecture_design_and_core_features.md)
+- [Architecture Design and Core Features](./docs/en/architecture_design_and_core_features.md)
 
-- [Operator Development Guide](./docs/zh/programming_guide/index.md)
+- [Operator Development Guide](./docs/en/programming_guide/index.md)
 
-- [Operator Migration Guide](./docs/zh/migration_guide/migrate_from_gpu.md)
+- [Operator Migration Guide](./docs/en/migration_guide/migrate_from_gpu.md)
 
-- [Operator Debugging Guide](./docs/zh/debug_guide/debugging.md#)
+- [Operator Debugging Guide](./docs/en/debug_guide/debugging.md#)
 
-- [Performance Tuning Guide](./docs/zh/debug_guide/profiling.md#)
+- [Performance Tuning Guide](./docs/en/debug_guide/profiling.md#)
 
-- [Environment Variables Reference](./docs/zh/environment_variable_and_compiler_options_reference.md)
+- [Environment Variables Reference](./docs/en/environment_variable_and_compiler_options_reference.md)
 
-- [FAQ](./docs/zh/FAQ.md)
+- [FAQ](./docs/en/FAQ.md)
 
 ## 🏘️ Community Activities
 
@@ -229,6 +226,6 @@ docker exec -u root -it triton-ascend_container /bin/bash
 
 ## 🤝 Community and Contribution
 
-- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/zh/community/CONTRIBUTING_zh.md)
+- Welcome to participate in Triton-Ascend development and code contribution. For details, please refer to the [Contribution Guide](./docs/en/community/CONTRIBUTING.md)
 
 - Please report any bugs you encounter via [Issue](https://github.com/triton-lang/triton-ascend/issues).

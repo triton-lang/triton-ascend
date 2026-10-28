@@ -186,12 +186,12 @@ def debug_barrier(sync_mode: str, _semantic=None) -> None:
 
 
 def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None], stride: int,
-           padding_size: int, dilation: int, groups: int, output_shape, _semantic=None) -> tl.tensor:
+           padding: Union[int, tuple], dilation: int, groups: int, output_shape, _semantic=None) -> tl.tensor:
     bias_handle = None if bias is None else bias.handle
 
     element_ty = input_tensor.type.element_ty
     output_ty = tl.block_type(element_ty, output_shape)
-    out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding_size,
+    out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding,
                                           dilation, groups, output_ty.to_ir(_semantic.builder))
     return tl.tensor(out, output_ty)
 
@@ -208,4 +208,16 @@ def dot(a: tl.tensor, b: tl.tensor, fractal_a: bool, fractal_b: bool, fractal_c:
     in_ty = a.type.element_ty
     acc_ty = tl.float32 if in_ty.is_floating() else tl.int32
     output_ty = tl.block_type(acc_ty, output_shape)
+    return tl.tensor(out, output_ty)
+
+
+def conv2d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None], stride: Union[int, tuple],
+           padding: Union[int, tuple], dilation: Union[int,
+                                                       tuple], groups: int, output_shape, _semantic=None) -> tl.tensor:
+    bias_handle = None if bias is None else bias.handle
+
+    element_ty = input_tensor.type.element_ty
+    output_ty = tl.block_type(element_ty, output_shape)
+    out = _semantic.builder.create_conv2d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding,
+                                          dilation, groups, output_ty.to_ir(_semantic.builder))
     return tl.tensor(out, output_ty)

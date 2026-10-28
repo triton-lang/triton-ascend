@@ -51,6 +51,8 @@ void SplitDataflowPass::runOnOperation() {
   OpPassManager pm(module.getOperationName());
   LDBG("Enter pass.");
 
+  pm.addPass(createCheckUnsupportedScenarioPass());
+
   // Step 1: Add block_id for control flow operations
   pm.addPass(createAddBlockIdForControlOpsPass());
 

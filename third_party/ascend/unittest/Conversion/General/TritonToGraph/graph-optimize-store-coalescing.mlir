@@ -1,6 +1,7 @@
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=64' -o - | FileCheck %s --check-prefix=CHECK
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=0' -o - | FileCheck %s --check-prefix=CAP0
 // RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=256' -o - | FileCheck %s --check-prefix=DYNAMIC
+// RUN: triton-opt %s --verify-each -graph-optimize='rule-mask=4 ub-capacity-bytes=64 compile-mode=simt_only' -o - | FileCheck %s --check-prefix=PURE-SIMT
 
 // Address order, rather than program order, determines the packed value
 // layout.  The high interval is deliberately stored first.  The replacement
@@ -29,6 +30,13 @@ tt.func @pack_reverse_program_order(%base: !tt.ptr<i32>) {
   tt.store %low_addresses, %low_value : tensor<4x!tt.ptr<i32>>
   tt.return
 }
+
+// PURE-SIMT-LABEL: tt.func @pack_reverse_program_order(
+// PURE-SIMT-NOT: tensor.empty
+// PURE-SIMT: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// PURE-SIMT: tt.store {{.*}}, {{.*}} : tensor<4x!tt.ptr<i32>>
+// PURE-SIMT-NOT: tensor.empty
+// PURE-SIMT-LABEL: tt.func @pack_rank2_row_major_nonzero_origin(
 
 // N-D values may be flattened only when their logical row-major order is
 // exactly address order.  This fixture also uses a nonzero row origin for the

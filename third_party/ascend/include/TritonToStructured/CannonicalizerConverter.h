@@ -78,6 +78,15 @@ public:
                                 PatternRewriter &rewriter) const override;
 };
 
+class StoreBroadcastConverter : public OpRewritePattern<triton::StoreOp> {
+public:
+  explicit StoreBroadcastConverter(MLIRContext *context)
+      : OpRewritePattern<triton::StoreOp>(context) {}
+
+  LogicalResult matchAndRewrite(triton::StoreOp op,
+                                PatternRewriter &rewriter) const override;
+};
+
 // Rewrites `tt.load %bptr` whose `%bptr = tt.make_tensor_ptr ...` has all
 // statically zero strides. The zero strides are the IR-level signature of a
 // broadcasted tensor: every element of the loaded block refers to the same

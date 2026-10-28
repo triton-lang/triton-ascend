@@ -136,7 +136,7 @@ def _tensor_multi_addptr_bf16_load(
     tl.store(out_ptr + output_offsets, values)
 
 
-@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
+@pytest.mark.skip(reason="The case is not supported on Ascend 950, skipping for now. Will be fixed in future.")
 def test_pointer_bitcast_paged_scale_tensor_offset():
     cache_block_size = 4
     dim = 8
@@ -233,7 +233,7 @@ def test_pointer_bitcast_inside_dynamic_loop():
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
 
 
-@pytest.mark.skip(reason="The case is not supported on A5, skipping for now. Will be fixed in future.")
+@pytest.mark.skip(reason="The case is not supported on Ascend 950, skipping for now. Will be fixed in future.")
 def test_pointer_bitcast_tensor_multi_addptr_broadcast_load():
     block_m = 4
     block_n = 32

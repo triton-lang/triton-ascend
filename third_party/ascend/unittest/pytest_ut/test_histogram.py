@@ -24,6 +24,7 @@ import torch
 import pytest
 import math
 import test_common
+from triton.backends.ascend.utils import is_compile_on_910_95
 
 
 @triton.jit
@@ -67,6 +68,10 @@ def test_histogram(M, N, ncore, dtype):
 @pytest.mark.parametrize("N", [2])
 @pytest.mark.parametrize("ncore", [1])
 @pytest.mark.parametrize("dtype", ["uint32", "uint64"])
+@pytest.mark.skipif(
+    not is_compile_on_910_95(triton.runtime.driver.active.get_current_target().arch),
+    reason="uint32/uint64 are only supported on Ascend 950 (A5); A2/A3 load/histogram do not support them.",
+)
 def test_histogram_uint(M, N, ncore, dtype):
     torch.manual_seed(17)
     x_cpu = torch.randint(low=0, high=N, size=(M, ), dtype=eval(f'torch.{dtype}'), device="cpu")

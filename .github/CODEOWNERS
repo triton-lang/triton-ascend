@@ -8,59 +8,99 @@
 # Analyses
 # --------
 # Alias analysis
-include/triton/Analysis/Alias.h @TecJesh
-lib/Analysis/Alias.cpp @TecJesh
+include/triton/Analysis/Alias.h @LH-123L @hongziqi
+lib/Analysis/Alias.cpp @LH-123L @hongziqi
 # Allocation analysis
-include/triton/Analysis/Allocation.h @TecJesh
-lib/Analysis/Allocation.cpp @TecJesh
+include/triton/Analysis/Allocation.h @LH-123L @hongziqi
+lib/Analysis/Allocation.cpp @LH-123L @hongziqi
 # Membar analysis
-include/triton/Analysis/Membar.h @TecJesh
-lib/Analysis/Membar.cpp @TecJesh
+include/triton/Analysis/Membar.h @LH-123L @hongziqi
+lib/Analysis/Membar.cpp @LH-123L @hongziqi
 # AxisInfo analysis
-include/triton/Analysis/AxisInfo.h @TecJesh
-lib/Analysis/AxisInfo.cpp @TecJesh
+include/triton/Analysis/AxisInfo.h @LH-123L @hongziqi
+lib/Analysis/AxisInfo.cpp @LH-123L @hongziqi
 # Utilities
-include/triton/Analysis/Utility.h @TecJesh
-lib/Analysis/Utility.cpp @TecJesh
+include/triton/Analysis/Utility.h @LH-123L @hongziqi
+lib/Analysis/Utility.cpp @LH-123L @hongziqi
 
 # ----------
 # Dialects
 # ----------
 # Pipeline pass
-lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @TecJesh
+lib/Dialect/TritonGPU/Transforms/Pipeline.cpp @LH-123L @hongziqi
 # Prefetch pass
-lib/Dialect/TritonGPU/Transforms/Prefetch.cpp @TecJesh
+lib/Dialect/TritonGPU/Transforms/Prefetch.cpp @LH-123L @hongziqi
 # Coalesce pass
-lib/Dialect/TritonGPU/Transforms/Coalesce.cpp @TecJesh
+lib/Dialect/TritonGPU/Transforms/Coalesce.cpp @LH-123L @hongziqi
 # Layout simplification pass
-lib/Dialect/TritonGPU/Transforms/Combine.cpp @TecJesh
+lib/Dialect/TritonGPU/Transforms/Combine.cpp @LH-123L @hongziqi
 
 # -----------
 # Conversions
 # -----------
 # TritonToTritonGPU
-include/triton/Conversion/TritonToTritonGPU/ @TecJesh
-lib/Dialect/TritonGPU/Transforms/TritonGPUConversion.cpp @TecJesh
+include/triton/Conversion/TritonToTritonGPU/ @LH-123L @hongziqi
+lib/Dialect/TritonGPU/Transforms/TritonGPUConversion.cpp @LH-123L @hongziqi
 
 # -----------
 # third_party
 # -----------
-third_party/amd/ @TecJesh
-third_party/proton/ @TecJesh
-third_party/ascend/ @KanuaK @WuTYSFG @hongziqi
+third_party/amd/ @LH-123L @hongziqi
+third_party/proton/ @LH-123L @hongziqi
+
+# -----------
+# third_party/ascend
+# -----------
+# backend, launch, runtime
+third_party/ascend/backend/ @LH-123L @zhanwei33 @KanuaK @Cadenza4287
+# ascend patch & llvm patch
+third_party/ascend/patch/ @LH-123L @hongziqi
+# ascend dialect
+third_party/ascend/include/Dialect @KanuaK @hongziqi @WuTYSFG
+third_party/ascend/lib/Dialect @KanuaK @hongziqi @WuTYSFG
+# discrete mask access conversion
+third_party/ascend/include/DiscreteMaskAccessConversion @hongziqi @WuTYSFG
+third_party/ascend/lib/DiscreteMaskAccessConversion @hongziqi @WuTYSFG
+# ssbuffer
+third_party/ascend/include/DynamicCVPipeline @Skyminers @olivervnc
+third_party/ascend/lib/DynamicCVPipeline @Skyminers @olivervnc
+# control flow
+third_party/ascend/include/TritonControlFlowOpt @elstainniles @KanuaK
+third_party/ascend/lib/TritonControlFlowOpt @elstainniles @KanuaK
+# graph optimization
+third_party/ascend/include/TritonToGraph @zhanwei33 @KanuaK
+third_party/ascend/lib/TritonToGraph @zhanwei33 @KanuaK
+# linalg
+third_party/ascend/include/TritonToLinalg @KanuaK @WuTYSFG @hongziqi @elstainniles
+third_party/ascend/lib/TritonToLinalg @KanuaK @WuTYSFG @hongziqi @elstainniles
+# structured
+third_party/ascend/include/TritonToStructured @elstainniles @KanuaK
+third_party/ascend/lib/TritonToStructured @elstainniles @KanuaK
+# unstructured
+third_party/ascend/include/TritonToUnstructure @KanuaK @hongziqi @elstainniles
+third_party/ascend/lib/TritonToUnstructure @KanuaK @hongziqi @elstainniles
+# annotation hfusion hivm llvm
+third_party/ascend/include/TritonToAnnotation @WuTYSFG @KanuaK
+third_party/ascend/lib/TritonToAnnotation @WuTYSFG @KanuaK
+third_party/ascend/include/TritonToHFusion @WuTYSFG @KanuaK
+third_party/ascend/lib/TritonToHFusion @WuTYSFG @KanuaK
+third_party/ascend/include/TritonToHIVM @WuTYSFG @KanuaK
+third_party/ascend/lib/TritonToHIVM @WuTYSFG @KanuaK
+third_party/ascend/include/TritonToLLVM @WuTYSFG @KanuaK
+third_party/ascend/lib/TritonToLLVM @WuTYSFG @KanuaK
 
 # -----------
 # gluon
 # -----------
-python/triton/experimental/gluon/ @TecJesh
-python/src/gluon_ir.cc @TecJesh
-python/test/gluon @TecJesh
-test/Gluon @TecJesh
-include/triton/Dialect/Gluon @TecJesh
-lib/Dialect/Gluon @TecJesh
+python/triton/experimental/gluon/ @LH-123L @hongziqi
+python/src/gluon_ir.cc @LH-123L @hongziqi
+python/test/gluon @LH-123L @hongziqi
+test/Gluon @LH-123L @hongziqi
+include/triton/Dialect/Gluon @LH-123L @hongziqi
+lib/Dialect/Gluon @LH-123L @hongziqi
 
 # -----------
 # Linear Layouts
 # -----------
-lib/Tools/ @TecJesh
-lib/Dialect/TritonGPU/IR/LinearLayoutConversions.cpp @TecJesh
+lib/Tools/ @LH-123L @hongziqi
+lib/Dialect/TritonGPU/IR/LinearLayoutConversions.cpp @LH-123L @hongziqi

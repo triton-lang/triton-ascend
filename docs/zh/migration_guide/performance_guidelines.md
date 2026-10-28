@@ -4,7 +4,7 @@
 
 ### 一、自动合并Grid分核优化原则
 
-部分场景下，Triton算子从GPU迁移到NPU。由于体系结构的差异，基于GPU开发的Triton算子Grid分核数较多。在NPU上执行时，无法一次全部调度，多轮下发导致下发时延过大，影响算子性能。基于NPU优化Triton算子过程中，需要首先检查Grid分核数。当分核数较大时，使用TRITON_ALL_BLOCKS_PARALLEL环境变量提升算子执行性能。
+部分场景需要将 Triton 算子从 GPU 迁移到 NPU。由于体系结构差异，基于 GPU 开发的 Triton 算子通常具有较大的逻辑 grid，无法在 NPU 上一次全部调度。昇腾后端会自动把符合条件且逻辑核相互独立的任务映射到可用物理核，并根据 IR 安全分析跳过不适用的 kernel。性能调优时应先检查 grid 大小和编译告警；如果自动 mapping 被跳过，需要通过显式 tiling 或内层循环减小逻辑 grid。
 
 ## 指令并行优化
 
@@ -17,42 +17,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
 
 ### 二、代码示例
 
-- 示例1：减少同步，提升并行度
-
-    在算子调优过程中，增加指令并行度是算子调优的重要手段。在如下的tl.load语句中，当N > M时, load加载的数据只能填充部分data指向的tensor内存空间中，剩下未填充的部分，如果用户未指定other值，则GPU默认填充为0，为了减少用户迁移的适配工作，NPU保持行为和GPU一致。NPU会先用Vector核将data指向的全部内存空间设置为指定值(如果用户未指定other值，同样设置为0)，然后再使用MTE2指令搬运数据到data指向的部分内存空间，这样就会导致MTE2和Vector产生依赖，无法高效并行，影响性能：
-
-    ```diff
-    @triton.jit
-    def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)
-        output,                         # [Tensor] output tensor (1 x col)
-        M: tl.constexpr,                # len of the vector
-        BLOCK_SIZE: tl.constexpr
-    ):
-        N :tl.constexpr = BLOCK_SIZE
-        idx = tl.arange(0, N)
-        mask = idx < M
-        data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
-    ```
-
-    为了提升性能，在load加载数据只能部分填充到指向的内存空间时，如果未填充的部分不影响后续的计算结果，可以在load语句中，添加care_padding=False来去掉默认值的填充，增加并行度，提升性能，上面算子的优化写法如下：
-
-    ```diff
-    @triton.jit
-    def npu_vector_add_kernel(
-        input,                          # [Tensor] input tensor (1 x col)
-        output,                         # [Tensor] output tensor (1 x col)
-        M: tl.constexpr,                # len of the vector
-        BLOCK_SIZE: tl.constexpr
-    ):
-        N = BLOCK_SIZE
-        idx = tl.arange(0, N)
-        mask = idx < M
-        # data = tl.load(input + idx, mask = mask) # 或者指定other=-1等值
-        data = tl.load(input + idx, mask = mask, care_padding=False) # 或者指定other=-1等值
-    ```
-
-- 示例2：在Triton算子内，使用for循环，增加Tiling，提升并行度
+- 示例1：在Triton算子内，使用for循环，增加Tiling，提升并行度
 
     在Triton算子编程中，mask运算经常运用在load/store/where等语法中，在性能优化过程中，需要特别注意这类运算导致的性能下降。当Triton算子内逻辑是单次顺序执行，开始->数据搬入->计算->数据搬出->结束，指令无法并行，执行效率低;可以通过在算子使用for循环增加tiling，将单次处理量减少，多次处理，能够让"数据搬入/计算/数据搬出"并行起来，减少串行的等待时间，提升整体性能；同时使用for循环增加Tiling，也能降低单次处理消耗的UB空间。
     需要注意：增加数据Tiling也同时需要考虑改变数据切块后的数学是否等价。
@@ -131,7 +96,7 @@ Triton算子在NPU上执行时，为了提升性能，NPU底层提供multi buffe
 
 ### 一、数据类型优化核心原则
 
-A2/A3 向量运算单元的部分运算操作不支持某些数据类型，这种场景下，对应的向量运算会退化为标量运算，影响性能。在确定不影响整体算子精度的情况下，建议使用支持的数据类型，提升性能。
+Atlas A2系列产品、Atlas A3系列产品 向量运算单元的部分运算操作不支持某些数据类型，这种场景下，对应的向量运算会退化为标量运算，影响性能。在确定不影响整体算子精度的情况下，建议使用支持的数据类型，提升性能。
 主要涉及以下操作
 
 |  **OP名称**  |  **不支持的数据类型**  |

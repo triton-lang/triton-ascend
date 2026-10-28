@@ -22,8 +22,10 @@
 
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 #include <optional>
+#include <utility>
 
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "mlir/Analysis/TopologicalSortUtils.h"
@@ -32,6 +34,7 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -81,14 +84,16 @@ public:
 
 private:
   bool matchFixpipePattern(linalg::MatmulOp matmulOp,
-                           SetVector<Operation *> &matchedOps);
+                           SetVector<Operation *> &toMergeWithMatmul,
+                           CVPipeline::ComputeBlockIdManager &bm,
+                           int &targetBlockId);
   bool isFixpipeCastPattern(Operation *truncOp,
                             SetVector<Operation *> &matchedOps);
   bool isFixpipeMulPattern(Operation *mulOp,
                            SetVector<Operation *> &matchedOps);
   bool isStoreToGM(Operation *materializeOp,
                    SetVector<Operation *> &matchedOps);
-  bool applyFixpipeOpt(SetVector<Operation *> &matchedOps,
+  bool applyFixpipeOpt(SetVector<Operation *> &matchedOps, int targetBlockId,
                        const CVPipeline::MemoryDependenceGraph &memGraph,
                        CVPipeline::ComputeBlockIdManager &bm);
   bool isSubviewFromGlobalMemory(ViewLikeOpInterface viewOp,
@@ -315,6 +320,77 @@ bool FixpipeOptPass::isFixpipeMulPattern(Operation *mulOp,
   return true;
 }
 
+/**
+ * Resolve the first value that escapes a chain of nested `scf.for` loops
+ * from a value defined inside the loop body.
+ *
+ * When a loop-carried value is updated by exactly one operation per
+ * iteration (the incoming block argument has a single use, which is the
+ * defining op of `nowV`, and `nowV` in turn is yielded as that same
+ * loop-carried operand), this function walks outward to the result of the
+ * outermost such loop.
+ *
+ * Example:
+ *   scf.for (%a = %init) {
+ *     %a_i = some_op(%a)            // %a has a single use -> some_op
+ *     scf.yield %a_i                // %a_i has a single use -> yield
+ *   }
+ *   %b = user(%a_n, %k)            // %a_n is the loop result
+ *
+ * Given `nowV = %a_i` and `outerInValue = %a` (the block argument), this
+ * returns `%a_n` — the first value visible to users outside the loop.
+ *
+ * \param nowV          Result of the op defined inside the loop body.
+ * \param outerInValue  The loop-carried block argument (or, at the outermost
+ *                      level, the loop init value) that feeds the op defining
+ *                      `nowV`.
+ * \return              The value that escapes the outermost qualifying loop;
+ *                      if any precondition fails, `nowV` is returned unchanged.
+ */
+static Value getFirstResultAfterLoop(Value nowV, Value outerInValue) {
+
+  if (outerInValue.getDefiningOp()) {
+    // we find the outer loop,
+    return nowV;
+  }
+
+  auto op = nowV.getDefiningOp();
+  auto parentOp = op->getParentOp();
+  auto nextSearchValue = nowV;
+
+  if (auto forOp = dyn_cast<scf::ForOp>(parentOp)) {
+    auto blockArg = dyn_cast_if_present<BlockArgument>(outerInValue);
+    if (!blockArg || blockArg.getOwner() != forOp.getBody() ||
+        !blockArg.hasOneUse()) {
+      return nowV;
+    }
+    auto argUser = blockArg.getUses().begin()->getOwner();
+    if (argUser != op) {
+      return nowV;
+    }
+
+    if (!nowV.hasOneUse()) {
+      return nowV;
+    }
+    auto nowVUser = nowV.getUses().begin()->getOwner();
+    int argIdx =
+        CVPipeline::getLoopCarriedArgIndex(blockArg, blockArg.getOwner());
+    auto yieldOp = dyn_cast<scf::YieldOp>(nowVUser);
+    if (!yieldOp || yieldOp->getBlock() != forOp.getBody() ||
+        nowV.getUses().begin()->getOperandNumber() != argIdx) {
+      return nowV;
+    }
+
+    outerInValue = forOp.getInitArgs()[argIdx];
+    nextSearchValue = forOp->getResult(argIdx);
+  } else {
+    LOG_DEBUG("WARN: not limited in one for");
+    return nowV;
+  }
+
+  return getFirstResultAfterLoop(nextSearchValue, outerInValue);
+}
+
 /** Match fixpipe optimization patterns starting from a matmul operation.
  Pattern 1 (Cast Pattern):
    linalg.matmul -> arith.truncf/i -> tensor.extract_slice ->
@@ -323,25 +399,47 @@ bool FixpipeOptPass::isFixpipeMulPattern(Operation *mulOp,
  Pattern 2 (Quantization Pattern):
    linalg.matmul -> arith.mulf -> tensor.extract_slice ->
    bufferization.materialize_in_destination(memref.subview(gm))
+
+  NOTE: This function can assure target block id is not -1.
  */
-bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp,
-                                         SetVector<Operation *> &matchedOps) {
+bool FixpipeOptPass::matchFixpipePattern(
+    linalg::MatmulOp matmulOp, SetVector<Operation *> &toMergeWithMatmul,
+    CVPipeline::ComputeBlockIdManager &bm, int &targetBlockId) {
   LOG_DEBUG("Check matmul op: " << *matmulOp);
   Value matmulResult = matmulOp.getResult(0);
   if (!matmulResult.hasOneUse()) {
     LOG_DEBUG("Matmul not only one user, NOT match.");
     return false;
   }
-  matchedOps.insert(matmulOp);
+  Value outerOutValue =
+      getFirstResultAfterLoop(matmulResult, *matmulOp.getDpsInits().begin());
 
-  auto matmulUser = *matmulResult.getUsers().begin();
+  auto outerOutOp = outerOutValue.getDefiningOp();
+  LOG_DEBUG("outerOutOp = " << *outerOutOp);
+  if (bm.getBlockIdByOp(outerOutOp) == -1) {
+    if (llvm::failed(bm.markOpBlockId(outerOutOp))) {
+      LOG_DEBUG("Matmul have no blockID, NOT match.");
+      return false;
+    }
+  }
+  targetBlockId = bm.getBlockIdByOp(outerOutOp);
+
+  if (!outerOutValue.hasOneUse()) {
+    LOG_DEBUG("Matmul(outerOutValue) not only one user, NOT match.");
+    return false;
+  }
+  if (isa<linalg::MatmulOp>(outerOutOp)) {
+    toMergeWithMatmul.insert(outerOutOp);
+  }
+
+  auto matmulUser = *outerOutValue.getUsers().begin();
 
   if (CVPipeline::getFixpipePreQuantMode(matmulUser).has_value()) {
-    if (isFixpipeCastPattern(matmulUser, matchedOps)) {
+    if (isFixpipeCastPattern(matmulUser, toMergeWithMatmul)) {
       return true;
     }
-  } else if (isValidMul(matmulUser, matmulResult, matchedOps)) {
-    if (isFixpipeMulPattern(matmulUser, matchedOps)) {
+  } else if (isValidMul(matmulUser, matmulResult, toMergeWithMatmul)) {
+    if (isFixpipeMulPattern(matmulUser, toMergeWithMatmul)) {
       return true;
     }
   } else {
@@ -353,7 +451,7 @@ bool FixpipeOptPass::matchFixpipePattern(linalg::MatmulOp matmulOp,
 }
 
 bool FixpipeOptPass::applyFixpipeOpt(
-    SetVector<Operation *> &matchedOps,
+    SetVector<Operation *> &matchedOps, int targetBlockId,
     const CVPipeline::MemoryDependenceGraph &memGraph,
     CVPipeline::ComputeBlockIdManager &bm) {
   // If there are no cycle in Compute Block level, we apply:
@@ -366,7 +464,6 @@ bool FixpipeOptPass::applyFixpipeOpt(
       break;
     }
   }
-  int targetBlockId = bm.getBlockIdByOp(matmulOp);
   auto block = matmulOp->getBlock();
 
   if (CVPipeline::willCreateCycle(matchedOps.getArrayRef(), memGraph,
@@ -376,9 +473,15 @@ bool FixpipeOptPass::applyFixpipeOpt(
   for (Operation *op : matchedOps) {
     if (isa<scf::SCFDialect>(op->getDialect())) {
       op->walk([&](Operation *nestedOp) {
+        // Never fold a sync into a compute block: it must keep its own unique
+        // block id so the fence between before/after ops survives.
+        if (CVPipeline::isSyncOp(nestedOp)) {
+          return WalkResult::advance();
+        }
         bm.updateBlockId(nestedOp, targetBlockId);
         nestedOp->setAttr(CVPipeline::kCoreType,
                           StringAttr::get(op->getContext(), "CUBE"));
+        return WalkResult::advance();
       });
     } else {
       bm.updateBlockId(op, targetBlockId);
@@ -406,12 +509,14 @@ void FixpipeOptPass::runOnOperation() {
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   LOG_DEBUG(module);
 
-  SmallVector<SetVector<Operation *>> allMatchedPatterns;
+  SmallVector<std::pair<SetVector<Operation *>, int>> allMatchedPatterns;
 
+  CVPipeline::ComputeBlockIdManager bm(module);
   module.walk([&](linalg::MatmulOp matmulOp) {
     SetVector<Operation *> matchedOps;
-    if (matchFixpipePattern(matmulOp, matchedOps)) {
-      allMatchedPatterns.push_back(matchedOps);
+    int targetBlockId = -1;
+    if (matchFixpipePattern(matmulOp, matchedOps, bm, targetBlockId)) {
+      allMatchedPatterns.push_back({matchedOps, targetBlockId});
     }
   });
   LOG_DEBUG("== Found " << allMatchedPatterns.size()
@@ -423,8 +528,7 @@ void FixpipeOptPass::runOnOperation() {
           D
       Now we want to fuse A/B/C, so clone A' for D to avoid cycle.
   */
-  auto bm = CVPipeline::ComputeBlockIdManager(module);
-  for (auto &matchedOps : allMatchedPatterns) {
+  for (auto &[matchedOps, targetBlockId] : allMatchedPatterns) {
     if (matchedOps.empty()) {
       continue;
     }
@@ -434,12 +538,8 @@ void FixpipeOptPass::runOnOperation() {
     for (auto op : closure.scalarOps) {
       matchedOps.insert(op);
     }
-    CVPipeline::cloneScalarOpsForCrossBlockUses(
-        bm, matchedOps, bm.getBlockIdByOp(matchedOps[0]));
-  }
-
-  for (auto &matchedOps : allMatchedPatterns) {
-    if (!applyFixpipeOpt(matchedOps, memDepGraph, bm)) {
+    CVPipeline::cloneScalarOpsForCrossBlockUses(bm, matchedOps, targetBlockId);
+    if (!applyFixpipeOpt(matchedOps, targetBlockId, memDepGraph, bm)) {
       for (Operation *op : matchedOps) {
         LOG_DEBUG("Cannot set block id for op: " << *op);
       }

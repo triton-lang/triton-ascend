@@ -6,13 +6,13 @@
 
 A: 可以直接使用pip 安装
 
-```Python
+```bash
 pip install triton-ascend
 ```
 
 **Q: 社区 Triton 和 Triton-Ascend 能否同时存在？**
 
-A: triton-ascend 3.2.0 及以下不可以。需要先卸载社区 Triton，再安装 Triton-Ascend。<br>
+A: triton-ascend 3.2.0 及以下不可以。需要先卸载社区 Triton，再安装 Triton-Ascend。
 triton-ascend 3.2.1 及以上，Triton-Ascend 通过将 Triton 声明为安装依赖来缓解安装覆盖问题。
 安装 Triton-Ascend 时会先安装社区 Triton，再由 Triton-Ascend 覆盖同名目录，从而避免后续安装其他依赖 Triton 的软件包时再次安装 Triton 而覆盖 Triton-Ascend。
 x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.5 版本开始才提供 arm 版本安装包：x86 依赖 triton==3.2.0，arm 依赖 triton==3.5.0。
@@ -20,7 +20,7 @@ x86 与 arm 使用不同版本的社区 Triton 安装包的原因是社区从 3.
 - 注：若安装triton-ascend后，再安装依赖triton的三方件或者triton本身，将覆盖掉已安装的 Triton-Ascend 目录。
 此时需要先卸载社区 Triton 和 Triton-Ascend，再安装 Triton-Ascend。
 
-```Python
+```bash
 pip uninstall triton
 pip uninstall triton-ascend
 pip install triton-ascend
@@ -74,7 +74,7 @@ A: 有集成性能分析工具（profiler），请参考 [算子性能调优方�
 **Q: 编译时报 "UB Overflow" 错误，如何解决？**
 
 A: UB Overflow 是 Triton-Ascend 开发中常见的问题，请参考 [UB Overflow 问题排查指南](./debug_guide/ub_overflow.md) 排查问题。如果不知道如何减小tiling来减少UB占用，可以使用Autotune来自动选择最优配置，Autotune的使用请参考[Triton-Ascend autotune 使用指南](./autotune_guide.md)。
-A5上可运行的算子迁移到A2/A3由于UB大小的差异可能导致UB Overflow，如果手动排查不出问题，也可采用Autotune自动选择最优配置。
+Ascend 950PR&950DT系列产品上可运行的算子迁移到Atlas A2系列产品、Atlas A3系列产品由于UB大小的差异可能导致UB Overflow，如果手动排查不出问题，也可采用Autotune自动选择最优配置。
 
 ## 8. Triton 使用限制
 
@@ -94,30 +94,4 @@ in_out_tensor = torch.randn(shape)
 func[grid](in_out_tensor, in_out_tensor)
 ```
 
-上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法使能相关优化。
-
-**Q: 在 `if` / `for` / `while` / `scope` 等控制流OP中使用 `tl.load` / `tl.store` 有哪些限制？**
-
-A: Triton-Ascend 支持同一来源 pointer 在控制流中进行简单地址更新后访存，`tl.load` / `tl.store` 放在控制流内部也是合理写法。
-但不建议让不同来源或不同结构的 pointer 在控制流后合并，再统一执行访存；也不建议在复杂嵌套控制流中反复更新 pointer 状态并同时执行 store/read-after-write。
-
-当前版本对于 `if` / `for` / `while` / `scope` 与 `tl.load` / `tl.store` 组合使用的场景支持还不完备，后续版本会持续完善。当前建议遵循以下限制。
-
-不推荐让不同基地址的 pointer，或在不同分支中分别构造的 block pointer，在分支后合并再访存：
-
-```Python
-if cond:
-    ptr = x + offsets
-else:
-    ptr = y + offsets
-value = tl.load(ptr)
-```
-
-推荐把访存放在各自分支中，让分支合并 loaded value，而不是 pointer 或 block pointer：
-
-```Python
-if cond:
-    value = tl.load(x + offsets)
-else:
-    value = tl.load(y + offsets)
-```
+上述代码中 `ptr0` 和 `ptr1` 实际指向同一块内存（即同一个 `in_out_tensor`），但编译器无法识别这种指针别名关系，因此这种同一个张量同时作为多个指针参数传入的写法是不受支持的，对应的 Kernel 将无法启用相关优化。

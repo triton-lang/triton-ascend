@@ -1,38 +1,27 @@
-// RUN: triton-opt --add_multi_buffer_inner_scope %s 2>&1 | FileCheck %s
-// Pass sets triton_ascend.dynamic_cv_pipeline.rc = 1 (ERRCODE_FAILED) to
-// signal fallback; the outer runOnOperation wrapper at
-// AddMultiBufferInnerScope.cpp:2180-2183 overwrites the more specific
-// ERRCODE_IGNORED=2 that addInnerMultiBuffer sets for i1 deps.
+// RUN: triton-opt --add_multi_buffer_inner_scope %s | FileCheck %s
+// Verifies that the i1 tensor dep triggers the IGNORED (rc=2) fallback path,
+// not the FAILED (rc=1) path. i1 cross-block tensor deps are intentionally
+// not multi-buffered (the multi-buffer pipeline assumes memref-shaped
+// tensors with element types the downstream pipeline can clone), so the
+// pass must signal IGNORED (rc=2 = ERRCODE_IGNORED) rather than FAILED
+// (rc=1 = ERRCODE_FAILED).
 
 // CHECK-LABEL: module attributes
-// CHECK-SAME: triton_ascend.dynamic_cv_pipeline.rc = 1
+// CHECK-SAME: triton_ascend.dynamic_cv_pipeline.rc = 2 : i32
+// Confirm we did NOT clobber the IGNORED code with FAILED.
+// CHECK-NOT: triton_ascend.dynamic_cv_pipeline.rc = 1
 
-// T-i1: i1 Tensor Dependency Triggers Fallback
-// Test: When a tensor dep with element type i1 is produced in one block and
-//       consumed in another inside the main_loop body (via a normal
-//       cross-block tensor ref, NOT the tensor.empty + linalg.fill clone
-//       pattern), the pass should detect this during dep collection and
-//       fall back (set ERRCODE_IGNORED=2 + signalPassFailure).
-//
-// Setup:
-//   - VECTOR scope with main_loop.
-//   - Producer block_id = 7 (inside main_loop): memref.alloc +
-//     bufferization.to_tensor to produce tensor<128xi1>.
-//   - Consumer block_id = 10 (inside main_loop, different from 7):
-//     arith.ori reads %prod cross-block.
-//   - The cross-block dep is %prod (tensor<i1>, block 7) -> %consumed (block 10).
-//   - This is a NORMAL tensor dep (would normally go through the multi-buffer
-//     pipeline), not the empty+fill clone path.
+// CHECK-LABEL: func.func @test_i1_tensor_dep_multi_buffer
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
-  func.func @test_i1_tensor_dep_fallback() {
+  func.func @test_i1_tensor_dep_multi_buffer() {
     %c0_i32 = arith.constant 0 : i32
     %c100_i32 = arith.constant 100 : i32
     %c1_i32 = arith.constant 1 : i32
     %cst_true = arith.constant true
     scope.scope : () -> () {
       scf.for %i = %c0_i32 to %c100_i32 step %c1_i32  : i32 {
-        // Producer: tensor<128xi1> in block 7 (NOT empty+fill pattern)
+        // Producer: tensor<128xi1> in block 7
         %alloc = memref.alloc() {ssbuffer.block_id = 7 : i32} : memref<128xi1>
         %prod = bufferization.to_tensor %alloc {ssbuffer.block_id = 7 : i32} : memref<128xi1> to tensor<128xi1>
         // Consumer in block 10 (cross-block)

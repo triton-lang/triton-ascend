@@ -31,6 +31,10 @@ inline constexpr const char *InspectedByStridedLoadStoreRewriteTAG =
     "InspectedByStridedLoadStoreRewrite";
 inline constexpr const char *RewrittenByStridedLoadStoreRewriteTAG =
     "RewrittenByStridedLoadStoreRewrite";
+inline constexpr const char *IATRuntimeExtentUnsignedMaskTAG =
+    "IATRuntimeExtentUnsignedMask";
+inline constexpr const char *PTSMRuntimeExtentUnsignedMaskTAG =
+    "PTSMRuntimeExtentUnsignedMask";
 
 } // namespace mlir::triton::memory_access
 

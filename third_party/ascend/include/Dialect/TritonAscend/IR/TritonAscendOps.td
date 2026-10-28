@@ -520,6 +520,31 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
     let summary = "1D convolution operation";
     let description = [{
         Performs a 1D convolution operation on the input tensor.
+
+        Dimension constraints:
+        - input: [C_in, L_in] (unbatched) or [N, C_in, L_in] (batched),
+          where N is the batch size, C_in the input channel count, and
+          L_in the signal length.
+        - weight: [C_out, C_in/groups, K], where C_out is the output
+          channel count and K the convolution kernel size.
+        - bias (optional): [C_out], one bias per output channel. Must have
+          the same element type as input and weight.
+        - result: [C_out, L_out] (unbatched) or [N, C_out, L_out] (batched).
+
+        Configurable attributes:
+        - stride: integer scalar, the step of the convolution kernel along
+          L. Must be > 0.
+        - padding: IntegerAttr (uniform scalar) or DenseI32ArrayAttr
+          [pad_left, pad_right], the number of zero-padding elements added
+          to each side of the input.
+        - dilation: integer scalar, the spacing between kernel elements.
+        - groups: number of blocked connections from input channels to
+          output channels. C_in and C_out must both be divisible by
+          groups.
+
+        Output shape derivation:
+        L_out = floor((L_in + pad_left + pad_right - dilation * (K - 1) - 1)
+                      / stride + 1)
     }];
 
     let arguments = (ins
@@ -527,7 +552,8 @@ def Conv1dOp : TT_Ascend_Op<"conv1d", [
         TT_Tensor:$weight,
         Optional<TT_Tensor>:$bias,
         I64Attr:$stride,
-        I64Attr:$padding_size,
+        // IntegerAttr (uniform scalar) or DenseI32ArrayAttr [pad_left, pad_right].
+        AnyAttr:$padding,
         I64Attr:$dilation,
         I64Attr:$groups
     );
@@ -583,6 +609,71 @@ def DotOp : TT_Ascend_Op<"dot", [
 
     let assemblyFormat = [{
         $a `,` $b attr-dict `:` type($a) `,` type($b) `->` type($d)
+    }];
+
+    let hasVerifier = 1;
+}
+
+//
+// Conv Op
+//
+def Conv2dOp : TT_Ascend_Op<"conv2d", [
+    Pure,
+    DeclareOpInterfaceMethods<InferTypeOpInterface>
+]> {
+    let summary = "2D convolution operation";
+    let description = [{
+        Performs a 2D convolution operation on the input tensor.
+
+        Dimension constraints:
+        - input: [C_in, H_in, W_in] (unbatched) or [N, C_in, H_in, W_in]
+          (batched), where N is the batch size, C_in the input channel
+          count, and H_in/W_in the spatial input dimensions.
+        - weight: [C_out, C_in/groups, kH, kW], where C_out is the output
+          channel count and kH/kW the convolution kernel size.
+        - bias (optional): [C_out], one bias per output channel. Must have
+          the same element type as input and weight.
+        - result: [C_out, H_out, W_out] (unbatched) or
+          [N, C_out, H_out, W_out] (batched).
+
+        Configurable attributes:
+        - stride: an integer (uniform along H and W) or 2-element integer
+          array [stride_h, stride_w], the step of the convolution kernel
+          along H and W. Elements must be > 0.
+        - padding: an integer (uniform on all sides), a 2-element integer
+          array [pad_h, pad_w] (symmetric per dimension), or a 4-element
+          integer array [pad_top, pad_bottom, pad_left, pad_right], the
+          number of zero-padding elements added to each side of the input.
+        - dilation: an integer (uniform along H and W) or 2-element integer
+          array [dil_h, dil_w], the spacing between kernel elements along H
+          and W.
+        - groups: number of blocked connections from input channels to
+          output channels. C_in and C_out must both be divisible by
+          groups.
+
+        Output shape derivation:
+        H_out = floor((H_in + pad_top + pad_bottom - dil_h * (kH - 1) - 1)
+                      / stride_h + 1)
+        W_out = floor((W_in + pad_left + pad_right - dil_w * (kW - 1) - 1)
+                      / stride_w + 1)
+    }];
+
+    let arguments = (ins
+        TT_Tensor:$input,
+        TT_Tensor:$weight,
+        Optional<TT_Tensor>:$bias,
+        // IntegerAttr (uniform scalar) or DenseI32ArrayAttr.
+        AnyAttr:$stride,
+        AnyAttr:$padding,
+        AnyAttr:$dilation,
+        I64Attr:$groups
+    );
+
+    let results = (outs TT_Tensor:$result);
+
+    let assemblyFormat = [{
+        `(` operands `)`
+        attr-dict `:` functional-type(operands, $result)
     }];
 
     let hasVerifier = 1;

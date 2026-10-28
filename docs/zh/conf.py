@@ -36,7 +36,11 @@ extensions = [
     'sphinx.ext.mathjax',
     'myst_parser',
     'sphinx_copybutton',
+    'sphinxcontrib.mermaid',
 ]
+
+# Map ```mermaid code fences to the mermaid directive instead of rendering as code blocks.
+myst_fence_as_directive = ['mermaid']
 
 # -- MyST configuration -------------------------------------------------------
 # Enable dollar-math extension so that $$...$$ and $...$ syntax is parsed.
@@ -74,9 +78,6 @@ if _is_zh:
 else:
     exclude_patterns.extend(['../zh'])
 
-# python-api RST files require triton import; mock it at build time.
-autodoc_mock_imports = ['triton']
-
 _HERE = os.path.dirname(__file__)
 _REPO = os.path.abspath(os.path.join(_HERE, "..", ".."))
 
@@ -107,8 +108,25 @@ if _force_mock:
         os.path.join(_HERE, "_mock", "_triton_mock.py"),
     ).install()
 
+autodoc_mock_imports = []
+
 import triton
 import triton.language.extra as _tl_extra
+
+# Inject do_bench_npu from ascend backend into triton.testing for API docs
+_testing_npu_src = os.path.join(_REPO, "third_party", "ascend", "backend", "testing.py")
+if os.path.exists(_testing_npu_src):
+    _parse_src = _load_module(
+        "docs.zh.python-api._parse_source",
+        os.path.join(_HERE, "python-api", "_parse_source.py"),
+    )
+    _npu_testing_mod = _parse_src._create_source_module(
+        [_testing_npu_src],
+        "triton.backends.ascend.testing",
+        export_filter=["do_bench_npu"],
+    )
+    if hasattr(_npu_testing_mod, "do_bench_npu"):
+        triton.testing.do_bench_npu = _npu_testing_mod.do_bench_npu
 
 # Operator doc stubs — ``tensor`` operator syntax (``x / y``, ``x & y``,
 # ``x >= y``, ...) has no ``tl.``-prefixed functions; attach lightweight

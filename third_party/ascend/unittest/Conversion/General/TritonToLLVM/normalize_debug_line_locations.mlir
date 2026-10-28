@@ -89,6 +89,60 @@ func.return loc("glue.py":5:3)
 // -----
 
 //===----------------------------------------------------------------------===//
+// floating_point_conversion_classification
+//
+// Verifies that an arith.extf/truncf on its own source line remains semantic,
+// while the same operations are synthetic when a load/store already provides
+// the semantic anchor for that source line.
+//===----------------------------------------------------------------------===//
+
+module {
+func.func @floating_point_conversion_classification(%src: memref<4xf16>, %dst: memref<4xf16>, %wide: f32) {
+%c0 = arith.constant 0 : index loc("fp_conversion.py":10:3)
+%loaded = memref.load %src[%c0] : memref<4xf16> loc("fp_conversion.py":10:5)
+%aux_ext = arith.extf %loaded : f16 to f32 loc("fp_conversion.py":10:20)
+%standalone_ext = arith.extf %loaded : f16 to f32 loc("fp_conversion.py":11:5)
+%standalone_trunc = arith.truncf %standalone_ext : f32 to f16 loc("fp_conversion.py":12:5)
+%aux_trunc = arith.truncf %wide : f32 to f16 loc("fp_conversion.py":13:5)
+memref.store %aux_trunc, %dst[%c0] : memref<4xf16> loc("fp_conversion.py":13:20)
+func.return loc("fp_conversion.py":14:3)
+}
+}
+
+// CHECK-DAG: #[[$FP_AUX_EXT_ORIGIN:[A-Za-z0-9_]+]] = loc("fp_conversion.py":10:20)
+// CHECK-DAG: #[[$FP_AUX_TRUNC_ORIGIN:[A-Za-z0-9_]+]] = loc("fp_conversion.py":13:5)
+
+// CHECK-LABEL: func.func @floating_point_conversion_classification
+// CHECK: %[[FP_LOADED:[A-Za-z0-9_]+]] = memref.load
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[FP_LOAD_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[FP_AUX_EXT:[A-Za-z0-9_]+]] = arith.extf %[[FP_LOADED]]
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$FP_AUX_EXT_ORIGIN]]
+// CHECK-SAME: loc(#[[FP_SYNTH_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[FP_STANDALONE_EXT:[A-Za-z0-9_]+]] = arith.extf %[[FP_LOADED]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[FP_STANDALONE_EXT_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[FP_STANDALONE_TRUNC:[A-Za-z0-9_]+]] = arith.truncf %[[FP_STANDALONE_EXT]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[FP_STANDALONE_TRUNC_LOC:[A-Za-z0-9_]+]])
+// CHECK: %[[FP_AUX_TRUNC:[A-Za-z0-9_]+]] = arith.truncf
+// CHECK-SAME: triton.debug_line.class = "synthetic"
+// CHECK-SAME: triton.debug_line.origin = #[[$FP_AUX_TRUNC_ORIGIN]]
+// CHECK-SAME: loc(#[[FP_SYNTH_LOC]])
+// CHECK: memref.store %[[FP_AUX_TRUNC]]
+// CHECK-SAME: triton.debug_line.class = "semantic"
+// CHECK-SAME: loc(#[[FP_STORE_LOC:[A-Za-z0-9_]+]])
+
+// CHECK-DAG: #[[FP_SYNTH_LOC]] = loc("fp_conversion.py":0:0)
+// CHECK-DAG: #[[FP_LOAD_LOC]] = loc("fp_conversion.py":10:5)
+// CHECK-DAG: #[[FP_STANDALONE_EXT_LOC]] = loc("fp_conversion.py":11:5)
+// CHECK-DAG: #[[FP_STANDALONE_TRUNC_LOC]] = loc("fp_conversion.py":12:5)
+// CHECK-DAG: #[[FP_STORE_LOC]] = loc("fp_conversion.py":13:20)
+
+// -----
+
+//===----------------------------------------------------------------------===//
 // source_line_write_anchor
 //
 // Verifies the main write-anchor normalization case modeled after the loop

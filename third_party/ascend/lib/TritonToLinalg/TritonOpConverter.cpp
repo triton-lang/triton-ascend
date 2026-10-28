@@ -61,6 +61,7 @@
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HFusion/IR/HFusion.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 namespace TTOpConverters {
 using namespace mlir;
@@ -254,15 +255,15 @@ getScalarPointerCarrierType(Type originalType,
   return memrefType;
 }
 
-static FailureOr<Type>
-getIfResultCarrierType(Type originalType, const TypeConverter &typeConverter) {
+static Type getIfResultCarrierType(Type originalType) {
   if (isa<triton::PointerType>(originalType))
     return IntegerType::get(originalType.getContext(), 64);
 
-  Type convertedType = typeConverter.convertType(originalType);
-  if (!convertedType)
-    return failure();
-  return convertedType;
+  // This converter exists only to carry scalar pointers as integer addresses.
+  // Sibling results already have valid SSA types and must stay unchanged; using
+  // the global type converter here would turn a tensor mask into a memref even
+  // though its existing users still consume the tensor value.
+  return originalType;
 }
 
 // Materialize a no-op-compatible memref cast to the common carrier. Returning
@@ -387,12 +388,7 @@ IfConverter::matchAndRewrite(scf::IfOp op, OpAdaptor adaptor,
   SmallVector<Type> convertedResultTypes;
   convertedResultTypes.reserve(op.getNumResults());
   for (Type resultType : op.getResultTypes()) {
-    FailureOr<Type> convertedType =
-        getIfResultCarrierType(resultType, *typeConverter);
-    if (failed(convertedType))
-      return rewriter.notifyMatchFailure(op,
-                                         "could not convert an if result type");
-    convertedResultTypes.push_back(*convertedType);
+    convertedResultTypes.push_back(getIfResultCarrierType(resultType));
   }
 
   auto newIfOp = rewriter.create<scf::IfOp>(op.getLoc(), convertedResultTypes,
@@ -1705,7 +1701,7 @@ LogicalResult
 ScanConverter::convertToTargetOp(triton::ScanOp op,
                                  typename triton::ScanOp::Adaptor adaptor,
                                  ConversionPatternRewriter &rewriter) const {
-  auto reductionOps = this->getReductionOps(op);
+  auto reductionOps = this->getRealReductionOps(op);
   if (reductionOps.empty()) {
     return rewriter.notifyMatchFailure(op,
                                        "No reduction op found in scan body");
@@ -1744,14 +1740,13 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
       argTypes.push_back(rewriter.getI1Type());
     }
     auto libFnType = rewriter.getFunctionType(argTypes, {resTy});
-    auto funcOp = rewriter.create<func::FuncOp>(loc, funcName.str(), libFnType);
-
-    SymbolTable symTab(moduleOp);
-    auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-    if (failed(maybePrintFuncNameAttr)) {
-      return op->emitError(
-          "failed to create a unique func name for device_print");
-    }
+    // Unique the name before creating the op: building a SymbolTable over a
+    // module that already holds a symbol of this name -- a kernel named
+    // "triton_cumsum", say -- trips SymbolTable's "uniquely named symbol
+    // operations" assertion before any renaming can happen.
+    auto uniqueName = generateUniqueFuncName(moduleOp, funcName);
+    auto funcOp =
+        rewriter.create<func::FuncOp>(loc, uniqueName.str(), libFnType);
     SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
 
     rewriter.setInsertionPoint(op);
@@ -1803,8 +1798,19 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
 
     auto memrefType = MemRefType::get(shape, elementType);
     Value inputMemRef =
-        rewriter.create<bufferization::ToBufferOp>(loc, memrefType, scanInput);
-    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, memrefType);
+        rewriter.create<bufferization::ToMemrefOp>(loc, memrefType, scanInput);
+
+    // Wrap scan logic in a scope with UB address space for the output buffer.
+    auto tensorResultType = RankedTensorType::get(shape, elementType);
+    auto scopeOp =
+        rewriter.create<scope::ScopeOp>(loc, TypeRange{tensorResultType});
+    scopeOp.getBodyRegion().emplaceBlock();
+    rewriter.setInsertionPointToEnd(&scopeOp.getBodyRegion().front());
+
+    auto ubMemRefType = MemRefType::get(
+        shape, elementType, nullptr,
+        rewriter.getAttr<hivm::AddressSpaceAttr>(hivm::AddressSpace::UB));
+    Value outputMemRef = rewriter.create<memref::AllocOp>(loc, ubMemRefType);
 
     auto processDimension = [&](ArrayRef<Value> baseIdxsArray) {
       auto startInd = rewriter.create<arith::ConstantIndexOp>(op.getLoc(), 0);
@@ -1901,13 +1907,17 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
     createSimpleNestedLoops(rewriter, loc, outputMemRef, nonScanDims,
                             processDimension);
 
-    rewriter.setInsertionPointAfter(op);
-
     mlir::Type resultType = mlir::memref::getTensorTypeFromMemRefType(
         dyn_cast<mlir::MemRefType>(outputMemRef.getType()));
     Value outputTensor = rewriter.create<bufferization::ToTensorOp>(
         loc, resultType, outputMemRef, true);
-    rewriter.replaceOp(op, outputTensor);
+    rewriter.create<scope::ReturnOp>(loc, ValueRange{outputTensor});
+
+    scopeOp->setAttr(hivm::TCoreTypeAttr::name,
+                     hivm::TCoreTypeAttr::get(rewriter.getContext(),
+                                              hivm::TCoreType::VECTOR));
+
+    rewriter.replaceOp(op, scopeOp.getResult(0));
     return success();
   }
 }
@@ -1963,7 +1973,7 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     memRefTypes.push_back(memRefTy);
     // Convert input tensors to MemRefs
     inputMemRefs.push_back(
-        rewriter.create<bufferization::ToBufferOp>(loc, memRefTy, operands[i]));
+        rewriter.create<bufferization::ToMemrefOp>(loc, memRefTy, operands[i]));
     // Allocate MemRefs for outputs
     outputMemRefs.push_back(rewriter.create<memref::AllocOp>(loc, memRefTy));
   }
@@ -2270,6 +2280,12 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
       customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
+
+      // The frontend owns the libdevice workspace ABI and size calculation.
+      for (StringRef name : {"extra_buffers_types", "extra_buffers_sizes"}) {
+        if (Attribute attr = op->getAttr(name))
+          customOp->setAttr(name, attr);
+      }
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();
@@ -2594,14 +2610,11 @@ LogicalResult DevicePrintConverter::matchAndRewrite(
     inputTypes.push_back(arg.getType());
   }
   auto libFnType = rewriter.getFunctionType(inputTypes, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_print" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_print");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   auto prefixAttr = op.getPrefixAttr();
   funcOp->setAttr(prefixAttrName, prefixAttr);
@@ -2633,14 +2646,11 @@ LogicalResult DeviceAssertConverter::matchAndRewrite(
   auto conditionType = op.getCondition().getType();
 
   auto libFnType = rewriter.getFunctionType({conditionType}, {});
+  // See ScanConverter: the name is uniqued before the op is created so that a
+  // kernel named "triton_assert" cannot make SymbolTable assert.
+  auto funcName = generateUniqueFuncName(moduleOp, printFuncNameBase);
   auto funcOp =
-      rewriter.create<func::FuncOp>(op.getLoc(), printFuncNameBase, libFnType);
-  mlir::SymbolTable symTab(moduleOp);
-  auto maybePrintFuncNameAttr = symTab.renameToUnique(funcOp, {&symTab});
-  if (failed(maybePrintFuncNameAttr)) {
-    return op->emitError(
-        "failed to create a unique func name for device_assert");
-  }
+      rewriter.create<func::FuncOp>(op.getLoc(), funcName.str(), libFnType);
   SymbolTable::setSymbolVisibility(funcOp, SymbolTable::Visibility::Private);
   funcOp->setAttr(msgAttrName, msgAttr);
 
@@ -2830,7 +2840,7 @@ static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
   } else {
     auto srcBufferTy = MemRefType::get(t.getShape(), elemTy);
     Value srcBuffer =
-        rewriter.create<bufferization::ToBufferOp>(loc, srcBufferTy, v);
+        rewriter.create<bufferization::ToMemrefOp>(loc, srcBufferTy, v);
     rewriter.create<memref::CopyOp>(loc, srcBuffer, subview);
   }
 
@@ -3190,19 +3200,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   if (lhsScaleTy.getElementType().isIntOrIndex()) {
     RankedTensorType lhsScaleI16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), i16Ty);
-    Value lhsScaleI16 =
-        rewriter.create<arith::ExtSIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
-
-    Value lhsShift127Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
-    Value lhsShift127 =
-        rewriter
-            .create<linalg::FillOp>(op.getLoc(), ValueRange{c127},
-                                    ValueRange{lhsShift127Empty})
-            .getResult(0);
-
-    Value lhsScaleI16Add127 =
-        rewriter.create<arith::AddIOp>(op.getLoc(), lhsScaleI16, lhsShift127);
+    Value lhsScaleI16;
+    lhsScaleI16 =
+        rewriter.create<arith::ExtUIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
 
     Value lhsShift7Empty = rewriter.create<tensor::EmptyOp>(
         op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
@@ -3210,8 +3210,8 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                           .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
                                                   ValueRange{lhsShift7Empty})
                           .getResult(0);
-    Value lhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
-        op.getLoc(), lhsScaleI16Add127, lhsShift7);
+    Value lhsScaleI16Shifted =
+        rewriter.create<arith::ShLIOp>(op.getLoc(), lhsScaleI16, lhsShift7);
 
     RankedTensorType lhsScaleBF16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), bf16Ty);
@@ -3253,26 +3253,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         DenseI32ArrayAttr::get(rewriter.getContext(), ArrayRef<int32_t>{1, 0}));
     RankedTensorType rhsScaleI16Ty =
         RankedTensorType::get(transposedShape, i16Ty);
-    Value rhsScaleI16 = rewriter.create<arith::ExtSIOp>(
-        op.getLoc(), rhsScaleI16Ty, transposedRhsScale);
-    Value rhsShift127Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
-    Value rhsShift127 =
-        rewriter
-            .create<linalg::FillOp>(op.getLoc(), ValueRange{c127},
-                                    ValueRange{rhsShift127Empty})
-            .getResult(0);
+    Value rhsScaleI16;
+    rhsScaleI16 = rewriter.create<arith::ExtUIOp>(op.getLoc(), rhsScaleI16Ty,
+                                                  transposedRhsScale);
 
-    Value rhsScaleI16Add127 =
-        rewriter.create<arith::AddIOp>(op.getLoc(), rhsScaleI16, rhsShift127);
     Value rhsShift7Empty = rewriter.create<tensor::EmptyOp>(
         op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
     Value rhsShift7 = rewriter
                           .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
                                                   ValueRange{rhsShift7Empty})
                           .getResult(0);
-    Value rhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
-        op.getLoc(), rhsScaleI16Add127, rhsShift7);
+    Value rhsScaleI16Shifted =
+        rewriter.create<arith::ShLIOp>(op.getLoc(), rhsScaleI16, rhsShift7);
 
     RankedTensorType rhsScaleBF16Ty =
         RankedTensorType::get(transposedShape, bf16Ty);
@@ -3881,6 +3873,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
 
   // Get result type
   auto resultTensorType = cast<RankedTensorType>(op.getResult().getType());
+  static constexpr llvm::StringLiteral wasBoolToInt8AttrName =
+      "was_bool_to_int8";
+  bool wasBoolToInt8 = op->hasAttr(wasBoolToInt8AttrName);
 
   auto elemType = resultTensorType.getElementType();
   auto resultShape = resultTensorType.getShape();
@@ -4057,6 +4052,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
     // For index_select on the trailing axis, mark as discrete memory access
     // This degrades to scalar read/write handling to avoid alignment issues
     auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
     copyOp->setAttr(ConverterUtils::discreteAttrName, rewriter.getUnitAttr());
   } else {
     // For index_select on non-trailing axes, add stride alignment annotation
@@ -4069,7 +4066,9 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
                        rewriter.getDenseI32ArrayAttr({32}));
 
     // Copy from source to destination
-    rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    auto copyOp = rewriter.create<memref::CopyOp>(loc, srcSubview, dstSubview);
+    if (wasBoolToInt8)
+      copyOp->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
   }
 
   // Restore insertion point
@@ -4078,6 +4077,8 @@ LogicalResult IndexSelectSimdConverter::matchAndRewrite(
   // Convert memref to tensor
   auto resultTensor = rewriter.create<bufferization::ToTensorOp>(
       loc, resultTensorType, outputBuffer, true, true);
+  if (wasBoolToInt8)
+    resultTensor->setAttr(wasBoolToInt8AttrName, rewriter.getBoolAttr(true));
 
   // Mark as index_select_simd
   resultTensor->setAttr("index_select_simd", rewriter.getUnitAttr());

@@ -94,6 +94,14 @@ static bool isScalarIntegerLike(Value value) {
   return intTy && intTy.getWidth() > 1;
 }
 
+static bool isAutomaticOverflowAssert(triton::AssertOp assertOp) {
+  if (!assertOp || !assertOp->hasAttr("tt.auto_overflow_assert"))
+    return false;
+  auto message = dyn_cast<StringAttr>(assertOp.getMessageAttr());
+  return message &&
+         message.getValue().contains("overflow detected for operation");
+}
+
 // Match the canonical rowwise guard:
 //
 //   %pid = tt.get_program_id x
@@ -151,6 +159,8 @@ static std::optional<RowSeed> matchRowSeed(ModuleOp moduleOp) {
 static bool isRowLiftable(Operation *op) {
   if (isa<triton::ReturnOp, cf::BranchOp, cf::CondBranchOp>(op))
     return false;
+  if (auto assertOp = dyn_cast<triton::AssertOp>(op))
+    return isAutomaticOverflowAssert(assertOp);
   if (auto *dialect = op->getDialect()) {
     StringRef ns = dialect->getNamespace();
     if (ns == arith::ArithDialect::getDialectNamespace() ||
@@ -220,8 +230,7 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
   triton::GetProgramIdOp pid = seed.pid;
   Value pidVal = pid.getResult();
   Location loc = pid.getLoc();
-  Block *pidBlock = seed.pid->getBlock();
-  if (!pidBlock || !seed.workBlock)
+  if (!seed.entryGuard || !seed.workBlock)
     return false;
 
   auto liftTy = [&](Type t) -> RankedTensorType {
@@ -255,10 +264,7 @@ static bool rewriteMatchedRow(ModuleOp moduleOp, const RowSeed &seed,
     return Value();
   };
 
-  if (Operation *validDef = seed.validCount.getDefiningOp())
-    rw.setInsertionPointAfter(validDef);
-  else
-    rw.setInsertionPointAfter(seed.pid);
+  rw.setInsertionPoint(seed.entryGuard);
   Value cH = rw.create<arith::ConstantIntOp>(loc, H, 32);
   Value pidH = rw.create<arith::MulIOp>(loc, pidVal, cH);
   auto hI32Ty = RankedTensorType::get({H}, rw.getI32Type());

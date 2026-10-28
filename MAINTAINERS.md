@@ -7,6 +7,10 @@
 | Tianyao Wu | WuTYSFG | 2026-05-11 |
 | Yihan Zhou | KanuaK | 2026-05-11 |
 | Zhijie Zhao | insanecoder-zzj | 2025-09-27 |
+| Zhao Jingkai | elstainniles | 2026-09-17 |
+| Liu Huan  | LH-123L | 2026-09-17 |
+| Wei Zhan | zhanwei33 | 2026-09-17 |
+| Yichen Liu | Skyminers | 2026-09-17 |
 | Chunli Zhang | HEX1A0A | 2025-09-27 |
 | Ce Zhu | Cadenza4287 | 2025-12-23 |
 | Xuan Peng | HinPeng | 2025-12-23 |

@@ -17,12 +17,11 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Regression test for triton import time.
+"""Guard the lazy backend initialization introduced by PR #1200.
 
-Guards against accidental regressions from PR #1200 (lazy init of
-``is_compile_on_910_95`` and moving the check out of module import time).
-Import is measured in a fresh subprocess so the measurement is not masked by
-triton already being imported in the pytest worker process.
+A fixed import-time limit is unreliable when CI workers share CPU and I/O.
+Check the deferred work directly in a fresh subprocess, independently of
+modules already imported by pytest and its fixtures.
 """
 
 import subprocess
@@ -32,28 +31,25 @@ import pytest
 
 pytestmark = pytest.mark.backend("native")
 
-# Upper limit (ms) for ``import triton``. The baseline after PR #1200 is
-# ~240ms on the dev container; 1000ms gives ~4x headroom to absorb CI jitter
-# while still catching real regressions (e.g. re-introducing eager init).
-IMPORT_TIME_LIMIT_MS = 1000
+_IMPORT_SCRIPT = """
+import sys
+import triton
+from triton.backends.ascend import utils
 
-# Measure only the import call; interpreter startup is excluded by reading the
-# elapsed time from inside the subprocess.
-_TIMING_SCRIPT = ("import time\n"
-                  "t = time.perf_counter()\n"
-                  "import triton\n"
-                  "print((time.perf_counter() - t) * 1000)\n")
+assert utils._is_compile_on_910_95 is None, "import triton queried the device target"
+assert triton.runtime.driver._default is None, "import triton initialized the default driver"
+assert triton.runtime.driver._active is None, "import triton initialized the active driver"
+loaded_runtimes = sorted({"acl", "torch", "torch_npu", "mindspore"} & sys.modules.keys())
+assert not loaded_runtimes, f"import triton eagerly loaded runtime modules: {loaded_runtimes}"
+"""
 
 
-@pytest.mark.parametrize("run_id", range(3))
-def test_import_triton_time_under_limit(run_id):
+def test_import_triton_keeps_backend_initialization_lazy():
     result = subprocess.run(
-        [sys.executable, "-c", _TIMING_SCRIPT],
+        [sys.executable, "-c", _IMPORT_SCRIPT],
         capture_output=True,
         text=True,
-        check=True,
+        # Bound hangs; this is not a performance threshold.
+        timeout=60,
     )
-    elapsed_ms = float(result.stdout.strip())
-    msg = (f"run {run_id}: import triton took {elapsed_ms:.1f} ms "
-           f"(limit {IMPORT_TIME_LIMIT_MS} ms)")
-    assert elapsed_ms < IMPORT_TIME_LIMIT_MS, msg
+    assert result.returncode == 0, result.stdout + result.stderr

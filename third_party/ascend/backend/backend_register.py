@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import importlib.util
 import os
 from typing import Callable, Dict
 
@@ -73,19 +74,6 @@ class _LazyBackendStrategyRegister:
 
 
 backend_strategy_registry = _LazyBackendStrategyRegister()
-
-
-@backend_strategy_registry.register("mindspore", "version_hash")
-def version_hash():
-    import mindspore
-    return [str(mindspore.version)]
-
-
-@backend_strategy_registry.register("torch_npu", "version_hash")
-def version_hash():
-    import torch
-    import torch_npu
-    return [torch.version.git_version, torch_npu.version.git_version]
 
 
 @backend_strategy_registry.register("mindspore", "cxx_abi")
@@ -195,12 +183,21 @@ def get_cc_cmd():
     ]
 
 
+def _get_package_dir(package_name):
+    spec = importlib.util.find_spec(package_name)
+    if spec is None:
+        raise ModuleNotFoundError(f"No module named '{package_name}'")
+    if spec.submodule_search_locations:
+        return os.path.realpath(next(iter(spec.submodule_search_locations)))
+    if spec.origin is None:
+        raise ModuleNotFoundError(f"Cannot locate module '{package_name}'")
+    return os.path.dirname(os.path.realpath(spec.origin))
+
+
 @backend_strategy_registry.register("torch_npu", "get_cc_cmd_npu_utils")
 def get_cc_cmd_npu_utils():
-    import torch
-    import torch_npu
-    torch_path = os.path.dirname(os.path.realpath(torch.__file__))
-    torch_npu_path = os.path.dirname(os.path.realpath(torch_npu.__file__))
+    torch_path = _get_package_dir("torch")
+    torch_npu_path = _get_package_dir("torch_npu")
     cc_cmd = [
         f"-I{os.path.join(torch_path, 'include')}",
         f"-I{os.path.join(torch_npu_path, 'include')}",
@@ -259,80 +256,3 @@ def get_current_stream(device):
     else:
         from torch_npu._C import _npu_getCurrentRawStream
         return _npu_getCurrentRawStream(device)
-
-
-@backend_strategy_registry.register("mindspore", "header_file")
-def header_file(enable_taskqueue):
-    return f'''#include "include/utils/device_manager_conf.h"
-#include "include/runtime/hardware_abstract/device_context/device_context_manager.h"
-#include "include/mindspore/ops/kernel/ascend/aclnn/pyboost_impl/aclnn_utils.h"
-{'#include "include/pynative/utils/runtime/op_executor.h"' if {enable_taskqueue} else ''}
-{'#include "include/runtime/pipeline/pipeline.h"' if {enable_taskqueue} else ''}'''
-
-
-@backend_strategy_registry.register("torch_npu", "header_file")
-def header_file(enable_taskqueue):
-    return '#include <dlfcn.h>\n#include <functional>'
-
-
-@backend_strategy_registry.register("mindspore", "allocate_memory")
-def allocate_memory(size, stream):
-    return f'''auto work_ptr = std::make_shared<mindspore::kernel::pyboost::MemBlock>(device_context, {size}, reinterpret_cast<uint64_t>({stream}));
-    workspace_addr_ptr = work_ptr->ptr_;'''
-
-
-@backend_strategy_registry.register("torch_npu", "allocate_memory")
-def allocate_memory(size, stream):
-    return f'''init_npu_utils();
-    if (!g_allocate_workspace) {{
-      fprintf(stderr, "Error: triton_allocate_workspace is unavailable\\n");
-      workspace_addr_ptr = nullptr;
-    }} else {{
-      workspace_addr_ptr = g_allocate_workspace({size}, &workspace_handle);
-    }}'''
-
-
-@backend_strategy_registry.register("mindspore", "allocate_sync_block_lock")
-def allocate_sync_block_lock(size, stream):
-    return f'''auto sync_ptr = std::make_shared<mindspore::kernel::pyboost::MemBlock>(device_context, {size}, reinterpret_cast<uint64_t>({stream}));
-    syncBlockLock_ptr = sync_ptr->ptr_;'''
-
-
-@backend_strategy_registry.register("torch_npu", "allocate_sync_block_lock")
-def allocate_sync_block_lock(size, stream):
-    return f'''init_npu_utils();
-    if (!g_allocate_sync_block_lock) {{
-      fprintf(stderr, "Error: triton_allocate_sync_block_lock is unavailable\\n");
-      syncBlockLock_ptr = nullptr;
-    }} else {{
-      syncBlockLock_ptr = g_allocate_sync_block_lock({size}, {stream}, &syncBlockLock_handle);
-    }}'''
-
-
-@backend_strategy_registry.register("mindspore", "pre_launch")
-def pre_launch(first_call):
-    if first_call:
-        return '''static auto device_context = mindspore::device::DeviceContextManager::GetInstance().GetOrCreateDeviceContext({mindspore::device::DeviceType::kAscend, mindspore::DeviceManagerConf::GetInstance()->device_id()});
-        device_context->device_res_manager_->BindDeviceToCurrentThread(false);'''
-    else:
-        return '''device_context->device_res_manager_->BindDeviceToCurrentThread(false);'''
-
-
-@backend_strategy_registry.register("torch_npu", "pre_launch")
-def pre_launch(first_call):
-    return ""
-
-
-@backend_strategy_registry.register("mindspore", "async_launch")
-def async_launch(func):
-    return f'''mindspore::runtime::OpExecutor::DispatchLaunchTask({func});'''
-
-
-@backend_strategy_registry.register("torch_npu", "async_launch")
-def async_launch(func):
-    return f'''init_npu_utils();
-   if (!g_async_launch) {{
-     fprintf(stderr, "Error: triton_async_launch is unavailable\\n");
-     return;
-   }}
-   g_async_launch(static_cast<void*>(&{func}), kernelName);'''

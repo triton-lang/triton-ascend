@@ -33,17 +33,9 @@ import hashlib
 from triton.runtime.cache import get_cache_manager, get_dump_manager, default_cache_dir
 from triton.backends.driver import DriverBase
 from triton.backends.compiler import GPUTarget
-from triton.backends.ascend.utils import (
-    _build_npu_ext,
-    _check_cxx11_abi,
-    convert_sigtype_to_int,
-    _is_auto_map_parallel_blocks_enabled,
-    get_ascend_arch_from_env,
-    is_ffts_supported,
-    force_disable_ffts,
-    get_backend_func,
-    get_cann_version
-)
+from triton.backends.ascend.utils import (_build_npu_ext, _check_cxx11_abi, convert_sigtype_to_int,
+                                          _is_auto_map_parallel_blocks_enabled, get_ascend_arch_from_env,
+                                          is_ffts_supported, force_disable_ffts, get_backend_func, get_cann_version)
 # Bind the already-imported utils module once so the launch hot path can write
 # TRITON_PROFILER_REGISTERED without a per-launch `import triton` + attribute walk.
 import triton.backends.ascend.utils as _ascend_utils
@@ -74,6 +66,7 @@ def _cache_build_lock(cache):
 
 
 class NPUUtils(object):
+
     def __new__(cls):
         if not hasattr(cls, 'instance'):
             cls.instance = super(NPUUtils, cls).__new__(cls)
@@ -148,7 +141,7 @@ class NPUUtils(object):
         prop = torch.npu.get_device_properties(device)
         cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
         return cube_core_num, vector_core_num
-    
+
     @functools.lru_cache()
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
@@ -172,9 +165,11 @@ class NPUUtils(object):
 
 
 class NPULauncher(object):
+
     def __init__(self, src, metadata):
         self.compile_only = os.getenv("TRITON_COMPILE_ONLY", 'false').lower() in ('true', '1')
-        self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF", 'false').lower() in ('true', '1')
+        self.enable_msprof_register_tensor = os.getenv("TRITON_REGISTER_TENSOR_MSPROF",
+                                                       'false').lower() in ('true', '1')
         self.src = src
         self.metadata = metadata
         self.so_launcher_path = self._make_launcher_stub_path()
@@ -213,11 +208,13 @@ class NPULauncher(object):
         else:
             if self.compile_only:
                 return
-  
+
             profiler_registered = self.launch(*args, **kwargs)
             _ascend_utils.TRITON_PROFILER_REGISTERED = (profiler_registered == 1)
 
+
 class NPUDriver(DriverBase):
+
     def __init__(self):
         self.utils = NPUUtils()
         self.launcher_cls = NPULauncher
@@ -225,11 +222,13 @@ class NPUDriver(DriverBase):
 
     @classmethod
     def is_active(cls):
+
         def test_npucompiler():
             from triton.backends.ascend.utils import _get_bisheng_path
             npucompiler = _get_bisheng_path()
             targets = subprocess.check_output([npucompiler, "-print-targets"]).decode().strip().split()
             return "hiipu64" in targets
+
         try:
             return test_npucompiler()
         except Exception as e_npucompiler:
@@ -297,7 +296,7 @@ def make_npu_launcher_stub(header_src, wrapper_src, debug=False):
         print(f"Dumping precompiled.h to {dump_manager.cache_dir}")
         dump_manager.put(header_src, "precompiled.h", binary=False)
         print(f"Dumping {name}.cxx to {dump_manager.cache_dir}")
-        dump_manager.put(wrapper_src, f"{name}.cxx", binary = False)
+        dump_manager.put(wrapper_src, f"{name}.cxx", binary=False)
 
     cache_path = so_cache_manager.get_file(so_name)
     if cache_path is not None:
@@ -399,8 +398,7 @@ def extract_device_print_code_from_cann():
 
 
 def generate_npu_header_src():
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
     return f"""
 #ifndef TRITON_NPU_HEADERS
 #define TRITON_NPU_HEADERS
@@ -412,6 +410,9 @@ def generate_npu_header_src():
 #include <memory>
 #include <sys/syscall.h>
 #include <vector>
+#include <map>
+#include <mutex>
+#include <tuple>
 #include <Python.h>
 #include "runtime/runtime/rt.h"
 #ifdef TRITON_CANN_910
@@ -428,7 +429,7 @@ static constexpr cann_error CANN_SUCCESS = ACL_SUCCESS;
 static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = ACL_MEMCPY_HOST_TO_DEVICE;
 static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return aclrtMallocHost(ptr, size); }}
 static inline cann_error cann_free_host(void *ptr) {{ return aclrtFreeHost(ptr); }}
-static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return aclrtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memcpy_async(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind, cann_stream stream) {{ return aclrtMemcpyAsync(dst, destMax, src, count, kind, stream); }}
 static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return aclrtMemsetAsync(dst, destMax, value, count, stream); }}
 static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return aclrtSynchronizeStream(stream); }}
 static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ return aclrtGetHardwareSyncAddr(addr); }}
@@ -455,7 +456,7 @@ static constexpr cann_error CANN_SUCCESS = RT_ERROR_NONE;
 static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = RT_MEMCPY_HOST_TO_DEVICE;
 static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return rtMallocHost(ptr, size, RT_MEMORY_HOST); }}
 static inline cann_error cann_free_host(void *ptr) {{ return rtFreeHost(ptr); }}
-static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return rtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memcpy_async(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind, cann_stream stream) {{ return rtMemcpyAsync(dst, destMax, src, count, kind, stream); }}
 static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return rtMemsetAsync(dst, destMax, value, count, stream); }}
 static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return rtStreamSynchronize(stream); }}
 static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ uint32_t len = 0; return rtGetC2cCtrlAddr(reinterpret_cast<uint64_t *>(addr), &len); }}
@@ -479,6 +480,47 @@ static inline void* cann_get_launch_kernel_cfg(uint32_t shared_mem_dynamic_size)
 
 #endif
 
+// Initialize the reusable lock workspace asynchronously on the compute stream.
+// Synchronous cann_memcpy does not synchronize with the stream, so a prior
+// kernel still consuming the lock buffer could be clobbered. Cache pinned
+// host templates for the lifetime of the process: queued copies and captured
+// graphs may outlive the launch that first used them.
+static inline cann_error initializeLocks(uint64_t orderedLocks,
+                                         uint64_t unorderedLocks,
+                                         uint64_t participants,
+                                         int64_t lockInitValue,
+                                         uint64_t bytes,
+                                         uint64_t elements,
+                                         uint64_t orderedElements,
+                                         uint64_t unorderedStride,
+                                         void *dst, cann_stream stream) {{
+  using Key = std::tuple<uint64_t, uint64_t, uint64_t, int64_t>;
+  static std::mutex mutex;
+  static std::map<Key, void *> templates;
+  const void *src;
+  {{
+    std::lock_guard<std::mutex> guard(mutex);
+    auto &cached = templates[Key(orderedLocks, unorderedLocks, participants,
+                                 lockInitValue)];
+    if (!cached) {{
+      void *data = nullptr;
+      cann_error ret = cann_malloc_host(&data, bytes);
+      if (ret != CANN_SUCCESS)
+        return ret;
+      auto *init = static_cast<int64_t *>(data);
+      for (uint64_t i = 0; i < elements; ++i)
+        init[i] = unorderedLocks ? 0 : lockInitValue;
+      for (uint64_t i = 0; i < unorderedLocks; ++i)
+        init[orderedElements + i * unorderedStride] =
+            static_cast<int64_t>(participants);
+      cached = data;
+    }}
+    src = cached;
+  }}
+  return cann_memcpy_async(dst, bytes, src, bytes, CANN_MEMCPY_HOST_TO_DEVICE,
+                           stream);
+}}
+
 {get_backend_func("header_file", enable_taskqueue)}
 #endif
 """
@@ -489,11 +531,8 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     import os
     workspace_size = int(metadata.workspace_size) \
                           if hasattr(metadata, 'workspace_size') else -1
-    lock_init_value = int(
-        metadata.lock_init_value if hasattr(metadata, 'lock_init_value')
-        else metadata.lock_init_val if hasattr(metadata, 'lock_init_val')
-        else 0
-    )
+    lock_init_value = int(metadata.lock_init_value if hasattr(metadata, 'lock_init_value') else metadata.
+                          lock_init_val if hasattr(metadata, 'lock_init_val') else 0)
     sync_block_lock_layout = int(getattr(metadata, "sync_block_lock_layout", 0))
     ordered_sync_block_lock_count = sync_block_lock_layout & 0xFFFFFFFF
     unordered_sync_block_lock_count = (sync_block_lock_layout >> 32) & 0xFFFFFFFF
@@ -514,31 +553,21 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     const uint64_t syncBlockLockI64Count = syncBlockLockOrderedI64Count +
         syncBlockLockUnorderedCount * syncBlockLockUnorderedStrideI64;
     const uint64_t syncBlockLockSize = syncBlockLockI64Count * sizeof(int64_t);"""
-    # Initialize on the compute stream. Each unordered lock stores its exact
-    # participant count at the first cache line of its dynamic region.
-    if unordered_sync_block_lock_count > 0:
-        lock_init_stmt = f"""
-    std::vector<int64_t> lockInitData(syncBlockLockI64Count, 0);
-    for (uint64_t lockIndex = 0; lockIndex < syncBlockLockUnorderedCount;
-         ++lockIndex) {{
-      const uint64_t lockOffset = syncBlockLockOrderedI64Count +
-          lockIndex * syncBlockLockUnorderedStrideI64;
-      lockInitData[lockOffset] =
-          static_cast<int64_t>(syncBlockLockParticipantNum);
-    }}
-    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize,
-                   reinterpret_cast<void *>(lockInitData.data()),
-                   syncBlockLockSize, CANN_MEMCPY_HOST_TO_DEVICE);"""
-    elif lock_init_value == 0:
-        lock_init_stmt = (
-            "ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
-            "syncBlockLockSize, stream);")
+    # Initialize on the compute stream. Synchronous memcpy is not ordered
+    # against the stream and could overwrite lock state still consumed by a
+    # previous kernel, so non-zero patterns go through initializeLocks which
+    # copies a cached pinned host template asynchronously on the stream.
+    if not unordered_sync_block_lock_count and not lock_init_value:
+        lock_init_stmt = ("ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
+                          "syncBlockLockSize, stream);")
     else:
-        lock_init_stmt = (
-            f"std::vector<int64_t> lockInitData({syncBlockLockI64Count}, {lock_init_value});\n"
-            "    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize, "
-            "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-            "CANN_MEMCPY_HOST_TO_DEVICE);")
+        lock_init_stmt = ("ret = initializeLocks("
+                          "syncBlockLockOrderedCount, syncBlockLockUnorderedCount, "
+                          "syncBlockLockParticipantNum, "
+                          f"{lock_init_value}, "
+                          "syncBlockLockSize, syncBlockLockI64Count, "
+                          "syncBlockLockOrderedI64Count, syncBlockLockUnorderedStrideI64, "
+                          "syncBlockLock_ptr, stream);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95
@@ -638,23 +667,17 @@ def generate_npu_wrapper_src(constants, signature, metadata):
 
     arch = get_ascend_arch_from_env()
     target_support_ffts = is_ffts_supported(arch) and (not force_disable_ffts())
-    enable_device_print = os.getenv(
-        "TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
-    enable_taskqueue = os.getenv(
-        "TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
-    enable_grid_warn_print = os.getenv(
-        "TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
+    enable_device_print = os.getenv("TRITON_DEVICE_PRINT", 'false').lower() in ('true', '1')
+    enable_taskqueue = os.getenv("TRITON_ENABLE_TASKQUEUE", 'true').lower() in ('true', '1')
+    enable_grid_warn_print = os.getenv("TRITON_GRID_WARN_PRINT", 'false').lower() in ('true', '1')
     has_auto_blockify_blacklist_op = getattr(
-      metadata,
-      "has_auto_blockify_blacklist_op",
-      False,
+        metadata,
+        "has_auto_blockify_blacklist_op",
+        False,
     )
-    enable_auto_map_parallel_blocks = (
-      _is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op
-    )
+    enable_auto_map_parallel_blocks = (_is_auto_map_parallel_blocks_enabled() and not has_auto_blockify_blacklist_op)
     npu_utils = NPUUtils()
-    num_physical_blocks = npu_utils.get_aivector_core_num(
-    ) if mix_mode == "aiv" else npu_utils.get_aicore_num()
+    num_physical_blocks = npu_utils.get_aivector_core_num() if mix_mode == "aiv" else npu_utils.get_aicore_num()
     task_type, mix_block_dim_ratio = _format_of_msprof_task_type_ratio(bs_task_type, mix_mode)
     is_mix_task_type = "true" if ("MIX" in task_type) else "false"
     LINE_CHANGE_CHAR = chr(10)  # it is \n
@@ -663,12 +686,8 @@ def generate_npu_wrapper_src(constants, signature, metadata):
     workspace_fail_code = 'fprintf(stderr, "Error: workspace allocation failed\\n"); return;'
     launch_signature_items = [(i, ty) for i, ty in signature.items() if i not in constants]
     launch_arg_count = len(launch_signature_items)
-    launch_arg_ptrs = ', '.join(
-        f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items
-    )
-    launch_arg_sizes = ', '.join(
-        f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items
-    )
+    launch_arg_ptrs = ', '.join(f'static_cast<const void*>(&arg{i})' for i, ty in launch_signature_items)
+    launch_arg_sizes = ', '.join(f'sizeof({_ty_to_cpp(ty)})' for i, ty in launch_signature_items)
 
     npu_utils_so_path = NPUUtils().get_so_path()
     cpp_npu_utils_dlopen = f"""
@@ -723,11 +742,9 @@ static void release_npu_tensor_handle(void* handle) {{
     coalesce_axis = int(getattr(metadata, "coalesce_axis", -1))
     if coalesce_factor > 1 and coalesce_axis in (0, 1, 2):
         _coalesce_grid_var = {0: "gridX", 1: "gridY", 2: "gridZ"}[coalesce_axis]
-        coalesce_grid_div = (
-            f"// coalescing: each program covers {coalesce_factor} tiles along "
-            f"axis {coalesce_axis}; shrink that grid dim.\n"
-            f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};"
-        )
+        coalesce_grid_div = (f"// coalescing: each program covers {coalesce_factor} tiles along "
+                             f"axis {coalesce_axis}; shrink that grid dim.\n"
+                             f"  {_coalesce_grid_var} = {_coalesce_grid_var} / {coalesce_factor};")
     else:
         coalesce_grid_div = ""
 

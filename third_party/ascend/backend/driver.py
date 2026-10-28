@@ -455,6 +455,9 @@ def generate_npu_header_src():
 #include <memory>
 #include <sys/syscall.h>
 #include <vector>
+#include <map>
+#include <mutex>
+#include <tuple>
 #include <Python.h>
 #include "runtime/runtime/rt.h"
 #include <acl/acl.h>
@@ -471,7 +474,7 @@ static constexpr cann_error CANN_SUCCESS = ACL_SUCCESS;
 static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = ACL_MEMCPY_HOST_TO_DEVICE;
 static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return aclrtMallocHost(ptr, size); }}
 static inline cann_error cann_free_host(void *ptr) {{ return aclrtFreeHost(ptr); }}
-static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return aclrtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memcpy_async(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind, cann_stream stream) {{ return aclrtMemcpyAsync(dst, destMax, src, count, kind, stream); }}
 static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return aclrtMemsetAsync(dst, destMax, value, count, stream); }}
 static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return aclrtSynchronizeStream(stream); }}
 static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ return aclrtGetHardwareSyncAddr(addr); }}
@@ -500,7 +503,7 @@ static constexpr cann_error CANN_SUCCESS = RT_ERROR_NONE;
 static constexpr cann_memcpy_kind CANN_MEMCPY_HOST_TO_DEVICE = RT_MEMCPY_HOST_TO_DEVICE;
 static inline cann_error cann_malloc_host(void **ptr, size_t size) {{ return rtMallocHost(ptr, size, RT_MEMORY_HOST); }}
 static inline cann_error cann_free_host(void *ptr) {{ return rtFreeHost(ptr); }}
-static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind) {{ return rtMemcpy(dst, destMax, src, count, kind); }}
+static inline cann_error cann_memcpy_async(void *dst, size_t destMax, const void *src, size_t count, cann_memcpy_kind kind, cann_stream stream) {{ return rtMemcpyAsync(dst, destMax, src, count, kind, stream); }}
 static inline cann_error cann_memset_async(void *dst, size_t destMax, int32_t value, size_t count, cann_stream stream) {{ return rtMemsetAsync(dst, destMax, value, count, stream); }}
 static inline cann_error cann_synchronize_stream(cann_stream stream) {{ return rtStreamSynchronize(stream); }}
 static inline cann_error cann_get_hardware_sync_addr(void **addr) {{ uint32_t len = 0; return rtGetC2cCtrlAddr(reinterpret_cast<uint64_t *>(addr), &len); }}
@@ -521,6 +524,47 @@ static inline void* cann_get_launch_kernel_cfg(uint32_t shared_mem_dynamic_size)
   return &cfgInfo;
 }}
 #endif
+
+// Initialize the reusable lock workspace asynchronously on the compute stream.
+// Synchronous cann_memcpy does not synchronize with the stream, so a prior
+// kernel still consuming the lock buffer could be clobbered. Cache pinned
+// host templates for the lifetime of the process: queued copies and captured
+// graphs may outlive the launch that first used them.
+static inline cann_error initializeLocks(uint64_t orderedLocks,
+                                         uint64_t unorderedLocks,
+                                         uint64_t participants,
+                                         int64_t lockInitValue,
+                                         uint64_t bytes,
+                                         uint64_t elements,
+                                         uint64_t orderedElements,
+                                         uint64_t unorderedStride,
+                                         void *dst, cann_stream stream) {{
+  using Key = std::tuple<uint64_t, uint64_t, uint64_t, int64_t>;
+  static std::mutex mutex;
+  static std::map<Key, void *> templates;
+  const void *src;
+  {{
+    std::lock_guard<std::mutex> guard(mutex);
+    auto &cached = templates[Key(orderedLocks, unorderedLocks, participants,
+                                 lockInitValue)];
+    if (!cached) {{
+      void *data = nullptr;
+      cann_error ret = cann_malloc_host(&data, bytes);
+      if (ret != CANN_SUCCESS)
+        return ret;
+      auto *init = static_cast<int64_t *>(data);
+      for (uint64_t i = 0; i < elements; ++i)
+        init[i] = unorderedLocks ? 0 : lockInitValue;
+      for (uint64_t i = 0; i < unorderedLocks; ++i)
+        init[orderedElements + i * unorderedStride] =
+            static_cast<int64_t>(participants);
+      cached = data;
+    }}
+    src = cached;
+  }}
+  return cann_memcpy_async(dst, bytes, src, bytes, CANN_MEMCPY_HOST_TO_DEVICE,
+                           stream);
+}}
 """
 
 
@@ -760,29 +804,21 @@ def make_launcher(constants, signature, metadata):
     const uint64_t syncBlockLockI64Count = syncBlockLockOrderedI64Count +
         syncBlockLockUnorderedCount * syncBlockLockUnorderedStrideI64;
     const uint64_t syncBlockLockSize = syncBlockLockI64Count * sizeof(int64_t);"""
-    # Initialize on the compute stream. Each unordered lock stores its exact
-    # participant count at the first cache line of its dynamic region.
-    if unordered_sync_block_lock_count > 0:
-        lock_init_stmt = f"""
-    std::vector<int64_t> lockInitData(syncBlockLockI64Count, 0);
-    for (uint64_t lockIndex = 0; lockIndex < syncBlockLockUnorderedCount;
-         ++lockIndex) {{
-      const uint64_t lockOffset = syncBlockLockOrderedI64Count +
-          lockIndex * syncBlockLockUnorderedStrideI64;
-      lockInitData[lockOffset] =
-          static_cast<int64_t>(syncBlockLockParticipantNum);
-    }}
-    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize,
-                   reinterpret_cast<void *>(lockInitData.data()),
-                   syncBlockLockSize, CANN_MEMCPY_HOST_TO_DEVICE);"""
-    elif lock_init_value == 0:
+    # Initialize on the compute stream. Synchronous memcpy is not ordered
+    # against the stream and could overwrite lock state still consumed by a
+    # previous kernel, so non-zero patterns go through initializeLocks which
+    # copies a cached pinned host template asynchronously on the stream.
+    if not unordered_sync_block_lock_count and not lock_init_value:
         lock_init_stmt = ("ret = cann_memset_async(syncBlockLock_ptr, syncBlockLockSize, 0, "
                           "syncBlockLockSize, stream);")
     else:
-        lock_init_stmt = (f"std::vector<int64_t> lockInitData(syncBlockLockI64Count, {lock_init_value});\n"
-                          "    ret = cann_memcpy(syncBlockLock_ptr, syncBlockLockSize, "
-                          "reinterpret_cast<void *>(lockInitData.data()), syncBlockLockSize, "
-                          "CANN_MEMCPY_HOST_TO_DEVICE);")
+        lock_init_stmt = ("ret = initializeLocks("
+                          "syncBlockLockOrderedCount, syncBlockLockUnorderedCount, "
+                          "syncBlockLockParticipantNum, "
+                          f"{lock_init_value}, "
+                          "syncBlockLockSize, syncBlockLockI64Count, "
+                          "syncBlockLockOrderedI64Count, syncBlockLockUnorderedStrideI64, "
+                          "syncBlockLock_ptr, stream);")
     bs_task_type = metadata.bs_task_type if hasattr(metadata, 'bs_task_type') else 0
     mix_mode = metadata.mix_mode
     compile_on_910_95 = metadata.compile_on_910_95

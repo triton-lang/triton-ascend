@@ -101,7 +101,7 @@ tt.func @atomic_min_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
 }
 
 // CHECK-LABEL: tt.func @atomic_umin_i32
-// CHECK: %[[default:.*]] = arith.constant dense<2147483647> : tensor<1024xi32>
+// CHECK: %[[default:.*]] = arith.constant dense<-1> : tensor<1024xi32>
 // CHECK: %[[value:.*]] = arith.select %[[mask:.*]], %[[origin:.*]], %[[default]]
 // CHECK: %[[result:.*]] = tt.atomic_rmw umin, acq_rel, gpu, %[[ptr:.*]], %[[value]]
 tt.func @atomic_umin_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
@@ -121,7 +121,7 @@ tt.func @atomic_umin_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {
 }
 
 // CHECK-LABEL: tt.func @atomic_and_i32
-// CHECK: %[[default:.*]] = arith.constant dense<2147483647> : tensor<1024xi32>
+// CHECK: %[[default:.*]] = arith.constant dense<-1> : tensor<1024xi32>
 // CHECK: %[[value:.*]] = arith.select %[[mask:.*]], %[[origin:.*]], %[[default]]
 // CHECK: %[[result:.*]] = tt.atomic_rmw and, acq_rel, gpu, %[[ptr:.*]], %[[value]]
 tt.func @atomic_and_i32(%arg0: !tt.ptr<i32>, %arg1: !tt.ptr<i32>) {

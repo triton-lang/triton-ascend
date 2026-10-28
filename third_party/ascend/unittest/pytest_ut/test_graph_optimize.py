@@ -31,6 +31,7 @@ from triton._C.libtriton import ascend, ir
 from triton._C.libtriton.ascend import ir as ascend_ir
 from triton.backends.ascend.compiler import NPUOptions, make_ttir
 from triton.backends.ascend.program_grid import (
+    ATOMIC_MASK_CANONICALIZATION_RULE_BIT,
     DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK,
     INDEPENDENT_AXIS_TENSORIZE_RULE_BIT,
     PERSISTENT_TASK_STRIP_MINING_RULE_BIT,
@@ -306,6 +307,7 @@ def test_default_graph_mask_enables_iat_and_ptsm():
     expected_mask = 511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT | PERSISTENT_TASK_STRIP_MINING_RULE_BIT
 
     assert DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK == expected_mask
+    assert not (expected_mask & ATOMIC_MASK_CANONICALIZATION_RULE_BIT)
     assert NPUOptions(arch="Ascend910_95").rule_mask == expected_mask
 
 

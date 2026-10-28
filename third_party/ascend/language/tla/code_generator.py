@@ -34,18 +34,35 @@ def handle_scope_with(generator, node):
 
     The register ops stay inline (sharing the enclosing function's scope, so
     buffer handles are used directly, without function-argument remapping).
+
+    Names assigned in this region are rejected if a later (or nested) region of
+    the other core reads them. The check runs before any scope op is emitted.
     """
     from triton.compiler.code_generator import enter_sub_region
 
+    from .scope_check import check_scope_body, install_scope_tracking
+
     context_expr = node.items[0].context_expr
     withitem_class = generator.visit(context_expr.func)
-
-    with enter_sub_region(generator):
-        scope_op = generator.builder.create_scope_op(withitem_class.mlir_attrs(generator.builder), [])
-        body = generator.builder.get_scope_entry_block(scope_op)
-        generator.builder.set_insertion_point_to_start(body)
-        generator.visit_compound_statement(node.body)
-        generator.builder.set_insertion_point_to_end(body)
-        if not body.has_terminator():
-            generator.builder.scope_return([])
+    install_scope_tracking(generator)
+    mode = getattr(withitem_class, "core_mode", None)
+    if mode not in ("vector", "cube"):
+        mode = None
+    stack = generator._tla_scope_stack
+    if mode is not None:
+        stack.append(mode)
+    try:
+        if mode is not None:
+            check_scope_body(node.body, mode, generator._tla_scope_defs)
+        with enter_sub_region(generator):
+            scope_op = generator.builder.create_scope_op(withitem_class.mlir_attrs(generator.builder), [])
+            body = generator.builder.get_scope_entry_block(scope_op)
+            generator.builder.set_insertion_point_to_start(body)
+            generator.visit_compound_statement(node.body)
+            generator.builder.set_insertion_point_to_end(body)
+            if not body.has_terminator():
+                generator.builder.scope_return([])
+    finally:
+        if mode is not None:
+            stack.pop()
     return None

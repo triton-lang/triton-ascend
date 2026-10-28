@@ -222,3 +222,53 @@ def test_scaled_dot_fast_math(normal_type):
 
     torch.testing.assert_close(out_fast_math, ref_fast_math, atol=1e-3, rtol=1e-2, equal_nan=True)
     torch.testing.assert_close(out_precise, ref_precise, atol=1e-3, rtol=1e-2, equal_nan=True)
+
+
+@pytest.mark.parametrize("M, N", [(16, 32), (32, 16)])
+@pytest.mark.parametrize("K, rhs_scale", [(16, "none")] + list(itertools.product([32, 64], ["none", "finite", "nan"])))
+@pytest.mark.parametrize("with_acc", [False, True])
+@pytest.mark.parametrize("fast_math", [False, True])
+def test_scaled_dot_fp16_missing_lhs_scale(M, N, K, rhs_scale, with_acc, fast_math):
+
+    @triton.jit
+    def kernel(A, B, S, C, O, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, WITH_ACC: tl.constexpr,
+               FAST_MATH: tl.constexpr):
+        m = tl.arange(0, M)
+        n = tl.arange(0, N)
+        k = tl.arange(0, K)
+        a = tl.load(A + m[:, None] * K + k[None, :])
+        b = tl.load(B + k[:, None] * N + n[None, :])
+        scale_b = None
+        if S is not None:
+            scale_b = tl.load(S + n[:, None] * (K // 32) + tl.arange(0, K // 32)[None, :])
+        acc = None
+        if WITH_ACC:
+            acc = tl.load(C + m[:, None] * N + n[None, :])
+        result = tl.dot_scaled(a, None, "fp16", b, scale_b, "fp16", acc=acc, fast_math=FAST_MATH, out_dtype=tl.float32)
+        tl.store(O + m[:, None] * N + n[None, :], result)
+
+    generator = torch.Generator().manual_seed(0)
+    a = torch.randint(-4, 5, (M, K), generator=generator).to(torch.float16) / 4
+    b = torch.randint(-4, 5, (K, N), generator=generator).to(torch.float16) / 4
+    c = torch.randint(-3, 4, (M, N), generator=generator).to(torch.float32) / 8
+    scale = None
+    scaled_b = b.float()
+    if rhs_scale != "none":
+        # E8M0 encodings for the exact factors 1/4, 1, and 4.
+        encodings = torch.tensor([125, 127, 129], dtype=torch.uint8)
+        scale = encodings[torch.arange(N * (K // 32)).reshape(N, K // 32) % 3]
+        if rhs_scale == "nan":
+            scale[5, 0] = 255
+        expanded = scale.T.repeat_interleave(32, dim=0)
+        scaled_b = b.float() * torch.pow(2.0, expanded.float() - 127)
+        if not fast_math:
+            scaled_b = scaled_b.masked_fill(expanded == 255, float("nan"))
+    expected = a.float() @ scaled_b
+    if with_acc:
+        expected += c
+
+    out = torch.empty((M, N), dtype=torch.float32, device="npu")
+    kernel[(1, )](a.npu(), b.npu(), scale.npu() if scale is not None else None, c.npu() if with_acc else None, out, M,
+                  N, K, with_acc, fast_math)
+    # Dyadic inputs and powers of two give exact FP32 reference results.
+    torch.testing.assert_close(out.cpu(), expected, atol=0, rtol=0, equal_nan=True)

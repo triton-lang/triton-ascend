@@ -155,6 +155,12 @@ private:
   OpCoreType getCoreType(Operation *op) const;
   OpCoreType getForInitCoreType(OpOperand *operand) const;
 
+  // True if `def` genuinely produces the carried value on the VECTOR side:
+  // a region-less VECTOR compute op (e.g. tensor arith/math). Region
+  // containers are excluded (their op-level core type is unreliable).
+  // The producer op itself is obtained via CVPipeline::getLoopCarriedDefOp.
+  bool isVectorProducerOp(Operation *def) const;
+
   // Set the core type of an operation
   void setCoreType(Operation *op, OpCoreType coreType);
 

@@ -803,7 +803,10 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
   return false;
 }
 
-// Propagate CUBE core type upstream
+// Propagate CUBE core type upstream. Seeded from the curated `cubeSeeds`
+// only: `scf.for` / `scf.while` are never seeds and a tensor iter_arg has
+// no defining op, so this BFS cannot reach an iter_args init def — no
+// `skipIterArgInits` shield is needed here (unlike propagateVectorUpstream).
 int OpClassifierPass::propagateCubeUpstream() {
   LLVM_DEBUG(DBGS() << "--- Step 2: CUBE upstream BFS --->\n");
   llvm::DenseSet<Operation *> cubeVisited;
@@ -1055,6 +1058,24 @@ int OpClassifierPass::propagateVectorUpstream() {
     llvm::SmallVector<Operation *> upstreamOps;
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
+    // An iter_args init's classification is driven by its body-side
+    // consumers; VECTOR from the loop's external consumers must not leak
+    // onto it. Exception: a VECTOR-produced recurrence — the yielded value
+    // comes from a genuine VECTOR compute op while CUBE users merely read
+    // it (e.g. matmul ins) — whose init must stay VECTOR-colorable so
+    // Step 7 splits it and binds the VECTOR clone to the loop.
+    llvm::SmallPtrSet<Operation *, 4> skipIterArgInits;
+    if (auto loop = dyn_cast<LoopLikeOpInterface>(cur)) {
+      for (OpOperand &init : loop.getInitsMutable()) {
+        BlockArgument iterArg = loop.getTiedLoopRegionIterArg(&init);
+        if (iterArg && isVectorProducerOp(CVPipeline::getLoopCarriedDefOp(
+                           iterArg, iterArg.getOwner())))
+          continue;
+        if (Operation *defOp = init.get().getDefiningOp())
+          skipIterArgInits.insert(defOp);
+      }
+    }
+
     for (Operation *def : upstreamOps) {
       if (!def || vecVisited.count(def))
         continue;
@@ -1068,10 +1089,17 @@ int OpClassifierPass::propagateVectorUpstream() {
         continue;
       }
 
+      // Skip iter_args init defs — see comment above the SmallPtrSet.
+      if (skipIterArgInits.count(def)) {
+        LLVM_DEBUG(DBGS() << "skip " << *def
+                          << ": iter_args init (classification driven by body "
+                             "consumers)\n");
+        continue;
+      }
+
       vecVisited.insert(def);
 
-      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << def->getName().getStringRef()
-                        << "\n");
+      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << *def << "\n");
       opCoreTypes[def] =
           static_cast<OpCoreType>(opCoreTypes[def] | OP_VECTOR_ONLY);
       vecQueue.push(def);
@@ -1563,6 +1591,19 @@ int OpClassifierPass::handleSCFYield() {
   }
 
   return 0;
+}
+
+bool OpClassifierPass::isVectorProducerOp(Operation *def) const {
+  if (!def)
+    return false;
+  // Region containers are excluded: the default sweep marks them VECTOR
+  // even when their body is CUBE, so they are not trusted as a producer
+  // signal.
+  if (def->getNumRegions() > 0)
+    return false;
+  if (isTensorArithOrMathOp(def))
+    return true;
+  return getCoreType(def) == OP_VECTOR_ONLY;
 }
 
 OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {

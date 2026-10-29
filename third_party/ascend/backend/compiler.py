@@ -379,6 +379,19 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if distributed is not None:
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
+        # Must run first: it needs the un-lowered TTIR, where `tt.splat` /
+        # `tt.broadcast` / `tt.reduce` still carry explicit shapes, so the
+        # folded-away statements also lose their UB tile.
+        #
+        # `opt.allow_fp_mul_zero_fold` (launch keyword, default True) opts into
+        # `x * 0 -> 0` for an `x` that is not proven finite. That is the only
+        # non-bit-exact rule in the pass, and it is what collapses the zero
+        # initial state (`zeros * exp(g)`) the speedup comes from. It is a
+        # deliberate IEEE relaxation: `0 * inf` and `0 * nan` become `0` instead
+        # of NaN. The pass warns once per module whenever a fold relied on it;
+        # pass `allow_fp_mul_zero_fold=False` to keep strict NaN/Inf semantics
+        # at the cost of that fold (and of the speedup).
+        ascend.passes.ttir.add_zero_value_propagation(pm, opt.allow_fp_mul_zero_fold)
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
         ascend.passes.ttir.add_triton_to_structure(pm, False, False)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
@@ -440,6 +453,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
+        # The zero-value pass cannot warn by itself: MLIR diagnostics below
+        # `error` are filtered out unless MLIR_ENABLE_DIAGNOSTICS=warnings
+        # (see setupTritonDiagnosticHandler in python/src/ir.cc). It publishes
+        # instead how many `x * 0 -> 0` folds relied on the IEEE relaxation, so
+        # the NaN/Inf semantic change is surfaced here instead of silently.
+        relaxed_mul_folds = mod.get_int_attr("tt.fp_mul_zero_folds")
+        if relaxed_mul_folds:
+            warnings.warn(
+                f"zero-value propagation folded {relaxed_mul_folds} `x * 0 -> 0` "
+                "statement(s) without proving `x` finite: `0 * inf` and `0 * nan` "
+                "now yield 0 instead of NaN. Pass `allow_fp_mul_zero_fold=False` "
+                "at kernel launch to keep strict NaN/Inf semantics.", stacklevel=2)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
@@ -1202,6 +1227,14 @@ class NPUOptions:
     enable_persistent: bool = False
     optimize_epilogue: bool = False
     enable_fp_fusion: bool = True
+    # Allows the TTIR zero-value pass to fold `x * 0 -> 0` even when `x` is not
+    # proven finite. It is the only rule in that pass which is not bit-exact:
+    # IEEE defines `0 * inf = nan` and `0 * nan = nan`, so with this on a
+    # non-finite multiplicand yields 0 instead of NaN. On by default because it
+    # is what collapses a zero initial state (e.g. `zeros * exp(g)`); turn it
+    # off to keep strict NaN/Inf semantics for a kernel whose multiplicand may
+    # be unbounded. A fold that relies on it is reported as a compiler warning.
+    allow_fp_mul_zero_fold: bool = True
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""

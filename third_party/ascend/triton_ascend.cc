@@ -77,6 +77,14 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());
   });
 
+  // `allowFpMulZeroFold` gates the single non-bit-exact fold in the pass,
+  // `x * 0 -> 0`; see ZeroValuePropagationPass.h for the IEEE rationale.
+  m.def("add_zero_value_propagation",
+        [](mlir::PassManager &pm, bool allowFpMulZeroFold) {
+          pm.addPass(
+              mlir::triton::createZeroValuePropagationPass(allowFpMulZeroFold));
+        });
+
   m.def("add_triton_to_annotation", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonToAnnotationPass());
   });

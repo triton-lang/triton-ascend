@@ -26,6 +26,7 @@
 #include "DeduplicateDebugNopsPass.h"
 #include "MarkTensorKindPass.h"
 #include "TritonToLinalgPass.h"
+#include "ZeroValuePropagationPass.h"
 
 namespace mlir::triton {
 

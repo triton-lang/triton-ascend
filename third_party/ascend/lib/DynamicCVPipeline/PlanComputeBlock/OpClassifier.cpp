@@ -803,7 +803,10 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
   return false;
 }
 
-// Propagate CUBE core type upstream
+// Propagate CUBE core type upstream. Seeded from the curated `cubeSeeds`
+// only: `scf.for` / `scf.while` are never seeds and a tensor iter_arg has
+// no defining op, so this BFS cannot reach an iter_args init def — no
+// `skipIterArgInits` shield is needed here (unlike propagateVectorUpstream).
 int OpClassifierPass::propagateCubeUpstream() {
   LLVM_DEBUG(DBGS() << "--- Step 2: CUBE upstream BFS --->\n");
   llvm::DenseSet<Operation *> cubeVisited;
@@ -1055,6 +1058,23 @@ int OpClassifierPass::propagateVectorUpstream() {
     llvm::SmallVector<Operation *> upstreamOps;
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
+    // An iter_args init's classification is driven by its body-side
+    // consumers; VECTOR from the loop's external consumers must not leak
+    // onto it. Exception: a VECTOR-produced recurrence — the yielded value
+    // comes from a genuine VECTOR compute op while CUBE users merely read
+    // it (e.g. matmul ins) — whose init must stay VECTOR-colorable so
+    // Step 7 splits it and binds the VECTOR clone to the loop.
+    llvm::SmallPtrSet<Operation *, 4> skipIterArgInits;
+    if (auto loop = dyn_cast<LoopLikeOpInterface>(cur)) {
+      for (OpOperand &init : loop.getInitsMutable()) {
+        BlockArgument iterArg = loop.getTiedLoopRegionIterArg(&init);
+        if (iterArg && isVectorProducerOp(getYieldProducerOp(iterArg)))
+          continue;
+        if (Operation *defOp = init.get().getDefiningOp())
+          skipIterArgInits.insert(defOp);
+      }
+    }
+
     for (Operation *def : upstreamOps) {
       if (!def || vecVisited.count(def))
         continue;
@@ -1068,10 +1088,17 @@ int OpClassifierPass::propagateVectorUpstream() {
         continue;
       }
 
+      // Skip iter_args init defs — see comment above the SmallPtrSet.
+      if (skipIterArgInits.count(def)) {
+        LLVM_DEBUG(DBGS() << "skip " << *def
+                          << ": iter_args init (classification driven by body "
+                             "consumers)\n");
+        continue;
+      }
+
       vecVisited.insert(def);
 
-      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << def->getName().getStringRef()
-                        << "\n");
+      LLVM_DEBUG(DBGS() << "\tcolor-vec: " << *def << "\n");
       opCoreTypes[def] =
           static_cast<OpCoreType>(opCoreTypes[def] | OP_VECTOR_ONLY);
       vecQueue.push(def);
@@ -1565,14 +1592,92 @@ int OpClassifierPass::handleSCFYield() {
   return 0;
 }
 
+Operation *OpClassifierPass::getYieldProducerOp(BlockArgument iterArg) const {
+  auto loop =
+      dyn_cast_or_null<LoopLikeOpInterface>(iterArg.getOwner()->getParentOp());
+  if (!loop)
+    return nullptr;
+  OpOperand *yielded = loop.getTiedLoopYieldedValue(iterArg);
+  if (!yielded)
+    return nullptr;
+  return yielded->get().getDefiningOp();
+}
+
+bool OpClassifierPass::isVectorProducerOp(Operation *def) const {
+  if (!def)
+    return false;
+  // Region containers are excluded: the default sweep marks them VECTOR
+  // even when their body is CUBE, so they are not trusted as a producer
+  // signal.
+  if (def->getNumRegions() > 0)
+    return false;
+  if (isTensorArithOrMathOp(def))
+    return true;
+  return getCoreType(def) == OP_VECTOR_ONLY;
+}
+
+OpCoreType
+OpClassifierPass::classifyIterArgFromBody(BlockArgument iterArg) const {
+  // Scalar iter_args (e.g. i32 counters) are cheap to duplicate across
+  // cores; body-driven classification is only meaningful for tensors.
+  if (isScalarType(iterArg))
+    return OP_UNDETERMINED;
+
+  // Producer side: when the yielded value comes from a genuine VECTOR
+  // compute op, the carried value is VECTOR-owned and CUBE body users merely
+  // read it cross-core (e.g. matmul ins) — the loop must carry the VECTOR
+  // clone. Region containers (marked VECTOR even when their body is CUBE)
+  // do not count and fall through to the consumer union below.
+  if (isVectorProducerOp(getYieldProducerOp(iterArg)))
+    return OP_VECTOR_ONLY;
+
+  // Walk every non-yield user and accumulate the union of their core types
+  // (short-circuiting on the first CUBE_ONLY user would lose the VECTOR
+  // signal of mixed CUBE/VECTOR consumers). Mixed users must resolve to
+  // CUBE_AND_VECTOR; no compute consumer -> UNDETERMINED (caller falls back
+  // to the yielded-def logic).
+  bool hasCube = false;
+  bool hasVector = false;
+  for (Operation *user : iterArg.getUsers()) {
+    // Yield ops are pass-through, not compute consumers — skip them.
+    if (isa<scf::YieldOp>(user))
+      continue;
+    OpCoreType userCT = getCoreType(user);
+    if (userCT == OP_CUBE_ONLY) {
+      hasCube = true;
+    } else if (userCT == OP_CUBE_AND_VECTOR) {
+      // A CUBE_AND_VECTOR consumer already needs both value flows; the init
+      // must therefore provide both.
+      hasCube = true;
+      hasVector = true;
+    } else if (userCT == OP_VECTOR_ONLY) {
+      hasVector = true;
+    }
+  }
+  if (hasCube && hasVector)
+    return OP_CUBE_AND_VECTOR;
+  if (hasCube)
+    return OP_CUBE_ONLY;
+  if (hasVector)
+    return OP_VECTOR_ONLY;
+  return OP_UNDETERMINED;
+}
+
 OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
-  // Unified handling for scf.for and scf.while using the tied loop interface
+  // The iter_args init classification must mirror the body-side consumers;
+  // the yielded value's defining op alone is unreliable (a region container
+  // like scf.if may be marked VECTOR by the default sweep even when its body
+  // is CUBE).
   Operation *owner = operand->getOwner();
 
   if (auto forOp = dyn_cast<scf::ForOp>(owner)) {
     auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
+    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
+        fromBody != OP_UNDETERMINED)
+      return fromBody;
+    // No compute consumer (pure pass-through): fall back to existing logic.
     auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;
@@ -1586,6 +1691,9 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
     auto iterArg = whileOp.getTiedLoopRegionIterArg(operand);
     if (!iterArg)
       return OP_UNDETERMINED;
+    if (OpCoreType fromBody = classifyIterArgFromBody(iterArg);
+        fromBody != OP_UNDETERMINED)
+      return fromBody;
     auto sourceOperand = whileOp.getTiedLoopYieldedValue(iterArg);
     if (!sourceOperand)
       return OP_UNDETERMINED;

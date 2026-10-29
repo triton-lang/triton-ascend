@@ -155,6 +155,20 @@ private:
   OpCoreType getCoreType(Operation *op) const;
   OpCoreType getForInitCoreType(OpOperand *operand) const;
 
+  // Classify a loop iter_arg by its recurrence: scalar -> UNDETERMINED
+  // (caller falls back to the yielded-def logic), genuine VECTOR yield
+  // producer -> VECTOR_ONLY, else the union of non-yield body consumers.
+  OpCoreType classifyIterArgFromBody(BlockArgument iterArg) const;
+
+  // Defining op of the value yielded back at `iterArg`'s loop position (the
+  // recurrence's producer), or nullptr.
+  Operation *getYieldProducerOp(BlockArgument iterArg) const;
+
+  // True if `def` genuinely produces the carried value on the VECTOR side:
+  // a region-less VECTOR compute op (e.g. tensor arith/math). Region
+  // containers are excluded (their op-level core type is unreliable).
+  bool isVectorProducerOp(Operation *def) const;
+
   // Set the core type of an operation
   void setCoreType(Operation *op, OpCoreType coreType);
 

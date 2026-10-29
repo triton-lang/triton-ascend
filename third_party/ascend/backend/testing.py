@@ -19,8 +19,10 @@
 # THE SOFTWARE.
 
 import builtins
+import math
 import multiprocessing
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -38,6 +40,23 @@ class ProfilerResultMismatchError(RuntimeError):
         )
 
 
+def _npu_bench_options(clear_l2_cache=False):
+    values = tuple(
+        type(default)(os.getenv("TRITON_NPU_BENCH_" + name, default)) for name, default in (
+            ("STABILITY_RUNS", 1),
+            ("STABILITY_TOLERANCE", 0.01),
+            ("LOWER_QUANTILE", 0.0),
+            ("UPPER_QUANTILE", 1.0),
+            ("MAX_RETRIES", 0),
+            ("CACHE_MODE", "cold" if clear_l2_cache else "hot"),
+        ))
+    confirmations, tolerance, lower, upper, batches, mode = values
+    if not (confirmations > 0 and batches >= 0 and math.isfinite(tolerance) and tolerance >= 0
+            and 0 <= lower < upper <= 1 and mode in ("hot", "cold")):
+        raise ValueError("Invalid TRITON_NPU_BENCH settings")
+    return values
+
+
 def do_bench_npu(
     funcs,
     warmup=5,
@@ -52,6 +71,8 @@ def do_bench_npu(
 
     if not isinstance(funcs, list):
         funcs = [funcs]
+    confirmations, tolerance, lower, upper, batches, mode = _npu_bench_options(clear_l2_cache)
+    clear_l2_cache = mode == "cold"
 
     # warmup kernel
     for fn in funcs:
@@ -77,14 +98,53 @@ def do_bench_npu(
         )
         torch_path = os.path.join(base_path, f"prof_{timestamp}_{process_name}-{pid}")
 
+    buffer = None
     if clear_l2_cache:
         buffer = runtime.driver.active.get_empty_cache_for_benchmark()
         buffer = buffer.float()  # to avoid type cast
         buffer.sum()
         torch.npu.synchronize()  # shake out of any npu error
 
+    histories = [[] for _ in funcs]
+    pending = list(builtins.range(len(funcs)))
+    for batch in builtins.range(max(1, batches)):
+        selected = [funcs[index] for index in pending] * confirmations
+        batch_path = os.path.join(torch_path, f"batch_{batch}") if batches > 1 else torch_path
+        _profile_npu_batch(selected, warmup, active, buffer, batch_path, experimental_config)
+        try:
+            scores = _collect_prof_result(batch_path, selected, warmup, active, target_kernel_name, clear_l2_cache,
+                                          (lower, upper) if active >= 10 else (0, 1))
+        finally:
+            _rm_dic(keep_res, torch_path)
+        if len(selected) == 1:
+            scores = [scores]
+        for position, index in enumerate(pending):
+            histories[index] = sorted(histories[index] + scores[position::len(pending)])[:confirmations]
+        pending = [
+            index for index in pending
+            if confirmations > 1 and (len(histories[index]) < confirmations or not math.isfinite(histories[index][-1])
+                                      or histories[index][0] <= 0 or histories[index][-1] > histories[index][0] *
+                                      (1 + tolerance))
+        ]
+        if not pending:
+            break
+    if clear_l2_cache:
+        del buffer
+    if pending:
+        print(f"NPU benchmark: minimum not confirmed for configurations {[index + 1 for index in pending]}")
+    time_cost = [history[0] for history in histories]
+    return time_cost[0] if len(funcs) == 1 else time_cost
+
+
+def _profile_npu_batch(funcs, warmup, active, buffer, torch_path, experimental_config):
+    import torch
+    import torch_npu
+
+    mode = os.getenv("TRITON_NPU_BENCH_PROFILER_MODE", "torch_npu").strip().lower()
+    if mode not in ("torch_npu", "mspti"):
+        raise ValueError("Invalid TRITON_NPU_BENCH_PROFILER_MODE")
     total = warmup + active
-    with torch_npu.profiler.profile(
+    profile = _mspti_npu_profile(torch_path, buffer) if mode == "mspti" else torch_npu.profiler.profile(
         activities=[torch_npu.profiler.ProfilerActivity.NPU],
         on_trace_ready=torch_npu.profiler.tensorboard_trace_handler(torch_path),
         record_shapes=False,
@@ -93,28 +153,65 @@ def do_bench_npu(
         with_flops=False,
         with_modules=False,
         experimental_config=experimental_config,
-    ) as prof:
+    )
+    with profile as prof:
         for fn in funcs:
             for _ in builtins.range(total):
-                if clear_l2_cache:
+                if buffer is not None:
                     buffer.sum()  # use buffer read to clear l2 cache
                     torch.npu.synchronize()
                 fn()
                 torch.npu.synchronize()
-    if clear_l2_cache:
-        del buffer
 
-    try:
-        return _collect_prof_result(
-            torch_path,
-            funcs,
-            warmup,
-            active,
-            target_kernel_name=target_kernel_name,
-            clear_l2_cache=clear_l2_cache,
-        )
-    finally:
-        _rm_dic(keep_res, torch_path)
+
+@contextmanager
+def _mspti_npu_profile(torch_path, buffer):
+    import csv
+    import torch
+    from mspti import KernelMonitor, MsptiResult
+
+    monitor, rows = KernelMonitor(), []
+
+    def capture(data):
+        rows.append((data.name, data.start, data.end, data.type))
+
+    @contextmanager
+    def record():
+        result = monitor.start(capture)
+        if result != MsptiResult.MSPTI_SUCCESS:
+            monitor.stop()
+            raise RuntimeError(f"msPTI start failed: {result}")
+        try:
+            yield
+        except BaseException:
+            monitor.stop()
+            raise
+        else:
+            result = monitor.stop()
+            if result != MsptiResult.MSPTI_SUCCESS:
+                raise RuntimeError(f"msPTI stop failed: {result}")
+
+    cache_names = set()
+    if buffer is not None:
+        # msPTI reports kernel types, not operator types; identify the eviction kernel once.
+        with record():
+            buffer.sum()
+            torch.npu.synchronize()
+        if not rows:
+            raise RuntimeError("msPTI did not record the L2 eviction kernel; check LD_PRELOAD and CANN support")
+        cache_names = {row[0] for row in rows}
+        rows.clear()
+    with record():
+        yield
+    if not rows or any(start <= 0 or end <= start for _, start, end, _ in rows):
+        raise RuntimeError("msPTI returned missing or invalid kernel timestamps; check LD_PRELOAD and CANN support")
+    rows.sort(key=lambda row: row[1])
+    os.makedirs(torch_path, exist_ok=True)
+    with open(os.path.join(torch_path, "kernel_details.csv"), "w", newline="", encoding="utf-8") as output:
+        writer = csv.writer(output)
+        writer.writerow(("Name", "Type", "Start Time(us)", "Duration(us)", "Accelerator Core"))
+        writer.writerows((name, "ReduceSum" if name in cache_names else kind, start / 1e3, (end - start) / 1e3, kind)
+                         for name, start, end, kind in rows)
 
 
 def _rm_dic(keep_res, torch_path):
@@ -133,6 +230,7 @@ def _collect_prof_result(
     num_active: int,
     target_kernel_name: Optional[str] = None,
     clear_l2_cache: bool = False,
+    quantiles=(0, 1),
 ):
     """
     Collect kernel performance from kernel_details.csv, returned in millisecond.
@@ -148,6 +246,7 @@ def _collect_prof_result(
     :type num_active: int
     :param target_kernel_name: target triton kernel name reported by profiler
     :type target_kernel_name: Optional[str]
+    :param quantiles: lower and upper sorted-sample boundaries; retain at least one duration
     """
 
     import numpy as np
@@ -178,12 +277,14 @@ def _collect_prof_result(
     if target_kernel_name is not None and actual_rows != expected_rows:
         raise ProfilerResultMismatchError(target_kernel_name, expected_rows, actual_rows)
 
-    time_cost = [0] * num_funcs
-    for func_idx in np.arange(0, num_funcs):
-        for active_index in np.arange(0, num_active):
-            row_index = func_idx * (num_warmup + num_active) + num_warmup + active_index
-            time_cost[func_idx] += filter_df.iloc[row_index]["Duration(us)"]
-    time_cost = [x / num_active / 1e3 for x in time_cost]
+    durations = filter_df["Duration(us)"].to_numpy(dtype=float)[:expected_rows].reshape(
+        num_funcs, num_warmup + num_active)
+    samples = durations[:, num_warmup:] / 1e3
+    valid = np.isfinite(samples).all(axis=1) & (samples > 0).all(axis=1)
+    if quantiles != (0, 1):
+        start, end = (int(num_active * quantile) for quantile in quantiles)
+        samples = np.sort(samples, axis=1)[:, start:max(start + 1, end)]
+    time_cost = np.where(valid, samples.mean(axis=1), np.inf).tolist()
 
     if num_funcs == 1:
         return time_cost[0]

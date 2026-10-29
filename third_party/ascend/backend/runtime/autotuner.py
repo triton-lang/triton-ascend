@@ -2240,7 +2240,9 @@ class AutoTilingTuner(Autotuner):
         if cache_miss:
             # prune configs
             pruned_configs = self.prune_configs(kwargs)
-            if self.enable_ubtuner or len(pruned_configs) > 1:
+            if (self.enable_ubtuner or len(pruned_configs) > 1 or
+                (os.getenv("TRITON_NPU_BENCH_SINGLE_CONFIG", "0") == "1"
+                 and os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu" and not self.user_defined_do_bench)):
                 used_cached_result = False
                 bench_start = time.time()
                 timings = self._batch_bench(*args, configs=pruned_configs, **kwargs)
@@ -2360,20 +2362,20 @@ class AutoTilingTuner(Autotuner):
         if len(run_fns) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc} \nStack trace: {exc_stack}")
 
-        if len(run_fns) == 1:
+        use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
+        # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
+        use_npu_profiling = use_profiling and not self.user_defined_do_bench
+        if (len(run_fns) == 1 and (not use_npu_profiling or os.getenv("TRITON_NPU_BENCH_SINGLE_CONFIG", "0") != "1")):
             # we ignore expensive profiling method when only single config is left
             return {config: self.do_bench(fn, quantiles=(0.5, 0.2, 0.8)) for config, fn in run_fns.items()}
 
         if (self.parser_mode in ("cube", "mix") and self.cv_parse_result is not None):
             run_fns = self._prune_by_time_limit(run_fns)
 
-        use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
-        # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
-        use_npu_profiling = use_profiling and not self.user_defined_do_bench
         if use_npu_profiling:
             from ..testing import ProfilerResultMismatchError, do_bench_npu
 
-            cv_mode = self.parser_mode in ("cube", "mix") and self.cv_parse_result is not None
+            cv_mode = self.parser_mode in ("cube", "mix") and self.cv_parse_result is not None and len(run_fns) > 1
             warmup = self.cv_warmup if cv_mode else 5
             active = self.cv_repeat if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
@@ -2385,6 +2387,8 @@ class AutoTilingTuner(Autotuner):
                     clear_l2_cache=True,
                     target_kernel_name=target_kernel_name,
                 )
+                if len(run_fns) == 1:
+                    time_cost = [time_cost]
                 assert len(time_cost) == len(run_fns)
                 return {config: cost for config, cost in zip(run_fns.keys(), time_cost)}
             except ProfilerResultMismatchError as exc:

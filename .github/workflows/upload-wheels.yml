@@ -1,0 +1,107 @@
+name: Upload Wheels
+
+on:
+  workflow_dispatch:
+    inputs:
+      wheel_urls:
+        description: >-
+          List of prebuilt wheel (.whl) URLs to download and upload to OBS,
+          separated by newlines and/or spaces.
+        required: true
+        type: string
+      obs_dir:
+        description: "Target OBS directory"
+        required: false
+        default: "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
+        type: string
+
+concurrency:
+  group: upload-wheels-${{ github.ref }}
+  # Do not cancel an in-flight upload: interrupting obsutil mid-copy could
+  # leave partial objects behind.
+  cancel-in-progress: false
+
+permissions: read-all
+
+jobs:
+
+  Upload-Wheels:
+    name: Upload prebuilt wheels to OBS
+    runs-on: linux-amd64-cpu-8
+    timeout-minutes: 60
+
+    permissions:
+      contents: read
+
+    steps:
+
+      - name: Download wheels
+        shell: bash
+        env:
+          WHEEL_URLS: ${{ github.event.inputs.wheel_urls }}
+        run: |
+          set -eu
+          mkdir -p wheelhouse
+          # Accept URLs separated by newlines, spaces, or a mix of both
+          # (workflow_dispatch multi-line input may arrive as one line).
+          mapfile -t urls < <(tr -s '[:space:]' '\n' <<< "$WHEEL_URLS" | grep -v '^$' || true)
+          for url in "${urls[@]}"; do
+            case "$url" in
+              https://*) ;;
+              *) echo "Only https:// URLs are allowed: $url"; exit 1 ;;
+            esac
+            fname="$(basename "${url%%\?*}")"
+            # Wheel filenames percent-encode '+' (local version separator).
+            fname="${fname//%2B/+}"
+            case "$fname" in
+              *.whl) ;;
+              *) echo "Not a .whl file: $fname"; exit 1 ;;
+            esac
+            echo "Downloading $url -> wheelhouse/$fname"
+            curl -fL --retry 3 --retry-delay 5 "$url" -o "wheelhouse/$fname"
+            # Sanity check: a wheel is a zip archive.
+            head -c 2 "wheelhouse/$fname" | grep -q 'PK' \
+              || { echo "Downloaded file is not a valid zip/wheel: $fname"; exit 1; }
+          done
+          [ "${#urls[@]}" -gt 0 ] || { echo "No URLs provided."; exit 1; }
+          shopt -s nullglob
+          wheels=(wheelhouse/*.whl)
+          [ "${#wheels[@]}" -gt 0 ] || { echo "No wheels downloaded."; exit 1; }
+          echo "Downloaded ${#wheels[@]} wheel(s):"
+          ls -l "${wheels[@]}"
+
+      - name: Setup obsutil and upload to OBS
+        shell: bash
+        env:
+          AK: ${{ secrets.NIGHTLY_OBS_AK }}
+          SK: ${{ secrets.NIGHTLY_OBS_SK }}
+          OBS_DIR: ${{ github.event.inputs.obs_dir }}
+        run: |
+          set -eu
+          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+            echo "OBS credentials are empty."
+            exit 1
+          fi
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz" -o obsutil.tar.gz
+          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil_linux_* obsutil
+
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
+          # obsutil cp takes exactly one source and one destination, so a
+          # multi-file glob must be uploaded one wheel at a time.
+          # -f: overwrite without prompting; -u: skip unchanged objects.
+          for f in wheelhouse/*.whl; do
+            obsutil/obsutil cp -f -u "$f" "${OBS_DIR}"
+          done
+
+          # Regenerate index.html from every .whl currently in the directory
+          # (non-recursive, short format), keeping only the basenames.
+          obsutil/obsutil ls "${OBS_DIR}" -d -s -limit=0 \
+            | grep -oE '[^/]+\.whl$' \
+            | sort -u > files.txt
+          while IFS= read -r f; do
+            printf "<a href='%s'>%s</a><br />\n" "$f" "$f"
+          done < files.txt > index.html
+          obsutil/obsutil cp index.html "${OBS_DIR}"

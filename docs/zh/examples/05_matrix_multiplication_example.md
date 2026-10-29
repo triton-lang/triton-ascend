@@ -1,4 +1,4 @@
-# 矩阵乘法 （Matrix Multiplication）
+# 矩阵乘法（Matrix Multiplication）
 
 在本节中，我们展示了使用 Triton 进行矩阵乘法的内核实现。
 

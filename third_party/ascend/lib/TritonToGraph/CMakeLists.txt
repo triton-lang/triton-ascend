@@ -23,6 +23,7 @@ add_triton_library(TritonToGraph
   Rules/ConvertModuloToMaskRule.cpp
   Rules/ReservedGraphOptimizationRule.cpp
   Rules/DiagonalMaskRemovalRule.cpp
+  Rules/GatherOptimizationRule.cpp
   Rules/IndependentAxisTensorizeRule.cpp
   Rules/PersistentTaskStripMiningRule.cpp
   Rules/ResidentLoadForwardingRule.cpp

@@ -38,6 +38,7 @@
 #include <optional>
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddScalarPipeControl.h"
 #include "ascend/include/DynamicCVPipeline/AllocMultiCache.h"
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -82,6 +83,7 @@ static inline void addPasses(OpPassManager &pm) {
   pm.addPass(createAllocMultiCachePass());
   pm.addPass(createAddControlFlowConditionPass());
   pm.addPass(createSeparateMemoryFromComputePass());
+  pm.addPass(createAddScalarPipeControlPass());
   pm.addPass(createRemoveSsbufAttrPass());
 }
 

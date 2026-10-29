@@ -27,6 +27,8 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
 
+#include <limits>
+
 #define DEBUG_TYPE "triton-bubble-up-operation"
 
 template <typename ExtractOpTy>
@@ -145,6 +147,13 @@ BubbleUpExtract<ExtractOpTy>::matchAndRewrite(ExtractOpTy op,
   } else if (auto splatOp = dyn_cast<triton::SplatOp>(parentOp)) {
     bubbleUpOperation(op, splatOp, loc, rewriter);
   } else if (auto makeRangeOp = dyn_cast<triton::MakeRangeOp>(parentOp)) {
+    if constexpr (std::is_same_v<ExtractOpTy, tensor::ExtractSliceOp>) {
+      auto size = getConstantIntValue(op.getMixedSizes()[0]);
+      // A new tt.make_range needs a static extent representable by its i32
+      // endpoints. Other slices must keep their original extraction.
+      if (!size || *size <= 0 || *size > std::numeric_limits<int32_t>::max())
+        return failure();
+    }
     bubbleUpOperation(op, makeRangeOp, loc, rewriter);
   } else if (auto addPtrOp = dyn_cast<triton::AddPtrOp>(parentOp)) {
     bubbleUpOperation(op, addPtrOp, loc, rewriter);
@@ -447,13 +456,34 @@ template <>
 void BubbleUpExtract<tensor::ExtractSliceOp>::bubbleUpOperation(
     tensor::ExtractSliceOp op, triton::MakeRangeOp parentOp, Location loc,
     PatternRewriter &rewriter) const {
-  auto resultType = cast<RankedTensorType>(parentOp.getResult().getType());
+  auto resultType = cast<RankedTensorType>(op.getResult().getType());
   auto idxOfr = op.getMixedOffsets()[0];
   Value idx = getValueOrCreateConstantIndexOp(rewriter, op.getLoc(), idxOfr);
   idx = rewriter.create<arith::IndexCastOp>(op.getLoc(),
                                             resultType.getElementType(), idx);
-  rewriter.replaceOpWithNewOp<triton::SplatOp>(op, op.getResult().getType(),
-                                               idx);
+  if (parentOp.getStart() != 0) {
+    Value start = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getIntegerAttr(resultType.getElementType(),
+                                     parentOp.getStart()));
+    idx = rewriter.create<arith::AddIOp>(loc, idx, start);
+  }
+  Value base = rewriter.create<triton::SplatOp>(loc, resultType, idx);
+  int64_t size = *getConstantIntValue(op.getMixedSizes()[0]);
+  if (size == 1) {
+    rewriter.replaceOp(op, base);
+    return;
+  }
+
+  Value range = rewriter.create<triton::MakeRangeOp>(loc, resultType, 0, size);
+  auto strideOfr = op.getMixedStrides()[0];
+  if (getConstantIntValue(strideOfr) != 1) {
+    Value stride = getValueOrCreateConstantIndexOp(rewriter, loc, strideOfr);
+    stride = rewriter.create<arith::IndexCastOp>(
+        loc, resultType.getElementType(), stride);
+    stride = rewriter.create<triton::SplatOp>(loc, resultType, stride);
+    range = rewriter.create<arith::MulIOp>(loc, range, stride);
+  }
+  rewriter.replaceOpWithNewOp<arith::AddIOp>(op, base, range);
 }
 
 template <typename ExtractOpTy>

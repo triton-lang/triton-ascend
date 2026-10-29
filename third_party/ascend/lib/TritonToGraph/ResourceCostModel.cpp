@@ -23,6 +23,7 @@
 #include "TritonToGraph/ResourceCostModel.h"
 
 #include "mlir/IR/BuiltinTypes.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/Triton/IR/Types.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/STLExtras.h"
@@ -219,12 +220,18 @@ bool addWeightedChange(uint64_t before, uint64_t after, uint64_t weight,
 CandidateEvaluation reject(const CandidateCost &candidate,
                            ResourceCostRejectReason reason,
                            uint64_t safeUBBudget = 0,
-                           uint64_t requiredParallelPrograms = 0) {
+                           uint64_t requiredParallelPrograms = 0,
+                           const ResourceSnapshot *resources = nullptr) {
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;
   evaluation.reason = reason;
   evaluation.safeUBBudgetBytes = safeUBBudget;
   evaluation.requiredParallelPrograms = requiredParallelPrograms;
+  if (resources && resources->hasL0Budgets()) {
+    evaluation.safeL0ABudgetBytes = resources->getSafeL0ABudget().value_or(0);
+    evaluation.safeL0BBudgetBytes = resources->getSafeL0BBudget().value_or(0);
+    evaluation.safeL0CBudgetBytes = resources->getSafeL0CBudget().value_or(0);
+  }
   evaluation.remark = formatCandidateRemark(evaluation);
   return evaluation;
 }
@@ -246,6 +253,12 @@ cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
     return "overflow";
   case ResourceCostRejectReason::UBOverflow:
     return "ub_overflow";
+  case ResourceCostRejectReason::L0AOverflow:
+    return "l0a_overflow";
+  case ResourceCostRejectReason::L0BOverflow:
+    return "l0b_overflow";
+  case ResourceCostRejectReason::L0COverflow:
+    return "l0c_overflow";
   case ResourceCostRejectReason::InvalidCandidate:
     return "invalid_candidate";
   }
@@ -257,49 +270,99 @@ bool ResourceSnapshot::isKnown() const {
          ubSafetyPercent > 0 && ubSafetyPercent <= 100;
 }
 
-std::optional<uint64_t> ResourceSnapshot::getSafeUBBudget() const {
-  if (!isKnown())
-    return std::nullopt;
+bool ResourceSnapshot::hasL0Budgets() const {
+  const bool capacitiesKnown =
+      l0aCapacityBytes != 0 && l0bCapacityBytes != 0 && l0cCapacityBytes != 0;
+  return capacitiesKnown && l0SafetyPercent > 0 && l0SafetyPercent <= 100;
+}
 
-  const uint64_t available = ubCapacityBytes - reservedUBBytes;
-  const uint64_t wholePercent = available / 100;
-  const uint64_t remainder = available % 100;
+namespace {
+
+std::optional<uint64_t> scaledSafeBudget(uint64_t availableBytes,
+                                         unsigned safetyPercent) {
+  if (safetyPercent == 0 || safetyPercent > 100)
+    return std::nullopt;
+  const uint64_t wholePercent = availableBytes / 100;
+  const uint64_t remainder = availableBytes % 100;
   uint64_t budget = 0;
-  if (!checkedMul(wholePercent, ubSafetyPercent, budget))
+  if (!checkedMul(wholePercent, safetyPercent, budget))
     return std::nullopt;
   uint64_t remainderBudget = 0;
-  if (!checkedMul(remainder, ubSafetyPercent, remainderBudget))
+  if (!checkedMul(remainder, safetyPercent, remainderBudget))
     return std::nullopt;
   if (!checkedAdd(budget, remainderBudget / 100, budget))
     return std::nullopt;
   return budget;
 }
 
-ResourceSnapshot ResourceSnapshot::fromExplicit(uint64_t ubCapacity,
-                                                unsigned safetyPercent,
-                                                uint64_t reservedUB) {
+} // namespace
+
+std::optional<uint64_t> ResourceSnapshot::getSafeUBBudget() const {
+  if (!isKnown())
+    return std::nullopt;
+  return scaledSafeBudget(ubCapacityBytes - reservedUBBytes, ubSafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0ABudget() const {
+  if (l0aCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0aCapacityBytes, l0SafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0BBudget() const {
+  if (l0bCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0bCapacityBytes, l0SafetyPercent);
+}
+
+std::optional<uint64_t> ResourceSnapshot::getSafeL0CBudget() const {
+  if (l0cCapacityBytes == 0)
+    return std::nullopt;
+  return scaledSafeBudget(l0cCapacityBytes, l0SafetyPercent);
+}
+
+ResourceSnapshot
+ResourceSnapshot::fromExplicit(uint64_t ubCapacity, unsigned ubSafety,
+                               uint64_t reservedUB, uint64_t l0aCapacity,
+                               uint64_t l0bCapacity, uint64_t l0cCapacity,
+                               unsigned l0Safety) {
   ResourceSnapshot result;
   result.ubCapacityBytes = ubCapacity;
   result.reservedUBBytes = reservedUB;
-  result.ubSafetyPercent = safetyPercent;
+  result.ubSafetyPercent = ubSafety;
+  result.l0aCapacityBytes = l0aCapacity;
+  result.l0bCapacityBytes = l0bCapacity;
+  result.l0cCapacityBytes = l0cCapacity;
+  result.l0SafetyPercent = l0Safety;
   return result;
 }
 
 ResourceSnapshot
 ResourceSnapshot::fromHardwareConfig(const ascend::HardwareConfig &hardware,
-                                     unsigned safetyPercent,
-                                     uint64_t reservedUB) {
+                                     unsigned ubSafety, uint64_t reservedUB,
+                                     unsigned l0Safety) {
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL
   const ascend::MemorySpace *ub = hardware.getMemorySpace("ub");
   if (!ub || ub->sizeBytes == 0 ||
       ub->sizeBytes > std::numeric_limits<uint64_t>::max())
     return {};
-  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes), safetyPercent,
-                      reservedUB);
+  uint64_t l0aCapacity = 0;
+  uint64_t l0bCapacity = 0;
+  uint64_t l0cCapacity = 0;
+  if (const ascend::MemorySpace *l0a = hardware.getMemorySpace("l0a"))
+    l0aCapacity = l0a->sizeBytes;
+  if (const ascend::MemorySpace *l0b = hardware.getMemorySpace("l0b"))
+    l0bCapacity = l0b->sizeBytes;
+  if (const ascend::MemorySpace *l0c = hardware.getMemorySpace("l0c"))
+    l0cCapacity = l0c->sizeBytes;
+  return fromExplicit(static_cast<uint64_t>(ub->sizeBytes), ubSafety,
+                      reservedUB, l0aCapacity, l0bCapacity, l0cCapacity,
+                      l0Safety);
 #else
   (void)hardware;
-  (void)safetyPercent;
+  (void)ubSafety;
   (void)reservedUB;
+  (void)l0Safety;
   return {};
 #endif
 }
@@ -512,29 +575,121 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
   return estimate;
 }
 
+namespace {
+
+ResourceCostRejectReason classifyUnknownTensorType(Type type) {
+  if (isa<UnrankedTensorType>(type) ||
+      (isa<RankedTensorType>(type) &&
+       !cast<RankedTensorType>(type).hasStaticShape()))
+    return ResourceCostRejectReason::DynamicShape;
+  return ResourceCostRejectReason::UnknownElementType;
+}
+
+} // namespace
+
+CubeByteEstimate cfg::estimatePeakCubeBytes(Operation *root) {
+  CubeByteEstimate estimate;
+  if (!root)
+    return estimate;
+
+  ResourceCostRejectReason failure = ResourceCostRejectReason::None;
+  root->walk([&](Operation *operation) {
+    Value lhs;
+    Value rhs;
+    Value accumulator;
+    Value result;
+    if (auto dot = dyn_cast<DotOp>(operation)) {
+      lhs = dot.getA();
+      rhs = dot.getB();
+      accumulator = dot.getC();
+      result = dot.getD();
+    } else if (auto scaled = dyn_cast<DotScaledOp>(operation)) {
+      lhs = scaled.getA();
+      rhs = scaled.getB();
+      accumulator = scaled.getC();
+      result = scaled.getD();
+    } else {
+      return;
+    }
+    ++estimate.dotSiteCount;
+
+    const auto record = [&](Value value, uint64_t &peak) {
+      std::optional<uint64_t> bytes = getStaticTensorBytes(value.getType());
+      if (bytes) {
+        peak = std::max(peak, *bytes);
+      } else if (failure == ResourceCostRejectReason::None) {
+        failure = classifyUnknownTensorType(value.getType());
+      }
+    };
+    // L0A holds the lhs (A matrix) tile, L0B the rhs (B matrix) tile, and
+    // L0C the accumulator/result tiles, including loop-carried accumulation
+    // across scf.for iterations (the acc operand reaches the next dot).
+    record(lhs, estimate.peakL0ABytes);
+    record(rhs, estimate.peakL0BBytes);
+    record(accumulator, estimate.peakL0CBytes);
+    record(result, estimate.peakL0CBytes);
+  });
+
+  if (estimate.dotSiteCount == 0 || failure == ResourceCostRejectReason::None) {
+    estimate.known = true;
+    estimate.reason = ResourceCostRejectReason::None;
+    return estimate;
+  }
+  estimate.reason = failure;
+  return estimate;
+}
+
 CandidateEvaluation
 cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
                            const CandidateCost &candidate,
                            const CostModelWeights &weights) {
   if (!resources.isKnown())
-    return reject(candidate, ResourceCostRejectReason::UnknownResource);
+    return reject(candidate, ResourceCostRejectReason::UnknownResource, 0, 0,
+                  &resources);
 
   std::optional<uint64_t> safeBudget = resources.getSafeUBBudget();
   if (!safeBudget)
-    return reject(candidate, ResourceCostRejectReason::Overflow);
+    return reject(candidate, ResourceCostRejectReason::Overflow, 0, 0,
+                  &resources);
 
   if (candidate.hasDynamicShape)
     return reject(candidate, ResourceCostRejectReason::DynamicShape,
-                  *safeBudget);
+                  *safeBudget, 0, &resources);
   if (candidate.hasUnknownResource || !candidate.hasPeakLiveBytes)
     return reject(candidate, ResourceCostRejectReason::UnknownResource,
-                  *safeBudget);
+                  *safeBudget, 0, &resources);
   if (candidate.plan.tensorizeFactor == 0 || candidate.plan.blockT == 0 ||
       candidate.plan.staticAxisFusionFactor == 0)
     return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget);
+                  *safeBudget, 0, &resources);
   if (candidate.estimatedPeakLiveBytes > *safeBudget)
-    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget);
+    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget,
+                  0, &resources);
+
+  // Cube-buffer checks: enforced only when the snapshot carries L0A/L0B/L0C
+  // capacities and the candidate reports cube tile bytes. A candidate that
+  // reports cube demand against a snapshot without L0 capacities is an
+  // unknown resource and must not pass silently.
+  if (candidate.hasPeakCubeBytes) {
+    if (!resources.hasL0Budgets())
+      return reject(candidate, ResourceCostRejectReason::UnknownResource,
+                    *safeBudget, 0, &resources);
+    const std::optional<uint64_t> safeL0A = resources.getSafeL0ABudget();
+    const std::optional<uint64_t> safeL0B = resources.getSafeL0BBudget();
+    const std::optional<uint64_t> safeL0C = resources.getSafeL0CBudget();
+    if (!safeL0A || !safeL0B || !safeL0C)
+      return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
+                    0, &resources);
+    if (candidate.peakL0ABytes > *safeL0A)
+      return reject(candidate, ResourceCostRejectReason::L0AOverflow,
+                    *safeBudget, 0, &resources);
+    if (candidate.peakL0BBytes > *safeL0B)
+      return reject(candidate, ResourceCostRejectReason::L0BOverflow,
+                    *safeBudget, 0, &resources);
+    if (candidate.peakL0CBytes > *safeL0C)
+      return reject(candidate, ResourceCostRejectReason::L0COverflow,
+                    *safeBudget, 0, &resources);
+  }
 
   uint64_t gains = 0;
   uint64_t penalties = 0;
@@ -559,8 +714,8 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
                          weights.tokenOnlyRepeatedByte, gains, penalties) ||
       gains > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       penalties > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
-    return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
-                  0);
+    return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget, 0,
+                  &resources);
 
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;
@@ -569,6 +724,11 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
   evaluation.benefitScore =
       static_cast<int64_t>(gains) - static_cast<int64_t>(penalties);
   evaluation.safeUBBudgetBytes = *safeBudget;
+  if (resources.hasL0Budgets()) {
+    evaluation.safeL0ABudgetBytes = resources.getSafeL0ABudget().value_or(0);
+    evaluation.safeL0BBudgetBytes = resources.getSafeL0BBudget().value_or(0);
+    evaluation.safeL0CBudgetBytes = resources.getSafeL0CBudget().value_or(0);
+  }
   evaluation.requiredParallelPrograms = 0;
   evaluation.effectiveWorkPerProgram = 0;
   evaluation.physicalWavesBefore = 0;
@@ -668,6 +828,12 @@ std::string cfg::formatCandidateRemark(const CandidateEvaluation &evaluation) {
          << " peak_live_bytes=" << candidate.baselinePeakLiveBytes << "->"
          << candidate.estimatedPeakLiveBytes
          << " ub_budget_bytes=" << evaluation.safeUBBudgetBytes
+         << " peak_l0a_bytes=" << candidate.peakL0ABytes
+         << " peak_l0b_bytes=" << candidate.peakL0BBytes
+         << " peak_l0c_bytes=" << candidate.peakL0CBytes
+         << " l0_budget_bytes=" << evaluation.safeL0ABudgetBytes << "/"
+         << evaluation.safeL0BBudgetBytes << "/"
+         << evaluation.safeL0CBudgetBytes
          << " work_per_program=" << evaluation.effectiveWorkPerProgram
          << " persistent_loop_trips=" << evaluation.persistentLoopTripsBefore
          << "->" << evaluation.persistentLoopTripsAfter
@@ -699,7 +865,8 @@ cfg::formatProfilerCalibrationRecord(const ProfilerCalibrationRecord &record) {
 
 ResourceCostAnalysis::ResourceCostAnalysis(Operation *root,
                                            ResourceSnapshot resources)
-    : resources(resources), liveBytes(estimatePeakLiveBytes(root)) {}
+    : resources(resources), liveBytes(estimatePeakLiveBytes(root)),
+      cubeBytes(estimatePeakCubeBytes(root)) {}
 
 CandidateEvaluation
 ResourceCostAnalysis::evaluate(const CandidateCost &candidate) const {
@@ -708,6 +875,22 @@ ResourceCostAnalysis::evaluate(const CandidateCost &candidate) const {
     effectiveCandidate.hasPeakLiveBytes = true;
     effectiveCandidate.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
     effectiveCandidate.estimatedPeakLiveBytes = liveBytes.peakLiveBytes;
+  }
+  // Cube-buffer gating mirrors the unified-buffer contract: when the
+  // snapshot carries L0 capacities, a candidate without its own cube
+  // estimate inherits the baseline one, and an unanalyzable cube demand is
+  // an unknown resource rather than a silent pass.
+  if (resources.hasL0Budgets() && !effectiveCandidate.hasPeakCubeBytes) {
+    if (cubeBytes.known) {
+      effectiveCandidate.hasPeakCubeBytes = true;
+      effectiveCandidate.peakL0ABytes = cubeBytes.peakL0ABytes;
+      effectiveCandidate.peakL0BBytes = cubeBytes.peakL0BBytes;
+      effectiveCandidate.peakL0CBytes = cubeBytes.peakL0CBytes;
+    } else if (cubeBytes.reason == ResourceCostRejectReason::DynamicShape) {
+      effectiveCandidate.hasDynamicShape = true;
+    } else {
+      effectiveCandidate.hasUnknownResource = true;
+    }
   }
   if (!liveBytes.known) {
     if (liveBytes.reason == ResourceCostRejectReason::DynamicShape)

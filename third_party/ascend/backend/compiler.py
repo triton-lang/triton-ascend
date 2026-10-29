@@ -65,6 +65,7 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
+    l0_size_in_kbytes_for_arch,
     ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
     is_cann_version_at_least,
@@ -287,9 +288,15 @@ def _with_debug_line(npubin_stage, options):
 
 
 def _graph_optimize_kwargs(opt):
+    l0a_kb, l0b_kb, l0c_kb = l0_size_in_kbytes_for_arch(opt.target_arch)
     kwargs = {
         "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
         "compile_mode": opt.compile_mode,
+        # Zero capacities (unknown target) leave the cube L0 checks disabled.
+        "mapping_l0a_capacity_bytes": l0a_kb * 1024,
+        "mapping_l0b_capacity_bytes": l0b_kb * 1024,
+        "mapping_l0c_capacity_bytes": l0c_kb * 1024,
+        "l0_safety_percent": 80,
     }
     rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
     if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:

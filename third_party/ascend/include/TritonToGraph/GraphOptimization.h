@@ -311,6 +311,12 @@ struct GraphOptimizationOptions {
   unsigned storeCoalescingUBBudgetBytes = 0;
   unsigned ubSafetyPercent = 80;
   unsigned reservedUBBytes = 0;
+  // Cube on-chip buffer capacities for program-mapping resource checks.
+  // Zero capacities keep the L0A/L0B/L0C candidate checks disabled.
+  unsigned mappingL0ACapacityBytes = 0;
+  unsigned mappingL0BCapacityBytes = 0;
+  unsigned mappingL0CCapacityBytes = 0;
+  unsigned l0SafetyPercent = 80;
   // RowCoalescing changes the launch grid and is valid only for
   // compile_mode="simt_only".  Keep the source selector rather than a
   // second derived force flag so every consumer follows one mode contract.

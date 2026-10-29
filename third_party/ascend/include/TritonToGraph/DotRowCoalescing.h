@@ -31,10 +31,16 @@ namespace mlir {
 namespace triton {
 namespace cfg {
 
+struct ResourceSnapshot;
+
 // Return a privately rewritten and verified plan for independent dot rows.
-// Unsupported inputs return nullptr without changing the original IR.
-std::unique_ptr<RewritePlan> createDotRowCoalescingPlan(triton::FuncOp function,
-                                                        unsigned epoch);
+// Unsupported inputs return nullptr without changing the original IR. The
+// resource snapshot bounds the coalescing factor against the physical
+// L0A/L0C cube-buffer capacities (lhs and accumulator tiles grow with the
+// factor); a snapshot without L0 budgets leaves the factor unconstrained.
+std::unique_ptr<RewritePlan>
+createDotRowCoalescingPlan(triton::FuncOp function, unsigned epoch,
+                           const ResourceSnapshot &resources);
 
 } // namespace cfg
 } // namespace triton

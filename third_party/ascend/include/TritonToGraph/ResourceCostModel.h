@@ -48,6 +48,9 @@ enum class ResourceCostRejectReason : uint8_t {
   UnknownElementType,
   Overflow,
   UBOverflow,
+  L0AOverflow,
+  L0BOverflow,
+  L0COverflow,
   InvalidCandidate,
 };
 
@@ -58,17 +61,34 @@ struct ResourceSnapshot {
   uint64_t reservedUBBytes = 0;
   unsigned ubSafetyPercent = 80;
 
-  bool isKnown() const;
-  std::optional<uint64_t> getSafeUBBudget() const;
+  // Cube (matrix-multiply) on-chip buffer capacities in bytes. A zero
+  // capacity leaves the corresponding L0 budget unknown and disables the
+  // L0A/L0B/L0C candidate checks (legacy behavior). Sizes per arch:
+  // 950 (A5): L0A 64K, L0B 64K, L0C 256K; 910 (A3): L0A 64K, L0B 64K,
+  // L0C 128K.
+  uint64_t l0aCapacityBytes = 0;
+  uint64_t l0bCapacityBytes = 0;
+  uint64_t l0cCapacityBytes = 0;
+  unsigned l0SafetyPercent = 80;
 
-  static ResourceSnapshot fromExplicit(uint64_t ubCapacityBytes,
-                                       unsigned ubSafetyPercent = 80,
-                                       uint64_t reservedUBBytes = 0);
+  bool isKnown() const;
+  // True only when every cube buffer capacity is populated; the candidate
+  // L0 checks are enforced only when this holds.
+  bool hasL0Budgets() const;
+  std::optional<uint64_t> getSafeUBBudget() const;
+  std::optional<uint64_t> getSafeL0ABudget() const;
+  std::optional<uint64_t> getSafeL0BBudget() const;
+  std::optional<uint64_t> getSafeL0CBudget() const;
 
   static ResourceSnapshot
-  fromHardwareConfig(const ascend::HardwareConfig &hardware,
-                     unsigned ubSafetyPercent = 80,
-                     uint64_t reservedUBBytes = 0);
+  fromExplicit(uint64_t ubCapacityBytes, unsigned ubSafetyPercent = 80,
+               uint64_t reservedUBBytes = 0, uint64_t l0aCapacityBytes = 0,
+               uint64_t l0bCapacityBytes = 0, uint64_t l0cCapacityBytes = 0,
+               unsigned l0SafetyPercent = 80);
+
+  static ResourceSnapshot fromHardwareConfig(
+      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
+      uint64_t reservedUBBytes = 0, unsigned l0SafetyPercent = 80);
 };
 
 struct LiveTensorInterval {
@@ -89,6 +109,22 @@ struct LiveByteEstimate {
 std::optional<uint64_t> getStaticTensorBytes(Type type);
 
 LiveByteEstimate estimatePeakLiveBytes(Operation *root);
+
+// Peak cube-tile bytes a function demands from the matrix-multiply
+// on-chip buffers: tt.dot/tt.dot_scaled lhs tiles map to L0A, rhs tiles to
+// L0B, and accumulators/results (including loop-carried accumulation) to
+// L0C. Unlike the unified buffer, each buffer serves one cube tile set at a
+// time, so the per-buffer maximum over all dot sites bounds the demand.
+struct CubeByteEstimate {
+  bool known = false;
+  ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
+  uint64_t peakL0ABytes = 0;
+  uint64_t peakL0BBytes = 0;
+  uint64_t peakL0CBytes = 0;
+  uint64_t dotSiteCount = 0;
+};
+
+CubeByteEstimate estimatePeakCubeBytes(Operation *root);
 
 struct CandidatePlan {
   uint64_t tensorizeFactor = 1;
@@ -125,6 +161,12 @@ struct CandidateCost {
   uint64_t workPerProgramBefore = 0;
   uint64_t workPerProgramAfter = 0;
   bool hasPeakLiveBytes = false;
+  // Peak cube-tile bytes from estimatePeakCubeBytes; enforced only when the
+  // resource snapshot carries L0A/L0B/L0C capacities.
+  bool hasPeakCubeBytes = false;
+  uint64_t peakL0ABytes = 0;
+  uint64_t peakL0BBytes = 0;
+  uint64_t peakL0CBytes = 0;
   bool hasDynamicShape = false;
   bool hasUnknownResource = false;
   bool legacyAutoMapBefore = false;
@@ -150,6 +192,9 @@ struct CandidateEvaluation {
   ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
   int64_t benefitScore = 0;
   uint64_t safeUBBudgetBytes = 0;
+  uint64_t safeL0ABudgetBytes = 0;
+  uint64_t safeL0BBudgetBytes = 0;
+  uint64_t safeL0CBudgetBytes = 0;
   uint64_t requiredParallelPrograms = 0;
   uint64_t effectiveWorkPerProgram = 0;
   uint64_t physicalWavesBefore = 0;
@@ -196,11 +241,13 @@ public:
 
   const ResourceSnapshot &getResourceSnapshot() const { return resources; }
   const LiveByteEstimate &getLiveByteEstimate() const { return liveBytes; }
+  const CubeByteEstimate &getCubeByteEstimate() const { return cubeBytes; }
   CandidateEvaluation evaluate(const CandidateCost &candidate) const;
 
 private:
   ResourceSnapshot resources;
   LiveByteEstimate liveBytes;
+  CubeByteEstimate cubeBytes;
 };
 
 } // namespace cfg

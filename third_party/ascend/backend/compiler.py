@@ -1210,7 +1210,7 @@ class NPUOptions:
     deprecated_fp8_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
     default_dot_input_precision: str = "ieee"
-    allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
+    allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32", "tf32x3", "bf16x3", "bf16x6")
     max_num_imprecise_acc_default: int = 0
     extern_libs: dict = None
     # Backend-managed BiSheng arguments. Keep the name discoverable so legacy

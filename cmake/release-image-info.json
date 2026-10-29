@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "triton_version": "3.6.0",
+  "source_hash": "97e8a2be1e46817c359f55c0e6464e49480d0b1f",
+  "llvm_hash": "f6ded0be897e2878612dd903f7e8bb85448269e5",
+  "patches": [
+    {
+      "file": "llvm_patch_f6ded0b.patch",
+      "sha256": "4ca231012887e58804647aeac30292f3b6957a6c7f11eda518714428d4a521e6"
+    }
+  ],
+  "cann": "9.2.0",
+  "python_version": "3.11.15",
+  "torch": "2.10.0",
+  "torch_npu": "2.10.0.post7"
+}

@@ -46,6 +46,7 @@
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
@@ -109,8 +110,8 @@ struct CrossGroupValue {
 
 struct GroupOutputInfo {
 
-  /// Values this group yields (cross-group values it produces;
-  /// for non-last groups in Case B, also includes original yield values).
+  /// Values this group yields (cross-group values it produces; in Case B also
+  /// the original yield slots it produces or has to carry).
   SmallVector<Value, 0> outputValues;
 
   /// Case B: original else-side yield value for each output slot.
@@ -122,20 +123,97 @@ struct GroupOutputInfo {
   bool isVoid() const { return outputValues.empty(); }
 };
 
+/// Case B: how an original result slot of the source if reaches the consumers
+/// of the split-if chain.
+///
+/// Classification keys on the then-side provenance and on whether the else
+/// operand is usable, not on whether the else operand is internal: the else
+/// side is materialized by one uniform path, so both variants of a row behave
+/// alike. then/else provenance combos and the row each one lands in:
+///   then external, else external  => External
+///   then external, else internal  => External
+///   then internal, else external  => Delegated / NativeLast
+///   then internal, else internal  => Relay / NativeLast
+enum class SlotKind {
+  /// Produced by a non-last group, whose else operand is already the original
+  /// else value: consumers read that group's split-if result directly.
+  Delegated,
+  /// Produced by the last group: no redirect needed, it is native there.
+  NativeLast,
+  /// Produced by an earlier group, but the slot's else operand is not usable
+  /// there: the last group forwards it through the producer's if result.
+  Relay,
+  /// Not produced inside the split region (block argument or defined before the
+  /// source if): the last group carries it as `if(cond) then v else w`, where v
+  /// and w are the slot's then/else operands (they may differ). w may also be
+  /// an
+  /// internal value: the un-split side's ops are moved into the last group's
+  /// else
+  /// block before its yield is built, so w dominates there.
+  External,
+};
+
+static llvm::StringRef slotKindName(SlotKind kind) {
+  switch (kind) {
+  case SlotKind::Delegated:
+    return "Delegated";
+  case SlotKind::NativeLast:
+    return "NativeLast";
+  case SlotKind::Relay:
+    return "Relay";
+  case SlotKind::External:
+    return "External";
+  }
+  return "Unknown";
+}
+
 /// Each split-if gets its own result signature based on what
 /// it actually produces. No uniform slot plan.
 struct YieldAugmentation {
   /// Cross-group values (deduplicated, in producer-group order).
   SmallVector<CrossGroupValue, 0> crossValues;
 
-  /// Per-group output info for non-last groups only.
-  /// Last group is handled separately in materialization.
+  /// Per-group output info, one entry per group (last group included).
   SmallVector<GroupOutputInfo, 0> groupOutputs;
 
-  // Case B only: info for building the last-if (carries original result types)
+  unsigned numGroups = 0;
+
+  // Case B only, all indexed by original slot s in [0, numOriginalSlots):
+  //   val(s)     := origYieldValues[s]         value yielded by the source if
+  //   prod(s)    := origYieldProducerGroup[s]  group that produces val(s), or
+  //                                            none when val(s) is defined
+  //                                            outside the split region
+  //   isLast(s)  := prod(s) is the last group
+  //   domElse(s) := elseVal(s) exists and dominates the source if
+  //   kind(s)    := origYieldSlotKind[s], the first line whose condition holds:
+  //                   prod(s) is none                 => External
+  //                   isLast(s)                       => NativeLast
+  //                   domElse(s)                      => Delegated
+  //                   otherwise                       => Relay
+  //   carrier(s) := the group whose split-if exposes slot s:
+  //                   kind(s) == Delegated ? *prod(s) : last group
+  //
+  //   kind(s)    | carrier(s) | how slot s reaches the carrier
+  //   -----------+------------+-----------------------------------------
+  //   Delegated  | *prod(s)   | producer's if result, read there
+  //   NativeLast | last       | produced in the last group
+  //   Relay      | last       | forwarded via *prod(s)'s if result
+  //   External   | last       | carried as if(cond) then v else w
+  //
+  // Carriers are decided once in planYieldCaseB and only read afterwards.
+  // These per-slot vectors replace std::vector per element, so they carry no
+  // inline storage.
   unsigned numOriginalSlots = 0;
   SmallVector<Value, 0> origYieldValues;
-  SmallVector<int, 0> origYieldProducerGroup;
+  SmallVector<std::optional<unsigned>, 0> origYieldProducerGroup;
+  SmallVector<SlotKind, 0> origYieldSlotKind;
+
+  /// Carrier group of original slot `slot` (see the table above).
+  unsigned carrierGroup(unsigned slot) const {
+    return origYieldSlotKind[slot] == SlotKind::Delegated
+               ? *origYieldProducerGroup[slot]
+               : numGroups - 1;
+  }
 
   bool empty() const { return crossValues.empty(); }
 };
@@ -524,13 +602,19 @@ static void dumpYieldAugmentation(const CandidateIf &cand) {
     }
   }
 
-  // --- last-if info (Case B) ---
+  // --- original slot plan (Case B) ---
   if (cand.hasYield) {
-    LDBG("[Part2] Case B: last-if original yield (" << ya.numOriginalSlots
-                                                    << " slot(s))");
+    LDBG("[Part2] Case B: original yield (" << ya.numOriginalSlots
+                                            << " slot(s))");
     for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
+      const auto producer = ya.origYieldProducerGroup[slot];
       LDBG("  slot[" << slot << "] = " << ya.origYieldValues[slot]
-                     << "  producer=group " << ya.origYieldProducerGroup[slot]);
+                     << "  producer="
+                     << (producer
+                             ? llvm::Twine("group ") + llvm::Twine(*producer)
+                             : llvm::Twine("external"))
+                     << "  kind=" << slotKindName(ya.origYieldSlotKind[slot])
+                     << "  carrier=group " << ya.carrierGroup(slot));
     }
   } else {
     LDBG("  [Part2] Case A: no original yield");
@@ -606,7 +690,8 @@ static void scanRegion(
 /// Tracks else-side yield values for non-last groups' original slots.
 static void
 planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
-               llvm::SmallDenseMap<Operation *, unsigned> &opToGroup) {
+               llvm::SmallDenseMap<Operation *, unsigned> &opToGroup,
+               DominanceInfo &dom) {
   unsigned nGroups = groups.size();
   auto &ya = c.yieldAug;
 
@@ -614,6 +699,7 @@ planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
       cast<scf::YieldOp>(splitThen ? c.ifOp.thenBlock()->getTerminator()
                                    : c.ifOp.elseBlock()->getTerminator());
 
+  ya.numGroups = nGroups;
   ya.numOriginalSlots = splitYieldOp->getNumOperands();
   ya.origYieldValues.clear();
   ya.origYieldProducerGroup.clear();
@@ -621,13 +707,14 @@ planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
     Value val = splitYieldOp->getOperand(slot);
     ya.origYieldValues.push_back(val);
     auto *defOp = val.getDefiningOp();
-    if (defOp) {
-      auto it = opToGroup.find(defOp);
-      ya.origYieldProducerGroup.push_back(
-          it != opToGroup.end() ? static_cast<int>(it->second) : -1);
-    } else {
-      ya.origYieldProducerGroup.push_back(-1); // block argument
+    if (!defOp) {
+      ya.origYieldProducerGroup.push_back(std::nullopt); // block argument
+      continue;
     }
+    auto it = opToGroup.find(defOp);
+    ya.origYieldProducerGroup.push_back(
+        it == opToGroup.end() ? std::nullopt
+                              : std::optional<unsigned>(it->second));
   }
 
   auto otherYieldOp =
@@ -638,19 +725,43 @@ planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
     otherYieldValues.push_back(v);
   }
 
+  // domElse(s): the slot's else operand exists and is usable inside the
+  // producer's else block, i.e. it dominates the source if.
+  auto domElse = [&](unsigned slot) {
+    return slot < otherYieldValues.size() && otherYieldValues[slot] &&
+           dom.properlyDominates(otherYieldValues[slot], c.ifOp);
+  };
+
+  // kind(s), i.e. which row of the taxonomy table a slot falls into. opToGroup
+  // only maps ops of this if, so prod(s) <= lastGi by construction.
+  unsigned lastGi = nGroups - 1;
+  ya.origYieldSlotKind.assign(ya.numOriginalSlots, SlotKind::External);
+  for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
+    const auto producer = ya.origYieldProducerGroup[slot];
+    if (!producer) {
+      continue; // External, the assigned default
+    }
+    if (*producer >= lastGi) {
+      ya.origYieldSlotKind[slot] = SlotKind::NativeLast;
+      continue;
+    }
+    ya.origYieldSlotKind[slot] =
+        domElse(slot) ? SlotKind::Delegated : SlotKind::Relay;
+  }
+
   llvm::SmallDenseMap<Value, unsigned> valueToSlot;
   for (unsigned si = 0; si < ya.crossValues.size(); ++si) {
     valueToSlot[ya.crossValues[si].value] = si;
   }
 
-  ya.groupOutputs.resize(nGroups > 0 ? nGroups - 1 : 0);
-  for (unsigned gi = 0; gi < nGroups - 1; ++gi) {
+  ya.groupOutputs.resize(nGroups);
+  for (unsigned gi = 0; gi < nGroups; ++gi) {
     auto &output = ya.groupOutputs[gi];
 
     // Build map: original yield value produced by this group → slot number.
     llvm::SmallDenseMap<Value, unsigned> origValToSlot;
     for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
-      if (ya.origYieldProducerGroup[slot] == static_cast<int>(gi)) {
+      if (ya.origYieldProducerGroup[slot] == gi) {
         origValToSlot[ya.origYieldValues[slot]] = slot;
       }
     }
@@ -698,7 +809,7 @@ planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
     // Step 2: Original yield values produced by this group that were NOT
     // already added as cross-group values
     for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
-      if (ya.origYieldProducerGroup[slot] == static_cast<int>(gi)) {
+      if (ya.origYieldProducerGroup[slot] == gi) {
         Value origVal = ya.origYieldValues[slot];
         if (!addedValues.contains(origVal)) {
           output.outputValues.push_back(origVal);
@@ -707,6 +818,25 @@ planYieldCaseB(CandidateIf &c, bool splitThen, ArrayRef<BlockGroup> groups,
         }
       }
     }
+  }
+
+  // Append the slots this group carries but does not produce: the Relay and
+  // External rows of the taxonomy table. Delegated slots live in their
+  // producer's group, and NativeLast slots were pushed by Step 1/2 above (the
+  // duplicate check below skips them).
+  auto &lastOutput = ya.groupOutputs[lastGi];
+  for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
+    if (ya.carrierGroup(slot) != lastGi) {
+      continue;
+    }
+    Value origVal = ya.origYieldValues[slot];
+    if (llvm::is_contained(lastOutput.outputValues, origVal)) {
+      continue;
+    }
+    lastOutput.outputValues.push_back(origVal);
+    lastOutput.outputTypes.push_back(origVal.getType());
+    lastOutput.origElseValues.push_back(
+        slot < otherYieldValues.size() ? otherYieldValues[slot] : Value());
   }
 }
 
@@ -721,8 +851,8 @@ static void planYieldCaseA(CandidateIf &c, ArrayRef<BlockGroup> groups) {
     valueToSlot[ya.crossValues[si].value] = si;
   }
 
-  // Per-group output for non-last groups only.
-  ya.groupOutputs.resize(nGroups > 0 ? nGroups - 1 : 0);
+  // Per-group output; the last group stays void (no cross-group consumer).
+  ya.groupOutputs.resize(nGroups);
   for (unsigned gi = 0; gi < nGroups - 1; ++gi) {
     auto &output = ya.groupOutputs[gi];
     for (auto *op : groups[gi].ops) {
@@ -751,7 +881,8 @@ static void planYield(
     llvm::SmallDenseMap<Operation *, unsigned> &opToGroup,
     llvm::SmallDenseMap<Value,
                         std::pair<unsigned, llvm::SmallPtrSet<Operation *, 4>>>
-        &crossValueMap) {
+        &crossValueMap,
+    DominanceInfo &dom) {
   unsigned nGroups = groups.size();
   auto &ya = c.yieldAug;
   ya.crossValues.clear();
@@ -781,7 +912,7 @@ static void planYield(
       });
 
   if (c.hasYield) {
-    planYieldCaseB(c, splitThen, groups, opToGroup);
+    planYieldCaseB(c, splitThen, groups, opToGroup, dom);
   } else {
     planYieldCaseA(c, groups);
   }
@@ -818,14 +949,21 @@ static void analyzeDependencies(CandidateIf &candidate) {
   scanRegion(candidate.elseGroups, opToElseGroup, elseValueMap);
 
   // Step 2.3: Plan yield augmentation for the active region.
+  // Redirected slots need the original else value to dominate the source if;
+  // a per-candidate DominanceInfo answers that without ad-hoc block walks.
+  // Planning below is read-only, so this instance cannot go stale: the IR edits
+  // of materializeCandidate happen after this function returns, and every
+  // candidate builds its own instance.
+  DominanceInfo dom(candidate.ifOp->getParentOp());
+
   // Groups are in natural dependency order from sequential basic block.
   bool splitThen = candidate.shouldSplitThen;
   if (splitThen) {
     planYield(candidate, /*splitThen=*/true, ArrayRef(candidate.thenGroups),
-              opToThenGroup, thenValueMap);
+              opToThenGroup, thenValueMap, dom);
   } else if (candidate.shouldSplitElse) {
     planYield(candidate, /*splitThen=*/false, ArrayRef(candidate.elseGroups),
-              opToElseGroup, elseValueMap);
+              opToElseGroup, elseValueMap, dom);
   }
 
   // Step 2.4: Debug yield augmentation
@@ -896,10 +1034,11 @@ static llvm::FailureOr<Value> createMatmulPlaceHolderValue(
   auto block = ifOp->getBlock();
   return llvm::TypeSwitch<Value, llvm::FailureOr<Value>>(bias)
       .Case([&](BlockArgument barg) -> llvm::FailureOr<Value> {
-        if (barg.getParentBlock()->findAncestorOpInBlock(*ifOp))
+        if (barg.getParentBlock()->findAncestorOpInBlock(*ifOp)) {
           return bias;
-        else
+        } else {
           return llvm::failure();
+        }
       })
       .Case([&](OpResult res) -> llvm::FailureOr<Value> {
         auto defOp = res.getDefiningOp();
@@ -910,8 +1049,9 @@ static llvm::FailureOr<Value> createMatmulPlaceHolderValue(
 
         auto sourceOp = fillOp.getDpsInitOperand(0)->get().getDefiningOp();
         auto sourceEmpty = llvm::dyn_cast_if_present<tensor::EmptyOp>(sourceOp);
-        if (!sourceEmpty)
+        if (!sourceEmpty) {
           return llvm::failure();
+        }
 
         auto emptyOp = builder.create<tensor::EmptyOp>(
             loc, tensorType.getShape(), tensorType.getElementType());
@@ -1196,13 +1336,20 @@ static Value ensureLocalValue(int blockId, Value val, Block &elseBlock,
   return val;
 }
 
-static void buildThenYieldForGroup(const GroupOutputInfo &output,
-                                   Block &thenBlock, Location loc,
-                                   OpBuilder &builder) {
+static void buildThenYieldForGroup(
+    const GroupOutputInfo &output,
+    const llvm::SmallDenseMap<Value, Value> &crossValueReplacement,
+    Block &thenBlock, Location loc, OpBuilder &builder) {
   builder.setInsertionPointToEnd(&thenBlock);
   SmallVector<Value> yieldVals;
   for (auto val : output.outputValues) {
-    yieldVals.push_back(val);
+    //   thenYield(v) = map[v]  if v in dom(map)
+    //                = v      otherwise
+    // map := crossValueReplacement. The first case is a Relay slot: v is
+    // produced by an earlier group, whose defining ops now live inside that
+    // group's if, so only that if's result is visible here.
+    auto it = crossValueReplacement.find(val);
+    yieldVals.push_back(it != crossValueReplacement.end() ? it->second : val);
   }
   builder.create<scf::YieldOp>(loc, yieldVals);
 }
@@ -1229,8 +1376,9 @@ static llvm::LogicalResult
 buildElseYieldForGroup(const int blockId, const GroupOutputInfo &output,
                        Block &elseBlock, Location loc, OpBuilder &builder) {
   auto ifOp = llvm::dyn_cast<scf::IfOp>(elseBlock.getParentOp());
-  if (!ifOp)
+  if (!ifOp) {
     return llvm::failure();
+  }
   builder.setInsertionPointToEnd(&elseBlock);
   SmallVector<Value> yieldVals;
 
@@ -1248,11 +1396,14 @@ buildElseYieldForGroup(const int blockId, const GroupOutputInfo &output,
   };
 
   for (unsigned idx = 0; idx < output.outputValues.size(); ++idx) {
-    // Check if this slot has an original else-side yield value (Case B).
-    // If the value doesn't dominate the new split-if's else block, fall back to
-    // placeholder.
+    // Case B: yield the slot's original else value when it dominates this else
+    // block. A slot without one (a cross-group value) gets a placeholder below,
+    // so the yield keeps the planned arity.
     if (idx < output.origElseValues.size() && output.origElseValues[idx]) {
       Value elseVal = output.origElseValues[idx];
+      // Non-dominating else operand: emit nothing for this slot on purpose, see
+      // the latent-issue note in AGENTS/DynamicCVPipeline/SplitIfByBlockId.md.
+      // The else yield is then short and the verifier rejects the if.
       if (valueDominates(elseVal, &elseBlock)) {
         yieldVals.push_back(
             ensureLocalValue(blockId, elseVal, elseBlock, builder));
@@ -1317,75 +1468,30 @@ static OtherSideContext collectOtherSideInfo(const CandidateIf &c,
 // Part3: Materialization (orchestrator)
 // ============================================================================
 
-/// Build then yield for the last-if in Case B.
-/// Re-yields earlier-group values via jump references (no passthrough chain).
-static void buildThenYieldForLastIf(
-    unsigned lastGi, const YieldAugmentation &ya,
-    llvm::SmallDenseMap<Value, Value> &crossValueReplacement, Block &thenBlock,
-    Location loc, OpBuilder &builder) {
-  builder.setInsertionPointToEnd(&thenBlock);
-  SmallVector<Value> yieldVals;
-  for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
-    int prodGroup = ya.origYieldProducerGroup[slot];
-    if (prodGroup == static_cast<int>(lastGi) || prodGroup < 0) {
-      // Produced by last group, or is a block arg / external value:
-      // yield directly (it dominates the split-if).
-      yieldVals.push_back(ya.origYieldValues[slot]);
-    } else {
-      // Produced by an earlier group: re-yield via jump reference.
-      Value oldVal = ya.origYieldValues[slot];
-      auto it = crossValueReplacement.find(oldVal);
-      if (it != crossValueReplacement.end()) {
-        yieldVals.push_back(it->second);
-      } else {
-        yieldVals.push_back(oldVal);
-      }
-    }
-  }
-  builder.create<scf::YieldOp>(loc, yieldVals);
-}
-
-/// Build else yield for the last-if in Case B.
-/// Absorbs other-side ops (Scene 3/4) or creates placeholders.
-static llvm::LogicalResult
-buildElseYieldForLastIf(int blockId, const OtherSideContext &otherCtx,
-                        ArrayRef<Type> lastIfTypes, Block &elseBlock,
-                        Location loc, OpBuilder &builder) {
-  auto ifOp = llvm::dyn_cast<scf::IfOp>(elseBlock.getParentOp());
-  if (elseBlock.mightHaveTerminator()) {
-    elseBlock.getTerminator()->erase();
-  }
-
-  builder.setInsertionPointToEnd(&elseBlock);
-  SmallVector<Value> yieldVals;
-
-  if (otherCtx.hasOps) {
-    // Scene 3/4: absorb other side ops into else block.
-    for (auto *op : otherCtx.ops) {
-      op->moveBefore(&elseBlock, elseBlock.end());
-    }
-  }
-
-  // Use original else-branch yield values when available (Case B).
-  // These dominate all split-ifs and preserve original semantics.
-  for (unsigned slot = 0; slot < lastIfTypes.size(); ++slot) {
-    if (slot < otherCtx.yieldValues.size()) {
-      yieldVals.push_back(ensureLocalValue(blockId, otherCtx.yieldValues[slot],
-                                           elseBlock, builder));
-    } else {
-      auto phRes = createPlaceholderValue(blockId, builder, loc,
-                                          lastIfTypes[slot], Value(), ifOp);
-      if (llvm::failed(phRes)) {
-        return failure();
-      }
-      yieldVals.push_back(phRes.value());
-    }
-  }
-
-  builder.create<scf::YieldOp>(loc, yieldVals);
-  return llvm::success();
-}
-
+/// Effect: publish group g's outputs to the rest of the source-if body.
+///   - replace users of each output value (outside g's own then block) with the
+///     matching split-if result
+///   - record that replacement in crossValueReplacement for the later groups
+///
+/// Precondition: g is not the last group, so every value of output(g) is
+/// produced inside the split region by g itself (planYieldCaseB pushes an
+/// original slot into output(g) only when prod(s) == g).
+///
+/// Why the last group must not call this, per taxonomy row it carries:
+///   kind(s)    | re-pointing val(s) at splitIf_last#k breaks because
+///   -----------+----------------------------------------------------------
+///   External   | replaceUsesWithIf covers the whole enclosing function, so
+///              | re-pointing an outer value rewrites unrelated blocks and
+///              | earlier loop iterations
+///   Relay      | the producer group already published val(s), and a middle
+///              | group's body (emitted before splitIf_last) may still read it
+///              | => use before def
+///   NativeLast | safe, but no later group reads it, so nothing to publish
+///
+/// Provenance, not position: a redirect moves a slot's *result* into an earlier
+/// if, while the original else operand stays an operand there (origElseValues,
+/// never an entry here), and rearrangeIfOp only moves a split-if after its last
+/// dependency. Neither turns a region-internal value into an External one.
 static void updateCrossValueReplacementGroup(
     const GroupOutputInfo &output, scf::IfOp splitIf, Block &thenBlock,
     llvm::SmallDenseMap<Value, Value> &crossValueReplacement) {
@@ -1411,6 +1517,7 @@ static scf::YieldOp safeGetTerminator(Block *block) {
 
 struct SplittedIfTagGenerator {
   int counter = 0;
+
   int next() { return counter++; }
 };
 
@@ -1434,8 +1541,9 @@ static void postProcess(scf::IfOp ifOp, scf::IfOp sourceIfOp, int blockId,
     auto coreTypeAttr = builder.getStringAttr(joinedAttr);
     ifOp->setAttr(CVPipeline::kCoreType, coreTypeAttr);
     thenYield->setAttr(CVPipeline::kCoreType, coreTypeAttr);
-    if (elseYield)
+    if (elseYield) {
       elseYield->setAttr(CVPipeline::kCoreType, coreTypeAttr);
+    }
   } else {
     ifOp->removeAttr(CVPipeline::kCoreType);
   }
@@ -1490,157 +1598,101 @@ materializeCandidate(CandidateIf &c, CVPipeline::ComputeBlockIdManager &bm,
   llvm::SmallDenseMap<Value, Value> crossValueReplacement;
   Operation *lastCreatedIf = originalIf.getOperation();
 
-  // Phase 1: Materialize each non-last group with per-group result types.
-  // Phase 2 handles the last group separately.
-  for (unsigned gi = 0; gi < nGroups - 1; ++gi) {
+  // One split-if per group, in dependency order. The last group additionally
+  // carries the original slots it either produces itself or cannot delegate.
+  SmallVector<Value> slotResults(ya.numOriginalSlots);
+  for (unsigned gi = 0; gi < nGroups; ++gi) {
     auto &output = ya.groupOutputs[gi];
+    bool isLastGroup = gi == nGroups - 1;
+    // Absorbing the un-split side needs an else region even for a void group.
+    // hasElse <= !output.isVoid() || (isLastGroup && otherCtx.hasOps).
+    // A redirect never invalidates isVoid(): buildThenYieldForGroup yields
+    // exactly output.outputValues, and a redirect only rewrites uses of those
+    // values, so a non-void output list always means a non-empty then yield.
+    bool hasElse = !output.isVoid() || (isLastGroup && otherCtx.hasOps);
     scf::IfOp splittedIf;
 
-    if (output.isVoid()) {
-      LDBG("[Part3] group[" << gi << "] void if");
+    LDBG("[Part3] group[" << gi << "] block_id=" << groups[gi].blockId
+                          << " outputs=" << output.outputValues.size()
+                          << " last=" << isLastGroup << " hasElse=" << hasElse);
 
-      builder.setInsertionPointAfter(lastCreatedIf);
-      splittedIf = builder.create<scf::IfOp>(loc, condition, /*hasElse=*/false);
-      splittedIf->setAttr(CVPipeline::kBlockId,
-                          builder.getI32IntegerAttr(groups[gi].blockId));
-      lastCreatedIf = splittedIf.getOperation();
-      if (splittedIf.getThenRegion().empty()) {
-        splittedIf.getThenRegion().emplaceBlock();
-      }
-      Block &thenBlock = splittedIf.getThenRegion().front();
-      if (thenBlock.mightHaveTerminator()) {
-        thenBlock.getTerminator()->erase();
-      }
+    builder.setInsertionPointAfter(lastCreatedIf);
+    splittedIf =
+        builder.create<scf::IfOp>(loc, output.outputTypes, condition, hasElse);
+    splittedIf->setAttr(CVPipeline::kBlockId,
+                        builder.getI32IntegerAttr(groups[gi].blockId));
+    lastCreatedIf = splittedIf.getOperation();
+    if (splittedIf.getThenRegion().empty()) {
+      splittedIf.getThenRegion().emplaceBlock();
+    }
+    if (hasElse && splittedIf.getElseRegion().empty()) {
+      splittedIf.getElseRegion().emplaceBlock();
+    }
 
-      rewireAndMoveOps(groups[gi], crossValueReplacement, thenBlock);
+    Block &thenBlock = splittedIf.getThenRegion().front();
+    if (thenBlock.mightHaveTerminator()) {
+      thenBlock.getTerminator()->erase();
+    }
+    rewireAndMoveOps(groups[gi], crossValueReplacement, thenBlock);
+    buildThenYieldForGroup(output, crossValueReplacement, thenBlock, loc,
+                           builder);
 
-      builder.setInsertionPointToEnd(&thenBlock);
-      builder.create<scf::YieldOp>(loc);
-
-      // No crossValueReplacement update needed (void if produces no values).
-    } else {
-      LDBG("[Part3] group[" << gi << "] result-bearing if ("
-                            << output.outputValues.size() << " outputs)");
-
-      builder.setInsertionPointAfter(lastCreatedIf);
-      splittedIf = builder.create<scf::IfOp>(loc, output.outputTypes, condition,
-                                             /*hasElse=*/true);
-      splittedIf->setAttr(CVPipeline::kBlockId,
-                          builder.getI32IntegerAttr(groups[gi].blockId));
-      lastCreatedIf = splittedIf.getOperation();
-      if (splittedIf.getThenRegion().empty()) {
-        splittedIf.getThenRegion().emplaceBlock();
-      }
-      if (splittedIf.getElseRegion().empty()) {
-        splittedIf.getElseRegion().emplaceBlock();
-      }
-
-      Block &thenBlock = splittedIf.getThenRegion().front();
-      if (thenBlock.mightHaveTerminator()) {
-        thenBlock.getTerminator()->erase();
-      }
-      rewireAndMoveOps(groups[gi], crossValueReplacement, thenBlock);
-      buildThenYieldForGroup(output, thenBlock, loc, builder);
-
+    if (hasElse) {
       Block &elseBlock = splittedIf.getElseRegion().front();
       if (elseBlock.mightHaveTerminator()) {
         elseBlock.getTerminator()->erase();
+      }
+      if (isLastGroup && otherCtx.hasOps) {
+        // Scene 3/4: the un-split side runs when the condition is false, so its
+        // ops move into this (last) else block instead of being dropped.
+        for (auto *op : otherCtx.ops) {
+          op->moveBefore(&elseBlock, elseBlock.end());
+        }
       }
       if (buildElseYieldForGroup(groups[gi].blockId, output, elseBlock, loc,
                                  builder)
               .failed()) {
         return llvm::failure();
       }
+    }
 
+    // Skipped for the last group, whose output list also holds the Relay and
+    // External slots: see the hazard table on updateCrossValueReplacementGroup.
+    if (!isLastGroup) {
       updateCrossValueReplacementGroup(output, splittedIf, thenBlock,
                                        crossValueReplacement);
     }
+
+    // Fill slotResults[s] with the result of carrier(s)'s split-if, for the
+    // slots this group carries. Every slot gets exactly one entry, checked
+    // after the loop over all groups.
+    for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
+      if (ya.carrierGroup(slot) != gi) {
+        continue;
+      }
+      auto it = llvm::find(output.outputValues, ya.origYieldValues[slot]);
+      if (output.isVoid() || it == output.outputValues.end()) {
+        LDBG("[Part3] original slot " << slot << " missing in group " << gi);
+        return llvm::failure();
+      }
+      slotResults[slot] =
+          splittedIf.getResult(it - output.outputValues.begin());
+    }
+
     postProcess(splittedIf, originalIf, groups[gi].blockId, splittedIfTag);
   }
 
-  // Phase 2: Materialize the last group.
-  scf::IfOp lastIf;
-  unsigned lastGi = nGroups - 1;
-  if (c.hasYield) {
-    // Case B: last-if carries ALL original result types.
-    SmallVector<Type> lastIfTypes;
-    for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
-      lastIfTypes.push_back(originalIf.getResult(slot).getType());
-    }
-
-    LDBG("[Part3] last-if (Case B, " << ya.numOriginalSlots << " results)");
-
-    builder.setInsertionPointAfter(lastCreatedIf);
-    lastIf = builder.create<scf::IfOp>(loc, lastIfTypes, condition,
-                                       /*hasElse=*/true);
-    lastIf->setAttr(CVPipeline::kBlockId,
-                    builder.getI32IntegerAttr(groups[lastGi].blockId));
-    if (lastIf.getThenRegion().empty()) {
-      lastIf.getThenRegion().emplaceBlock();
-    }
-    if (lastIf.getElseRegion().empty()) {
-      lastIf.getElseRegion().emplaceBlock();
-    }
-
-    Block &thenBlock = lastIf.getThenRegion().front();
-    if (thenBlock.mightHaveTerminator()) {
-      thenBlock.getTerminator()->erase();
-    }
-    rewireAndMoveOps(groups[lastGi], crossValueReplacement, thenBlock);
-    buildThenYieldForLastIf(lastGi, ya, crossValueReplacement, thenBlock, loc,
-                            builder);
-
-    Block &elseBlock = lastIf.getElseRegion().front();
-    if (buildElseYieldForLastIf(groups[lastGi].blockId, otherCtx, lastIfTypes,
-                                elseBlock, loc, builder)
-            .failed()) {
+  // Replace the source if's results with their carriers, so no slot travels
+  // through a downstream if.
+  // Fail: a slot without a carrier means the plan and the materialization
+  // disagree.
+  for (unsigned slot = 0; slot < ya.numOriginalSlots; ++slot) {
+    if (!slotResults[slot]) {
+      LDBG("[Part3] original slot " << slot << " has no carrier");
       return llvm::failure();
     }
-
-    for (unsigned ri = 0; ri < ya.numOriginalSlots; ++ri) {
-      originalIf.getResult(ri).replaceAllUsesWith(lastIf.getResult(ri));
-    }
-  } else {
-    // Case A: last group is void (no original yield, no cross-group values).
-    LDBG("[Part3] last-if (Case A, void if)");
-
-    builder.setInsertionPointAfter(lastCreatedIf);
-    bool hasElse = otherCtx.hasOps;
-    lastIf = builder.create<scf::IfOp>(loc, condition, hasElse);
-    lastIf->setAttr(CVPipeline::kBlockId,
-                    builder.getI32IntegerAttr(groups[lastGi].blockId));
-    if (lastIf.getThenRegion().empty()) {
-      lastIf.getThenRegion().emplaceBlock();
-    }
-    Block &thenBlock = lastIf.getThenRegion().front();
-    if (thenBlock.mightHaveTerminator()) {
-      thenBlock.getTerminator()->erase();
-    }
-
-    rewireAndMoveOps(groups[lastGi], crossValueReplacement, thenBlock);
-
-    builder.setInsertionPointToEnd(&thenBlock);
-    builder.create<scf::YieldOp>(loc);
-
-    // Scene 3/4: else block absorbs other side's ops.
-    if (hasElse) {
-      if (lastIf.getElseRegion().empty()) {
-        lastIf.getElseRegion().emplaceBlock();
-      }
-      Block &elseBlock = lastIf.getElseRegion().front();
-      if (elseBlock.mightHaveTerminator()) {
-        elseBlock.getTerminator()->erase();
-      }
-
-      for (auto *op : otherCtx.ops) {
-        op->moveBefore(&elseBlock, elseBlock.end());
-      }
-
-      builder.setInsertionPointToEnd(&elseBlock);
-      builder.create<scf::YieldOp>(loc);
-    }
+    originalIf.getResult(slot).replaceAllUsesWith(slotResults[slot]);
   }
-  postProcess(lastIf, originalIf, groups[lastGi].blockId, splittedIfTag);
 
   originalIf->erase();
 

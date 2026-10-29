@@ -1,6 +1,6 @@
 # Installation Guide
 
-**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Ascend Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
+**Triton-Ascend** is an optimized version of Triton adapted for Huawei Ascend processors. It provides automatic kernel tuning, operator compilation and deployment capabilities. It supports Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products, is compatible with core Triton syntax, and has been deeply optimized for Huawei Ascend NPU features, including automatic parsing of kernel parameters, optimized memory access logic, and improved secure deployment mechanisms.
 
 This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, covering three installation methods: quick installation, source installation and container image installation. It also includes environment validation and common issue troubleshooting.
 
@@ -8,7 +8,7 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 **Hardware Requirements**
 
-- Ascend products: Atlas A2 products/Atlas A3 products\Ascend 950PR&950DT products.
+- Huawei Ascend products: Atlas A2 products/Atlas A3 products\Ascend 950PR&950DT products.
 
 - NPU configuration: at least 32 GB of memory per card is recommended.
 
@@ -16,7 +16,7 @@ This guide instructs developers to install **Triton-Ascend** on **Ubuntu**, cove
 
 **Software Dependencies**
 
-Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Ascend community website.
+Determine the CANN, Python, and TorchNPU software versions and install them. For the driver and firmware installation, refer to [CANN Quick Installation](https://www.hiascend.com/cann/download) on the official Huawei Ascend community website.
 
 - CANN version: 9.2.0
 - Python version: 3.11
@@ -50,7 +50,7 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 git checkout main
-pip install -e .
+pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
 ### Custom LLVM Build (Optional)
@@ -138,24 +138,24 @@ Refer to the **'Installation' -> 'Method 3: Source Code Compilation'** section i
 
 **Table 2** Selected Triton-Ascend Container Images
 
-| Chip | Image Tag | Dockerfile | Pull Command |
-|----------|----------|------------|-------------|
-| A2 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-debian12-py3.11` |
-| A2 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11` |
-| A2 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-openeuler24.03-py3.11` |
-| A3 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-debian12-py3.11` |
-| A3 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-ubuntu24.04-py3.11` |
-| A3 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-a3-openeuler24.03-py3.11` |
-| 950 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-debian12-py3.11` |
-| 950 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-ubuntu24.04-py3.11` |
-| 950 | 3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11 | [Dockerfile](../../docker/3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11/Dockerfile) | `docker pull quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-950-openeuler24.03-py3.11` |
+| Chip | Image Tag | Pull Command |
+|----------|----------|-------------|
+| A2 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-debian12-py3.11` |
+| A2 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11` |
+| A2 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-openeuler24.03-py3.11` |
+| A3 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-debian12-py3.11` |
+| A3 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-ubuntu24.04-py3.11` |
+| A3 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-a3-openeuler24.03-py3.11` |
+| 950 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-debian12-py3.11` |
+| 950 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-ubuntu24.04-py3.11` |
+| 950 | 3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11 | `docker pull quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-950-openeuler24.03-py3.11` |
 
 For more images,please refer to [OVERVIEW.md](https://github.com/triton-lang/triton-ascend/blob/main/docker/OVERVIEW.md)
 
 **Using the Image**
 
 ```bash
-# Using 3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 as an example
+# Using 3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11 as an example
 docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 --security-opt seccomp=unconfined \
 --device=/dev/davinci0 \
@@ -175,7 +175,7 @@ docker run -u 0 -dit --shm-size=512g --name=triton-ascend_container \
 -v /usr/local/Ascend/driver:/usr/local/Ascend/driver \
 -v /home:/home \
 -v /etc/ascend_install.info:/etc/ascend_install.info \
-quay.io/ascend/triton:3.2.2-cann9.1.0-torch_npu2.7.1.post8-910b-ubuntu24.04-py3.11 \
+quay.io/ascend/triton:3.6.0-cann9.2.0-torch_npu2.10.0.post7-910b-ubuntu24.04-py3.11 \
 /bin/bash
 
 # The image has installed the basic components(such as CANN, TorchNPU, and Triton-Ascend) required by the operators

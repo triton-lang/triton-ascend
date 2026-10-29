@@ -38,18 +38,15 @@ def _init_npu_params():
     prop = driver.active.utils.get_device_properties(device)
 
     num_cube_core = prop["num_aicore"]
-    num_vector_core = prop["num_aicore"]
+    num_vector_core = prop["num_vectorcore"]
     # Keep the runtime's historical fallback for a device descriptor that is
     # not yet listed in the compiler-side architecture table.  Graph
     # optimization intentionally treats that case as zero budget instead.
     ub_size_in_kbytes = ub_size_in_kbytes_for_arch(target.arch) or 192
     rf_size_in_kbytes = None
 
-    ASCEND_VARIANTS = ["Ascend910B", "Ascend910_93", "Ascend910_95", "Ascend950"]
-    if any(variant in target.arch for variant in ASCEND_VARIANTS):
-        num_vector_core = num_cube_core * 2
-
-    if target.arch.startswith("Ascend910_95") or target.arch.startswith("Ascend950"):
+    if (target.arch.startswith("Ascend910_95") or target.arch.startswith("Ascend950")
+            or target.arch.startswith("Ascend910_96") or target.arch.startswith("Ascend960")):
         rf_size_in_kbytes = 128
 
     _cached_params = {

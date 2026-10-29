@@ -37,6 +37,7 @@ from dataclasses import dataclass, field
 from itertools import product
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
+from triton import knobs
 from triton.runtime.jit import KernelInterface
 
 
@@ -122,7 +123,7 @@ def _get_option_value(option: str, enabled: bool) -> bool:
 
 def get_mode_choice() -> str:
     """Get the mode to use based on environment variable."""
-    mode_env = os.getenv(_Config.ENV_MODE, "None").lower()
+    mode_env = knobs.ascend.enable_ubtuner.lower() or "none"
     if mode_env in _Config.SUPPORTED_MODES:
         return mode_env
     _log_debug(f"Unknown mode: {mode_env}, using '{_Config.DEFAULT_MODE}' as default")
@@ -535,15 +536,18 @@ class UBTuner(KernelInterface):
         """Find the best UB config using configured algorithm."""
         mode = get_mode_choice()
         _log_debug(f"Using cost mode: {mode}")
-        os.environ[_Config.ENV_ENABLE_PRINT_UB_BITS] = 'true' if mode == _Config.DEFAULT_MODE else 'false'
-        try:
+        # Print UB bits only while tuning, then restore the user's value.  The
+        # knob writes the environment variable too, so kernels compiled inside
+        # ``self.fn.run`` observe the temporary value.
+        with knobs.ascend.scope():
+            knobs.ascend.print_ub_bits = (mode == _Config.DEFAULT_MODE)
             compiled_kernel = self.fn.run(*args, **kwargs)
             metadata = dict(compiled_kernel.metadata._asdict()) if hasattr(compiled_kernel, 'metadata') else {}
             npu_options = self._create_npu_options(metadata)
             if npu_options is None:
                 return UBConfig()
 
-            asm_key = 'bcmlir'
+            asm_key = 'ttadapter'
             linalg_ir = compiled_kernel.asm.get(asm_key) if hasattr(compiled_kernel, 'asm') else None
             if linalg_ir is None:
                 _log_debug("Could not get linalg IR, using default config")
@@ -552,8 +556,6 @@ class UBTuner(KernelInterface):
             available_options = list(UB_OPTION_METADATA.keys())
 
             benefit_cost = self._get_benefit_cost(mode, available_options, args, kwargs, npu_options)
-        finally:
-            os.environ.pop(_Config.ENV_ENABLE_PRINT_UB_BITS, None)
 
         for config in self._try_algorithms(['greedy'], benefit_cost, available_options, linalg_ir, metadata,
                                            npu_options):

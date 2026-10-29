@@ -132,9 +132,7 @@ def compiler_module():
     for name in (
             "_get_kernel_target",
             "_get_triton_adapter_opt_path",
-            "_get_triton_mlir_opt_path",
             "_get_triton_opt_path",
-            "_get_bishengir_opt_path",
     ):
         setattr(utils_stub, name, lambda *_args, **_kwargs: "")
     utils_stub._get_npucompiler_path = lambda *_args, **_kwargs: ("", {})
@@ -673,6 +671,7 @@ def test_make_ttir_forwards_normalized_graph_ub_budget(compiler_module, monkeypa
 def test_ttir_to_npubin_auto_blockify_argv_matrix(compiler_module, monkeypatch):
     common_options = ["--common-before-pure-simt", "--common-after-pure-simt"]
     pure_simt_prefix = [
+        '--enable-debug-info=true',
         "--enable-hivm-compile=false",
         "--enable-triton-ir-compile",
         "--pure-simt",

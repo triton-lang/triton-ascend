@@ -50,9 +50,6 @@ def asin_kernel(
     tl.store(y_ptr + offsets, x, mask=mask)
 
 
-extern_libs = {'libdevice': get_libdevice()}
-
-
 def run_asin_case(size, use_extern_libs):
     torch.manual_seed(0)
     x = torch.rand(size, device=DEV)
@@ -67,7 +64,8 @@ def run_asin_case(size, use_extern_libs):
 
     launch_kwargs = {"BLOCK_SIZE": 1024}
     if use_extern_libs:
-        launch_kwargs["extern_libs"] = extern_libs
+        arch = triton.runtime.driver.active.get_current_target().arch
+        launch_kwargs["extern_libs"] = {'libdevice': get_libdevice(arch)}
 
     asin_kernel[grid](x, output_triton, n_elements, **launch_kwargs)
     torch.testing.assert_close(output_torch, output_triton, rtol=1e-4, atol=1e-4)

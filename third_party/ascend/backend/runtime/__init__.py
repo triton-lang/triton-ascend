@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-import os
+from triton import knobs
 
 from .autotuner import get_max_configs, max_autotune
 
@@ -79,7 +79,7 @@ def _patch_cache_invalidating_env_vars():
 
     def _patched_get_env_vars():
         env_vars = _original_get_env_vars()
-        ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+        ubtuner_mode = knobs.ascend.enable_ubtuner
         if ubtuner_mode:
             env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
         return env_vars
@@ -90,3 +90,9 @@ def _patch_cache_invalidating_env_vars():
 _patch_autotune()
 _patch_config_init()
 _patch_cache_invalidating_env_vars()
+
+# ``triton.backends.ascend.runtime.autotuner`` was imported above, after the
+# backend-level install ran; hook its cache-key binding now as well.
+from triton.backends.ascend.knobs import install_ascend_knobs as _install_ascend_knobs
+
+_install_ascend_knobs()

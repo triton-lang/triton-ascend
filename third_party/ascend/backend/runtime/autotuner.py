@@ -46,7 +46,7 @@ import triton
 from triton import knobs
 from triton._C.libtriton import get_cache_invalidating_env_vars
 from triton.runtime.autotuner import Autotuner, Config
-from triton.runtime.jit import compute_cache_key
+from triton.runtime.jit import MockTensor, compute_cache_key
 from triton.backends.ascend.utils import (_InternalNPUOptionInt, _remove_deprecated_npu_options,
                                           _RESERVED_NPU_OPTION_NAMES, is_compile_on_910_95, _multibuffer_mode_to_tuple)
 
@@ -410,13 +410,12 @@ class AutoTilingTuner(Autotuner):
         self.user_specified_multibuffer = None
         target_arch = triton.runtime.driver.active.get_current_target().arch
         self.default_multibuffer = not is_compile_on_910_95(target_arch)
-        self.print_autotuning = os.getenv("TRITON_PRINT_AUTOTUNING", None) == "1"
 
         # Mark the original function so ubtuner can detect autotune was applied
         ori_fn = get_origin_fn(fn)
         setattr(ori_fn, '_triton_autotuned', True)
 
-        self.enable_ubtuner = os.getenv("TRITON_ENABLE_UBTUNER", "").lower() in ('compile', 'run') or getattr(
+        self.enable_ubtuner = knobs.ascend.enable_ubtuner.lower() in ('compile', 'run') or getattr(
             ori_fn, '_ubtuned', False)
         if self.enable_ubtuner:
             self.ubtuner = UBTuner(fn, key)
@@ -424,7 +423,7 @@ class AutoTilingTuner(Autotuner):
         # Compile kernels in parallel by default for triton.runtime.JITFunction or UBTuner,
         # but not for others, e.g., LibEntry, since it's not compatible with AsyncCompileMode
         self.compile_parallel = (isinstance(self.fn, (triton.runtime.JITFunction, UBTuner))
-                                 and os.getenv("TRITON_AUTOTUNE_PARALLEL_COMPILE", "1") == "1")
+                                 and knobs.ascend.autotune_parallel_compile)
         self._source_module_ast_cache: Optional[ast.Module] = None
         self._source_module_ast_resolved = False
 
@@ -463,7 +462,7 @@ class AutoTilingTuner(Autotuner):
                 new_cfg.num_warps = num_warps
                 simt_configs.append(new_cfg)
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Triton autotuning: Expanded to {len(simt_configs)} SIMT configs (with warps: {cand_num_warps})")
         return simt_configs
 
@@ -489,7 +488,7 @@ class AutoTilingTuner(Autotuner):
                         num_stages=num_stages,
                     ))
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print("Triton autotuning: Expanded to "
                   f"{len(expanded_configs)} configs (with num_stages: {num_stages_candidates})")
         return expanded_configs
@@ -509,7 +508,7 @@ class AutoTilingTuner(Autotuner):
                     base_cfg.num_stages = _multibuffer_to_num_stages(self.user_specified_multibuffer)
 
                 normalized_configs.append(base_cfg)
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print("Triton autotuning: Skip SIMD multibuffer expansion because user "
                       f"specified multibuffer={self.user_specified_multibuffer}, "
                       f"num_stages={self.user_specified_num_stages}")
@@ -531,7 +530,7 @@ class AutoTilingTuner(Autotuner):
             new_cfg.num_stages = _multibuffer_to_num_stages(opposite_default_multibuffer)
             simd_configs.append(new_cfg)
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print("Triton autotuning: Expanded to "
                   f"{len(simd_configs)} SIMD configs (toggle multibuffer={opposite_default_multibuffer})")
         return simd_configs
@@ -572,7 +571,7 @@ class AutoTilingTuner(Autotuner):
         return repr(value)
 
     def _print_autotuning_parse_result(self, label: str, result) -> None:
-        if not self.print_autotuning:
+        if not knobs.autotuning.print:
             return
         normalized_result = self._normalize_autotuning_debug_value(result)
         print("{}: {}".format(
@@ -1559,7 +1558,7 @@ class AutoTilingTuner(Autotuner):
         try:
             return parser_fn()
         except Exception:
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print("[WARNING] Failed to parse {}, fallback to {}.".format(parser_name, fallback_value))
             return fallback_value
 
@@ -1950,7 +1949,7 @@ class AutoTilingTuner(Autotuner):
                 )
             return result
         except Exception as exc:
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print("Ascend autotuning vector v2 parse failed: {}: {}".format(
                     type(exc).__name__,
                     exc,
@@ -1969,7 +1968,7 @@ class AutoTilingTuner(Autotuner):
         from .tile_generator import KernelMeta, TileGenerator
 
         vector_tile_inputs = self._materialize_vector_tile_inputs(kv_dict, all_args)
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print("Ascend autotuning vector tile inputs: "
                   f"axis_sizes={vector_tile_inputs['axis_sizes']}, "
                   f"split_params={vector_tile_inputs['split_params']}, "
@@ -2008,7 +2007,7 @@ class AutoTilingTuner(Autotuner):
         if len(self.gen_configs) == 0:
             print("[WARNING] The generated candidate tiling configs are empty based on provided parameters!")
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print("Generated configs number: {}".format(len(self.gen_configs)))
 
     def _gen_tile_configs_cv(self, kv_dict: Dict[str, int], dtype: torch.dtype,
@@ -2086,7 +2085,7 @@ class AutoTilingTuner(Autotuner):
                 break
             valid_configs.append(config)
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Triton autotuning: estimate n_warmup={n_warmup}, n_repeat={n_repeat}, "
                   f"cumulative={cumulative_time:.4f}s/{time_limit}s, "
                   f"valid={len(valid_configs)}/{len(run_fns)}")
@@ -2228,7 +2227,7 @@ class AutoTilingTuner(Autotuner):
 
     def run(self, *args, **kwargs):
         configs = getattr(self, "_expanded_user_configs", getattr(self, "user_configs", []))
-        self._user_config_diagnostics = _UserConfigDiagnostics(configs) if self.print_autotuning and configs else None
+        self._user_config_diagnostics = _UserConfigDiagnostics(configs) if knobs.autotuning.print and configs else None
         try:
             return self._run_autotune(*args, **kwargs)
         except Exception as exc:
@@ -2291,7 +2290,7 @@ class AutoTilingTuner(Autotuner):
 
         self.best_config = config
 
-        if self.print_autotuning and did_benchmark:
+        if knobs.autotuning.print and did_benchmark:
             all_args = {**self.nargs, **kwargs}
             key_args = {name: arg for name, arg in all_args.items() if name in self.arg_names}
             key_names = [name for name in self.keys if name in key_args]
@@ -2347,14 +2346,14 @@ class AutoTilingTuner(Autotuner):
             # to ubtuner as the search starting point.
             compile_opts = config.all_kwargs()
             ub_cfg = self.ubtuner.get_best_config(*args, compile_opts=compile_opts, **kwargs)
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print(f"ub_cfg {ub_cfg}")
             if ub_cfg:
                 setattr(config, 'ubtune_cfg', ub_cfg)
                 ub_fn = self._make_kernel_call(*args, config=config, **kwargs)
                 run_fns[config] = functools.partial(ub_fn, warmup=False)
         except Exception as e:
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print(f"[WARN] encounter exception when try ubtune, Details: {e}")
 
     def _handle_compile_failure(self, *args, config, excp, run_fns, compile_key, **kwargs):
@@ -2378,7 +2377,7 @@ class AutoTilingTuner(Autotuner):
         return timing
 
     def _print_benchmark_results(self, timings) -> None:
-        if not self.print_autotuning:
+        if not knobs.autotuning.print:
             return
 
         print(f"Triton autotuning benchmark results for function {self.base_fn.__name__}:")
@@ -2448,7 +2447,7 @@ class AutoTilingTuner(Autotuner):
             jit_key = compute_cache_key(kernel_key_cache, specialization, options)
 
             env_vars = get_cache_invalidating_env_vars()
-            ubtuner_mode = os.environ.get("TRITON_ENABLE_UBTUNER", "")
+            ubtuner_mode = knobs.ascend.enable_ubtuner
             if ubtuner_mode:
                 env_vars["TRITON_ENABLE_UBTUNER"] = ubtuner_mode
 
@@ -2492,7 +2491,7 @@ class AutoTilingTuner(Autotuner):
                 continue
 
             cached_configs.append(config)
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print("Triton autotuning: skip cached compile-failed config "
                       f"{config}; previous failure: {failure['exception_type']}")
                 self._record_user_config(config, "reported")
@@ -2607,7 +2606,7 @@ class AutoTilingTuner(Autotuner):
         if parser_mode in ("cube", "mix") and cv_parse_result is not None:
             run_fns = self._prune_by_time_limit(run_fns)
 
-        use_profiling = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
+        use_profiling = knobs.ascend.bench_method.lower() == "npu"
         # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
         use_npu_profiling = use_profiling and not self.user_defined_do_bench
         if use_npu_profiling:
@@ -2698,6 +2697,8 @@ class AutoTilingTuner(Autotuner):
         return kernel_call
 
     def warmup(self, *args, **kwargs):
+        # refer to triton.runtime.jit.KernelInterface.warmup, and wrap args with MockTensor.wrap_dtype
+        args = tuple(map(MockTensor.wrap_dtype, args))
         kwargs = _remove_deprecated_npu_options(kwargs)
         self._inject_grid_num_tiles(kwargs)
         _ = self.generate_key_and_configs(*args, **kwargs)
@@ -2745,7 +2746,7 @@ class AutoTilingTuner(Autotuner):
         self.axis_pid_dims = dict(getattr(parser, "axis_pid_dims", {}))
         self.split_params = dict(split_axes)
         self._refresh_vector_axes()
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Ascend autotuning parse split axes: {split_axes}, "
                   f"split axis pid dims: {self.split_axis_pid_dims}, "
                   f"axis pid dims: {self.axis_pid_dims}")
@@ -2766,7 +2767,7 @@ class AutoTilingTuner(Autotuner):
         self.axis_pid_dims = dict(getattr(parser, "axis_pid_dims", {}))
         self.split_axis_pid_dims = dict(getattr(parser, "split_axis_pid_dims", {}))
         self._refresh_vector_axes()
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print("Ascend autotuning parse axis pid dims (independent): "
                   f"{self.axis_pid_dims}")
         return self.axis_pid_dims
@@ -2887,7 +2888,7 @@ class AutoTilingTuner(Autotuner):
         tiling_axes = parser.parse()
         self.tiling_params = dict(tiling_axes)
         self._refresh_vector_axes()
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Ascend autotuning parse tiling axes: {tiling_axes}")
         return tiling_axes
 
@@ -2906,7 +2907,7 @@ class AutoTilingTuner(Autotuner):
         self.reduction_axes = list(reduction_axes)
         self._refresh_vector_axes()
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Ascend autotuning parse axis arg names: {self.axis_arg_names} \n"
                   f"Ascend autotuning parse reduction axes: {reduction_axes}")
         return reduction_axes
@@ -2920,12 +2921,12 @@ class AutoTilingTuner(Autotuner):
         parser = LowDimsAxesParser(func_ast, parser_axis_arg_names)
         low_dim_axes = parser.parse()
         if len(low_dim_axes) < 1:
-            if self.print_autotuning:
+            if knobs.autotuning.print:
                 print("[WARNING] Failed to parse low-dimensional axes, fallback to empty low_dim_axes.")
             return []
         self.low_dim_axes = list(low_dim_axes)
         self._refresh_vector_axes()
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Ascend autotuning parse low dimensional axes: {low_dim_axes}")
         return low_dim_axes
 
@@ -2940,7 +2941,7 @@ class AutoTilingTuner(Autotuner):
                 ptr_nums += 1
                 ptr_params.append(k)
 
-        if self.print_autotuning:
+        if knobs.autotuning.print:
             print(f"Ascend autotuning parse pointer params: {ptr_params}, pointer nums: {ptr_nums}")
         return ptr_nums
 

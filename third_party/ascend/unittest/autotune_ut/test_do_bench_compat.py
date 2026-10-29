@@ -27,6 +27,14 @@ from triton.runtime.autotuner import Config
 from triton.backends.ascend.runtime.autotuner import AutoTilingTuner
 
 
+@pytest.fixture(autouse=True)
+def _autotune_print_off():
+    """Printing follows knobs.autotuning.print. Stub tuners stay quiet unless a test opts in."""
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = False
+        yield
+
+
 def _make_tuner(do_bench):
     tuner = object.__new__(AutoTilingTuner)
     tuner.compile_parallel = False
@@ -59,7 +67,6 @@ def _make_run_tuner(configs):
     tuner.prune_configs = lambda kwargs: configs
     tuner.enable_ubtuner = False
     tuner.cache_results = True
-    tuner.print_autotuning = False
     tuner.auto_profile_dir = None
     tuner.nargs = {}
     tuner.pre_hook = lambda kwargs, reset_only=False: None
@@ -183,14 +190,15 @@ def test_print_benchmark_results_formats_quantiles_and_selected_config(capsys):
     selected = Config({"BLOCK_SIZE": 128}, num_warps=4)
     other = Config({"BLOCK_SIZE": 256}, num_warps=8)
     tuner = object.__new__(AutoTilingTuner)
-    tuner.print_autotuning = True
     tuner.base_fn = _dummy_kernel
     tuner.best_config = selected
 
-    tuner._print_benchmark_results({
-        selected: (1.23456, 1.0, 1.8),
-        other: 2.34567,
-    })
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = True
+        tuner._print_benchmark_results({
+            selected: (1.23456, 1.0, 1.8),
+            other: 2.34567,
+        })
 
     output = capsys.readouterr().out
     assert "Triton autotuning benchmark results for function _dummy_kernel:" in output
@@ -202,9 +210,10 @@ def test_print_benchmark_results_formats_quantiles_and_selected_config(capsys):
 
 def test_print_benchmark_results_is_disabled_without_debug_flag(capsys):
     tuner = object.__new__(AutoTilingTuner)
-    tuner.print_autotuning = False
 
-    tuner._print_benchmark_results({Config({"BLOCK_SIZE": 128}): 1.0})
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = False
+        tuner._print_benchmark_results({Config({"BLOCK_SIZE": 128}): 1.0})
 
     assert capsys.readouterr().out == ""
 
@@ -218,7 +227,6 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
     other = Config({"BLOCK_SIZE": 256}, num_warps=8)
     tuner, _ = _make_run_tuner([selected, other])
     tuner.cache_results = False
-    tuner.print_autotuning = True
     tuner.base_fn = _dummy_kernel
     tuner.arg_names = ["cache_key", "input"]
     tuner.keys = ["cache_key"]
@@ -231,7 +239,9 @@ def test_run_prints_benchmark_results_after_tuning(capsys):
         other: (2.0, 1.8, 2.2),
     }
 
-    assert tuner.run() == "kernel-result"
+    with triton.knobs.autotuning.scope():
+        triton.knobs.autotuning.print = True
+        assert tuner.run() == "kernel-result"
     output = capsys.readouterr().out
     assert "with key as " not in output
     assert ("with key fields as cache_key='disk-cache-key', input.dtype='torch.float32', "

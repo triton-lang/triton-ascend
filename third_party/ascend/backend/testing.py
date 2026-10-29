@@ -26,6 +26,7 @@ from typing import Optional
 import fnmatch
 
 import triton.runtime as runtime
+from triton import knobs
 from triton.knobs import cache
 
 
@@ -384,7 +385,7 @@ def do_bench_npu(
         funcs = [funcs]
         use_autotune = False
     else:
-        use_autotune = os.getenv("TRITON_BENCH_METHOD", "default").lower() == "npu"
+        use_autotune = knobs.ascend.bench_method.lower() == "npu"
 
     results = None
     need_fallback = True

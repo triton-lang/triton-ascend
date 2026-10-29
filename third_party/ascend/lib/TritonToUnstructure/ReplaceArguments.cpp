@@ -130,13 +130,13 @@ static bool isStableFunctionScalarPointerBase(Value value) {
 }
 
 // Offset analysis deliberately represents a scalar pointer selected by
-// scf.if as an opaque complete address. If such a value is a loop backedge,
-// the loop must choose the complete-address protocol before any edge is
-// rewritten; otherwise the init/region argument can become i64 while the
+// scf.if or arith.select as an opaque complete address. If it is a loop
+// backedge, the loop must choose the complete-address protocol before any edge
+// is rewritten; otherwise the init/region argument can become i64 while the
 // yield remains a pointer.
-static bool isOpaqueScalarPointerIfResult(Value value) {
+static bool isOpaqueScalarPointerSelection(Value value) {
   return isScalarPointerType(value.getType()) &&
-         value.getDefiningOp<scf::IfOp>();
+         isa_and_nonnull<scf::IfOp, arith::SelectOp>(value.getDefiningOp());
 }
 
 // A scalar pointer can use the established T2U offset representation only if
@@ -185,7 +185,7 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
     for (Value value : whileOp.getYieldOp().getOperands())
-      if (isOpaqueScalarPointerIfResult(value))
+      if (isOpaqueScalarPointerSelection(value))
         return true;
     return false;
   } else if (auto loopOp = dyn_cast<LoopLikeOpInterface>(op)) {
@@ -196,7 +196,7 @@ shouldPreserveScalarPointers(Operation *op, RewriterBase &rewriter,
       if (!canRewriteBoundary(arg, /*allowStableBase=*/false))
         return true;
     for (Value value : loopOp.getYieldedValues())
-      if (isOpaqueScalarPointerIfResult(value))
+      if (isOpaqueScalarPointerSelection(value))
         return true;
     return false;
   } else if (auto ifOp = dyn_cast<scf::IfOp>(op)) {

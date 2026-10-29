@@ -18,11 +18,13 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import pytest
 import torch
 
 import triton
 import triton.language as tl
 from triton.compiler import ASTSource
+from triton.backends.ascend.utils import is_compile_on_910_95
 import triton.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
 
@@ -52,3 +54,34 @@ def test_to_buffer():
         signature={},
     )
     triton.compile(src=src, target=target)
+
+
+@triton.jit
+def _to_buffer_after_if(X, Y, Out, Selector, BLOCK: tl.constexpr):
+    offsets = tl.arange(0, BLOCK)
+    x = tl.load(X + offsets)
+    y = tl.load(Y + offsets)
+    if tl.load(Selector) != 0:
+        selected = x
+    else:
+        selected = y
+    # Keep the conversion live across a tensor-valued scf.if, as in the
+    # ping/pong buffer selection used by manually scheduled attention kernels.
+    src = bl.to_buffer(selected, al.ascend_address_space.UB)
+    dst = bl.alloc(selected.dtype, [BLOCK], al.ascend_address_space.UB)
+    al.copy(src, dst)
+    tl.store(Out + offsets, bl.to_tensor(dst))
+
+
+@pytest.mark.skipif(not is_compile_on_910_95(target.arch), reason="al.copy requires Ascend 950 (A5)")
+@pytest.mark.parametrize("take_first", [False, True])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+def test_to_buffer_after_if(take_first, dtype):
+    x = torch.arange(64, dtype=dtype, device="npu")
+    y = -x - 1
+    output = torch.empty_like(x)
+    selector = torch.tensor(int(take_first), dtype=torch.int32, device="npu")
+    kernel = _to_buffer_after_if[(1, )](x, y, output, selector, BLOCK=64)
+    torch.testing.assert_close(output, x if take_first else y, rtol=0, atol=0)
+    assert "bufferization.to_memref " in kernel.asm["ttadapter"]
+    assert "bufferization.to_buffer " not in kernel.asm["ttadapter"]

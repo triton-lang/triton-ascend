@@ -4,6 +4,7 @@ import sys
 import warnings
 from pathlib import Path
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,6 +39,26 @@ def _write_acl_config(cfg_dir, config):
     with open(cfg_path, "w") as f:
         json.dump(config, f)
     return cfg_path
+
+
+@pytest.mark.parametrize(
+    "arch, filename",
+    [
+        ("Ascend910B1", "libdevice.220.bc"),
+        ("Ascend910_9391", "libdevice.220.bc"),
+        ("Ascend910_9581", "libdevice.10.bc"),
+        ("Ascend950PR_9579", "libdevice.10.bc"),
+        ("Ascend910_9691", "libdevice.9201.bc"),
+        ("Ascend960", "libdevice.9201.bc"),
+    ],
+)
+def test_get_libdevice_selects_architecture_specific_bitcode(arch, filename):
+    assert Path(compiler.get_libdevice(arch)).name == filename
+
+
+def test_get_libdevice_rejects_unsupported_architecture():
+    with pytest.raises(ValueError, match="unsupported Ascend architecture"):
+        compiler.get_libdevice("unknown")
 
 
 def test_get_simt_stack_limit_default(monkeypatch):
@@ -148,7 +169,7 @@ def test_empty_options_expose_all_legacy_names(backend):
     assert utils._DEPRECATED_NPU_OPTIONS <= options.__dict__.keys()
     assert options.__dict__["arch"] == options.arch == backend.target.arch
     assert options.__dict__["warp_size"] == 32
-    assert options.__dict__["use_bytecode"] is True
+    assert options.__dict__["use_bytecode"] is False
     assert options.__dict__["enable_vf_fusion"] is None
 
 
@@ -160,6 +181,59 @@ def test_active_options_keep_explicit_values(backend):
     assert options.enable_mixed_cv is True
     assert options.enable_dynamic_cv_pipeline is False
     assert options.num_warps == 16
+
+
+def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
+    options = backend.parse_options({})
+    stages = {}
+    backend.add_stages(stages, options, language=None)
+    assert list(stages) == ["ttir", "ttadapter", "npubin"]
+
+    def no_bridge(*args, **kwargs):
+        pytest.fail("text compatibility stage must not launch a subprocess")
+
+    monkeypatch.setattr(compiler.subprocess, "run", no_bridge)
+    text = "module { /* overridden BishengIR text */ }"
+    monkeypatch.setattr(compiler, "ttir_to_linalg", lambda *args, **kwargs: text)
+    assert stages["ttadapter"](object(), {"hash": "text-export-test"}) == text
+    consumed = []
+
+    def compile_text(src, metadata, options):
+        consumed.append(src)
+        return b"npubin"
+
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_910_95", compile_text)
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_A2_A3", compile_text)
+    monkeypatch.setattr(compiler, "rewrite_debug_line", lambda artifact, **kwargs: artifact)
+    assert stages["npubin"](text, {}) == b"npubin"
+    assert consumed == [text]
+
+
+@pytest.mark.parametrize("extension", ["mlirbc", "bcmlir"])
+def test_reject_retired_bridge_override(backend, extension):
+    with pytest.raises(ValueError, match="stages have been removed"):
+        backend.parse_options({"ir_override": f"kernel.{extension}"})
+
+
+def test_ubtuner_uses_ttadapter_without_bridge_stage(monkeypatch):
+    from triton.backends.ascend.runtime.ubtuner import UBConfig, UBTuner
+
+    text = "module { /* directly consumable ttadapter */ }"
+    compiled = SimpleNamespace(asm={"ttadapter": text})
+    tuner = object.__new__(UBTuner)
+    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: compiled)
+    monkeypatch.setattr(tuner, "_create_npu_options", lambda metadata: object())
+    monkeypatch.setattr(tuner, "_get_benefit_cost", lambda *args: {})
+    expected = UBConfig()
+    consumed = []
+
+    def try_algorithms(algorithms, benefit_cost, available_options, linalg_ir, metadata, options):
+        consumed.append(linalg_ir)
+        yield expected
+
+    monkeypatch.setattr(tuner, "_try_algorithms", try_algorithms)
+    assert tuner._find_best_config() is expected
+    assert consumed == [text]
 
 
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -
@@ -194,7 +268,7 @@ def test_legacy_bisheng_options_launch_uses_backend_defaults(backend, value):
         options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
 
     assert kwargs == {"bisheng_options": value}
-    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice()
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice(options.target_arch)
     assert options.__dict__ == baseline.__dict__
     assert options.hash() == baseline.hash()
     assert signature == constexprs == attrs == {}

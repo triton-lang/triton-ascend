@@ -57,6 +57,7 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createExpLoadPatternPass());
   pm.addPass(createUBUsageOptPass());
+  pm.addPass(createUBUsageOptUpStreamPass());
   pm.addPass(createBroadcastUBOptPass());
   pm.addPass(createPosMaskPatternPass());
   pm.addPass(createMergeSameSourceAxisPass());
@@ -106,6 +107,7 @@ void registerComputeBlockOptPasses() {
     return createComputeBlockOptPass();
   });
   registerPass(createUBUsageOptPass);
+  registerPass(createUBUsageOptUpStreamPass);
   registerPass(createMergeSameSourceAxisPass);
   registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);

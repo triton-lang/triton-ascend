@@ -27,8 +27,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     // CHECK: arith.constant 0 : index
     // CHECK-NOT: memref.alloc
     %alloc = memref.alloc() {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "VECTOR"} : memref<32x32xf32>
-    // CHECK: gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.external_sync = 1 : i32}
-    gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.external_sync = 1 : i32}
+    // CHECK: gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.external_sync = 1 : i32}
+    gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.external_sync = 1 : i32}
     // CHECK: memref.alloc() {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR"} : memref<32x32xf32>
     // CHECK: memref.load %{{.*}} {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR"} : memref<32x32xf32>
     %ld = memref.load %alloc[%c0, %c0] {ssbuffer.block_id = 2 : i32, ssbuffer.core_type = "VECTOR"} : memref<32x32xf32>
@@ -45,8 +45,8 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     %alloc = memref.alloc() {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "VECTOR"} : memref<16x16xf32>
     // CHECK: memref.load %{{.*}} {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "VECTOR"} : memref<16x16xf32>
     %ld = memref.load %alloc[%c0, %c0] {ssbuffer.block_id = 3 : i32, ssbuffer.core_type = "VECTOR"} : memref<16x16xf32>
-    // CHECK: gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.external_sync = 1 : i32}
-    gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "CUBE", ssbuffer.external_sync = 1 : i32}
+    // CHECK: gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.external_sync = 1 : i32}
+    gpu.barrier {ssbuffer.block_id = 5 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.external_sync = 1 : i32}
     return
   }
 }

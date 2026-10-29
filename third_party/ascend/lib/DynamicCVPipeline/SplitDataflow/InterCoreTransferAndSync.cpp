@@ -841,6 +841,22 @@ mlir::Operation *InterCoreTransferAndSyncPass::getFixpipePointAfterProducer(
   if (blockId != producerBlockId) {
     return nullptr;
   }
+
+  while (Operation *nextOp = fixpipePoint->getNextNode()) {
+    if (CVPipeline::getOpBlockId(nextOp).value_or(-1) != producerBlockId ||
+        !isa<hivm::FixpipeOp>(nextOp)) {
+      break;
+    }
+    Operation *setOp = nextOp->getNextNode();
+    if (!setOp ||
+        CVPipeline::getOpBlockId(setOp).value_or(-1) != producerBlockId ||
+        !isa<hivm::SyncBlockSetOp>(setOp)) {
+      break;
+    }
+
+    fixpipePoint = setOp;
+  }
+
   return fixpipePoint;
 }
 
@@ -1182,6 +1198,9 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     Operation *consumedDataOp, bool isStoreDirectly) {
   LOG_DEBUG("Inserting inter-core synchronization for transferOp: "
             << *transferOp << "\n");
+  if (dep.flagId < 0) {
+    return;
+  }
 
   auto flagId = builder.getIntegerAttr(builder.getI64Type(), flag);
 

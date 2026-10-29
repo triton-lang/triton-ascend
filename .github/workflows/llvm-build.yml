@@ -151,7 +151,7 @@ jobs:
         update-alternatives --install /usr/bin/lld lld /usr/bin/lld-15 100
 
     - name: Enable Cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ env.SCCACHE_DIR }}
         key: ${{ matrix.config.target-os }}-${{ matrix.config.arch }}-${{ env.short_llvm_commit_hash }}-${{ env.patch_hash }}

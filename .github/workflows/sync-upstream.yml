@@ -127,7 +127,7 @@ jobs:
           echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
 
       - name: Cache build dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.triton/llvm

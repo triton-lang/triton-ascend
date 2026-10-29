@@ -37,7 +37,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache build dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.triton/llvm
@@ -205,7 +205,7 @@ jobs:
           python3.12 -c 'import torch, torch_npu, numpy, packaging; print("Mojo import dependencies are available")'
 
       - name: Cache Mojo build dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.triton/llvm

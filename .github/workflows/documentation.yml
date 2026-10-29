@@ -42,7 +42,7 @@ jobs:
           node-version: '20'
 
       - name: Cache cspell dictionaries
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: .cache
           key: docs-ci-${{ runner.os }}-${{ hashFiles('.github/docs-ci/docs-ci-v2.js', '.github/docs-ci/config.json') }}
@@ -158,7 +158,7 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache build dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.triton/llvm

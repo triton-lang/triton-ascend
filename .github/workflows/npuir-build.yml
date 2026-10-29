@@ -102,7 +102,7 @@ jobs:
           echo "bisheng_dir=${BISHENG_DIR}" >> "$GITHUB_OUTPUT"
 
       - name: Restore ccache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           # Keyed on the fetched stable HEAD: cache identity follows the
@@ -175,7 +175,7 @@ jobs:
             --collect-binary "$GITHUB_WORKSPACE/npuir-payload"
 
       - name: Save ccache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .ccache
           key: npuir-ccache-ml-2_34-${{ matrix.config.arch }}-${{ steps.fetch-npuir.outputs.npuir_sha }}

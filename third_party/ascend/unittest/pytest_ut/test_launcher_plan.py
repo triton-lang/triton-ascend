@@ -1104,3 +1104,49 @@ def test_compiler_version_unresolved_dependencies_query_live(host_compiler, monk
     monkeypatch.setattr(subprocess, "check_output", output)
     assert _query_host_compiler(tool.path) == "test-compiler-v1"
     assert not list((tool.root / "cache").rglob("compiler-version.json"))
+
+
+@pytest.mark.parametrize("size", [0, 4096])
+def test_proton_profile_size_is_carried_in_launch_plan(policy, size):
+    spec = launcher.make_launch_spec(metadata(profile_scratch_size=size), policy)
+    assert spec.profile_scratch_size == size
+
+
+def test_proton_scratch_follows_expanded_user_arguments():
+    calls = []
+    wrapped = launcher.wrap_handle_tensordesc(lambda *args: calls.append(args), {0: ("i32", "i64")},
+                                              profile_scratch=True)
+    prefix = tuple(range(9))
+    scratch = object()
+    wrapped(*prefix, (11, 13), scratch)
+    assert calls == [(*prefix, 11, 13, scratch)]
+    with pytest.raises(TypeError):
+        wrapped(*prefix, (11, 13))
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_proton_exit_drains_framework_queue_before_collecting(monkeypatch, enabled):
+    from triton.backends.ascend import driver
+    from triton.runtime import _allocation
+
+    events = []
+    scratch = object()
+    interface = SimpleNamespace(synchronize=lambda: events.append("synchronize"))
+    monkeypatch.setattr(driver, "get_backend_func", lambda method: interface)
+    monkeypatch.setattr(_allocation, "_profile_allocator",
+                        SimpleNamespace(get=lambda: lambda size, alignment, stream: scratch))
+    instance = object.__new__(driver.NPULauncher)
+    instance.compile_only = False
+    instance.profile_scratch_size = 16 if enabled else 0
+    instance.profile_scratch_align = 64
+
+    def native(*args):
+        if enabled:
+            assert args[-1] is scratch
+        events.append("enqueue")
+        args[8](args[6])
+
+    instance.launch = native
+    exit_hook = lambda metadata: events.append("collect")
+    instance(1, 1, 1, 0, 0, {}, None, None, exit_hook)
+    assert events == (["enqueue", "synchronize", "collect"] if enabled else ["enqueue", "collect"])

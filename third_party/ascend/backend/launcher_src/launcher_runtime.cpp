@@ -67,9 +67,12 @@ struct Invocation {
         function(request.function),
         stream(static_cast<cann_stream>(request.stream)),
         grid(prepareGrid(plan->spec, request.grid)) {
+    if (plan->spec.profile_scratch_size && !request.profile_scratch)
+      throw std::invalid_argument("missing Proton profile scratch buffer");
     if (plan->layout.total > small.size())
       large.resize(plan->layout.total);
     std::memset(data(), 0, plan->layout.total);
+    put(plan->layout.profile, request.profile_scratch);
     if (plan->layout.originalGrid != ArgLayout::absent) {
       const std::array<uint32_t, 2> originalGrid{
           static_cast<uint32_t>(request.grid[0]),
@@ -181,6 +184,15 @@ static cann_error execute(Invocation &call) {
     call.put(layout.lock, lock.data);
   }
   call.put(layout.workspace, workspace.data);
+  if (spec.profile_scratch_size) {
+    void *profile = nullptr;
+    std::memcpy(&profile, call.data() + layout.profile, sizeof(profile));
+    const auto bytes =
+        checkedMultiply(spec.profile_scratch_size, call.grid.logicalBlocks);
+    auto ret = cann_memset_async(profile, bytes, 0, bytes, call.stream);
+    if (ret != CANN_SUCCESS)
+      return ret;
+  }
   std::memcpy(call.data() + layout.grid, call.grid.grid.data(),
               3 * sizeof(int32_t));
 
@@ -501,9 +513,10 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     if (!handle)
       return nullptr;
     const auto &layout = handle->impl->layout;
-    if (count < 9 || size_t(count - 9) != layout.inputCount) {
+    const size_t extra = handle->impl->spec.profile_scratch_size ? 1 : 0;
+    if (count < 9 || size_t(count - 9) != layout.inputCount + extra) {
       PyErr_Format(PyExc_TypeError, "launch expects %zu arguments, got %zd",
-                   layout.inputCount + 9, count);
+                   layout.inputCount + 9 + extra, count);
       return nullptr;
     }
     TritonNpuLaunchRequestV1 request{};
@@ -543,6 +556,8 @@ PyObject *launch(PyObject *self, PyObject *const *args, Py_ssize_t count) {
     }
     request.kernel_name = PyUnicode_AsUTF8(name);
     if (!request.kernel_name)
+      return nullptr;
+    if (extra && !pointerValue(args[count - 1], &request.profile_scratch))
       return nullptr;
     auto call = std::make_shared<Invocation>(handle->impl, request);
     bool profile = profileL1.load(std::memory_order_relaxed);
@@ -654,6 +669,9 @@ PyObject *createLauncher(PyObject *, PyObject *args) {
     READ_FIELD(task_type);
     READ_FIELD(mix_ratio);
     READ_FIELD(shared_mem_dynamic_size);
+    if (PyDict_GetItemString(config, "profile_scratch_size")) {
+      READ_FIELD(profile_scratch_size);
+    }
 #undef READ_FIELD
     std::vector<TritonNpuArgTypeV1> types;
     auto count = PyList_GET_SIZE(inputTypes);

@@ -35,7 +35,8 @@ class Spec(ct.Structure):
                 ("workspace_size", ct.c_uint64), ("ordered_locks", ct.c_uint64), ("unordered_locks", ct.c_uint64),
                 ("lock_init_value", ct.c_int64), ("participant_factor", ct.c_uint32), ("physical_blocks", ct.c_uint32),
                 ("coalesce_factor", ct.c_uint32), ("coalesce_axis", ct.c_int32), ("task_type", ct.c_uint32),
-                ("mix_ratio", ct.c_uint32), ("shared_mem_dynamic_size", ct.c_uint32)]
+                ("mix_ratio", ct.c_uint32), ("shared_mem_dynamic_size", ct.c_uint32),
+                ("profile_scratch_size", ct.c_uint64)]
 
 
 class ArgType(ct.Structure):
@@ -46,7 +47,7 @@ class Request(ct.Structure):
     _fields_ = [("version", ct.c_uint32), ("struct_size", ct.c_uint32), ("kernel_name", ct.c_char_p),
                 ("function", ct.c_void_p), ("stream", ct.c_void_p), ("grid", ct.c_int32 * 3),
                 ("shapes_data", ct.POINTER(ct.c_int64)), ("shape_dims", ct.POINTER(ct.c_int)),
-                ("tensor_kinds", ct.POINTER(ct.c_int)), ("num_tensors", ct.c_int)]
+                ("tensor_kinds", ct.POINTER(ct.c_int)), ("num_tensors", ct.c_int), ("profile_scratch", ct.c_void_p)]
 
 
 @pytest.fixture(scope="module")

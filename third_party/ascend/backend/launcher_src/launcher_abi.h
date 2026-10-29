@@ -87,6 +87,7 @@ typedef struct {
   uint32_t task_type;
   uint32_t mix_ratio;
   uint32_t shared_mem_dynamic_size;
+  uint64_t profile_scratch_size;
 } TritonNpuLaunchSpecV1;
 
 typedef struct {
@@ -100,6 +101,7 @@ typedef struct {
   const int *shape_dims;
   const int *tensor_kinds;
   int num_tensors;
+  void *profile_scratch;
 } TritonNpuLaunchRequestV1;
 
 typedef struct TritonNpuLaunchPlan TritonNpuLaunchPlan;

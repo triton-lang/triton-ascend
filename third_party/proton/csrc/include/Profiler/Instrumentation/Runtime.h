@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
+#include <string>
 
 #include "Device.h"
 
@@ -28,6 +29,10 @@ public:
                     uint8_t *deviceBuffer, size_t deviceBufferSize,
                     void *stream,
                     std::function<void(uint8_t *, size_t)> callback) = 0;
+
+  // Returns the runtime SoC name when the backend can query it. Backends that
+  // do not expose a SoC name return an empty string.
+  virtual std::string getSocName() const { return {}; }
 
   DeviceType getDeviceType() const { return deviceType; }
 

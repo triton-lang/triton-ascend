@@ -7,3 +7,7 @@ add_proton_library(ProtonProfiler
 	Instrumentation/HipRuntime.cpp
 	Instrumentation/Metadata.cpp
 )
+
+if(PROTON_ENABLE_NPU)
+	target_sources(ProtonProfiler PRIVATE Instrumentation/AscendRuntime.cpp)
+endif()

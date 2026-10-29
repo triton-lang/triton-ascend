@@ -467,6 +467,33 @@ def _get_ascend_cmake_args():
     return cmake_args
 
 
+def _get_ascend_proton_cmake_args():
+    """Return CANN include arguments for the optional Proton NPU build."""
+    ascend_include_dir = os.getenv("ASCEND_INCLUDE_DIR", "")
+    if ascend_include_dir and not os.path.exists(os.path.join(ascend_include_dir, "acl", "acl.h")):
+        ascend_include_dir = ""
+
+    if not ascend_include_dir:
+        ascend_home = os.getenv("ASCEND_HOME_PATH", "")
+        if not ascend_home:
+            ascend_home = os.getenv("ASCEND_TOOLKIT_HOME", "")
+        if ascend_home:
+            for candidate in (
+                    os.path.join(ascend_home, "include"),
+                    os.path.join(ascend_home, "runtime", "include"),
+            ):
+                if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
+                    ascend_include_dir = candidate
+                    break
+
+    if not ascend_include_dir:
+        return []
+    return [
+        "-DPROTON_ENABLE_NPU=ON",
+        "-DASCEND_INCLUDE_DIR=" + ascend_include_dir,
+    ]
+
+
 def _get_install_requirements():
     install_requires = [
         "attrs==24.2.0",
@@ -521,6 +548,11 @@ def patch_module(mod):
     _OrigCMakeBuild = mod.CMakeBuild
 
     class CMakeBuild(_OrigCMakeBuild):
+
+        def get_proton_cmake_args(self):
+            cmake_args = super().get_proton_cmake_args()
+            cmake_args += _get_ascend_proton_cmake_args()
+            return cmake_args
 
         def run(self):
             _apply_triton_ascend_patch()

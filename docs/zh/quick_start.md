@@ -51,7 +51,7 @@ python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 
 观察到类似的输出即说明环境配置正确。
 
-```shell
+```text
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0

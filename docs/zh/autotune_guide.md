@@ -179,13 +179,13 @@ grid = lambda meta: (triton.cdiv(M, meta["BLOCK_M"]),)
 
 ## 使用注意事项
 
-autotune的benchmark语义与社区一致，会多次执行kernel。如果kernel存在副作用，例如包含原子操作、inplace写入，或会修改输入/输出buffer的累积状态，仍然需要通过社区已有的hook机制处理。
+autotune的benchmark语义与社区一致，会多次执行kernel。如果kernel存在副作用，例如包含原子操作、in-place写入，或会修改输入/输出buffer的累积状态，仍然需要通过社区已有的hook机制处理。
 
 ## Triton-Ascend相比社区autotune的扩展
 
 社区版 `triton.autotune` 的典型模式是：用户手工提供一组 `triton.Config`，框架做benchmark，然后缓存最优结果。
 
-Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事。
+Triton-Ascend在保持这套接口习惯不变的前提下，主要扩展了下面几件事：
 
 ### 1. 支持 `configs=[]` 自动生成候选配置
 
@@ -203,7 +203,7 @@ Triton-Ascend支持在autotune做benchmark时切换性能采集方式：除了�
 
 ## 自动Tiling生成能力的范围与行为
 
-前面的第1点说明了Triton-Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明。
+前面的第1点说明了Triton-Ascend支持 `configs=[]` 自动生成候选配置。对这项能力，进行以下几点说明：
 
 ### 1. 自动生成范围聚焦在Tiling参数
 
@@ -213,7 +213,7 @@ Ascend自动生成的重点是kernel中与Tiling相关的 `tl.constexpr` 参数�
 
 ### 2. 候选配置会带上Ascend硬件约束
 
-Ascend backend在生成候选时，会结合NPU的片上存储容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目benchmark。
+Ascend backend在生成候选时，会结合NPU的片上内存容量、对齐约束、核数利用等边界做筛选，而不是单纯枚举一批配置再盲目benchmark。
 
 ### 3. 自动Tiling模式的目标是方便给出“性能不错”的配置
 
@@ -259,7 +259,7 @@ Triton autotuning benchmark results for function kernel:
   config=BLOCK_M: 64, BLOCK_N: 256, ...; p50=0.0140 ms, p20=0.0130 ms, p80=0.0150 ms
 ```
 
-`[selected]` 标记被选中的最佳配置。`p50`、`p20`、`p80` 分别为第50、20、80百分位耗时，单位为毫秒；若测速返回平均耗时，则显示 `mean=... ms`。
+`[selected]` 标记被选中的最佳配置。`p50`、`p20`、`p80` 分别为第50、20、80百分位耗时，单位为 `ms`；若测速返回平均耗时，则显示 `mean=... ms`。
 
 用户配置（`configs`，包括通过 `hints` 展开的配置）发生失败，或调优因异常中断时，会打印相应配置的状态和原因。以下分别为编译失败和调优中断的示意输出：
 
@@ -272,7 +272,7 @@ Triton autotuning: config=BLOCK_M: 64, BLOCK_N: 256, ...; not_evaluated; reason=
 
 ## 进阶用法：自动Tiling与其他参数联合调优
 
-以下内容属于进阶用法，只有当用户希望在自动Tiling模式下，继续联合调优kernel的非Tiling参数或编译参数时，再考虑使用。
+以下内容属于进阶用法，只有当用户希望在自动Tiling模式下，继续联合调优kernel的非Tiling参数或编译参数时，再考虑使用：
 
 ### 1. 社区autotune：手工枚举全部调优参数
 

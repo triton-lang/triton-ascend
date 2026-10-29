@@ -25,6 +25,7 @@ import torch
 import triton.language as tl
 import triton.extension.buffer.language as bl
 import triton.language.extra.cann.extension as al
+from triton.language.extra.cann import libdevice
 from triton.language.extra.cann.extension import index_put, gather_out_to_ub, scatter_ub_to_out
 from triton.compiler.compiler import ASTSource
 from triton.compiler.code_generator import ast_to_ttir
@@ -85,19 +86,19 @@ def kernel_core_functions(M: tl.constexpr, N: tl.constexpr):
     result_fixpipe = al.fixpipe(data, buf_ub)
 
 
-# Test cases for math_ops.py
+# Test cases for libdevice math functions
 @triton.jit
 def kernel_math_ops(M: tl.constexpr, N: tl.constexpr):
     # Test atan2
     x = tl.full([M, N], 1.0, dtype=tl.float32)
     y = tl.full([M, N], 1.0, dtype=tl.float32)
-    result_atan2 = al.atan2(y, x)
+    result_atan2 = libdevice.atan2(y, x)
 
     # Test isfinited
-    result_isfinited = al.isfinited(x)
+    result_isfinited = libdevice.isfinited(x)
 
     # Test finitef
-    result_finitef = al.finitef(x)
+    result_finitef = libdevice.finitef(x)
 
 
 # Test cases for vec_ops.py

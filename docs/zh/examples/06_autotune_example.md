@@ -83,27 +83,27 @@ if __name__ == "__main__":
 #        2. 若 configs=[]，框架基于 kernel 自动生成候选 tiling 配置，注意此时需要将@triton.autotune装饰器直接应用在@triton.jit之上，
 #           中间不能插入其他装饰器，例如libentry；
 #        3. 若 configs 不为空，则框架默认不会自动生成候选 tiling 配置；
-#        4. 若 configs 不为空，且hints.auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
+#        4. 若 configs 不为空，且hints.auto_gen_config=True，则框架自动生成Config，并与用户定义Config合并进行配置择优；
 #        5. 进阶版本支持通过设置os.environ["TRITON_BENCH_METHOD"] = ( "npu" ) 来设置性能采集方式。
 #
 # hints(Dict[str, str])：
 # 注意：1. hints可选，用户不填时框架会自动解析切分轴（split_params），分块轴（tiling_params）等相关参数
-#      2. 用户可通过hints传参来生成tiling,涉及切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes），且四个参数需同时提供
+#      2. 用户可通过hints传参来生成tiling，涉及切分轴（split_params）、分块轴（tiling_params）、低维轴（low_dim_axes）、规约轴（reduction_axes），且四个参数需同时提供
 
-# split_params (Dict[str, str]): axis name: argument name组成的字典, argument 是切分轴的可调参数, 例如 'XBLOCK'
+# split_params (Dict[str, str]): axis name: argument name组成的字典， argument 是切分轴的可调参数， 例如 'XBLOCK'
 #     axis name必须在参数key的轴名称集合里。 请勿在轴名称前添加前缀 r
 #     此参数可以为空，当split_params 和 tiling_params 都为空的时候不会进行自动寻优
 #     切分轴通常可以根据 `tl.program_id()` 分核语句来确定
-# tiling_params (Dict[str, str]): axis name: argument name组成的字典, argument 是分块轴的可调参数, 例如 'XBLOCK_SUB'
+# tiling_params (Dict[str, str]): axis name: argument name组成的字典，argument 是分块轴的可调参数，例如 'XBLOCK_SUB'
 #     axis name必须在参数key的轴名称集合里。请勿在轴名称前添加前缀 r
 #     此参数可以为空，当split_params 和 tiling_params 都为空的时候不会进行自动寻优
 #     分块轴通常可以根据 `tl.arange()` 分块表达式来确定
 # low_dim_axes (List[str]): 所有低维轴的轴名称列表，axis name必须在参数key的轴名称集合里
 # reduction_axes (List[str]): 所有规约轴的轴名称列表，axis name必须在参数key的轴名称集合里， 在轴名称前添加前缀 r
-# auto_gen_config (bool): 默认为False,涉及如下场景组合
-#     1. 用户未定义Config,无论是否设置auto_gen_config,框架默认自动生成Config；
-#     2. 用户定义了Config,且auto_gen_config=False,则框架不自动生成Config,只使用用户定义的Config；
-#     3. 用户定义了Config,且auto_gen_config=True,则框架自动生成Config,并与用户定义Config合并进行配置择优；
+# auto_gen_config (bool): 默认为False，涉及如下场景组合
+#     1. 用户未定义Config，无论是否设置auto_gen_config，框架默认自动生成Config；
+#     2. 用户定义了Config，且auto_gen_config=False，则框架不自动生成Config，只使用用户定义的Config；
+#     3. 用户定义了Config，且auto_gen_config=True，则框架自动生成Config，并与用户定义Config合并进行配置择优；
 #
 # key（list[str]）：
 # - 传入运行时参数名列表；列表中任一参数值变化会触发候选配置的重新生成与评估

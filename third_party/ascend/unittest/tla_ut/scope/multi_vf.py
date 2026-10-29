@@ -8,7 +8,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -18,7 +17,7 @@ SIGNATURE = {"X_ptr": "*fp32", "W_ptr": "*fp32", "O1_ptr": "*fp32", "O2_ptr": "*
 N = 64
 
 
-@triton.jit
+@tla.jit
 def multi_vf(X_ptr, W_ptr, O1_ptr, O2_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     w_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
@@ -62,7 +61,7 @@ def test_compile():
     W = torch.randn(N, dtype=torch.float32, device="npu")
     O1 = torch.empty(N, dtype=torch.float32, device="npu")
     O2 = torch.empty(N, dtype=torch.float32, device="npu")
-    multi_vf[(1, )](X, W, O1, O2, enable_tla_mode=True, **constexprs())
+    multi_vf[(1, )](X, W, O1, O2, **constexprs())
     torch.npu.synchronize()
     artifacts = check_compile_artifacts()
     assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"

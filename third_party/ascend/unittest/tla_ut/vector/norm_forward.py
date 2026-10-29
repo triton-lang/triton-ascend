@@ -9,7 +9,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -21,7 +20,7 @@ SHAPE = dict(tmax=8, hid=256, pad_h=256, nacc=4, eps=1e-5, versions=2, cores=4)
 SIGNATURE = {"X_ptr": "*bf16", "W_ptr": "*bf16", "O_ptr": "*fp32", "num_tokens": "i32"}
 
 
-@triton.jit
+@tla.jit
 def rmsnorm(X_ptr, W_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, HID: tl.constexpr, PAD_H: tl.constexpr,
             NACC: tl.constexpr, WITH_W: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr, EPS: tl.constexpr):
     tl.static_assert(HID > 0 and HID == PAD_H and PAD_H % 256 == 0,

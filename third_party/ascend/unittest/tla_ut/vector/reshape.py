@@ -33,7 +33,7 @@ def constexprs():
     return dict(SHAPE)
 
 
-@triton.jit
+@tla.jit
 def reshape_fwd(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     # Branches A/C/D share the same (H, D) GM tile; B reads the flat (H*D,) tile.
     x_tile = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
@@ -64,7 +64,7 @@ def reshape_fwd(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     tla.copy(d, tla.view(O_ptr, (H // 2, 2, D), strides=(2 * D, D, 1), offsets=(0, 0, 0)))
 
 
-@triton.jit
+@tla.jit
 def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
@@ -73,7 +73,7 @@ def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     tla.reshape(sub, (H * D // 2, ))
 
 
-@triton.jit
+@tla.jit
 def reshape_count_mismatch(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))

@@ -30,7 +30,7 @@ SHAPE = dict(M=64, N=64, K=64)
 SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def gemm_basic(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
     tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
     a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")

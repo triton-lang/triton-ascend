@@ -32,7 +32,7 @@ SHAPE = dict(M=64, N=64, K=64, BIAS=1.0, FLAG=0)
 SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def gemm_bias(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr,
               FLAG: tl.constexpr):
     tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")

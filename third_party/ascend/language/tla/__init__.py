@@ -30,6 +30,8 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
+import triton
+
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
@@ -49,6 +51,12 @@ from . import cube
 
 # Explicit pipeline / global synchronization.
 from . import sync
+
+
+def jit(fn=None, **kwargs):
+    """``triton.jit`` alias; ``hacc.mode`` is stamped at ``lower_ttir``."""
+    return triton.jit(fn, **kwargs) if fn is not None else triton.jit(**kwargs)
+
 
 __all__ = [
     "buffer",
@@ -83,4 +91,7 @@ __all__ = [
 
     # explicit synchronization
     "sync",
+
+    # kernel decorator
+    "jit",
 ]

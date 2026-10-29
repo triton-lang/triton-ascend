@@ -18,7 +18,7 @@ M = 64
 K = 64
 
 
-@triton.jit
+@tla.jit
 def gm2l1(A_ptr, M: tl.constexpr, K: tl.constexpr):
     # 4-D NZ physical shape for the L1 tile (fractal of the 2-D ND view).
     a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")

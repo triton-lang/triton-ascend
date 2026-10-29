@@ -25,7 +25,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -37,7 +36,7 @@ SHAPE = dict(BM=64, BN=64, D=128, N=64, FLAG_S=0, FLAG_P=1, FLAG_O=2)
 SIGNATURE = {"Q_ptr": "*fp16", "K_ptr": "*fp16", "V_ptr": "*fp32", "P_ptr": "*fp32", "O_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def flash_attn(Q_ptr, K_ptr, V_ptr, P_ptr, O_ptr, BM: tl.constexpr, BN: tl.constexpr, D: tl.constexpr, N: tl.constexpr,
                SCALE: tl.constexpr, FLAG_S: tl.constexpr, FLAG_P: tl.constexpr, FLAG_O: tl.constexpr):
     tl.static_assert(D % 16 == 0 and BM % 16 == 0 and BN % 16 == 0 and N % 16 == 0,
@@ -166,7 +165,7 @@ def _launch():
     V = torch.randn(s["BN"], s["N"], dtype=torch.float32, device="npu")
     P = torch.full((s["BM"], s["BN"]), 0.0, dtype=torch.float32, device="npu")
     O = torch.full((s["BM"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    flash_attn[(1, )](Q, K, V, P, O, enable_tla_mode=True, **constexprs())
+    flash_attn[(1, )](Q, K, V, P, O, **constexprs())
     torch.npu.synchronize()
     return Q, K, V, O
 

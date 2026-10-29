@@ -14,7 +14,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -26,7 +25,7 @@ SHAPE = dict(h=512, hc=2, cores=4, versions=3)
 SIGNATURE = {"H_ptr": "*bf16", "E_ptr": "*bf16", "O_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def fused_weight(H_ptr, E_ptr, O_ptr, H: tl.constexpr, HC: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr):
     # Route A: tile kernel pointer args directly via one tla.view(ptr) each.
     hu = tla.alloc_buffer((256, ), tl.bfloat16, space="ub", versions=VERSIONS)

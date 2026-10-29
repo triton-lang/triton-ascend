@@ -2,6 +2,30 @@ name: NPUIR Payload Build
 
 on:
   workflow_dispatch:
+    inputs:
+      npuir_run_id:
+        description: >-
+          Run id of an earlier successful npuir-build run: skip building and
+          republish that run's payload artifacts to OBS. Leave empty to build
+          first, then publish the fresh payload.
+        required: false
+        type: string
+        default: ""
+      package_version:
+        description: "Version used in the payload tarball filename (e.g. 2.0.0)"
+        required: false
+        type: string
+        default: "2.0.0"
+      package_tag:
+        description: "Optional filename tag appended after linux-<arch> (e.g. pr_4374 or 1029)"
+        required: false
+        type: string
+        default: ""
+      overwrite_existing:
+        description: "Overwrite the object on OBS if one with the same name already exists"
+        required: false
+        type: boolean
+        default: false
   # The payload tracks the AscendNPU-IR stable branch (no longer the pinned
   # submodule gitlink), so this daily schedule is what picks up new upstream
   # commits. It must stay ahead of wheels.yml's 08:00 UTC cron so the nightly
@@ -36,6 +60,12 @@ jobs:
   # 2.28 was too old for the 9.2 bisheng compiler binaries anyway.
   build-npuir-manylinux:
     name: Build npuir payload manylinux (${{ matrix.config.arch }})
+    # A dispatch carrying npuir_run_id skips the build entirely: the publish
+    # job below then repackages that historical run's artifacts instead.
+    # Every other event (schedule/push/PR) and input-less dispatches build.
+    # (github.event.inputs is null for non-dispatch events, and null == ''
+    # evaluates to true, so the job runs for them.)
+    if: ${{ github.event.inputs.npuir_run_id == '' }}
     runs-on: ${{ matrix.config.runs_on }}
     timeout-minutes: 360
     container:
@@ -194,3 +224,97 @@ jobs:
           name: npuir-payload-manylinux-${{ matrix.config.arch }}
           path: npuir-payload/
           if-no-files-found: error
+
+  # Packs the npuir payload into a plain tarball (bin/, lib/, npuir-sha.txt
+  # at the archive root) and publishes it to the triton-ascend-artifacts OBS
+  # bucket under cann/, named ascendnpu-ir_<ver>_linux-<arch>[-<tag>].tar.gz
+  # after the official .run releases' filename scheme. Dispatch-only: the
+  # nightly schedule keeps publishing GitHub artifacts alone so it can never
+  # clobber an official release. Payload source: this run's build job
+  # (default), or the historical run named by the npuir_run_id input.
+  publish-npuir-run:
+    name: Publish npuir payload to OBS (${{ matrix.arch }})
+    # always() lets this job run when the build job was skipped (the
+    # npuir_run_id path); a failed build still blocks publishing.
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      (needs.build-npuir-manylinux.result == 'success' ||
+       needs.build-npuir-manylinux.result == 'skipped')
+    needs: build-npuir-manylinux
+    # Packaging is arch-independent (tars prebuilt binaries), so both matrix
+    # legs can run on the amd64 pool.
+    runs-on: linux-amd64-cpu-4
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Download npuir payload artifact
+        uses: dawidd6/action-download-artifact@v9
+        with:
+          # Empty input -> the artifacts this run's build job just uploaded;
+          # a run id -> republish that earlier run's payload.
+          run_id: ${{ github.event.inputs.npuir_run_id || github.run_id }}
+          name: npuir-payload-manylinux-${{ matrix.arch }}
+          path: npuir-artifacts
+
+      - name: Pack payload tarball
+        env:
+          VERSION: ${{ github.event.inputs.package_version }}
+          TAG: ${{ github.event.inputs.package_tag }}
+        run: |
+          set -eu
+          # Locate the payload root robustly: artifact downloads may or may
+          # not carry a wrapping directory (same discovery logic as
+          # wheels.yml's "Prepare npuir payload" step).
+          BIN=$(find npuir-artifacts -name bishengir-compile -type f | head -1 || true)
+          [ -n "$BIN" ] || { echo "No bishengir-compile found in the artifact"; exit 1; }
+          PAYLOAD_DIR=$(dirname "$(dirname "$BIN")")
+          echo "Payload root: ${PAYLOAD_DIR}"
+          # Artifact zips carry no unix permission bits; restore exec modes.
+          chmod -R a+x "${PAYLOAD_DIR}/bin"
+
+          case "${{ matrix.arch }}" in
+            x86_64)  ARCH_NAME="x86" ;;
+            aarch64) ARCH_NAME="aarch64" ;;
+          esac
+          NAME="ascendnpu-ir_${VERSION}_linux-${ARCH_NAME}"
+          [ -n "$TAG" ] && NAME="${NAME}-${TAG}"
+          mkdir -p dist
+          tar czf "dist/${NAME}.tar.gz" -C "$PAYLOAD_DIR" .
+          sha256sum "dist/${NAME}.tar.gz"
+
+      - name: Setup obsutil and upload to OBS
+        shell: bash
+        env:
+          AK: ${{ secrets.OBS_AK }}
+          SK: ${{ secrets.OBS_SK }}
+          OVERWRITE: ${{ github.event.inputs.overwrite_existing }}
+        run: |
+          set -eu
+          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
+            echo "OBS credentials are empty."
+            exit 1
+          fi
+          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_amd64.tar.gz" -o obsutil.tar.gz
+          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
+          tar xzf obsutil.tar.gz
+          rm -f obsutil.tar.gz
+          mv obsutil_linux_* obsutil
+
+          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-southwest-2.myhuaweicloud.com
+          OBS_DIR="obs://triton-ascend-artifacts/cann/"
+          for f in dist/*.tar.gz; do
+            base="$(basename "$f")"
+            # Guard: never silently replace an existing object unless the
+            # dispatch explicitly asked for it.
+            if [ "${OVERWRITE}" != "true" ] && obsutil/obsutil stat "${OBS_DIR}${base}" >/dev/null 2>&1; then
+              echo "Object cann/${base} already exists on OBS; re-dispatch with overwrite_existing=true to replace it."
+              exit 1
+            fi
+            obsutil/obsutil cp -f -u "$f" "${OBS_DIR}"
+          done

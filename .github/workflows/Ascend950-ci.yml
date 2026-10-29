@@ -3,7 +3,7 @@ name: Ascend950 CI
 on:
   pull_request_target:
     branches: ['feature/simd-simt-compile-mode']
-    paths: &paths
+    paths:
       # Source code
       - 'python/**'
       - 'lib/**'
@@ -63,8 +63,7 @@ jobs:
           ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           submodules: "true"
-          # This workflow is scoped to contents:read only and passes zero
-          # secrets to the build job — PR code cannot exfiltrate anything.
+          # Required by checkout@v4 for this pull_request_target PR-head checkout.
           allow-unsafe-pr-checkout: true
 
       - name: Add git safe directory
@@ -78,7 +77,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'third_party/ascend/patch/llvm_patch_*.patch', 'cmake/bisheng-info.json', 'cmake/nvidia-toolchain-version.json') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-wheels
 
       - name: Build triton-ascend wheel

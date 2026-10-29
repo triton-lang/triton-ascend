@@ -47,7 +47,8 @@ from third_party.ascend.build import prepare as _ascend_prepare
 
 _ascend_prepare()
 
-from python.build_helpers import get_base_dir, get_cmake_dir
+from python.build_helpers import (Package as Package, check_env_flag, get_base_dir, get_cmake_dir,
+                                  get_json_package_info, get_llvm_package_info)
 
 
 def is_git_repo():
@@ -127,11 +128,6 @@ class BackendInstaller:
         ]
 
 
-# Taken from https://github.com/pytorch/pytorch/blob/master/tools/setup_helpers/env.py
-def check_env_flag(name: str, default: str = "") -> bool:
-    return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]
-
-
 def get_build_type():
     if check_env_flag("DEBUG"):
         return "Debug"
@@ -167,84 +163,6 @@ def is_offline_build() -> bool:
     Note that this flag isn't tested by the CI and does not provide any guarantees.
     """
     return check_env_flag("TRITON_OFFLINE_BUILD", "")
-
-
-# --- third party packages -----
-
-
-@dataclass
-class Package:
-    package: str
-    name: str
-    url: str
-    include_flag: str
-    lib_flag: str
-    syspath_var_name: str
-    sym_name: Optional[str] = None
-
-
-# json
-def get_json_package_info():
-    url = "https://github.com/nlohmann/json/releases/download/v3.11.3/include.zip"
-    return Package("json", "", url, "JSON_INCLUDE_DIR", "", "JSON_SYSPATH")
-
-
-def is_linux_os(id):
-    if os.path.exists("/etc/os-release"):
-        with open("/etc/os-release", "r") as f:
-            os_release_content = f.read()
-            return f'ID="{id}"' in os_release_content
-    return False
-
-
-# llvm
-def get_llvm_package_info():
-    system = platform.system()
-    try:
-        arch = {"x86_64": "x64", "arm64": "arm64", "aarch64": "arm64"}[platform.machine()]
-    except KeyError:
-        arch = platform.machine()
-    if (env_system_suffix := os.environ.get("TRITON_LLVM_SYSTEM_SUFFIX", None)):
-        system_suffix = env_system_suffix
-    elif system == "Darwin":
-        system_suffix = f"macos-{arch}"
-    elif system == "Linux":
-        if arch == 'arm64' and is_linux_os('almalinux'):
-            system_suffix = 'almalinux-arm64'
-        elif arch == 'arm64':
-            system_suffix = 'ubuntu-arm64'
-        elif arch == 'x64':
-            vglibc = tuple(map(int, platform.libc_ver()[1].split('.')))
-            vglibc = vglibc[0] * 100 + vglibc[1]
-            if vglibc > 228:
-                # Ubuntu 24 LTS (v2.39)
-                # Ubuntu 22 LTS (v2.35)
-                # Ubuntu 20 LTS (v2.31)
-                system_suffix = "ubuntu-x64"
-            else:
-                # Manylinux_2.28 (v2.28)
-                # AlmaLinux 8 (v2.28)
-                system_suffix = "almalinux-x64"
-        else:
-            print(
-                f"LLVM pre-compiled image is not available for {system}-{arch}. Proceeding with user-configured LLVM from source build."
-            )
-            return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
-    else:
-        print(
-            f"LLVM pre-compiled image is not available for {system}-{arch}. Proceeding with user-configured LLVM from source build."
-        )
-        return Package("llvm", "LLVM-C.lib", "", "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH")
-    # use_assert_enabled_llvm = check_env_flag("TRITON_USE_ASSERT_ENABLED_LLVM", "False")
-    # release_suffix = "assert" if use_assert_enabled_llvm else "release"
-    llvm_hash_path = os.path.join(get_base_dir(), "cmake", "llvm-hash.txt")
-    with open(llvm_hash_path, "r") as llvm_hash_file:
-        rev = llvm_hash_file.read(8)
-    name = f"llvm-{rev}-{system_suffix}"
-    # Create a stable symlink that doesn't include revision
-    sym_name = f"llvm-{system_suffix}"
-    url = f"https://oaitriton.blob.core.windows.net/public/llvm-builds/{name}.tar.gz"
-    return Package("llvm", name, url, "LLVM_INCLUDE_DIRS", "LLVM_LIBRARY_DIR", "LLVM_SYSPATH", sym_name=sym_name)
 
 
 def open_url(url):

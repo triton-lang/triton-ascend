@@ -44,7 +44,7 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/llvm_patch/*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'third_party/ascend/patch/llvm_patch_*.patch', 'cmake/bisheng-info.json', 'cmake/nvidia-toolchain-version.json') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann8.5.0-ubuntu22.04-910b-py3.11-dcv
 
       - name: Checkout base
@@ -212,18 +212,17 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ${{ github.workspace }}/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/cmake/llvm-hash.txt', 'pr/cmake/json-version.txt', 'pr/cmake/nvidia-toolchain-version.json', 'pr/third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-dcv-mojo-${{ hashFiles('pr/cmake/llvm-info.json', 'pr/cmake/json-version.txt', 'pr/third_party/ascend/patch/llvm_patch_*.patch', 'pr/cmake/bisheng-info.json', 'pr/cmake/nvidia-toolchain-version.json') }}
 
       - name: Install Bisheng compiler
         shell: bash
         run: |
           set -euo pipefail
           cd pr
+          command -v jq >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq jq; }
           arch=$(uname -m)
-          filename=$(sed -n "s/^${arch}: //p" cmake/bisheng-version.txt | xargs)
-          checksum=$(sed -n "s/^${arch}_sha256: //p" cmake/bisheng-version.txt | xargs)
-          test -n "$filename"
-          test -n "$checksum"
+          filename=$(jq -er --arg arch "${arch}" '.bisheng[$arch].file | strings | select(length > 0)' cmake/bisheng-info.json)
+          checksum=$(jq -er --arg arch "${arch}" '.bisheng[$arch].sha256 | strings | select(length > 0)' cmake/bisheng-info.json)
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             "https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com/cann/${filename}" \
             -o bisheng.run

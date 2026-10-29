@@ -60,18 +60,36 @@ If you need to customize the LLVM build process, follow the steps below to compi
 1. **Prepare the source code**: Check out the LLVM source code of the specified version with `git checkout` and apply the patch.
 
     ```bash
+    # Run from this triton-ascend checkout; use its sole LLVM pin and local patch manifest.
+    TRITON_ROOT="$(pwd)"
+    LLVM_COMMIT=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["llvm_hash"])' "$TRITON_ROOT/cmake/llvm-info.json") || exit 1
+    LLVM_PATCHES=$(python3 - "$TRITON_ROOT" <<'PY'
+    import json
+    import sys
+    from pathlib import Path
+    root = Path(sys.argv[1])
+    with open(root / "cmake/llvm-info.json") as stream:
+        info = json.load(stream)
+    for name in info["patches"]:
+        print(root / "third_party/ascend/patch" / name)
+    PY
+    ) || exit 1
+
     git clone --no-checkout https://github.com/llvm/llvm-project.git
     cd llvm-project
-    git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-    wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-    git apply llvm_patch_f6ded0b.patch
+    git checkout "$LLVM_COMMIT"
+    if [ -n "$LLVM_PATCHES" ]; then
+      while IFS= read -r patch; do
+        git apply "$patch" || exit 1
+      done <<< "$LLVM_PATCHES"
+    fi
     ```
 
 2. **Build LLVM**: The path `/path/llvm-install` is the LLVM installation path planned by the user, which needs to be adjusted according to the actual situation; the path `{PATH_TO}` refers to the root directory of the llvm-project source you checked out in step 1.
 
     ```bash
     export LLVM_INSTALL_PREFIX=/path/llvm-install
-    cd {PATH_TO}/llvm-project
+    cd "$TRITON_ROOT/llvm-project"
     mkdir build
     cd build
     cmake ../llvm \

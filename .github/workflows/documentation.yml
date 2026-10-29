@@ -165,36 +165,26 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-${{ hashFiles('cmake/llvm-info.json', 'cmake/json-version.txt', 'third_party/ascend/patch/llvm_patch_*.patch', 'cmake/bisheng-info.json', 'cmake/nvidia-toolchain-version.json') }}
           restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-triton-
 
       - name: Download and install Bisheng compiler
         shell: bash
         run: |
-          if [ ! -f cmake/bisheng-version.txt ]; then
-            echo "cmake/bisheng-version.txt not found, skipping"
-            exit 0
-          fi
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || { apt-get update -qq && apt-get install -y -qq jq; }
           ARCH=$(uname -m)
           OBS_BASE="https://triton-ascend-artifacts.obs.cn-southwest-2.myhuaweicloud.com"
-          BISHENG_FILENAME=$(sed -n "s/^${ARCH}: //p" cmake/bisheng-version.txt | xargs)
-          BISHENG_SHA256=$(sed -n "s/^${ARCH}_sha256: //p" cmake/bisheng-version.txt | xargs)
-          if [ -z "${BISHENG_FILENAME}" ]; then
-            echo "Error: cmake/bisheng-version.txt has no entry for arch ${ARCH}." >&2
-            exit 1
-          fi
+          BISHENG_FILENAME=$(jq -er --arg arch "${ARCH}" '.bisheng[$arch].file | strings | select(length > 0)' cmake/bisheng-info.json)
+          BISHENG_SHA256=$(jq -er --arg arch "${ARCH}" '.bisheng[$arch].sha256 | strings | select(length > 0)' cmake/bisheng-info.json)
           echo "Downloading: ${BISHENG_FILENAME} (arch=${ARCH})"
           curl -fL --connect-timeout 30 --retry 5 --retry-all-errors \
             --retry-delay 10 -C - \
             "${OBS_BASE}/cann/${BISHENG_FILENAME}" -o bisheng.run
-          if [ -n "${BISHENG_SHA256}" ]; then
-            echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
-          else
-            echo "Warning: No SHA256 checksum provided, skipping verification"
-          fi
+          echo "${BISHENG_SHA256}  bisheng.run" | sha256sum -c -
           chmod +x bisheng.run
           ./bisheng.run --quiet --install --install-path=/usr/local/bisheng
-          echo "/usr/local/bisheng/tools/bishengir/bin" >> $GITHUB_PATH
+          echo "/usr/local/bisheng/tools/bishengir/bin" >> "$GITHUB_PATH"
 
       - name: Build and install triton-ascend
         shell: bash

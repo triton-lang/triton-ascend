@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "llvm_hash": "f6ded0be897e2878612dd903f7e8bb85448269e5",
+  "patches": [
+    "llvm_patch_f6ded0b.patch"
+  ]
+}

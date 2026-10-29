@@ -105,18 +105,34 @@ pip install -e .
 #### 自定义LLVM构建（可选）
 
 ```bash
-# 如果需要自定义构建LLVM过程的，可以先执行这一步再去编译Triton-Ascend
-# 检出指定版本的LLVM源码并应用补丁
+# 在当前 triton-ascend 仓库根目录执行；使用唯一 LLVM pin 和本地补丁清单。
+TRITON_ROOT="$(pwd)"
+LLVM_COMMIT=$(python3 -c 'import json, sys; print(json.load(open(sys.argv[1]))["llvm_hash"])' "$TRITON_ROOT/cmake/llvm-info.json") || exit 1
+LLVM_PATCHES=$(python3 - "$TRITON_ROOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+root = Path(sys.argv[1])
+with open(root / "cmake/llvm-info.json") as stream:
+    info = json.load(stream)
+for name in info["patches"]:
+    print(root / "third_party/ascend/patch" / name)
+PY
+) || exit 1
+
 git clone --no-checkout https://github.com/llvm/llvm-project.git
 cd llvm-project
-git checkout f6ded0be897e2878612dd903f7e8bb85448269e5
-wget https://raw.githubusercontent.com/triton-lang/triton-ascend/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch
-git apply llvm_patch_f6ded0b.patch
+git checkout "$LLVM_COMMIT"
+if [ -n "$LLVM_PATCHES" ]; then
+  while IFS= read -r patch; do
+    git apply "$patch" || exit 1
+  done <<< "$LLVM_PATCHES"
+fi
 
 export LLVM_INSTALL_PREFIX=/path/to/llvm-install
 
 # 构建自定义LLVM版本
-cd {PATH_TO}/llvm_project
+cd "$TRITON_ROOT/llvm-project"
 mkdir build
 cd build
 cmake ../llvm \

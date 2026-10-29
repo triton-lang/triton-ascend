@@ -27,19 +27,41 @@
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
 #include "DynamicCVPipeline/Common/Utils.h"
 
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
 static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
+
+namespace {
+
+class PatternMatchRewritePass
+    : public PassWrapper<PatternMatchRewritePass, OperationPass<ModuleOp>> {
+public:
+  MLIR_DEFINE_EXPLICIT_INTERNAL_INLINE_TYPE_ID(PatternMatchRewritePass);
+
+  PatternMatchRewritePass() = default;
+  void runOnOperation() override;
+
+  void getDependentDialects(mlir::DialectRegistry &registry) const override {
+    registry.insert<mlir::linalg::LinalgDialect, mlir::arith::ArithDialect,
+                    mlir::tensor::TensorDialect>();
+  }
+
+  [[nodiscard]] llvm::StringRef getArgument() const final {
+    return "ssbuf-standardize-op-pattern-match";
+  }
+};
+
+} // namespace
 
 void PatternMatchRewritePass::runOnOperation() {
   auto moduleOp = getOperation();
@@ -74,13 +96,11 @@ void PatternMatchRewritePass::runOnOperation() {
     CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
     return;
   }
+
   LOG_DEBUG("Output mlir:\n" << moduleOp);
 }
 
-namespace mlir::triton::CVSplit {
-
-std::unique_ptr<OperationPass<ModuleOp>> createPatternMatchRewritePass() {
+std::unique_ptr<OperationPass<ModuleOp>>
+CVPipeline::createPatternMatchRewritePass() {
   return std::make_unique<PatternMatchRewritePass>();
 }
-
-} // namespace mlir::triton::CVSplit

@@ -30,14 +30,13 @@
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "FoldExpandExtCollapse";
 #define LOG_DEBUG(...)                                                         \
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
-namespace mlir::triton::CVSplit {
+namespace mlir::CVPipeline {
 
 LogicalResult
 FoldExpandExtCollapse::matchAndRewrite(tensor::CollapseShapeOp collapseOp,
@@ -95,4 +94,4 @@ FoldExpandExtCollapse::matchAndRewrite(tensor::CollapseShapeOp collapseOp,
   return success();
 }
 
-} // namespace mlir::triton::CVSplit
+} // namespace mlir::CVPipeline

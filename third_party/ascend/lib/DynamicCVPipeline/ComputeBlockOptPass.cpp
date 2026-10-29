@@ -20,16 +20,17 @@
  * THE SOFTWARE.
  */
 
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
-#include "DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "DynamicCVPipeline/PlanComputeBlock/Passes.h"
-#include "DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
+#include "mlir/Pass/PassManager.h"
+#include "mlir/Pass/PassRegistry.h"
+
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/MergeCubeBlockPass.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOptPass.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ReorderOpsByBlockId.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlockPass.h"
-
-#include "mlir/Pass/PassManager.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflowPass.h"
 
 using namespace mlir;
 using namespace triton;
@@ -85,6 +86,9 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeInputInitSharedCubeBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createRelocateMemrefDeclPass());
+
+  pm.addPass(createUnpackScopePass());
+
   if (failed(runPipeline(pm, module))) {
     if (!CVPipeline::hasFallbackAttr(module)) {
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
@@ -123,6 +127,7 @@ void registerComputeBlockOptPasses() {
   registerPass(createMergeInputInitSharedCubeBlockPass);
   registerPass(createMergeCubeBlockPass);
   registerPass(createRelocateMemrefDeclPass);
+  registerPass(createUnpackScopePass);
 }
 
 } // namespace triton

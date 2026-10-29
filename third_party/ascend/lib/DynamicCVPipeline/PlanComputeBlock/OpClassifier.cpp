@@ -22,6 +22,7 @@
 
 #include <queue>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +30,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
@@ -39,6 +41,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
+#include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -47,17 +50,22 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/WalkResult.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
+#include "DynamicCVPipeline/Common/Analysis.h"
+#include "DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/HIVM/Utils/Utils.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "bishengir/Dialect/Utils/Util.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 using namespace mlir;
 using namespace mlir::CVPipeline;
@@ -67,9 +75,7 @@ static constexpr const char *DEBUG_TYPE = "op-classifier";
   LLVM_DEBUG(llvm::dbgs() << " [" << DEBUG_TYPE << "] " << __VA_ARGS__)
 using namespace mlir::triton;
 
-namespace {
-
-bool isInsideNestedLinalgRegion(Operation *op) {
+static bool isInsideNestedLinalgRegion(Operation *op) {
   for (Operation *parent = op ? op->getParentOp() : nullptr; parent;
        parent = parent->getParentOp()) {
     if (isa<linalg::LinalgDialect>(parent->getDialect())) {
@@ -79,12 +85,11 @@ bool isInsideNestedLinalgRegion(Operation *op) {
   return false;
 }
 
-} // namespace
-
 // Helper: describe operation for logging
 std::string OpClassifierPass::describeOp(Operation *op) const {
-  if (!op)
+  if (!op) {
     return "<null-op>";
+  }
   std::string result;
   llvm::raw_string_ostream os(result);
   os << op->getName().getStringRef();
@@ -92,7 +97,7 @@ std::string OpClassifierPass::describeOp(Operation *op) const {
 }
 
 // Helper: convert OpCoreType to string for IR attribute
-std::string coreTypeToString(OpCoreType ct) {
+static std::string coreTypeToString(OpCoreType ct) {
   switch (ct) {
   case OP_CUBE_ONLY:
     return "CUBE";
@@ -105,22 +110,18 @@ std::string coreTypeToString(OpCoreType ct) {
   }
 }
 
-namespace {
-
 // Maximum number of core types in a comma-separated core type string (e.g.,
 // "CUBE,VECTOR")
-constexpr size_t kMaxCoreTypeParts = 4;
+static constexpr size_t kMaxCoreTypeParts = 4;
 
 // Minimum number of inputs for linalg.matmul (A and B matrices)
-constexpr size_t kMinMatmulInputs = 2;
-
-} // namespace
+static constexpr size_t kMinMatmulInputs = 2;
 
 // Helper: parse OpCoreType from string (handles both "CUBE" and "CUBE,VECTOR"
 // formats) For comma-separated multi-value strings, returns the i-th component
 // if index is provided, otherwise returns the first component.
-OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
-                                   size_t index = 0) {
+static OpCoreType parseCoreTypeFromString(const std::string &coreTypeStr,
+                                          size_t index = 0) {
   llvm::StringRef ref(coreTypeStr);
   llvm::SmallVector<llvm::StringRef, kMaxCoreTypeParts> parts;
   ref.split(parts, ',');
@@ -148,34 +149,50 @@ void OpClassifierPass::initializePass(ModuleOp module) {
   vectorOnlyProducerCache.clear();
   inBroadcastChain.clear();
   CloneOpMap.clear();
+  preClassifiedOps.clear();
 
-  // Collect all operations
-  module.walk([&](Operation *op) {
+  // Treat a `scope::ScopeOp` from an earlier pass as an atomic unit: record the
+  // scope but skip its body -> `WalkResult::skip()` needs PreOrder to prune.
+  module.walk<WalkOrder::PreOrder>([&](Operation *op) -> WalkResult {
     if (isa<ModuleOp, func::FuncOp, func::ReturnOp>(op)) {
-      return; // Skip module, function, and return ops
+      return WalkResult::advance(); // Skip module, function, and return ops
+    }
+    if (isa<scope::ScopeOp>(op)) {
+      allOps.push_back(op);
+      return WalkResult::skip();
     }
     allOps.push_back(op);
+    return WalkResult::advance();
   });
 
   LLVM_DEBUG(DBGS() << "Collected: " << allOps.size() << " ops\n");
 
-  // Initialize all ops to UNDETERMINED
+  // Initialize all ops to UNDETERMINED, honoring any core type stamped on the
+  // IR by an earlier pass. Such ops are never re-classified.
   for (Operation *op : allOps) {
     opCoreTypes[op] = OP_UNDETERMINED;
+    if (auto ctAttr = op->getAttrOfType<StringAttr>(kCoreType)) {
+      opCoreTypes[op] = parseCoreTypeFromString(ctAttr.getValue().str());
+      preClassifiedOps.insert(op);
+    }
   }
 }
 
 // Mark an operation as CUBE
 void OpClassifierPass::markCube(Operation *op) {
-  if (op && opCoreTypes.count(op)) {
+  // `opCoreTypes` is pre-filled for every op in `allOps` (initializePass), so
+  // `contains` is always true for them; it only rejects ops outside `allOps`,
+  // i.e. ops nested in a skipped `scope.scope` body.
+  if (op && !preClassifiedOps.contains(op) && opCoreTypes.contains(op)) {
     opCoreTypes[op] = static_cast<OpCoreType>(opCoreTypes[op] | OP_CUBE_ONLY);
     LLVM_DEBUG(DBGS() << "CUBE: " << *op << "\n");
   }
 }
 
 static bool isExtractedLoadStoreRelated(Operation *op) {
-  if (!op)
+  if (!op) {
     return false;
+  }
   return llvm::TypeSwitch<Operation *, bool>(op)
       .Case([](bufferization::ToTensorOp toTensorOp) {
         return isExtractedLoadStoreRelated(
@@ -185,8 +202,9 @@ static bool isExtractedLoadStoreRelated(Operation *op) {
         Value memref = allocOp.getMemref();
         for (auto user : memref.getUsers()) {
           auto forOp = user->getParentOfType<scf::ForOp>();
-          if (forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+          if (forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr)) {
             return true;
+          }
         }
         return false;
       })
@@ -220,8 +238,9 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
   constexpr llvm::StringLiteral kMayImplicitTransposeWithLastAxis =
       "MayImplicitTransposeWithLastAxis";
 
-  if (!toTensorOp)
+  if (!toTensorOp) {
     return;
+  }
 
   // special case: implicit transpose -> remains vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
@@ -277,15 +296,17 @@ void OpClassifierPass::matchToTensorPattern(Operation *def) {
 // ============================================================================
 void OpClassifierPass::matchTransposePattern(Operation *def) {
   auto transposeOp = dyn_cast<linalg::TransposeOp>(def);
-  if (!transposeOp)
+  if (!transposeOp) {
     return;
+  }
 
   markCube(transposeOp);
 
   // Helper lambda to check if an operand's defining op qualifies for CUBE seed
   auto shouldMarkCubeSeed = [](Operation *opDef) -> bool {
-    if (!opDef || isExtractedLoadStoreRelated(opDef))
+    if (!opDef || isExtractedLoadStoreRelated(opDef)) {
       return false;
+    }
     return (isa<bufferization::BufferizationDialect>(opDef->getDialect()) &&
             !isa<bufferization::AllocTensorOp>(opDef)) ||
            isa<tensor::EmptyOp>(opDef);
@@ -327,8 +348,9 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 // ============================================================================
 void OpClassifierPass::matchFillPattern(Operation *def) {
   auto fillOp = dyn_cast<linalg::FillOp>(def);
-  if (!fillOp)
+  if (!fillOp) {
     return;
+  }
 
   markCube(fillOp);
   cubeSeeds.push_back(fillOp);
@@ -350,8 +372,9 @@ void OpClassifierPass::matchFillPattern(Operation *def) {
 // ============================================================================
 void OpClassifierPass::matchEmptyPattern(Operation *def) {
   auto emptyOp = dyn_cast<tensor::EmptyOp>(def);
-  if (!emptyOp)
+  if (!emptyOp) {
     return;
+  }
 
   markCube(emptyOp);
   cubeSeeds.push_back(emptyOp);
@@ -391,11 +414,13 @@ Value OpClassifierPass::extractMmadBiasFromPotentialUnitDimExpand(Value bias) {
   }
   return bias;
 }
+
 void OpClassifierPass::matchBroadcastPattern(Operation *def) {
   auto broadcastOp = dyn_cast<linalg::BroadcastOp>(def);
 
-  if (!broadcastOp)
+  if (!broadcastOp) {
     return;
+  }
   if (!CVPipeline::allResultHasOneUser(def)) {
     return;
   }
@@ -409,8 +434,9 @@ void OpClassifierPass::matchBroadcastPattern(Operation *def) {
   // check if the broadcast used by matmul's outs
   for (Operation *user : broadcastOp->getUsers()) {
     auto matmulOp = dyn_cast<linalg::MatmulOp>(user);
-    if (!matmulOp)
+    if (!matmulOp) {
       continue;
+    }
 
     auto outs = matmulOp.getDpsInits();
     for (Value out : outs) {
@@ -459,8 +485,9 @@ void OpClassifierPass::matchBroadcastPattern(Operation *def) {
 // efficient matrix data write-back.
 // ============================================================================
 void OpClassifierPass::matchStorePattern(Operation *user) {
-  if (!isa<hivm::StoreOp>(user))
+  if (!isa<hivm::StoreOp>(user)) {
     return;
+  }
 
   markCube(user);
   cubeSeeds.push_back(user);
@@ -486,8 +513,9 @@ void OpClassifierPass::matchStorePattern(Operation *user) {
 // ============================================================================
 void OpClassifierPass::matchExtractSlicePattern(Operation *user) {
   auto extractSliceOp = dyn_cast<tensor::ExtractSliceOp>(user);
-  if (!extractSliceOp)
+  if (!extractSliceOp) {
     return;
+  }
 
   markCube(extractSliceOp);
   cubeSeeds.push_back(extractSliceOp);
@@ -520,8 +548,9 @@ void OpClassifierPass::matchExtractSlicePattern(Operation *user) {
 // data transfer capabilities.
 // ============================================================================
 void OpClassifierPass::matchMaterializePattern(Operation *user) {
-  if (!isa<bufferization::MaterializeInDestinationOp>(user))
+  if (!isa<bufferization::MaterializeInDestinationOp>(user)) {
     return;
+  }
 
   markCube(user);
   cubeSeeds.push_back(user);
@@ -532,8 +561,9 @@ int OpClassifierPass::patternMatchCUBE() {
   LOG_DEBUG("--- Step 1: pattern match --->\n");
 
   for (Operation *op : allOps) {
-    if (!isa<linalg::MatmulOp>(op))
+    if (!isa<linalg::MatmulOp>(op)) {
       continue;
+    }
 
     // matmul always CUBE
     opCoreTypes[op] = OP_CUBE_ONLY;
@@ -557,8 +587,9 @@ int OpClassifierPass::patternMatchCUBE() {
         cur = init->get();
         def = cur.getDefiningOp();
       }
-      if (!def)
+      if (!def || preClassifiedOps.contains(def)) {
         continue;
+      }
 
       matchToTensorPattern(def);
       matchTransposePattern(def);
@@ -646,24 +677,28 @@ findIterArgUpstreamOps(Value def,
                        llvm::SmallVectorImpl<Operation *> &upstreamOps) {
   // Check if def is a block argument (iter_arg)
   auto blockArg = dyn_cast<BlockArgument>(def);
-  if (!blockArg)
+  if (!blockArg) {
     return;
+  }
 
   Operation *parentOp = blockArg.getOwner()->getParentOp();
-  if (!isa<scf::ForOp, scf::WhileOp>(parentOp))
+  if (!isa<scf::ForOp, scf::WhileOp>(parentOp)) {
     return;
+  }
 
   // Get the iter_arg index from block argument
   unsigned argIdx = blockArg.getArgNumber();
   auto inits = getLoopInitValues(parentOp);
   // For scf.for: argIdx 0 is lb (loop lower bound), not an iter_arg, skip it.
   // For scf.while: argIdx 0 can be a valid iter_arg, don't skip.
-  if (argIdx >= inits.size() || (isa<scf::ForOp>(parentOp) && argIdx == 0))
+  if (argIdx >= inits.size() || (isa<scf::ForOp>(parentOp) && argIdx == 0)) {
     return;
+  }
 
   Value initValue = inits[argIdx - (isa<scf::ForOp>(parentOp) ? 1 : 0)];
-  if (!isScalarType(initValue))
+  if (!isScalarType(initValue)) {
     return;
+  }
 
   Operation *initDef = initValue.getDefiningOp();
   if (initDef && initDef != parentOp) {
@@ -679,8 +714,9 @@ findIterArgUpstreamOps(Value def,
 
   Operation *yieldOp = getLoopYieldOp(parentOp);
   if (!yieldOp || !isa<scf::YieldOp>(yieldOp) ||
-      yieldOperandIdx >= yieldOp->getNumOperands())
+      yieldOperandIdx >= yieldOp->getNumOperands()) {
     return;
+  }
 
   Value yieldedValue = yieldOp->getOperand(yieldOperandIdx);
   Operation *yieldedDef = yieldedValue.getDefiningOp();
@@ -816,6 +852,14 @@ int OpClassifierPass::propagateCubeUpstream() {
     cubeVisited.insert(seed);
     cubeQueue.push(seed);
   }
+  // Ops already stamped CUBE are seeds too, so propagation reaches their
+  // upstream even though they are never re-marked themselves.
+  for (Operation *op : allOps) {
+    if (preClassifiedOps.contains(op) && opCoreTypes[op] == OP_CUBE_ONLY) {
+      cubeVisited.insert(op);
+      cubeQueue.push(op);
+    }
+  }
 
   while (!cubeQueue.empty()) {
     Operation *cur = cubeQueue.front();
@@ -829,12 +873,17 @@ int OpClassifierPass::propagateCubeUpstream() {
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
     for (Operation *def : upstreamOps) {
-      if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
+      if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def)) {
         continue;
+      }
+      if (preClassifiedOps.contains(def)) {
+        continue;
+      }
 
       // Shared skip rules (see shouldSkipCubeUpstream).
-      if (shouldSkipCubeUpstream(def))
+      if (shouldSkipCubeUpstream(def)) {
         continue;
+      }
 
       cubeVisited.insert(def);
 
@@ -861,6 +910,9 @@ int OpClassifierPass::propagateCubeUpstream() {
 int OpClassifierPass::markRemainingAsVector() {
   LLVM_DEBUG(DBGS() << "--- Step 3: default VECTOR --->\n");
   for (Operation *op : allOps) {
+    if (preClassifiedOps.contains(op)) {
+      continue;
+    }
     if (isa<annotation::MarkOp>(op)) {
       auto markOp = cast<annotation::MarkOp>(op);
       Value src = markOp.getSrc();
@@ -902,8 +954,9 @@ void OpClassifierPass::markFillOpsAsCube() {
   LLVM_DEBUG(DBGS() << "--- Marking fill ops as CUBE when outs is CUBE --->\n");
 
   for (Operation *op : allOps) {
-    // Only process fill ops that are still UNDETERMINED
-    if (!isa<linalg::FillOp>(op) || opCoreTypes[op] != OP_UNDETERMINED) {
+    // Only process fill ops that are still UNDETERMINED and not pre-classified
+    if (!isa<linalg::FillOp>(op) || opCoreTypes[op] != OP_UNDETERMINED ||
+        preClassifiedOps.contains(op)) {
       continue;
     }
 
@@ -952,35 +1005,40 @@ void OpClassifierPass::markFillOpsAsCube() {
 void OpClassifierPass::handleFillInScfIf(Operation *fillOp) {
   Operation *parentOp = fillOp->getParentOp();
   auto ifOp = dyn_cast<scf::IfOp>(parentOp);
-  if (!ifOp)
+  if (!ifOp) {
     return;
+  }
 
   // Only handle scf.if used for conditional branching (no iter_args)
   // If scf.if has results (iter_args), it's used as a loop structure, skip it
-  if (!ifOp.getResults().empty())
+  if (!ifOp.getResults().empty()) {
     return;
+  }
 
   // Check if all ops in scf.if's blocks are CUBE (except yield terminator)
   bool allOpsAreCube = true;
   for (Region &region : ifOp->getRegions()) {
     for (Block &block : region) {
       for (Operation &innerOp : block.getOperations()) {
-        if (isa<scf::YieldOp>(innerOp))
+        if (isa<scf::YieldOp>(innerOp)) {
           continue;
+        }
         // Check if this op is marked as CUBE
         if (opCoreTypes[&innerOp] != OP_CUBE_ONLY) {
           allOpsAreCube = false;
           break;
         }
       }
-      if (!allOpsAreCube)
+      if (!allOpsAreCube) {
         break;
+      }
     }
-    if (!allOpsAreCube)
+    if (!allOpsAreCube) {
       break;
+    }
   }
 
-  if (allOpsAreCube) {
+  if (allOpsAreCube && !preClassifiedOps.contains(ifOp)) {
     LLVM_DEBUG(
         DBGS() << "\tfill in scf.if with all CUBE ops, mark scf.if as CUBE: "
                << *ifOp << "\n");
@@ -1006,13 +1064,19 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
     getUpstreamOpsWithMemoryDeps(cur, upstreamOps);
 
     for (Operation *upstreamOp : upstreamOps) {
-      if (!upstreamOp || cubeVisited.count(upstreamOp))
+      if (!upstreamOp || cubeVisited.count(upstreamOp)) {
         continue;
-      if (isa<linalg::MatmulOp>(upstreamOp))
+      }
+      if (isa<linalg::MatmulOp>(upstreamOp)) {
         continue;
+      }
+      if (preClassifiedOps.contains(upstreamOp)) {
+        continue;
+      }
       // Same skip rules as the main CUBE BFS.
-      if (shouldSkipCubeUpstream(upstreamOp))
+      if (shouldSkipCubeUpstream(upstreamOp)) {
         continue;
+      }
 
       cubeVisited.insert(upstreamOp);
       LLVM_DEBUG(DBGS() << "\t\tcube upstream: "
@@ -1077,12 +1141,13 @@ int OpClassifierPass::propagateVectorUpstream() {
     }
 
     for (Operation *def : upstreamOps) {
-      if (!def || vecVisited.count(def))
+      if (!def || vecVisited.count(def)) {
         continue;
+      }
 
       // Skip operations that should not be marked VECTOR:
       // - matmul: never mark matmul as vector (CUBE-only operation)
-      if (isa<linalg::MatmulOp>(def) ||
+      if (preClassifiedOps.contains(def) || isa<linalg::MatmulOp>(def) ||
           isa<scf::SCFDialect>(def->getDialect())) {
         LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
                           << ": should not be marked VECTOR\n");
@@ -1111,6 +1176,11 @@ int OpClassifierPass::propagateVectorUpstream() {
 
 namespace {
 
+// TODO(cv-pipeline): duplicate of CVPipeline::getAliasSource in Common/Utils.h.
+// Kept separate because the two are not equivalent: the common version returns
+// null plus a debug warning for non-`func.func` block arguments, while this one
+// silently returns null for every block argument. Unify once the
+// block-argument handling is agreed.
 Value getAliasSource(Value val) {
   auto *op = val.getDefiningOp();
   if (!op) {
@@ -1173,8 +1243,9 @@ bool isDisqualifyingLoaderOp(Operation *op) {
 } // namespace
 
 bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
-  if (forOp->hasAttr(hivm::ExtractLoadStoreAttr))
+  if (forOp->hasAttr(hivm::ExtractLoadStoreAttr)) {
     return false;
+  }
 
   // Every result must be live and used only by CUBE consumers
   if (forOp.getNumResults() == 0) {
@@ -1182,16 +1253,18 @@ bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
   }
   for (Value result : forOp.getResults()) {
     for (Operation *user : result.getUsers()) {
-      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
+      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY) {
         continue;
+      }
       return false;
     }
   }
   // Body must be pure data movement
   bool disqualified = false;
   forOp.getBody()->walk([&](Operation *op) {
-    if (op == forOp.getOperation())
+    if (op == forOp.getOperation()) {
       return WalkResult::advance();
+    }
     if (isDisqualifyingLoaderOp(op)) {
       disqualified = true;
       return WalkResult::interrupt();
@@ -1205,16 +1278,18 @@ bool OpClassifierPass::isCubeLoaderForWhileOp(scf::WhileOp whileOp) {
   // Every result must be live and used only by CUBE consumers
   for (Value result : whileOp.getResults()) {
     for (Operation *user : result.getUsers()) {
-      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
+      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY) {
         continue;
+      }
       return false;
     }
   }
   // After body must be pure data movement
   bool disqualified = false;
   whileOp.getAfterBody()->walk([&](Operation *op) {
-    if (op == whileOp.getOperation())
+    if (op == whileOp.getOperation()) {
       return WalkResult::advance();
+    }
     if (isDisqualifyingLoaderOp(op)) {
       disqualified = true;
       return WalkResult::interrupt();
@@ -1227,15 +1302,23 @@ bool OpClassifierPass::isCubeLoaderForWhileOp(scf::WhileOp whileOp) {
 // Helper: mark all ops in a loop body as CUBE_ONLY
 static void
 markLoopBodyAsCube(Operation *loop, Block *body,
-                   llvm::DenseMap<Operation *, OpCoreType> &opCoreTypes) {
+                   llvm::DenseMap<Operation *, OpCoreType> &opCoreTypes,
+                   const llvm::DenseSet<Operation *> &preClassifiedOps) {
   body->walk([&](Operation *op) {
-    if (op == loop || isa<scf::SCFDialect>(op->getDialect()))
+    if (op == loop || isa<scf::SCFDialect>(op->getDialect())) {
       return;
+    }
+    if (preClassifiedOps.contains(op)) {
+      return;
+    }
     auto it = opCoreTypes.find(op);
-    if (it != opCoreTypes.end())
+    if (it != opCoreTypes.end()) {
       it->second = OP_CUBE_ONLY;
+    }
   });
-  opCoreTypes[loop] = OP_CUBE_ONLY;
+  if (!preClassifiedOps.contains(loop)) {
+    opCoreTypes[loop] = OP_CUBE_ONLY;
+  }
 }
 
 llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
@@ -1243,18 +1326,27 @@ llvm::LogicalResult OpClassifierPass::penetrateCubeIntoForLoops() {
   // Use a combined walk to collect both ForOps and WhileOps
   llvm::SmallVector<Operation *> loaderLoops;
   getOperation().walk([&](scf::ForOp forOp) {
-    if (isCubeLoaderForOp(forOp))
+    if (forOp->getParentOfType<scope::ScopeOp>()) {
+      return;
+    }
+    if (isCubeLoaderForOp(forOp)) {
       loaderLoops.push_back(forOp);
+    }
   });
   getOperation().walk([&](scf::WhileOp whileOp) {
-    if (isCubeLoaderForWhileOp(whileOp))
+    if (whileOp->getParentOfType<scope::ScopeOp>()) {
+      return;
+    }
+    if (isCubeLoaderForWhileOp(whileOp)) {
       loaderLoops.push_back(whileOp);
+    }
   });
 
   for (Operation *loop : loaderLoops) {
     Block *body = getLoopBodyBlock(loop);
-    if (body)
-      markLoopBodyAsCube(loop, body, opCoreTypes);
+    if (body) {
+      markLoopBodyAsCube(loop, body, opCoreTypes, preClassifiedOps);
+    }
   }
 
   return llvm::success();
@@ -1273,6 +1365,9 @@ OpCoreType OpClassifierPass::getCoreType(Operation *op) const {
 }
 
 void OpClassifierPass::setCoreType(Operation *op, OpCoreType coreType) {
+  if (preClassifiedOps.contains(op)) {
+    return;
+  }
   opCoreTypes[op] = coreType;
 }
 
@@ -1342,8 +1437,9 @@ bool OpClassifierPass::shouldStopPropagationForYield(
 
 void OpClassifierPass::propagateCoreTypeUpwardForYield(
     Operation *startOp, OpCoreType targetCoreType) {
-  if (!startOp)
+  if (!startOp) {
     return;
+  }
 
   llvm::DenseSet<Operation *> visited;
   std::queue<Operation *> queue;
@@ -1354,11 +1450,16 @@ void OpClassifierPass::propagateCoreTypeUpwardForYield(
     Operation *cur = queue.front();
     queue.pop();
 
-    if (!cur || !cur->getBlock())
+    if (!cur || !cur->getBlock()) {
       continue;
+    }
 
-    if (shouldStopPropagationForYield(cur, targetCoreType))
+    if (shouldStopPropagationForYield(cur, targetCoreType)) {
       continue;
+    }
+    if (preClassifiedOps.contains(cur)) {
+      continue;
+    }
 
     opCoreTypes[cur] = targetCoreType;
 
@@ -1407,7 +1508,7 @@ bool OpClassifierPass::handleYieldFromElseRegion(
   }
 
   // Get the core_type attribute from then region yield
-  auto thenCoreTypeAttr = thenYieldForElse->getAttr("ssbuffer.core_type");
+  auto thenCoreTypeAttr = thenYieldForElse->getAttr(kCoreType);
   if (!thenCoreTypeAttr) {
     return false;
   }
@@ -1518,11 +1619,11 @@ void OpClassifierPass::processYieldOperation(Operation *op,
     }
   }
 
-  // Write ssbuffer.core_type attribute onto the yield op and its parent scf op
+  // Write the core type onto the yield op and its parent scf op. Never packed
+  // into a scope, so no pre-classified guard is needed here.
   if (!coreTypes.empty()) {
     std::string coreTypeStr = joinCoreTypes(coreTypes);
-    op->setAttr("ssbuffer.core_type",
-                StringAttr::get(op->getContext(), coreTypeStr));
+    op->setAttr(kCoreType, StringAttr::get(op->getContext(), coreTypeStr));
 
     OpCoreType opCt = (coreTypeStr.find("CUBE") != std::string::npos)
                           ? OP_CUBE_ONLY
@@ -1530,7 +1631,7 @@ void OpClassifierPass::processYieldOperation(Operation *op,
     opCoreTypes[op] = opCt;
 
     if (parentOp && llvm::isa<scf::SCFDialect>(parentOp->getDialect())) {
-      parentOp->setAttr("ssbuffer.core_type",
+      parentOp->setAttr(kCoreType,
                         StringAttr::get(parentOp->getContext(), coreTypeStr));
       opCoreTypes[parentOp] = opCt;
     }
@@ -1580,12 +1681,14 @@ int OpClassifierPass::handleSCFYield() {
 
   // Process remaining scf.yield operations (not inside scf.if, e.g. scf.for)
   for (Operation *op : allOps) {
-    if (!isa<scf::YieldOp>(op))
+    if (!isa<scf::YieldOp>(op)) {
       continue;
+    }
 
     Operation *parentOp = op->getParentOp();
-    if (dyn_cast_or_null<scf::IfOp>(parentOp))
+    if (dyn_cast_or_null<scf::IfOp>(parentOp)) {
       continue;
+    }
 
     processYieldOperation(op, nullptr);
   }
@@ -1612,27 +1715,33 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 
   if (auto forOp = dyn_cast<scf::ForOp>(owner)) {
     auto iterArg = forOp.getTiedLoopRegionIterArg(operand);
-    if (!iterArg)
+    if (!iterArg) {
       return OP_UNDETERMINED;
+    }
     auto sourceOperand = forOp.getTiedLoopYieldedValue(iterArg);
-    if (!sourceOperand)
+    if (!sourceOperand) {
       return OP_UNDETERMINED;
+    }
     auto defOp = sourceOperand->get().getDefiningOp();
-    if (!defOp)
+    if (!defOp) {
       return OP_UNDETERMINED;
+    }
     return getCoreType(defOp);
   }
 
   if (auto whileOp = dyn_cast<scf::WhileOp>(owner)) {
     auto iterArg = whileOp.getTiedLoopRegionIterArg(operand);
-    if (!iterArg)
+    if (!iterArg) {
       return OP_UNDETERMINED;
+    }
     auto sourceOperand = whileOp.getTiedLoopYieldedValue(iterArg);
-    if (!sourceOperand)
+    if (!sourceOperand) {
       return OP_UNDETERMINED;
+    }
     auto defOp = sourceOperand->get().getDefiningOp();
-    if (!defOp)
+    if (!defOp) {
       return OP_UNDETERMINED;
+    }
     return getCoreType(defOp);
   }
 
@@ -1664,13 +1773,15 @@ void OpClassifierPass::splitOperationForCubeAndVector(
     Operation *op, llvm::DenseSet<Operation *> &processedOps,
     llvm::DenseMap<Operation *, Operation *> &opToVectorClone) {
   // Guard against double-processing the same op
-  if (processedOps.count(op))
+  if (processedOps.count(op)) {
     return;
+  }
   processedOps.insert(op);
 
   // Only split ops explicitly marked CUBE_AND_VECTOR
-  if (opCoreTypes[op] != OP_CUBE_AND_VECTOR)
+  if (opCoreTypes[op] != OP_CUBE_AND_VECTOR) {
     return;
+  }
 
   // ------------------------------------------------------------------
   // Phase 1: Recursively handle CUBE_AND_VECTOR operands first
@@ -1778,15 +1889,17 @@ int OpClassifierPass::handleCubeAndVector() {
       }
     }
 
-    if (cubeAndVectorOps.empty())
+    if (cubeAndVectorOps.empty()) {
       break;
+    }
 
     llvm::DenseMap<Operation *, Operation *> opToVectorClone;
     llvm::DenseSet<Operation *> processedOps;
 
     for (Operation *op : cubeAndVectorOps) {
-      if (processedOps.count(op))
+      if (processedOps.count(op)) {
         continue;
+      }
       splitOperationForCubeAndVector(op, processedOps, opToVectorClone);
       changed = true;
     }
@@ -1801,19 +1914,22 @@ int OpClassifierPass::handleCubeAndVector() {
 
 int OpClassifierPass::stampToIR() {
   for (Operation *op : allOps) {
-    if (!op || !op->getBlock())
+    if (!op || !op->getBlock()) {
       continue;
+    }
 
     auto it = opCoreTypes.find(op);
-    if (it == opCoreTypes.end())
+    if (it == opCoreTypes.end()) {
       continue;
+    }
     OpCoreType coreType = it->second;
 
     // Skip most scf dialect operations except scf.condition (terminator in
     // while's before region)
     if (llvm::isa<scf::SCFDialect>(op->getDialect()) &&
-        !llvm::isa<scf::ConditionOp>(op))
+        !llvm::isa<scf::ConditionOp>(op)) {
       continue;
+    }
 
     // scf.condition is always VECTOR (it's the condition check in while's
     // before region)
@@ -1831,14 +1947,16 @@ int OpClassifierPass::stampToIR() {
       }
       parent = parent->getParentOp();
     }
-    if (isInsideLinalgBlock)
+    if (isInsideLinalgBlock) {
       continue;
+    }
 
     // Skip builtin.module, func.func, and tt.func operations
-    if (isa<ModuleOp, func::FuncOp>(op))
+    if (isa<ModuleOp, func::FuncOp>(op)) {
       continue;
+    }
 
-    op->setAttr("ssbuffer.core_type",
+    op->setAttr(kCoreType,
                 StringAttr::get(op->getContext(), coreTypeToString(coreType)));
   }
 

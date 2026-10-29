@@ -33,7 +33,6 @@
 #include "llvm/Support/LogicalResult.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
@@ -51,8 +50,10 @@
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/PlanCubeBlockPass.h"
 
+#include "DynamicCVPipeline/Common/CycleDetector.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 
 using namespace mlir;
 using namespace triton;
@@ -174,6 +175,7 @@ class TopologicalPartitionPlanner {
   bool shouldSkip(Operation *op) {
     return !isCubeSimpleOpOrCf(op) || assigned.contains(op);
   };
+
   bool canExpandTo(Operation *op);
   void dumpQueueAndIndegreeInfo();
   llvm::LogicalResult populateQueueWithReadyOps();
@@ -195,6 +197,7 @@ public:
       }
     });
   }
+
   llvm::LogicalResult run();
 };
 
@@ -434,6 +437,7 @@ static bool checkValidInputSeed(Operation *op) {
              tensor::EmptyOp, linalg::BroadcastOp, tensor::ExpandShapeOp,
              arith::ExtFOp>(op);
 }
+
 static bool checkValidUserSeed(Operation *op, linalg::MatmulOp &preDot) {
   // keep unify to OpClassifer
   if (isa<hivm::StoreOp, bufferization::MaterializeInDestinationOp,
@@ -459,8 +463,9 @@ matchSeed(Operation *dotOp, ComputeBlockIdManager &bm,
   ret.push_back(dotOp);
   for (Value operand : dotOp->getOperands()) {
     Operation *def = operand.getDefiningOp();
-    if (!def)
+    if (!def) {
       continue;
+    }
     if (checkValidInputSeed(def) && isCubeSimpleOpOrCf(def) &&
         dotOp->getBlock() == def->getBlock() && bm.getBlockIdByOp(def) == -1) {
       if (CVPipeline::isOnlyDirectlyUse(def, dotOp, memGraph)) {
@@ -568,6 +573,11 @@ void mlir::triton::PlanCubeBlockPass::runOnOperation() {
   // We do not need to skip linalg blocks since they do not have core types and
   // do not contain matmul
   auto result = moduleOp.walk<WalkOrder::PreOrder>([&](Block *block) {
+    // Packed scope units are atomic and already carry their core type; never
+    // assign block ids to the ops nested inside them.
+    if (isa_and_nonnull<scope::ScopeOp>(block->getParentOp())) {
+      return WalkResult::skip();
+    }
     if (bm.shouldInheritFromParent(block, CoreType::CUBE_ONLY)) {
       if (llvm::failed(bm.inheritFromParent(block))) {
         block->getParentOp()->emitError()

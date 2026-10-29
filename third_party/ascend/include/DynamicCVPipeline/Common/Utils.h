@@ -28,11 +28,6 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/Casting.h"
-#include <cstdint>
-#include <optional>
-#include <string_view>
 
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -190,28 +185,34 @@ inline bool isVectorSimpleOpOrCf(Operation *op) {
 // ============================================================================
 // Get the body block of a loop (ForOp's body or WhileOp's after-body block)
 inline Block *getLoopBodyBlock(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getBody();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getAfterBody()->getNextNode();
+  }
   return nullptr;
 }
 
 // Get the init values of a loop (ForOp's initArgs or WhileOp's inits)
 inline ValueRange getLoopInitValues(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getInitArgs();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getInits();
+  }
   return {};
 }
 
 // Get the yield terminator of a loop's body
 inline Operation *getLoopYieldOp(Operation *loop) {
-  if (auto forOp = dyn_cast<scf::ForOp>(loop))
+  if (auto forOp = dyn_cast<scf::ForOp>(loop)) {
     return forOp.getBody()->getTerminator();
-  if (auto whileOp = dyn_cast<scf::WhileOp>(loop))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(loop)) {
     return whileOp.getAfterBody()->getTerminator();
+  }
   return nullptr;
 }
 
@@ -219,10 +220,12 @@ inline Operation *getLoopYieldOp(Operation *loop) {
 // after-body)
 inline bool isLoopIterArg(BlockArgument blockArg) {
   Operation *parentOp = blockArg.getOwner()->getParentOp();
-  if (isa<scf::ForOp>(parentOp))
+  if (isa<scf::ForOp>(parentOp)) {
     return true;
-  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp))
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(parentOp)) {
     return blockArg.getOwner() == whileOp.getAfterBody()->getNextNode();
+  }
   return false;
 }
 
@@ -234,10 +237,12 @@ inline bool isScalarType(Value value) {
 // Helper: Check if a value is a scalar iter_arg from scf.for or scf.while
 inline bool isScalarIterArgOp(Value iterArg) {
   auto blockArg = dyn_cast<BlockArgument>(iterArg);
-  if (!blockArg)
+  if (!blockArg) {
     return false;
-  if (!isLoopIterArg(blockArg))
+  }
+  if (!isLoopIterArg(blockArg)) {
     return false;
+  }
   return isScalarType(iterArg);
 }
 
@@ -308,13 +313,16 @@ inline Operation *getLoopCarriedDefOp(Value value, Block *block) {
 
 inline bool isTensorComputeOp(Operation *op) {
   if (auto linalgOp = dyn_cast<linalg::LinalgOp>(op)) {
-    if (linalg::isaCopyOpInterface(linalgOp))
+    if (linalg::isaCopyOpInterface(linalgOp)) {
       return false;
+    }
     auto genericOp = dyn_cast<linalg::GenericOp>(op);
-    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value())
+    if (genericOp && linalg::isaBroadcastOpInterface(genericOp).has_value()) {
       return false;
-    if (isa<linalg::FillOp>(op))
+    }
+    if (isa<linalg::FillOp>(op)) {
       return false;
+    }
     return true;
   }
 
@@ -348,6 +356,21 @@ getFixpipePreQuantMode(Operation *truncOp);
 // Trace an operand's defining op back through C2C intermediate ops to find the
 // underlying producing op. Returns null when the operand has no defining op.
 Operation *getSourceThroughCIntermediateOps(Value operand);
+
+/// Resolves `val` one step towards the memory it aliases: through a view-like
+/// op (`getViewSource`) or `bufferization.to_tensor` (`getBuffer`). Returns
+/// null when there is no such source (`func.func` block arguments included).
+Value getAliasSource(Value val);
+
+/// Walks `getAliasSource` until it stops, yielding the root memref behind
+/// `val` (e.g. the `memref.alloc` it came from, or the function argument
+/// itself).
+inline Value traceMemDef(Value val) {
+  while (auto source = getAliasSource(val)) {
+    val = source;
+  }
+  return val;
+}
 
 } // namespace CVPipeline
 } // namespace mlir

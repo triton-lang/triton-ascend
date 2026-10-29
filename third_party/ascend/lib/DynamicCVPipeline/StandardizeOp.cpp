@@ -20,21 +20,21 @@
  * THE SOFTWARE.
  */
 
+#include <memory>
+
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LogicalResult.h"
-#include <memory>
 
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Pass/PassRegistry.h"
 
-#include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-#include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
+
+#include "DynamicCVPipeline/StandardizeOp/Passes.h"
 
 using namespace mlir;
-using namespace triton;
-using namespace CVSplit;
+using namespace CVPipeline;
 
 static constexpr const char *DEBUG_TYPE = "StandardizeOp";
 #define LOG_DEBUG(...)                                                         \
@@ -51,7 +51,9 @@ void StandardizeOpPass::runOnOperation() {
 
   LOG_DEBUG("Input mlir:\n" << op);
   OpPassManager pm(op.getOperationName());
+
   pm.addPass(createPatternMatchRewritePass());
+  pm.addPass(createPackMemrefPass());
 
   if (llvm::failed(runPipeline(pm, op))) {
     LOG_DEBUG("Pipeline Failed!");
@@ -80,6 +82,7 @@ std::unique_ptr<OperationPass<ModuleOp>> createStandardizeOpPass() {
 void registerStandardizeOpPasses() {
   registerPass(createStandardizeOpPass);
   registerPass(createPatternMatchRewritePass);
+  registerPass(createPackMemrefPass);
 }
 
 } // namespace mlir::triton

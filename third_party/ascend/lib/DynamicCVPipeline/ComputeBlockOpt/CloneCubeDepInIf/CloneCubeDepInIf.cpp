@@ -31,6 +31,7 @@
 
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
+#include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Block.h"
 #include "mlir/IR/IRMapping.h"
@@ -45,6 +46,7 @@
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 
 static constexpr const char *DEBUG_TYPE = "clone-cube-dep-in-if";
+static constexpr llvm::StringLiteral kSkippedKernels[1] = {""};
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -585,23 +587,38 @@ void CloneCubeDepInIfPass::runOnOperation() {
   // exec-after edges (mirrors CloneOps' per-loop rebuild).
   auto &aa = getAnalysis<AliasAnalysis>();
 
-  WalkResult walkRes = module->walk([&](scf::IfOp ifOp) -> WalkResult {
-    CandidateIf cand = getCandidate(ifOp);
-    if (!cand.thenNeedsSplit && !cand.elseNeedsSplit) {
-      return WalkResult::advance();
-    }
-    LDBG("Processing if: " << ifOp);
-    LDBG("  thenNeedsSplit=" << cand.thenNeedsSplit
-                             << " elseNeedsSplit=" << cand.elseNeedsSplit
-                             << " thenCubes=" << cand.thenCubes.size()
-                             << " elseCubes=" << cand.elseCubes.size());
-    if (failed(processCandidate(cand, aa))) {
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
+  auto mainRes =
+      walkMainLoop(module, [&](Operation *op) -> llvm::LogicalResult {
+        auto funcOp = op->getParentOfType<func::FuncOp>();
+        if (funcOp &&
+            llvm::is_contained(kSkippedKernels, funcOp.getSymName())) {
+          LDBG("Skip kernel: " << funcOp.getSymName());
+          return llvm::success();
+        }
 
-  if (walkRes.wasInterrupted()) {
+        LDBG("Detected main loop: " << *op);
+        WalkResult walkRes = op->walk([&](scf::IfOp ifOp) -> WalkResult {
+          CandidateIf cand = getCandidate(ifOp);
+          if (!cand.thenNeedsSplit && !cand.elseNeedsSplit) {
+            return WalkResult::advance();
+          }
+          LDBG("Processing if: " << ifOp);
+          LDBG("  thenNeedsSplit=" << cand.thenNeedsSplit
+                                   << " elseNeedsSplit=" << cand.elseNeedsSplit
+                                   << " thenCubes=" << cand.thenCubes.size()
+                                   << " elseCubes=" << cand.elseCubes.size());
+          if (failed(processCandidate(cand, aa))) {
+            return WalkResult::interrupt();
+          }
+          return WalkResult::advance();
+        });
+        if (walkRes.wasInterrupted()) {
+          return llvm::failure();
+        }
+        return llvm::success();
+      });
+
+  if (llvm::failed(mainRes)) {
     LDBG("Clone cube deps in if failed, fallback to original");
     setFallbackAttr(module, ERRCODE_FAILED);
     return;

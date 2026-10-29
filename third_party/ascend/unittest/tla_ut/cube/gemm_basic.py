@@ -30,7 +30,7 @@ SHAPE = dict(M=64, N=64, K=64)
 SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def gemm_basic(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
     tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
     a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
@@ -58,9 +58,10 @@ def constexprs():
 def gemm_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr):
     rows = tl.arange(0, M)
     cols = tl.arange(0, N)
-    a = tl.load(A_ptr + rows[:, None] * K + cols[None, :])  # (M, K)
-    b = tl.load(B_ptr + cols[:, None] * K + rows[None, :])  # (N, K) -> load B(K, N) transposed
-    c = tl.sum(a[:, :, None] * b[None, :, :], axis=1)  # (M, N) f32 accumulate
+    inner = tl.arange(0, K)
+    a = tl.load(A_ptr + rows[:, None] * K + inner[None, :])  # (M, K)
+    b = tl.load(B_ptr + inner[:, None] * N + cols[None, :])  # (K, N)
+    c = tl.dot(a, b)  # (M, N) f32 accumulate
     tl.store(C_ptr + rows[:, None] * N + cols[None, :], c)
 
 

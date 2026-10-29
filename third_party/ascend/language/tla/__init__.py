@@ -50,6 +50,17 @@ from . import cube
 # Explicit pipeline / global synchronization.
 from . import sync
 
+
+def jit(fn=None, **kwargs):
+    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
+    from .jit import TLAJITFunction
+
+    def decorator(f):
+        return TLAJITFunction(f, **kwargs)
+
+    return decorator(fn) if fn is not None else decorator
+
+
 __all__ = [
     "buffer",
     "buffer_type",
@@ -83,4 +94,7 @@ __all__ = [
 
     # explicit synchronization
     "sync",
+
+    # kernel decorator
+    "jit",
 ]

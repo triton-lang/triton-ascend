@@ -32,7 +32,7 @@ SHAPE = dict(M=8, N=64)
 SIGNATURE = {"A_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def device_print_kernel(A_ptr, M: tl.constexpr, N: tl.constexpr):
     a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
     a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
@@ -46,7 +46,7 @@ def device_print_kernel(A_ptr, M: tl.constexpr, N: tl.constexpr):
 # negative kernels: must raise RuntimeError at compile time.
 def _bad_inside_scope():
 
-    @triton.jit
+    @tla.jit
     def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
         a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
         a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
@@ -60,7 +60,7 @@ def _bad_inside_scope():
 
 def _bad_l1():
 
-    @triton.jit
+    @tla.jit
     def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
         a_l1 = tla.alloc_buffer((M, N), tl.float32, space="l1")
         a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
@@ -73,7 +73,7 @@ def _bad_l1():
 
 def _bad_gm():
 
-    @triton.jit
+    @tla.jit
     def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
         a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
         a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))

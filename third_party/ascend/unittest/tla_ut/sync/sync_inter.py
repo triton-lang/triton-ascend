@@ -21,7 +21,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -34,7 +33,7 @@ FLAG = 0
 SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32", "O_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def sync_inter(A_ptr, B_ptr, C_ptr, O_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr,
                FLAG: tl.constexpr):
     tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
@@ -104,7 +103,7 @@ def _launch():
     B = torch.randn(K, N, dtype=torch.float16, device="npu")
     C = torch.zeros(M, N, dtype=torch.float32, device="npu")
     O = torch.full((M, N), -7.0, dtype=torch.float32, device="npu")
-    sync_inter[(1, )](A, B, C, O, enable_tla_mode=True, **constexprs())
+    sync_inter[(1, )](A, B, C, O, **constexprs())
     torch.npu.synchronize()
     return A, B, C, O
 

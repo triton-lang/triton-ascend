@@ -788,20 +788,19 @@ void init_tla_builder(py::module &&m) {
              }
              auto scopeOp = self.create<scope::ScopeOp>(TypeRange(resultTypes));
              scopeOp->setAttrs(attrs);
-             Region &region = scopeOp->getRegion(0);
-             // If the region was left empty, create the entry block.
-             if (region.empty())
-               region.emplaceBlock();
              return OpState(scopeOp);
            })
-      // Returns a non-owning reference to the scope entry block.  pybind11
-      // wraps Block with a unique_ptr holder, so a bare Block* under the
-      // default automatic policy would delete the block when the Python
-      // wrapper is GC'd; reference keeps the block alive in the IR.
+      // Ensures the TLA scope has its entry block; the cann-shared
+      // create_scope_op makes its own, so the emplace stays here to avoid
+      // two blocks in non-TLA scopes.
+      // pybind11 wraps Block in unique_ptr; reference keeps it alive.
       .def(
           "get_scope_entry_block",
           [](TLABuilder &self, OpState op) -> Block * {
-            return &op->getRegion(0).front();
+            Region &region = op->getRegion(0);
+            if (region.empty())
+              region.emplaceBlock();
+            return &region.front();
           },
           py::return_value_policy::reference)
       // Set an attribute on an existing operation. module.get_function is not

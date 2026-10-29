@@ -8,9 +8,8 @@ rejected at trace time.
 Stages (env TLA_TEST_STAGE, default all with auto-degrade):
   ir      : offline HIVM IR assert (2 collapse / 3 expand / 4 load / 4 store /
             4 multibuffer / 6 pointer entries)
-  compile : full compile, confirm .o/.npubin artifacts exist (TODO: needs
-            npuir memref.reshape lowering)
-  run     : real-device launch + accuracy (TODO)
+  compile : full compile, confirm .o/.npubin artifacts exist
+  run     : real-device launch + accuracy
 """
 import sys, os
 
@@ -33,38 +32,39 @@ def constexprs():
     return dict(SHAPE)
 
 
-@triton.jit
+@tla.jit
 def reshape_fwd(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
-    # Branches A/C/D share the same (H, D) GM tile; B reads the flat (H*D,) tile.
-    x_tile = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
-    x_flat = tla.view(X_ptr, (H * D, ), strides=(1, ), offsets=(0, ))
+    with tla.scope.vector():
+        # Branches A/C/D share the same (H, D) GM tile; B reads the flat (H*D,) tile.
+        x_tile = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
+        x_flat = tla.view(X_ptr, (H * D, ), strides=(1, ), offsets=(0, ))
 
-    # A: (H, D) -> (H*D,)  flatten
-    ub_a = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
-    tla.copy(x_tile, ub_a)
-    a = tla.reshape(ub_a, (H * D, ))
-    tla.copy(a, tla.view(O_ptr, (H * D, ), strides=(1, ), offsets=(0, )))
+        # A: (H, D) -> (H*D,)  flatten
+        ub_a = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        tla.copy(x_tile, ub_a)
+        a = tla.reshape(ub_a, (H * D, ))
+        tla.copy(a, tla.view(O_ptr, (H * D, ), strides=(1, ), offsets=(0, )))
 
-    # B: (H*D,) -> (H, D)  unflatten
-    ub_b = tla.alloc_buffer((H * D, ), tl.bfloat16, space="ub")
-    tla.copy(x_flat, ub_b)
-    b = tla.reshape(ub_b, (H, D))
-    tla.copy(b, tla.view(O_ptr, (H, D), strides=(D, 1), offsets=(0, 0)))
+        # B: (H*D,) -> (H, D)  unflatten
+        ub_b = tla.alloc_buffer((H * D, ), tl.bfloat16, space="ub")
+        tla.copy(x_flat, ub_b)
+        b = tla.reshape(ub_b, (H, D))
+        tla.copy(b, tla.view(O_ptr, (H, D), strides=(D, 1), offsets=(0, 0)))
 
-    # C: (H, D) -> (H//2, 2*D)  split dim0 + merge dim1
-    ub_c = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
-    tla.copy(x_tile, ub_c)
-    c = tla.reshape(ub_c, (H // 2, 2 * D))
-    tla.copy(c, tla.view(O_ptr, (H // 2, 2 * D), strides=(2 * D, 1), offsets=(0, 0)))
+        # C: (H, D) -> (H//2, 2*D)  split dim0 + merge dim1
+        ub_c = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        tla.copy(x_tile, ub_c)
+        c = tla.reshape(ub_c, (H // 2, 2 * D))
+        tla.copy(c, tla.view(O_ptr, (H // 2, 2 * D), strides=(2 * D, 1), offsets=(0, 0)))
 
-    # D: (H, D) -> (H//2, 2, D)  split dim0 into two
-    ub_d = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
-    tla.copy(x_tile, ub_d)
-    d = tla.reshape(ub_d, (H // 2, 2, D))
-    tla.copy(d, tla.view(O_ptr, (H // 2, 2, D), strides=(2 * D, D, 1), offsets=(0, 0, 0)))
+        # D: (H, D) -> (H//2, 2, D)  split dim0 into two
+        ub_d = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
+        tla.copy(x_tile, ub_d)
+        d = tla.reshape(ub_d, (H // 2, 2, D))
+        tla.copy(d, tla.view(O_ptr, (H // 2, 2, D), strides=(2 * D, D, 1), offsets=(0, 0, 0)))
 
 
-@triton.jit
+@tla.jit
 def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
@@ -73,7 +73,7 @@ def reshape_strided(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     tla.reshape(sub, (H * D // 2, ))
 
 
-@triton.jit
+@tla.jit
 def reshape_count_mismatch(X_ptr, O_ptr, H: tl.constexpr, D: tl.constexpr):
     x_ub = tla.alloc_buffer((H, D), tl.bfloat16, space="ub")
     x = tla.view(X_ptr, (H, D), strides=(D, 1), offsets=(0, 0))
@@ -121,12 +121,28 @@ def test_ir(output_dir=None):
     print("NEG PASS: strided / count-mismatch reshape rejected")
 
 
+def _launch():
+    H, D = SHAPE["H"], SHAPE["D"]
+    X = torch.arange(H * D, dtype=torch.bfloat16, device="npu").reshape(H, D)
+    O = torch.full((H, D), 0.0, dtype=torch.bfloat16, device="npu")
+    reshape_fwd[(1, )](X, O, **constexprs())
+    torch.npu.synchronize()
+    return X, O
+
+
 def test_compile():
-    raise NotImplementedError("reshape compile/run needs npuir memref.reshape lowering (TODO)")
+    _launch()
+    artifacts = check_compile_artifacts()
+    assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
+    print("COMPILE PASS: reshape artifacts", len(artifacts), "->", artifacts[0])
 
 
 def test_run():
-    raise NotImplementedError("reshape compile/run needs npuir memref.reshape lowering (TODO)")
+    X, O = _launch()
+    ox, oo = X.cpu(), O.cpu()
+    ok = torch.equal(oo, ox)
+    print("RESHAPE", "OK" if ok else "MISMATCH")
+    assert ok, "reshape e2e mismatch"
 
 
 def main():

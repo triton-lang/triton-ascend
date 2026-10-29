@@ -19,7 +19,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -30,7 +29,7 @@ N = 64  # f32 vector-register lane count (2048 bits)
 SIGNATURE = {"A_ptr": "*fp32", "B_ptr": "*fp32", "O_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def sync_intra(A_ptr, B_ptr, O_ptr, N: tl.constexpr):
     a_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     b_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
@@ -90,7 +89,7 @@ def _launch():
     A = torch.randn(N, dtype=torch.float32, device="npu")
     B = torch.randn(N, dtype=torch.float32, device="npu")
     O = torch.full((N, ), -7.0, dtype=torch.float32, device="npu")
-    sync_intra[(1, )](A, B, O, enable_tla_mode=True, **constexprs())
+    sync_intra[(1, )](A, B, O, **constexprs())
     torch.npu.synchronize()
     return A, B, O
 

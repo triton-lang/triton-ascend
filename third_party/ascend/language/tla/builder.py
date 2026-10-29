@@ -37,7 +37,13 @@ __all__ = [
 
 def setup_unified_builder(main_builder, ascend_builder):
     """Set up a unified builder interface by attaching methods from specialized builders."""
-    main_builder._ascend_builder = ascend_builder
+    # Register scope 'with' handlers here so TLA needs no build-time patch.
+    from .dispatch import register_with_dispatch
+
+    register_with_dispatch()
+    # Only attach TLA-specific methods.  The cann setup_unified_builder owns
+    # _ascend_builder and the shared methods; re-attaching or reassigning them
+    # here would shadow the cann versions for every kernel.
     ascend_methods = [
         'create_tla_barrier',
         'create_tla_set_flag',
@@ -59,13 +65,9 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_hivm_nd2nz',
         'create_hivm_fixpipe',
         'create_hivm_mmadl1',
-        'create_annotation_mark',
-        'get_array_attr',
+        # TLA-only helpers; the cann extension does not mount parse_attr.
+        'get_scope_entry_block',
         'parse_attr',
-        'is_simt_mode',
-        'get_i64_array_attr',
-        'get_buffer_ty',
-        'get_buffer_ty_with_strides',
         'create_simd_vlds',
         'create_simd_vsts',
         'create_simd_binary',
@@ -84,8 +86,5 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vintlv',
         'create_simd_vdintlv',
         'create_simd_bitcast',
-        'create_scope_op',
-        'get_scope_entry_block',
-        'scope_return',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

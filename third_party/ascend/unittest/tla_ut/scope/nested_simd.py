@@ -8,7 +8,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -18,7 +17,7 @@ SIGNATURE = {"X_ptr": "*fp32", "O_ptr": "*fp32"}
 N = 64
 
 
-@triton.jit
+@tla.jit
 def nested_simd(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
@@ -53,7 +52,7 @@ def test_ir(output_dir=None):
 def test_compile():
     X = torch.randn(N, dtype=torch.float32, device="npu")
     O = torch.empty(N, dtype=torch.float32, device="npu")
-    nested_simd[(1, )](X, O, enable_tla_mode=True, **constexprs())
+    nested_simd[(1, )](X, O, **constexprs())
     torch.npu.synchronize()
     artifacts = check_compile_artifacts()
     assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"

@@ -458,6 +458,8 @@ runAscendCostModelInProcess(const std::string &mlirText,
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)
 void init_ascend_ir(py::module &&m);
 void init_buffer_ir(py::module &&m);
+// TLA-specific builder bindings (defined in language/tla/cpp/tla_builder.cc)
+void init_tla_builder(py::module &&m);
 
 void init_triton_ascend(py::module &&m) {
   py::module_ libtriton = py::module_::import("triton._C.libtriton");
@@ -496,4 +498,6 @@ void init_triton_ascend(py::module &&m) {
 
   // Initialize ascend IR bindings (ascendnpu_ir_builder, scope/hivm dialects)
   init_ascend_ir(m.def_submodule("ir"));
+  // TLA builder bindings share the same "ir" submodule (def_submodule caches).
+  init_tla_builder(m.def_submodule("ir"));
 }

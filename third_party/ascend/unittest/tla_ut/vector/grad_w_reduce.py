@@ -9,7 +9,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -21,7 +20,7 @@ SHAPE = dict(h=256, hc=2, np=2, bw=128, versions=1, cores=4)
 SIGNATURE = {"P_ptr": "*fp32", "WH_ptr": "*bf16", "WE_ptr": "*bf16", "GH_ptr": "*fp32", "GE_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def grad_w_reduce(P_ptr, WH_ptr, WE_ptr, GH_ptr, GE_ptr, H: tl.constexpr, HC: tl.constexpr, NP: tl.constexpr,
                   BW: tl.constexpr, CORES: tl.constexpr, VERSIONS: tl.constexpr):
     tl.static_assert(H > 0 and H % BW == 0 and BW % 64 == 0,

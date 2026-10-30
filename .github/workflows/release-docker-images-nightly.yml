@@ -91,7 +91,7 @@ jobs:
           echo "Final image:        ${IMAGE_REPOSITORY}:${base_tag}"
 
       - name: Build and push platform image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/cann9.2.0_npu.Dockerfile

@@ -23,6 +23,7 @@
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -171,6 +172,13 @@ static void collectAllDeps(Operation *startOp,
   }
 }
 
+/// True when `op` carries a tensor out of a compute block: a raw
+/// `bufferization::ToTensorOp`, or the atomic `ssbuffer.load` scope that
+/// PackMemref packed the load unit into.
+static bool isTensorCarrier(Operation *op) {
+  return isa<bufferization::ToTensorOp>(op) || CVPipeline::isLoadScope(op);
+}
+
 /// Check if the memref.copy feeding \p toTensor (the copy writing the buffer
 /// consumed by to_tensor) loads its data from global memory (external func
 /// argument). If no feeding copy is found, the to_tensor itself is
@@ -192,18 +200,30 @@ isToTensorFedByGlobalCopy(bufferization::ToTensorOp toTensor,
   return true;
 }
 
-/// Returns the bufferization::ToTensorOp in CubePre that Cube depends on,
-/// only to_tensor ops whose feeding memref.copy loads data from GM (external
+/// True when the tensor carrier \p op moves its data in from global memory: a
+/// packed `ssbuffer.load` scope always does (PackMemref packs only units that
+/// read GM), a raw to_tensor needs its feeding copy to come from GM (external
 /// func argument).
+static bool
+isCarrierFedByGlobalMemory(Operation *op,
+                           const CVPipeline::MemoryDependenceGraph &memGraph) {
+  if (CVPipeline::isLoadScope(op)) {
+    return true;
+  }
+  return isToTensorFedByGlobalCopy(cast<bufferization::ToTensorOp>(op),
+                                   memGraph);
+}
+
+/// Returns the tensor carriers in CubePre that Cube depends on. \p edgeSrcOps
+/// are the dependency source ops on the CubePre → Cube edges.
 static SmallVector<Operation *>
-findToTensorDeps(const ComputeBlock *cubePre,
-                 const DenseSet<Operation *> &edgeSrcOps,
-                 const CVPipeline::MemoryDependenceGraph &memGraph) {
+findTensorCarrierDeps(const ComputeBlock *cubePre,
+                      const DenseSet<Operation *> &edgeSrcOps,
+                      const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallVector<Operation *> result;
   for (Operation *srcOp : edgeSrcOps) {
-    auto toTensor = dyn_cast<bufferization::ToTensorOp>(srcOp);
-    if (toTensor && llvm::is_contained(cubePre->ops, srcOp) &&
-        isToTensorFedByGlobalCopy(toTensor, memGraph)) {
+    if (isTensorCarrier(srcOp) && llvm::is_contained(cubePre->ops, srcOp) &&
+        isCarrierFedByGlobalMemory(srcOp, memGraph)) {
       result.push_back(srcOp);
     }
   }
@@ -250,8 +270,12 @@ static void cloneOpCrossCubeDep(
     }
     Operation *cloned = builder.clone(*op, mapper);
     record.clonedOps.push_back(cloned);
-    cloned->walk(
-        [&](Operation *innerOp) { bm.updateBlockId(innerOp, cube->id); });
+    // A cloned load scope keeps its atomicity: stamp the scope, not its body.
+    cloned->walk<WalkOrder::PreOrder>([&](Operation *innerOp) {
+      bm.updateBlockId(innerOp, cube->id);
+      return CVPipeline::isLoadScope(innerOp) ? WalkResult::skip()
+                                              : WalkResult::advance();
+    });
   }
 
   // Remap Cube's original ops' operands: replace references to old CubePre
@@ -339,18 +363,18 @@ static void markSubBlock(const ComputeBlock &predV, const ComputeBlock &succV) {
   }
 }
 
-/// Collect the ops in CubePre that the given to_tensor ops transitively
+/// Collect the ops in CubePre that the given tensor carriers transitively
 /// depend on (via SSA use-def chains, memory execution predecessors, and
 /// ops nested in regions). These are the ops that need to be cloned to Cube
 /// to break the cycle.
 static SmallPtrSet<Operation *, kCloneDepSetInlineSize>
 collectDepOpsInCubePre(const ComputeBlock &cubePre,
-                       ArrayRef<Operation *> toTensorOps,
+                       ArrayRef<Operation *> carrierOps,
                        const CVPipeline::MemoryDependenceGraph &memGraph) {
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> opsToClone;
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> depOps;
-  for (Operation *toTensor : toTensorOps) {
-    collectAllDeps(toTensor, memGraph, depOps);
+  for (Operation *carrier : carrierOps) {
+    collectAllDeps(carrier, memGraph, depOps);
   }
   for (Operation *op : depOps) {
     if (llvm::is_contained(cubePre.ops, op))
@@ -378,23 +402,24 @@ tryCloneFromCubePre(const VectorMergeEdge &edge,
     return false;
   }
 
-  // c. Check if Cube depends on CubePre via to_tensor whose feeding
-  // memref.copy loads data from GM (external func argument).
-  SmallVector<Operation *> toTensorOps;
+  // c. Check if Cube depends on CubePre via a tensor carrier whose data comes
+  // from GM (a raw to_tensor fed by a global memref.copy, or the packed load
+  // scope).
+  SmallVector<Operation *> carrierOps;
   auto edgeIt = cube->inEdgeSrcOps.find(cubePre);
   if (edgeIt != cube->inEdgeSrcOps.end()) {
-    toTensorOps = findToTensorDeps(cubePre, edgeIt->second, memGraph);
+    carrierOps = findTensorCarrierDeps(cubePre, edgeIt->second, memGraph);
   }
-  if (toTensorOps.empty()) {
+  if (carrierOps.empty()) {
     LOG_DEBUG("Cube(" << cube->id << ") depends on CubePre(" << cubePre->id
                       << ") not for load data, skipping clone");
     return false;
   }
 
-  // d. Trace back all transitive dependencies of the to_tensor ops and
-  // keep the ones in CubePre; clone them to Cube.
+  // d. Trace back all transitive dependencies of the carriers and keep the
+  // ones in CubePre; clone them to Cube.
   SmallPtrSet<Operation *, kCloneDepSetInlineSize> opsToClone =
-      collectDepOpsInCubePre(*cubePre, toTensorOps, memGraph);
+      collectDepOpsInCubePre(*cubePre, carrierOps, memGraph);
   cloneOpCrossCubeDep(cubePre, cube, opsToClone, bm, record);
   return true;
 }

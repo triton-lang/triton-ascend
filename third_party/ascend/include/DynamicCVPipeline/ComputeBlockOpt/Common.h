@@ -23,13 +23,15 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_COMPUTE_BLOCK_OPT_COMMON_H
 
+#include "llvm/ADT/ArrayRef.h"
+
+#include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
+
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "mlir/IR/BuiltinOps.h"
-#include "mlir/IR/Operation.h"
-#include "mlir/Interfaces/ViewLikeInterface.h"
-#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/Support/LogicalResult.h"
 
@@ -47,7 +49,7 @@ namespace CVPipeline {
  * the function leaves
  * @p bm in its original state regardless of the result.
  *
- * Shared by the ComputeBlockOpt passes (e.g. UnifyAllocBlockPass and
+ * Shared by the ComputeBlockOpt passes (e.g. MergeVectorIfBlockPass and
  * MergeVectorIfBlockPass) that merge operations into a common block_id.
  *
  * @param opsToUnify Block-level operations to add to the safe set (okSet)

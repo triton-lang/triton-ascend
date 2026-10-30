@@ -48,6 +48,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Dominance.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/DenseSet.h"
@@ -65,6 +66,123 @@ using namespace hivm;
 
 static constexpr int kIntegerBitWidth = 32;
 static constexpr int iniNzDimWidth = 16;
+
+/// The innermost scf.for/scf.while strictly enclosing `op`, or nullptr.
+static Operation *getEnclosingLoop(Operation *op) {
+  for (Operation *parent = op->getParentOp(); parent;
+       parent = parent->getParentOp()) {
+    if (isa<scf::ForOp, scf::WhileOp>(parent)) {
+      return parent;
+    }
+  }
+  return nullptr;
+}
+
+/// Values aliasing `roots` through views, casts and to_tensor.
+static void collectBufferAliases(ArrayRef<Value> roots,
+                                 llvm::DenseSet<Value> &aliases) {
+  SmallVector<Value> workList(roots.begin(), roots.end());
+  while (!workList.empty()) {
+    Value currVal = workList.pop_back_val();
+    if (!aliases.insert(currVal).second) {
+      continue;
+    }
+    for (Operation *user : currVal.getUsers()) {
+      if (isa<ViewLikeOpInterface, memref::MemorySpaceCastOp,
+              bufferization::ToTensorOp>(user)) {
+        llvm::append_range(workList, user->getResults());
+      }
+    }
+  }
+}
+
+/// Whether `op` names a transfer buffer without touching its data.
+static bool isHarmlessBufferUse(Operation *op) {
+  return isa<memref::AllocOp, memref::DeallocOp, annotation::MarkOp,
+             memref::MemorySpaceCastOp, bufferization::ToTensorOp,
+             SyncBlockSetOp, SyncBlockWaitOp, ViewLikeOpInterface>(op);
+}
+
+/// Loops nested directly in `loopOp`: those whose innermost enclosing loop is
+/// `loopOp` itself, reached through any amount of non-loop nesting.
+static SmallVector<Operation *> getDirectlyNestedLoops(Operation *loopOp) {
+  SmallVector<Operation *> nested;
+  loopOp->walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (op == loopOp) {
+      return WalkResult::advance();
+    }
+    if (isa<scf::ForOp, scf::WhileOp>(op)) {
+      nested.push_back(op);
+      // Anything below this loop is nested in it, not in `loopOp`.
+      return WalkResult::skip();
+    }
+    return WalkResult::advance();
+  });
+  return nested;
+}
+
+/// Whether the initial grant and the final drain of one transfer may bracket
+/// `outerLoop` instead of `mainLoopOp`.
+static bool isGrantHoistSafe(Operation *outerLoop, Operation *mainLoopOp,
+                             ArrayRef<Operation *> transferAllocs) {
+  if (transferAllocs.empty()) {
+    return false;
+  }
+
+  // The main loop has to run exactly once per outer iteration, or the grant
+  // stops dominating the in-loop wait and the drain stops post-dominating the
+  // in-loop set. Requiring it to be an unconditional statement of the outer
+  // body gives that without a dominance query, and also rejects a main loop
+  // sitting in a WhileOp's second region or under an scf.if.
+  Region &outerBody = outerLoop->getRegion(0);
+  if (!outerBody.hasOneBlock() ||
+      mainLoopOp->getBlock() != &outerBody.front()) {
+    LOG_DEBUG("main loop is not an unconditional outer-loop statement\n");
+    return false;
+  }
+
+  // A sibling loop would sit inside the hoisted bracket while keeping its own
+  // transfers and their own credit rotation, so the two brackets interleave
+  // around `outerLoop` instead of nesting.
+  for (Operation *nestedLoop : getDirectlyNestedLoops(outerLoop)) {
+    if (nestedLoop != mainLoopOp) {
+      LOG_DEBUG("outer loop holds a sibling loop, no grant hoist\n");
+      return false;
+    }
+  }
+
+  SmallVector<Value> roots;
+  for (Operation *allocOp : transferAllocs) {
+    if (!allocOp || allocOp->getNumResults() == 0) {
+      return false;
+    }
+    roots.push_back(allocOp->getResult(0));
+  }
+
+  llvm::DenseSet<Value> aliases;
+  collectBufferAliases(roots, aliases);
+
+  bool isSafe = true;
+  // Pre-order, so skipping the main loop skips its body with it.
+  outerLoop->walk<WalkOrder::PreOrder>([&](Operation *op) {
+    if (op == mainLoopOp) {
+      return WalkResult::skip();
+    }
+    if (op == outerLoop || isHarmlessBufferUse(op)) {
+      return WalkResult::advance();
+    }
+    if (llvm::any_of(op->getOperands(), [&](Value operand) {
+          return aliases.contains(operand);
+        })) {
+      LOG_DEBUG(op->getName()
+                << " uses a transfer buffer outside the main loop\n");
+      isSafe = false;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  return isSafe;
+}
 
 static uint64_t getElemBytesForAlign(Type t) {
   static constexpr uint64_t kBitsPerByte = 8;
@@ -718,6 +836,7 @@ InterCoreTransferAndSyncPass::createTransferAllocs(
     attachTransferTags(markConsOp, prodBlockId, consTag, transferIndex);
   }
   markAllocIndex++;
+  transferAllocsByIndex[transferIndex] = {prodAllocOp, consAllocOp};
 
   return {prodAllocOp, consAllocOp};
 }
@@ -1158,16 +1277,28 @@ void InterCoreTransferAndSyncPass::insertInterCoreSync(
     attachTransferTags(setOpForWrite, consumerBlockId, config.dstCoreType,
                        transferIndex);
 
-    builder.setInsertionPoint(mainLoopOp);
+    // Bracket the enclosing loop when safe, so the credit is carried across
+    // its iterations instead of being reset at every boundary.
+    Operation *grantLoopOp = mainLoopOp;
+    if (grantHoistAllowed && !hasStartEndSyncWhitelistKernel(module)) {
+      if (Operation *outerLoop = getEnclosingLoop(mainLoopOp)) {
+        if (isGrantHoistSafe(outerLoop, mainLoopOp,
+                             transferAllocsByIndex.lookup(transferIndex))) {
+          grantLoopOp = outerLoop;
+        }
+      }
+    }
+
+    builder.setInsertionPoint(grantLoopOp);
     auto setOpForStart = builder.create<SyncBlockSetOp>(
         loc, config.dstCoreAttr, config.forWriteTPipe, config.forWritePipe,
         flagId);
-    builder.setInsertionPointAfter(mainLoopOp);
+    builder.setInsertionPointAfter(grantLoopOp);
     auto waitOpForEnd = builder.create<SyncBlockWaitOp>(
         loc, config.srcCoreAttr, config.forWriteTPipe, config.forWritePipe,
         flagId);
 
-    int startEndBlockId = CVPipeline::getOpBlockId(mainLoopOp).value_or(-1);
+    int startEndBlockId = CVPipeline::getOpBlockId(grantLoopOp).value_or(-1);
     attachTransferTags(setOpForStart, startEndBlockId, config.dstCoreType,
                        transferIndex);
     attachTransferTags(waitOpForEnd, startEndBlockId, config.srcCoreType,
@@ -2329,6 +2460,24 @@ LogicalResult InterCoreTransferAndSyncPass::processDependencies(
     LOG_DEBUG("Error: Data dependency analysis failed.\n");
     return failure();
   }
+
+  // Bracketing the enclosing loop stretches a transfer's flag live range over
+  // that whole loop, so every hoisted flag interferes with every other one.
+  // Once a kernel needs more flags than the budget allows, that pressure is
+  // what breaks downstream rather than the placement, so leave every pair on
+  // its own main loop. Decided here, before anything is inserted, so the
+  // answer does not depend on the order the dependencies are processed. The
+  // stricter of the two budgets applies: the inter-core buffer count that
+  // picks between them is not settled yet.
+  size_t crossCoreDepCount = info.getV2CDependencies().size() +
+                             info.getC2VDependencies().size() +
+                             info.getMemoryDependencies().size();
+  grantHoistAllowed = crossCoreDepCount <=
+                      static_cast<size_t>(FlagIdManager::MULTI_MAX_FLAG_ID);
+  LOG_DEBUG("Grant hoist " << (grantHoistAllowed ? "enabled" : "disabled")
+                           << ": " << crossCoreDepCount
+                           << " cross-core dependencies, budget "
+                           << FlagIdManager::MULTI_MAX_FLAG_ID << "\n");
 
   // Analyze loop nesting before inserting inter-core transfer/sync.
   if (hasStartEndSyncWhitelistKernel(module)) {

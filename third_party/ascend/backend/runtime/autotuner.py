@@ -2235,9 +2235,14 @@ class AutoTilingTuner(Autotuner):
                 self._user_config_diagnostics.abort(exc)
             raise
         finally:
-            if self._user_config_diagnostics is not None:
-                self._user_config_diagnostics.report()
-            self._user_config_diagnostics = None
+            # Configuration generation, pruning and benchmarking can fail before
+            # the final launch's cleanup block is reached.
+            self.nargs = None
+            try:
+                if self._user_config_diagnostics is not None:
+                    self._user_config_diagnostics.report()
+            finally:
+                self._user_config_diagnostics = None
 
     def _run_autotune(self, *args, **kwargs):
         kwargs = _remove_deprecated_npu_options(kwargs)
@@ -2699,34 +2704,36 @@ class AutoTilingTuner(Autotuner):
     def warmup(self, *args, **kwargs):
         # refer to triton.runtime.jit.KernelInterface.warmup, and wrap args with MockTensor.wrap_dtype
         args = tuple(map(MockTensor.wrap_dtype, args))
-        kwargs = _remove_deprecated_npu_options(kwargs)
-        self._inject_grid_num_tiles(kwargs)
-        _ = self.generate_key_and_configs(*args, **kwargs)
-        pruned_configs = self.prune_configs(kwargs)
-        ret = []
+        try:
+            kwargs = _remove_deprecated_npu_options(kwargs)
+            self._inject_grid_num_tiles(kwargs)
+            _ = self.generate_key_and_configs(*args, **kwargs)
+            pruned_configs = self.prune_configs(kwargs)
+            ret = []
 
-        def warmup_config(config):
-            from triton.backends.ascend.reuse.context import exact_request_scope
+            def warmup_config(config):
+                from triton.backends.ascend.reuse.context import exact_request_scope
 
-            compile_options = dict(config.all_kwargs(), **kwargs)
-            with exact_request_scope():
-                return self.fn.warmup(*args, **compile_options)
+                compile_options = dict(config.all_kwargs(), **kwargs)
+                with exact_request_scope():
+                    return self.fn.warmup(*args, **compile_options)
 
-        if self.compile_parallel:
-            import psutil
+            if self.compile_parallel:
+                import psutil
 
-            max_workers = min(psutil.cpu_count(logical=False) // 2, len(pruned_configs))
-            with (
-                    ThreadPoolExecutor(max_workers=max_workers) as executor,
-                    triton.AsyncCompileMode(executor),
-            ):
+                max_workers = min(psutil.cpu_count(logical=False) // 2, len(pruned_configs))
+                with (
+                        ThreadPoolExecutor(max_workers=max_workers) as executor,
+                        triton.AsyncCompileMode(executor),
+                ):
+                    for config in pruned_configs:
+                        ret.append(warmup_config(config))
+            else:
                 for config in pruned_configs:
                     ret.append(warmup_config(config))
-        else:
-            for config in pruned_configs:
-                ret.append(warmup_config(config))
-        self.nargs = None
-        return ret
+            return ret
+        finally:
+            self.nargs = None
 
     def _profile(self, *args, config, **meta):
         from ..testing import do_bench_npu

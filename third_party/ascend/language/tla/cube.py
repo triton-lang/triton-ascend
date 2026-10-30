@@ -25,6 +25,7 @@ Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Only
 """
 from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer
+from .dma import _unit_flag_args
 
 __all__ = ["mmad"]
 
@@ -44,7 +45,16 @@ def _logical_shape(shape):
 
 
 @builtin
-def mmad(a, b, acc, transpose_b=False, clear_accum=False, _semantic=None):
+def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
+         _semantic=None):
+    """Multiply L1 buffers into L0C, optionally clearing the accumulator first.
+
+    ``unit_flag_ctrl`` and ``unit_flag_group_id`` pass through to HIVM's
+    UnitFlag interface. None leaves each attribute unset; modes 0/2/3 mean
+    disabled, enabled without update, and enabled with update respectively.
+    To test manual modes without backend automatic UnitFlag inference
+    rewriting them, launch with ``unit_flag=False``.
+    """
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")
     if a.space != "l1" or b.space != "l1":
@@ -60,5 +70,8 @@ def mmad(a, b, acc, transpose_b=False, clear_accum=False, _semantic=None):
     k2, n = _logical_shape(b.shape)
     if k != k2 or _logical_shape(acc.shape) != (m, n):
         raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
-    _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle, bool(_unwrap_if_constexpr(clear_accum)), m, k,
-                                         n, bool(_unwrap_if_constexpr(transpose_b)))
+    unit_flag_ctrl, unit_flag_group_id = _unit_flag_args(unit_flag_ctrl, unit_flag_group_id)
+    _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle,
+                                         init_condition=bool(_unwrap_if_constexpr(clear_accum)), real_m=m, real_k=k,
+                                         real_n=n, transpose_b=bool(_unwrap_if_constexpr(transpose_b)),
+                                         unit_flag_ctrl=unit_flag_ctrl, unit_flag_group_id=unit_flag_group_id)

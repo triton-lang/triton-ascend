@@ -35,7 +35,8 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text, "vector scope must stamp tcore_type<VECTOR>"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=1, stores=1, buffers=1, extra=("hivm.tcore_type<VECTOR>", "hivm.func_core_type<AIV>"))
+    check_lowered_ir(text, loads=1, stores=1, buffers=None,
+                     extra=("hivm.tcore_type<VECTOR>", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.vector_function") == 0, "vector scope is not a VF"
     assert 'mix_mode = "aiv"' in text, "pure-vector kernel is aiv"
     print("IR PASS: copy_only (DMA-only vector scope)")

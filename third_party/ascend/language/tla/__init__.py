@@ -34,6 +34,40 @@ from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
+from .dma import (
+    PadMode,
+    EvictionPolicy,
+    AtomicKind,
+    UnitFlagMode,
+    FixpipeDMAMode,
+    FixpipeDualDstMode,
+    FixpipeSubBlock,
+    FixpipePreQuantMode,
+    FixpipePreReluMode,
+    LoadGM2UBParams,
+    StoreUB2GMParams,
+    LoadGM2L1Params,
+    CopyUB2L1Params,
+    CopyL12UBParams,
+    CopyL12BTParams,
+    CopyL12FBParams,
+    CopyL1ToL0Params,
+    FixpipeL0C2GMParams,
+    FixpipeL0C2L1Params,
+    FixpipeL0C2UBParams,
+    load_gm_to_ub,
+    store_ub_to_gm,
+    load_gm_to_l1,
+    copy_ub_to_l1,
+    copy_l1_to_ub,
+    copy_l1_to_bt,
+    copy_l1_to_fb,
+    copy_l1_to_l0,
+    store_l0c_to_gm,
+    copy_l0c_to_ub,
+    copy_l0c_to_l1,
+    set_ctrl,
+)
 from .view import view, reshape
 from .aux_ops import annotate_buffer_versions
 from . import math
@@ -49,6 +83,7 @@ from . import cube
 
 # Explicit pipeline / global synchronization.
 from . import sync
+from .sync import sub_block_id
 
 
 def jit(fn=None, **kwargs):
@@ -62,6 +97,38 @@ def jit(fn=None, **kwargs):
 
 
 __all__ = [
+    "PadMode",
+    "EvictionPolicy",
+    "AtomicKind",
+    "UnitFlagMode",
+    "FixpipeDMAMode",
+    "FixpipeDualDstMode",
+    "FixpipeSubBlock",
+    "FixpipePreQuantMode",
+    "FixpipePreReluMode",
+    "LoadGM2UBParams",
+    "StoreUB2GMParams",
+    "LoadGM2L1Params",
+    "CopyUB2L1Params",
+    "CopyL12UBParams",
+    "CopyL12BTParams",
+    "CopyL12FBParams",
+    "CopyL1ToL0Params",
+    "FixpipeL0C2GMParams",
+    "FixpipeL0C2L1Params",
+    "FixpipeL0C2UBParams",
+    "load_gm_to_ub",
+    "store_ub_to_gm",
+    "load_gm_to_l1",
+    "copy_ub_to_l1",
+    "copy_l1_to_ub",
+    "copy_l1_to_bt",
+    "copy_l1_to_fb",
+    "copy_l1_to_l0",
+    "store_l0c_to_gm",
+    "copy_l0c_to_ub",
+    "copy_l0c_to_l1",
+    "set_ctrl",
     "buffer",
     "buffer_type",
     "vector",
@@ -94,6 +161,7 @@ __all__ = [
 
     # explicit synchronization
     "sync",
+    "sub_block_id",
 
     # kernel decorator
     "jit",

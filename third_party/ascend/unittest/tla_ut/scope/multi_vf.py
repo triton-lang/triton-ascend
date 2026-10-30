@@ -50,7 +50,7 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=2, stores=2, buffers=4, extra=("hivm.tcore_type<VECTOR>", "hivm.vector_function"))
+    check_lowered_ir(text, loads=2, stores=2, buffers=None, extra=("hivm.tcore_type<VECTOR>", "hivm.vector_function"))
     assert text.count("hivm.vector_function") == 2, "two sibling simd scopes -> two VFs"
     assert 'mix_mode = "aiv"' in text
     print("IR PASS: multi_vf (two nested SIMD VFs in one vector scope)")

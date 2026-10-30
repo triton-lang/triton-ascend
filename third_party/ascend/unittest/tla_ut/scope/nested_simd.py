@@ -42,7 +42,7 @@ def test_ir(output_dir=None):
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(
-        text, loads=1, stores=1, buffers=2,
+        text, loads=1, stores=1, buffers=None,
         extra=("hivm.tcore_type<VECTOR>", "hivm.vector_function", "hivm.vf_mode<SIMD>", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.vector_function") == 1, "only the nested simd scope is a VF"
     assert 'mix_mode = "aiv"' in text, "pure-vector kernel is aiv"

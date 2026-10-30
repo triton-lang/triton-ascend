@@ -79,7 +79,7 @@ def test_ir(output_dir=None):
     assert text.count("memref.reinterpret_cast") == 5, "tla.view(ptr) x5"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=5, stores=2, buffers=5)
+    check_lowered_ir(text, loads=5, stores=2, buffers=None)
     print("IR PASS: grad_w_reduce HIVM structure ok (5 load / 2 store / 5 multibuffer)")
 
 

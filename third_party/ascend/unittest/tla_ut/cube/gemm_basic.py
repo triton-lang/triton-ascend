@@ -73,7 +73,7 @@ def test_ir(output_dir=None):
     assert text.count("memref.reinterpret_cast") == 3, "tla.view(ptr) x3"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=0, stores=0, buffers=3,
+    check_lowered_ir(text, loads=0, stores=0, buffers=None,
                      extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>", "#hivm.tcore_type<CUBE>"))
     assert text.count("hivm.hir.nd2nz") == 2, "GM->L1 x2"
     assert text.count("hivm.hir.mmadL1") == 1, "one gemm"

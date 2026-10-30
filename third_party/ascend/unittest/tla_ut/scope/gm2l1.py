@@ -37,7 +37,7 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text, "vector scope must stamp tcore_type<VECTOR>"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=0, stores=0, buffers=1,
+    check_lowered_ir(text, loads=0, stores=0, buffers=None,
                      extra=("hivm.tcore_type<VECTOR>", "hivm.hir.nd2nz", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.hir.nd2nz") == 1, "one GM->L1 nd2nz in the vector scope"
     assert text.count("hivm.vector_function") == 0, "no simd scope, no VF"

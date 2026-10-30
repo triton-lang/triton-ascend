@@ -68,7 +68,7 @@ def _vector_control_flow(out, n):
         acc = tla.simd.vfull(0.0, tl.float32, 64)
         step = tla.simd.vfull(1.0, tl.float32, 64)
         for i in range(n):
-            acc, mask = tla.simd.vadd(acc, step), tla.simd.vcmp(acc, step, "ge")
+            acc, mask = tla.simd.vadd(acc, step), tla.simd.vcmp(acc, step, op=tla.simd.CMP.GE)
             acc = tla.simd.vsel(mask, acc, step)
         pair = (acc, step)
         for i in range(n):

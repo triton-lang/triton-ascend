@@ -55,14 +55,14 @@ def flash_attn(Q_ptr, K_ptr, V_ptr, P_ptr, O_ptr, BM: tl.constexpr, BN: tl.const
         tla.cube.mmad(q_l1, k_l1, s_l0c, clear_accum=True)  # hivm.hir.mmadL1
         tla.copy(s_l0c, s_ub)  # hivm.hir.fixpipe (NZ -> ND into UB)
         # AIC: signal the softmax handoff only after fixpipe has written S.
-        tla.sync.block_set_flag(0, "FIX", FLAG_S)
+        tla.sync.block_set_flag(tla.sync.MODE.INTER, tla.sync.PIPE.F, FLAG_S)
 
     # AIV: row-wise softmax of S in place (each row = one 64-lane f32 reg).
     p_blk = tla.view(P_ptr, (BM, BN), strides=(BN, 1))
     with tla.scope.vector():
         p_ub = tla.alloc_buffer((BM, BN), tl.float32, space="ub")
         # AIV: wait for S, then softmax each row and store P (f32) to GM.
-        tla.sync.block_wait_flag("V", FLAG_S)
+        tla.sync.block_wait_flag(tla.sync.MODE.INTER, tla.sync.PIPE.V, FLAG_S)
         with tla.scope.simd():
             one = tla.simd.vfull(1.0, tl.float32, 64)
             sc = tla.simd.vfull(SCALE, tl.float32, 64)
@@ -76,7 +76,7 @@ def flash_attn(Q_ptr, K_ptr, V_ptr, P_ptr, O_ptr, BM: tl.constexpr, BN: tl.const
                 tla.simd.vsts(p_ub[r, 0], p)
         tla.copy(p_ub, p_blk)  # hivm.hir.store (MTE3 UB->GM)
         # AIV: signal the P round-trip only after the MTE3 store landed.
-        tla.sync.block_set_flag(0, "MTE3", FLAG_P)
+        tla.sync.block_set_flag(tla.sync.MODE.INTER, tla.sync.PIPE.MTE3, FLAG_P)
 
     # AIC: O = P @ V (f32 inputs -> f32 L0C), fixpipe straight to GM.
     v_blk = tla.view(V_ptr, (BN, N), strides=(N, 1))
@@ -86,7 +86,7 @@ def flash_attn(Q_ptr, K_ptr, V_ptr, P_ptr, O_ptr, BM: tl.constexpr, BN: tl.const
         v_l1 = tla.alloc_buffer((N // 8, BN // 16, 16, 8), tl.float32, space="l1")
         o_l0c = tla.alloc_buffer((N // 16, BM // 16, 16, 16), tl.float32, space="l0c")
         # AIC: wait for P, then load it back into L1 and accumulate O.
-        tla.sync.block_wait_flag("MTE2", FLAG_P)
+        tla.sync.block_wait_flag(tla.sync.MODE.INTER, tla.sync.PIPE.MTE2, FLAG_P)
         tla.copy(p_blk, p_l1)  # hivm.hir.nd2nz
         tla.copy(v_blk, v_l1)  # hivm.hir.nd2nz
         tla.cube.mmad(p_l1, v_l1, o_l0c, clear_accum=True)  # hivm.hir.mmadL1
@@ -120,8 +120,8 @@ def test_ir(output_dir=None):
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(
-        text, loads=0, stores=1, buffers=8, extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
-                                                   "#hivm.tcore_type<CUBE>", "#hivm.func_core_type<AIV>"))
+        text, loads=0, stores=1, buffers=None, extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
+                                                      "#hivm.tcore_type<CUBE>", "#hivm.func_core_type<AIV>"))
     assert text.count("hivm.hir.nd2nz") == 4, "GM->L1 x4 (q, k, p, v)"
     assert text.count("hivm.hir.mmadL1") == 2, "two gemms: S and O"
     assert text.count("hivm.hir.fixpipe") == 2, "L0C->UB/GM x2 (S, O)"

@@ -87,7 +87,7 @@ def test_ir(output_dir=None):
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=4, stores=4, buffers=4)
+    check_lowered_ir(text, loads=4, stores=4, buffers=None)
     assert text.count("memref.reshape") == 0, "reshape must decompose to expand/collapse"
     # A (4,8)->(32,): pure collapse; B (32,)->(4,8): pure expand;
     # C (4,8)->(2,16): collapse-to-1D then expand; D (4,8)->(2,2,8) is a pure

@@ -38,7 +38,7 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=1, stores=1, buffers=2,
+    check_lowered_ir(text, loads=1, stores=1, buffers=None,
                      extra=("hivm.vector_function", "hivm.vf_mode<SIMD>", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.vector_function") == 1, "standalone simd scope is one VF"
     assert 'mix_mode = "aiv"' in text

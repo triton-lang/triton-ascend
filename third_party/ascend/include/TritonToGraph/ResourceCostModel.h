@@ -48,9 +48,6 @@ enum class ResourceCostRejectReason : uint8_t {
   UnknownElementType,
   Overflow,
   UBOverflow,
-  L0AOverflow,
-  L0BOverflow,
-  L0COverflow,
   InvalidCandidate,
 };
 
@@ -110,21 +107,17 @@ std::optional<uint64_t> getStaticTensorBytes(Type type);
 
 LiveByteEstimate estimatePeakLiveBytes(Operation *root);
 
-// Peak cube-tile bytes a function demands from the matrix-multiply
-// on-chip buffers: tt.dot/tt.dot_scaled lhs tiles map to L0A, rhs tiles to
-// L0B, and accumulators/results (including loop-carried accumulation) to
-// L0C. Unlike the unified buffer, each buffer serves one cube tile set at a
-// time, so the per-buffer maximum over all dot sites bounds the demand.
-struct CubeByteEstimate {
-  bool known = false;
-  ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
-  uint64_t peakL0ABytes = 0;
-  uint64_t peakL0BBytes = 0;
-  uint64_t peakL0CBytes = 0;
-  uint64_t dotSiteCount = 0;
-};
-
-CubeByteEstimate estimatePeakCubeBytes(Operation *root);
+// Standalone cube-buffer query for rules: returns true when the
+// matrix-multiply tiles under `root` exceed the safe L0A/L0B/L0C budgets of
+// `resources` (tt.dot/tt.dot_scaled lhs tiles map to L0A, rhs tiles to L0B,
+// accumulators/results to L0C; each buffer serves one cube tile set at a
+// time, so the per-buffer maximum over all dot sites bounds the demand).
+// Returns false when the snapshot carries no L0 capacities (target unknown,
+// query disabled) or the function has no dot sites. Unanalyzable tiles
+// (dynamic shape, unknown element type) report true: the demand cannot be
+// proven to fit. The resource model imposes no policy; callers decide what
+// to do with the answer.
+bool exceedsCubeBudgets(Operation *root, const ResourceSnapshot &resources);
 
 struct CandidatePlan {
   uint64_t tensorizeFactor = 1;
@@ -161,12 +154,6 @@ struct CandidateCost {
   uint64_t workPerProgramBefore = 0;
   uint64_t workPerProgramAfter = 0;
   bool hasPeakLiveBytes = false;
-  // Peak cube-tile bytes from estimatePeakCubeBytes; enforced only when the
-  // resource snapshot carries L0A/L0B/L0C capacities.
-  bool hasPeakCubeBytes = false;
-  uint64_t peakL0ABytes = 0;
-  uint64_t peakL0BBytes = 0;
-  uint64_t peakL0CBytes = 0;
   bool hasDynamicShape = false;
   bool hasUnknownResource = false;
   bool legacyAutoMapBefore = false;
@@ -192,9 +179,6 @@ struct CandidateEvaluation {
   ResourceCostRejectReason reason = ResourceCostRejectReason::UnknownResource;
   int64_t benefitScore = 0;
   uint64_t safeUBBudgetBytes = 0;
-  uint64_t safeL0ABudgetBytes = 0;
-  uint64_t safeL0BBudgetBytes = 0;
-  uint64_t safeL0CBudgetBytes = 0;
   uint64_t requiredParallelPrograms = 0;
   uint64_t effectiveWorkPerProgram = 0;
   uint64_t physicalWavesBefore = 0;
@@ -241,13 +225,11 @@ public:
 
   const ResourceSnapshot &getResourceSnapshot() const { return resources; }
   const LiveByteEstimate &getLiveByteEstimate() const { return liveBytes; }
-  const CubeByteEstimate &getCubeByteEstimate() const { return cubeBytes; }
   CandidateEvaluation evaluate(const CandidateCost &candidate) const;
 
 private:
   ResourceSnapshot resources;
   LiveByteEstimate liveBytes;
-  CubeByteEstimate cubeBytes;
 };
 
 } // namespace cfg

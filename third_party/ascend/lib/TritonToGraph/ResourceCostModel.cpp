@@ -220,18 +220,12 @@ bool addWeightedChange(uint64_t before, uint64_t after, uint64_t weight,
 CandidateEvaluation reject(const CandidateCost &candidate,
                            ResourceCostRejectReason reason,
                            uint64_t safeUBBudget = 0,
-                           uint64_t requiredParallelPrograms = 0,
-                           const ResourceSnapshot *resources = nullptr) {
+                           uint64_t requiredParallelPrograms = 0) {
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;
   evaluation.reason = reason;
   evaluation.safeUBBudgetBytes = safeUBBudget;
   evaluation.requiredParallelPrograms = requiredParallelPrograms;
-  if (resources && resources->hasL0Budgets()) {
-    evaluation.safeL0ABudgetBytes = resources->getSafeL0ABudget().value_or(0);
-    evaluation.safeL0BBudgetBytes = resources->getSafeL0BBudget().value_or(0);
-    evaluation.safeL0CBudgetBytes = resources->getSafeL0CBudget().value_or(0);
-  }
   evaluation.remark = formatCandidateRemark(evaluation);
   return evaluation;
 }
@@ -253,12 +247,6 @@ cfg::getResourceCostRejectReasonName(ResourceCostRejectReason reason) {
     return "overflow";
   case ResourceCostRejectReason::UBOverflow:
     return "ub_overflow";
-  case ResourceCostRejectReason::L0AOverflow:
-    return "l0a_overflow";
-  case ResourceCostRejectReason::L0BOverflow:
-    return "l0b_overflow";
-  case ResourceCostRejectReason::L0COverflow:
-    return "l0c_overflow";
   case ResourceCostRejectReason::InvalidCandidate:
     return "invalid_candidate";
   }
@@ -575,24 +563,17 @@ LiveByteEstimate cfg::estimatePeakLiveBytes(Operation *root) {
   return estimate;
 }
 
-namespace {
+bool cfg::exceedsCubeBudgets(Operation *root,
+                             const ResourceSnapshot &resources) {
+  // Target without known cube capacities: the query is disabled.
+  if (!root || !resources.hasL0Budgets())
+    return false;
 
-ResourceCostRejectReason classifyUnknownTensorType(Type type) {
-  if (isa<UnrankedTensorType>(type) ||
-      (isa<RankedTensorType>(type) &&
-       !cast<RankedTensorType>(type).hasStaticShape()))
-    return ResourceCostRejectReason::DynamicShape;
-  return ResourceCostRejectReason::UnknownElementType;
-}
-
-} // namespace
-
-CubeByteEstimate cfg::estimatePeakCubeBytes(Operation *root) {
-  CubeByteEstimate estimate;
-  if (!root)
-    return estimate;
-
-  ResourceCostRejectReason failure = ResourceCostRejectReason::None;
+  uint64_t peakL0ABytes = 0;
+  uint64_t peakL0BBytes = 0;
+  uint64_t peakL0CBytes = 0;
+  uint64_t dotSiteCount = 0;
+  bool analyzable = true;
   root->walk([&](Operation *operation) {
     Value lhs;
     Value rhs;
@@ -611,32 +592,38 @@ CubeByteEstimate cfg::estimatePeakCubeBytes(Operation *root) {
     } else {
       return;
     }
-    ++estimate.dotSiteCount;
+    ++dotSiteCount;
 
-    const auto record = [&](Value value, uint64_t &peak) {
-      std::optional<uint64_t> bytes = getStaticTensorBytes(value.getType());
-      if (bytes) {
-        peak = std::max(peak, *bytes);
-      } else if (failure == ResourceCostRejectReason::None) {
-        failure = classifyUnknownTensorType(value.getType());
-      }
-    };
     // L0A holds the lhs (A matrix) tile, L0B the rhs (B matrix) tile, and
     // L0C the accumulator/result tiles, including loop-carried accumulation
     // across scf.for iterations (the acc operand reaches the next dot).
-    record(lhs, estimate.peakL0ABytes);
-    record(rhs, estimate.peakL0BBytes);
-    record(accumulator, estimate.peakL0CBytes);
-    record(result, estimate.peakL0CBytes);
+    const auto record = [&](Value value, uint64_t &peak) {
+      std::optional<uint64_t> bytes = getStaticTensorBytes(value.getType());
+      if (bytes)
+        peak = std::max(peak, *bytes);
+      else
+        analyzable = false;
+    };
+    record(lhs, peakL0ABytes);
+    record(rhs, peakL0BBytes);
+    record(accumulator, peakL0CBytes);
+    record(result, peakL0CBytes);
   });
 
-  if (estimate.dotSiteCount == 0 || failure == ResourceCostRejectReason::None) {
-    estimate.known = true;
-    estimate.reason = ResourceCostRejectReason::None;
-    return estimate;
-  }
-  estimate.reason = failure;
-  return estimate;
+  // No dot sites: zero cube demand, nothing can exceed.
+  if (dotSiteCount == 0)
+    return false;
+  // Unanalyzable tiles cannot be proven to fit; report as exceeding.
+  if (!analyzable)
+    return true;
+
+  const std::optional<uint64_t> safeL0A = resources.getSafeL0ABudget();
+  const std::optional<uint64_t> safeL0B = resources.getSafeL0BBudget();
+  const std::optional<uint64_t> safeL0C = resources.getSafeL0CBudget();
+  if (!safeL0A || !safeL0B || !safeL0C)
+    return true;
+  return peakL0ABytes > *safeL0A || peakL0BBytes > *safeL0B ||
+         peakL0CBytes > *safeL0C;
 }
 
 CandidateEvaluation
@@ -644,52 +631,24 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
                            const CandidateCost &candidate,
                            const CostModelWeights &weights) {
   if (!resources.isKnown())
-    return reject(candidate, ResourceCostRejectReason::UnknownResource, 0, 0,
-                  &resources);
+    return reject(candidate, ResourceCostRejectReason::UnknownResource);
 
   std::optional<uint64_t> safeBudget = resources.getSafeUBBudget();
   if (!safeBudget)
-    return reject(candidate, ResourceCostRejectReason::Overflow, 0, 0,
-                  &resources);
+    return reject(candidate, ResourceCostRejectReason::Overflow);
 
   if (candidate.hasDynamicShape)
     return reject(candidate, ResourceCostRejectReason::DynamicShape,
-                  *safeBudget, 0, &resources);
+                  *safeBudget);
   if (candidate.hasUnknownResource || !candidate.hasPeakLiveBytes)
     return reject(candidate, ResourceCostRejectReason::UnknownResource,
-                  *safeBudget, 0, &resources);
+                  *safeBudget);
   if (candidate.plan.tensorizeFactor == 0 || candidate.plan.blockT == 0 ||
       candidate.plan.staticAxisFusionFactor == 0)
     return reject(candidate, ResourceCostRejectReason::InvalidCandidate,
-                  *safeBudget, 0, &resources);
+                  *safeBudget);
   if (candidate.estimatedPeakLiveBytes > *safeBudget)
-    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget,
-                  0, &resources);
-
-  // Cube-buffer checks: enforced only when the snapshot carries L0A/L0B/L0C
-  // capacities and the candidate reports cube tile bytes. A candidate that
-  // reports cube demand against a snapshot without L0 capacities is an
-  // unknown resource and must not pass silently.
-  if (candidate.hasPeakCubeBytes) {
-    if (!resources.hasL0Budgets())
-      return reject(candidate, ResourceCostRejectReason::UnknownResource,
-                    *safeBudget, 0, &resources);
-    const std::optional<uint64_t> safeL0A = resources.getSafeL0ABudget();
-    const std::optional<uint64_t> safeL0B = resources.getSafeL0BBudget();
-    const std::optional<uint64_t> safeL0C = resources.getSafeL0CBudget();
-    if (!safeL0A || !safeL0B || !safeL0C)
-      return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
-                    0, &resources);
-    if (candidate.peakL0ABytes > *safeL0A)
-      return reject(candidate, ResourceCostRejectReason::L0AOverflow,
-                    *safeBudget, 0, &resources);
-    if (candidate.peakL0BBytes > *safeL0B)
-      return reject(candidate, ResourceCostRejectReason::L0BOverflow,
-                    *safeBudget, 0, &resources);
-    if (candidate.peakL0CBytes > *safeL0C)
-      return reject(candidate, ResourceCostRejectReason::L0COverflow,
-                    *safeBudget, 0, &resources);
-  }
+    return reject(candidate, ResourceCostRejectReason::UBOverflow, *safeBudget);
 
   uint64_t gains = 0;
   uint64_t penalties = 0;
@@ -714,8 +673,8 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
                          weights.tokenOnlyRepeatedByte, gains, penalties) ||
       gains > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()) ||
       penalties > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
-    return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget, 0,
-                  &resources);
+    return reject(candidate, ResourceCostRejectReason::Overflow, *safeBudget,
+                  0);
 
   CandidateEvaluation evaluation;
   evaluation.candidate = candidate;
@@ -724,11 +683,6 @@ cfg::evaluateCandidateCost(const ResourceSnapshot &resources,
   evaluation.benefitScore =
       static_cast<int64_t>(gains) - static_cast<int64_t>(penalties);
   evaluation.safeUBBudgetBytes = *safeBudget;
-  if (resources.hasL0Budgets()) {
-    evaluation.safeL0ABudgetBytes = resources.getSafeL0ABudget().value_or(0);
-    evaluation.safeL0BBudgetBytes = resources.getSafeL0BBudget().value_or(0);
-    evaluation.safeL0CBudgetBytes = resources.getSafeL0CBudget().value_or(0);
-  }
   evaluation.requiredParallelPrograms = 0;
   evaluation.effectiveWorkPerProgram = 0;
   evaluation.physicalWavesBefore = 0;
@@ -828,12 +782,6 @@ std::string cfg::formatCandidateRemark(const CandidateEvaluation &evaluation) {
          << " peak_live_bytes=" << candidate.baselinePeakLiveBytes << "->"
          << candidate.estimatedPeakLiveBytes
          << " ub_budget_bytes=" << evaluation.safeUBBudgetBytes
-         << " peak_l0a_bytes=" << candidate.peakL0ABytes
-         << " peak_l0b_bytes=" << candidate.peakL0BBytes
-         << " peak_l0c_bytes=" << candidate.peakL0CBytes
-         << " l0_budget_bytes=" << evaluation.safeL0ABudgetBytes << "/"
-         << evaluation.safeL0BBudgetBytes << "/"
-         << evaluation.safeL0CBudgetBytes
          << " work_per_program=" << evaluation.effectiveWorkPerProgram
          << " persistent_loop_trips=" << evaluation.persistentLoopTripsBefore
          << "->" << evaluation.persistentLoopTripsAfter
@@ -865,8 +813,7 @@ cfg::formatProfilerCalibrationRecord(const ProfilerCalibrationRecord &record) {
 
 ResourceCostAnalysis::ResourceCostAnalysis(Operation *root,
                                            ResourceSnapshot resources)
-    : resources(resources), liveBytes(estimatePeakLiveBytes(root)),
-      cubeBytes(estimatePeakCubeBytes(root)) {}
+    : resources(resources), liveBytes(estimatePeakLiveBytes(root)) {}
 
 CandidateEvaluation
 ResourceCostAnalysis::evaluate(const CandidateCost &candidate) const {
@@ -875,22 +822,6 @@ ResourceCostAnalysis::evaluate(const CandidateCost &candidate) const {
     effectiveCandidate.hasPeakLiveBytes = true;
     effectiveCandidate.baselinePeakLiveBytes = liveBytes.peakLiveBytes;
     effectiveCandidate.estimatedPeakLiveBytes = liveBytes.peakLiveBytes;
-  }
-  // Cube-buffer gating mirrors the unified-buffer contract: when the
-  // snapshot carries L0 capacities, a candidate without its own cube
-  // estimate inherits the baseline one, and an unanalyzable cube demand is
-  // an unknown resource rather than a silent pass.
-  if (resources.hasL0Budgets() && !effectiveCandidate.hasPeakCubeBytes) {
-    if (cubeBytes.known) {
-      effectiveCandidate.hasPeakCubeBytes = true;
-      effectiveCandidate.peakL0ABytes = cubeBytes.peakL0ABytes;
-      effectiveCandidate.peakL0BBytes = cubeBytes.peakL0BBytes;
-      effectiveCandidate.peakL0CBytes = cubeBytes.peakL0CBytes;
-    } else if (cubeBytes.reason == ResourceCostRejectReason::DynamicShape) {
-      effectiveCandidate.hasDynamicShape = true;
-    } else {
-      effectiveCandidate.hasUnknownResource = true;
-    }
   }
   if (!liveBytes.known) {
     if (liveBytes.reason == ResourceCostRejectReason::DynamicShape)

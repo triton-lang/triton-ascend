@@ -241,5 +241,6 @@
   "CUPTI",
   "shmem",
   "SHMEM",
-  "msdebug"
+  "msdebug",
+  "LLDB"
 ]

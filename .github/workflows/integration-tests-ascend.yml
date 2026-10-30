@@ -24,8 +24,6 @@ jobs:
     env:
       PROTON_SKIP_PC_SAMPLING_TEST: 1
       PYTHON: "python${{ matrix.python_version }}"
-      PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
-      PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
 
     steps:

@@ -2077,14 +2077,16 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
     This behavior is experimental and may be subject to change in the future.
 
     :param lhs: The first tensor to be multiplied.
-    :type lhs: 2D tensor representing fp4, fp8 or bf16 elements. Fp4 elements are packed into uint8 inputs with the first element in lower bits. Fp8 are stored as uint8 or the corresponding fp8 type.
+    :type lhs: 2D or 3D tensor representing fp4, fp8 or bf16 elements. For 3D inputs, the first dimension is the batch dimension and must match rhs. Fp4 elements are packed into uint8 inputs with the first element in lower bits. Fp8 are stored as uint8 or the corresponding fp8 type.
     :param lhs_scale: Scale factor for lhs tensor. Shape should be [M, K//group_size] when lhs is [M, K], where group_size is 32 if scales type are `e8m0`.
+                      For batched inputs, the shape must be [B, M, K//group_size]; scales are not broadcast across batches.
     :type lhs_scale: e8m0 type represented as an uint8 tensor, or None.
     :param lhs_format: format of the lhs tensor. Available formats: {:code:`e2m1`, :code:`e4m3`, :code:`e5m2`, :code:`bf16`, :code:`fp16`}.
     :type lhs_format: str
     :param rhs: The second tensor to be multiplied.
-    :type rhs: 2D tensor representing fp4, fp8 or bf16 elements. Fp4 elements are packed into uint8 inputs with the first element in lower bits. Fp8 are stored as uint8 or the corresponding fp8 type.
+    :type rhs: 2D or 3D tensor representing fp4, fp8 or bf16 elements. For 3D inputs, the first dimension is the batch dimension and must match lhs. Fp4 elements are packed into uint8 inputs with the first element in lower bits. Fp8 are stored as uint8 or the corresponding fp8 type.
     :param rhs_scale: Scale factor for rhs tensor. Shape should be [N, K//group_size] where rhs is [K, N].
+                      For batched inputs, the shape must be [B, N, K//group_size]; scales are not broadcast across batches.
                       Important: Do NOT transpose rhs_scale
     :type rhs_scale: e8m0 type represented as an uint8 tensor, or None.
     :param rhs_format: format of the rhs tensor. Available formats: {:code:`e2m1`, :code:`e4m3`, :code:`e5m2`, :code:`bf16`, :code:`fp16`}.

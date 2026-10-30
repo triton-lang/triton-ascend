@@ -786,7 +786,14 @@ struct SortOpConverter : public OpConversionPattern<triton::ascend::SortOp> {
 };
 
 struct DotScaledConverter : public OpConversionPattern<triton::DotScaledOp> {
-  using OpConversionPattern<triton::DotScaledOp>::OpConversionPattern;
+  DotScaledConverter(MLIRContext *context, bool compileOn91095)
+      : OpConversionPattern(context), compileOn91095(compileOn91095) {}
+
+  bool compileOn91095;
+
+  // Large fallback dots become bounded sub-dots, which this same pattern
+  // lowers after the tiling rewrite.
+  void initialize() { setHasBoundedRewriteRecursion(); }
 
   LogicalResult
   matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,

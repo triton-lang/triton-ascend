@@ -43,8 +43,8 @@ namespace CVPipeline {
  * the function leaves
  * @p bm in its original state regardless of the result.
  *
- * Shared by the ComputeBlockOpt passes (e.g. UnifyAllocBlockPass and
- * MergeVectorIfBlockPass) that merge operations into a common block_id.
+ * Shared by the ComputeBlockOpt passes (e.g. MergeVectorIfBlockPass and
+ * MergeComputeBlockPass) that merge operations into a common block_id.
  *
  * @param opsToUnify Block-level operations to add to the safe set (okSet)
  * @param memGraph Memory dependence graph for RAW/WAW/WAR dependency analysis

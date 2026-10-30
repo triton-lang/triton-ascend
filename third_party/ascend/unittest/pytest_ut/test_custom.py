@@ -173,7 +173,7 @@ class my_custom_op_cube_data_layout:
     def __init__(self, a, b, out=None):
         self.indexing_map = [al.affine_map.get_identity(1)]
         # Set data layout for CUBE operations
-        self.data_layout = {"a": al.DataLayout.DOTA_ND, "b": al.DataLayout.DOTB_ND, "out": al.DataLayout.Fractal}
+        self.data_layout = {"a": al.DataLayout.ND, "b": al.DataLayout.ND, "out": al.DataLayout.Fractal}
 
 
 @triton.jit
@@ -348,8 +348,7 @@ def test_custom_op_cube_with_data_layout():
     # Check that data_layout attribute is present
     assert "data_layout" in line
     # Check for the specific data layout values we set
-    assert "DOTA_ND" in line or "dota_nd" in line.lower()
-    assert "DOTB_ND" in line or "dotb_nd" in line.lower()
+    assert "data_layout<ND>" in line or "data_layout<nd>" in line.lower()
 
 
 def test_custom_op_cube_with_address_space():

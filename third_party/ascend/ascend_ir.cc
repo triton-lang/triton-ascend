@@ -581,9 +581,7 @@ void init_ascend_ir(py::module &&m) {
       .value("P_RELU", hivm::FixpipePreReluMode::P_RELU)
       .export_values();
   py::enum_<hivm::DataLayout>(m, "DataLayout", py::module_local())
-      .value("DOTA_ND", hivm::DataLayout::DOTA_ND)
-      .value("DOTB_ND", hivm::DataLayout::DOTB_ND)
-      .value("DOTC_ND", hivm::DataLayout::DOTC_ND)
+      .value("ND", hivm::DataLayout::ND)
       .value("nZ", hivm::DataLayout::nZ)
       .value("zN", hivm::DataLayout::zN)
       .value("Fractal", hivm::DataLayout::Fractal)
@@ -1246,12 +1244,6 @@ void init_ascend_ir(py::module &&m) {
           "get_data_layout_attr",
           [](AscendNPUIROpBuilder &self, hivm::DataLayout layout) -> Attribute {
             auto *ctx = self.getBuilder().getContext();
-            // For DOTA_ND and DOTB_ND, transpose must be set (default to false)
-            if (layout == hivm::DataLayout::DOTA_ND ||
-                layout == hivm::DataLayout::DOTB_ND) {
-              return hivm::DataLayoutAttr::get(ctx, layout,
-                                               /*transpose=*/false);
-            }
             return hivm::DataLayoutAttr::get(ctx, layout);
           })
       .def("get_iterator_types_attr",

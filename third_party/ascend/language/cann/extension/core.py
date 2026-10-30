@@ -154,11 +154,7 @@ class IteratorType(enum.Enum):
 
 
 class DataLayout(enum.Enum):
-    DOTA_ND = ascend_ir.DataLayout.DOTA_ND
-    DOTB_ND = ascend_ir.DataLayout.DOTB_ND
-    DOTC_ND = ascend_ir.DataLayout.DOTC_ND
-    nZ = ascend_ir.DataLayout.nZ
-    zN = ascend_ir.DataLayout.zN
+    ND = ascend_ir.DataLayout.ND
     Fractal = ascend_ir.DataLayout.Fractal
 
 

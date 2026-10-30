@@ -34,6 +34,7 @@
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
@@ -55,9 +56,10 @@ namespace {
 struct ExpLoadPattern {
   linalg::BroadcastOp broadcastOp;
   Operation *expOp = nullptr;
-  bufferization::ToTensorOp toTensorOp;
-  memref::CopyOp copyOp;
-  memref::AllocOp allocOp;
+  /// Ops of the load unit feeding `exp`: the atomic `ssbuffer.load` scope when
+  /// PackMemref packed it, otherwise the raw `alloc -> copy -> to_tensor`
+  /// chain.
+  SmallVector<Operation *> loadOps;
   arith::MulFOp mulfOp;
   int blockId = -1;
   int newBlockId = -1;
@@ -67,10 +69,46 @@ static bool isExpLike(Operation *op) {
   return isa_and_present<math::ExpOp, math::Exp2Op>(op);
 }
 
+/// Collects the ops of a load unit that PackMemref left unpacked, i.e. the raw
+/// `alloc -> memref.copy -> to_tensor` chain behind `loadValue`. Fails unless
+/// every op of the chain already sits in \p blockId, which is what lets the
+/// whole unit travel to another block.
+static bool collectRawLoadUnit(Value loadValue,
+                               CVPipeline::ComputeBlockIdManager &bm,
+                               int blockId,
+                               SmallVectorImpl<Operation *> &loadOps) {
+  auto toTensorOp = loadValue.getDefiningOp<bufferization::ToTensorOp>();
+  if (!toTensorOp || bm.getBlockIdByOp(toTensorOp) != blockId) {
+    return false;
+  }
+
+  auto allocOp = toTensorOp.getBuffer().getDefiningOp<memref::AllocOp>();
+  if (!allocOp || bm.getBlockIdByOp(allocOp) != blockId) {
+    return false;
+  }
+
+  for (Operation *user : allocOp->getUsers()) {
+    auto copyOp = dyn_cast<memref::CopyOp>(user);
+    if (!copyOp || copyOp.getTarget() != allocOp.getMemref()) {
+      continue;
+    }
+    if (bm.getBlockIdByOp(copyOp) != blockId ||
+        copyOp->getBlock() != toTensorOp->getBlock()) {
+      return false;
+    }
+    loadOps.assign({toTensorOp.getOperation(), copyOp.getOperation(),
+                    allocOp.getOperation()});
+    return true;
+  }
+  return false;
+}
+
 // Match pattern:
 //   mulf <- broadcast <- exp/exp2 <- load
 //        ↖
 //           %arg
+// `load` is an `ssbuffer.load` scope after PackMemref, or the raw alloc/copy/
+// to_tensor chain when the unit was left unpacked.
 static bool matchExpLoadPattern(linalg::BroadcastOp broadcastOp,
                                 CVPipeline::ComputeBlockIdManager &bm,
                                 ExpLoadPattern &info) {
@@ -92,28 +130,19 @@ static bool matchExpLoadPattern(linalg::BroadcastOp broadcastOp,
     return false;
   }
 
-  auto toTensorOp =
-      expOp->getOperand(0).getDefiningOp<bufferization::ToTensorOp>();
-  if (!toTensorOp || bm.getBlockIdByOp(toTensorOp) != blockId ||
-      !toTensorOp->hasOneUse()) {
+  // The load unit must sit in the pattern's block: the scalar closure below is
+  // collected with `includeParent = false`, so every op of the pattern has to
+  // be a direct child of it.
+  Value loadValue = expOp->getOperand(0);
+  Operation *loadCarrier = loadValue.getDefiningOp();
+  if (!loadCarrier || loadCarrier->getBlock() != broadcastOp->getBlock() ||
+      bm.getBlockIdByOp(loadCarrier) != blockId || !loadCarrier->hasOneUse()) {
     return false;
   }
-
-  auto allocOp = toTensorOp.getBuffer().getDefiningOp<memref::AllocOp>();
-  if (!allocOp || bm.getBlockIdByOp(allocOp) != blockId) {
-    return false;
-  }
-
-  memref::CopyOp copyOp;
-  for (Operation *user : allocOp->getUsers()) {
-    auto c = dyn_cast<memref::CopyOp>(user);
-    if (c && c.getTarget() == allocOp.getMemref()) {
-      copyOp = c;
-      break;
-    }
-  }
-  if (!copyOp || bm.getBlockIdByOp(copyOp) != blockId ||
-      copyOp->getBlock() != broadcastOp->getBlock()) {
+  SmallVector<Operation *> loadOps;
+  if (CVPipeline::isLoadScope(loadCarrier)) {
+    loadOps = {loadCarrier};
+  } else if (!collectRawLoadUnit(loadValue, bm, blockId, loadOps)) {
     return false;
   }
 
@@ -142,9 +171,7 @@ static bool matchExpLoadPattern(linalg::BroadcastOp broadcastOp,
 
   info.broadcastOp = broadcastOp;
   info.expOp = expOp;
-  info.toTensorOp = toTensorOp;
-  info.copyOp = copyOp;
-  info.allocOp = allocOp;
+  info.loadOps = std::move(loadOps);
   info.mulfOp = mulfOp;
   info.blockId = blockId;
   info.newBlockId = newBlockId;
@@ -192,9 +219,8 @@ public:
         continue;
       }
 
-      SmallVector<Operation *> coreOps = {info.broadcastOp, info.expOp,
-                                          info.toTensorOp, info.copyOp,
-                                          info.allocOp};
+      SmallVector<Operation *> coreOps{info.broadcastOp, info.expOp};
+      coreOps.append(info.loadOps);
 
       CVPipeline::ScalarClosure closure{info.broadcastOp->getBlock(), coreOps,
                                         false};
@@ -213,6 +239,12 @@ public:
       if (!CVPipeline::willCreateCycle(matchedOps.getArrayRef(), memGraph,
                                        info.newBlockId, bm)) {
         for (Operation *op : matchedOps) {
+          // A packed unit carries its block id on the scope only; stamping the
+          // body would break the scope atomicity the earlier passes rely on.
+          if (CVPipeline::isLoadScope(op)) {
+            bm.updateBlockId(op, info.newBlockId);
+            continue;
+          }
           bm.updateBlockIdWithInner(op, info.newBlockId);
         }
 

@@ -23,6 +23,7 @@
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/DependencyHelper.h"
+#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
@@ -186,12 +187,19 @@ static void collectAllDeps(Operation *startOp,
   }
 }
 
-/// Check if Cube depends on CubePre via bufferization::ToTensorOp defined in
-/// CubePre. \p edgeSrcOps are the dependency source ops on the CubePre → Cube
-/// edges. Returns the to_tensor ops in CubePre that Cube depends on.
+/// True when `op` carries a tensor out of a compute block: a raw
+/// `bufferization::ToTensorOp`, or the atomic `ssbuffer.load` scope that
+/// PackMemref packed the load unit into.
+static bool isTensorCarrier(Operation *op) {
+  return isa<bufferization::ToTensorOp>(op) || CVPipeline::isLoadScope(op);
+}
+
+/// Check if Cube depends on CubePre via a tensor carrier defined in CubePre.
+/// \p edgeSrcOps are the dependency source ops on the CubePre → Cube edges.
+/// Returns the carriers in CubePre that Cube depends on.
 static SmallVector<Operation *>
-findToTensorDeps(const ComputeBlock *cubePre,
-                 ArrayRef<Operation *> edgeSrcOps) {
+findTensorCarrierDeps(const ComputeBlock *cubePre,
+                      ArrayRef<Operation *> edgeSrcOps) {
   SmallVector<Operation *> result;
   if (!cubePre) {
     return result;
@@ -199,8 +207,7 @@ findToTensorDeps(const ComputeBlock *cubePre,
   DenseSet<Operation *> cubePreOpsSet(cubePre->ops.begin(), cubePre->ops.end());
 
   for (Operation *srcOp : edgeSrcOps) {
-    if (isa<bufferization::ToTensorOp>(srcOp) &&
-        cubePreOpsSet.contains(srcOp)) {
+    if (isTensorCarrier(srcOp) && cubePreOpsSet.contains(srcOp)) {
       result.push_back(srcOp);
     }
   }
@@ -229,8 +236,12 @@ cloneOpCrossCubeDep(int cubePreId, int cubeId,
       continue;
     }
     Operation *cloned = builder.clone(*op, mapper);
-    cloned->walk(
-        [&](Operation *innerOp) { bm.updateBlockId(innerOp, cubeId); });
+    // A cloned load scope keeps its atomicity: stamp the scope, not its body.
+    cloned->walk<WalkOrder::PreOrder>([&](Operation *innerOp) {
+      bm.updateBlockId(innerOp, cubeId);
+      return CVPipeline::isLoadScope(innerOp) ? WalkResult::skip()
+                                              : WalkResult::advance();
+    });
   }
 
   // Remap Cube's original ops' operands: replace references to old CubePre
@@ -372,27 +383,28 @@ static bool tryCrossCubeCloneMerge(
     return false;
   }
 
-  // 5c. Check if Cube depends on CubePre via to_tensor
-  SmallVector<Operation *> toTensorOps;
+  // 5c. Check if Cube depends on CubePre via a tensor carrier (a raw to_tensor
+  // or the packed load scope)
+  SmallVector<Operation *> carrierOps;
   auto edgeIt = blockEdges.find(*cubePreId);
   if (edgeIt != blockEdges.end()) {
     auto dstIt = edgeIt->second.find(*cubeId);
     if (dstIt != edgeIt->second.end()) {
-      toTensorOps =
-          findToTensorDeps(&computeBlocks.at(*cubePreId), dstIt->second);
+      carrierOps =
+          findTensorCarrierDeps(&computeBlocks.at(*cubePreId), dstIt->second);
     }
   }
-  if (toTensorOps.empty()) {
+  if (carrierOps.empty()) {
     LOG_DEBUG("MergeComputeBlock: Cube("
               << *cubeId << ") depends on CubePre(" << *cubePreId
-              << ") but not via to_tensor, skipping");
+              << ") but not via a tensor carrier, skipping");
     return false;
   }
 
   // 5d. Trace back all transitive dependencies
   SmallPtrSet<Operation *, 16> allPredecessors;
-  for (Operation *toTensor : toTensorOps) {
-    collectAllDeps(toTensor, memGraph, allPredecessors);
+  for (Operation *carrier : carrierOps) {
+    collectAllDeps(carrier, memGraph, allPredecessors);
   }
 
   // 5e. Filter to ops in CubePre and clone to Cube

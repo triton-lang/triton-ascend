@@ -66,8 +66,18 @@ WORKDIR /project
 # TRITON_BUILD_NPUIR=ON in-image fallback. Includes the nested third-party
 # submodules (llvm-project / torch-mlir / shmem). NPUIR_REF overrides the
 # branch with an exact SHA for the pinned-submodule verification wheel.
+#
+# Then freeze the gitlink for the rest of the image build: the root setup.py
+# (BackendInstaller.prepare) runs `git submodule update --init ascend` from
+# third_party, whose directory-prefix pathspec also matches the nested
+# AscendNPU-IR gitlink — with the pre-fetched tree at a different SHA (the
+# stable-tracking flows) that command would silently checkout the pinned
+# SHA back over it. submodule.<name>.update=none makes every in-image
+# `git submodule update` skip it; the product code's own guards never issue
+# a submodule command when the tree already exists, so nothing else changes.
 # ---------------------------------------------------------------------------
-RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR
+RUN NPUIR_REPO_BRANCH=${NPUIR_REF} bash .github/workflows/build/fetch-npuir-stable.sh third_party/ascend/AscendNPU-IR \
+ && git config submodule.third_party/ascend/AscendNPU-IR.update none
 
 # ---------------------------------------------------------------------------
 # Build the wheel with the target Python from the manylinux toolchain.

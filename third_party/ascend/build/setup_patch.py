@@ -330,49 +330,6 @@ def _ensure_npuir_payload():
     build_npuir()
 
 
-def _ensure_npuir_sources():
-    """OFF mode: initialize the pinned AscendNPU-IR submodule when missing.
-
-    The prebuilt payload from the wheel CI only provides the runtime
-    binaries bundled into the wheel; the C++ plugin build still compiles the
-    BiShengIR dialects via
-    ``add_subdirectory(third_party/ascend/AscendNPU-IR)``, so the source tree
-    must be present. Local builds get the version pinned by the submodule
-    gitlink (the relatively stable, tested revision); the wheel CI images
-    pre-fetch their own (stable-branch) sources before running setup.py, so
-    any existing checkout is left untouched here.
-    """
-    if _npuir_build_enabled():
-        return  # build_npuir() initializes the sources itself
-    npuir_dir = _REPO_ROOT / "third_party" / "ascend" / "AscendNPU-IR"
-    if (npuir_dir / "CMakeLists.txt").exists():
-        return
-    if not _is_git_repo():
-        print(f"WARNING: {_REPO_ROOT} is not a git repository and {npuir_dir} has no "
-              "source tree; cannot initialize the AscendNPU-IR submodule.")
-        return
-    _git_check_call_with_retry([
-        "git",
-        "submodule",
-        "update",
-        "--init",
-        "--depth",
-        "1",
-        "--",
-        "third_party/ascend/AscendNPU-IR",
-    ], cwd=_REPO_ROOT)
-    if (npuir_dir / "CMakeLists.txt").exists():
-        # Nested submodules (LLVM, Torch-MLIR, shmem) recorded by the pinned
-        # AscendNPU-IR revision.
-        _git_check_call_with_retry([
-            "git",
-            "submodule",
-            "update",
-            "--init",
-            "--recursive",
-        ], cwd=npuir_dir)
-
-
 def _ensure_distributed_submodule():
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
@@ -754,8 +711,13 @@ def _build_setup_kwargs(mod, kwargs):
 def prepare():
     """Top-of-setup.py hook: defaults and optional npuir/distributed sources."""
     _set_default_env_vars()
+    # OFF-mode note: the C++ plugin build needs the AscendNPU-IR source tree
+    # (add_subdirectory), but only its top level (the STANDALONE_IR_ONLY
+    # dialects; MLIR comes from Triton's own LLVM). Initializing the pinned
+    # submodule is left to the root setup.py's BackendInstaller.prepare
+    # (`git submodule update --init <backend>`); the wheel CI images pre-fetch
+    # their own sources, and ON mode goes through build_npuir() below.
     _ensure_npuir_payload()
-    _ensure_npuir_sources()
     _ensure_distributed_submodule()
 
 

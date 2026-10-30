@@ -168,39 +168,16 @@ static void collectAllDeps(Operation *startOp,
   }
 }
 
-/// Check if the memref.copy feeding \p toTensor (the copy writing the buffer
-/// consumed by to_tensor) loads its data from global memory (external func
-/// argument). If no feeding copy is found, the to_tensor itself is
-/// considered to come from global memory.
-static bool
-isToTensorFedByGlobalCopy(bufferization::ToTensorOp toTensor,
-                          const CVPipeline::MemoryDependenceGraph &memGraph) {
-  for (Operation *def : memGraph.getMemDefs(toTensor.getOperation())) {
-    auto copyOp = dyn_cast<memref::CopyOp>(def);
-    if (!copyOp) {
-      continue;
-    }
-    SetVector<Operation *> viewOps;
-    if (!CVPipeline::collectViewOpsAndCheckGlobalMemory(copyOp.getSource(),
-                                                        viewOps)) {
-      return false;
-    }
-  }
-  return true;
-}
-
 /// Returns the bufferization::ToTensorOp in CubePre that Cube depends on,
 /// only to_tensor ops whose feeding memref.copy loads data from GM (external
 /// func argument).
 static SmallVector<Operation *>
 findToTensorDeps(const ComputeBlock *cubePre,
-                 const DenseSet<Operation *> &edgeSrcOps,
-                 const CVPipeline::MemoryDependenceGraph &memGraph) {
+                 const DenseSet<Operation *> &edgeSrcOps) {
   SmallVector<Operation *> result;
   for (Operation *srcOp : edgeSrcOps) {
-    auto toTensor = dyn_cast<bufferization::ToTensorOp>(srcOp);
-    if (toTensor && llvm::is_contained(cubePre->ops, srcOp) &&
-        isToTensorFedByGlobalCopy(toTensor, memGraph)) {
+    
+    if (CVPipeline::isLoadScope(srcOp) && llvm::is_contained(cubePre->ops, srcOp)) {
       result.push_back(srcOp);
     }
   }
@@ -247,8 +224,12 @@ static void cloneOpCrossCubeDep(
     }
     Operation *cloned = builder.clone(*op, mapper);
     record.clonedOps.push_back(cloned);
-    cloned->walk(
-        [&](Operation *innerOp) { bm.updateBlockId(innerOp, cube->id); });
+    // A cloned load scope keeps its atomicity: stamp the scope, not its body.
+    cloned->walk<WalkOrder::PreOrder>([&](Operation *innerOp) {
+      bm.updateBlockId(innerOp, cubeId); 
+      return CVPipeline::isLoadScope(innerOp) ? WalkResult::skip()
+                                              : WalkResult::advance();
+    });
   }
 
   // Remap Cube's original ops' operands: replace references to old CubePre

@@ -23,6 +23,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from contextlib import contextmanager
 
 try:
     from setuptools.command.bdist_wheel import bdist_wheel
@@ -659,36 +660,36 @@ def patch_module(mod):
     mod._ascend_is_manylinux = is_manylinux
 
 
+@contextmanager
 def _robust_open_url(url, retries=5):
-    """Download ``url`` fully to a temp file with resumable retries.
+    """Yield a downloaded stream, cleaning its temporary archive on exit.
 
-    The prebuilt LLVM tarballs are ~1.2 GB. The upstream setup.py streams
-    them via urllib with a 300 s timeout and no retry: OBS serves large
-    objects at ~2.5 MB/s per connection, so every download exceeds the
-    timeout (or gets cut) and the build dies — systematically, on every
-    job. Use curl with `-C -` so each attempt resumes from the bytes
-    already on disk instead of restarting.
+    Keep resumable curl retries for Ascend artifacts. Both setup.py callers
+    use the response as a context manager; archive ownership lasts until
+    that context exits, including extraction failures.
     """
-    import subprocess
     import tempfile
 
-    tmp = tempfile.NamedTemporaryFile(delete=False)
-    tmp.close()
-    last_error = None
-    for attempt in range(1, retries + 1):
-        proc = subprocess.run(
-            [
-                "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
-                "--max-time", "1000", "-o", tmp.name, url
-            ],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        if proc.returncode == 0:
-            return open(tmp.name, "rb")
-        last_error = proc.stderr.decode(errors="replace")[-300:]
-        print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
-    raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
+    with tempfile.TemporaryDirectory(prefix="triton-ascend-download-") as directory:
+        archive = Path(directory) / "archive"
+        last_error = None
+        for attempt in range(1, retries + 1):
+            proc = subprocess.run(
+                [
+                    "curl", "-fsSL", "-C", "-", "--retry", "2", "--retry-all-errors", "--connect-timeout", "30",
+                    "--max-time", "1000", "-o",
+                    str(archive), url
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if proc.returncode == 0:
+                with archive.open("rb") as response:
+                    yield response
+                return
+            last_error = proc.stderr.decode(errors="replace")[-300:]
+            print(f"[setup_patch] download of {url} attempt {attempt}/{retries} failed: {last_error}")
+        raise RuntimeError(f"download failed after {retries} attempts: {last_error}")
 
 
 def _build_setup_kwargs(mod, kwargs):

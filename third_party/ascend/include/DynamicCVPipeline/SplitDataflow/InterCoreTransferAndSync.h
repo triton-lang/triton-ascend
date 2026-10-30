@@ -174,6 +174,8 @@ private:
   mlir::Operation *getCopyPointBeforeStore(Value depValue,
                                            Operation *vectorEndOp,
                                            int iniProducerBlockId);
+  Operation *findConsumerSetPoint(int transferIndex, int consumerBlockId,
+                                  mlir::Operation *consEndPoint);
   mlir::Operation *getFixpipePointAfterProducer(Value depValue,
                                                 int iniProducerBlockId);
   linalg::MatmulOp findYieldMatmulInSplitIf(Value splittedIfResult);

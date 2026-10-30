@@ -772,6 +772,13 @@ mlir::Operation *InterCoreTransferAndSyncPass::getFixpipePointAfterProducer(
   if (blockId != producerBlockId) {
     return nullptr;
   }
+  while (fixpipePoint &&
+         CVPipeline::getOpBlockId(fixpipePoint) == producerBlockId) {
+    if (!isa<hivm::SyncBlockSetOp>(fixpipePoint->getNextNode())) {
+      break;
+    }
+    fixpipePoint = fixpipePoint->getNextNode();
+  }
   return fixpipePoint;
 }
 
@@ -1663,6 +1670,53 @@ void InterCoreTransferAndSyncPass::AnalyzeSplittedIf(DependencyInfo &dep) {
   }
 }
 
+Operation *InterCoreTransferAndSyncPass::findConsumerSetPoint(
+    int transferIndex, int consumerBlockId, mlir::Operation *consEndPoint) {
+  LOG_DEBUG("findConsumerSetPoint for block: " << consumerBlockId << "\n");
+  bufferization::ToTensorOp toTensorOp = nullptr;
+  module->walk([&](bufferization::ToTensorOp op) {
+    if (!op->hasAttr(CVPipeline::kTransferId)) {
+      return WalkResult::advance();
+    }
+    if (op->getAttrOfType<IntegerAttr>(CVPipeline::kTransferId).getInt() ==
+        transferIndex) {
+      toTensorOp = op;
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+  if (!toTensorOp)
+    return nullptr;
+
+  llvm::DenseSet<mlir::Operation *> consumerOps;
+  for (Operation *user : toTensorOp->getResult(0).getUsers()) {
+    auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
+    if (userBlockIdOpt && *userBlockIdOpt == consumerBlockId) {
+      consumerOps.insert(user);
+    }
+  }
+
+  Operation *curr = consEndPoint;
+  Operation *firstSyncOpAfterConsumer = nullptr;
+  while (curr) {
+    auto blockIdOpt = CVPipeline::getOpBlockId(curr);
+    if (blockIdOpt != consumerBlockId) {
+      break;
+    }
+    if (consumerOps.contains(curr)) {
+      break;
+    }
+    if (isa<hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp, hivm::CopyOp,
+            hivm::FixpipeOp>(curr)) {
+      firstSyncOpAfterConsumer = curr->getPrevNode();
+      LOG_DEBUG("firstSyncOpAfterConsumer: " << *firstSyncOpAfterConsumer
+                                             << "\n");
+    }
+    curr = curr->getPrevNode();
+  }
+  return firstSyncOpAfterConsumer;
+}
+
 // V->C Transfer Logic
 LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
     OpBuilder &builder, DependencyInfo &dep, FlagIdManager &flagManager,
@@ -1717,6 +1771,15 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
     if (newconsumerPoint &&
         newConsStart->getBlock() == newconsumerPoint->getBlock()) {
       newConsStart = newconsumerPoint;
+    }
+  }
+
+  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+    Operation *firstSyncOpAfterConsumer =
+        findConsumerSetPoint(transferIndex, dep.iniConsumerBlockId, newConsEnd);
+    if (firstSyncOpAfterConsumer &&
+        newConsEnd->getBlock() == firstSyncOpAfterConsumer->getBlock()) {
+      newConsEnd = firstSyncOpAfterConsumer;
     }
   }
 
@@ -1807,6 +1870,14 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
     if (newconsumerPoint && yieldBeforeOp) {
       newConsStart = newconsumerPoint;
       newConsEnd = yieldBeforeOp;
+    }
+  }
+  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+    Operation *firstSyncOpAfterConsumer =
+        findConsumerSetPoint(transferIndex, dep.iniConsumerBlockId, newConsEnd);
+    if (firstSyncOpAfterConsumer &&
+        newConsEnd->getBlock() == firstSyncOpAfterConsumer->getBlock()) {
+      newConsEnd = firstSyncOpAfterConsumer;
     }
   }
   insertInterCoreSync(builder, transferOp, newConsStart, newConsEnd, flagId,

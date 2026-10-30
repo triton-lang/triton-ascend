@@ -532,6 +532,20 @@ int OpClassifierPass::patternMatchCUBE() {
   LOG_DEBUG("--- Step 1: pattern match --->\n");
 
   for (Operation *op : allOps) {
+    // Check for custom ops with CUBE tcore_type attribute
+    if (auto tcoreAttr =
+            op->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+      if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+        LLVM_DEBUG(
+            DBGS() << "=== MARKING CUSTOM CUBE OP as OP_CUBE_ONLY ===\n");
+        LLVM_DEBUG(DBGS() << "Op: " << *op << "\n");
+        opCoreTypes[op] = OP_CUBE_ONLY;
+        LLVM_DEBUG(DBGS() << "opCoreTypes[op] = " << opCoreTypes[op]
+                          << " (OP_CUBE_ONLY=1)\n");
+        continue;
+      }
+    }
+
     if (!isa<linalg::MatmulOp>(op))
       continue;
 
@@ -829,6 +843,14 @@ int OpClassifierPass::propagateCubeUpstream() {
       if (!def || cubeVisited.count(def) || isa<linalg::MatmulOp>(def))
         continue;
 
+      // Skip custom ops with CUBE tcore_type - they are already CUBE seeds
+      if (auto tcoreAttr =
+              def->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+        if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+          continue;
+        }
+      }
+
       // Shared skip rules (see shouldSkipCubeUpstream).
       if (shouldSkipCubeUpstream(def))
         continue;
@@ -1007,6 +1029,14 @@ void OpClassifierPass::propagateCubeUpstreamForOp(Operation *startOp) {
         continue;
       if (isa<linalg::MatmulOp>(upstreamOp))
         continue;
+
+      // Skip custom ops with CUBE tcore_type
+      if (auto tcoreAttr = upstreamOp->getAttrOfType<hivm::TCoreTypeAttr>(
+              "hivm.tcore_type")) {
+        if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+          continue;
+        }
+      }
       // Same skip rules as the main CUBE BFS.
       if (shouldSkipCubeUpstream(upstreamOp))
         continue;
@@ -1061,6 +1091,7 @@ int OpClassifierPass::propagateVectorUpstream() {
 
       // Skip operations that should not be marked VECTOR:
       // - matmul: never mark matmul as vector (CUBE-only operation)
+      // - custom ops with CUBE tcore_type: these are complete CUBE operations
       if (isa<linalg::MatmulOp>(def) ||
           isa<scf::SCFDialect>(def->getDialect())) {
         LLVM_DEBUG(DBGS() << "skip " << def->getName().getStringRef()
@@ -1068,12 +1099,41 @@ int OpClassifierPass::propagateVectorUpstream() {
         continue;
       }
 
+      // Skip custom ops that already have CUBE tcore_type attribute
+      if (auto tcoreAttr =
+              def->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+        if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+          LLVM_DEBUG(
+              DBGS()
+              << "=== PROTECTING CUSTOM CUBE OP FROM VECTOR MARKING ===\n");
+          LLVM_DEBUG(DBGS() << "Op: " << *def << "\n");
+          LLVM_DEBUG(DBGS()
+                     << "  current opCoreType: " << opCoreTypes[def]
+                     << " (1=CUBE_ONLY, 2=VECTOR_ONLY, 3=CUBE_AND_VECTOR)\n");
+          if (opCoreTypes[def] == OP_CUBE_AND_VECTOR) {
+            LLVM_DEBUG(DBGS()
+                       << "  ERROR: Already marked as CUBE_AND_VECTOR! This "
+                          "means it was ORed with VECTOR before this check.\n");
+          }
+          continue;
+        }
+      }
+
       vecVisited.insert(def);
 
       LLVM_DEBUG(DBGS() << "\tcolor-vec: " << def->getName().getStringRef()
                         << "\n");
-      opCoreTypes[def] =
-          static_cast<OpCoreType>(opCoreTypes[def] | OP_VECTOR_ONLY);
+      // A CUBE-only op must never gain the VECTOR bit, otherwise it becomes
+      // OP_CUBE_AND_VECTOR and gets cloned by splitOperationForCubeAndVector().
+      // Custom ops carrying hivm.tcore_type = CUBE are CUBE-only hosts.
+      OpCoreType oldType = opCoreTypes[def];
+      OpCoreType newType = static_cast<OpCoreType>(oldType | OP_VECTOR_ONLY);
+      if (oldType == OP_CUBE_ONLY && newType == OP_CUBE_AND_VECTOR) {
+        LLVM_DEBUG(DBGS() << "REFUSING to OR VECTOR into CUBE_ONLY op: " << *def
+                          << "\n");
+        continue;
+      }
+      opCoreTypes[def] = newType;
       vecQueue.push(def);
     }
   }
@@ -1154,7 +1214,16 @@ bool OpClassifierPass::isCubeLoaderForOp(scf::ForOp forOp) {
   }
   for (Value result : forOp.getResults()) {
     for (Operation *user : result.getUsers()) {
-      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
+      // Check if user is matmul, custom CUBE op, or marked as CUBE_ONLY
+      bool isCubeUser =
+          isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY;
+      if (!isCubeUser) {
+        if (auto tcoreAttr =
+                user->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+          isCubeUser = (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE);
+        }
+      }
+      if (isCubeUser)
         continue;
       return false;
     }
@@ -1177,7 +1246,16 @@ bool OpClassifierPass::isCubeLoaderForWhileOp(scf::WhileOp whileOp) {
   // Every result must be live and used only by CUBE consumers
   for (Value result : whileOp.getResults()) {
     for (Operation *user : result.getUsers()) {
-      if (isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY)
+      // Check if user is matmul, custom CUBE op, or marked as CUBE_ONLY
+      bool isCubeUser =
+          isa<linalg::MatmulOp>(user) || getCoreType(user) == OP_CUBE_ONLY;
+      if (!isCubeUser) {
+        if (auto tcoreAttr =
+                user->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+          isCubeUser = (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE);
+        }
+      }
+      if (isCubeUser)
         continue;
       return false;
     }
@@ -1269,6 +1347,14 @@ bool OpClassifierPass::shouldStopPropagationForYield(
   // Stop at linalg.matmul
   if (isa<linalg::MatmulOp>(op)) {
     return true;
+  }
+
+  // Stop at custom ops with CUBE tcore_type
+  if (auto tcoreAttr =
+          op->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+    if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+      return true;
+    }
   }
 
   // Stop at hivm.hir.store
@@ -1630,6 +1716,15 @@ void OpClassifierPass::splitOperationForCubeAndVector(
   // Only split ops explicitly marked CUBE_AND_VECTOR
   if (opCoreTypes[op] != OP_CUBE_AND_VECTOR)
     return;
+
+  // Debug: check if this is a custom CUBE op that shouldn't be split
+  if (auto tcoreAttr =
+          op->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type")) {
+    if (tcoreAttr.getTcoretype() == hivm::TCoreType::CUBE) {
+      LLVM_DEBUG(DBGS() << "WARNING: Custom CUBE op marked as CUBE_AND_VECTOR! "
+                        << "This should not happen: " << *op << "\n");
+    }
+  }
 
   // ------------------------------------------------------------------
   // Phase 1: Recursively handle CUBE_AND_VECTOR operands first

@@ -22,6 +22,8 @@ from .core import (
     CORE,
     copy_from_ub_to_l1,
     copy,
+    AddressSpace,
+    DataLayout,
     debug_barrier,
     fixpipe,
     FixpipeDMAMode,
@@ -87,6 +89,7 @@ __all__ = [
     "copy_from_ub_to_l1",
     "copy",
     "CORE",
+    "DataLayout",
     "debug_barrier",
     "fixpipe",
     "FixpipeDMAMode",
@@ -109,6 +112,7 @@ __all__ = [
 
     # address space
     "ascend_address_space",
+    "AddressSpace",
 
     # ascend IR affine (MLIR)
     "affine_expr",

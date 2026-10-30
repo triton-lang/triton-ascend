@@ -255,11 +255,68 @@ def _make_align_dim_attrs(op, builder, arg_attrs):
             assert False, f"{name}'s keys should be string or int"
 
 
+def _make_data_layout_attrs(op, builder, arg_attrs):
+    # Find op argument by name using op.data_layout's key
+    # data_layout should be a dict mapping argument name/index to a DataLayout enum value
+    # Only apply for CUBE core type
+    name = 'data_layout'
+    if not hasattr(op, name):
+        return
+
+    # To find argument indices matching each data_layout key, check the op.signature parameters
+    # and map data_layout key (argument name) to its index position.
+    data_layout_arg_indices = {}
+    if hasattr(op, "signature"):
+        param_names = list(op.signature.parameters.keys())
+        for arg_name in op.data_layout.keys():
+            if arg_name in param_names:
+                data_layout_arg_indices[arg_name] = param_names.index(arg_name)
+
+    for arg, layout in op.data_layout.items():
+        # Extract the actual DataLayout enum value (handle nested enums)
+        layout_value = layout.value if hasattr(layout, 'value') else layout
+
+        if isinstance(arg, str) and arg in data_layout_arg_indices:
+            arg_idx = data_layout_arg_indices[arg]
+            if arg_idx not in arg_attrs:
+                arg_attrs[arg_idx] = {}
+            arg_attrs[arg_idx][name] = builder.get_data_layout_attr(layout_value)
+        elif isinstance(arg, int):
+            if arg not in arg_attrs:
+                arg_attrs[arg] = {}
+            arg_attrs[arg][name] = builder.get_data_layout_attr(layout_value)
+        else:
+            assert False, f"{name}'s keys should be string or int"
+
+
+def _make_address_space_attrs(op, builder, arg_attrs):
+    # address_space should be a dict mapping argument name/index to an AddressSpace enum value
+    # (al.AddressSpace or ascend_ir.AddressSpace). Only applied for CUBE core type.
+    name = 'address_space'
+    if not hasattr(op, name):
+        return
+
+    param_names = list(op.signature.parameters.keys()) if hasattr(op, "signature") else []
+
+    for arg, space in op.address_space.items():
+        space_value = space.value if isinstance(space, core.AddressSpace) else space
+        if isinstance(arg, str) and arg in param_names:
+            arg_idx = param_names.index(arg)
+        elif isinstance(arg, int):
+            arg_idx = arg
+        else:
+            assert False, f"{name}'s keys should be string or int"
+        arg_attrs[arg_idx][name] = builder.get_target_attribute(space_value)
+
+
 def _make_arg_attrs(op, builder):
     num_args = len(op.signature.parameters) if hasattr(op, "signature") else 0
     arg_attrs = [{} for _ in range(num_args)]
 
     _make_align_dim_attrs(op, builder, arg_attrs)
+    if op.core == core.CORE.CUBE:
+        _make_data_layout_attrs(op, builder, arg_attrs)
+        _make_address_space_attrs(op, builder, arg_attrs)
     return arg_attrs
 
 

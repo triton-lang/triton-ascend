@@ -27,9 +27,7 @@ RUN dnf install -y clang lld ccache cmake
 # Install setuptools + wheel for the target Python (not pre-installed in
 # minimal manylinux images). Source-independent: cacheable layer.
 # ---------------------------------------------------------------------------
-RUN export PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple \
-    && export PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local \
-    && export PIP_TIMEOUT=120 \
+RUN export PIP_TIMEOUT=120 \
     && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m ensurepip \
     && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install --upgrade pip \
     && /opt/python/${PYTHON_VERSION}-${PYTHON_VERSION}/bin/python3 -m pip install setuptools wheel cmake ninja pybind11

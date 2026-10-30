@@ -45,12 +45,6 @@ void ComputeBlockOptPass::runOnOperation() {
 
   OpPassManager pm(module.getOperationName());
 
-  /**
-      First, perform UnifyAllocBlock to merge load semantic operations into a
-     unified block. Then, use UBUsageOpt to find the smallest UB dependency
-     location and divide the computation blocks.
-   */
-  pm.addPass(createUnifyAllocBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createMergeVectorIfBlockPass());
@@ -114,7 +108,6 @@ void registerComputeBlockOptPasses() {
   });
   registerPass(createUBUsageOptPass);
   registerPass(createMergeSameSourceAxisPass);
-  registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
@@ -122,7 +115,6 @@ void registerComputeBlockOptPasses() {
   registerPass(createExpLoadPatternPass);
   registerPass(createSinkI1ProducersIntoUsersPass);
   registerPass(createBroadcastUBOptPass);
-  registerPass(createMoveLoadIntoUserPass);
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);

@@ -1116,3 +1116,34 @@ def test_multibuffer_dictionary_order_does_not_change_compiler_hash(compiler_mod
     assert reordered.hash() == options.hash()
     mode["ub"] = 8
     assert dict(options.multibuffer_mode)["ub"] == 2
+
+
+@pytest.mark.parametrize("requested,enabled", [({}, False), ({"enable_mmadl1_decomposition": False}, False),
+                                               ({"enable_mmadl1_decomposition": True}, True)])
+def test_mmadl1_decomposition_option_parsing(compiler_module, requested, enabled):
+    options = _parse_options(compiler_module, "Ascend910B4", requested)
+    assert options.enable_mmadl1_decomposition is enabled
+    assert options.__dict__["enable_mmadl1_decomposition"] is enabled
+
+
+def test_mmadl1_decomposition_changes_cache_key(compiler_module):
+    default = _parse_options(compiler_module, "Ascend910B4")
+    disabled = _parse_options(compiler_module, "Ascend910B4", {"enable_mmadl1_decomposition": False})
+    enabled = _parse_options(compiler_module, "Ascend910B4", {"enable_mmadl1_decomposition": True})
+    assert default.hash() == disabled.hash()
+    assert enabled.hash() != disabled.hash()
+
+
+@pytest.mark.parametrize("is_a5", [False, True])
+@pytest.mark.parametrize("requested,enabled", [({}, False), ({"enable_mmadl1_decomposition": False}, False),
+                                               ({"enable_mmadl1_decomposition": True}, True)])
+def test_mmadl1_decomposition_compiler_argument(compiler_module, monkeypatch, is_a5, requested, enabled):
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, is_a5, requested)
+    arguments = [arg for arg in command if arg.startswith("--enable-mmadl1-decomposition=")]
+    assert arguments == (["--enable-mmadl1-decomposition=true"] if enabled and not is_a5 else [])
+
+
+def test_mmadl1_decomposition_is_not_forwarded_to_regbase(compiler_module, monkeypatch):
+    monkeypatch.setattr(compiler_module, "_check_bishengir_is_regbased", lambda: True)
+    command = _capture_multibuffer_command(compiler_module, monkeypatch, False, {"enable_mmadl1_decomposition": True})
+    assert not any(arg.startswith("--enable-mmadl1-decomposition=") for arg in command)

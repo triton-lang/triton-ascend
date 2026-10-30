@@ -922,6 +922,11 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             f"--target={NPUUtils().get_arch()}",
         ]
 
+        # The L1-to-L0 decomposition currently supports only the membase path.
+        # Omit the flag by default for compatibility with older compilers.
+        if metadata.get("enable_mmadl1_decomposition", False) and not _check_bishengir_is_regbased():
+            _compile_option_list.append("--enable-mmadl1-decomposition=true")
+
         multibuffer_mode = metadata.get("multibuffer_mode")
         if multibuffer_mode is not None:
             mode_arg = "[" + ",".join(f"({level},{count})" for level, count in multibuffer_mode) + "]"
@@ -1228,6 +1233,8 @@ class NPUOptions:
     enable_hivm_auto_cv_balance: bool = None
     # Temporary 910_95 switch; the NPU compiler plans to make this default in Q4.
     enable_hivm_batch_matmul: bool = False
+    # Only takes effect on the A2/A3 membase compilation path.
+    enable_mmadl1_decomposition: bool = False
     # Only takes effect on the Ascend 950 non-pure-SIMT BiShengIR compilation path.
     enable_vf_stack_limit: bool = False
     sync_solver: bool = None

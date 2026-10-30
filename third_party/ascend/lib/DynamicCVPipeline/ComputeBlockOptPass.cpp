@@ -45,11 +45,12 @@ void ComputeBlockOptPass::runOnOperation() {
   OpPassManager pm(module.getOperationName());
 
   /**
-      First, perform UnifyAllocBlock to merge load semantic operations into a
-     unified block. Then, use UBUsageOpt to find the smallest UB dependency
-     location and divide the computation blocks.
+      Each packed load / custom-op unit is already one `scope::ScopeOp` with a
+      single block_id, so the former "unify the id of alloc + copy + to_tensor"
+      and "move the load into its user's block" passes have nothing left to do
+      and were removed. Start with the vector-if merge, then let UBUsageOpt
+      find the smallest UB dependency location and divide the compute blocks.
    */
-  pm.addPass(createUnifyAllocBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createMergeVectorIfBlockPass());
@@ -70,7 +71,6 @@ void ComputeBlockOptPass::runOnOperation() {
 
   pm.addPass(createFixpipeOptPass());
   pm.addPass(createReorderOpsByBlockIdPass());
-  pm.addPass(createMoveLoadIntoUserPass());
   pm.addPass(createUnifyStoreBlockPass());
   pm.addPass(createExpSubfPatternPass());
   pm.addPass(createReorderOpsByBlockIdPass());
@@ -111,7 +111,6 @@ void registerComputeBlockOptPasses() {
   });
   registerPass(createUBUsageOptPass);
   registerPass(createMergeSameSourceAxisPass);
-  registerPass(createUnifyAllocBlockPass);
   registerPass(createMergeVectorIfBlockPass);
   registerPass(createFixpipeOptPass);
   registerPass(createUnifyStoreBlockPass);
@@ -119,7 +118,6 @@ void registerComputeBlockOptPasses() {
   registerPass(createExpLoadPatternPass);
   registerPass(createSinkI1ProducersIntoUsersPass);
   registerPass(createBroadcastUBOptPass);
-  registerPass(createMoveLoadIntoUserPass);
   registerPass(createPosMaskPatternPass);
   registerPass(createMergeSmallBlockPass);
   registerPass(createSplitIfByBlockIdPass);

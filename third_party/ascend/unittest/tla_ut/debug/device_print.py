@@ -4,8 +4,8 @@ Semantics: copy GM->UB, print two UB slices outside the SIMD scope, then copy
 UB->GM inside it.  Each value emits one hivm.hir.debug op; buf[i0, i1, ...]
 element ranges lower to a 0-d memref subview so only that element is dumped.
 
-Validation (see device_print.py): calls inside a tla.scope and non-UB values
-(L1/GM) are rejected with RuntimeError.
+Validation (see device_print.py): calls inside a tla.scope and non-UB/GM
+values (L1/L0*) are rejected with RuntimeError.
 
 Stages (env TLA_TEST_STAGE, default all with auto-degrade):
   ir      : offline-compile, assert hivm.hir.debug at AST stage and unchanged
@@ -71,20 +71,6 @@ def _bad_l1():
     return k
 
 
-def _bad_gm():
-
-    @tla.jit
-    def k(A_ptr, M: tl.constexpr, N: tl.constexpr):
-        a_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
-        a_blk = tla.view(A_ptr, (M, N), strides=(N, 1))
-        tla.copy(a_blk, a_ub)
-        tla.device_print("x = ", a_blk[0, 0])  # GM value
-        with tla.scope.simd():
-            tla.copy(a_ub, a_blk)
-
-    return k
-
-
 def constexprs():
     s = SHAPE
     return {"M": s["M"], "N": s["N"]}
@@ -101,9 +87,9 @@ def test_ir(output_dir=None):
         assert forbidden not in text, forbidden
     assert text.count("hivm.hir.debug") == 2, "hivm.hir.debug survives lower unchanged"
     assert text.count("hivm.hir.load") == 1 and text.count("hivm.hir.store") == 1
-    # validation: inside-scope, L1, and GM prints must be rejected.  The
+    # validation: inside-scope and L1 prints must be rejected.  The
     # frontend raises RuntimeError which ast_to_ttir wraps in CompilationError.
-    for bad in (_bad_inside_scope, _bad_l1, _bad_gm):
+    for bad in (_bad_inside_scope, _bad_l1):
         try:
             compile_offline(bad(), SIGNATURE, constexprs())
         except (RuntimeError, CompilationError) as e:

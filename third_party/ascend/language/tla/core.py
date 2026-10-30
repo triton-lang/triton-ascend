@@ -63,6 +63,11 @@ def is_ub(value):
     return space_of(value) in (None, "ub")
 
 
+def is_gm(value):
+    """True for scalars or GM-backed values."""
+    return space_of(value) in (None, "gm")
+
+
 class buffer_type(tl.base_type):
 
     def __init__(self, shape, dtype, space="gm", strides=None, offset=0):

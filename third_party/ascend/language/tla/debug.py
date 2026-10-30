@@ -21,9 +21,9 @@
 
 ``device_print`` emits ``hivm.hir.debug`` directly instead of ``tt.print``
 (``tt.print`` only takes TT_Type operands and the pure-buffer interface set has
-no scalar-extraction op): a UB buffer/memref or a ``buf[i0, i1, ...]`` element
+no scalar-extraction op): a UB/GM buffer/memref or a ``buf[i0, i1, ...]`` element
 range (lowered to a 0-d subview) can be printed at the buffer stage.  Only
-allowed outside ``tla.scope`` and on UB-backed values.
+allowed outside ``tla.scope`` and on UB/GM-backed values.
 
 ``device_assert`` mirrors ``tl.device_assert``: emitted only under
 ``options.debug`` (else no-op).  The condition must be a scalar i1 — the
@@ -36,6 +36,7 @@ from triton.language.core import builtin
 
 from .core import buffer
 from .core import buffer_access
+from .core import is_gm
 from .core import is_ub
 from .core import space_of
 
@@ -60,30 +61,42 @@ def _in_scope(generator):
     return found[0]
 
 
+def _printable(value):
+    """True for UB/GM-backed buffers or scalars; L1/L0* are rejected."""
+    return is_ub(value) or is_gm(value)
+
+
+def _reject(space):
+    """L1/L0* cannot be printed directly by hardware; copy to UB/GM first."""
+    return RuntimeError(f"tla.device_print: only UB/GM values are supported, got {space} "
+                        "(L1/L0 cannot be printed directly; copy the value to UB or GM first)")
+
+
 def _print_arg(semantic, builder, arg):
     """Map a tla value to an ``hivm.hir.debug`` operand.
 
     ``buffer_access`` -> 0-d memref subview (only the addressed element),
-    UB ``buffer`` -> the memref itself, scalar -> tensor handle.  Non-UB
-    spaces (L1/GM) are rejected: the debug chain prints UB-backed values only.
+    UB/GM ``buffer`` -> the memref itself, scalar -> tensor handle.  L1/L0*
+    spaces are rejected: hardware cannot print them directly — copy to UB/GM
+    first.
     """
     if isinstance(arg, buffer_access):
         src = arg.buffer
-        if not is_ub(src):
-            raise RuntimeError(f"tla.device_print: only UB values are supported, got {space_of(src)}")
+        if not _printable(src):
+            raise _reject(space_of(src))
         offsets = [semantic.to_tensor(i).handle for i in arg.indices]
         rank = len(src.shape)
         return builder.create_tla_subview(src.handle, offsets, [1] * rank, [1] * rank)
     if isinstance(arg, buffer):
-        if not is_ub(arg):
-            raise RuntimeError(f"tla.device_print: only UB values are supported, got {space_of(arg)}")
+        if not _printable(arg):
+            raise _reject(space_of(arg))
         return arg.handle
     return semantic.to_tensor(arg).handle
 
 
 @builtin
 def device_print(prefix, *args, hex=False, _semantic=None, _generator=None):
-    """Print values on device; only outside ``tla.scope`` and on UB values.
+    """Print values on device; only outside ``tla.scope`` and on UB/GM values.
 
     Each value emits one ``hivm.hir.debug`` op; ``buf[i0, i1, ...]`` element
     ranges lower to a 0-d subview so only that element is dumped.

@@ -1565,6 +1565,36 @@ void init_ascend_ir(py::module &&m) {
            [](AscendNPUIROpBuilder &self, Value src, Value dst) {
              self.create<hivm::CopyOp>(mlir::TypeRange{}, src, dst);
            })
+      .def("create_memref_collapse_to_1d",
+           [](AscendNPUIROpBuilder &self, Value source) -> Value {
+             auto srcType = dyn_cast<MemRefType>(source.getType());
+             if (!srcType)
+               throw std::invalid_argument(
+                   "create_memref_collapse_to_1d expects a memref");
+             if (srcType.getRank() <= 1)
+               return source;
+             if (!srcType.getLayout().isIdentity())
+               throw std::invalid_argument(
+                   "create_memref_collapse_to_1d requires an identity layout");
+             int64_t numel = 1;
+             for (int64_t dim : srcType.getShape()) {
+               if (dim == ShapedType::kDynamic)
+                 throw std::invalid_argument(
+                     "create_memref_collapse_to_1d requires static dimensions");
+               numel *= dim;
+             }
+             auto flatType = MemRefType::get({numel}, srcType.getElementType(),
+                                             MemRefLayoutAttrInterface{},
+                                             srcType.getMemorySpace());
+             ReassociationIndices indices;
+             for (int64_t i = 0, e = srcType.getRank(); i < e; ++i)
+               indices.push_back(i);
+             return self.getBuilder()
+                 .create<memref::CollapseShapeOp>(
+                     source.getLoc(), flatType, source,
+                     SmallVector<ReassociationIndices>{indices})
+                 .getResult();
+           })
       .def("create_copy_tensor",
            [](AscendNPUIROpBuilder &self, Value src, Value dst) {
              return self

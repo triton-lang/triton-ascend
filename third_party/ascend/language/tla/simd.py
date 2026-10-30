@@ -55,6 +55,7 @@ from . import simd_semantic as ss
 __all__ = [
     "vlds",
     "vsts",
+    "vsts_stride",
     "vextf",
     "vintlv",
     "vdintlv",
@@ -259,6 +260,41 @@ def vsts(ptr, offsets_or_val, val=None, *, dist=None, mask=None, _semantic=None)
     _check_mask(mask, val_lanes)
     base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
     _semantic.builder.create_simd_vsts(base, indices, val.handle, mask.handle, dist)
+
+
+@builtin
+def vsts_stride(ptr, offsets_or_val, val=None, *, stride, mask=None, _semantic=None):
+    """
+    Vector-register masked store with a block stride
+    (``ave.hir.store_with_stride``).
+
+    The register is written as fixed-size vector blocks separated by
+    ``stride`` elements. For example, a 64-lane f32 register becomes eight
+    8-element blocks. This packs a row-major softmax row into the group-major
+    zN destination without a transpose library call. The destination memref
+    must currently be addressed with two indices.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+        val = offsets_or_val
+    elif val is None:
+        raise TypeError("vsts_stride needs a value: vsts_stride(buf[i, ...], val)")
+    else:
+        offsets = offsets_or_val
+    if not isinstance(ptr, buffer):
+        raise TypeError("vsts_stride expects a tla.buffer")
+    _require_vector(val, "val")
+    stride = _unwrap_if_constexpr(stride)
+    if type(stride) is not int or stride <= 0:
+        raise ValueError(f"vsts_stride stride must be a positive integer, got {stride!r}")
+    val_lanes = val.shape[0]
+    if mask is None:
+        mask = _all_mask(val_lanes, _semantic)
+    _check_mask(mask, val_lanes)
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    if len(indices) != 2:
+        raise ValueError("vsts_stride currently requires exactly two indices")
+    _semantic.builder.create_simd_vsts_stride(base, indices, stride, val.handle, mask.handle)
 
 
 @builtin

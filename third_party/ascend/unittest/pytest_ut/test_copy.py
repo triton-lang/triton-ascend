@@ -79,6 +79,12 @@ def copy(
     A_ub = bl.alloc(tl.float32, [M, N], al.ascend_address_space.UB)
     al.copy(add_ub, A_ub)
 
+    # UB copies are bytewise: reshaped contiguous destinations are valid.
+    A_l1_flat = bl.alloc(tl.float32, [M * N], al.ascend_address_space.L1)
+    al.copy_from_ub_to_l1(add_ub, A_l1_flat)
+    A_ub_flat = bl.alloc(tl.float32, [M * N], al.ascend_address_space.UB)
+    al.copy(add_ub, A_ub_flat)
+
 
 def test_copy():
     print("=" * 60)
@@ -91,6 +97,11 @@ def test_copy():
     )
     print(f"✅ Generated MLIR ({len(mlir)} chars):\n")
     print(mlir)
+    assert mlir.count("memref.collapse_shape") == 2, \
+        "mismatched-shape copies must flatten both operands"
+    assert mlir.count("hivm.hir.copy") == 4, \
+        "same-shape and flattened UB copies must all emit hivm.hir.copy"
+    print("COPY PASS: mismatched contiguous shapes accepted")
 
 
 # ============== Main for manual testing ==============

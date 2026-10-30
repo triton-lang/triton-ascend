@@ -71,6 +71,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'get_target_attribute',
         'create_get_sub_vec_id',
         'create_copy_buffer',
+        'create_memref_collapse_to_1d',
         'create_copy_tensor',
         'create_fixpipe',
         'create_annotation_mark',

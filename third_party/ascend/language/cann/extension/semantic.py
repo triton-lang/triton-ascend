@@ -26,6 +26,7 @@ __all__ = [
 ]
 
 import enum
+import math
 from typing import (TypeVar, List, Union)
 
 from triton._C.libtriton import ir
@@ -36,6 +37,34 @@ import triton.extension.buffer.language as bl
 from triton.backends.ascend.utils import is_register_based_arch
 
 T = TypeVar('T')
+
+
+def _is_contiguous_buffer(buf):
+    if not buf.strides:
+        return True
+    expected = 1
+    for dim, stride in zip(reversed(buf.shape), reversed(buf.strides)):
+        if dim != 1 and stride != expected:
+            return False
+        expected *= dim
+    return True
+
+
+def _same_contiguous_extent(src, dst):
+    """True when two buffers describe the same contiguous payload."""
+    return _is_contiguous_buffer(src) and _is_contiguous_buffer(dst) and \
+        math.prod(src.shape) == math.prod(dst.shape)
+
+
+def _copy_handles(src, dst, builder):
+    src_handle = src.handle
+    dst_handle = dst.handle
+    if src.shape != dst.shape:
+        if len(src.shape) > 1:
+            src_handle = builder.create_memref_collapse_to_1d(src_handle)
+        if len(dst.shape) > 1:
+            dst_handle = builder.create_memref_collapse_to_1d(dst_handle)
+    return src_handle, dst_handle
 
 
 def create_address_space(address_space: ascend_ir.AddressSpace,
@@ -104,8 +133,8 @@ def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, b
         raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
-    if src.shape != dst.shape:
-        raise TypeError("src and dst must have same shape")
+    if src.shape != dst.shape and not _same_contiguous_extent(src, dst):
+        raise TypeError("src and dst must have the same shape or contiguous extent")
     if src.dtype != dst.dtype:
         raise TypeError("src and dst need to have the same type")
     if isinstance(src, bl.buffer) and isinstance(dst, bl.buffer):
@@ -113,7 +142,8 @@ def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, b
             raise TypeError("src's AddressSpace must be UB")
         if dst.space != al.ascend_address_space.L1:
             raise TypeError("dst's AddressSpace must be L1")
-        _semantic.builder.create_copy_buffer(src.handle, dst.handle)
+        src_handle, dst_handle = _copy_handles(src, dst, _semantic.builder)
+        _semantic.builder.create_copy_buffer(src_handle, dst_handle)
     else:
         raise TypeError("src and dst must be tl.tensor or bl.buffer")
 
@@ -123,8 +153,8 @@ def copy(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _se
         raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
-    if src.shape != dst.shape:
-        raise TypeError("src and dst must have same shape")
+    if src.shape != dst.shape and not _same_contiguous_extent(src, dst):
+        raise TypeError("src and dst must have the same shape or contiguous extent")
     if src.dtype != dst.dtype:
         raise TypeError("src and dst need to have the same type")
     if isinstance(src, bl.buffer) and isinstance(dst, bl.buffer):
@@ -132,7 +162,8 @@ def copy(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _se
             raise TypeError("src's AddressSpace must be UB")
         if dst.space not in (al.ascend_address_space.L1, al.ascend_address_space.UB):
             raise TypeError("dst's AddressSpace must be UB or L1")
-        _semantic.builder.create_copy_buffer(src.handle, dst.handle)
+        src_handle, dst_handle = _copy_handles(src, dst, _semantic.builder)
+        _semantic.builder.create_copy_buffer(src_handle, dst_handle)
     else:
         raise TypeError("src and dst must be tl.tensor or bl.buffer")
 

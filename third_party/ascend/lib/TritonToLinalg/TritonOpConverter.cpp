@@ -3159,11 +3159,28 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     return success();
   }
 
+  RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());
   if (!lhsScale) {
-    return op.emitError("lhsScale is required for non-FP8 input");
+    if (lhsElemType != triton::ScaleDotElemType::FP16 ||
+        rhsElemType != triton::ScaleDotElemType::FP16 || lhsTy.getRank() != 2 ||
+        cast<RankedTensorType>(rhs.getType()).getRank() != 2)
+      return op.emitError("lhsScale is required for non-FP8 input");
+
+    // The E8M0 scale value 127 represents a multiplication factor of one.
+    // Keep a scale block for K smaller than the usual group of 32 elements.
+    auto defaultScaleTy = RankedTensorType::get(
+        {lhsTy.getDimSize(0), (lhsTy.getDimSize(1) + 31) / 32},
+        rewriter.getI8Type());
+    Value unitScale =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(127));
+    Value scaleEmpty = rewriter.create<tensor::EmptyOp>(
+        loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
+    lhsScale = rewriter
+                   .create<linalg::FillOp>(loc, ValueRange{unitScale},
+                                           ValueRange{scaleEmpty})
+                   .getResult(0);
   }
 
-  RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());
   RankedTensorType lhsScaleTy = cast<RankedTensorType>(lhsScale.getType());
   RankedTensorType rhsScaleTy =
       rhsScale ? cast<RankedTensorType>(rhsScale.getType()) : nullptr;

@@ -773,10 +773,12 @@ static void accumulateReductionWorkload(Operation *operation,
       axisStride *= input.getShape()[axisIndex];
     const auto reverse = operation->getAttrOfType<mlir::BoolAttr>("reverse");
     if (independentSequences > 0)
-      work.prefixScanCounts[{extent, independentSequences, axisStride,
-                             static_cast<int64_t>(operation->getNumResults()),
-                             reverse && reverse.getValue(),
-                             classifyScanCombine(operation)}] += 1.0;
+      work.prefixScanCounts[{
+          extent, independentSequences, axisStride,
+          static_cast<int64_t>(operation->getNumResults()),
+          reverse && reverse.getValue(), classifyScanCombine(operation),
+          typeToString(input.getElementType()), input.getRank(), dimension,
+          getScalarBitWidth(input.getElementType())}] += 1.0;
     return;
   }
   const int64_t independentRows = input.getNumElements() / extent;

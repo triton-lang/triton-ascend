@@ -467,7 +467,8 @@ def _auto_simt_asset_hash(path: str, default_name: str) -> str:
     except (TypeError, ValueError, UnicodeError):
         profile = {}
     for key, label in [("microbenchmark_profile", b"shared-microbenchmark"),
-                       ("indirect_memory_profile", b"indirect-memory"), ("reduction_profile", b"reduction-profile")]:
+                       ("indirect_memory_profile", b"indirect-memory"), ("reduction_profile", b"reduction-profile"),
+                       ("prefixscan_profile", b"prefixscan-profile")]:
         reference = profile.get(key) if isinstance(profile, dict) else None
         if reference is None:
             continue

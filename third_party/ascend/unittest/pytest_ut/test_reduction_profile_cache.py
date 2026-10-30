@@ -13,7 +13,7 @@ def test_reduction_profile_changes_in_one_process(tmp_path):
     source = profiles / "simd_simt" / "ascend_950pr_simd_simt_v1.json"
     selection = json.loads(source.read_text())
     reduction = json.loads((source.parent / selection["reduction_profile"]).read_text())
-    for key in ("microbenchmark_profile", "indirect_memory_profile"):
+    for key in ("microbenchmark_profile", "indirect_memory_profile", "prefixscan_profile"):
         if key in selection:
             selection[key] = str((source.parent / selection[key]).resolve())
     dependency = tmp_path / "reduction.json"

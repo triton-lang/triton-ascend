@@ -2,7 +2,7 @@
   "reduction_profile": "../reduction/david_v100_reduction_v1.json",
   "$schema": "./simd_simt_profile_schema.json",
   "schema_version": 19,
-  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency",
+  "profile_version": "ascend-950pr-simd-simt-20261027-v152-indirect-memory-loop-dependency-prefixscan-v1",
   "simt_indirect_store_model": "prefix_mask_rank_factor_20261017",
   "simd_indirect_store_model": "simd_mask_envelope_20261019",
   "simt_indirect_load_model": "prefix_mask_rank_factor_20261017",
@@ -10,6 +10,7 @@
   "indirect_memory_profile": "../indirect_memory/ascend_950pr_v1.json",
   "target": "Ascend950PR/dav-c310",
   "description": "Generic Stage Route Model hardware profile. Every kernel is derived from transformed TTIR resource workloads; absolute time adds measured kernel-boundary and global-load completion envelopes selected only by structural route facts. No operator identity, exact function DAG signature, shape whitelist, or kernel-specific elapsed intercept participates in scoring or prediction. SIMD f16 MMAD resource work uses the qualified Cube/TinyCube MAC/MTE1 formula within its calibrated domain.",
+  "prefixscan_profile": "../prefixscan/ascend_950pr_prefixscan_v1.json",
   "microbenchmark_profile": "../microbench/ascend_950pr_v1.json",
   "compatible_targets": [
     "Ascend950PR_*",

@@ -7,6 +7,10 @@ on:
   pull_request:
     paths:
       - .github/workflows/wheels.yml
+      - cmake/triton-distributed-info.json
+      - cmake/npuir-info.json
+      - .github/workflows/build/fetch-npuir-stable.sh
+      - third_party/ascend/build/setup_patch.py
       - .github/workflows/build/wheels.Dockerfile
       - setup.py
       - pyproject.toml
@@ -24,7 +28,25 @@ permissions: read-all
 
 jobs:
 
+  deps:
+    runs-on: ubuntu-latest
+    outputs:
+      branch: ${{ steps.refs.outputs.branch }}
+    steps:
+      - name: Select wheel source ref
+        id: refs
+        shell: bash
+        run: |
+          ref=main
+          case "${GITHUB_EVENT_NAME:-}" in
+            push|workflow_dispatch) ref="${GITHUB_REF_NAME:-main}" ;;
+          esac
+          branch=$(jq -cn --arg ref "$ref" '[{ref: $ref, tag: ($ref | gsub("/"; "-")),
+            local: (if $ref | startswith("release/") then "release" else "dev" end), npuir: "OFF"}]')
+          echo "branch=${branch}" >> "$GITHUB_OUTPUT"
+
   Build-Wheels:
+    needs: deps
     name: Build wheels for ${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}
     runs-on: ${{ matrix.config.runs_on }}
     container:
@@ -46,15 +68,8 @@ jobs:
         - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
         - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
-        branch:
-        # npuir: OFF uses the prebuilt payload from npuir-build.yml, which
-        # tracks the AscendNPU-IR stable branch and is branch-independent (all
-        # matrix branches share the same payload); ON (only as the fallback
-        # when no artifact is available) builds the payload in-image via
-        # build_npuir.py, also from stable.
-        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
-        # - {ref: 'main-dev', tag: 'main-dev', local: 'dev', npuir: 'OFF'}
-        # - {ref: 'release/3.2.2', tag: 'release-3.2.2', local: 'release', npuir: 'OFF'}
+        # NPU-IR still tracks its configured watch branch; this is not a release lock.
+        branch: ${{ fromJSON(needs.deps.outputs.branch) }}
 
     permissions:
       id-token: write
@@ -84,7 +99,12 @@ jobs:
         with:
           # PR: checkout the PR head, not the matrix.branch ref (main).
           # push/workflow_dispatch/schedule: use the matrix branch ref.
-          ref: ${{ github.event_name != 'pull_request' && matrix.branch.ref || '' }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || matrix.branch.ref }}
+
+      - name: Prepare Python for source metadata
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
 
       - name: Restore npuir payload from local cache
         id: npuir-cache
@@ -98,16 +118,7 @@ jobs:
           # when the upstream source actually moves, and is shared across all
           # matrix branches (the payload no longer depends on the triton-ascend
           # branch). Cached on the shared-volume PVC (/root/.cache).
-          NPUIR_SHA=""
-          for attempt in 1 2 3; do
-            NPUIR_SHA=$(git ls-remote https://gitcode.com/Ascend/AscendNPU-IR.git refs/heads/stable | awk '{print $1}') && [ -n "$NPUIR_SHA" ] && break || true
-            echo "ls-remote attempt ${attempt}/3 failed; retrying in 10s..."
-            sleep 10
-          done
-          if [ -z "$NPUIR_SHA" ]; then
-            echo "::error::cannot resolve AscendNPU-IR stable HEAD from gitcode"
-            exit 1
-          fi
+          NPUIR_SHA=$(bash .github/workflows/build/fetch-npuir-stable.sh --resolve-only)
           echo "AscendNPU-IR stable HEAD: ${NPUIR_SHA}"
           echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
           CACHE_DIR="/root/.cache/npuir-payload/${NPUIR_SHA}-${{ matrix.config.arch }}"
@@ -130,8 +141,7 @@ jobs:
             echo "npuir payload cache hit: ${CACHE_DIR}"
             rm -rf .npuir-payload
             mkdir -p .npuir-payload
-            cp -a "${CACHE_DIR}/bin" .npuir-payload/
-            cp -a "${CACHE_DIR}/lib" .npuir-payload/
+            cp -a "${CACHE_DIR}"/{bin,lib} .npuir-payload/
             chmod -R a+x .npuir-payload/bin
             echo "cache_hit=true" >> "$GITHUB_OUTPUT"
           else
@@ -198,45 +208,33 @@ jobs:
             exit 0
           fi
           PAYLOAD_DIR=$(dirname "$(dirname "${BIN}")")
+          WANT_SHA="${{ steps.npuir-cache.outputs.npuir_sha }}"
+          HAVE_SHA=$(cat "${PAYLOAD_DIR}/npuir-sha.txt" 2>/dev/null || true)
+          if [ -z "${WANT_SHA}" ] || [ "${HAVE_SHA}" != "${WANT_SHA}" ]; then
+            echo "Payload source '${HAVE_SHA:-<unknown>}' does not match ${WANT_SHA}; building from configured sources."
+            echo "build_npuir=ON" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           echo "Using npuir-build payload at ${PAYLOAD_DIR}"
           rm -rf .npuir-payload
           mkdir -p .npuir-payload
-          cp -a "${PAYLOAD_DIR}/bin" .npuir-payload/
-          cp -a "${PAYLOAD_DIR}/lib" .npuir-payload/
+          cp -a "${PAYLOAD_DIR}"/{bin,lib} .npuir-payload/
           # GitHub artifact zips carry no unix permission bits (upload-artifact
           # zips without setUnixMode) and action-download-artifact extracts
           # via adm-zip as 0644, so restore the exec bit explicitly.
           chmod -R a+x .npuir-payload/bin
-          # Seed the PVC cache only when the payload self-identifies as built
-          # from exactly the stable HEAD we keyed on (npuir-build.yml writes
-          # npuir-sha.txt into the artifact). A stale payload — e.g. the old
-          # pin-built one from main while this PR's npuir-build is still
-          # running — is still used for this wheel, but must NOT be cached
-          # under the stable-HEAD key: a poisoned entry would mask the real
-          # payload on every later run until stable moves again.
-          WANT_SHA="${{ steps.npuir-cache.outputs.npuir_sha }}"
-          HAVE_SHA=$(cat "${PAYLOAD_DIR}/npuir-sha.txt" 2>/dev/null || true)
-          if [ "${HAVE_SHA}" != "${WANT_SHA}" ]; then
-            echo "WARNING: payload built from npuir '${HAVE_SHA:-<unknown, legacy artifact>}' but stable HEAD is ${WANT_SHA}; using it without caching"
-          else
-            # Seed the shared-volume PVC cache atomically (write a per-process
-            # temp dir, then mv) so the next run skips the slow download and the
-            # concurrent same-arch jobs (same key, identical content) never
-            # clobber each other's temp or expose a half-written dir.
-            CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
-            TMP_DIR="${CACHE_DIR}.tmp.$$"
-            rm -rf "${TMP_DIR}"
-            mkdir -p "${TMP_DIR}"
-            cp -a .npuir-payload/bin "${TMP_DIR}/"
-            cp -a .npuir-payload/lib "${TMP_DIR}/"
-            # Mark the entry with its source SHA (HAVE == WANT inside this
-            # branch) so the restore step can validate it on later runs.
-            cp "${PAYLOAD_DIR}/npuir-sha.txt" "${TMP_DIR}/npuir-sha.txt"
-            chmod -R a+x "${TMP_DIR}/bin"
-            rm -rf "${CACHE_DIR}"
-            mv "${TMP_DIR}" "${CACHE_DIR}"
-            echo "Saved npuir payload to local cache ${CACHE_DIR}"
-          fi
+          # Stage complete contents before replacing the old cache entry.
+          # Readers validate its SHA and may miss during the replacement.
+          CACHE_DIR="${{ steps.npuir-cache.outputs.cache_dir }}"
+          TMP_DIR="${CACHE_DIR}.tmp.$$"
+          rm -rf "${TMP_DIR}"
+          mkdir -p "${TMP_DIR}"
+          cp -a .npuir-payload/{bin,lib} "${TMP_DIR}/"
+          # Record the verified source SHA for later cache readers.
+          cp "${PAYLOAD_DIR}/npuir-sha.txt" "${TMP_DIR}/npuir-sha.txt"
+          rm -rf "${CACHE_DIR}"
+          mv "${TMP_DIR}" "${CACHE_DIR}"
+          echo "Saved npuir payload to local cache ${CACHE_DIR}"
           ls -la .npuir-payload/bin
           echo "build_npuir=OFF" >> "$GITHUB_OUTPUT"
 
@@ -290,7 +288,7 @@ jobs:
   # The job reports status only; Build-Wheels uploads to OBS independently.
   Test-Wheels:
     name: Test wheels on NPU (${{ matrix.config.chip_type }})
-    needs: Build-Wheels
+    needs: [deps, Build-Wheels]
     runs-on: ${{ matrix.config.runs_on }}
     container:
       # Same image as integration-tests-ascend.yml (proven to pull on these
@@ -313,7 +311,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
         with:
-          ref: ${{ github.event_name != 'pull_request' && 'main' || '' }}
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || fromJSON(needs.deps.outputs.branch)[0].ref }}
           submodules: "true"
 
       - name: Add git safe directory
@@ -324,7 +322,7 @@ jobs:
         uses: actions/download-artifact@v4
         continue-on-error: true
         with:
-          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.config.python }}-main-wheels-upload
+          name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.config.python }}-${{ fromJSON(needs.deps.outputs.branch)[0].tag }}-wheels-upload
           path: wheelhouse
 
       - name: Test wheel on NPU
@@ -376,7 +374,7 @@ jobs:
   # publishes its own artifact.
   Publish-Wheels:
     name: Publish wheels (${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }})
-    needs: [Build-Wheels, Test-Wheels]
+    needs: [deps, Build-Wheels, Test-Wheels]
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.config.runs_on }}
     container:
@@ -391,8 +389,7 @@ jobs:
         - {runs_on: 'linux-amd64-cpu-4', arch: 'x86_64'}
         - {runs_on: 'linux-aarch64-cpu-4', arch: 'aarch64'}
         python: ["cp310", "cp311", "cp312", "cp313"]
-        branch:
-        - {ref: 'main', tag: 'main', local: 'dev', npuir: 'OFF'}
+        branch: ${{ fromJSON(needs.deps.outputs.branch) }}
     steps:
       - name: Download built wheel
         id: download

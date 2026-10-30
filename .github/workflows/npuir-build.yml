@@ -13,8 +13,10 @@ on:
     paths:
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/fetch-npuir-stable.sh
+      - cmake/npuir-info.json
   pull_request:
     paths:
+      - cmake/npuir-info.json
       - .github/workflows/npuir-build.yml
       - .github/workflows/build/fetch-npuir-stable.sh
 

@@ -15,19 +15,24 @@
 #   --skip-nested skip the nested third-party/* submodules (the caller
 #                 initializes them itself, e.g. build_npuir.py which has
 #                 its own retry handling)
+#   --resolve-only print the configured watch branch SHA without modifying sources
 #
 # All logs go to stderr; the resolved stable SHA is printed on stdout as the
 # last line so callers can capture it for cache keys:
 #   NPUIR_SHA=$(bash fetch-npuir-stable.sh)
 set -eu -o pipefail
 
-URL="${NPUIR_REPO_URL:-https://gitcode.com/Ascend/AscendNPU-IR.git}"
-BRANCH="${NPUIR_REPO_BRANCH:-stable}"
+SOURCE_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)
+METADATA_PYTHON="${NPUIR_PYTHON:-python3}"
+URL="${NPUIR_REPO_URL:-$("$METADATA_PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["repository"])' "$SOURCE_ROOT/cmake/npuir-info.json")}"
+BRANCH="${NPUIR_REPO_BRANCH:-$("$METADATA_PYTHON" -c 'import json, sys; print(json.load(open(sys.argv[1]))["branch"])' "$SOURCE_ROOT/cmake/npuir-info.json")}"
 DEST="third_party/ascend/AscendNPU-IR"
 WITH_NESTED=1
+RESOLVE_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --skip-nested) WITH_NESTED=0 ;;
+    --resolve-only) RESOLVE_ONLY=1 ;;
     *) DEST="$arg" ;;
   esac
 done
@@ -68,6 +73,10 @@ if [ -z "$SHA" ]; then
   exit 1
 fi
 log "${BRANCH} HEAD: ${SHA}"
+if [ "$RESOLVE_ONLY" -eq 1 ]; then
+  printf '%s\n' "$SHA"
+  exit 0
+fi
 
 NEED_FETCH=1
 if [ -d "${DEST}/.git" ]; then

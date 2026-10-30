@@ -353,18 +353,28 @@ def _ensure_npuir_sources():
 
 
 def _ensure_distributed_submodule():
+    import json
+    import re
+
     if os.getenv("TRITON_BUILD_TD", "OFF").upper() not in ["ON", "1", "YES", "TRUE", "Y"]:
         return
     distributed_dir = _REPO_ROOT / "third_party" / "ascend" / "Triton-distributed-ascend"
-    commit_id = "82b8c919bc4f82e733e15ded7ea259aa089c9e6a"
+    with open(_REPO_ROOT / "cmake" / "triton-distributed-info.json", encoding="utf-8") as metadata:
+        info = json.load(metadata)
+    commit_id = info["revision"]
+    if (not isinstance(info["repository"], str)
+            or re.fullmatch(r"https://[^/\s]+/[A-Za-z0-9_./-]+\.git", info["repository"]) is None):
+        raise ValueError("Triton-Distributed requires an HTTPS repository URL")
+    if not isinstance(commit_id, str) or re.fullmatch(r"[0-9a-f]{40}", commit_id) is None:
+        raise ValueError("Triton-Distributed revision must be a full commit SHA")
     if not distributed_dir.is_dir():
         try:
             _git_check_call_with_retry([
                 "git",
                 "clone",
-                "https://gitcode.com/Ascend/Triton-distributed-ascend.git",
-                "-b",
-                "master",
+                "--no-checkout",
+                info["repository"],
+                str(distributed_dir),
             ], cwd=_REPO_ROOT / "third_party" / "ascend")
         except Exception:
             # A clone interrupted by a network failure leaves a partially
@@ -372,27 +382,13 @@ def _ensure_distributed_submodule():
             if distributed_dir.is_dir():
                 shutil.rmtree(distributed_dir, ignore_errors=True)
             raise
-    if _is_git_repo():
-        _add_git_safe_dir(str(distributed_dir))
-        _git_check_call_with_retry([
-            "git",
-            "fetch",
-            "origin",
-        ], cwd=distributed_dir)
-        subprocess.check_call([
-            "git",
-            "checkout",
-            commit_id,
-        ], cwd=distributed_dir)
-
-        result = subprocess.run([
-            "git",
-            "rev-parse",
-            "HEAD",
-        ], capture_output=True, text=True, cwd=distributed_dir)
-        current_id = result.stdout.strip()
-        if current_id != commit_id:
-            raise RuntimeError(f"Triton-Distributed submodule is not {commit_id}")
+    _add_git_safe_dir(str(distributed_dir))
+    _git_check_call_with_retry(["git", "fetch", "origin", commit_id], cwd=distributed_dir)
+    subprocess.check_call(["git", "checkout", commit_id], cwd=distributed_dir)
+    result = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True,
+                            cwd=distributed_dir)
+    if result.stdout.strip() != commit_id:
+        raise RuntimeError(f"Triton-Distributed checkout is not {commit_id}")
 
 
 def _copy_ascend_tools(extdir, cmake_dir):

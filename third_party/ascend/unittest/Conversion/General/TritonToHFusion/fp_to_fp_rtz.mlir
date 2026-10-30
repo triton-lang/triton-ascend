@@ -3,10 +3,28 @@
 // CHECK-LABEL: tt.func @test_fp32_to_fp16_rtz
 tt.func @test_fp32_to_fp16_rtz(%arg0: tensor<1024xf32>) -> tensor<1024xf16> {
   // CHECK: %[[EMPTY:.*]] = tensor.empty() : tensor<1024xf16>
-  // CHECK: %[[RESULT:.*]] = hfusion.cast {mode = #hfusion.round_mode<trunc>} ins(%arg0 : tensor<1024xf32>) outs(%[[EMPTY]] : tensor<1024xf16>) -> tensor<1024xf16>
+  // CHECK: %[[RESULT:.*]] = hfusion.cast {round_mode = #hfusion.round_mode<trunc>} ins(%arg0 : tensor<1024xf32>) outs(%[[EMPTY]] : tensor<1024xf16>) -> tensor<1024xf16>
   %0 = tt.fp_to_fp %arg0, rounding = rtz : tensor<1024xf32> -> tensor<1024xf16>
   // CHECK: return %[[RESULT]]
   tt.return %0 : tensor<1024xf16>
+}
+
+// CHECK-LABEL: tt.func @test_fp32_to_bf16_rtz
+tt.func @test_fp32_to_bf16_rtz(%arg0: tensor<1024xf32>) -> tensor<1024xbf16> {
+  // CHECK: %[[EMPTY:.*]] = tensor.empty() : tensor<1024xbf16>
+  // CHECK: %[[RESULT:.*]] = hfusion.cast {round_mode = #hfusion.round_mode<trunc>} ins(%arg0 : tensor<1024xf32>) outs(%[[EMPTY]] : tensor<1024xbf16>) -> tensor<1024xbf16>
+  %0 = tt.fp_to_fp %arg0, rounding = rtz : tensor<1024xf32> -> tensor<1024xbf16>
+  // CHECK: return %[[RESULT]]
+  tt.return %0 : tensor<1024xbf16>
+}
+
+// CHECK-LABEL: tt.func @test_fp32_to_fp8_rtz
+tt.func @test_fp32_to_fp8_rtz(%arg0: tensor<1024xf32>) -> tensor<1024xf8E5M2> {
+  // CHECK: %[[EMPTY:.*]] = tensor.empty() : tensor<1024xf8E5M2>
+  // CHECK: %[[RESULT:.*]] = hfusion.cast {round_mode = #hfusion.round_mode<trunc>} ins(%arg0 : tensor<1024xf32>) outs(%[[EMPTY]] : tensor<1024xf8E5M2>) -> tensor<1024xf8E5M2>
+  %0 = tt.fp_to_fp %arg0, rounding = rtz : tensor<1024xf32> -> tensor<1024xf8E5M2>
+  // CHECK: return %[[RESULT]]
+  tt.return %0 : tensor<1024xf8E5M2>
 }
 
 

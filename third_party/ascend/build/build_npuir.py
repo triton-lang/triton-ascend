@@ -104,14 +104,22 @@ def _init_npuir_repo():
         "third_party/ascend/AscendNPU-IR",
     ], cwd=_REPO_ROOT)
 
-    # Then recursively initialize its nested submodules (LLVM, Torch-MLIR).
+    # Then initialize the nested submodules recorded by the pinned revision
+    # (third-party/llvm-project, torch-mlir, shmem) — single level, depth-1,
+    # mirroring what the wheel CI fetches (fetch-npuir-stable.sh). NOT
+    # --recursive: the torch-mlir fork's own .gitmodules points at github.com
+    # (externals/llvm-project — the full upstream LLVM monorepo — and
+    # stablehlo), which recursive init would try to clone with no depth
+    # limit; build-tools/build.sh consumes third-party/* directly and never
+    # uses those externals (the CI payload builds prove it daily).
     if _is_submodule_initialized(_NPUIR_DIR):
         _run_with_retry([
             "git",
             "submodule",
             "update",
             "--init",
-            "--recursive",
+            "--depth",
+            "1",
         ], cwd=_NPUIR_DIR)
     else:
         raise RuntimeError(f"AscendNPU-IR submodule initialization failed: {_NPUIR_DIR} is not git repository.")

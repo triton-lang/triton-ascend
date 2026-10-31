@@ -101,6 +101,33 @@ public:
 };
 
 /*
+ * Rewrite tt.ptr_to_int(arith.select(c, a, b)) on tensor-of-pointer values
+ * into arith.select(c, tt.ptr_to_int(a), tt.ptr_to_int(b)).
+ */
+class PtrToIntSelectCanonicalizer
+    : public OpRewritePattern<triton::PtrToIntOp> {
+public:
+  using OpRewritePattern<triton::PtrToIntOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(triton::PtrToIntOp op,
+                                PatternRewriter &rewriter) const override;
+};
+
+/*
+ * Fold tt.ptr_to_int(tt.int_to_ptr(x)) back to x.  Both casts are
+ * bit-identity elementwise operations on i64, so an integer tensor promoted
+ * to a pointer tensor and immediately read back carries the original value
+ * unchanged.  Only the tensor variant is folded; the scalar variant is left
+ * to the dedicated scalar-pointer converters of the memory conversion stage.
+ */
+class PtrToIntIntToPtrCanonicalizer
+    : public OpRewritePattern<triton::PtrToIntOp> {
+public:
+  using OpRewritePattern<triton::PtrToIntOp>::OpRewritePattern;
+  LogicalResult matchAndRewrite(triton::PtrToIntOp op,
+                                PatternRewriter &rewriter) const override;
+};
+
+/*
  * Move tt.bitcast to a previous location if tt.bitcast is not directly applied
  * on function arguments
  */

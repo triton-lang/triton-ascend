@@ -709,6 +709,47 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
   return success();
 }
 
+LogicalResult
+PtrToIntSelectCanonicalizer::matchAndRewrite(triton::PtrToIntOp op,
+                                             PatternRewriter &rewriter) const {
+  auto select = op.getSrc().getDefiningOp<arith::SelectOp>();
+  if (!select)
+    return rewriter.notifyMatchFailure(op, "source is not an arith.select");
+
+  // Only the elementwise tensor variant is folded here.  Scalar pointer
+  // selects are handled by PointerSelectConverter during the memory conversion
+  // stage.
+  auto selectType = dyn_cast<RankedTensorType>(select.getType());
+  if (!selectType || !isa<triton::PointerType>(selectType.getElementType()))
+    return rewriter.notifyMatchFailure(
+        op, "only tensor-of-pointer selects are folded");
+
+  auto trueAddress = rewriter.create<triton::PtrToIntOp>(
+      op.getLoc(), op.getType(), select.getTrueValue());
+  auto falseAddress = rewriter.create<triton::PtrToIntOp>(
+      op.getLoc(), op.getType(), select.getFalseValue());
+  auto selectedAddress = rewriter.create<arith::SelectOp>(
+      op.getLoc(), op.getType(), select.getCondition(), trueAddress,
+      falseAddress);
+  rewriter.replaceOp(op, selectedAddress.getResult());
+  return success();
+}
+
+LogicalResult PtrToIntIntToPtrCanonicalizer::matchAndRewrite(
+    triton::PtrToIntOp op, PatternRewriter &rewriter) const {
+  auto intToPtr = op.getSrc().getDefiningOp<triton::IntToPtrOp>();
+  if (!intToPtr || !isa<RankedTensorType>(op.getType()))
+    return rewriter.notifyMatchFailure(
+        op, "only elementwise tensor ptr_to_int(int_to_ptr) chains fold");
+
+  Value src = intToPtr.getSrc();
+  if (src.getType() != op.getType())
+    return rewriter.notifyMatchFailure(op, "address types do not round-trip");
+
+  rewriter.replaceOp(op, src);
+  return success();
+}
+
 /*
  * Move tt.bitcast to a previous location if tt.bitcast is not directly
  * applied on function arguments

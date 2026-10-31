@@ -1322,13 +1322,13 @@ ClampFConverter::matchAndRewrite(triton::ClampFOp op, OpAdaptor adaptor,
   }
 
   if (propagateNan_para == PropagateNan::NONE) {
-    auto minOp = rewriter.create<arith::MinNumFOp>(loc, input, max_para);
-    auto maxOp = rewriter.create<arith::MaxNumFOp>(loc, min_para, minOp);
-    rewriter.replaceOp(op, ValueRange{maxOp});
+    auto maxOp = rewriter.create<arith::MaxNumFOp>(loc, input, min_para);
+    auto minOp = rewriter.create<arith::MinNumFOp>(loc, maxOp, max_para);
+    rewriter.replaceOp(op, ValueRange{minOp});
   } else if (propagateNan_para == PropagateNan::ALL) {
-    auto minOp = rewriter.create<arith::MinimumFOp>(loc, input, max_para);
-    auto maxOp = rewriter.create<arith::MaximumFOp>(loc, min_para, minOp);
-    rewriter.replaceOp(op, ValueRange{maxOp});
+    auto maxOp = rewriter.create<arith::MaximumFOp>(loc, input, min_para);
+    auto minOp = rewriter.create<arith::MinimumFOp>(loc, maxOp, max_para);
+    rewriter.replaceOp(op, ValueRange{minOp});
   } else {
     return failure();
   }

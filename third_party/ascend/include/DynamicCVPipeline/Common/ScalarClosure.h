@@ -44,31 +44,30 @@ public:
   /// Collects the closure of `ops` into `scalarOps`.
   void collect();
 
-  /// Returns the collected scalar ops in dominance order. Ops may live in
-  /// either the current block or its parent block; they are ordered by their
-  /// ancestor in the lowest common ancestor block first, then by their position
-  /// in their own block. The internal SetVector is rewritten so that repeated
-  /// calls keep a stable, sorted backing store.
+  /// Returns the collected scalar ops in insertion order. Collecting does not
+  /// define an order: callers that need dominance order must call
+  /// `sortByDomOrder` (`IROrder.h`) on their own copy, which keeps the ordering
+  /// requirement visible at the call site.
+  llvm::ArrayRef<Operation *> getScalars() const;
+
+  /// Comparator for dominance order: true when `a` strictly precedes `b`.
+  /// Forwards to `isBeforeInIr` (`IROrder.h`); the precondition is that both
+  /// ops are not in sibling regions of one multi-region op, NOT that they are
+  /// members of `scalarOps`.
   ///
   /// PRECONDITION: ops must not be spread over different regions of the same
-  /// multi-region op (e.g. the then/else regions of one `scf.if`).
+  /// multi-region op (e.g. the then/else regions of one `scf.if`);
   /// `ScalarClosure` guarantees this by construction (it collects only from
-  /// `block`/ `parentBlock`); external callers feeding arbitrary op sets are
-  /// responsible for upholding it. No runtime check is performed.
-  llvm::ArrayRef<Operation *> getScalarOps();
-
-  /// Comparator for dominance order: true when `a` strictly precedes `b`. Used
-  /// as the `llvm::sort` predicate in `getScalarOps`; both operations must be
-  /// in `scalarOps`.
-  ///
-  /// PRECONDITION: same as `getScalarOps`. If a caller violates it, a
-  /// sibling-region pair is reported as `false` in both orders, i.e. `false` is
-  /// overloaded and means either "`b` precedes `a`" or "unordered".
+  /// `block` / `parentBlock`). If a caller violates it, a sibling-region pair
+  /// is reported as `false` in both orders, i.e. `false` is overloaded and
+  /// means either "`b` precedes `a`" or "unordered".
   bool isBefore(Operation *a, Operation *b);
 
   /// Clones every collected op that is not already inside `ops` into the block
   /// of `ops`, tags each clone with `blockId`, and returns the clones plus the
   /// original -> clone mapping. Ops already in `ops` are left in place.
+  /// Clones are emitted in dominance order, so each clone reads earlier clones
+  /// instead of originals placed after the insertion point.
   std::pair<SmallVector<Operation *>, IRMapping> capture(int blockId);
 
 private:

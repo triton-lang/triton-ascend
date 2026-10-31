@@ -47,13 +47,50 @@ def _logical_shape(shape):
 @builtin
 def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
          _semantic=None):
-    """Multiply L1 buffers into L0C, optionally clearing the accumulator first.
+    """Multiplies L1 matrices into L0C using ``hivm.hir.mmadL1``.
 
-    ``unit_flag_ctrl`` and ``unit_flag_group_id`` pass through to HIVM's
-    UnitFlag interface. None leaves each attribute unset; modes 0/2/3 mean
-    disabled, enabled without update, and enabled with update respectively.
-    To test manual modes without backend automatic UnitFlag inference
-    rewriting them, launch with ``unit_flag=False``.
+    Computes ``acc = a @ b`` when ``clear_accum=True`` and adds the product to
+    the existing accumulator otherwise.
+
+    :param a: L1 left operand with logical shape ``(M, K)``.
+    :type a: tla.buffer
+    :param b: L1 right operand with logical shape ``(K, N)`` and the same
+        element type as ``a``.
+    :type b: tla.buffer
+    :param acc: L0C accumulator with logical shape ``(M, N)``. Its element type
+        must be a backend-supported accumulator type for ``a`` and ``b``.
+    :type acc: tla.buffer
+    :param transpose_b: Compile-time native B-transpose flag. Defaults to
+        ``False``. It is forwarded to the backend and does not swap ``b.shape``
+        in the frontend's logical-shape validation.
+    :type transpose_b: bool
+    :param clear_accum: Whether to initialize the accumulator before this
+        multiplication. Defaults to ``False``; in that case ``acc`` must
+        already contain valid values.
+    :type clear_accum: bool
+    :param unit_flag_ctrl: Compile-time UnitFlag mode, or ``None`` to leave
+        the attribute unset (default). ``DISABLED`` (0),
+        ``ENABLED_WITHOUT_UPDATE`` (2) and ``ENABLED_WITH_UPDATE`` (3) select
+        explicit modes. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Keyword-only compile-time signed 64-bit group
+        ID, or ``None`` to leave it unset. Match the related Fixpipe protocol;
+        valid hardware IDs are backend-dependent.
+    :type unit_flag_group_id: int or None
+    :return: None. The result is stored in ``acc``.
+    :rtype: None
+
+    .. note::
+        Use inside ``tla.scope.cube()``. Each operand may independently use
+        a logical 2-D shape or a physical 4-D NZ shape. A 4-D buffer has logical
+        shape ``(shape[1] * shape[2], shape[0] * shape[3])``. These dimensions
+        must satisfy ``a=(M,K)``, ``b=(K,N)``, ``acc=(M,N)`` even when
+        ``transpose_b=True``. Dtypes, block sizes and alignment are checked
+        by the backend. There is no ``transpose_a`` argument.
+
+        To preserve a manually configured UnitFlag protocol, launch with
+        ``unit_flag=False`` to disable automatic UnitFlag inference. Leaving
+        ``unit_flag_ctrl=None`` does not explicitly disable the protocol.
     """
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")

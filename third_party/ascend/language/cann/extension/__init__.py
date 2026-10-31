@@ -1,4 +1,4 @@
-from triton.backends.ascend.utils import is_compile_on_910_95
+from triton.backends.ascend.utils import is_register_based_arch
 from triton._C.libtriton.ascend import ir as _ascend_ir
 
 # MLIR affine bindings (same objects as triton._C.libtriton.ascend.ir).
@@ -160,7 +160,7 @@ __all__ = [
     "index_select_simd",
 
     # utils
-    "is_compile_on_910_95",
+    "is_register_based_arch",
 
     # dot ops
     "dot",

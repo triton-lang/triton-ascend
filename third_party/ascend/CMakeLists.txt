@@ -35,7 +35,6 @@ include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd f
 # are created by add_subdirectory(lib).
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/costmodel/include)
 
-add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 

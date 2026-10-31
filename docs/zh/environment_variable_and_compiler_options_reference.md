@@ -108,7 +108,7 @@ configs = [
 | 同步 | `unit_flag` | 控制HIVM unit-flag同步。 | `None`；布尔值 | 支持 | 常规路径 |
 | 同步 | `inject_barrier_all` | 控制自动注入barrier同步。 | `None`；布尔值 | 支持 | 常规路径 |
 | 同步 | `inject_block_all` | 控制自动注入block同步。 | `None`；布尔值 | 支持 | 常规路径 |
-| 同步 | `disable_auto_inject_block_sync` | 禁用编译器自动插入核间同步。使用Ascend亲和接口 [`sync_block_all`](./triton_api_extension/al/sync_block_all.md)、[`sync_block_set`](./triton_api_extension/al/sync_block_set.md) 或 [`sync_block_wait`](./triton_api_extension/al/sync_block_wait.md) 时，必须设置 `disable_auto_inject_block_sync=True`。 | `None`；布尔值 | 支持 | 常规路径 |
+| 同步 | `disable_auto_inject_block_sync` | 禁用编译器自动插入核间同步。使用Ascend亲和接口 `sync_block_all`、`sync_block_set` 或 `sync_block_wait` 时，必须设置 `disable_auto_inject_block_sync=True`。 | `None`；布尔值 | 支持 | 常规路径 |
 | 调度与流水 | `enable_auto_bind_sub_block` | 覆盖后端推导的sub-block自动绑定策略。 | `None`；布尔值 | 支持 | 常规路径 |
 | 调度与流水 | `enable_hivm_auto_cv_balance` | 控制HIVM的自动CV balance。 | `None`；布尔值 | 支持 | 常规路径 |
 | 调度与流水 | `tile_mix_vector_loop` | 设置Vector循环的切分份数。 | `None`；整数 | 支持 | — |

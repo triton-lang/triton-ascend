@@ -37,12 +37,12 @@
 
 本项目在标准 Triton 基础上，扩展支持华为 Ascend NPU（通过 CANN 软件栈）。整体设计遵循以下**代码原则**：
 
-**（1）归属判断：按是否与硬件相关决定落点**
+（1）归属判断：按是否与硬件相关决定落点
 
 > - **若修改与目标硬件无关**（target independent），应保留在 **Triton core** 部分（如 language、runtime 的通用修改）；
 > - **若修改与 Ascend 硬件强相关**（target affinitive），应放在 **Triton-Ascend** 中。
 
-**（2）落地方式：非侵入社区代码，统一以 patch 承载**
+（2）落地方式：非侵入社区代码，统一以 patch 承载
 
 为保持与上游 Triton / LLVM 的同步能力、降低版本升级时的合并冲突，默认**不直接修改社区源码**：
 
@@ -95,7 +95,7 @@ NPUOptions 是控制**单个 kernel 编译策略**的参数，可通过 `triton.
 | CV 融合与 tiling | 自动绑定 sub-block、Cube/Vector 平衡与切分 | `enable_auto_bind_sub_block`、`enable_hivm_auto_cv_balance`、`tile_mix_vector_loop`、`tile_mix_cube_loop` |
 | VF / HFusion | 950 系列的 VF 融合策略与多 consumer 融合 | `vf_fusion_mode`、`hfusion_enable_multiple_consumer_fusion` |
 | 同步 | 求解器、unit flag 及 barrier/block 注入 | `sync_solver`、`unit_flag`、`inject_barrier_all`、`inject_block_all` |
-| 多缓冲与 Workspace | 各存储层级的缓冲槽数与 workspace 多缓冲级别 | `multibuffer_mode`、`set_workspace_multibuffer` |
+| 多缓冲与 Workspace | 各内存层级的缓冲槽数与 workspace 多缓冲级别 | `multibuffer_mode`、`set_workspace_multibuffer` |
 | DynamicCV 缓冲 | veccore / 跨核 / GM 的 buffer slot 数量 | `buf_slot_num_of_veccore`、`buf_slot_num_of_crosscore`、`buf_slot_num_of_gm` |
 
 完整选项清单、默认值 / 可选值与配置方式以参考文档为准（避免两处维护导致不一致）：见[环境变量与编译选项 · 编译选项参考表](https://triton-ascend.readthedocs.io/zh-cn/latest/environment_variable_and_compiler_options_reference.html#compiler-options-reference)；已废弃选项的兼容行为与更名映射见同文档[编译选项清理与兼容性](https://triton-ascend.readthedocs.io/zh-cn/latest/environment_variable_and_compiler_options_reference.html#compiler-option-cleanup-and-compatibility)。
@@ -214,7 +214,7 @@ TritonToLinalg 用于将 TTIR 转换为 Linalg IR。
 | triton-to-annotation | 处理Ascend NPU特有的编译提示指令 (`extension.compile_hint`)，将其转换为后端的Annotation方言，用于指导后续的硬件特定优化或资源配置。 | TritonAnnotationConversion | 将 `triton::AnnotationOp` 转换为 `annotation::MarkOp`，实现高级编译提示信息向底层注释标记的传递。 |
 | triton-to-hfusion | 将Triton中的`TTIR`转换为Ascend NPU硬件加速器`HFusion`方言中的对应操作。 | TritonHistogramToHFusionConversion | 将 `triton::HistogramOp` 转换为 `hfusion::HistogramOp`，使其能在NPU的专用硬件上高效执行。 |
 | triton-to-hivm | 处理Triton的块同步操作 (`extension.sync_block_all`, `extension.sync_block_set`, `extension.sync_block_wait`)，将其转换为Ascend NPU的`HIVM`方言中的跨核心同步指令。这些指令用于管理多核流水线中的同步与数据依赖，是流水优化的关键。 | TritonCustomOpToHIVMSyncOpConversion | 实现Triton同步指令到HIVM同步指令的转换：`sync_block_all`（全局块同步）；`sync_block_set`（设置同步点）；`sync_block_wait`（等待同步点） |
-| triton-to-llvm | 将Triton中的内联汇编操作 (`extension.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp` 。|
+| triton-to-llvm | 将Triton中的内联汇编操作 (`extension.inline_assembly`) 转换为LLVM方言的内联汇编，并最终映射为Ascend NPU的CCE硬件固有函数（Intrinsics） | ElementwiseInlineAsmOpConversion | 将 `triton::ElementwiseInlineAsmOp` 转换为 `LLVM::InlineAsmOp`。|
 
 <a id="dynamic-cv-pipeline"></a>
 
@@ -226,7 +226,7 @@ DynamicCV 用于优化同时包含 Cube 矩阵计算和 Vector 计算的 kernel�
 
 #### 3.2.3 SIMT 编译器（Ascend 950PR&950DT系列产品）
 
-Ascend 950PR&950DT系列产品 在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。
+Ascend 950PR&950DT系列产品在 SIMD 路径之外增加 SIMT 能力，用于加速**非结构化 / 离散**访存（如间接索引的 load/store）。
 开发者通过 `compile_mode` 选择编译路径。
 
 ##### 3.2.3.1 `compile_mode` 说明
@@ -295,7 +295,7 @@ flowchart TD
 
 | 阶段 | `"simd"` | `"simd_simt_template"` | `"simt_only"` |
 |------|----------|--------------------------|---------------|
-| 离散 mask 处理 | 拆成连续/离散边界，用 load + select / store 处理 | Ascend 950PR&950DT系列产品 且张量维数 ≤ 5：标记后交给下游；否则同左 | 不运行 |
+| 离散 mask 处理 | 拆成连续/离散边界，用 load + select / store 处理 | Ascend 950PR&950DT系列产品且张量维数 ≤ 5：标记后交给下游；否则同左 | 不运行 |
 | 非结构化访存 | 展开为标量循环 | 尽量转为 SIMT 间接访存（维数 ≤ 5）；失败则回退标量循环 | 不运行 |
 | TritonToLinalg | 常规 Linalg IR 降级 | 常规 Linalg IR 降级 | 不运行 |
 
@@ -308,7 +308,7 @@ flowchart TD
    - 否则（纯 SIMD 或不满足条件）：将 mask 拆成连续 / 离散部分，用连续边界限定全局内存访问，再通过 select 合并结果。
 
 2. **非结构化访存处理**
-   - 在 Ascend 950PR&950DT系列产品 混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道：
+   - 在 Ascend 950PR&950DT系列产品混合模式下，对非结构化访存或已标记的离散访存走 SIMT 快速通道：
      - `load` / `store` → `indirect_load` / `indirect_store`（维数 ≤ 5）
      - `atomic` 操作 → `hivm.custom(symbol="__builtin_indirect_atomic")`
    - 不满足条件则回退为标量循环（与 `"simd"` 一致）。

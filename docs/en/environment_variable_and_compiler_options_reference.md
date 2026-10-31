@@ -108,7 +108,7 @@ The table lists Ascend backend defaults and notes any different `triton.Config` 
 | Synchronization | `unit_flag` | Controls HIVM unit-flag synchronization. | `None`; boolean | Yes | Normal path |
 | Synchronization | `inject_barrier_all` | Controls automatic barrier injection. | `None`; boolean | Yes | Normal path |
 | Synchronization | `inject_block_all` | Controls automatic block synchronization injection. | `None`; boolean | Yes | Normal path |
-| Synchronization | `disable_auto_inject_block_sync` | Disables automatic inter-core synchronization insertion. Set `disable_auto_inject_block_sync=True` when using any of the Ascend affinity APIs [`sync_block_all`](./triton_api_extension/al/sync_block_all.md), [`sync_block_set`](./triton_api_extension/al/sync_block_set.md), or [`sync_block_wait`](./triton_api_extension/al/sync_block_wait.md). | `None`; boolean | Yes | Normal path |
+| Synchronization | `disable_auto_inject_block_sync` | Disables automatic inter-core synchronization insertion. Set `disable_auto_inject_block_sync=True` when using any of the Ascend affinity APIs `sync_block_all`, `sync_block_set`, or `sync_block_wait`. | `None`; boolean | Yes | Normal path |
 | Scheduling and pipelines | `enable_auto_bind_sub_block` | Overrides backend-derived automatic sub-block binding. | `None`; boolean | Yes | Normal path |
 | Scheduling and pipelines | `enable_hivm_auto_cv_balance` | Controls automatic HIVM CV balancing. | `None`; boolean | Yes | Normal path |
 | Scheduling and pipelines | `tile_mix_vector_loop` | Sets the Vector loop split count. | `None`; integer | Yes | — |

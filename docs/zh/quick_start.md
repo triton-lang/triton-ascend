@@ -2,9 +2,9 @@
 
 ## 项目介绍
 
-**Triton-Ascend**是适配华为Ascend处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对昇腾NPU特性进行深度优化，能够帮助用户在昇腾平台上快速开发和部署高性能计算任务。
+**Triton-Ascend**是适配华为昇腾处理器的Triton优化版本，用于高效进行核函数自动调优、算子编译及部署，通过兼容Triton核心语法并针对华为昇腾NPU特性进行深度优化，能够帮助用户在华为昇腾平台上快速开发和部署高性能计算任务。
 
-本文以**Ubuntu 22.04**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
+本文以**Ubuntu**环境下通过软件包部署方式在线安装并运行向量加法示例为例，指导用户快速上手使用**Triton-Ascend**。如需体验更多安装方式请阅读[安装指南](./installation_guide.md)文档。
 
 ## 环境准备
 
@@ -12,13 +12,13 @@
 
 支持的操作系统：Linux（aarch64/x86_64）
 
-支持的Ascend产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
+支持的华为昇腾产品：Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品
 
 最小硬件配置：单卡32GB内存（推荐）
 
 **软件依赖**
 
-确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
+确定CANN、Python和TorchNPU软件版本并安装。其中，可以参考华为昇腾社区官网《[CANN快速安装](https://www.hiascend.com/cann/download)》完成驱动与固件安装。
 
 - CANN版本：9.2.0
 - Python版本：3.11
@@ -37,7 +37,7 @@ pip install triton-ascend --extra-index-url=https://mirrors.huaweicloud.com/asce
 **运行tutorials中的向量加法示例验证结果**
 
 向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)
-通过对比Triton算子与PyTorch原生计算的输出结果，证明昇腾NPU设备可正确调用Triton算子并保证计算精度。
+通过对比Triton算子与PyTorch原生计算的输出结果，证明华为昇腾NPU设备可正确调用Triton算子并保证计算精度。
 > ⚠️ 下述命令需在bash环境下执行。若使用POSIX sh，请将 `source` 替换为 `.`。
 
 ```bash
@@ -51,7 +51,7 @@ python3 ./triton-ascend/third_party/ascend/tutorials/01-vector-add.py
 
 观察到类似的输出即说明环境配置正确。
 
-```shell
+```text
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 tensor([0.8329, 1.0024, 1.3639,  ..., 1.0796, 1.0406, 1.5811], device='npu:0')
 The maximum difference between torch and triton is 0.0
@@ -64,14 +64,14 @@ The maximum difference between torch and triton is 0.0
 1. **算子开发**：按算子类型阅读Vector / Cube / 融合开发教程，再对照典型样例修改Kernel，完成开发、编译、验证闭环。
 2. **自动调优**：使用Autotune选择合适的Tiling配置。
 3. **调试与调优**：掌握打印调试与性能采集方法。
-4. **迁移与进阶**：从GPU Triton迁移到Ascend，或查阅环境变量与编译选项。
+4. **迁移与进阶**：从GPU Triton迁移到华为昇腾，或查阅环境变量与编译选项。
 
 ### 开发指南
 
 | 文档 | 说明 |
 |------|------|
 | [Triton-Ascend算子开发](./programming_guide/index.md) | 分核、片上内存、访存、Tiling等通用开发原则 |
-| [Triton-Ascend算子迁移](./migration_guide/index.md) | GPU Triton算子迁移到昇腾NPU |
+| [Triton-Ascend算子迁移](./migration_guide/index.md) | GPU Triton算子迁移到华为昇腾NPU |
 | [Triton-Ascend算子调试与调优](./debug_guide/index.md) | 调试、性能分析与精度排查 |
 | [环境变量与编译选项](./environment_variable_and_compiler_options_reference.md) | 运行与编译相关配置说明 |
 

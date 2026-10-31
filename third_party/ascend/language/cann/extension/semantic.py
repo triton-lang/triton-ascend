@@ -33,6 +33,7 @@ from triton._C.libtriton.ascend import ir as ascend_ir
 import triton.language.core as tl
 import triton.language.extra.cann.extension as al
 import triton.extension.buffer.language as bl
+from triton.backends.ascend.utils import is_register_based_arch
 
 T = TypeVar('T')
 
@@ -99,8 +100,8 @@ def sub_vec_id(_semantic=None) -> tl.tensor:
 
 
 def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _semantic=None):
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
     if src.shape != dst.shape:
@@ -118,8 +119,8 @@ def copy_from_ub_to_l1(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, b
 
 
 def copy(src: Union[tl.tensor, bl.buffer], dst: Union[tl.tensor, bl.buffer], _semantic=None):
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if isinstance(src, tl.tensor) or isinstance(dst, tl.tensor):
         raise TypeError("tensor not support yet")
     if src.shape != dst.shape:
@@ -186,12 +187,12 @@ def debug_barrier(sync_mode: str, _semantic=None) -> None:
 
 
 def conv1d(input_tensor: tl.tensor, weight_tensor: tl.tensor, bias: Union[tl.tensor, None], stride: int,
-           padding_size: int, dilation: int, groups: int, output_shape, _semantic=None) -> tl.tensor:
+           padding: Union[int, tuple], dilation: int, groups: int, output_shape, _semantic=None) -> tl.tensor:
     bias_handle = None if bias is None else bias.handle
 
     element_ty = input_tensor.type.element_ty
     output_ty = tl.block_type(element_ty, output_shape)
-    out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding_size,
+    out = _semantic.builder.create_conv1d(input_tensor.handle, weight_tensor.handle, bias_handle, stride, padding,
                                           dilation, groups, output_ty.to_ir(_semantic.builder))
     return tl.tensor(out, output_ty)
 

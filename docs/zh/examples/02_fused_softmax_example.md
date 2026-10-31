@@ -1,10 +1,10 @@
-# 融合 Softmax （Fused Softmax）
+# 融合 Softmax（Fused Softmax）
 
 在本节中，我们将使用 Triton 编写一个融合的 softmax 操作的程序。
 在此过程中，你会学习到：
 
 - 内核融合对于带宽受限操作的优势。
-- Triton 中缩减操作。
+- Triton 中的缩减操作。
 
 ## 使用原生 PyTorch 对 X 逐行进行 Softmax 计算
 
@@ -109,7 +109,7 @@ def softmax(x):
 
 ## 单元测试
 
-需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用
+需要在一个具有不规则行和列数的矩阵上测试处理好的内核，此举可以验证Padding机制是否起作用。
 
 ```python
 torch.manual_seed(0)

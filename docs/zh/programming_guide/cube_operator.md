@@ -8,7 +8,7 @@ Cube算子以矩阵乘或批量矩阵乘为主要计算负载，Triton代码中�
 
 1. 明确输入输出shape和stride，例如 `A[M, K]`、`B[K, N]`、`C[M, N]`。
 2. 用 `tl.program_id` 映射当前program到输出矩阵的 `(pid_m, pid_n)` tile。
-3. 用 `BLOCK_SIZE_M/N/K` 构造A/B的二维偏移。
+3. 用 `BLOCK_M/N/K` 构造A/B的二维偏移。
 4. 沿K维循环加载A/B子块，并用 `tl.dot` 累加到fp32 accumulator。
 5. 将accumulator转为输出dtype，并用边界mask写回C。
 

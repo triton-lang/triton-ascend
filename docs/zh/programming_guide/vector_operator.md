@@ -9,9 +9,9 @@ Vector算子主要由Vector Core执行，典型形态包括逐元素计算、行
 1. 用 `tl.arange` 构造当前tile的连续偏移。
 2. 用 `mask` 保护尾块，避免越界load/store。
 3. 完成逐元素计算后写回结果。
-4. 当grid数远大于物理核数时，将grid固定为 `num_vectorcore`，在kernel内用 `range(pid, num_blocks, num_core)` 分批处理。
+4. 当grid数远大于物理核数时，将grid固定为 `num_vectorcore`，在Kernel内用 `range(pid, num_blocks, num_core)` 分批处理。
 
-基础kernel结构如下：
+基础Kernel结构如下：
 
 ```python
 @triton.jit
@@ -48,13 +48,14 @@ def add_kernel(x_ptr, y_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 2. **按UB容量切分hidden维**：对 `NUM_COLUMNS` 使用 `BLOCK_X` 分块，并预留double buffer、索引和临时张量的空间。
 3. **用 `SUB_BLOCK_SIZE` 合并小粒度离散任务**：一次加载一组indices，在UB中组织成连续临时块，减少GM标量访存和多次store。
 4. **用扩展语义管理UB内局部数据**：先通过 `import triton.language.extra.cann.extension as extension` 引入扩展模块，再使用 `extension.insert_slice` 合并多行数据，使用 `extension.extract_slice` 取出子块后再分散写回。
-5. **为尾块保留统一mask**：复杂gather/scatter中同时存在index mask、column mask和expert/bin边界，建议分别命名并只在load/store处组合。
+5. **为尾块保留统一Mask**：复杂gather/scatter中同时存在index Mask、column Mask和expert/bin边界，建议分别命名并只在load/store处组合。
 
 典型的UB预算思路如下：
 
 ```python
 # 获取NPU硬件属性，详见“通用多核任务并行”一节
 import torch_npu
+import triton
 import triton.runtime.driver as driver
 device = torch_npu.npu.current_device()
 properties = driver.active.utils.get_device_properties(device)
@@ -71,5 +72,5 @@ sub_block_size = max((ub_budget - block_x * element_bytes) //
 
 - grid是否远大于物理Vector Core数，导致多轮下发。
 - 离散访存是否可转化为“批量搬入UB后在UB内选择”。
-- 尾轴（最后一个维度）是否满足32B对齐；不满足时是否可用转置或借轴转置规避自动padding。
+- 尾轴（最后一个维度）是否满足32Byte对齐；不满足时是否可用转置或借轴转置规避自动padding。
 - `BLOCK_X` 和 `SUB_BLOCK_SIZE` 是否造成UB overflow或过小的搬运粒度。

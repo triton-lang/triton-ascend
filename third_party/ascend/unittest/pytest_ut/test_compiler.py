@@ -403,3 +403,122 @@ def test_save_temps_isolates_same_hash_compilations(monkeypatch, tmp_path):
     assert first.parent == second.parent == tmp_path
     assert (first / "kernel.ll").read_text() == "first compilation"
     assert (second / "kernel.ll").read_text() == "second compilation"
+
+
+# The callback library is loaded to evaluate a few int64 constants and is then
+# released, so these tests pin the cleanup contract without dlopen'ing anything.
+_CALLBACK_SYMBOLS = {
+    "_infer_task_type_function": 11,
+    "_infer_workspace_shape_function": 22,
+    "_infer_sync_block_lock_num_function": 33,
+    "_infer_sync_block_lock_init_function": 44,
+}
+
+_CALLBACK_METADATA = {
+    "bs_task_type": 11,
+    "workspace_size": 22,
+    "sync_block_lock_layout": 33,
+    "lock_init_val": 44,
+}
+
+# Two leading underscores, so bind the helper once instead of writing an
+# attribute access that a class body would mangle.
+_load_metadata_by_callback = getattr(compiler, "__load_metadata_by_callback")
+
+
+class _FakeCallback:
+    """Stand in for a ctypes function pointer returning an int64 constant."""
+
+    def __init__(self, value):
+        self.value = value
+        self.restype = None
+        self.argtypes = None
+
+    def __call__(self):
+        if isinstance(self.value, BaseException):
+            raise self.value
+        return self.value
+
+
+class _FakeLib:
+    """Stand in for ctypes.CDLL: only the declared symbols resolve, like dlsym."""
+
+    def __init__(self, handle, kernel_name, symbols):
+        self._handle = handle
+        for postfix, value in symbols.items():
+            setattr(self, kernel_name + postfix, _FakeCallback(value))
+
+
+def test_metadata_is_read_before_the_callback_library_is_unloaded(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes",
+                        SimpleNamespace(dlclose=lambda handle: closed.append((handle, dict(metadata)))))
+
+    _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}
+    assert len(closed) == 1
+    handle, metadata_at_close = closed[0]
+    # The handle must still be the one dlopen reported, and every callback must
+    # already have been copied, because nothing may read the library afterwards.
+    assert handle == 0xBEEF
+    assert metadata_at_close == metadata
+
+
+def test_callback_library_is_unloaded_once_when_a_callback_raises(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    symbols = dict(_CALLBACK_SYMBOLS, _infer_sync_block_lock_num_function=OSError("callback exploded"))
+    lib = _FakeLib(0xBEEF, "triton_add", symbols)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=closed.append))
+
+    with pytest.raises(OSError, match="callback exploded"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert closed == [0xBEEF]
+    assert metadata == {"kernel_name": "triton_add", "bs_task_type": 11, "workspace_size": 22}
+
+
+def test_callback_library_is_unloaded_when_no_symbol_resolves(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    lib = _FakeLib(0xBEEF, "triton_add", {})
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=closed.append))
+
+    _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add"}
+    assert closed == [0xBEEF]
+
+
+def test_missing_dlclose_warns_without_failing_the_compilation(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace())
+
+    with pytest.warns(UserWarning, match="could not unload /nonexistent/libkernel.so"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}
+
+
+def test_failing_dlclose_warns_without_failing_the_compilation(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+
+    def failing_dlclose(handle):
+        raise OSError("cannot unload")
+
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=failing_dlclose))
+
+    with pytest.warns(UserWarning, match="could not unload /nonexistent/libkernel.so: cannot unload"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}

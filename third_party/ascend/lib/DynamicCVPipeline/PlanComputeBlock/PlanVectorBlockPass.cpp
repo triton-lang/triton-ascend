@@ -335,20 +335,18 @@ extractWholeFuseGroup(Block *block,
 
   SetVector<Operation *> toRemove;
   auto *terminator = block->getTerminator();
-  if (llvm::isa_and_present<scf::YieldOp>(terminator) &&
-      isa<scf::ForOp, scf::WhileOp>(block->getParentOp())) {
+  if (llvm::isa_and_present<scf::YieldOp>(terminator)) {
     for (auto *op : nowFuseGroup) {
-      auto walkResult = op->walk(
-          [block, terminator, &bm, &nowFuseGroup](Operation *nestedOp) {
-            for (auto operand : nestedOp->getOperands()) {
-              auto *defOp = getLoopCarriedDefOp(operand, block);
-              if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
-                  !llvm::is_contained(nowFuseGroup, defOp)) {
-                return WalkResult::interrupt();
-              }
-            }
-            return WalkResult::advance();
-          });
+      auto walkResult = op->walk([&](Operation *nestedOp) {
+        for (auto operand : nestedOp->getOperands()) {
+          auto *defOp = getLoopCarriedDefOp(operand, block);
+          if (defOp && bm.getBlockIdByOp(defOp) == -1 &&
+              !llvm::is_contained(nowFuseGroup, defOp)) {
+            return WalkResult::interrupt();
+          }
+        }
+        return WalkResult::advance();
+      });
       if (walkResult.wasInterrupted()) {
         collectAllUsersInFuseGroup(op, nowFuseGroup, toRemove);
       }

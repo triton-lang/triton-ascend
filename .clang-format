@@ -1,1 +1,49 @@
+---
 BasedOnStyle: LLVM
+Language: Cpp
+
+# ==========================================
+# 影子/非侵入式选项（本地格式化生效，且 CI 不会报错）
+# ==========================================
+
+# 1. 自动在函数、类定义块之间添加空行 (LLVM 默认为 Leave)
+SeparateDefinitionBlocks: Always
+
+# 2. 自动规范限定符位置，统一置于左侧 (LLVM 默认为 Leave)
+QualifierAlignment: Left
+
+# 3. 自动为单行 if/for/while 补全大括号 (LLVM 不会主动剥离大括号)
+InsertBraces: true
+
+# 4. 自动移除冗余的圆括号 (LLVM 默认为 Leave)
+RemoveParentheses: MultipleParentheses
+
+# --- G.INC.07-CPP: 按照合理的顺序包含头文件 ---
+SortIncludes: CaseSensitive
+IncludeBlocks: Regroup               # 排序后按类别在块之间加空行
+IncludeIsMainRegex: '(_test\.cpp|\.cpp)$'
+
+IncludeCategories:
+  - Regex:    '^<[^.]*>$'            # 1. C++ 标准库 (如 <memory>)
+    Priority: 1
+  - Regex:    '^<.*\.h>$'            # 2. C/OS 系统库 (如 <unistd.h>)
+    Priority: 2
+  - Regex:    '^"llvm/.*"'           # 3. 外部依赖库: LLVM
+    Priority: 3
+  - Regex:    '^"mlir/.*"'           # 4. 外部依赖库: MLIR
+    Priority: 4
+  - Regex:    '^"ascend/.*"'         # 5. 项目特定头文件 (Ascend 项目代码)
+    Priority: 5
+  - Regex:    '.*'                   # 6. 其他 (兜底)
+    Priority: 6
+
+# ==========================================
+# 必须向 LLVM 标准妥协的硬性选项 (不可本地自定义)
+# ==========================================
+IndentWidth: 2
+ColumnLimit: 80
+UseTab: Never
+PointerAlignment: Right
+BreakBeforeBraces: Attach
+
+...

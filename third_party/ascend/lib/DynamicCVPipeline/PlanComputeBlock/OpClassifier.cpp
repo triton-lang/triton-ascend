@@ -52,13 +52,13 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/WalkResult.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/Analysis.h"
+#include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
 #include "ascend/include/DynamicCVPipeline/PlanComputeBlock/OpClassifier.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
-#include "DynamicCVPipeline/Common/Analysis.h"
-#include "DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
@@ -189,67 +189,49 @@ void OpClassifierPass::markCube(Operation *op) {
   }
 }
 
-static bool isExtractedLoadStoreRelated(Operation *op) {
-  if (!op) {
-    return false;
-  }
-  return llvm::TypeSwitch<Operation *, bool>(op)
-      .Case([](bufferization::ToTensorOp toTensorOp) {
-        return isExtractedLoadStoreRelated(
-            toTensorOp.getBuffer().getDefiningOp());
-      })
-      .Case([](memref::AllocOp allocOp) {
-        Value memref = allocOp.getMemref();
-        for (auto user : memref.getUsers()) {
-          auto forOp = user->getParentOfType<scf::ForOp>();
-          if (forOp && forOp->hasAttr(hivm::ExtractLoadStoreAttr)) {
-            return true;
-          }
-        }
-        return false;
-      })
-      .Case([](ViewLikeOpInterface viewOp) {
-        return isExtractedLoadStoreRelated(
-            viewOp.getViewSource().getDefiningOp());
-      })
-      .Default([](auto) { return false; });
-}
-
 // ============================================================================
-// Pattern: to_tensor → matmul (Upstream)
+// Pattern: load unit → matmul (Upstream)
 // ============================================================================
-// Matches cases where matmul's input comes from bufferization.to_tensor.
-// to_tensor converts a memref to a tensor, typically used for loading matrix
-// data from memory. IR Example
-//   %memref = memref.alloc() : memref<1024x1024xf32>
-//   %tensor = bufferization.to_tensor %memref : memref<1024x1024xf32> ->
-//   tensor<1024x1024xf32> %result = linalg.matmul ins(%tensor, %tensor_b)
-//   outs(%init)
+// Matches cases where matmul's input comes from a load unit.
+// After PackMemrefPass the whole `alloc -> ... -> bufferization.to_tensor`
+// chain is a single scope::ScopeOp tagged `ssbuffer.load`; such a unit feeding
+// matmul must run on CUBE. A raw bufferization.to_tensor is only kept as a
+// fallback for unusual upstream input, since PackMemrefPass normally hides it
+// inside the scope.
 // Matching Logic
-//   1. Check if matmul's operand defining op is bufferization.to_tensor
-//   2. If matched, mark to_tensor as CUBE and add to cubeSeeds
-//   3. Also trace back to_tensor's memref source and mark its defining op as
-//   CUBE
+//   1. If `def` is a load scope -> mark it CUBE and seed the BFS.
+//   2. Otherwise, if `def` is a bufferization.to_tensor, mark it and its memref
+//      source as CUBE (legacy fallback).
 // Purpose: Ensure matmul's input data loading executes on CUBE for efficient
 // matrix data transfer.
 // ============================================================================
-void OpClassifierPass::matchToTensorPattern(Operation *def) {
-  auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(def);
-  constexpr llvm::StringLiteral kMayImplicitTransposeWithLastAxis =
-      "MayImplicitTransposeWithLastAxis";
+void OpClassifierPass::matchLoadPattern(Operation *def) {
+  if (auto scopeOp = dyn_cast<scope::ScopeOp>(def)) {
+    // A scope stamped by PackMemref keeps its authoritative core type. A
+    // pre-classified CUBE scope is not (re-)added to `cubeSeeds` here; Step 2
+    // seeds such ops separately from `allOps` so their upstream still
+    // propagates.
+    if (scopeOp->hasAttr(CVPipeline::kScopeLoadAttr) &&
+        !preClassifiedOps.contains(scopeOp)) {
+      opCoreTypes[scopeOp] = OP_CUBE_ONLY;
+      cubeSeeds.push_back(scopeOp);
+    }
+    return;
+  }
 
+  // PackMemref only packs units that read from GM, so a compute-pattern unit
+  // keeps its raw `to_tensor` and reaches this fallback by design.
+  auto toTensorOp = dyn_cast<bufferization::ToTensorOp>(def);
   if (!toTensorOp) {
     return;
   }
 
+  // TODO(cv-pipeline): PackMemrefPass should consume the implicit-transpose
+  // annotation when it packs the unit (packing and stamping it as VECTOR); this
+  // re-check only covers the raw `to_tensor` fallback.
   // special case: implicit transpose -> remains vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
-                                   kMayImplicitTransposeWithLastAxis)) {
-    return;
-  }
-
-  // special case: ExtractedLoadOrStore -> remains vector
-  if (isExtractedLoadStoreRelated(toTensorOp)) {
+                                   hivm::kMayImplicitTransposeWithLastAxis)) {
     return;
   }
 
@@ -304,7 +286,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
 
   // Helper lambda to check if an operand's defining op qualifies for CUBE seed
   auto shouldMarkCubeSeed = [](Operation *opDef) -> bool {
-    if (!opDef || isExtractedLoadStoreRelated(opDef)) {
+    if (!opDef) {
       return false;
     }
     return (isa<bufferization::BufferizationDialect>(opDef->getDialect()) &&
@@ -322,7 +304,7 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
       continue;
     }
     if (llvm::isa<bufferization::ToTensorOp>(defOp)) {
-      matchToTensorPattern(defOp);
+      matchLoadPattern(defOp);
       continue;
     }
     markCube(defOp);
@@ -591,7 +573,7 @@ int OpClassifierPass::patternMatchCUBE() {
         continue;
       }
 
-      matchToTensorPattern(def);
+      matchLoadPattern(def);
       matchTransposePattern(def);
       matchFillPattern(def);
       matchEmptyPattern(def);
@@ -825,10 +807,6 @@ bool OpClassifierPass::shouldSkipCubeUpstream(Operation *op) {
   if (isInsideNestedLinalgRegion(op)) {
     LLVM_DEBUG(DBGS() << "skip " << op->getName().getStringRef()
                       << ": inside linalg block\n");
-    return true;
-  }
-  if (isExtractedLoadStoreRelated(op)) {
-    LOG_DEBUG("skip " << *op << ": Extracted Load/Store Related");
     return true;
   }
   if (isa<scf::ForOp, scf::WhileOp, scf::IfOp>(op)) {
@@ -1764,23 +1742,22 @@ OpCoreType OpClassifierPass::getForInitCoreType(OpOperand *operand) const {
 //       shared_fill (CUBE_ONLY)    → matmul (CUBE)
 //       shared_fill_vector_clone   → arith.addf (VECTOR)
 //         (VECTOR_ONLY)
-// This step runs after step 4 (VECTOR propagation) and before step 6
-// (SCF yield processing). The do-while loop handles cases where splitting
-// an op produces new CUBE_AND_VECTOR ops among its operands.
+// This step runs after step 6 (VECTOR propagation) and before the SCF yield
+// handling. Only an op whose core type is CUBE_AND_VECTOR is duplicated.
 // ============================================================================
 
-void OpClassifierPass::splitOperationForCubeAndVector(
+bool OpClassifierPass::splitOperationForCubeAndVector(
     Operation *op, llvm::DenseSet<Operation *> &processedOps,
     llvm::DenseMap<Operation *, Operation *> &opToVectorClone) {
   // Guard against double-processing the same op
   if (processedOps.count(op)) {
-    return;
+    return false;
   }
   processedOps.insert(op);
 
   // Only split ops explicitly marked CUBE_AND_VECTOR
   if (opCoreTypes[op] != OP_CUBE_AND_VECTOR) {
-    return;
+    return false;
   }
 
   // ------------------------------------------------------------------
@@ -1864,47 +1841,38 @@ void OpClassifierPass::splitOperationForCubeAndVector(
       use->set(vectorResult); // redirect to VECTOR clone
     }
   }
+
+  return true;
 }
 
 // ============================================================================
 // handleCubeAndVector: entry point for CUBE_AND_VECTOR splitting
 // ============================================================================
-// Repeatedly scans for CUBE_AND_VECTOR ops and splits them until no more
-// remain. The do-while loop is needed because splitOperationForCubeAndVector
-// is called recursively on operands; each recursive call may turn a
-// CUBE_AND_VECTOR operand into CUBE_ONLY + VECTOR_ONLY (via the same
-// splitOperationForCubeAndVector), which can in turn enable more splits at
-// the current level.
-
+// A single-core marker (CUBE / VECTOR) is authoritative and is never
+// duplicated; only an op whose core type is CUBE_AND_VECTOR is split into a
+// CUBE copy and a VECTOR copy. Cross-core consumption of a single-core op is
+// carried by the dependency chain, not by OpClassifier.
 int OpClassifierPass::handleCubeAndVector() {
-  bool changed = true;
-  do {
-    changed = false;
-
-    // Collect all ops still marked CUBE_AND_VECTOR
-    llvm::SmallVector<Operation *> cubeAndVectorOps;
-    for (Operation *op : allOps) {
-      if (opCoreTypes[op] == OP_CUBE_AND_VECTOR) {
-        cubeAndVectorOps.push_back(op);
-      }
+  // A single pass is enough: splitting only turns a CUBE_AND_VECTOR op into
+  // CUBE_ONLY / VECTOR_ONLY, so it can never create a new candidate (this is
+  // what the previous do/while loop guessed at). The candidates are snapshotted
+  // first because `splitOperationForCubeAndVector` appends the VECTOR clone to
+  // `allOps`, which would otherwise invalidate iterators over `allOps`.
+  llvm::SmallVector<Operation *> cubeAndVectorOps;
+  for (Operation *op : allOps) {
+    if (opCoreTypes[op] == OP_CUBE_AND_VECTOR) {
+      cubeAndVectorOps.push_back(op);
     }
+  }
 
-    if (cubeAndVectorOps.empty()) {
-      break;
+  llvm::DenseMap<Operation *, Operation *> opToVectorClone;
+  llvm::DenseSet<Operation *> processedOps;
+  for (Operation *op : cubeAndVectorOps) {
+    if (processedOps.count(op)) {
+      continue;
     }
-
-    llvm::DenseMap<Operation *, Operation *> opToVectorClone;
-    llvm::DenseSet<Operation *> processedOps;
-
-    for (Operation *op : cubeAndVectorOps) {
-      if (processedOps.count(op)) {
-        continue;
-      }
-      splitOperationForCubeAndVector(op, processedOps, opToVectorClone);
-      changed = true;
-    }
-  } while (changed);
-
+    splitOperationForCubeAndVector(op, processedOps, opToVectorClone);
+  }
   return 0;
 }
 

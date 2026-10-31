@@ -25,12 +25,12 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/WalkResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
+#include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
-
-#include "DynamicCVPipeline/Common/Utils.h"
 
 using namespace mlir;
 using namespace CVPipeline;
@@ -40,6 +40,23 @@ static constexpr const char *DEBUG_TYPE = "PatternMatchRewrites";
   LLVM_DEBUG(llvm::dbgs() << "\n[" << DEBUG_TYPE << "] " << __VA_ARGS__ << "\n")
 
 static constexpr llvm::StringLiteral needSplitAllFuncNme[]{""};
+
+[[nodiscard]] static bool verifyMaynotExec(ModuleOp moduleOp) {
+  auto walkResult = moduleOp->walk([&](linalg::MatmulOp matmulOp) {
+    if (matmulOp->hasAttr(CVPipeline::kMayNotExec)) {
+      return WalkResult::interrupt();
+    }
+    return WalkResult::advance();
+  });
+
+  if (!walkResult.wasInterrupted()) {
+    return false;
+  }
+
+  LOG_DEBUG("Matmul may not execute!");
+  CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_IGNORED);
+  return true;
+}
 
 namespace {
 
@@ -94,6 +111,10 @@ void PatternMatchRewritePass::runOnOperation() {
           applyPatternsGreedily(moduleOp, std::move(patterns), config))) {
     LOG_DEBUG("matchAndRewrite does not converge!");
     CVPipeline::setFallbackAttr(moduleOp, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  if (verifyMaynotExec(moduleOp)) {
     return;
   }
 

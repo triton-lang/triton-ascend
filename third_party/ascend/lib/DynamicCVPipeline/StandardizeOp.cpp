@@ -30,8 +30,7 @@
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp.h"
-
-#include "DynamicCVPipeline/StandardizeOp/Passes.h"
+#include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
 
 using namespace mlir;
 using namespace CVPipeline;
@@ -58,19 +57,6 @@ void StandardizeOpPass::runOnOperation() {
   if (llvm::failed(runPipeline(pm, op))) {
     LOG_DEBUG("Pipeline Failed!");
     CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_FAILED);
-    return;
-  }
-
-  bool findMayNotExec = false;
-  op->walk([&](linalg::MatmulOp matmulOp) {
-    if (matmulOp->hasAttr(CVPipeline::kMayNotExec)) {
-      findMayNotExec = true;
-    }
-  });
-
-  if (findMayNotExec) {
-    LOG_DEBUG("Matmul may not execute!");
-    CVPipeline::setFallbackAttr(op, CVPipeline::ERRCODE_IGNORED);
     return;
   }
 }

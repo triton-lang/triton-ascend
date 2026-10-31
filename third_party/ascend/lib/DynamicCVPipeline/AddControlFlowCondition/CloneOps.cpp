@@ -554,7 +554,7 @@ LogicalResult CloneOpsPass::validateClonedOpsInVector(ModuleOp module) {
       });
       if (hasTensorDep) {
         LDBG("[Error]: VECTOR main_loop contains cloned op with tensor type: "
-             << bodyOp.getName());
+             << bodyOp);
         return WalkResult::interrupt();
       }
     }

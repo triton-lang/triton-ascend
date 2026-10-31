@@ -1,0 +1,4 @@
+# MLIR test files carry FileCheck patterns that must not be reflowed: clang-format cannot parse MLIR
+# and rewrites `// CHECK:` lines, which breaks the patterns. Files here are test IR, not C++; the
+# C++ sources under lib/ keep the repo-root config.
+DisableFormat: true

@@ -40,10 +40,13 @@ public:
 
   // Run the pass
   void runOnOperation() override;
+
+  llvm::StringRef getArgument() const override { return "alloc-multi-cache"; }
 };
 
 // Create the pass
 std::unique_ptr<OperationPass<ModuleOp>> createAllocMultiCachePass();
+void registerCreateAllocMultiCachePasses();
 
 } // namespace triton
 } // namespace mlir

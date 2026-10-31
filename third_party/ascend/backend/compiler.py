@@ -84,6 +84,7 @@ from triton.backends.compiler import (
 )
 from triton.runtime.cache import get_dump_manager
 
+import shlex
 
 # TODO: materialize the concrete min shape
 def min_dot_size(target: GPUTarget):
@@ -255,6 +256,10 @@ def _adjust_metadata_by_module_result(mod, metadata, opt, **kwargs):
     if rc != -1 and rc > 0:
         # When the option dynamic_cv_pipeline is set to False,
         # these options should also reverted.
+        if os.environ.get("FALLBACK_ERROR", False) and rc != 2:
+            err_str = f"回退: {rc}"
+            print(err_str)
+            raise ValueError(err_str)
         metadata["enable_dynamic_cv_pipeline"] = False
         metadata["enable_mixed_cv"] = kwargs["enable_mixed_cv"]
         metadata["disable_auto_inject_block_sync"] = kwargs["disable_auto_inject_block_sync"]
@@ -408,7 +413,22 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             # `ssbuffer.insertionOptimization` attribute (set here) at run time.
             # Keep the existing default-on buffer insertion behavior.
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
-            ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+
+            if True:
+                ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
+            else:
+                ascend.passes.ttir.set_buffer_count(mod, "INTRA", 2)
+                ascend.passes.ttir.set_buffer_count(mod, "INTER", 1)
+                ascend.passes.ttir.pre_check_available(pm)
+                ascend.passes.ttir.standardize_op(pm)
+                ascend.passes.ttir.plan_compute_block(pm)
+                ascend.passes.ttir.compute_block_opt(pm)
+                ascend.passes.ttir.split_dataflow(pm)
+                ascend.passes.ttir.analyse_dataflow(pm)
+                ascend.passes.ttir.separate_memory_from_compute(pm)
+                ascend.passes.ttir.alloc_multi_cache(pm)
+                ascend.passes.ttir.add_control_flow_condition(pm)
+                ascend.passes.ttir.remove_ssbuf_attr(pm)
 
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)

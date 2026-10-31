@@ -45,12 +45,17 @@ public:
   // Run the pass
   void runOnOperation() override;
 
+  [[nodiscard]] llvm::StringRef getArgument() const final {
+    return "split-dataflow";
+  }
+
   /// Return the dialect that must be loaded in the context before this pass.
   void getDependentDialects(::mlir::DialectRegistry &registry) const override {
     registry.insert<hivm::HIVMDialect>();
     registry.insert<bufferization::BufferizationDialect>();
     registry.insert<scope::ScopeDialect>();
     registry.insert<annotation::AnnotationDialect>();
+    registry.insert<LLVM::LLVMDialect>();
   }
 };
 

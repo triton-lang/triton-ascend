@@ -1,0 +1,26 @@
+# Review exclusions for this repo (read by ~/.pi/agent/extensions/review-workflow.ts).
+#
+# `bash ~/personal/build_ta.sh` applies third_party/ascend/patch/triton-ascend-3.6.0.patch to the
+# upstream triton checkout, so those hunks are always present in the working copy. They are
+# build-only plumbing for the vendored upstream tree, not code this repo maintains, so they are
+# excluded from review. The list is explicit on purpose: a directory rule such as `python/` or
+# `CMakeLists.txt` would also hide this repo's own files under third_party/ascend/.
+#
+# Everything else stays reviewed, including third_party/ascend/lib|cpp|include and the unit tests.
+CMakeLists.txt
+bin/CMakeLists.txt
+bin/RegisterTritonDialects.h
+bin/triton-opt.cpp
+include/triton/Dialect/Triton/IR/TritonAttrDefs.td
+lib/Dialect/Triton/IR/Traits.cpp
+python/src/ir.cc
+python/triton/_utils.py
+python/triton/compiler/code_generator.py
+python/triton/compiler/compiler.py
+python/triton/compiler/errors.py
+python/triton/language/math.py
+python/triton/language/semantic.py
+python/triton/language/standard.py
+python/triton/runtime/autotuner.py
+python/triton/runtime/interpreter.py
+python/triton/runtime/jit.py

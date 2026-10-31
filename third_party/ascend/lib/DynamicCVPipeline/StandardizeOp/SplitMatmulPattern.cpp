@@ -52,9 +52,9 @@
 #include "mlir/Support/LLVM.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/PatternMatchRewrites.h"
 
-#include "DynamicCVPipeline/PlanComputeBlock/Common.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 #include "bishengir/Dialect/Utils/Util.h"
 
@@ -557,7 +557,8 @@ static bool shouldSplitByInput(linalg::MatmulOp matmulOp, Value &outerOutValue,
     return true;
   }
 
-  if (operationIsFillZero(outerInValue.getDefiningOp())) {
+  if (operationIsFillZero(outerInValue.getDefiningOp()) ||
+      llvm::isa<tensor::EmptyOp>(outerInValue.getDefiningOp())) {
     LOG_DEBUG("Not split because bias is zero. " << matmulOp);
     return false;
   }

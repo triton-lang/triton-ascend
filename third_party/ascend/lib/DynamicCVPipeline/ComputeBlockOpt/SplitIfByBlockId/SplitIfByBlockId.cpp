@@ -63,6 +63,7 @@
 
 #include "ComputeBlockOpt/SplitIfByBlockId/Common.h"
 #include "DynamicCVPipeline/Common/FallbackHelper.h"
+#include "DynamicCVPipeline/Common/ScalarClosure.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
 
@@ -515,7 +516,16 @@ static void preprocessScalarDependencies(CandidateIf &cand) {
   auto processGroup = [](BlockGroup &group) {
     auto allOpsIter = llvm::concat<Operation *>(group.ops, group.nestedIfs);
     SmallVector<Operation *> allOps{allOpsIter.begin(), allOpsIter.end()};
-    ScalarClosure closure{group, allOps};
+    // Same early-out as the previous BlockGroup-based ScalarClosure, which
+    // bailed out whenever `group.ops` was empty: a group holding only nested
+    // ifs is skipped. It also guards the `allOps.front()` deref below.
+    // TODO(cv-pipeline): revisit whether such nested-if-only groups need their
+    // outer scalar deps cloned as well; proceeding here would change behaviour
+    // relative to the old implementation.
+    if (group.ops.empty()) {
+      return;
+    }
+    ScalarClosure closure{(**allOps.begin()).getBlock(), allOps, true};
     closure.collect();
 
     auto [newOps, mapper] = closure.capture(group.blockId);

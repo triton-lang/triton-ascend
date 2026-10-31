@@ -65,9 +65,6 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createMergeSmallBlockPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
-  pm.addPass(createSinkI1ProducersIntoUsersPass());
-  pm.addPass(createReorderOpsByBlockIdPass());
-
   pm.addPass(createFixpipeOptPass());
   pm.addPass(createCloneCubeDepInIfPass());
   pm.addPass(createSplitIfByBlockIdPass());

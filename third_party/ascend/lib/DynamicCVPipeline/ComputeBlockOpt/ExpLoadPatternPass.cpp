@@ -230,7 +230,7 @@ public:
       for (auto *op : coreOps) {
         matchedOps.insert(op);
       }
-      for (Operation *op : closure.getScalarOps()) {
+      for (Operation *op : closure.getScalars()) {
         matchedOps.insert(op);
       }
       CVPipeline::cloneScalarOpsForCrossBlockUses(bm, matchedOps,

@@ -41,6 +41,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/Analysis.h"
+#include "ascend/include/DynamicCVPipeline/Common/IROrder.h"
 #include "ascend/include/DynamicCVPipeline/Common/ScalarClosure.h"
 #include "ascend/include/DynamicCVPipeline/Common/ScopeOpUtils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
@@ -116,6 +117,9 @@ public:
 static void packCustomOpUnit(hivm::CustomOp customOp);
 // Pack `memref.alloc -> <ops on it> -> bufferization.to_tensor` load units.
 static PackUnitStatus packLoadUnit(memref::AllocOp allocOp);
+// Materializes the unit plus its closure into the op list of a new scope.
+static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
+                                              ArrayRef<Operation *> scalars);
 // Two-pass module driver: custom-op units first, then the remaining load units.
 static void packAllCustomOpUnits(ModuleOp moduleOp);
 static void packAllLoadUnits(ModuleOp moduleOp);
@@ -166,7 +170,31 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
   auto &ana = anaRes.value();
   LDBG("packing " << ana.customOp);
 
-  auto scopeOp = packScopeOp(ana.relevantOps);
+  // The analysed ops build the unit; the index arithmetic and views they read
+  // travel with them, exactly as in `packLoadUnit`. Skip the closure when the
+  // unit is not confined to one block: it would be collected from the wrong
+  // block, and the scope placement assumes a single block anyway.
+  SmallVector<Operation *> unitOps(ana.relevantOps);
+  if (unitOps.empty()) {
+    LDBG("custom op unit holds no analysable buffer; nothing to pack");
+    return;
+  }
+  Block *block = unitOps.front()->getBlock();
+  bool sameBlock = llvm::all_of(
+      unitOps, [block](Operation *op) { return op->getBlock() == block; });
+  SmallVector<Operation *> packList(unitOps);
+  if (sameBlock) {
+    sortByDomOrder(unitOps);
+    ScalarClosure closure(block, unitOps, false);
+    closure.collect();
+    SmallVector<Operation *> scalars(closure.getScalars());
+    sortByDomOrder(scalars);
+    packList = buildPackList(unitOps, scalars);
+  } else {
+    LDBG("custom op unit spans blocks; packing it without a closure");
+  }
+
+  auto scopeOp = packScopeOp(packList);
   if (!scopeOp) {
     // Leaving the custom op unpacked is safe: its buffers are either picked up
     // later as load units by `packAllLoadUnits`, or fall back to the raw
@@ -357,17 +385,32 @@ static bool unitReadsGlobalMemory(ArrayRef<Operation *> unitOps) {
 /// Builds the dominance-ordered op list that moves into the scope: the unit ops
 /// plus the closure scalars. A scalar that still has a consumer outside the
 /// unit is cloned, the internal consumers are rewired to the clone, and the
-/// original keeps dominating the external uses. A scalar reaching a foreign
-/// local allocation stays outside, so two local buffers are never merged into
-/// one unit. Precondition: every op of `unitOps` and `scalars` is a direct
-/// child of the same block (the closure is collected with `includeParent =
-/// false`), which is what makes the in-block sort valid.
+/// original keeps dominating the external uses. A closure op that must stay
+/// where it is (`staysOutside` below) is skipped instead.
+/// Preconditions: every op of `unitOps` and `scalars` is a direct child of the
+/// same block (the closure is collected with `includeParent = false`), and
+/// `scalars` is sorted in dominance order by the caller.
 static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
                                               ArrayRef<Operation *> scalars) {
   llvm::DenseSet<Operation *> inUnit(unitOps.begin(), unitOps.end());
 
-  llvm::DenseSet<Operation *> foreignAllocScalars;
+  // A closure op stays outside the new scope in two cases, so the new body
+  // captures its results instead of moving the op in:
+  //   tag            | condition
+  //   ---------------+----------------------------------
+  //   [ForeignAlloc] | reaches a foreign local allocation
+  //   [PackedUnit]   | is itself a `scope.scope` unit
+  // [ForeignAlloc] keeps two local buffers apart; [PackedUnit] keeps every
+  // packed unit atomic, because nesting it would redirect its results to an op
+  // created after the consumers they dominate.
+  llvm::DenseSet<Operation *> staysOutside;
   for (Operation *scalarOp : scalars) {
+    if (isa<scope::ScopeOp>(scalarOp)) {
+      LDBG("closure depends on the packed unit "
+           << scalarOp << "; leaving it outside the new scope");
+      staysOutside.insert(scalarOp);
+      continue;
+    }
     for (Value operand : scalarOp->getOperands()) {
       Value src = traceMemDef(operand);
       if (!src || inUnit.contains(src.getDefiningOp())) {
@@ -375,9 +418,9 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
       }
       if (isa_and_nonnull<memref::AllocOp, memref::AllocaOp>(
               src.getDefiningOp())) {
-        LDBG("load unit closure reached a foreign allocation "
+        LDBG("closure reached a foreign allocation "
              << src << "; leaving " << *scalarOp << " outside the scope");
-        foreignAllocScalars.insert(scalarOp);
+        staysOutside.insert(scalarOp);
         break;
       }
     }
@@ -385,8 +428,38 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
 
   llvm::DenseSet<Operation *> inClosure;
   for (Operation *scalarOp : scalars) {
-    if (!foreignAllocScalars.contains(scalarOp)) {
+    if (!staysOutside.contains(scalarOp)) {
       inClosure.insert(scalarOp);
+    }
+  }
+
+  // A closure op whose result reaches a consumer that stays outside the scope
+  // is copied: the clone travels in for the internal consumers while the
+  // original keeps serving the outside ones. The rule cascades, because a
+  // copied consumer's own original also stays outside and keeps reading its
+  // operands, so every producer feeding it has to be copied as well.
+  //
+  //   kind(user)              | consequence for the producer
+  //   ------------------------+---------------------------------
+  //   in the unit             | travels in; nothing to do
+  //   closure, moved in       | travels in; nothing to do
+  //   closure, copied         | its own original stays outside -> copy
+  //   outside / pinned        | reads across the scope boundary -> copy
+  //
+  // Walking `scalars` backwards visits every consumer before its producers
+  // (dominance order), so one pass reaches the fixpoint; an unsorted container
+  // would need the fixpoint loop back.
+  llvm::DenseSet<Operation *> copiedOps;
+  for (Operation *scalarOp : llvm::reverse(scalars)) {
+    bool escape = llvm::any_of(scalarOp->getResults(), [&](Value result) {
+      return llvm::any_of(result.getUses(), [&](OpOperand &use) {
+        Operation *user = use.getOwner();
+        return !inUnit.contains(user) &&
+               (!inClosure.contains(user) || copiedOps.contains(user));
+      });
+    });
+    if (escape) {
+      copiedOps.insert(scalarOp);
     }
   }
 
@@ -395,27 +468,12 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
 
   SmallVector<Operation *> packList(unitOps);
   for (Operation *scalarOp : scalars) {
-    // Fallback: consumers of a foreign allocation stay outside the scope.
-    if (foreignAllocScalars.contains(scalarOp)) {
+    if (staysOutside.contains(scalarOp)) {
       continue;
     }
 
-    bool hasExternalUse = false;
-    for (Value result : scalarOp->getResults()) {
-      for (OpOperand &use : result.getUses()) {
-        Operation *user = use.getOwner();
-        if (!inUnit.contains(user) && !inClosure.contains(user)) {
-          hasExternalUse = true;
-          break;
-        }
-      }
-      if (hasExternalUse) {
-        break;
-      }
-    }
-
-    if (!hasExternalUse) {
-      // No external consumer: move it straight into the scope.
+    // No outside consumer: move it straight into the scope.
+    if (!copiedOps.contains(scalarOp)) {
       packList.push_back(scalarOp);
       continue;
     }
@@ -433,7 +491,11 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
       Value replacement = cloned->getResult(i);
       for (OpOperand &use : llvm::make_early_inc_range(original.getUses())) {
         Operation *user = use.getOwner();
-        if (inUnit.contains(user) || inClosure.contains(user)) {
+        // Rewire only the consumers that travel into the scope: the original of
+        // a copied op stays outside (see `copiedOps` above) and must keep
+        // reading the original value.
+        if (inUnit.contains(user) ||
+            (inClosure.contains(user) && !copiedOps.contains(user))) {
           use.set(replacement);
         }
       }
@@ -441,8 +503,7 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
     packList.push_back(cloned);
   }
 
-  llvm::sort(packList,
-             [](Operation *a, Operation *b) { return a->isBeforeInBlock(b); });
+  sortByDomOrder(packList);
   return packList;
 }
 
@@ -479,8 +540,7 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
       unitOps.push_back(use.top);
     }
   }
-  llvm::sort(unitOps,
-             [](Operation *a, Operation *b) { return a->isBeforeInBlock(b); });
+  sortByDomOrder(unitOps);
 
   if (!unitReadsGlobalMemory(unitOps)) {
     LDBG("skip " << base
@@ -492,8 +552,12 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
   ScalarClosure closure(block, unitOps, false);
   closure.collect();
 
-  SmallVector<Operation *> packList =
-      buildPackList(unitOps, closure.getScalarOps());
+  // Collection yields an unordered set: the escape analysis walks it backwards
+  // and relies on dominance order, so sort explicitly here.
+  SmallVector<Operation *> scalars(closure.getScalars());
+  sortByDomOrder(scalars);
+
+  SmallVector<Operation *> packList = buildPackList(unitOps, scalars);
 
   auto scopeOp = packScopeOp(packList);
   if (!scopeOp) {

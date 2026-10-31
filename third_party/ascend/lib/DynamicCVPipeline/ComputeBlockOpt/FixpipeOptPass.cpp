@@ -538,7 +538,7 @@ void FixpipeOptPass::runOnOperation() {
     CVPipeline::ScalarClosure closure{matchedOps.front()->getBlock(),
                                       matchedOps.getArrayRef(), false};
     closure.collect();
-    for (auto op : closure.getScalarOps()) {
+    for (auto op : closure.getScalars()) {
       matchedOps.insert(op);
     }
     CVPipeline::cloneScalarOpsForCrossBlockUses(bm, matchedOps, targetBlockId);

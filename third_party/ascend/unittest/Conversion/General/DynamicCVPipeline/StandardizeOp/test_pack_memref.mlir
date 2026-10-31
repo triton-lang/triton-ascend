@@ -184,14 +184,15 @@ module {
   // ============================================================================
   // 9. pack_custom_op_filling_local_buffer
   // The custom op writes the local buffer itself, so the alloc has two users:
-  // the custom op and the to_tensor. The unit is still packed and the
-  // to_tensor follows the custom op inside the scope.
+  // the custom op and the to_tensor. The unit is still packed, and the packed
+  // body keeps the source order of the unit ops (the to_tensor was created
+  // before the custom op), which is what makes unpacking a round trip.
   // ============================================================================
   // CHECK-LABEL: func.func @pack_custom_op_filling_local_buffer(
   // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<2048xf32>
-  // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {{.*}} outs(%[[ALLOC]] : memref<2048xf32>) -> memref<2048xf32>
   // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<2048xf32>
+  // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {{.*}} outs(%[[ALLOC]] : memref<2048xf32>) -> memref<2048xf32>
   // CHECK:   scope.return %[[T]] : tensor<2048xf32>
   // CHECK: } {ssbuffer.core_type = "VECTOR"}
   // CHECK: return %[[SCOPE]]
@@ -205,13 +206,14 @@ module {
   // ============================================================================
   // 10. pack_custom_op_with_convert_layout
   // A to_tensor whose single user is a layout conversion drags that conversion
-  // into the unit, so the packed scope returns the converted tensor.
+  // into the unit, so the packed scope returns the converted tensor. The body
+  // keeps the source order of the unit ops.
   // ============================================================================
   // CHECK-LABEL: func.func @pack_custom_op_with_convert_layout(
   // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<2048xf32> {
   // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<2048xf32>
-  // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {{.*}} outs(%[[ALLOC]] : memref<2048xf32>) -> memref<2048xf32>
   // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<2048xf32>
+  // CHECK:   %[[CUSTOM:.*]] = hivm.hir.custom {{.*}} outs(%[[ALLOC]] : memref<2048xf32>) -> memref<2048xf32>
   // CHECK:   %[[CL:.*]] = hivm.hir.convert_layout %[[T]] output_shape [2048] {{.*}} : (tensor<2048xf32>) -> tensor<2048xf32>
   // CHECK:   scope.return %[[CL]] : tensor<2048xf32>
   // CHECK: } {ssbuffer.core_type = "VECTOR"}
@@ -312,5 +314,77 @@ module {
     %1:2 = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, symbol = "tanh_fp32"} "tanh_fp32" ins(%arg0 : tensor<2048xf32>) outs(%a0, %a1 : tensor<2048xf32>, tensor<2048xf32>) -> (tensor<2048xf32>, tensor<2048xf32>)
     %2 = hivm.hir.convert_layout %1#0 output_shape [2048] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>} : (tensor<2048xf32>) -> tensor<2048xf32>
     return %2 : tensor<2048xf32>
+  }
+
+  // ============================================================================
+  // 13. pack_load_unit_closure_feeding_outside_consumer
+  // A closure scalar whose only closure consumer is itself copied (it has a
+  // consumer before the unit) must be copied as well: the copy rule cascades,
+  // otherwise the copied op's original would read a value that moved into a
+  // scope created after it.
+  // ============================================================================
+  // CHECK-LABEL: func.func @pack_load_unit_closure_feeding_outside_consumer(
+  // CHECK: %[[A:.*]] = arith.muli
+  // CHECK: %[[B:.*]] = arith.addi %[[A]]
+  // CHECK: memref.store %[[B]], {{.*}} : memref<1xi32>
+  // The whole closure prefix of `%[[B]]` is copied into the scope, so the store
+  // above keeps reading the outer chain.
+  // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<32x64xf16> {
+  // CHECK:   %[[A2:.*]] = arith.muli
+  // CHECK:   %[[B2:.*]] = arith.addi %[[A2]]
+  // CHECK:   %[[IDX:.*]] = arith.index_cast %[[B2]] : i32 to index
+  // CHECK:   %[[ALLOC:.*]] = memref.alloc() : memref<32x64xf16>
+  // CHECK:   %[[SRC:.*]] = memref.reinterpret_cast {{.*}} to offset: [%[[IDX]]], sizes: [32, 64], strides: [64, 1]
+  // CHECK:   %[[DST:.*]] = memref.subview %[[ALLOC]]
+  // CHECK:   memref.copy %[[SRC]], %[[DST]]
+  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<32x64xf16>
+  // CHECK:   scope.return %[[T]] : tensor<32x64xf16>
+  // CHECK: } {ssbuffer.load}
+  // CHECK: return %[[SCOPE]]
+  func.func @pack_load_unit_closure_feeding_outside_consumer(
+      %gm: memref<?xf16>, %flag: memref<1xi32>) -> tensor<32x64xf16> {
+    %c0 = arith.constant 0 : index
+    %c32_i32 = arith.constant 32 : i32
+    %c1_i32 = arith.constant 1 : i32
+    %a = arith.muli %c32_i32, %c32_i32 : i32
+    %b = arith.addi %a, %c1_i32 : i32
+    memref.store %b, %flag[%c0] : memref<1xi32>
+    %idx = arith.index_cast %b : i32 to index
+    %alloc = memref.alloc() : memref<32x64xf16>
+    %src = memref.reinterpret_cast %gm to offset: [%idx], sizes: [32, 64], strides: [64, 1] : memref<?xf16> to memref<32x64xf16, strided<[64, 1], offset: ?>>
+    %dst = memref.subview %alloc[0, 0] [32, 64] [1, 1] : memref<32x64xf16> to memref<32x64xf16, strided<[64, 1]>>
+    memref.copy %src, %dst : memref<32x64xf16, strided<[64, 1], offset: ?>> to memref<32x64xf16, strided<[64, 1]>>
+    %t = bufferization.to_tensor %alloc restrict writable : memref<32x64xf16> to tensor<32x64xf16>
+    return %t : tensor<32x64xf16>
+  }
+
+  // ============================================================================
+  // 14. pack_custom_op_with_index_closure
+  // A custom-op unit collects the closure of its analysed ops too, so the index
+  // arithmetic of a dynamic allocation travels into the scope instead of being
+  // left behind (it would otherwise be scheduled outside the unit's block).
+  // ============================================================================
+  // CHECK-LABEL: func.func @pack_custom_op_with_index_closure(
+  // CHECK-NOT: arith.muli
+  // CHECK: %[[SCOPE:.*]] = scope.scope : () -> tensor<?xf32> {
+  // CHECK:   %[[C4:.*]] = arith.constant 4 : index
+  // CHECK:   %[[C8:.*]] = arith.constant 8 : index
+  // CHECK:   %[[N:.*]] = arith.muli %{{.*}}, %[[C4]] : index
+  // CHECK:   %[[M:.*]] = arith.addi %[[N]], %[[C8]] : index
+  // CHECK:   %[[ALLOC:.*]] = memref.alloc(%[[M]]) : memref<?xf32>
+  // CHECK:   %[[T:.*]] = bufferization.to_tensor %[[ALLOC]] restrict writable : memref<?xf32>
+  // CHECK:   hivm.hir.custom {{.*}} outs(%[[T]] : tensor<?xf32>)
+  // CHECK:   scope.return
+  // CHECK: } {ssbuffer.core_type = "VECTOR"}
+  // CHECK: return %[[SCOPE]]
+  func.func @pack_custom_op_with_index_closure(%arg0: tensor<?xf32>, %i: index) -> tensor<?xf32> {
+    %c4 = arith.constant 4 : index
+    %c8 = arith.constant 8 : index
+    %n = arith.muli %i, %c4 : index
+    %m = arith.addi %n, %c8 : index
+    %alloc = memref.alloc(%m) : memref<?xf32>
+    %0 = bufferization.to_tensor %alloc restrict writable : memref<?xf32> to tensor<?xf32>
+    %1 = hivm.hir.custom {arg_attrs = [], bitcode = "", hivm.inline_mode = #hivm.inline_mode<always_inline>, hivm.pipe = #hivm.pipe<PIPE_V>, hivm.tcore_type = #hivm.tcore_type<VECTOR>, hivm.vf_mode = #hivm.vf_mode<SIMD>, symbol = "tanh_fp32"} "tanh_fp32" ins(%arg0 : tensor<?xf32>) outs(%0 : tensor<?xf32>) -> tensor<?xf32>
+    return %1 : tensor<?xf32>
   }
 }

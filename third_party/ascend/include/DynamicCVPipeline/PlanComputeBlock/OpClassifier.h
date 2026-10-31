@@ -23,9 +23,8 @@
 #ifndef TRITON_ADAPTER_OP_CLASSIFIER_H
 #define TRITON_ADAPTER_OP_CLASSIFIER_H
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "llvm/Support/LogicalResult.h"
+
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -36,6 +35,12 @@
 #include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
+#include "bishengir/Dialect/HIVM/IR/HIVM.h"
+#include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace mlir {
@@ -65,10 +70,13 @@ public:
   static constexpr ::llvm::StringRef getArgumentName() {
     return "op-classifier";
   }
+
   ::llvm::StringRef getArgument() const override { return "op-classifier"; }
+
   ::llvm::StringRef getDescription() const override {
     return "Classify operations as CUBE or VECTOR for dynamic CV pipeline";
   }
+
   ::llvm::StringRef getName() const override { return "OpClassifierPass"; }
 
 private:
@@ -76,6 +84,11 @@ private:
 
   // Map from operation to its core type
   llvm::DenseMap<Operation *, OpCoreType> opCoreTypes;
+
+  // Ops whose core type was already decided before this pass (e.g. packed
+  // scope units carrying `ssbuffer.core_type`). Their type is authoritative
+  // and they act as propagation boundaries.
+  llvm::DenseSet<Operation *> preClassifiedOps;
 
   // Cache: value -> whether its defining chain reaches a VECTOR-only op.
   // Memoizes hasVectorOnlyProducer during CUBE upstream propagation.

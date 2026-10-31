@@ -29,7 +29,9 @@
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Linalg/IR/Linalg.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinAttributes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/IR/Value.h"
 #include "llvm/ADT/DenseSet.h"
@@ -57,8 +59,8 @@ public:
 
   llvm::StringRef getArgument() const final { return "pos-mask-pattern-opt"; }
   llvm::StringRef getDescription() const final {
-    return "Optimize pos mask pattern (broadcast+cmpi+extui) by moving ops "
-           "to user's block when safe";
+    return "Sink position patterns and attention mask computations into "
+           "their user blocks when safe";
   }
 };
 
@@ -192,6 +194,145 @@ findTargetBlock(const PosPattern &pattern,
   return targetBlockId;
 }
 
+// Match the consumer, rather than treating every comparison as an attention
+// mask. Constants may have been folded from linalg.fill to dense splats.
+static std::optional<APFloat> getFloatSplat(Value value) {
+  if (auto fill = value.getDefiningOp<linalg::FillOp>())
+    return getFloatSplat(fill.getInputs()[0]);
+  Attribute attr;
+  if (!matchPattern(value, m_Constant(&attr)))
+    return std::nullopt;
+  if (auto scalar = dyn_cast<FloatAttr>(attr))
+    return scalar.getValue();
+  if (auto dense = dyn_cast<DenseFPElementsAttr>(attr);
+      dense && dense.isSplat())
+    return dense.getSplatValue<APFloat>();
+  return std::nullopt;
+}
+
+static bool isMaskBias(arith::SelectOp select) {
+  auto a = getFloatSplat(select.getTrueValue());
+  auto b = getFloatSplat(select.getFalseValue());
+  if (!a || !b)
+    return false;
+  auto isNegative = [](const APFloat &v) {
+    return v.isNegative() && !v.isZero() && !v.isNaN();
+  };
+  return (a->isZero() && isNegative(*b)) || (b->isZero() && isNegative(*a));
+}
+
+static bool isScaledMatmul(Value value) {
+  auto mul = value.getDefiningOp<arith::MulFOp>();
+  if (!mul)
+    return false;
+  return mul.getLhs().getDefiningOp<linalg::MatmulOp>() ||
+         mul.getRhs().getDefiningOp<linalg::MatmulOp>();
+}
+
+static bool isOneSplat(Value value) {
+  if (auto fill = value.getDefiningOp<linalg::FillOp>())
+    return isOneSplat(fill.getInputs()[0]);
+  Attribute attr;
+  if (!matchPattern(value, m_Constant(&attr)))
+    return false;
+  if (auto scalar = dyn_cast<IntegerAttr>(attr))
+    return scalar.getValue().isOne();
+  auto dense = dyn_cast<DenseIntElementsAttr>(attr);
+  return dense && dense.isSplat() && dense.getSplatValue<APInt>().isOne();
+}
+
+// Loads, to_tensor, control flow, and arbitrary regions remain inputs of
+// the moved, side-effect-free tensor computation.
+// Loads, to_tensor, control flow, and arbitrary regions remain inputs of
+// the moved, side-effect-free tensor computation.
+static bool isMaskComputation(Operation *op) {
+  return isa<arith::CmpIOp, arith::ExtUIOp, arith::TruncIOp, arith::AndIOp,
+             arith::OrIOp, arith::ShRUIOp, linalg::BroadcastOp,
+             tensor::ExpandShapeOp, tensor::CollapseShapeOp, tensor::ReshapeOp,
+             tensor::ExtractSliceOp, tensor::InsertSliceOp>(op);
+}
+
+static void sinkAttentionMasks(ModuleOp module,
+                               CVPipeline::MemoryDependenceGraph &memGraph,
+                               CVPipeline::ComputeBlockIdManager &bm) {
+  module.walk([&](arith::AddFOp add) {
+    if (CVPipeline::getOpCoreType(add) != CVPipeline::CoreType::VECTOR_ONLY)
+      return;
+    arith::SelectOp bias;
+    if (isScaledMatmul(add.getLhs()))
+      bias = add.getRhs().getDefiningOp<arith::SelectOp>();
+    else if (isScaledMatmul(add.getRhs()))
+      bias = add.getLhs().getDefiningOp<arith::SelectOp>();
+    if (!bias || !isMaskBias(bias) || bias->getBlock() != add->getBlock())
+      return;
+    int source = bm.getBlockIdByOp(bias);
+    int target = bm.getBlockIdByOp(add);
+    if (source < 0 || target < 0 || source == target)
+      return;
+
+    llvm::SetVector<Operation *> candidates;
+    SmallVector<Operation *> pending{bias.getOperation()};
+    while (!pending.empty()) {
+      Operation *op = pending.pop_back_val();
+      if (candidates.contains(op) || op->getBlock() != add->getBlock() ||
+          bm.getBlockIdByOp(op) != source ||
+          CVPipeline::getOpCoreType(op) != CVPipeline::CoreType::VECTOR_ONLY ||
+          (op != bias.getOperation() && !isMaskComputation(op)))
+        continue;
+      candidates.insert(op);
+      for (Value operand : op->getOperands())
+        if (Operation *def = operand.getDefiningOp())
+          pending.push_back(def);
+    }
+
+    // Shared producers stay in their original block; prune to a fixed point,
+    // since retaining one producer can also require retaining its inputs.
+    bool changed;
+    do {
+      changed = false;
+      SmallVector<Operation *> retained;
+      for (Operation *op : candidates)
+        for (Operation *user : op->getUsers())
+          if (!candidates.contains(user) &&
+              (user->getBlock() != add->getBlock() ||
+               bm.getBlockIdByOp(user) != target)) {
+            retained.push_back(op);
+            break;
+          }
+      for (Operation *op : retained) {
+        candidates.remove(op);
+        changed = true;
+      }
+    } while (changed);
+
+    if (!candidates.contains(bias))
+      return;
+    // Do not turn this into a general-purpose select sinking rule. Require
+    // either a comparison/boolean-combination chain or bit extraction.
+    bool hasCompare = false, hasLogic = false, hasShift = false;
+    for (Operation *op : candidates) {
+      if (auto cmp = dyn_cast<arith::CmpIOp>(op))
+        hasCompare |= cmp.getPredicate() != arith::CmpIPredicate::ne;
+      hasLogic |= isa<arith::AndIOp, arith::OrIOp>(op);
+      if (auto bitAnd = dyn_cast<arith::AndIOp>(op)) {
+        auto isBitExtraction = [](Value bits, Value one) {
+          return bits.getDefiningOp<arith::ShRUIOp>() && isOneSplat(one);
+        };
+        hasShift |= isBitExtraction(bitAnd.getLhs(), bitAnd.getRhs()) ||
+                    isBitExtraction(bitAnd.getRhs(), bitAnd.getLhs());
+      }
+    }
+    if (!hasLogic || (!hasCompare && !hasShift))
+      return;
+    SmallVector<Operation *> ops(candidates.begin(), candidates.end());
+    if (CVPipeline::willCreateCycle(ops, memGraph, target, bm))
+      return;
+    LOG_DEBUG("Moving attention mask computation to block " << target << "\n");
+    for (Operation *op : ops)
+      bm.updateBlockId(op, target);
+  });
+}
+
 } // namespace
 
 namespace mlir {
@@ -240,6 +381,7 @@ void PosMaskPatternPass::runOnOperation() {
       bm.updateBlockId(op, *targetBlockId);
     }
   }
+  sinkAttentionMasks(moduleOp, memGraph, bm);
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> createPosMaskPatternPass() {

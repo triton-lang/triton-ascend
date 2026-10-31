@@ -741,18 +741,74 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
   return conditions;
 }
 
+// Return true when `op` is textually after `latestOp` in `thenBlock`.
+// `latestOp` is the last matmul kept so far. Both ops may be nested.
+// `opInThen` and `latestInThen` are the ancestors written directly in
+// use `findAncestorOpInBlock`. Different ancestors are compared
+// in `thenBlock`. The same ancestor is compared only when `op` and `latestOp`
+// share a block. Otherwise `latestOp` stays earlier.
+static bool isLaterInThenBlock(Operation *op, Operation *latestOp,
+                               Block *thenBlock) {
+  Operation *opInThen = thenBlock->findAncestorOpInBlock(*op);
+  Operation *latestInThen = thenBlock->findAncestorOpInBlock(*latestOp);
+  if (opInThen != latestInThen)
+    return latestInThen->isBeforeInBlock(opInThen);
+  if (op->getBlock() == latestOp->getBlock())
+    return latestOp->isBeforeInBlock(op);
+  return false;
+}
+
+// Return the last linalg.matmul that reads `consumer` and is written directly
+// in `ifOp`'s then block.
+static Operation *findLastMatmulOnUserChain(Operation *consumer,
+                                            scf::IfOp ifOp) {
+  Block *thenBlock = &ifOp.getThenRegion().front();
+  SmallVector<Operation *> worklist;
+  DenseSet<Operation *> seen;
+  for (Operation *user : consumer->getUsers())
+    worklist.push_back(user);
+
+  Operation *latestMatmul = nullptr;
+  while (!worklist.empty()) {
+    Operation *userOp = worklist.pop_back_val();
+    if (!seen.insert(userOp).second)
+      continue;
+    if (isa<linalg::MatmulOp>(userOp)) {
+      if (!latestMatmul || isLaterInThenBlock(userOp, latestMatmul, thenBlock))
+        latestMatmul = userOp;
+      continue;
+    }
+    for (Operation *user : userOp->getUsers())
+      worklist.push_back(user);
+  }
+  if (!latestMatmul || latestMatmul->getBlock() != thenBlock)
+    return nullptr;
+  return latestMatmul;
+}
+
 // Part 3: Update control variables in then block
 void UpdateConditionInfoPass::updateCrossCoreControlVars(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
     SmallVector<int> crossCoreInputValues,
-    SmallVector<int> crossCoreOutputValues, bool isAIC, Value oneConst,
-    DenseMap<int, Value> &VectorSSBufferPtrs,
+    SmallVector<int> crossCoreOutputValues,
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        &crossCoreBuffers,
+    bool isAIC, Value oneConst, DenseMap<int, Value> &VectorSSBufferPtrs,
     SmallVector<SmallVector<Value>> ssbufferPtrs) {
   Block *thenBlock = &ifOp.getThenRegion().front();
   auto yieldOp = cast<scf::YieldOp>(thenBlock->getTerminator());
-  builder.setInsertionPoint(yieldOp);
 
   for (int inputGroupIdx : crossCoreInputValues) {
+    Operation *insertAfterOp = nullptr;
+    if (isAIC) {
+      // `inputGroupIdx` selects one group. The inner map has one consumer;
+      Operation *consumer = crossCoreBuffers[inputGroupIdx].begin()->first;
+      insertAfterOp = findLastMatmulOnUserChain(consumer, ifOp);
+    }
+    if (insertAfterOp)
+      builder.setInsertionPointAfter(insertAfterOp);
+    else
+      builder.setInsertionPoint(yieldOp);
     createSsbufLoads(builder, loc, isAIC, inputGroupIdx, VectorSSBufferPtrs,
                      ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
                        Value newValue = builder.create<arith::SubIOp>(
@@ -765,6 +821,7 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
                      });
   }
 
+  builder.setInsertionPoint(yieldOp);
   for (int outputGroupIdx : crossCoreOutputValues) {
     createSsbufLoads(builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs,
                      ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
@@ -848,8 +905,8 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
 
   // ========== Part 3: Update control variables ==========
   updateCrossCoreControlVars(builder, loc, ifOp, crossCoreInputValues,
-                             crossCoreOutputValues, isAIC, oneConst,
-                             VectorSSBufferPtrs, ssbufferPtrs);
+                             crossCoreOutputValues, crossCoreBuffers, isAIC,
+                             oneConst, VectorSSBufferPtrs, ssbufferPtrs);
 
   return UPDATE_CONDITION_INFO_SUCCESS;
 }

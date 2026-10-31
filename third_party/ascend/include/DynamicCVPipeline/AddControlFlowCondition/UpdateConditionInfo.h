@@ -227,13 +227,14 @@ private:
       SmallVector<SmallVector<Value>> ssbufferPtrs);
 
   // Part 3: Update control variables in then block
-  void updateCrossCoreControlVars(OpBuilder &builder, Location loc,
-                                  scf::IfOp ifOp,
-                                  SmallVector<int> crossCoreInputValues,
-                                  SmallVector<int> crossCoreOutputValues,
-                                  bool isAIC, Value oneConst,
-                                  DenseMap<int, Value> &precomputedPtrs,
-                                  SmallVector<SmallVector<Value>> ssbufferPtrs);
+  void updateCrossCoreControlVars(
+      OpBuilder &builder, Location loc, scf::IfOp ifOp,
+      SmallVector<int> crossCoreInputValues,
+      SmallVector<int> crossCoreOutputValues,
+      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+          &crossCoreBuffers,
+      bool isAIC, Value oneConst, DenseMap<int, Value> &precomputedPtrs,
+      SmallVector<SmallVector<Value>> ssbufferPtrs);
 
   DenseMap<Value, Value> controlVarToLatestValue;
   SmallVector<Value> currentUsedVars;

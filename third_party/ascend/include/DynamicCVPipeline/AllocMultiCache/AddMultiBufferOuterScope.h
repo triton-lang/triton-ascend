@@ -46,10 +46,8 @@ struct BufferAllocPair {
 struct TransferOpChain {
   Operation *waitOp = nullptr;
   Operation *transferOp = nullptr;
-  // Group-buffer operand of transferOp; remapped to the spare buffer on wrap
+  // Group-buffer operand of transferOp, selected using the loop parity.
   Value bufferOperand;
-  Operation *toTensorOp =
-      nullptr; // memref→tensor boundary op terminating the receiver chain
   Operation *setOp = nullptr;
 };
 

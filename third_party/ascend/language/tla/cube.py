@@ -47,23 +47,72 @@ def _logical_shape(shape):
 @builtin
 def mmad(a, b, acc, transpose_a=False, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *,
          unit_flag_group_id=None, real_m=None, real_k=None, real_n=None, _semantic=None):
-    """Multiply L1 buffers into L0C, optionally clearing the accumulator first.
+    """Multiplies L1 matrices into L0C using ``hivm.hir.mmadL1``.
 
-    ``transpose_a`` and ``transpose_b`` transpose the logical matrices stored
-    in the input buffers. A=(K,M), B=(K,N), transpose_a=True computes C=(M,N);
-    the transpose is carried by MMAD rather than a separate data movement.
+    Computes ``acc = a @ b`` when ``clear_accum=True`` and adds the product to
+    the existing accumulator otherwise.
 
-    ``real_m``, ``real_k`` and ``real_n`` restrict the computation to a leading
-    submatrix after transposition. Explicit extents must be positive
-    compile-time multiples of 16 within the corresponding input dimensions.
-    Omitted extents use the full dimensions. The L0C buffer must have exactly
-    the actual (real_m, real_n) logical shape, matching its packed output layout.
+    :param a: L1 left operand with logical shape ``(M, K)``, or ``(K, M)``
+        when ``transpose_a=True``.
+    :type a: tla.buffer
+    :param b: L1 right operand with logical shape ``(K, N)``, or ``(N, K)``
+        when ``transpose_b=True``, and the same element type as ``a``.
+    :type b: tla.buffer
+    :param acc: L0C accumulator with logical shape ``(real_m, real_n)``. Its
+        element type must be a backend-supported accumulator type for ``a``
+        and ``b``.
+    :type acc: tla.buffer
+    :param transpose_a: Compile-time native A-transpose flag. Defaults to
+        ``False``. The transpose is carried by MMAD rather than a separate
+        data movement, and the frontend swaps the two logical dimensions of
+        ``a`` when validating the product.
+    :type transpose_a: bool
+    :param transpose_b: Compile-time native B-transpose flag. Defaults to
+        ``False``. Like ``transpose_a`` it is carried by MMAD, and the
+        frontend swaps the two logical dimensions of ``b``.
+    :type transpose_b: bool
+    :param clear_accum: Whether to initialize the accumulator before this
+        multiplication. Defaults to ``False``; in that case ``acc`` must
+        already contain valid values.
+    :type clear_accum: bool
+    :param unit_flag_ctrl: Compile-time UnitFlag mode, or ``None`` to leave
+        the attribute unset (default). ``DISABLED`` (0),
+        ``ENABLED_WITHOUT_UPDATE`` (2) and ``ENABLED_WITH_UPDATE`` (3) select
+        explicit modes. Value 1 is reserved.
+    :type unit_flag_ctrl: tla.UnitFlagMode, int or None
+    :param unit_flag_group_id: Keyword-only compile-time signed 64-bit group
+        ID, or ``None`` to leave it unset. Match the related Fixpipe protocol;
+        valid hardware IDs are backend-dependent.
+    :type unit_flag_group_id: int or None
+    :param real_m: Actual M extent to compute, or ``None`` (default) for the
+        full ``M``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``M``.
+    :type real_m: int or None
+    :param real_k: Actual K extent to compute, or ``None`` (default) for the
+        full ``K``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``K``.
+    :type real_k: int or None
+    :param real_n: Actual N extent to compute, or ``None`` (default) for the
+        full ``N``. Must be a positive compile-time multiple of 16 that does
+        not exceed ``N``.
+    :type real_n: int or None
+    :return: None. The result is stored in ``acc``.
+    :rtype: None
 
-    ``unit_flag_ctrl`` and ``unit_flag_group_id`` pass through to HIVM's
-    UnitFlag interface. None leaves each attribute unset; modes 0/2/3 mean
-    disabled, enabled without update, and enabled with update respectively.
-    To test manual modes without backend automatic UnitFlag inference
-    rewriting them, launch with ``unit_flag=False``.
+    .. note::
+        Use inside ``tla.scope.cube()``. Each operand may independently use
+        a logical 2-D shape or a physical 4-D NZ shape. A 4-D buffer has logical
+        shape ``(shape[1] * shape[2], shape[0] * shape[3])``. After the
+        transposes are applied the dimensions must satisfy ``a=(M,K)``,
+        ``b=(K,N)`` and ``acc=(real_m, real_n)``. Explicit ``real_m``,
+        ``real_k`` and ``real_n`` restrict the multiplication to a leading
+        submatrix, and ``acc`` is a packed L0C accumulator that must match
+        those actual extents exactly. Dtypes, block sizes and alignment are
+        checked by the backend.
+
+        To preserve a manually configured UnitFlag protocol, launch with
+        ``unit_flag=False`` to disable automatic UnitFlag inference. Leaving
+        ``unit_flag_ctrl=None`` does not explicitly disable the protocol.
     """
     if not (isinstance(a, buffer) and isinstance(b, buffer) and isinstance(acc, buffer)):
         raise TypeError("tla.mmad expects tla.buffer operands for a, b, acc")

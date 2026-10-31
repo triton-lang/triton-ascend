@@ -106,6 +106,11 @@ def is_xpu():
     return False if target is None else target.backend == "xpu"
 
 
+def is_npu():
+    target = get_current_target()
+    return False if target is None else target.backend == "npu"
+
+
 def get_arch():
     target = get_current_target()
     return "" if target is None else str(target.arch)

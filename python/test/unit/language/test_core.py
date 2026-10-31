@@ -35,6 +35,7 @@ from triton._internal_testing import (
     is_hip_gfx11,
     is_hip_gfx12,
     is_xpu,
+    is_npu,
     get_arch,
     torch_float8_dtypes,
     torch_dtypes,
@@ -5494,7 +5495,8 @@ def test_poison_return(device):
     h = kernel.warmup(a, grid=(1, ))
     assert "ub.poison" in h.asm["ttir"], h.asm["ttir"]
     # hip/xpu uses llvm.store, which in this case is removed by the optimizer
-    if not (is_hip() or is_xpu()):
+    # npu has no llir stage
+    if not (is_hip() or is_xpu() or is_npu()):
         assert "poison" in h.asm["llir"], h.asm["llir"]
 
 

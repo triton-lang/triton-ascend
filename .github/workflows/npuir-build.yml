@@ -75,10 +75,6 @@ jobs:
           echo "npuir_sha=${NPUIR_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Install build tools
-        env:
-          # In-cluster pypi cache, same as llvm-build.yml / integration tests.
-          PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
-          PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
         run: |
           # Same toolchain as the upstream AscendNPU-IR wheel CI (their
           # manylinux build): dnf clang/lld/ccache; cmake+ninja from pip

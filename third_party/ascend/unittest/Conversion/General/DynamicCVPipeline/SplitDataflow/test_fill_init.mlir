@@ -39,5 +39,5 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
 // CHECK: arith.constant
 // CHECK: hivm.hir.sync_block_set
 
-// CHECK: scf.yield {ssbuffer.core_type = "VECTOR"} %[[TENSOR_5]] : tensor<32x32xf32>
+// CHECK: scf.yield {{{.*}}ssbuffer.core_type = "VECTOR"{{.*}}} %[[TENSOR_5]] : tensor<32x32xf32>
 // CHECK: } {{{.*}}ssbuffer.core_type = "VECTOR"{{.*}}}

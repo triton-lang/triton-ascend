@@ -45,34 +45,28 @@ FlagIdManager::FlagIdManager(ModuleOp module) {
 
 void FlagIdManager::scanExistingFlags(ModuleOp module) {
   module.walk([&](Operation *op) {
-    if (auto syncBlock = dyn_cast<hivm::SyncBlockOp>(op)) {
-      if (auto flagIdOpt = syncBlock.getFlagId()) {
-        int64_t id = flagIdOpt->getInt();
-        if (id >= 0 && id <= MAX_FLAG_ID) {
-          currentMaxId = std::max(currentMaxId, id);
-        }
-      }
-    }
     if (isa<hivm::SyncBlockSetOp>(op) || isa<hivm::SyncBlockWaitOp>(op)) {
-      int flag = -1;
-      if (auto intAttr = op->getAttrOfType<IntegerAttr>("static_flag_id")) {
-        flag = (int)intAttr.getInt();
-      } else if (auto intAttr = op->getAttrOfType<IntegerAttr>("flag")) {
-        flag = (int)intAttr.getInt();
+      auto flagId = op->getAttrOfType<IntegerAttr>("static_flag_id");
+      if (!flagId) {
+        flagId = op->getAttrOfType<IntegerAttr>("flag");
       }
-      if (flag >= 0) {
-        currentMaxId = std::max(currentMaxId, (int64_t)flag);
+      if (flagId && flagId.getInt() >= 0) {
+        currentMaxId = std::max(currentMaxId, flagId.getInt());
       }
     }
   });
 }
 
-int FlagIdManager::acquireId() { return ++currentMaxId; }
+int FlagIdManager::acquireId() {
+  scanExistingFlags(module);
+  return ++currentMaxId;
+}
 
 bool FlagIdManager::checkCurrentId() {
   BufferCountManager::DepType depType = BufferCountManager::DepType::InterCore;
   BufferCountManager bufferCountMgr(module);
   int outerBufferCount = bufferCountMgr.getBufferCountByType(depType);
+  scanExistingFlags(module);
   if (outerBufferCount > 1) {
     return currentMaxId <= MULTI_MAX_FLAG_ID;
   }

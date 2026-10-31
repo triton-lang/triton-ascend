@@ -267,6 +267,9 @@ LogicalResult getScopeType(Operation *scopeOp, bool &isCube, bool &isVector) {
 // Check if op is a scf.if whose body only contains hivm.hir.sync_block_wait,
 // hivm.hir.sync_block_set and hivm.fixpipe ops (excluding terminators).
 bool isIfOpWithOnlySyncOps(Operation *op) {
+  if (op->hasAttr(kSplittedIf)) {
+    return true;
+  }
   auto ifOp = dyn_cast<scf::IfOp>(op);
   if (!ifOp) {
     return false;

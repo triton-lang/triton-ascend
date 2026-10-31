@@ -322,34 +322,12 @@ def _npuir_build_enabled():
 
 
 def _ensure_npuir_payload():
-    """ON mode: build the BishengIR payload in-image via build_npuir.py
-    (which fetches the AscendNPU-IR stable branch itself)."""
+    """ON mode: build the BishengIR payload via build_npuir.py (which uses
+    the pinned AscendNPU-IR submodule unless a source tree is already
+    present — the wheel CI pre-fetches its own sources)."""
     if not _npuir_build_enabled():
         return
     build_npuir()
-
-
-def _ensure_npuir_sources():
-    """OFF mode: fetch the AscendNPU-IR stable sources when they are missing.
-
-    The prebuilt payload from npuir-build.yml only provides the runtime
-    binaries bundled into the wheel; the C++ plugin build still compiles the
-    BiShengIR dialects via
-    ``add_subdirectory(third_party/ascend/AscendNPU-IR)``, so the source tree
-    must be present. The CI docker context carries no submodule checkout, so
-    fetch stable HEAD — the same source the payload was built from — via the
-    shared workflow script (nested third-party submodules included; trimming
-    those is a possible follow-up once the standalone-IR build is confirmed
-    not to need them). An existing checkout (a local developer's initialized
-    submodule, or a previous fetch) is left untouched.
-    """
-    if _npuir_build_enabled():
-        return  # build_npuir() fetches the sources itself
-    npuir_dir = _REPO_ROOT / "third_party" / "ascend" / "AscendNPU-IR"
-    if (npuir_dir / "CMakeLists.txt").exists():
-        return
-    script = _REPO_ROOT / ".github" / "workflows" / "build" / "fetch-npuir-stable.sh"
-    subprocess.check_call(["bash", str(script), str(npuir_dir)])
 
 
 def _ensure_distributed_submodule():
@@ -733,8 +711,13 @@ def _build_setup_kwargs(mod, kwargs):
 def prepare():
     """Top-of-setup.py hook: defaults and optional npuir/distributed sources."""
     _set_default_env_vars()
+    # OFF-mode note: the C++ plugin build needs the AscendNPU-IR source tree
+    # (add_subdirectory), but only its top level (the STANDALONE_IR_ONLY
+    # dialects; MLIR comes from Triton's own LLVM). Initializing the pinned
+    # submodule is left to the root setup.py's BackendInstaller.prepare
+    # (`git submodule update --init <backend>`); the wheel CI images pre-fetch
+    # their own sources, and ON mode goes through build_npuir() below.
     _ensure_npuir_payload()
-    _ensure_npuir_sources()
     _ensure_distributed_submodule()
 
 

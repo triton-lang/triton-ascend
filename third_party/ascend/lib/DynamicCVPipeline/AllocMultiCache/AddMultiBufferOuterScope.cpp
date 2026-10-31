@@ -15,6 +15,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/Dominance.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -408,12 +409,6 @@ static int collectExtraSync(const SmallVector<Operation *> &ops,
     }
   }
 
-  // Fallback: use first available pair if exact match not found
-  if (!extraSets.empty() && !extraWaits.empty()) {
-    info.setOp = extraSets.front();
-    info.waitOp = extraWaits.front();
-  }
-
   return 0;
 }
 
@@ -578,6 +573,28 @@ static int buildTransferGroupData(int tid, const SmallVector<Operation *> &ops,
   return 0;
 }
 
+/// A reused flag may carry its seed/drain tags on a different transfer_id.
+/// Only borrow a lifecycle enclosing the transfers on both cores. Sync ops
+/// remain owned by their original group so they are not duplicated.
+static bool hasSharedSyncLifecycle(const TransferGroupInfo &group,
+                                   const TransferGroupInfo &owner,
+                                   DominanceInfo &dom,
+                                   PostDominanceInfo &postDom) {
+  if (!owner.extraSyncSetOp || !owner.extraSyncWaitOp ||
+      !group.senderChain.setOp || !group.receiverChain.waitOp)
+    return false;
+  Operation *seed = owner.extraSyncSetOp;
+  Operation *drain = owner.extraSyncWaitOp;
+  Operation *sender = group.senderChain.setOp;
+  Operation *receiver = group.receiverChain.waitOp;
+  return seed->getParentOfType<scope::ScopeOp>() ==
+             receiver->getParentOfType<scope::ScopeOp>() &&
+         drain->getParentOfType<scope::ScopeOp>() ==
+             sender->getParentOfType<scope::ScopeOp>() &&
+         dom.properlyDominates(seed, receiver) &&
+         postDom.properlyPostDominates(drain, sender);
+}
+
 /// Collect TransferGroupInfo for all transfer groups
 static int collectTransferGroupData(
     ModuleOp module, DenseMap<int, SmallVector<Operation *>> &opsByTid,
@@ -590,6 +607,42 @@ static int collectTransferGroupData(
     if (info.senderChain.transferOp || info.receiverChain.transferOp) {
       groups[p.first] = info;
     }
+  }
+
+  // A missing per-tid seed/drain must be covered by another group's lifecycle
+  // on the same channel. Otherwise keep the entire channel single-buffered;
+  // mixing rotating and non-rotating users of one flag is unsafe.
+  using ChannelKey = std::pair<int, bool>;
+  std::set<ChannelKey> incompleteChannels;
+  DominanceInfo dom(module);
+  PostDominanceInfo postDom(module);
+  for (auto &p : groups) {
+    const auto &group = p.second;
+    if (group.extraSyncSetOp && group.extraSyncWaitOp)
+      continue;
+    bool covered = false;
+    for (auto &q : groups) {
+      const auto &owner = q.second;
+      if (group.originalFlag == owner.originalFlag &&
+          group.isCtoV == owner.isCtoV &&
+          hasSharedSyncLifecycle(group, owner, dom, postDom)) {
+        covered = true;
+        break;
+      }
+    }
+    if (!covered)
+      incompleteChannels.emplace(group.originalFlag, group.isCtoV);
+  }
+  SmallVector<int> skippedGroups;
+  for (auto &p : groups) {
+    if (incompleteChannels.count({p.second.originalFlag, p.second.isCtoV}))
+      skippedGroups.push_back(p.first);
+  }
+  for (int tid : skippedGroups) {
+    LDBG("Group tid=" << tid
+                      << " has no complete shared sync lifecycle, keeping"
+                      << " its channel single-buffered.");
+    groups.erase(tid);
   }
 
   // Output flag reuse: groups with same (originalFlag, direction) share an
@@ -742,13 +795,12 @@ static int createOutputBufferForGroup(TransferGroupInfo &g,
                                               << " (sender scope).");
   }
 
-  // Insert output sync wait at extra_sync position
-  Operation *outputWaitInsertOp =
-      g.extraSyncWaitOp ? g.extraSyncWaitOp : g.receiverChain.waitOp;
-  if (outputWaitInsertOp) {
-    createOutputSyncWaitOp(outputWaitInsertOp, g.outputFlag, g.tid, builder);
+  // Only a real drain is a valid insertion point. An in-loop receiver wait
+  // consumes data and must not acquire a second fixed-flag wait.
+  if (g.extraSyncWaitOp) {
+    createOutputSyncWaitOp(g.extraSyncWaitOp, g.outputFlag, g.tid, builder);
     LDBG("Created output sync wait with flag="
-         << g.outputFlag << " at block_id=" << getBlockId(outputWaitInsertOp)
+         << g.outputFlag << " at block_id=" << getBlockId(g.extraSyncWaitOp)
          << " (receiver scope).");
   }
   return 0;

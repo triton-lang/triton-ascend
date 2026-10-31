@@ -1272,6 +1272,269 @@ TritonToUnstructurePass::processIfYieldAddHoistOperations(ModuleOp moduleOp) {
   return success();
 }
 
+// ============================================================================
+// Mask-implied clamp normalization (predicate-implied range narrowing).
+//
+// A clamp such as `tl.maximum(off, 0)` is commonly written only to keep
+// masked-off lanes from forming an out-of-range address.  It lowers to
+// `arith.maxsi`, which makes the address a piecewise function of the index
+// instead of `base + sum(idx_i * stride_i)`.  OffsetAnalysis then has to mark
+// that axis unstructured, and the whole tile load degenerates into a per-row
+// `scf.for` with one small DMA per row instead of a single contiguous copy.
+//
+// Triton never accesses masked-off lanes, so when the access mask itself
+// implies `off >= 0`, the clamp is the identity on every lane that is actually
+// touched.  Rewriting `maxsi(off, 0)` to `off` restores the affine address and
+// lets the access follow the ordinary structured path again.
+//
+// The rewrite is applied only when every use of the clamp stays inside address
+// computation and every memory access reached that way is masked with a
+// predicate that implies the clamp is a no-op.  Anything not provable is left
+// untouched.
+// ============================================================================
+
+/// Match a splat integer constant (scalar attribute or dense tensor) and return
+/// its value.
+static bool matchSplatIntConstant(Value value, int64_t &out) {
+  auto cst = value.getDefiningOp<arith::ConstantOp>();
+  if (!cst)
+    return false;
+  Attribute attr = cst.getValue();
+  if (auto intAttr = dyn_cast<IntegerAttr>(attr)) {
+    out = intAttr.getInt();
+    return true;
+  }
+  if (auto dense = dyn_cast<DenseIntElementsAttr>(attr)) {
+    if (!dense.isSplat())
+      return false;
+    APInt splat = dense.getSplatValue<APInt>();
+    if (!splat.isSignedIntN(64))
+      return false;
+    out = splat.getSExtValue();
+    return true;
+  }
+  return false;
+}
+
+/// A lower bound `operand >= bound` (inclusive) or `operand > bound` implied by
+/// a comparison that is part of a mask.
+struct MaskLowerBound {
+  Value operand;
+  int64_t bound;
+  bool inclusive;
+};
+
+static bool matchMaskLowerBound(arith::CmpIOp cmp, MaskLowerBound &out) {
+  Value lhs = cmp.getLhs();
+  Value rhs = cmp.getRhs();
+  int64_t k = 0;
+  switch (cmp.getPredicate()) {
+  case arith::CmpIPredicate::sge:
+    if (!matchSplatIntConstant(rhs, k))
+      return false;
+    out = {lhs, k, /*inclusive=*/true};
+    return true;
+  case arith::CmpIPredicate::sgt:
+    if (!matchSplatIntConstant(rhs, k))
+      return false;
+    out = {lhs, k, /*inclusive=*/false};
+    return true;
+  case arith::CmpIPredicate::sle:
+    if (!matchSplatIntConstant(lhs, k))
+      return false;
+    out = {rhs, k, /*inclusive=*/true};
+    return true;
+  case arith::CmpIPredicate::slt:
+    if (!matchSplatIntConstant(lhs, k))
+      return false;
+    out = {rhs, k, /*inclusive=*/false};
+    return true;
+  default:
+    return false;
+  }
+}
+
+/// Collect the lower bounds a mask predicate implies, looking through the
+/// `and`/broadcast/expand_dims/splat structure that mask lowering produces.
+static void collectMaskLowerBounds(Value mask,
+                                   llvm::SmallVectorImpl<MaskLowerBound> &out,
+                                   llvm::DenseSet<Value> &visited) {
+  if (!mask || !visited.insert(mask).second)
+    return;
+  Operation *def = mask.getDefiningOp();
+  if (!def)
+    return;
+  if (auto andOp = dyn_cast<arith::AndIOp>(def)) {
+    collectMaskLowerBounds(andOp.getLhs(), out, visited);
+    collectMaskLowerBounds(andOp.getRhs(), out, visited);
+    return;
+  }
+  if (auto bcast = dyn_cast<triton::BroadcastOp>(def)) {
+    collectMaskLowerBounds(bcast.getSrc(), out, visited);
+    return;
+  }
+  if (auto expand = dyn_cast<triton::ExpandDimsOp>(def)) {
+    collectMaskLowerBounds(expand.getSrc(), out, visited);
+    return;
+  }
+  if (auto splat = dyn_cast<triton::SplatOp>(def)) {
+    collectMaskLowerBounds(splat.getSrc(), out, visited);
+    return;
+  }
+  if (auto cmp = dyn_cast<arith::CmpIOp>(def)) {
+    MaskLowerBound bound;
+    if (matchMaskLowerBound(cmp, bound))
+      out.push_back(bound);
+    return;
+  }
+}
+
+/// True when the mask guarantees `operand >= floor` on every active lane.
+static bool maskImpliesAtLeast(Value mask, Value operand, int64_t floor) {
+  llvm::SmallVector<MaskLowerBound, 8> bounds;
+  llvm::DenseSet<Value> visited;
+  collectMaskLowerBounds(mask, bounds, visited);
+  for (const MaskLowerBound &bound : bounds) {
+    if (bound.operand != operand)
+      continue;
+    if (bound.inclusive ? bound.bound >= floor : bound.bound >= floor + 1)
+      return true;
+  }
+  return false;
+}
+
+static bool isAddressPropagatingOp(Operation *op) {
+  return isa<arith::ExtSIOp, arith::ExtUIOp, arith::IndexCastOp,
+             arith::IndexCastUIOp, arith::TruncIOp, arith::AddIOp,
+             arith::SubIOp, arith::MulIOp, arith::MaxSIOp, arith::MinSIOp,
+             arith::MaxUIOp, arith::MinUIOp, triton::ExpandDimsOp,
+             triton::BroadcastOp, triton::SplatOp, triton::ReshapeOp>(op);
+}
+
+/// True when `value` only feeds the boolean cone of `tt.assert` operations.
+static bool feedsOnlyAsserts(Value value, llvm::DenseSet<Value> &visited) {
+  if (!visited.insert(value).second)
+    return true;
+  for (Operation *user : value.getUsers()) {
+    if (isa<triton::AssertOp>(user))
+      continue;
+    if (isa<arith::CmpIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp>(user)) {
+      if (!feedsOnlyAsserts(user->getResult(0), visited))
+        return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+static bool isMaskedMemAccessOp(Operation *op) {
+  return isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+             triton::AtomicCASOp>(op);
+}
+
+static Value getMemAccessMask(Operation *op) {
+  if (auto load = dyn_cast<triton::LoadOp>(op))
+    return load.getMask();
+  if (auto store = dyn_cast<triton::StoreOp>(op))
+    return store.getMask();
+  if (auto rmw = dyn_cast<triton::AtomicRMWOp>(op))
+    return rmw.getMask();
+  // `tt.atomic_cas` carries no mask; report "no usable mask" so callers stay
+  // conservative and leave the clamp in place.
+  return nullptr;
+}
+
+/// True when `op` is a memory access that takes `ptr` as its pointer operand.
+static bool isAccessOfPointer(Operation *op, Value ptr) {
+  if (auto load = dyn_cast<triton::LoadOp>(op))
+    return load.getPtr() == ptr;
+  if (auto store = dyn_cast<triton::StoreOp>(op))
+    return store.getPtr() == ptr;
+  if (auto rmw = dyn_cast<triton::AtomicRMWOp>(op))
+    return rmw.getPtr() == ptr;
+  return false;
+}
+
+/// Ops that only reshape or rebase an address on its way to a memory access.
+/// A tile address is frequently built on a narrower pointer tensor, broadcast
+/// to the full tile shape and then offset again, so the walk has to look
+/// through these before it can see the access.
+static bool isAddressFlowOp(Operation *op) {
+  return isa<triton::AddPtrOp, triton::BroadcastOp, triton::ExpandDimsOp,
+             triton::ReshapeOp, triton::SplatOp>(op);
+}
+
+/// Walk every path leaving `value`, which must stay inside address computation
+/// (or the boolean cone feeding overflow asserts) and terminate at a memory
+/// access whose mask implies `inner >= floor`.  `sawAccess` records whether at
+/// least one such access was reached.
+static bool addressFlowIsSafe(Value value, Value inner, int64_t floor,
+                              bool &sawAccess, llvm::DenseSet<Value> &visited) {
+  if (!visited.insert(value).second)
+    return true;
+  for (Operation *user : value.getUsers()) {
+    if (isa<triton::AssertOp>(user))
+      continue;
+    if (isMaskedMemAccessOp(user)) {
+      if (!isAccessOfPointer(user, value))
+        return false;
+      Value mask = getMemAccessMask(user);
+      if (!mask || !maskImpliesAtLeast(mask, inner, floor))
+        return false;
+      sawAccess = true;
+      continue;
+    }
+    if (isa<arith::CmpIOp, arith::AndIOp, arith::OrIOp, arith::XOrIOp>(user)) {
+      llvm::DenseSet<Value> assertVisited;
+      if (!feedsOnlyAsserts(user->getResult(0), assertVisited))
+        return false;
+      continue;
+    }
+    if (isAddressPropagatingOp(user) || isAddressFlowOp(user)) {
+      if (!addressFlowIsSafe(user->getResult(0), inner, floor, sawAccess,
+                             visited))
+        return false;
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/// True when dropping `maxsi(inner, floor)` -> `inner` cannot change any
+/// observed memory access.
+static bool clampDropIsSafe(Value clampResult, Value inner, int64_t floor) {
+  bool sawAccess = false;
+  llvm::DenseSet<Value> visited;
+  if (!addressFlowIsSafe(clampResult, inner, floor, sawAccess, visited))
+    return false;
+  return sawAccess;
+}
+
+static void normalizeMaskImpliedClamps(ModuleOp moduleOp) {
+  llvm::SmallVector<std::pair<arith::MaxSIOp, Value>, 8> rewrites;
+  moduleOp.walk([&](arith::MaxSIOp maxOp) {
+    Value inner;
+    int64_t floor = 0;
+    if (matchSplatIntConstant(maxOp.getRhs(), floor))
+      inner = maxOp.getLhs();
+    else if (matchSplatIntConstant(maxOp.getLhs(), floor))
+      inner = maxOp.getRhs();
+    else
+      return;
+    if (!clampDropIsSafe(maxOp.getResult(), inner, floor))
+      return;
+    rewrites.emplace_back(maxOp, inner);
+  });
+
+  // Outermost first: an inner clamp may itself be the replacement value of an
+  // outer one, so it has to stay alive until it has been consumed.
+  IRRewriter rewriter(moduleOp.getContext());
+  for (const auto &[maxOp, inner] : llvm::reverse(rewrites))
+    rewriter.replaceOp(maxOp, inner);
+}
+
 TritonToUnstructurePass::TritonToUnstructurePass(
     const TritonToUnstructureOptions &options)
     : TritonToUnstructureBase(options) {}
@@ -1299,6 +1562,10 @@ void TritonToUnstructurePass::runOnOperation() {
   MLIRContext *ctx = &getContext();
 
   canonicalizeSupportedPointerBitcasts(moduleOp);
+
+  // Drop mask-implied address clamps before the offset analysis runs, so the
+  // affected axes stay affine and the access keeps the structured lowering.
+  normalizeMaskImpliedClamps(moduleOp);
 
   moduleOp->walk([this](triton::FuncOp funcOp) {
     replacePtrArguments(funcOp, offsetMapForLoopArgs);

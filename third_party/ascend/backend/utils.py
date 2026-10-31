@@ -710,6 +710,9 @@ def _enable_dump_memory_info() -> bool:
 
 
 def _enable_msdebug() -> bool:
+    # Debug variables need the source locations that line info provides.
+    if _is_debug_line_info_disabled():
+        return False
     return os.getenv("LLVM_EXTRACT_DI_LOCAL_VARIABLES", "false").lower() in ("true", "1")
 
 

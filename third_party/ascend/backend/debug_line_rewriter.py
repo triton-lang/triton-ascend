@@ -93,8 +93,6 @@ except ImportError:  # surfaced lazily; importing this module must never fail
 
 log = logging.getLogger(__name__)
 
-ENV_FLAG = "LLVM_EXTRACT_DI_LOCAL_VARIABLES"
-
 # ── DWARF line-program opcodes ────────────────────────────────────────────────
 DW_LNS_COPY = 0x01
 DW_LNS_ADVANCE_PC = 0x02
@@ -629,7 +627,8 @@ def rewrite_debug_line_file(path: str, src_path: Optional[str] = None, out_path:
 
 
 def _enabled() -> bool:
-    return os.environ.get(ENV_FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+    from .utils import _enable_msdebug
+    return _enable_msdebug()
 
 
 def _resolve_source(metadata) -> Optional[str]:

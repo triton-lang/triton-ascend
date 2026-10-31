@@ -103,7 +103,7 @@ git checkout main
 pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
-> 提示：`pip install` 传入 `--no-build-isolation` 参数，可加快无变更构建速度。
+> 提示：`--no-build-isolation` 复用环境中已装好的构建依赖，不再重新拉取，重复构建因此更快。
 
 #### 自定义LLVM构建（可选）
 

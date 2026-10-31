@@ -53,7 +53,10 @@ git checkout main
 pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
-> Tip: Pass `--no-build-isolation` to `pip install` to make nop builds faster.
+> Tip: `--no-build-isolation` makes `pip` reuse the build dependencies already present in the
+> environment (those listed under `[build-system] requires` in `pyproject.toml`: `setuptools`,
+> `cmake`, `ninja`, `pybind11`) instead of fetching them into a temporary build environment, which
+> is what makes repeated builds faster.
 
 ### Custom LLVM Build (Optional)
 
@@ -204,6 +207,10 @@ triton-ascend version: <version>
 ```
 
 The Triton-Ascend package is installed successfully. Continue by running the vector-add example in the tutorials to verify that the backend compiled successfully. Vector-add example: [01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py).
+
+If the import fails after a source install, run `pip show triton` to check whether a PyPI `triton`
+distribution is installed alongside Triton-Ascend; that combination breaks the import. Question 3
+in the Installation FAQ below describes the cause and the fix.
 
 ```bash
 # Set CANN environment variables (using root user default install path `/usr/local/Ascend` as example)

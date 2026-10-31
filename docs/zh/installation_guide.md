@@ -54,7 +54,9 @@ git checkout main
 pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
-> 提醒：`pip install` 传入 `--no-build-isolation` 参数，可加快无变更构建速度。
+> 提醒：`--no-build-isolation` 让 `pip` 复用环境中已有的构建依赖（即 `pyproject.toml` 的
+> `[build-system] requires`：`setuptools`、`cmake`、`ninja`、`pybind11`），不再先把它们拉取到临时
+> 构建环境，重复构建因此更快。
 
 ### 自定义LLVM构建（可选）
 
@@ -205,6 +207,8 @@ triton-ascend version: 版本号
 ```
 
 说明Triton-Ascend包安装成功了。继续运行tutorials中向量加法示例验证后端是否编译成功。向量加法示例：[01-vector-add.py](../../third_party/ascend/tutorials/01-vector-add.py)。
+
+源码安装后若导入失败，可用 `pip show triton` 确认是否同时装了 PyPI 的 `triton` 分发包，二者共存会导致该导入失败；成因与处理见下文「安装常见问题」问题三。
 
 ```bash
 # 设置CANN环境变量（以root用户默认安装路径`/usr/local/Ascend`为例）

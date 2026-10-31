@@ -103,7 +103,8 @@ git checkout main
 pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
 
-> Tip: Pass `--no-build-isolation` to `pip install` to make nop builds faster.
+> Tip: `--no-build-isolation` reuses the build dependencies already installed in the environment
+> instead of fetching them again, which makes repeated builds faster.
 
 #### Custom LLVM Build (Optional)
 

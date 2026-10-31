@@ -28,3 +28,32 @@ target_link_options(TestTritonOffsetCacheLifetime PRIVATE
   "LINKER:--wrap=_ZdlPv"
   "LINKER:--wrap=_ZdlPvm"
 )
+
+add_triton_ut(
+  NAME TestPublicPtrAnalysis
+  SRCS
+    PtrAnalysisTest.cpp
+    PtrAnalysisAddressTest.cpp
+    PtrAnalysisBitcastTest.cpp
+    PtrAnalysisTestUtils.cpp
+    PtrAnalysisShapeTest.cpp
+    PtrAnalysisIntegerTest.cpp
+    BlockPtrAnalysisTest.cpp
+    PtrAnalysisLifecycleTest.cpp
+    PtrAnalysisExtensionTest.cpp
+    PtrAnalysisControlFlowTest.cpp
+  LIBS
+    TritonPtrAnalysis
+    TritonIR
+    TritonGPUIR
+    TritonGPUTransforms
+    TritonNvidiaGPUTransforms
+    MLIRArithDialect
+    MLIRFuncDialect
+    MLIRIR
+    MLIRParser
+    MLIRSCFDialect
+    MLIRTensorDialect
+    MLIRSupport
+    MLIRTransforms
+)

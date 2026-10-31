@@ -312,17 +312,21 @@ void UpdateConditionInfoPass::collectDependencyBuffers(
 
   // Collect intraCoreBuffers for all main_loop for/while ops
   for (Operation *loopOp : mainLoopOps) {
-    if (info->intraCoreDependentMap.count(loopOp)) {
-      auto &loopDeps = info->intraCoreDependentMap[loopOp];
-      DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-          intraCoreBuffers;
-      int intraCoreIdx = 0;
-      for (auto &entry : loopDeps) {
-        intraCoreBuffers[intraCoreIdx][entry.first] = entry.second;
-        intraCoreIdx++;
-      }
-      intraCoreBuffersMap[loopOp] = intraCoreBuffers;
-    }
+    auto depsIt = info->intraCoreDependentMap.find(loopOp);
+    if (depsIt == info->intraCoreDependentMap.end())
+      continue;
+    auto &loopDeps = depsIt->second;
+    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
+        intraCoreBuffers;
+    int intraCoreIdx = 0;
+    loopOp->walk([&](Operation *op) {
+      auto entryIt = loopDeps.find(op);
+      if (entryIt == loopDeps.end())
+        return;
+      intraCoreBuffers[intraCoreIdx][entryIt->first] = entryIt->second;
+      intraCoreIdx++;
+    });
+    intraCoreBuffersMap[loopOp] = std::move(intraCoreBuffers);
   }
 }
 
@@ -372,9 +376,14 @@ int UpdateConditionInfoPass::buildIdxToVarMap(
     return UPDATE_CONDITION_INFO_FAILED;
   }
 
-  for (const auto &entry : intraCoreBuffers) {
-    int idx = entry.first;
+  // intraCoreBuffers stays a lookup table. Group order is this vector.
+  SmallVector<int> groupIndices;
+  groupIndices.reserve(intraCoreBuffers.size());
+  for (const auto &entry : intraCoreBuffers)
+    groupIndices.push_back(entry.first);
+  llvm::sort(groupIndices);
 
+  for (int idx : groupIndices) {
     int argIdx = innerDepIndices[varIdx];
     if (argIdx < 0 || argIdx >= iterArgNum) {
       LDBG("Invalid inner dependency arg index: "
@@ -512,6 +521,10 @@ int UpdateConditionInfoPass::getInputOutputValues(
                               intraCoreInputSet.end());
   intraCoreOutputValues.assign(intraCoreOutputSet.begin(),
                                intraCoreOutputSet.end());
+  llvm::sort(crossCoreInputValues);
+  llvm::sort(crossCoreOutputValues);
+  llvm::sort(intraCoreInputValues);
+  llvm::sort(intraCoreOutputValues);
 
   LDBG("==== Cross Core & Intra Core Values ====" << "\n");
   LLVM_DEBUG(
@@ -858,7 +871,7 @@ int UpdateConditionInfoPass::setCrossCoreCondition(
 void UpdateConditionInfoPass::collectIntraCoreInputConditions(
     OpBuilder &builder, Location loc, SmallVector<int> &intraCoreInputValues,
     DenseMap<int, Value> &idxToVar, SmallVector<Value> &conditions,
-    DenseSet<Value> &usedVarsSet,
+    SetVector<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   if (intraCoreInputValues.empty()) {
     LDBG("No intraCore input conditions to collect." << "\n");
@@ -900,7 +913,7 @@ int UpdateConditionInfoPass::collectIntraCoreOutputConditions(
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         &intraCoreBuffers,
     SmallVector<int> &intraCoreOutputValues, DenseMap<int, Value> &idxToVar,
-    SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+    SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   if (intraCoreOutputValues.empty()) {
     LDBG("No intraCore output conditions to collect." << "\n");
@@ -953,8 +966,8 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
   auto &depsVec = info->tensorIterArgDepsMap[loopOp];
   auto &indicesMap = info->tensorIterArgIndicesMap[loopOp];
 
-  llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> producerVars;
-  llvm::DenseMap<scf::IfOp, llvm::DenseSet<Value>> consumerVars;
+  llvm::DenseMap<scf::IfOp, SetVector<Value>> producerVars;
+  llvm::DenseMap<scf::IfOp, SetVector<Value>> consumerVars;
 
   for (auto &depEntry : depsVec) {
     Value origIterArg = depEntry.iterArg;
@@ -976,7 +989,7 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
 
     // Establish a mapping (one-to-one) from consumers to variables
     // for: region iter args; while-do: after-region args.
-    llvm::DenseMap<scf::IfOp, Value> consumerToVar;
+    SmallVector<std::pair<scf::IfOp, Value>> consumerToVar;
     for (size_t i = 0; i < relation.consumers.size(); ++i) {
       scf::IfOp consumer = relation.consumers[i];
       Value var;
@@ -987,20 +1000,16 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
              << ", consumer=" << consumer << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
       }
-      consumerToVar[consumer] = var;
+      consumerToVar.push_back({consumer, var});
     }
 
-    // Add all the variables of the consumers that depend on the producer
     if (relation.producer) {
-      for (auto &[consumer, var] : consumerToVar) {
+      for (auto &[consumer, var] : consumerToVar)
         producerVars[relation.producer].insert(var);
-      }
     }
 
-    // Add all the variables of the consumers that depend on each producer
-    for (auto &[consumer, var] : consumerToVar) {
+    for (auto &[consumer, var] : consumerToVar)
       consumerVars[consumer].insert(var);
-    }
   }
 
   // Convert the temporary data structure to tensorIfOpVarMap
@@ -1023,7 +1032,7 @@ int UpdateConditionInfoPass::buildTensorIterArgIfOpVarMap(Operation *loopOp) {
 // Collect the conditions for tensor iter arg consumer values.
 void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
-    SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+    SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   if (!tensorIterArgIfOpVars.count(ifOp)) {
     return;
@@ -1051,7 +1060,7 @@ void UpdateConditionInfoPass::collectTensorIterArgInputConditions(
 // Collect the conditions for tensor iter arg producer values.
 void UpdateConditionInfoPass::collectTensorIterArgOutputConditions(
     OpBuilder &builder, Location loc, scf::IfOp ifOp,
-    SmallVector<Value> &conditions, DenseSet<Value> &usedVarsSet,
+    SmallVector<Value> &conditions, SetVector<Value> &usedVarsSet,
     DenseMap<Value, VarUpdateType> &varUpdateTypes) {
   if (!tensorIterArgIfOpVars.count(ifOp)) {
     return;
@@ -1092,7 +1101,7 @@ int UpdateConditionInfoPass::setIntraCoreCondition(
   Location loc = ifOp.getLoc();
 
   SmallVector<Value> conditions;
-  DenseSet<Value> usedVarsSet;
+  SetVector<Value> usedVarsSet;
   LDBG("Collect intraCore conditions: inputs "
        << intraCoreInputValues.size() << ", outputs "
        << intraCoreOutputValues.size() << "\n");

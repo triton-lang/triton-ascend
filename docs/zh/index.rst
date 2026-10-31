@@ -74,6 +74,7 @@ Triton Ascend
     :caption: 昇腾扩展 API 接口说明
 
     triton_api_extension/index.md
+    triton_api_extension/tla.md
 
 .. toctree::
     :maxdepth: 1

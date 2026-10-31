@@ -719,13 +719,13 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
-        npu_utils = NPUUtils()
-        if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
+        has_limit, aic, aiv = NPUUtils().get_device_limit()
+        if _is_a5_target_arch(metadata["target"].arch) or has_limit:
             _compile_option_list += [
-                f"--custom-aic-number={npu_utils.get_aicore_num()}",
+                f"--custom-aic-number={aic}",
             ]
             _compile_option_list += [
-                f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                f"--custom-aiv-number={aiv}",
             ]
 
         if force_disable_ffts(opt.target_arch):
@@ -1486,11 +1486,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
-                npu_utils = NPUUtils()
-                if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
+                has_limit, aic, aiv = NPUUtils().get_device_limit()
+                if _is_a5_target_arch(metadata["target"].arch) or has_limit:
                     _compile_option_list += [
-                        f"--custom-aic-number={npu_utils.get_aicore_num()}",
-                        f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                        f"--custom-aic-number={aic}",
+                        f"--custom-aiv-number={aiv}",
                     ]
 
             bisheng_options = metadata["bisheng_options"]

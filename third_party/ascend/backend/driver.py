@@ -49,6 +49,9 @@ def _npu_utils_key(source, fingerprint):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
+_NPU_DEVICE_LIMIT_REGEX = re.compile(r'^\d+ *, *\d+$')
+
+
 class NPUUtils(object):
 
     def __new__(cls):
@@ -132,7 +135,7 @@ class NPUUtils(object):
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
-        is_valid = re.match(r'^\d+ *, *\d+$', npu_device_limit_str.strip())
+        is_valid = _NPU_DEVICE_LIMIT_REGEX.match(npu_device_limit_str.strip())
         if is_valid:
             parts = [part.strip() for part in npu_device_limit_str.split(",")]
             num_aic_env = int(parts[0])
@@ -175,12 +178,13 @@ class NPUUtils(object):
         cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
         return cube_core_num, vector_core_num
 
-    def has_device_limit(self):
-        num_aic, num_aiv = self.get_device_core()
+    def get_device_limit(self):
         try:
-            return num_aic != self.get_aicore_num() or num_aiv != self.get_aivector_core_num()
+            limited_aic, limited_aiv = self._get_npu_device_limit_form_env()
         except ValueError:
-            return False
+            return False, None, None
+        num_aic, num_aiv = self.get_device_core()
+        return num_aic != limited_aic or num_aiv != limited_aiv, limited_aic, limited_aiv
 
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain

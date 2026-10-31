@@ -221,6 +221,7 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
     driver_class = next(node for node in ast.parse(driver_path.read_text()).body
                         if isinstance(node, ast.ClassDef) and node.name == "NPUUtils")
     namespace = {name: importlib.import_module(name) for name in ("functools", "os", "re")}
+    namespace["_NPU_DEVICE_LIMIT_REGEX"] = namespace["re"].compile(r'^\d+ *, *\d+$')
     exec(compile(ast.Module(body=[driver_class], type_ignores=[]), str(driver_path), "exec"), namespace)
     npu_utils = object.__new__(namespace["NPUUtils"])
     npu_utils.get_device_core = lambda: (28, 56)
@@ -503,8 +504,8 @@ def _run_linalg_to_npubin(compiler, monkeypatch, function_name, has_blacklist_op
 
     class FakeNPUUtils:
 
-        def has_device_limit(self):
-            return False
+        def get_device_limit(self):
+            return False, None, None
 
         def get_arch(self):
             return "Ascend910B"
@@ -1015,8 +1016,8 @@ def _capture_multibuffer_command(compiler, monkeypatch, is_a5, requested, derive
     monkeypatch.setattr(compiler, "_get_npucompiler_path", lambda: ("/fake/compiler", {}))
     monkeypatch.setattr(
         compiler, "NPUUtils",
-        lambda: SimpleNamespace(has_device_limit=lambda: False, get_arch=lambda: options.target_arch, get_aicore_num=
-                                lambda: 28, get_aivector_core_num=lambda: 56))
+        lambda: SimpleNamespace(get_device_limit=lambda: (False, None, None), get_arch=lambda: options.target_arch,
+                                get_aicore_num=lambda: 28, get_aivector_core_num=lambda: 56))
     monkeypatch.delenv("TRITON_ENABLE_LIBDEVICE", raising=False)
 
     class CommandCaptured(BaseException):

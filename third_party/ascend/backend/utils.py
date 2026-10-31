@@ -618,53 +618,51 @@ def _is_valid_bishengir_path(path: str) -> bool:
     return True
 
 
+@functools.lru_cache(None)
+def _get_bishengir_compile_help(bishengir_path: str) -> str:
+    """Return bishengir-compile --help stdout, cached per compiler path.
+
+    All feature probes (api change, reg-based, full-row-copy inlining) parse the
+    same help text. Forking the compiler once per probe dominated per-kernel
+    compile latency, so the subprocess result is memoized by compiler path.
+    """
+    result = subprocess.run(
+        [bishengir_path, "--help"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    return result.stdout if result.returncode == 0 else ""
+
+
+def _probe_bishengir_compile_help() -> str:
+    """Validate the resolved compiler path and return its cached help text."""
+    bishengir_path, _ = _get_npucompiler_path()
+    if not _is_valid_bishengir_path(bishengir_path):
+        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
+        return ""
+    try:
+        return _get_bishengir_compile_help(bishengir_path)
+    except Exception as e:
+        print(f"ERROR: {e}")
+        return ""
+
+
 # grep bishengir-compile's option limit-auto-multi-buffer-buffer to check
 # if bishengir-compile is a newer version which does not generate kernel_reloc.o
 # any more.
 def _check_bishengir_api_change() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'limit-auto-multi-buffer-buffer' in result.stdout:
-            # bishengir-compile is newer version
-            return True
-        else:
-            # bishengir-compile is older version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # newer version emits the option, older version does not.
+    return bool(help_text) and 'limit-auto-multi-buffer-buffer' in help_text
 
 
 def _check_bishengir_is_regbased() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'reg-based' in result.stdout:
-            # bishengir-compile is regbased version
-            return True
-        else:
-            # bishengir-compile is membased version
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    # regbased version emits 'reg-based', membased version does not.
+    return bool(help_text) and 'reg-based' in help_text
 
 
 def _get_ascend_path() -> Path:
@@ -1078,24 +1076,8 @@ def convert_dtype_to_numpy(dtype):
 
 
 def _check_bishengir_able_save_ir() -> bool:
-    bishengir_path, _ = _get_npucompiler_path()
-    if not _is_valid_bishengir_path(bishengir_path):
-        print(f"ERROR: Invalid bishengir path format: {bishengir_path}")
-        return False
-    try:
-        result = subprocess.run(
-            [bishengir_path, "--help"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-        if result.returncode == 0 and 'save-linked-ir' in result.stdout:
-            return True
-        else:
-            return False
-    except Exception as e:
-        print(f"ERROR: {e}")
-        return False
+    help_text = _probe_bishengir_compile_help()
+    return bool(help_text) and 'save-linked-ir' in help_text
 
 
 def get_ascend_arch_from_env():

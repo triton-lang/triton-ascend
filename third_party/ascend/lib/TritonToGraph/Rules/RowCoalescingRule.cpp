@@ -24,6 +24,7 @@
 #include "TritonToGraph/GraphOptimizationRule.h"
 #include "TritonToGraph/LegacyMemoryAccess/RowCoalescing.h"
 #include "TritonToGraph/ProgramAxisDependenceAnalysis.h"
+#include "TritonToGraph/ResourceCostModel.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
@@ -426,7 +427,8 @@ public:
   }
 
   AnalysisRequirement getAnalysisRequirements() const override {
-    return AnalysisRequirement::ProgramAxisDependence;
+    return AnalysisRequirement::ProgramAxisDependence |
+           AnalysisRequirement::ResourceCost;
   }
 
   LogicalResult findCandidates(
@@ -435,8 +437,9 @@ public:
     // The legacy pattern is enabled only for simt_only. Dot row coalescing
     // belongs to the non-pure-SIMT path and must not override that pattern.
     if (!enableLegacyPattern) {
-      if (auto plan = createDotRowCoalescingPlan(context.getFunction(),
-                                                 context.getEpoch()))
+      if (auto plan = createDotRowCoalescingPlan(
+              context.getFunction(), context.getEpoch(),
+              context.getResourceCostAnalysis().getResourceSnapshot()))
         plans.push_back(std::move(plan));
       return success();
     }

@@ -61,6 +61,20 @@ def _stub_graph_ub_budget_bytes_for_arch(arch):
     return _stub_ub_size_in_kbytes_for_arch(arch) * 1024 * 80 // 100
 
 
+def _stub_l0_size_in_kbytes_for_arch(arch):
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return (64, 64, 256)
+    if arch.startswith((
+            "Ascend910A",
+            "Ascend910B",
+            "Ascend910D",
+            "Ascend910_93",
+            "Ascend310B",
+    )):
+        return (64, 64, 128)
+    return (0, 0, 0)
+
+
 class _FakeModule:
 
     def __init__(self, events):
@@ -146,6 +160,7 @@ def compiler_module():
     utils_stub.get_cann_version_file_hash = lambda: ""
     utils_stub.graph_ub_budget_bytes_for_arch = _stub_graph_ub_budget_bytes_for_arch
     utils_stub.ub_size_in_kbytes_for_arch = _stub_ub_size_in_kbytes_for_arch
+    utils_stub.l0_size_in_kbytes_for_arch = _stub_l0_size_in_kbytes_for_arch
 
     class UnusedNPUUtils:
         pass
@@ -703,6 +718,10 @@ def test_make_ttir_passes_canonical_compile_mode_to_graph_optimize(compiler_modu
     assert graph_calls == [{
         "ub_capacity_bytes": 192 * 1024 * 80 // 100,
         "compile_mode": "simt_only",
+        "mapping_l0a_capacity_bytes": 64 * 1024,
+        "mapping_l0b_capacity_bytes": 64 * 1024,
+        "mapping_l0c_capacity_bytes": 128 * 1024,
+        "l0_safety_percent": 80,
     }]
     assert events[-1] == "run_row"
 

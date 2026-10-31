@@ -156,7 +156,7 @@ jobs:
         # fetch script gets its own npuir-build run on the PR head branch;
         # for fork PRs that run lives on the fork, so allow_forks is required.
         # Ordinary PRs have no such run — the next step falls back to main.
-        uses: dawidd6/action-download-artifact@v9
+        uses: dawidd6/action-download-artifact@v27
         continue-on-error: true
         with:
           workflow: npuir-build.yml
@@ -174,7 +174,7 @@ jobs:
         # schedule on main, so main-dev/release branches consume main's
         # payload too (they never run npuir-build themselves). Skipped only
         # when the PR-head step above already found this PR's own payload.
-        uses: dawidd6/action-download-artifact@v9
+        uses: dawidd6/action-download-artifact@v27
         continue-on-error: true
         with:
           workflow: npuir-build.yml

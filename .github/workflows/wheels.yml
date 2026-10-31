@@ -537,12 +537,21 @@ jobs:
           name: cibw-wheels-manylinux_2_34_${{ matrix.config.arch }}-${{ matrix.python }}-${{ matrix.branch.tag }}-wheels-upload
           path: wheelhouse
 
-      - name: Setup obsutil and upload to OBS
+      - name: Setup obsutil
+        if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')
+        id: obs
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.NIGHTLY_OBS_AK }}
+          sk: ${{ secrets.NIGHTLY_OBS_SK }}
+          endpoint: https://obs.cn-north-4.myhuaweicloud.com
+          arch: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
+
+      - name: Upload wheels to OBS
+        if: github.event_name != 'pull_request' && (github.event_name != 'push' || steps.new-commits.outputs.has_new_commits != 'false')
         shell: bash
         env:
-          AK: ${{ secrets.NIGHTLY_OBS_AK }}
-          SK: ${{ secrets.NIGHTLY_OBS_SK }}
-          ARCH: ${{ matrix.config.arch == 'x86_64' && 'amd64' || 'arm64' }}
+          OBSUTIL: ${{ steps.obs.outputs.obsutil-path }}
         run: |
           set -eu
           WHL_COUNT=$(ls wheelhouse/*.whl 2>/dev/null | wc -l)
@@ -550,26 +559,15 @@ jobs:
             echo "No wheel artifact (commit already published or build skipped); skipping publish"
             exit 0
           fi
-          if [ -z "${AK}" ] || [ -z "${SK}" ]; then
-            echo "OBS credentials are empty."
-            exit 1
-          fi
-          curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" -o obsutil.tar.gz
-          gzip -t obsutil.tar.gz || { echo "obsutil.tar.gz is not a valid gzip"; exit 1; }
-          tar xzf obsutil.tar.gz
-          rm -f obsutil.tar.gz
-          mv obsutil_linux_* obsutil
-
-          obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
           OBS_DIR="obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
-          obsutil/obsutil cp -u wheelhouse/*.whl "${OBS_DIR}"
+          "${OBSUTIL}" cp -u wheelhouse/*.whl "${OBS_DIR}"
 
           # Regenerate index.html from every .whl currently in the directory
           # (non-recursive, short format), keeping only the basenames.
-          obsutil/obsutil ls "${OBS_DIR}" -d -s -limit=0 \
+          "${OBSUTIL}" ls "${OBS_DIR}" -d -s -limit=0 \
             | grep -oE '[^/]+\.whl$' \
             | sort -u > files.txt
           while IFS= read -r f; do
             printf "<a href='%s'>%s</a><br />\n" "$f" "$f"
           done < files.txt > index.html
-          obsutil/obsutil cp index.html "${OBS_DIR}"
+          "${OBSUTIL}" cp index.html "${OBS_DIR}"

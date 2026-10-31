@@ -1,0 +1,79 @@
+name: LLVM Build Upload (PR)
+
+# Relay for llvm-build.yml.
+#
+# Fork PRs cannot access repository secrets, so on pull_request events
+# llvm-build.yml only stores the LLVM tarballs as workflow artifacts.
+# This workflow runs in the base-repository context after "LLVM Build"
+# completes, downloads those artifacts and uploads them to the PR-scoped
+# OBS prefix llvm-builds/prs/<head-sha>/, which the integration tests fall
+# back to (see .github/workflows/scripts/wait_for_llvm_package.py).
+#
+# Security notes:
+#   * The workflow file itself always comes from the default branch and it
+#     never checks out or executes PR code - it only moves artifacts.
+#   * PR-produced files are only ever written under the isolated per-commit
+#     prs/<head-sha>/ prefix; the canonical llvm-builds/ path stays
+#     push-only (written by llvm-build.yml itself).
+#   * NOTE: a workflow_run-triggered workflow only takes effect once this
+#     file exists on the default branch.
+
+on:
+  workflow_run:
+    workflows: ["LLVM Build"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  upload-to-obs:
+    name: Upload PR LLVM artifacts to OBS
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.repository == 'triton-lang/triton-ascend'
+    runs-on: linux-amd64-cpu-4
+    container:
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/cann:9.0.0-a3-ubuntu22.04-py3.12
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout default branch (trusted workflow code only)
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download LLVM build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+          pattern: llvm-*
+          merge-multiple: true
+          path: llvm-artifacts
+
+      - name: Setup obsutil
+        id: obs
+        uses: ./.github/actions/setup-obsutil
+        with:
+          ak: ${{ secrets.OBS_AK }}
+          sk: ${{ secrets.OBS_SK }}
+
+      - name: Upload to OBS (PR-scoped prefix)
+        shell: bash
+        env:
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -eu
+          # Guard against a missing/malformed head_sha: an empty value would
+          # collapse the destination to llvm-builds/prs/ and mix artifacts of
+          # different PRs together.
+          if [[ ! "${HEAD_SHA}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Refusing to upload: head_sha='${HEAD_SHA}' is not a full git SHA" >&2
+            exit 1
+          fi
+          ls -l llvm-artifacts/
+          "${{ steps.obs.outputs.obsutil-path }}" cp -u -r -f llvm-artifacts/ \
+            "obs://triton-ascend-artifacts/llvm-builds/prs/${HEAD_SHA}/"

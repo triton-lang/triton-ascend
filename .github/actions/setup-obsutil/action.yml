@@ -1,0 +1,69 @@
+name: Setup obsutil
+description: >-
+  Download, verify and configure obsutil for Huawei Cloud OBS access.
+  Secrets are confined to this step's env; call sites run cp/rm/ls
+  themselves via the obsutil-path output.
+
+inputs:
+  ak:
+    description: OBS access key (pass a secret; never hardcode)
+    required: true
+  sk:
+    description: OBS secret key (pass a secret; never hardcode)
+    required: true
+  endpoint:
+    description: OBS endpoint to configure
+    required: false
+    default: https://obs.cn-southwest-2.myhuaweicloud.com
+  arch:
+    description: obsutil arch (amd64 or arm64); auto-detected from uname -m when empty
+    required: false
+    default: ''
+
+outputs:
+  obsutil-path:
+    description: Absolute path to the configured obsutil binary
+    value: ${{ steps.setup.outputs.obsutil-path }}
+
+runs:
+  using: composite
+  steps:
+    - id: setup
+      shell: bash
+      env:
+        OBS_AK: ${{ inputs.ak }}
+        OBS_SK: ${{ inputs.sk }}
+        OBS_ENDPOINT: ${{ inputs.endpoint }}
+        OBSUTIL_ARCH: ${{ inputs.arch }}
+      run: |
+        set -eu
+        if [ -z "${OBS_AK}" ] || [ -z "${OBS_SK}" ]; then
+          echo "OBS credentials are empty." >&2
+          exit 1
+        fi
+
+        ARCH="${OBSUTIL_ARCH}"
+        if [ -z "${ARCH}" ]; then
+          case "$(uname -m)" in
+            x86_64)          ARCH="amd64" ;;
+            aarch64 | arm64) ARCH="arm64" ;;
+            *) echo "Unsupported architecture: $(uname -m)" >&2; exit 1 ;;
+          esac
+        fi
+
+        WORKDIR="$(mktemp -d "${RUNNER_TEMP:-/tmp}/obsutil.XXXXXX")"
+        curl -fL "https://obs-community.obs.cn-north-1.myhuaweicloud.com/obsutil/current/obsutil_linux_${ARCH}.tar.gz" \
+          -o "${WORKDIR}/obsutil.tar.gz"
+        gzip -t "${WORKDIR}/obsutil.tar.gz" || { echo "obsutil.tar.gz is not a valid gzip" >&2; exit 1; }
+        tar xzf "${WORKDIR}/obsutil.tar.gz" -C "${WORKDIR}"
+        rm -f "${WORKDIR}/obsutil.tar.gz"
+
+        OBSUTIL_BIN="$(find "${WORKDIR}" -maxdepth 2 -type f -name obsutil | head -1)"
+        if [ -z "${OBSUTIL_BIN}" ]; then
+          echo "obsutil binary not found in ${WORKDIR}" >&2
+          exit 1
+        fi
+        chmod +x "${OBSUTIL_BIN}"
+        "${OBSUTIL_BIN}" config -i="${OBS_AK}" -k="${OBS_SK}" -e="${OBS_ENDPOINT}"
+
+        echo "obsutil-path=${OBSUTIL_BIN}" >> "${GITHUB_OUTPUT}"

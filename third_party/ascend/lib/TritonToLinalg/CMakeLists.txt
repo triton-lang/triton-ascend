@@ -3,6 +3,7 @@ add_triton_library(TritonToLinalg
         LoadStoreConverter.cpp
         FunctionConverter.cpp
         ArgMinMaxConverter.cpp
+        FoldOneHotPayload.cpp
         TritonOpConverter.cpp
         HoistBroadcast.cpp
         BlockPtrAnalysis.cpp

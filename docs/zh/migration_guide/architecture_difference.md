@@ -29,7 +29,7 @@ triton_gelu[n, 1, 1](...)  # 第一个参数表示使用的核数，n表示使�
 
 社区 Triton 在 NVIDIA GPU 上把 grid 视为纯逻辑维度 —— `n` 个逻辑块按 1:1 映射到 `n` 个硬件块，运行时由硬件分发到各 SM，每个块不需要内部循环。昇腾上由于[多核任务并行策略](#多核任务并行策略)中描述的物理核强绑定，可启动的 grid 上限被限制在 65,535，对含百万级逻辑工作项的 kernel（autotune 后的 reduce/scan、megablocks 风格的稀疏 kernel 等）过于严苛。
 
-`auto-blockify`（TA/NPUIR 的 AutoBlockify V1 编译期 pass + 配套的运行期 cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
+`auto-blockify`（`SIMTAutoBlockify` 编译期 pass + 配套的运行期 cap）通过"编译期视为逻辑、启动期折叠到物理核"消除该限制：
 
 - **编译期**：Triton pass 把 kernel 函数体包进一层 `scf.for`，迭代变量由 `gpu.linear_block_id` 提供。chunk 大小 = `ceildiv(logical_block_count, physical_core_count)`，每个物理块依次跑 `chunk` 个逻辑 block id。
 - **运行期**：传给 launcher 的 block-count 参数从逻辑 grid clamp 到 `physical_core_count`，与编译期的折叠保持一致。

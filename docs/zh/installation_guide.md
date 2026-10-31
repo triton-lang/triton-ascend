@@ -124,9 +124,9 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     | `TRITON_PARALLEL_LINK_JOBS`   | None          | 并行链接任务数。链接阶段占用内存较大，内存不足时可设为 `1`。 |
     | `IS_MANYLINUX`                | OFF           | 设为 `ON` 后构建生成的 wheel 包为 manylinux 兼容格式，用于在不同 Linux 发行版上安装。 |
 
-1. **(可选)Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
+4. **(可选)Triton-distributed-ascend**：若使用[Triton-distributed-ascend](https://gitcode.com/Ascend/Triton-distributed-ascend)的功能，需源码编译shmem v1.7.0组件。
 
-1.1 获取源码：
+4.1 获取源码：
 
   ```bash
     git clone https://gitcode.com/cann/shmem.git
@@ -134,7 +134,7 @@ pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/
     git checkout v1.7.0
   ```
 
-1.2 源码编译：
+4.2 源码编译：
 
 参见 [shmem项目](https://gitcode.com/cann/shmem) README.md中 "安装"->"方式三： 源码编译" 章节。
 

@@ -29,7 +29,7 @@ By optimizing the number of cores, you can fully schedule and utilize all comput
 
 Upstream Triton on NVIDIA GPUs treats the grid as a pure logical dimension — `n` logical blocks map 1:1 to `n` hardware blocks, and the runtime expands the work across SMs without any per-block iteration. On Ascend, the strict physical-core binding described in [Multi-Core Task Parallelism Strategy](#multi-core-task-parallelism-strategy) caps the launchable grid at 65,535, which is restrictive for kernels with millions of logical work items (autotuned reduce/scan, megablocks-style sparse kernels, etc.).
 
-`auto-blockify` (the TA/NPUIR AutoBlockify V1 compiler pass plus a matching runtime cap) removes that limit by treating the grid as logical at compile time and folding it onto the physical cores at launch:
+`auto-blockify` (the `SIMTAutoBlockify` compiler pass plus a matching runtime cap) removes that limit by treating the grid as logical at compile time and folding it onto the physical cores at launch:
 
 - **Compile time**: a Triton pass wraps the kernel body in an `scf.for` over per-block work, indexed by `gpu.linear_block_id`. The chunk size is `ceildiv(logical_block_count, physical_core_count)`, so each physical block iterates through `chunk` logical block IDs.
 - **Runtime**: the block-count argument passed to the launcher is clamped from the logical grid down to `physical_core_count`, mirroring the compile-time fold.

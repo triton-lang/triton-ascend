@@ -874,7 +874,7 @@ def _npu_compiler_identity(compiler):
             return None
         paths = {compiler, interpreter}
         for line in output.splitlines():
-            if re.fullmatch(r"\s*linux-vdso\.so\.\d+ \(0x[0-9a-f]+\)\s*", line):
+            if re.fullmatch(r"\s*(?:linux-vdso\.so\.\d+\s*)?\(0x[0-9a-f]+\)\s*", line):
                 continue
             match = re.fullmatch(r"\s*(?:\S+ => )?(/\S+) \(0x[0-9a-f]+\)\s*", line)
             if not match:

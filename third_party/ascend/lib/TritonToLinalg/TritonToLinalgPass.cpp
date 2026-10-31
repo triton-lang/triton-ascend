@@ -34,7 +34,6 @@
 #include "ascend/include/TritonToLinalg/DevicePrintOffsetRewrite.h"
 #include "ascend/include/TritonToLinalg/FunctionConverter.h"
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
-#include "ascend/include/TritonToLinalg/ImplicitPermute.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
@@ -1588,26 +1587,6 @@ TritonToLinalgPass::processPtrBroadcastOperations(ModuleOp moduleOp) {
   return success();
 }
 
-LogicalResult
-TritonToLinalgPass::processImplicitPermuteOperations(ModuleOp moduleOp) {
-  mlir::RewritePatternSet patterns(&getContext());
-  patterns.add<ImplicitPermute::LoadConverter>(patterns.getContext());
-  patterns.add<ImplicitPermute::StoreConverter>(patterns.getContext());
-  patterns.add<ImplicitPermute::AtomicRMWConverter>(patterns.getContext());
-  patterns.add<ImplicitPermute::AtomicCASConverter>(patterns.getContext());
-  patterns.add<CannonicalizerConverter::SplatCmpConverter>(
-      patterns.getContext());
-
-  if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
-    LLVM_DEBUG({ llvm::dbgs() << "ImplicitPermute: rewrite MemOp failed\n"; });
-  }
-
-  mlir::PassManager pm(&getContext(), moduleOp.getOperationName());
-  pm.addPass(createCSEPass());
-  pm.addPass(createCanonicalizerPass());
-  return runPipeline(pm, getOperation());
-}
-
 LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     ModuleOp moduleOp) {
   // The strided-axis rewrites below only apply in 950 SIMT mode. On other
@@ -1737,13 +1716,6 @@ LogicalResult TritonToLinalgPass::initializeTargetOptions() {
 void TritonToLinalgPass::normalizeMemoryAccessForms(ModuleOp moduleOp) {
   // Execute tensor descriptor operations conversion
   if (failed(processDescriptorOperations(moduleOp))) {
-    signalPassFailure();
-  }
-
-  // Execute implicit permute
-  if (failed(processImplicitPermuteOperations(moduleOp))) {
-    LLVM_DEBUG(
-        { llvm::dbgs() << "Failed to process implicit permute operations\n"; });
     signalPassFailure();
   }
 

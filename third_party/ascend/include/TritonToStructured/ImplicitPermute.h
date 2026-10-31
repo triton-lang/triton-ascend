@@ -19,21 +19,14 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  */
+#ifndef TRITON_ADAPTER_IMPLICIT_PERMUTE_H
+#define TRITON_ADAPTER_IMPLICIT_PERMUTE_H
 
 #include "TritonMemoryAccess/MemoryAccessTags.h"
-#include "TritonToStructured/MaskAnalysis.h"
-#include "TritonToStructured/PtrAnalysis.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
-#include "mlir/Dialect/Arith/Utils/Utils.h"
-#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
-#include "mlir/IR/AffineMap.h"
-#include "mlir/IR/BuiltinTypes.h"
+#include "TritonToStructured/MemOpConverter.h"
 #include "mlir/IR/MLIRContext.h"
-#include "mlir/IR/OpDefinition.h"
-#include "mlir/IR/Value.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Support/LogicalResult.h"
-#include "mlir/Transforms/DialectConversion.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 
 namespace ImplicitPermute {
@@ -49,19 +42,25 @@ inline constexpr const char *ImplicitPermuteHandledTAG =
 
 class LoadConverter : public OpRewritePattern<triton::LoadOp> {
 public:
-  explicit LoadConverter(MLIRContext *context)
-      : OpRewritePattern<triton::LoadOp>(context) {};
+  explicit LoadConverter(MLIRContext *context, bool compileOn91095Flag = false,
+                         bool existDotFlag = false)
+      : OpRewritePattern<triton::LoadOp>(context),
+        compileOn91095Flag(compileOn91095Flag), existDotFlag(existDotFlag) {}
 
   using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const override;
+
+private:
+  bool compileOn91095Flag = false;
+  bool existDotFlag = false;
 };
 
 class StoreConverter : public OpRewritePattern<triton::StoreOp> {
 public:
   explicit StoreConverter(MLIRContext *context)
-      : OpRewritePattern<triton::StoreOp>(context) {};
+      : OpRewritePattern<triton::StoreOp>(context) {}
 
   using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
@@ -72,7 +71,7 @@ public:
 class AtomicRMWConverter : public OpRewritePattern<triton::AtomicRMWOp> {
 public:
   explicit AtomicRMWConverter(MLIRContext *context)
-      : OpRewritePattern<triton::AtomicRMWOp>(context) {};
+      : OpRewritePattern<triton::AtomicRMWOp>(context) {}
 
   using OpRewritePattern<triton::AtomicRMWOp>::OpRewritePattern;
 
@@ -83,7 +82,7 @@ public:
 class AtomicCASConverter : public OpRewritePattern<triton::AtomicCASOp> {
 public:
   explicit AtomicCASConverter(MLIRContext *context)
-      : OpRewritePattern<triton::AtomicCASOp>(context) {};
+      : OpRewritePattern<triton::AtomicCASOp>(context) {}
 
   using OpRewritePattern<triton::AtomicCASOp>::OpRewritePattern;
 
@@ -91,39 +90,6 @@ public:
                                 PatternRewriter &rewriter) const override;
 };
 
-class MemOpTransformer {
-public:
-  TritonToStructured::PtrState ptrState;
-  TritonToStructured::MaskState maskState;
-
-  enum class MemType { load, store, deafaultType };
-
-  MemType currentType = MemType::deafaultType;
-
-  MemOpTransformer(MemType memType) : currentType(memType) {}
-
-  Value materializeImplicitPermute(Value srcTensor, const Location loc,
-                                   PatternRewriter &rewriter);
-
-  Value createNewAddPtr(Value oldPtr, const Location loc,
-                        PatternRewriter &rewriter);
-
-  Value createNewAdvancePtr(Value oldPtr, const Location loc,
-                            PatternRewriter &rewriter);
-
-  Value createNewTensorPtr(Value oldPtr, const Location loc,
-                           PatternRewriter &rewriter);
-
-  Value createNewMask(Value oldPtr, const Location loc,
-                      PatternRewriter &rewriter);
-
-  Value createNewOther(Value oldOther, const Location loc,
-                       PatternRewriter &rewriter);
-
-  SmallVector<int32_t>
-  getBoundaryCheck(ArrayRef<int32_t> oldBoundaryCheck) const;
-
-  bool applyPermuteOnMask();
-};
-
 } // namespace ImplicitPermute
+
+#endif

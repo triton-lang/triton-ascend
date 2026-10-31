@@ -6,7 +6,6 @@ add_triton_library(TritonToLinalg
         TritonOpConverter.cpp
         HoistBroadcast.cpp
         BlockPtrAnalysis.cpp
-        ImplicitPermute.cpp
         DescriptorConverter.cpp
         MarkTensorKindPass.cpp
         DevicePrintOffsetRewrite.cpp

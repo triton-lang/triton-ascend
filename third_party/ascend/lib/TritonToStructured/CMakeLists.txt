@@ -3,6 +3,7 @@ add_triton_library(TritonToStructured
         PtrAnalysis.cpp
         CannonicalizerConverter.cpp
         MemOpConverter.cpp
+        ImplicitPermute.cpp
         MaskAnalysis.cpp
 
   DEPENDS
@@ -20,6 +21,7 @@ add_triton_library(TritonToStructured
   TritonIR
   TritonTransforms
   TritonAnalysis
+  TritonMemoryAccessCore
   MLIRTritonNPUUtils
   MLIRSCFTransforms
   MLIRLinalgTransforms

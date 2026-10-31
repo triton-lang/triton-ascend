@@ -55,6 +55,7 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
+#include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -1678,6 +1679,22 @@ void TritonToLinalgPass::runOnOperation() {
 
   auto moduleOp = getOperation();
 
+  // Remember whether the input carries concrete source locations before
+  // conversion creates helper operations with synthetic NameLocs. If Triton
+  // intentionally omitted file/line/column information
+  // (TRITON_DISABLE_LINE_INFO), there is no source location to recover at the
+  // end of this pass.
+  bool inputHasSourceLocation = false;
+  if (!triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO")) {
+    moduleOp.walk([&](Operation *op) {
+      if (op->getLoc()->findInstanceOf<FileLineColLoc>()) {
+        inputHasSourceLocation = true;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+  }
+
   // Validate the CFO handoff before any rewrite can erase malformed metadata.
   if (failed(validatePointerDescriptorHandoffMetadata(moduleOp))) {
     moduleOp->emitError("invalid pointer descriptor handoff metadata");
@@ -1717,6 +1734,9 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+  // Without input source locations, there is nothing useful to recover.
+  if (inputHasSourceLocation)
+    repairUnknownLocations(moduleOp);
 }
 
 // Initialize the existing target flags before any target-dependent analysis.
@@ -1967,7 +1987,6 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
 
   optimizeInterleavedStores(moduleOp);
   addRuntimeWorkspaceArguments(moduleOp);
-  repairUnknownLocations(moduleOp);
   return success();
 }
 

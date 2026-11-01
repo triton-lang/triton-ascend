@@ -27,8 +27,27 @@ from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
-``simd`` (vector-register ops), ``annotate_buffer_versions``.
+``simd`` (vector-register ops), ``annotate_buffer_versions``, and scalar dtypes.
+
+Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
+directly to buffer, vector, and cast APIs.  The ``dtype`` constructor uses
+Triton's canonical names (for example, ``dtype("fp32")``).
 """
+
+from triton.language.core import (
+    bfloat16,
+    dtype,
+    float16,
+    float32,
+    int8,
+    int16,
+    int32,
+    int64,
+    uint8,
+    uint16,
+    uint32,
+    uint64,
+)
 
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
@@ -97,6 +116,19 @@ def jit(fn=None, **kwargs):
 
 
 __all__ = [
+    # scalar dtypes (shared with triton.language)
+    "bfloat16",
+    "dtype",
+    "float16",
+    "float32",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",

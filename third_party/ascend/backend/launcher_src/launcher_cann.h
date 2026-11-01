@@ -37,11 +37,9 @@ static inline cann_error cann_malloc_host(void **ptr, size_t size) {
 static inline cann_error cann_free_host(void *ptr) {
   return aclrtFreeHost(ptr);
 }
-static inline cann_error cann_memcpy_async(void *dst, size_t destMax,
-                                           const void *src, size_t count,
-                                           cann_memcpy_kind kind,
-                                           cann_stream stream) {
-  return aclrtMemcpyAsync(dst, destMax, src, count, kind, stream);
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src,
+                                     size_t count, cann_memcpy_kind kind) {
+  return aclrtMemcpy(dst, destMax, src, count, kind);
 }
 static inline cann_error cann_memset_async(void *dst, size_t destMax,
                                            int32_t value, size_t count,
@@ -88,11 +86,9 @@ static inline cann_error cann_malloc_host(void **ptr, size_t size) {
   return rtMallocHost(ptr, size, RT_MEMORY_HOST);
 }
 static inline cann_error cann_free_host(void *ptr) { return rtFreeHost(ptr); }
-static inline cann_error cann_memcpy_async(void *dst, size_t destMax,
-                                           const void *src, size_t count,
-                                           cann_memcpy_kind kind,
-                                           cann_stream stream) {
-  return rtMemcpyAsync(dst, destMax, src, count, kind, stream);
+static inline cann_error cann_memcpy(void *dst, size_t destMax, const void *src,
+                                     size_t count, cann_memcpy_kind kind) {
+  return rtMemcpy(dst, destMax, src, count, kind);
 }
 static inline cann_error cann_memset_async(void *dst, size_t destMax,
                                            int32_t value, size_t count,

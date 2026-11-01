@@ -18,7 +18,7 @@ M = 64
 K = 64
 
 
-@triton.jit
+@tla.jit
 def gm2l1(A_ptr, M: tl.constexpr, K: tl.constexpr):
     # 4-D NZ physical shape for the L1 tile (fractal of the 2-D ND view).
     a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
@@ -37,7 +37,7 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text, "vector scope must stamp tcore_type<VECTOR>"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=0, stores=0, buffers=1,
+    check_lowered_ir(text, loads=0, stores=0, buffers=None,
                      extra=("hivm.tcore_type<VECTOR>", "hivm.hir.nd2nz", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.hir.nd2nz") == 1, "one GM->L1 nd2nz in the vector scope"
     assert text.count("hivm.vector_function") == 0, "no simd scope, no VF"

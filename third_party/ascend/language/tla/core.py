@@ -37,8 +37,10 @@ def _row_major_strides(sizes):
 
 
 # Frontend space names; "gm"/"ub" map 1:1, the rest as in tla_builder.cc.
-SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c")
-_HIVM_SCOPE = {"gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc"}
+SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c", "bt", "fb")
+_HIVM_SCOPE = {
+    "gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc", "bt": "biasbuf", "fb": "fixbuf"
+}
 
 
 def space_of(value):
@@ -59,6 +61,11 @@ def space_of(value):
 def is_ub(value):
     """True for scalars or UB-backed values."""
     return space_of(value) in (None, "ub")
+
+
+def is_gm(value):
+    """True for scalars or GM-backed values."""
+    return space_of(value) in (None, "gm")
 
 
 class buffer_type(tl.base_type):

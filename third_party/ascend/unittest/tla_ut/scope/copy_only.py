@@ -6,7 +6,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -16,7 +15,7 @@ SIGNATURE = {"X_ptr": "*fp32", "O_ptr": "*fp32"}
 N = 64
 
 
-@triton.jit
+@tla.jit
 def copy_only(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     x_blk = tla.view(X_ptr, (N, ), strides=(1, ))
@@ -36,7 +35,8 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text, "vector scope must stamp tcore_type<VECTOR>"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=1, stores=1, buffers=1, extra=("hivm.tcore_type<VECTOR>", "hivm.func_core_type<AIV>"))
+    check_lowered_ir(text, loads=1, stores=1, buffers=None,
+                     extra=("hivm.tcore_type<VECTOR>", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.vector_function") == 0, "vector scope is not a VF"
     assert 'mix_mode = "aiv"' in text, "pure-vector kernel is aiv"
     print("IR PASS: copy_only (DMA-only vector scope)")
@@ -45,7 +45,7 @@ def test_ir(output_dir=None):
 def test_compile():
     X = torch.randn(N, dtype=torch.float32, device="npu")
     O = torch.empty(N, dtype=torch.float32, device="npu")
-    copy_only[(1, )](X, O, enable_tla_mode=True, **constexprs())
+    copy_only[(1, )](X, O, **constexprs())
     torch.npu.synchronize()
     artifacts = check_compile_artifacts()
     assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"

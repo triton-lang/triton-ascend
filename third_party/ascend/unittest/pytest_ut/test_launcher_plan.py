@@ -421,36 +421,51 @@ def test_preparation_cache_root_switch_and_deleted_artifacts(prepared_backend, m
     else:
         monkeypatch.setenv(setting, str(tmp_path / "new-cache"))
     second = state.driver.NPULauncher(state.src, metadata())
-    assert second._runtime_path != first._runtime_path
-    # The helper's absolute path is baked into the runtime, so switching cache
-    # roots rebuilds the runtime under a key tied to the helper's new location.
-    assert Path(second._runtime_path).parent.name != Path(first._runtime_path).parent.name
-    assert len(state.builds) == 4
+    # The helper and runtime live under the backend's fixed bin/ directory:
+    # switching the kernel cache root neither relocates nor rebuilds them.
+    assert second._runtime_path == first._runtime_path
+    assert Path(second._runtime_path).parent.name == Path(first._runtime_path).parent.name
+    assert len(state.builds) == 2
     Path(second._runtime_path).unlink()
     helper = state.driver.NPUUtils().get_so_path()
     Path(helper).unlink()
     third = state.driver.NPULauncher(state.src, metadata())
     assert third._runtime_path == second._runtime_path
     assert Path(third._runtime_path).exists() and Path(helper).exists()
-    assert len(state.builds) == 6
+    assert len(state.builds) == 4
 
 
-def test_runtime_rebuilds_when_inductor_repoints_cache_dir(prepared_backend, monkeypatch, tmp_path):
+def test_runtime_survives_inductor_cache_repointing(prepared_backend, monkeypatch, tmp_path):
     state = prepared_backend
     first = state.driver.NPULauncher(state.src, metadata())
     first_helper = state.driver.NPUUtils().get_so_path()
+    first_runtime = first._runtime_path
     # PyTorch Inductor repoints TRITON_CACHE_DIR at a fresh temporary root
-    # (tempfile.mkdtemp) after the helper was already built: the launcher must
-    # rebuild against the helper's new location instead of resolving the
-    # stale restored value from the live environment.
+    # (tempfile.mkdtemp) after the helper was already built: the helper and
+    # runtime keep serving from their stable bin/ location instead of
+    # following (or being stranded by) the repointed kernel cache root.
     monkeypatch.setenv("TRITON_CACHE_DIR", str(tmp_path / "inductor-temp"))
     second = state.driver.NPULauncher(state.src, metadata())
     second_helper = state.driver.NPUUtils().get_so_path()
-    assert second_helper != first_helper
-    assert Path(second_helper).parents[1] == tmp_path / "inductor-temp"
-    assert second._runtime_path != first._runtime_path
+    assert second_helper == first_helper
+    assert Path(second_helper).parents[1] == state.root / "bin"
+    assert second._runtime_path == first_runtime
     assert Path(first_helper).exists()
-    assert len(state.builds) == 4
+    assert len(state.builds) == 2
+
+
+def test_get_runtime_rebuilds_helper_deleted_after_resolution(prepared_backend):
+    state = prepared_backend
+    first = state.driver.NPULauncher(state.src, metadata())
+    helper = state.driver.NPUUtils().get_so_path()
+    Path(helper).unlink()
+    # A caller may pass a path resolved before the artifact was deleted or
+    # evicted: get_runtime must re-resolve (and rebuild) the helper before
+    # baking its absolute path into the runtime's sources.
+    _, path = launcher.get_runtime(str(helper))
+    assert Path(helper).exists()
+    assert path == first._runtime_path
+    assert len(state.builds) == 3
 
 
 def test_debug_dump_and_lazy_export_after_preparation_reuse(prepared_backend, monkeypatch, tmp_path):
@@ -486,7 +501,7 @@ def test_device_print_configuration_invalidates_runtime(prepared_backend, monkey
     assert state.driver.NPULauncher(state.src, metadata())._runtime_path == first._runtime_path
 
 
-def test_custom_cache_queries_and_materialization_are_not_bypassed(prepared_backend, monkeypatch):
+def test_custom_cache_managers_stay_scoped_to_per_kernel_artifacts(prepared_backend, monkeypatch):
     from triton.runtime.cache import FileCacheManager, get_cache_manager
     state = prepared_backend
     queries = []
@@ -502,20 +517,26 @@ def test_custom_cache_queries_and_materialization_are_not_bypassed(prepared_back
 
     monkeypatch.setattr(state.driver, "get_cache_manager", manager)
     monkeypatch.setattr(launcher, "get_cache_manager", manager)
-    state.driver.NPULauncher(state.src, metadata())
+    first = state.driver.NPULauncher(state.src, metadata())
     queries.clear()
     for _ in range(4):
         state.driver.NPULauncher(state.src, metadata())
-    assert len(queries) == 8
-    assert queries.count("npu_utils.so") == 4
+    # Shared artifacts are served from the backend's bin/ directory and never
+    # consult knob-configured custom managers; those stay scoped to per-kernel
+    # traffic such as the lazily built export adapter.
+    assert queries == []
+    assert Path(first._runtime_path).exists()
     assert len(state.builds) == 2
+    import sysconfig
+    first.get_launcher_so_path()
+    assert "launcher_export" + sysconfig.get_config_var("EXT_SUFFIX") in queries
 
 
-def test_remote_cache_keeps_access_accounting(prepared_backend, monkeypatch):
+def test_remote_cache_stays_scoped_to_kernel_artifacts(prepared_backend, monkeypatch):
     from triton import knobs
     from triton.runtime.cache import RemoteCacheManager
     state = prepared_backend
-    storage, accesses = {}, []
+    accesses = []
 
     class RemoteBackend:
 
@@ -524,33 +545,37 @@ def test_remote_cache_keeps_access_accounting(prepared_backend, monkeypatch):
 
         def get(self, names):
             accesses.append((self.key, tuple(names)))
-            return {name: storage[self.key, name] for name in names if (self.key, name) in storage}
+            return {}
 
         def put(self, name, value):
-            storage[self.key, name] = value
+            accesses.append((self.key, (name, )))
 
     monkeypatch.setattr(knobs.cache, "manager_class", RemoteCacheManager)
     monkeypatch.setattr(knobs.cache, "remote_manager_class", RemoteBackend)
     first = state.driver.NPULauncher(state.src, metadata())
     accesses.clear()
-    # Even materialized files must not bypass remote access accounting.
     for _ in range(3):
         assert state.driver.NPULauncher(state.src, metadata())._runtime_path == first._runtime_path
-    assert len(accesses) == 6
+    # Shared helper/runtime artifacts are served from the backend's bin/
+    # directory; a configured remote backend sees no traffic for them and is
+    # left to the per-kernel artifacts it is meant to serve.
+    assert accesses == []
+    assert Path(first._runtime_path).exists()
     assert len(state.builds) == 2
 
 
 def test_preparation_preserves_existing_content_keys(prepared_backend):
     state = prepared_backend
     instance = state.driver.NPULauncher(state.src, metadata())
-    from triton.runtime.cache import get_cache_manager
     source = (state.root / "npu_utils.cpp").read_text()
     expected = hashlib.sha256(json.dumps([source, state.fingerprint], sort_keys=True).encode()).hexdigest()
-    assert state.driver.NPUUtils().get_so_path() == get_cache_manager(expected).get_file("npu_utils.so")
+    bin_dir = state.root / "bin"
+    assert state.driver.NPUUtils().get_so_path() == utils.bin_cache_manager(expected, bin_dir).get_file("npu_utils.so")
     sources = launcher._runtime_sources()
     config = launcher._runtime_config(state.driver.NPUUtils().get_so_path(), utils.backend_policy, None)
     key = hashlib.sha256(json.dumps([state.fingerprint, {**sources, **config}], sort_keys=True).encode()).hexdigest()
-    assert Path(instance._runtime_path).parent.name == get_cache_manager(key).key
+    assert Path(instance._runtime_path).parent.parent == bin_dir
+    assert Path(instance._runtime_path).parent.name == utils.bin_cache_manager(key, bin_dir).key
 
 
 def _concurrent_artifact_worker(root, gate, queue):

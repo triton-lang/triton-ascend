@@ -538,11 +538,6 @@ DenseMap<int, int> UBUsageOptPass::collectRecordChange(
             auto dependNodes =
                 findDependency(chain[i], chainPreNode, linkIn, linkStart);
             for (auto node : dependNodes) {
-              Operation *depOp = nodeId2op.at(node);
-              if (CVPipeline::getCoreTypeOfSimpleOpOrCf(depOp) !=
-                  CVPipeline::CoreType::VECTOR_ONLY) {
-                continue;
-              }
               if (nodeBlockId[node] != optBlockId) {
                 recordChange[node] = optBlockId;
               }
@@ -648,8 +643,6 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
     return;
   }
 
-  LOG_DEBUG("Input mlir:\n" << module << "\n==========\n");
-
   auto &aliasAnalysis = getAnalysis<AliasAnalysis>();
   CVPipeline::MemoryDependenceGraph memDepGraph(module, aliasAnalysis);
   auto bm = CVPipeline::ComputeBlockIdManager(module);
@@ -663,7 +656,6 @@ void mlir::triton::UBUsageOptPass::runOnOperation() {
     }
   }
 
-  LOG_DEBUG("Output mlir:\n" << module << "\n==========\n");
   LOG_DEBUG("=== Pass UBUsageOpt complete ===\n");
 }
 

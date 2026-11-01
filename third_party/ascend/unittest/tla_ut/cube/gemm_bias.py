@@ -32,31 +32,31 @@ SHAPE = dict(M=64, N=64, K=64, BIAS=1.0, FLAG=0)
 SIGNATURE = {"A_ptr": "*fp16", "B_ptr": "*fp16", "C_ptr": "*fp32"}
 
 
-@triton.jit
+@tla.jit
 def gemm_bias(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr,
               FLAG: tl.constexpr):
     tl.static_assert(K % 16 == 0 and M % 16 == 0 and N % 16 == 0, "M/N/K must be multiples of 16 (cube tile)")
-    tl.static_assert((M * N) % 64 == 0, "M*N must be a multiple of 64 (vector lanes)")
-    a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
-    b_l1 = tla.alloc_buffer((N // 16, K // 16, 16, 16), tl.float16, space="l1")
-    c_l0c = tla.alloc_buffer((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
+    tl.static_assert(N % 64 == 0, "N must be a multiple of 64 (vector lanes)")
     c_ub = tla.alloc_buffer((M, N), tl.float32, space="ub")
     a_blk = tla.view(A_ptr, (M, K), strides=(K, 1))
     b_blk = tla.view(B_ptr, (K, N), strides=(N, 1))
     c_blk = tla.view(C_ptr, (M, N), strides=(N, 1))
     with tla.scope.cube():
+        a_l1 = tla.alloc_buffer((K // 16, M // 16, 16, 16), tl.float16, space="l1")
+        b_l1 = tla.alloc_buffer((N // 16, K // 16, 16, 16), tl.float16, space="l1")
+        c_l0c = tla.alloc_buffer((N // 16, M // 16, 16, 16), tl.float32, space="l0c")
         tla.copy(a_blk, a_l1)  # hivm.hir.nd2nz (ND -> NZ)
         tla.copy(b_blk, b_l1)  # hivm.hir.nd2nz
         tla.cube.mmad(a_l1, b_l1, c_l0c, clear_accum=True)  # hivm.hir.mmadL1
         tla.copy(c_l0c, c_ub)  # hivm.hir.fixpipe (NZ -> ND into UB)
         # AIC: signal the handoff only after fixpipe has written c_ub.
-        tla.sync.block_set_flag(0, "FIX", FLAG)
+        tla.sync.block_set_flag(tla.sync.MODE.INTER, tla.sync.PIPE.F, FLAG)
     with tla.scope.vector():
         # AIV: wait for the cube handoff before the SIMD stage reads c_ub.
-        tla.sync.block_wait_flag("V", FLAG)
+        tla.sync.block_wait_flag(tla.sync.MODE.INTER, tla.sync.PIPE.V, FLAG)
         with tla.scope.simd():
             bias = tla.simd.vfull(BIAS, tl.float32, 64)
-            for i in tl.range((M * N) // 64):
+            for i in tl.static_range((M * N) // 64):
                 row = i // (N // 64)
                 col = (i % (N // 64)) * 64
                 v = tla.simd.vlds(c_ub[row, col])  # NORM, ND row-major read
@@ -76,9 +76,10 @@ def constexprs():
 def gemm_bias_triton(A_ptr, B_ptr, C_ptr, M: tl.constexpr, N: tl.constexpr, K: tl.constexpr, BIAS: tl.constexpr):
     rows = tl.arange(0, M)
     cols = tl.arange(0, N)
-    a = tl.load(A_ptr + rows[:, None] * K + cols[None, :])
-    b = tl.load(B_ptr + cols[:, None] * K + rows[None, :])
-    c = tl.sum(a[:, :, None] * b[None, :, :], axis=1) + BIAS
+    inner = tl.arange(0, K)
+    a = tl.load(A_ptr + rows[:, None] * K + inner[None, :])  # (M, K)
+    b = tl.load(B_ptr + inner[:, None] * N + cols[None, :])  # (K, N)
+    c = tl.dot(a, b) + BIAS
     tl.store(C_ptr + rows[:, None] * N + cols[None, :], c)
 
 
@@ -91,8 +92,8 @@ def test_ir(output_dir=None):
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(
-        text, loads=0, stores=1, buffers=4, extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
-                                                   "#hivm.tcore_type<CUBE>", "#hivm.func_core_type<AIV>"))
+        text, loads=0, stores=1, buffers=None, extra=("#hivm.address_space<cbuf>", "#hivm.address_space<cc>",
+                                                      "#hivm.tcore_type<CUBE>", "#hivm.func_core_type<AIV>"))
     assert text.count("hivm.hir.nd2nz") == 2, "GM->L1 x2"
     assert text.count("hivm.hir.mmadL1") == 1, "one gemm"
     assert text.count("hivm.hir.fixpipe") == 1, "L0C->UB"
@@ -127,7 +128,7 @@ def _launch_triton():
     A = torch.randn(s["M"], s["K"], dtype=torch.float16, device="npu")
     B = torch.randn(s["K"], s["N"], dtype=torch.float16, device="npu")
     C = torch.full((s["M"], s["N"]), 7.0, dtype=torch.float32, device="npu")
-    gemm_bias_triton[(1, )](A, B, C, **constexprs())
+    gemm_bias_triton[(1, )](A, B, C, M=s["M"], N=s["N"], K=s["K"], BIAS=s["BIAS"])
     torch.npu.synchronize()
     return C, (A.float() @ B.float() + s["BIAS"])
 

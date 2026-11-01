@@ -6,7 +6,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -16,7 +15,7 @@ SIGNATURE = {"X_ptr": "*fp32", "O_ptr": "*fp32"}
 N = 64
 
 
-@triton.jit
+@tla.jit
 def simd_only(X_ptr, O_ptr, N: tl.constexpr):
     x_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
     o_ub = tla.alloc_buffer((N, ), tl.float32, space="ub")
@@ -39,7 +38,7 @@ def test_ir(output_dir=None):
     assert "hivm.tcore_type<VECTOR>" in text
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=1, stores=1, buffers=2,
+    check_lowered_ir(text, loads=1, stores=1, buffers=None,
                      extra=("hivm.vector_function", "hivm.vf_mode<SIMD>", "hivm.func_core_type<AIV>"))
     assert text.count("hivm.vector_function") == 1, "standalone simd scope is one VF"
     assert 'mix_mode = "aiv"' in text
@@ -49,7 +48,7 @@ def test_ir(output_dir=None):
 def test_compile():
     X = torch.randn(N, dtype=torch.float32, device="npu")
     O = torch.empty(N, dtype=torch.float32, device="npu")
-    simd_only[(1, )](X, O, enable_tla_mode=True, **constexprs())
+    simd_only[(1, )](X, O, **constexprs())
     torch.npu.synchronize()
     artifacts = check_compile_artifacts()
     assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"

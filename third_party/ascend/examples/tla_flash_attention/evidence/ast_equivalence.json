@@ -1,0 +1,38 @@
+{
+  "long_d128": {
+    "original_source": "fa_phase4_kqt_dualkv_native.py",
+    "original_source_sha256": "2f0358da139717f2f9f2f4ffaf862429cee211714268669fdf1c342c1dd9f23f",
+    "ast_sha256": "87e8124b24b645fe8b974b1073cc9df3562bf56f460ee1d3258ff4ebf2b33eec",
+    "equal": true
+  },
+  "long_d64": {
+    "original_source": "fa_phase4_pv2_dualkv.py",
+    "original_source_sha256": "b86c068611f60aa1b561779d88b89de06d6be480d302a446cc06731c380b93c8",
+    "ast_sha256": "ac12decc166e965628c3d9feb5f7740cc9686445af10828143150b9b32150c08",
+    "equal": true
+  },
+  "short_causal_d128": {
+    "original_source": "fa_phase4_tasks_mixed.py",
+    "original_source_sha256": "92b3f13ef5c6a52856ecc4bfce47c0ad0b67c171bcaeaa17dd0400280fe9dd42",
+    "ast_sha256": "e123c665b9627572bc2f1ae6d2c0a6e5a0d5d86b43ffb46395481b9403ba6879",
+    "equal": true
+  },
+  "short_dense_d128": {
+    "original_source": "fa_phase4_kqt_native.py",
+    "original_source_sha256": "1b5a8979e419463c14524cf61e13931ab3074ead450961dfba9c9ecdbf6a9ebf",
+    "ast_sha256": "15caafd5d2aeee6153ea0a56ed2a972df671d06c5a113112baba0d91bd07e561",
+    "equal": true
+  },
+  "short_causal_d64": {
+    "original_source": "fa_phase4_pv2_compact.py",
+    "original_source_sha256": "b5deb96fb8b800ef41d2bc0b0b529a5c936bdf980f0133d807b9dd8f8130a400",
+    "ast_sha256": "5a2850e411275912f79be2d496a4c748befdcff310414e62132f78f335df9a07",
+    "equal": true
+  },
+  "short_dense_d64": {
+    "original_source": "fa_phase4_pv2.py",
+    "original_source_sha256": "5581bd1841a154ef3da3b33fb3bde354c5fee6a365dc915b9f0ef9bf1ea16baf",
+    "ast_sha256": "bc88a7320d87158dfd149a7e1bf28c5aa56b7bbd1322208be2653dc89be206bb",
+    "equal": true
+  }
+}

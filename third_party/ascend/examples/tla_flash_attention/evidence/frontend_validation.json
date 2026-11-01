@@ -1,0 +1,9 @@
+{
+  "source_base": "2a00c6052a110b6f52a2912d1eb8641ba135d9c3",
+  "host_contract_tests": 54,
+  "host_contract_tests_passed": true,
+  "cpp_wheel_built": false,
+  "direct_binding_device_validation": false,
+  "compatibility_path_all8_binary_identical": true,
+  "compatibility_path_full_output_checks_each": 152
+}

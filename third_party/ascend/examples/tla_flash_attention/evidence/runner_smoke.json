@@ -1,0 +1,87 @@
+{
+  "completed": true,
+  "shared_device": true,
+  "frontend": "compat",
+  "launch_options": {
+    "sanitize_overflow": false,
+    "enable_auto_bind_sub_block": false,
+    "enable_preload": false
+  },
+  "device_name": "Ascend950PR_9579",
+  "packages": {
+    "torch": "2.7.1+cpu",
+    "torch-npu": "2.7.1.post7.dev20260707",
+    "triton-ascend": "3.6.0.dev20261031+git8ca956c1"
+  },
+  "records": [
+    {
+      "case": "FA7",
+      "model": "baseline_tla_v4",
+      "rounds": [
+        {
+          "samples_us": [
+            36.526,
+            36.407,
+            36.478,
+            36.47
+          ],
+          "median_us": 36.474000000000004,
+          "aic": 28,
+          "aiv": 56,
+          "samples": 4
+        }
+      ],
+      "median_us": 36.474000000000004,
+      "range_us": [
+        36.474000000000004,
+        36.474000000000004
+      ]
+    },
+    {
+      "case": "FA7",
+      "model": "final_tla",
+      "rounds": [
+        {
+          "samples_us": [
+            32.533,
+            32.21,
+            32.577,
+            32.678
+          ],
+          "median_us": 32.555,
+          "aic": 28,
+          "aiv": 56,
+          "samples": 4
+        }
+      ],
+      "median_us": 32.555,
+      "range_us": [
+        32.555,
+        32.555
+      ]
+    },
+    {
+      "case": "FA7",
+      "model": "ascendc",
+      "rounds": [
+        {
+          "samples_us": [
+            34.276,
+            34.339,
+            34.248,
+            33.972
+          ],
+          "median_us": 34.262,
+          "aic": 28,
+          "aiv": 56,
+          "samples": 4
+        }
+      ],
+      "median_us": 34.262,
+      "range_us": [
+        34.262,
+        34.262
+      ]
+    }
+  ]
+}

@@ -101,11 +101,13 @@ __all__ = [
     "vdintlv",
     "vbitcast",
     "vmul",
+    "vmuls",
     "vadd",
     "vadds",
     "vaddc",
     "vdiv",
     "vmax",
+    "vexpdif",
     "vmin",
     "vmaxs",
     "vexp",
@@ -1592,3 +1594,36 @@ def membar(scope, _semantic=None):
     """
     scope = str(_unwrap_if_constexpr(scope)).upper()
     _semantic.builder.create_simd_vmembar(scope)
+
+
+@builtin
+def vexpdif(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Native FP32 ``exp(lhs - rhs)`` (``ave.hir.vexpdif``).
+
+    This exposes the hardware ExpSub operation; it does not select a lower
+    precision approximation. Both operands must be same-typed FP32 vectors.
+    Mask and mode follow :func:`vadd`, including its zero merge source.
+    """
+    _require_vector(lhs, "lhs")
+    _require_vector(rhs, "rhs")
+    if lhs.dtype != tl.float32 or rhs.dtype != tl.float32:
+        raise TypeError("vexpdif requires FP32 operands")
+    return _binary("expdif", lhs, rhs, _semantic, mask, mode)
+
+
+@builtin
+def vmuls(src, scalar, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Native FP32 vector-scalar multiply (``ave.hir.vmuls``).
+
+    The scalar must match the vector element type. Mask and mode follow
+    :func:`vadds`; no vector broadcast is needed for the scalar operand.
+    """
+    _require_vector(src, "src")
+    if src.dtype != tl.float32:
+        raise TypeError("vmuls requires FP32 operands")
+    scalar_handle = _scalar_handle(src, scalar, _semantic)
+    mode = _check_mode(mode)
+    mask = _resolve_mask(mask, src.type.lanes, _semantic)
+    handle = _semantic.builder.create_simd_binary_scalar("muls", src.handle, scalar_handle, mask.handle,
+                                                         _MODE_BUILDER_NAMES[mode])
+    return vector(handle, src.type)

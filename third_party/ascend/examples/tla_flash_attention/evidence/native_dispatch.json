@@ -1,0 +1,206 @@
+{
+  "completed": true,
+  "purpose": "Native dispatch identity only; not timing or utilization",
+  "records": [
+    {
+      "case": "FA1",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_7012104621695959856_mix_aic",
+      "tiling_key": 7012104621695959856,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 128,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 1,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 1
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA2",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2328361009230644016_mix_aic",
+      "tiling_key": 2328361009230644016,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 128,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 0,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA3",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_7012104620890653488_mix_aic",
+      "tiling_key": 7012104620890653488,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 64,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 1,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 1
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA4",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2328361008425599792_mix_aic",
+      "tiling_key": 2328361008425599792,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 256,
+        "D": 64,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 0,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA5",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2400418603268571952_mix_aic",
+      "tiling_key": 2400418603268571952,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 128,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 1,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA6",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2328361009230644016_mix_aic",
+      "tiling_key": 2328361009230644016,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 128,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 0,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA7",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2400418602463265584_mix_aic",
+      "tiling_key": 2400418602463265584,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 128,
+        "D": 64,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 1,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    },
+    {
+      "case": "FA8",
+      "kernel": "FlashAttentionScore_50348df09d0b3ee451d3693a6b2ab3f5_2328361008425599792_mix_aic",
+      "tiling_key": 2328361008425599792,
+      "decoded": {
+        "KernelTypeKey": 0,
+        "ImplMode": 0,
+        "Layout": 3,
+        "S1": 128,
+        "S2": 256,
+        "D": 64,
+        "Dv": 0,
+        "PseMode": 9,
+        "HasAtten": 0,
+        "HasDrop": 0,
+        "HasRope": 0,
+        "OutDtype": 0,
+        "Regbase": 1,
+        "optionalDn": 0
+      },
+      "binary_sha256": [
+        "b10333ed6904bbf2932f6e3481a84d2adfad9f95e5e66dd0b71f35a42a76cba3"
+      ],
+      "metrics_valid": false
+    }
+  ]
+}

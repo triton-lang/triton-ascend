@@ -1,0 +1,252 @@
+{
+  "scope": "FA8 core0/vector0; completed VFs from partial simulator captures",
+  "limitations": [
+    "Not full-operator or device timing",
+    "Old native capture hit simulator assertion/timeout",
+    "Requested 9579 does not establish exact hardware-model equivalence",
+    "New trace emits inf/NaN-input diagnostics on max initialization; hardware output checks passed"
+  ],
+  "kernels": {
+    "ascendc": {
+      "evidence": "native_fa8_sim_partial",
+      "vector_functions": [
+        {
+          "vf_id": "456539",
+          "complete": true,
+          "first_issue_cycle": 17913,
+          "last_issue_cycle": 18994,
+          "issue_span_cycles": 1082,
+          "unique_instructions": 2074,
+          "counts": {
+            "RV_PLT": 1,
+            "RV_PSET": 3,
+            "RV_SEND": 1,
+            "RV_SMEM_BAR": 1,
+            "RV_VADD": 259,
+            "RV_VBR": 2,
+            "RV_VCVT_F2F": 256,
+            "RV_VDINTLV": 128,
+            "RV_VDUPS": 1,
+            "RV_VEXPDIF": 256,
+            "RV_VLD": 512,
+            "RV_VLN": 1,
+            "RV_VMAX": 259,
+            "RV_VMOV": 6,
+            "RV_VMULS": 257,
+            "RV_VSSTB": 128,
+            "RV_VSTI": 2,
+            "RV_VSUB": 1
+          },
+          "vf_execute_cycles": 1593,
+          "vf_real_execute_cycles": 1593
+        },
+        {
+          "vf_id": "567494",
+          "complete": true,
+          "first_issue_cycle": 19013,
+          "last_issue_cycle": 20099,
+          "issue_span_cycles": 1087,
+          "unique_instructions": 2081,
+          "counts": {
+            "RV_PLT": 1,
+            "RV_PSET": 3,
+            "RV_SEND": 1,
+            "RV_SMEM_BAR": 1,
+            "RV_VADD": 260,
+            "RV_VBR": 2,
+            "RV_VCVT_F2F": 256,
+            "RV_VDINTLV": 128,
+            "RV_VDUPS": 1,
+            "RV_VEXPDIF": 257,
+            "RV_VLD": 512,
+            "RV_VLDI": 2,
+            "RV_VLN": 1,
+            "RV_VMAX": 260,
+            "RV_VMOV": 6,
+            "RV_VMUL": 1,
+            "RV_VMULS": 257,
+            "RV_VSSTB": 128,
+            "RV_VSTI": 3,
+            "RV_VSUB": 1
+          },
+          "vf_execute_cycles": 1170,
+          "vf_real_execute_cycles": 1105
+        },
+        {
+          "vf_id": "655014",
+          "complete": true,
+          "first_issue_cycle": 20118,
+          "last_issue_cycle": 21190,
+          "issue_span_cycles": 1073,
+          "unique_instructions": 2081,
+          "counts": {
+            "RV_PLT": 1,
+            "RV_PSET": 3,
+            "RV_SEND": 1,
+            "RV_SMEM_BAR": 1,
+            "RV_VADD": 260,
+            "RV_VBR": 2,
+            "RV_VCVT_F2F": 256,
+            "RV_VDINTLV": 128,
+            "RV_VDUPS": 1,
+            "RV_VEXPDIF": 257,
+            "RV_VLD": 512,
+            "RV_VLDI": 2,
+            "RV_VLN": 1,
+            "RV_VMAX": 260,
+            "RV_VMOV": 6,
+            "RV_VMUL": 1,
+            "RV_VMULS": 257,
+            "RV_VSSTB": 128,
+            "RV_VSTI": 3,
+            "RV_VSUB": 1
+          },
+          "vf_execute_cycles": 1151,
+          "vf_real_execute_cycles": 1091
+        }
+      ]
+    },
+    "best_v2": {
+      "evidence": "tla_fa8_sim_core0",
+      "vector_functions": [
+        {
+          "vf_id": "6987",
+          "complete": true,
+          "first_issue_cycle": 2377,
+          "last_issue_cycle": 2393,
+          "issue_span_cycles": 17,
+          "unique_instructions": 11,
+          "counts": {
+            "RV_PSET": 1,
+            "RV_SEND": 1,
+            "RV_VBR": 1,
+            "RV_VSTI": 8
+          },
+          "vf_execute_cycles": 592,
+          "vf_real_execute_cycles": 592
+        },
+        {
+          "vf_id": "19954",
+          "complete": true,
+          "first_issue_cycle": 5485,
+          "last_issue_cycle": 7291,
+          "issue_span_cycles": 1807,
+          "unique_instructions": 2244,
+          "counts": {
+            "RV_PSET": 2,
+            "RV_SEND": 1,
+            "RV_VADD": 192,
+            "RV_VBR": 1,
+            "RV_VCADD": 64,
+            "RV_VCMAX": 64,
+            "RV_VCVT_F2F": 256,
+            "RV_VDINTLV": 128,
+            "RV_VDUP": 64,
+            "RV_VEXP": 256,
+            "RV_VLDI": 256,
+            "RV_VMAX": 192,
+            "RV_VMUL": 256,
+            "RV_VSSTB": 128,
+            "RV_VSTI": 128,
+            "RV_VSUB": 256
+          },
+          "vf_execute_cycles": 2204,
+          "vf_real_execute_cycles": 2204
+        },
+        {
+          "vf_id": "233475",
+          "complete": false,
+          "first_issue_cycle": 7814,
+          "last_issue_cycle": 9309,
+          "issue_span_cycles": 1496,
+          "unique_instructions": 1951,
+          "counts": {
+            "RV_PSET": 2,
+            "RV_VADD": 156,
+            "RV_VBR": 1,
+            "RV_VCADD": 52,
+            "RV_VCMAX": 54,
+            "RV_VCVT_F2F": 208,
+            "RV_VDINTLV": 104,
+            "RV_VDUP": 53,
+            "RV_VEXP": 208,
+            "RV_VLDI": 270,
+            "RV_VMAX": 214,
+            "RV_VMUL": 216,
+            "RV_VSSTB": 103,
+            "RV_VSTI": 102,
+            "RV_VSUB": 208
+          }
+        }
+      ]
+    },
+    "phase4_kqt_native": {
+      "evidence": "phase4/kqt_native_sim_partial",
+      "vector_functions": [
+        {
+          "vf_id": "6975",
+          "complete": true,
+          "first_issue_cycle": 2303,
+          "last_issue_cycle": 2319,
+          "issue_span_cycles": 17,
+          "unique_instructions": 11,
+          "counts": {
+            "RV_PSET": 1,
+            "RV_SEND": 1,
+            "RV_VBR": 1,
+            "RV_VSTI": 8
+          },
+          "vf_execute_cycles": 576,
+          "vf_real_execute_cycles": 576
+        },
+        {
+          "vf_id": "13863",
+          "complete": true,
+          "first_issue_cycle": 5589,
+          "last_issue_cycle": 6632,
+          "issue_span_cycles": 1044,
+          "unique_instructions": 2068,
+          "counts": {
+            "RV_PSET": 2,
+            "RV_SEND": 1,
+            "RV_VADD": 259,
+            "RV_VBR": 2,
+            "RV_VCVT_F2F": 256,
+            "RV_VDINTLV": 128,
+            "RV_VEXPDIF": 256,
+            "RV_VLDI": 512,
+            "RV_VMAX": 259,
+            "RV_VMOV": 6,
+            "RV_VMULS": 257,
+            "RV_VSSTB": 128,
+            "RV_VSTI": 2
+          },
+          "vf_execute_cycles": 1513,
+          "vf_real_execute_cycles": 1513
+        },
+        {
+          "vf_id": "212446",
+          "complete": false,
+          "first_issue_cycle": 8198,
+          "last_issue_cycle": 9118,
+          "issue_span_cycles": 921,
+          "unique_instructions": 1848,
+          "counts": {
+            "RV_PSET": 2,
+            "RV_VADD": 216,
+            "RV_VBR": 2,
+            "RV_VCVT_F2F": 216,
+            "RV_VDINTLV": 108,
+            "RV_VEXPDIF": 223,
+            "RV_VLDI": 483,
+            "RV_VMAX": 260,
+            "RV_VMOV": 6,
+            "RV_VMULS": 225,
+            "RV_VSSTB": 105,
+            "RV_VSTI": 2
+          }
+        }
+      ]
+    }
+  }
+}

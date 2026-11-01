@@ -68,7 +68,7 @@ from .dma import (
     copy_l0c_to_l1,
     set_ctrl,
 )
-from .view import view, reshape
+from .view import view, reshape, prefix_view
 from .aux_ops import annotate_buffer_versions
 from . import math
 from .math import compensated_rstd
@@ -140,6 +140,7 @@ __all__ = [
     "copy",
     "view",
     "reshape",
+    "prefix_view",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",

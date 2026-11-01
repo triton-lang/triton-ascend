@@ -1,0 +1,162 @@
+{
+  "FA1": {
+    "name": "fa_forward_phase4_kqt_dualkv_native",
+    "source_sha256": "2f0358da139717f2f9f2f4ffaf862429cee211714268669fdf1c342c1dd9f23f",
+    "binary_sha256": "6025cb5d1dba1c3d97e68cc859f0c37405e6789dab3792db5d37b7b791a38237",
+    "ttadapter_sha256": "36a4c4ef626356611f3fc7edba9b40848d251d28aefb44297faad8a1fedc8e9d",
+    "constants": {
+      "S": 8192,
+      "D": 128,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": true,
+      "TILES": 2048,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 62
+    }
+  },
+  "FA2": {
+    "name": "fa_forward_phase4_kqt_dualkv_native",
+    "source_sha256": "2f0358da139717f2f9f2f4ffaf862429cee211714268669fdf1c342c1dd9f23f",
+    "binary_sha256": "7498350f82b62a4257ea4705916e629249715a87db57eb509c8d77260ed4762e",
+    "ttadapter_sha256": "c871b56768d95e0353bba1afed4f85e627f7c7898afd2d320ebed4f1aab14477",
+    "constants": {
+      "S": 8192,
+      "D": 128,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": false,
+      "TILES": 2048,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 0
+    }
+  },
+  "FA3": {
+    "name": "fa_forward_phase4_pv2_dualkv",
+    "source_sha256": "b86c068611f60aa1b561779d88b89de06d6be480d302a446cc06731c380b93c8",
+    "binary_sha256": "e3e0e0a69b16b6da7b13508886d8fb758886c57bcef837f2242196080d73c7ee",
+    "ttadapter_sha256": "34671e41ea760100caa65c2bac221f3d58de93ae66dc60f173449c03e72822ba",
+    "constants": {
+      "S": 8192,
+      "D": 64,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": true,
+      "TILES": 2048,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 62
+    }
+  },
+  "FA4": {
+    "name": "fa_forward_phase4_pv2_dualkv",
+    "source_sha256": "b86c068611f60aa1b561779d88b89de06d6be480d302a446cc06731c380b93c8",
+    "binary_sha256": "d9c14d2dfdda88ce159b0a673fd5ba90bf8a1d2e405f89281da057203bd28267",
+    "ttadapter_sha256": "63ff067d4c6d4252b7e80e2dfbc07f13d07bd9a0b33b3365f14261095d146a8f",
+    "constants": {
+      "S": 8192,
+      "D": 64,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": false,
+      "TILES": 2048,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 0
+    }
+  },
+  "FA5": {
+    "name": "fa_forward_phase4_tasks_mixed",
+    "source_sha256": "92b3f13ef5c6a52856ecc4bfce47c0ad0b67c171bcaeaa17dd0400280fe9dd42",
+    "binary_sha256": "5f01ca1fbce801e91320e236abf8f36dc2b6b8fb08732da0958c6ea10d94a2ea",
+    "ttadapter_sha256": "fee8e8c4f3a9371f24076c13555b721c34dac9d9981942044abeb340d054d93f",
+    "constants": {
+      "S": 1024,
+      "D": 128,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": true,
+      "TILES": 256,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 6
+    }
+  },
+  "FA6": {
+    "name": "fa_forward_phase4_kqt_native",
+    "source_sha256": "1b5a8979e419463c14524cf61e13931ab3074ead450961dfba9c9ecdbf6a9ebf",
+    "binary_sha256": "49b2966fa0dffca68f88b0a4e6e96c55d5825c9270279f47137246b3d8b2fccb",
+    "ttadapter_sha256": "eb56e9bbae3432674a669191bea5f2306ee5d49dc36a704982c306580c009ef1",
+    "constants": {
+      "S": 1024,
+      "D": 128,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": false,
+      "TILES": 256,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 0
+    }
+  },
+  "FA7": {
+    "name": "fa_forward_phase4_pv2_compact",
+    "source_sha256": "b5deb96fb8b800ef41d2bc0b0b529a5c936bdf980f0133d807b9dd8f8130a400",
+    "binary_sha256": "a3fe5823b9ef6bffee24fb2217901446a1bfff02ef816811579d94528596f1fb",
+    "ttadapter_sha256": "e504ca4cd5c946ddfdc711c6d6a11d233bcd3cca0ab3680b9d111879005a6836",
+    "constants": {
+      "S": 1024,
+      "D": 64,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": true,
+      "TILES": 256,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 6
+    }
+  },
+  "FA8": {
+    "name": "fa_forward_phase4_pv2",
+    "source_sha256": "5581bd1841a154ef3da3b33fb3bde354c5fee6a365dc915b9f0ef9bf1ea16baf",
+    "binary_sha256": "26cce854967b90a8ee9956826e57bb215b6e6dc4e0d1adf9d47d8c09cdd60662",
+    "ttadapter_sha256": "326fce1f6f42d08952d36cb31f4219e21477b2284edc68b17ea28b0a010868fe",
+    "constants": {
+      "S": 1024,
+      "D": 64,
+      "H": 8,
+      "BM": 128,
+      "BN": 256,
+      "CAUSAL": false,
+      "TILES": 256,
+      "CORES": 28,
+      "FIRST_OPT": true,
+      "MASK_OPT": true,
+      "QUERY_DRAIN": false,
+      "ROTATION": 0
+    }
+  }
+}

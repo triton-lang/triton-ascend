@@ -770,3 +770,36 @@ def test_public_names_are_defined_and_documented():
         assert ast.get_docstring(node), f"{name} has no docstring"
     for name in ("membar", "pge", "vci"):
         assert f'"{name}"' in src
+
+
+@pytest.mark.parametrize("mode", [simd.MODE.ZEROING, simd.MODE.MERGING])
+def test_flash_attention_native_fp32_ops(mode):
+    sem = _Semantic()
+    x, y, mask = _vec(64, tl.float32), _vec(64, tl.float32), _mask(64)
+    simd.vexpdif(x, y, mask=mask, mode=mode, _semantic=sem)
+    name, args = _last(sem)
+    assert name == "binary" and args[:4] == ("expdif", x.handle, y.handle, mask.handle)
+    assert args[4] == ("zeroing" if mode == simd.MODE.ZEROING else "merging")
+    simd.vmuls(x, 0.125, mask=mask, mode=mode, _semantic=sem)
+    name, args = _last(sem)
+    assert name == "binary_scalar" and args[0] == "muls" and args[1] is x.handle
+    assert args[3] is mask.handle
+    assert args[4] == ("zeroing" if mode == simd.MODE.ZEROING else "merging")
+
+
+@pytest.mark.parametrize("dtype", [tl.float16, tl.bfloat16, tl.int32])
+def test_flash_attention_ops_reject_non_fp32(dtype):
+    with pytest.raises(TypeError, match="FP32"):
+        simd.vexpdif(_vec(64, dtype), _vec(64, dtype), _semantic=_Semantic())
+    with pytest.raises(TypeError, match="FP32"):
+        simd.vmuls(_vec(64, dtype), 1, _semantic=_Semantic())
+
+
+def test_flash_attention_ops_reject_bad_mask_and_scalar():
+    x = _vec(64, tl.float32)
+    with pytest.raises(ValueError):
+        simd.vexpdif(x, x, mask=_mask(32), _semantic=_Semantic())
+    with pytest.raises(TypeError):
+        simd.vmuls(x, _vec(1, tl.float16), _semantic=_Semantic())
+    with pytest.raises(ValueError):
+        simd.vexpdif(x, _vec(32, tl.float32), _semantic=_Semantic())

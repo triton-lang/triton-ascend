@@ -325,6 +325,13 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
     pm.run(mod, 'make_ttir')
+    if opt.enable_interleaved_access_packing:
+        pm = ir.pass_manager(mod.context)
+        pm.enable_debug()
+        ascend.passes.ttir.add_pack_interleaved_access(pm)
+        passes.common.add_canonicalizer(pm)
+        passes.common.add_cse(pm)
+        pm.run(mod, 'pack_interleaved_access')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
         print(f"Dumping intermediate results to {dump_manager.cache_dir}")
@@ -1182,6 +1189,8 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
 
 @dataclass(frozen=True)
 class NPUOptions:
+    # Experimental; cross-pointer motion requires proven row alignment.
+    enable_interleaved_access_packing: bool = False
     debug: bool = False
     sanitize_overflow: bool = True
     # Backend-only construction input.  AscendBackend.parse_options injects

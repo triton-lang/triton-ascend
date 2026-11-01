@@ -12,6 +12,7 @@
 #include "ascend/include/AutoBlockify/Passes.h"
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
+#include "ascend/include/TTIRLayoutMerge/PackInterleavedAccess.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
 #include "ascend/include/TritonToAnnotation/Passes.h"
 #include "ascend/include/TritonToGraph/GraphOptimization.h"
@@ -60,6 +61,9 @@ namespace py = pybind11;
 using namespace mlir;
 
 void init_triton_ascend_passes_ttir(py::module &&m) {
+  m.def("add_pack_interleaved_access", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createPackInterleavedAccessPass());
+  });
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;

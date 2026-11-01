@@ -1,0 +1,17 @@
+[
+  {
+    "file": "native_template_tiling_key.h",
+    "sha256": "92ab7139110ad3ad0d0d1580bebb2e18659ea7e412b1c6baad05e4ba90f62161",
+    "runtime": "CANN 9.1.0 installed sources"
+  },
+  {
+    "file": "flash_attention_score_common_regbase.h",
+    "sha256": "7d9c41f80ba86e999cfce1e62611b9ecb502e10d1d185231fadbee6732d3437e",
+    "runtime": "CANN 9.1.0 installed sources"
+  },
+  {
+    "file": "flash_attention_noquant_block_cube.h",
+    "sha256": "98bcb5bedc207d9d69645e3df8dccedea303dc33b7a4254fe1e4588a82aa2d0b",
+    "runtime": "CANN 9.1.0 installed sources"
+  }
+]

@@ -1,0 +1,55 @@
+{
+  "completed": true,
+  "cases_per_input": 8,
+  "input_families": [
+    {
+      "name": "normal",
+      "variant": "normal",
+      "seed": 20261030,
+      "trials": 10
+    },
+    {
+      "name": "alternate",
+      "variant": "normal",
+      "seed": 20261031,
+      "trials": 3
+    },
+    {
+      "name": "uniform",
+      "variant": "uniform",
+      "seed": 20261101,
+      "trials": 3
+    },
+    {
+      "name": "peaked",
+      "variant": "peaked",
+      "seed": 20261102,
+      "trials": 3
+    }
+  ],
+  "model_summary": {
+    "best_v5": {
+      "full_output_checks": 152,
+      "worst_errors": {
+        "O": 0.003331644771650175,
+        "max": 3.199668002448066e-07,
+        "sum": 1.2095586366467483e-05
+      }
+    },
+    "ascendc": {
+      "full_output_checks": 152,
+      "worst_errors": {
+        "O": 0.003331644771650175,
+        "max": 3.199668002448066e-07,
+        "sum": 1.2172140710559049e-05
+      }
+    }
+  },
+  "selection_sha256": "364f8f57114444dc5a5e3d7ffd40a4b2f364b1737808aae13ff9c9b2dfdc70c2",
+  "tolerances": {
+    "O": 0.005,
+    "max": 0.0001,
+    "sum": 0.0001
+  },
+  "metric": "max(abs(actual-reference))/max(abs(reference)); denominator floor 1e-30"
+}

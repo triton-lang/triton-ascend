@@ -156,3 +156,29 @@ def reshape(src, shape, _semantic=None):
     if len(sizes) > 1:  # unflatten from 1-D to the target shape
         handle = b.create_tla_expand_shape(handle, dst_ty, [list(range(len(sizes)))])
     return buffer(handle, ty)
+
+
+@builtin
+def prefix_view(src, shape, _semantic=None):
+    """Alias a contiguous prefix of a zero-offset allocation, changing pitch.
+
+    This differs from ``view`` (a rank-preserving subview with the old pitch)
+    and ``reshape`` (which preserves the element count). No copy or allocation
+    occurs. Only a contiguous identity buffer is accepted; arbitrary/dynamic
+    subview origins cannot safely be used with reinterpret_cast's base offset.
+    The returned alias deliberately has unknown offset metadata, preventing
+    it from being reused as an allocation origin by reshape/prefix_view.
+    """
+    if not isinstance(src, buffer):
+        raise TypeError("tla.prefix_view expects a tla.buffer")
+    sizes = _shape(shape)
+    if src.offset != 0 or src.strides != _row_major_strides(src.shape):
+        raise ValueError("tla.prefix_view requires a zero-offset contiguous buffer")
+    if _numel(sizes) > _numel(src.shape):
+        raise ValueError("tla.prefix_view must fit within the source buffer")
+    strides = _row_major_strides(sizes)
+    ty = buffer_type(sizes, src.dtype, src.space, strides, offset=None)
+    handle = _semantic.builder.create_tla_reinterpret_cast(src.handle,
+                                                           _semantic.to_tensor(0).handle, list(sizes), list(strides),
+                                                           ty.to_ir(_semantic.builder))
+    return buffer(handle, ty)

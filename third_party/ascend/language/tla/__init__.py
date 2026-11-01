@@ -87,8 +87,17 @@ from .sync import sub_block_id
 
 
 def jit(fn=None, **kwargs):
-    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
+    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend.
+
+    ``tla.buffer``/``tla.buffer_type`` parameters take host tensors; the TLA
+    binder validates them and the launcher adapts them to the declared buffer.
+    """
+    # The lazy submodule import sets ``tla.jit`` to the module itself, which
+    # would break every later ``@tla.jit`` in the same process; rebind the
+    # package attribute to the decorator class that replaces this function.
     from .jit import TLAJITFunction
+
+    globals()["jit"] = TLAJITFunction
 
     def decorator(f):
         return TLAJITFunction(f, **kwargs)

@@ -45,6 +45,31 @@ CONSTEXPR, POINTER, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F16, BF16 = 
 FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW = (
     1 << i for i in range(11))
 
+# Prefix of the ``tlabuf:<space>:<dtype>:<shape>:<strides>:<offset>`` signature
+# entries emitted by ``@tla.jit`` for kernel parameters annotated as
+# ``tla.buffer``/``tla.buffer_type``.  Keep in sync with
+# ``triton/language/extra/tla/host.py``.
+_TLA_BUFFER_PREFIX = "tlabuf:"
+
+# Canonical Triton dtype names carried in those entries -> launcher spellings.
+_TLA_POINTER_TYPES = {
+    "int1": "i1",
+    "int8": "i8",
+    "int16": "i16",
+    "int32": "i32",
+    "int64": "i64",
+    "uint8": "u8",
+    "uint16": "u16",
+    "uint32": "u32",
+    "uint64": "u64",
+    "fp8e5": "fp8e5",
+    "fp8e4nv": "fp8e4nv",
+    "fp16": "fp16",
+    "bf16": "bf16",
+    "fp32": "fp32",
+    "fp64": "fp64",
+}
+
 _KINDS = {
     "constexpr": CONSTEXPR,
     "i1": I32,
@@ -227,6 +252,11 @@ def _expand_signature(sig, constants=(), path=()):
         return ["constexpr"] * len(_expand_signature(sig))
     if isinstance(sig, tuple):
         return [ty for index, child in enumerate(sig) for ty in _expand_signature(child, constants, (*path, index))]
+    if sig.startswith(_TLA_BUFFER_PREFIX):
+        # TLA host buffers pass one base pointer, like *dtype parameters;
+        # their shape, strides and address space live in the kernel IR.
+        dtype = sig.split(":", 3)[2]
+        return ["*" + _TLA_POINTER_TYPES.get(dtype, dtype)]
     if sig.startswith("tensordesc"):
         return _descriptor_signature(sig)
     return [sig]

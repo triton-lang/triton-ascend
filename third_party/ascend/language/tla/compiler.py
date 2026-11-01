@@ -206,9 +206,15 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     """Compile a kernel whose runtime arguments are TLA buffers or scalars.
 
     ``signature`` maps argument names to buffer_type or scalar Triton strings.
-    Only top-level constexpr parameters are supported by this offline entry.
+    Host buffer parameters arrive as ``tlabuf:<space>:<dtype>:<shape>:<strides>
+    :<offset>`` entries produced by ``tla.host.buffer_spec``; they are decoded
+    back into :class:`tla.buffer_type` here.  Only top-level constexpr
+    parameters are supported by this offline entry.
     """
     from triton._C.libtriton.ascend import ir as ascend_ir
+
+    from .host import is_buffer_spec, parse_buffer_spec
+
     types, constants = [], {}
     for index, name in enumerate(fn.arg_names):
         if name in constexprs:
@@ -216,7 +222,9 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
             constants[(index, )] = constexprs[name]
         else:
             ty = signature[name]
-            if isinstance(ty, str):
+            if is_buffer_spec(ty):
+                ty = parse_buffer_spec(ty)
+            elif isinstance(ty, str):
                 ty = str_to_ty(ty, None)
             types.append(ty)
     prototype = ASTFunction([], types, constants, {})

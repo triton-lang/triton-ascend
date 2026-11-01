@@ -23,9 +23,17 @@ A plain ``triton.jit`` kernel runs the generic ``make_ttir`` frontend and
 skips the TLA kernel-mode stamping.  Reusing ``ast_to_ttir`` keeps runtime
 kernels consistent with the offline tla_ut flow and sets
 ``options.enable_tla_mode`` for the backend.
+
+``@tla.jit`` additionally adapts kernel parameters annotated as
+``tla.buffer_type`` (or a bare ``tla.buffer``) for launch: the host passes a
+tensor, the binder validates it and encodes the buffer type into the
+specialization signature, and the launcher maps that entry onto the pointer
+argument the device ABI expects.  See :mod:`triton.language.extra.tla.host`.
 """
 from triton.compiler.compiler import ASTSource
 from triton.runtime.jit import JITFunction
+
+from .host import buffer_spec, is_buffer_annotation, resolve_buffer_arg
 
 
 class TLASTSource(ASTSource):
@@ -43,7 +51,32 @@ class TLASTSource(ASTSource):
 class TLAJITFunction(JITFunction):
     """``@tla.jit``: ``triton.jit`` whose kernels lower via the TLA frontend."""
 
+    def _buffer_annotations(self):
+        return {
+            param.name: param._param.annotation
+            for param in self.params
+            if is_buffer_annotation(param._param.annotation)
+        }
+
+    def _wrap_binder(self, binder, annotations):
+        """Adapt host values of buffer parameters into TLA buffer signatures."""
+        positions = {name: self.arg_names.index(name) for name in annotations}
+
+        def wrapped(*args, **kwargs):
+            bound_args, specialization, options = binder(*args, **kwargs)
+            specialization = list(specialization)
+            for name, annotation in annotations.items():
+                ty = resolve_buffer_arg(bound_args[name], annotation, name)
+                specialization[positions[name]] = (buffer_spec(ty), None)
+            return bound_args, specialization, options
+
+        return wrapped
+
     def create_binder(self):
         info = super().create_binder()
         self.ASTSource = TLASTSource
-        return info
+        kernel_cache, key_cache, target, backend, binder = info
+        annotations = self._buffer_annotations()
+        if annotations:
+            binder = self._wrap_binder(binder, annotations)
+        return kernel_cache, key_cache, target, backend, binder

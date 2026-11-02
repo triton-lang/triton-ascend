@@ -134,6 +134,19 @@ def test_scalar_where_ir(output_dir=None):
     lower_offline(module, ctx, output_dir)
 
 
+@tr.jit
+def _scalar_assume(cond):
+    tla.assume(cond)
+
+
+def test_assume_scalar_ir(output_dir=None):
+    module, ctx = compile_offline(_scalar_assume, {"cond": "i1"}, {}, output_dir)
+    text = str(module)
+    assert "llvm.intr.assume" in text, text
+    lowered = lower_offline(module, ctx, output_dir)
+    assert "llvm.intr.assume" in str(lowered), str(lowered)
+
+
 def test_ir(output_dir=None):
     module, ctx = compile_offline(_vector_control_flow, {"out": tla.buffer_type((64, ), tl.float32, "ub"), "n": "i32"},
                                   {}, output_dir)

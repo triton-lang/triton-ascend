@@ -74,6 +74,7 @@ def _load_selection():
 simd = _load_simd()
 selection = _load_selection()
 math_src = _source_package()("tla_src.math")
+aux_src = _source_package()("tla_src.aux_ops")
 tla_core = importlib.import_module("tla_src.core")
 
 
@@ -206,6 +207,9 @@ class _ScalarBuilder:
 
     def create_srem(self, lhs, rhs):
         return self._make("srem", (lhs, rhs))
+
+    def create_assume(self, cond):
+        self.calls.append(("create_assume", (cond,)))
 
     def create_urem(self, lhs, rhs):
         return self._make("urem", (lhs, rhs))
@@ -1126,6 +1130,61 @@ def test_where_invalid_inputs_never_reach_the_builder():
     for exc_type, match, call in cases:
         with pytest.raises(exc_type, match=match):
             call()
+
+
+# --------------------------------------------------------------------------
+# tla.assume (aux_ops.py)
+# --------------------------------------------------------------------------
+
+
+def test_assume_export_and_builtin():
+    assert "assume" in aux_src.__all__
+    assert _triton_is_builtin(aux_src.assume)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        aux_src.assume(True)
+    name = "tla_assume_export"
+    spec = importlib.util.spec_from_file_location(
+        name, _TLA_DIR / "__init__.py", submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "assume" in pkg.__all__
+        assert pkg.assume is pkg.aux_ops.assume
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("cond,value", [(True, True), (False, False),
+                                        (tl.constexpr(True), True), (tl.constexpr(False), False)])
+def test_assume_constants_emit(cond, value):
+    sem, builder = _scalar_semantic()
+    assert aux_src.assume(cond, _semantic=sem) is None
+    assert builder.calls[0] == ("get_int1", value)
+    assert len(builder.calls) == 2
+    name, (handle,) = builder.calls[-1]
+    assert name == "create_assume"
+    assert (handle.op, handle.value) == ("get_int1", value)
+
+
+def test_assume_runtime_condition_emits_with_debug_disabled():
+    sem, builder = _scalar_semantic()
+    builder.options = types.SimpleNamespace(debug=False)
+    cond = tl.tensor(_ScalarHandle("arg", "cond"), tl.int1)
+    assert aux_src.assume(cond, _semantic=sem) is None
+    assert builder.calls == [("create_assume", (cond.handle,))]
+
+
+def test_assume_invalid_inputs_never_reach_builder():
+    values = [1, 0, 1.0, None, tl.constexpr(1), tl.constexpr(1.0),
+              tl.tensor("block", tl.block_type(tl.int1, [64])),
+              tl.tensor("integer", tl.int32), tl.tensor("float", tl.float32),
+              _vec(64, tl.int1),
+              tla_core.buffer("buf", tla_core.buffer_type((64,), tl.float32, "ub"))]
+    for cond in values:
+        with pytest.raises(TypeError, match="assume requires"):
+            aux_src.assume(cond, _semantic=_NoBuilder())
 
 
 # --------------------------------------------------------------------------

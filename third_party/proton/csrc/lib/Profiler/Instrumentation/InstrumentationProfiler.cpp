@@ -1,12 +1,15 @@
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
 #include "TraceDataIO/CircularLayoutParser.h"
 
+#ifdef PROTON_BUILD_CUDA
 #include "Driver/GPU/CudaApi.h"
 #include "Profiler/Instrumentation/CudaRuntime.h"
+#endif
+#ifdef PROTON_BUILD_HIP
 #include "Profiler/Instrumentation/HipRuntime.h"
-#ifdef PROTON_ENABLE_NPU
+#endif
+#ifdef PROTON_BUILD_CANN
 #include "Profiler/Instrumentation/AscendRuntime.h"
-#include <acl/acl.h>
 #endif
 #include "Utility/Numeric.h"
 #include "Utility/String.h"
@@ -62,20 +65,26 @@ void InstrumentationProfiler::doSetMode(
   }
   if (proton::toLower(modeAndOptions[0]) ==
       proton::toLower(DeviceTraits<DeviceType::CUDA>::name)) {
+#ifdef PROTON_BUILD_CUDA
     runtime = std::make_unique<CudaRuntime>();
+#else
+    throw std::runtime_error("CUDA instrumentation support is not built");
+#endif
   } else if (proton::toLower(modeAndOptions[0]) ==
              proton::toLower(DeviceTraits<DeviceType::HIP>::name)) {
+#ifdef PROTON_BUILD_HIP
     runtime = std::make_unique<HipRuntime>();
-  }
-#ifdef PROTON_ENABLE_NPU
-  else if (proton::toLower(modeAndOptions[0]) == "npu" ||
-           proton::toLower(modeAndOptions[0]) == "ascend" ||
-           proton::toLower(modeAndOptions[0]) ==
-               proton::toLower(DeviceTraits<DeviceType::ASCEND>::name)) {
-    runtime = std::make_unique<AscendRuntime>();
-  }
+#else
+    throw std::runtime_error("HIP instrumentation support is not built");
 #endif
-  else {
+  } else if (proton::toLower(modeAndOptions[0]) == "npu" ||
+             proton::toLower(modeAndOptions[0]) == "ascend") {
+#ifdef PROTON_BUILD_CANN
+    runtime = std::make_unique<AscendRuntime>();
+#else
+    throw std::runtime_error("NPU instrumentation support is not built");
+#endif
+  } else {
     throw std::runtime_error("Unknown device type: " + modeAndOptions[0]);
   }
   for (size_t i = 1; i < modeAndOptions.size(); ++i) {
@@ -257,7 +266,7 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
   }
 
   int64_t timeShiftCost = 0;
-  if (runtime->getDeviceType() == DeviceType::ASCEND) {
+  if (runtime->getDeviceType() == DeviceType::NPU) {
     timeShiftCost = getAscendTimeShiftCost(*runtime);
   } else if (modeOptions.count("optimizations")) {
     auto optimizations = proton::split(modeOptions.at("optimizations"), ",");
@@ -307,9 +316,7 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
   if (isHost) {
     // The buffer already lives on the host (Ascend instrumentation path).
     parseBuffer(buffer, size);
-#ifdef PROTON_ENABLE_NPU
-    aclrtFreeHost(buffer);
-#endif
+    runtime->freeHostBuffer(buffer);
   } else {
     runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
     runtime->processHostBuffer(hostBuffer, size, buffer, size, priorityStream,

@@ -406,7 +406,7 @@ convertToTimelineTrace(TraceData::Trace *trace,
     metadata->callStack = std::move(callStack);
     uint64_t devType =
         getInt64Value(kernelEvent.cycleMetric, CycleMetric::DeviceType);
-    if (static_cast<DeviceType>(devType) == DeviceType::ASCEND)
+    if (static_cast<DeviceType>(devType) == DeviceType::NPU)
       // Ascend AICore system counter runs at 50MHz.
       metadata->cycleCounterFreqMhz = 50.0;
     if (timeShiftCost > 0)

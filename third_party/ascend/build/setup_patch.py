@@ -468,30 +468,24 @@ def _get_ascend_cmake_args():
 
 
 def _get_ascend_proton_cmake_args():
-    """Return CANN include arguments for the optional Proton NPU build."""
-    ascend_include_dir = os.getenv("ASCEND_INCLUDE_DIR", "")
-    if ascend_include_dir and not os.path.exists(os.path.join(ascend_include_dir, "acl", "acl.h")):
-        ascend_include_dir = ""
-
-    if not ascend_include_dir:
-        ascend_home = os.getenv("ASCEND_HOME_PATH", "")
-        if not ascend_home:
-            ascend_home = os.getenv("ASCEND_TOOLKIT_HOME", "")
-        if ascend_home:
-            for candidate in (
-                    os.path.join(ascend_home, "include"),
-                    os.path.join(ascend_home, "runtime", "include"),
-            ):
-                if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
-                    ascend_include_dir = candidate
-                    break
-
-    if not ascend_include_dir:
-        return []
-    return [
-        "-DPROTON_ENABLE_NPU=ON",
-        "-DASCEND_INCLUDE_DIR=" + ascend_include_dir,
-    ]
+    """Return CANN and MSPTI paths for both Ascend Proton backends."""
+    cann_home = os.getenv("ASCEND_TOOLKIT_HOME", "") or os.getenv("ASCEND_HOME_PATH", "")
+    cann_include_dir = os.getenv("CANN_INCLUDE_DIR", "") or os.getenv("ASCEND_INCLUDE_DIR", "")
+    if not cann_include_dir and cann_home:
+        for candidate in (os.path.join(cann_home, "include"), os.path.join(cann_home, "runtime", "include")):
+            if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
+                cann_include_dir = candidate
+                break
+    cmake_args = []
+    if cann_include_dir:
+        cmake_args.append(f"-DCANN_INCLUDE_DIR={cann_include_dir}")
+    for variable, suffix in (("MSPTI_INCLUDE_DIR", "include"), ("MSPTI_LIB_DIR", "lib64")):
+        path = os.getenv(variable, "")
+        if not path and cann_home:
+            path = os.path.join(cann_home, "tools", "mspti", suffix)
+        if path:
+            cmake_args.append(f"-D{variable}={path}")
+    return cmake_args
 
 
 def _get_install_requirements():
@@ -509,6 +503,8 @@ def _get_install_requirements():
     argv = " ".join(sys.argv).lower()
     if "editable_wheel" not in argv and "dist_info" not in argv:
         install_requires.append("triton==3.6.0")
+    if os.getenv("TRITON_BUILD_PROTON", "ON").lower() not in ("0", "false", "off", "no"):
+        install_requires.append("llnl-hatchet")
     return [*install_requires]
 
 
@@ -549,7 +545,8 @@ def patch_module(mod):
     class CMakeBuild(_OrigCMakeBuild):
 
         def get_proton_cmake_args(self):
-            cmake_args = super().get_proton_cmake_args()
+            cmake_args = mod.get_thirdparty_packages([mod.get_json_package_info()])
+            cmake_args += self.get_pybind11_cmake_args()
             cmake_args += _get_ascend_proton_cmake_args()
             return cmake_args
 

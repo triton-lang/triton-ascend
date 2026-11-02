@@ -172,7 +172,7 @@ Device decodeDevice(const uint32_t dev) {
     device.arch = "";
     break;
   case 3:
-    device.type = DeviceType::ASCEND;
+    device.type = DeviceType::NPU;
     device.arch = "";
     break;
   default:
@@ -253,7 +253,7 @@ uint64_t proton::getTimeShiftCost(const CircularLayoutParserConfig &config) {
     return 7;
   else if (config.device.type == DeviceType::HIP)
     return 36;
-  else if (config.device.type == DeviceType::ASCEND)
+  else if (config.device.type == DeviceType::NPU)
     // GetSysCntOp + PipeBarrier overhead on the in-order AICore pipeline.
     return 12;
 

@@ -7,7 +7,7 @@ namespace proton {
 
 class AscendRuntime : public Runtime {
 public:
-  AscendRuntime() : Runtime(DeviceType::ASCEND) {}
+  AscendRuntime() : Runtime(DeviceType::NPU) {}
   ~AscendRuntime() = default;
 
   void allocateHostBuffer(uint8_t **buffer, size_t size) override;

@@ -1,13 +1,29 @@
-add_proton_library(ProtonProfiler
-	Cupti/CuptiPCSampling.cpp
-	Cupti/CuptiProfiler.cpp
-	RocTracer/RoctracerProfiler.cpp
-	Instrumentation/InstrumentationProfiler.cpp
-	Instrumentation/CudaRuntime.cpp
-	Instrumentation/HipRuntime.cpp
-	Instrumentation/Metadata.cpp
+set(PROTON_PROFILER_SOURCES
+  Instrumentation/InstrumentationProfiler.cpp
+  Instrumentation/Metadata.cpp
 )
 
-if(PROTON_ENABLE_NPU)
-	target_sources(ProtonProfiler PRIVATE Instrumentation/AscendRuntime.cpp)
+if(PROTON_BUILD_CUDA)
+  list(APPEND PROTON_PROFILER_SOURCES
+    Cupti/CuptiPCSampling.cpp
+    Cupti/CuptiProfiler.cpp
+    Instrumentation/CudaRuntime.cpp
+  )
 endif()
+
+if(PROTON_BUILD_HIP)
+  list(APPEND PROTON_PROFILER_SOURCES
+    RocTracer/RoctracerProfiler.cpp
+    Instrumentation/HipRuntime.cpp
+  )
+endif()
+
+if(PROTON_BUILD_MSPTI)
+  list(APPEND PROTON_PROFILER_SOURCES Mspti/MsptiProfiler.cpp)
+endif()
+
+if(PROTON_BUILD_CANN)
+  list(APPEND PROTON_PROFILER_SOURCES Instrumentation/AscendRuntime.cpp)
+endif()
+
+add_proton_library(ProtonProfiler ${PROTON_PROFILER_SOURCES})

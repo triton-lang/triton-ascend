@@ -1,8 +1,10 @@
 #include "Device.h"
+#include "Driver/GPU/CannApi.h"
+#ifdef PROTON_BUILD_CUDA
 #include "Driver/GPU/CudaApi.h"
+#endif
+#ifdef PROTON_BUILD_HIP
 #include "Driver/GPU/HipApi.h"
-#ifdef PROTON_ENABLE_NPU
-#include "Driver/NPU/AscendApi.h"
 #endif
 
 #include "Utility/Errors.h"
@@ -10,17 +12,19 @@
 namespace proton {
 
 Device getDevice(DeviceType type, uint64_t index) {
+#ifdef PROTON_BUILD_CUDA
   if (type == DeviceType::CUDA) {
     return cuda::getDevice(index);
   }
+#endif
+#ifdef PROTON_BUILD_HIP
   if (type == DeviceType::HIP) {
     return hip::getDevice(index);
   }
-#ifdef PROTON_ENABLE_NPU
-  if (type == DeviceType::ASCEND) {
-    return ascend::getDevice(index);
-  }
 #endif
+  if (type == DeviceType::NPU) {
+    return cann::getDevice(index);
+  }
   throw std::runtime_error("DeviceType not supported");
 }
 
@@ -29,12 +33,9 @@ const std::string getDeviceTypeString(DeviceType type) {
     return DeviceTraits<DeviceType::CUDA>::name;
   } else if (type == DeviceType::HIP) {
     return DeviceTraits<DeviceType::HIP>::name;
+  } else if (type == DeviceType::NPU) {
+    return DeviceTraits<DeviceType::NPU>::name;
   }
-#ifdef PROTON_ENABLE_NPU
-  if (type == DeviceType::ASCEND) {
-    return DeviceTraits<DeviceType::ASCEND>::name;
-  }
-#endif
   throw std::runtime_error("DeviceType not supported");
 }
 

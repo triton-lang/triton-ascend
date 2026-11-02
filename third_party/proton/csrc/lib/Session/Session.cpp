@@ -3,9 +3,16 @@
 #include "Context/Shadow.h"
 #include "Data/TraceData.h"
 #include "Data/TreeData.h"
+#ifdef PROTON_BUILD_CUDA
 #include "Profiler/Cupti/CuptiProfiler.h"
+#endif
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
+#ifdef PROTON_BUILD_MSPTI
+#include "Profiler/Mspti/MsptiProfiler.h"
+#endif
+#ifdef PROTON_BUILD_HIP
 #include "Profiler/Roctracer/RoctracerProfiler.h"
+#endif
 #include "Utility/String.h"
 
 namespace proton {
@@ -13,13 +20,24 @@ namespace proton {
 namespace {
 
 Profiler *makeProfiler(const std::string &name) {
+#ifdef PROTON_BUILD_CUDA
   if (proton::toLower(name) == "cupti") {
     return &CuptiProfiler::instance();
-  } else if (proton::toLower(name) == "roctracer") {
+  }
+#endif
+#ifdef PROTON_BUILD_HIP
+  if (proton::toLower(name) == "roctracer") {
     return &RoctracerProfiler::instance();
-  } else if (proton::toLower(name) == "instrumentation") {
+  }
+#endif
+  if (proton::toLower(name) == "instrumentation") {
     return &InstrumentationProfiler::instance();
   }
+#ifdef PROTON_BUILD_MSPTI
+  if (proton::toLower(name) == "mspti") {
+    return &MsptiProfiler::instance();
+  }
+#endif
   throw std::runtime_error("Unknown profiler: " + name);
 }
 

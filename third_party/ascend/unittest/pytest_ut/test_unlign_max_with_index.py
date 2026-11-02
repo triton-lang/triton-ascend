@@ -98,7 +98,8 @@ def test_max_with_index_dim0(param_list):
     assert (ncore * xblock * shape[-1] == numel)
 
     b = test_common.generate_tensor(shape, dtype).npu()
-    idx = torch.zeros((shape), device='npu', dtype=torch.int32)
+    # Match torch.max indices: each element carries its position along dim 0.
+    idx = (torch.arange(shape[0]).view(-1, 1).expand(shape).contiguous().to(torch.int32).npu())
     c, d = torch.max(b, dim=0)
 
     print(f"std_ret = {c[0:4]}")

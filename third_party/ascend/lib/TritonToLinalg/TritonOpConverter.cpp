@@ -1471,6 +1471,135 @@ Value ReduceConverter::computeReduceResultWithCompileFlag(
   }
 }
 
+// Returns the inserted axis if `op` maps a rank-N shape to a rank-(N+1) shape
+// that only differs by a length-1 dimension at that axis, i.e. the reshape is
+// equivalent to `expand_dims`. Returns -1 if the reshape is not of that form.
+// When several axes match, the first one is returned.
+static int64_t getExpandDimsLikeReshapeAxis(triton::ReshapeOp op) {
+  auto srcType = cast<RankedTensorType>(op.getSrc().getType());
+  auto dstType = cast<RankedTensorType>(op.getType());
+  if (srcType.getRank() + 1 != dstType.getRank())
+    return -1;
+
+  ArrayRef<int64_t> srcShape = srcType.getShape();
+  ArrayRef<int64_t> dstShape = dstType.getShape();
+  for (int64_t axis = 0; axis < dstType.getRank(); ++axis) {
+    if (dstShape[axis] == 1 &&
+        srcShape.take_front(axis) == dstShape.take_front(axis) &&
+        srcShape.drop_front(axis) == dstShape.drop_front(axis + 1))
+      return axis;
+  }
+  return -1;
+}
+
+// Returns true iff `index`, viewed along `reduceAxis`, is exactly
+// 0, 1, ..., extent-1. Only value-preserving ops (widening integer casts,
+// broadcast, expand_dims) are accepted on top of make_range, plus reshapes
+// that are equivalent to expand_dims; anything else is treated as
+// non-canonical.
+static bool isCanonicalIotaIndex(Value index, int64_t reduceAxis,
+                                 int64_t extent) {
+  SmallVector<Operation *> chain; // outermost -> innermost
+  Value cur = index;
+  while (Operation *def = cur.getDefiningOp()) {
+    // Widening an integer iota keeps 0..extent-1 intact (e.g. i32 -> i64).
+    if (auto ext = dyn_cast<arith::ExtSIOp>(def)) {
+      cur = ext.getIn();
+      continue;
+    }
+    if (auto ext = dyn_cast<arith::ExtUIOp>(def)) {
+      cur = ext.getIn();
+      continue;
+    }
+    if (auto broadcast = dyn_cast<triton::BroadcastOp>(def)) {
+      chain.push_back(def);
+      cur = broadcast.getSrc();
+      continue;
+    }
+    if (auto expandDims = dyn_cast<triton::ExpandDimsOp>(def)) {
+      chain.push_back(def);
+      cur = expandDims.getSrc();
+      continue;
+    }
+    if (auto reshape = dyn_cast<triton::ReshapeOp>(def)) {
+      if (reshape.getAllowReorder() ||
+          getExpandDimsLikeReshapeAxis(reshape) < 0)
+        return false;
+      chain.push_back(def);
+      cur = reshape.getSrc();
+      continue;
+    }
+    break;
+  }
+
+  auto range = cur.getDefiningOp<triton::MakeRangeOp>();
+  if (!range)
+    return false;
+  // The generated getStart()/getEnd() return uint32_t; use the attrs so that
+  // signedness is preserved (TritonOps.td, TT_MakeRangeOp).
+  if (range.getStartAttr().getInt() != 0 ||
+      range.getEndAttr().getInt() != extent)
+    return false;
+
+  // Replay the shape ops from the inside out and track the position of the
+  // iota dimension. broadcast keeps positions unchanged; expand_dims and its
+  // equivalent reshape shift the iota dimension for an inserted leading axis.
+  int64_t pos = 0;
+  for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+    if (auto expandDims = dyn_cast<triton::ExpandDimsOp>(*it)) {
+      int64_t axis = expandDims.getAxisAttr().getInt();
+      if (axis <= pos)
+        ++pos;
+    } else if (auto reshape = dyn_cast<triton::ReshapeOp>(*it)) {
+      int64_t axis = getExpandDimsLikeReshapeAxis(reshape);
+      if (axis <= pos)
+        ++pos;
+    }
+  }
+  return pos == reduceAxis;
+}
+
+// Marks the index operand with UseIndexInput when it is not a canonical iota,
+// so that LinalgToHFusion keeps it instead of synthesizing indices from
+// positions. Returns failure only when the index cannot be represented by the
+// device templates (the index payload is int32 there).
+static LogicalResult
+maybeMarkNonCanonicalIndex(triton::ReduceOp op,
+                           typename triton::ReduceOp::Adaptor adaptor,
+                           ConversionPatternRewriter &rewriter) {
+  if (op.getOperands().size() != 2)
+    return success();
+
+  Value ttIndex = op.getOperands()[1];
+  auto indexTy = dyn_cast<RankedTensorType>(ttIndex.getType());
+  auto valueTy = dyn_cast<RankedTensorType>(op.getOperands()[0].getType());
+  if (!indexTy || !valueTy)
+    return success();
+
+  int64_t axis = op.getAxis();
+  if (axis < 0 || axis >= valueTy.getRank())
+    return success();
+  int64_t extent = valueTy.getShape()[axis];
+  if (extent == ShapedType::kDynamic ||
+      isCanonicalIotaIndex(ttIndex, axis, extent))
+    return success();
+
+  if (!indexTy.getElementType().isInteger(32)) {
+    op.emitError() << "reduce-with-index requires an i32 index operand when "
+                      "the index is not a canonical iota (got "
+                   << indexTy.getElementType()
+                   << "); cast the index to i32 before tl.reduce";
+    return failure();
+  }
+
+  // The mark has to be attached to the converted value: LinalgToHFusion looks
+  // the annotation up among the users of linalg.reduce's second input.
+  auto mark = rewriter.create<annotation::MarkOp>(op.getLoc(),
+                                                  adaptor.getOperands()[1]);
+  mark->setAttr("UseIndexInput", rewriter.getUnitAttr());
+  return success();
+}
+
 LogicalResult
 ReduceConverter::convertToTargetOp(triton::ReduceOp op,
                                    typename triton::ReduceOp::Adaptor adaptor,
@@ -1643,6 +1772,16 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
         rewriter.create<tensor::EmptyOp>(loc, resultShape, elemTypes[i]));
   }
 
+  auto params = getReduceWithIndexParams(op);
+  if (failed(params))
+    return rewriter.notifyMatchFailure(op, "meaningless reduce operation");
+
+  // Keep the index operand when the backend cannot synthesize it from
+  // positions, i.e. when it is not a canonical iota.
+  if (params->withIndexType != ReduceWithIndexType::None &&
+      failed(maybeMarkNonCanonicalIndex(op, adaptor, rewriter)))
+    return failure();
+
   auto linalgOp = rewriter.create<linalg::ReduceOp>(
       loc, adaptor.getOperands(), outputs,
       SmallVector<int64_t>{adaptor.getAxis()},
@@ -1662,12 +1801,8 @@ LogicalResult ReduceConverter::convertToTargetOpExtended(
         b.create<linalg::YieldOp>(loc, results);
       });
 
-  auto params = getReduceWithIndexParams(op);
-  if (failed(params)) {
-    return rewriter.notifyMatchFailure(op, "meaningless reduce operation");
-  } else if (params->withIndexType != ReduceWithIndexType::None) {
+  if (params->withIndexType != ReduceWithIndexType::None)
     addReduceWithIndexAttr(*params, rewriter, linalgOp);
-  }
 
   insertDebugNop(loc, rewriter);
   if (isScalarReduce) {

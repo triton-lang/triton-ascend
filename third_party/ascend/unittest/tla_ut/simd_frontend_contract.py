@@ -73,6 +73,7 @@ def _load_selection():
 
 simd = _load_simd()
 selection = _load_selection()
+math_src = _source_package()("tla_src.math")
 tla_core = importlib.import_module("tla_src.core")
 
 
@@ -198,6 +199,16 @@ class _ScalarBuilder:
     def create_select(self, cond, x, y):
         self.calls.append(("create_select", (cond, x, y)))
         return _ScalarHandle("select", (cond, x, y))
+
+
+    def get_int8(self, value):
+        return self._make("get_int8", value)
+
+    def create_srem(self, lhs, rhs):
+        return self._make("srem", (lhs, rhs))
+
+    def create_urem(self, lhs, rhs):
+        return self._make("urem", (lhs, rhs))
 
 
 def _scalar_semantic():
@@ -905,6 +916,94 @@ def test_existing_internal_callers_still_work():
     sem = _Semantic()
     simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=sem)
     assert _last(sem)[0] == "binary"
+
+
+# --------------------------------------------------------------------------
+# tla.truncmod (math.py)
+# --------------------------------------------------------------------------
+
+
+def test_truncmod_export_and_builtin():
+    assert "truncmod" in math_src.__all__
+    assert _triton_is_builtin(math_src.truncmod)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        math_src.truncmod(7, 3)
+    name = "tla_truncmod_export"
+    spec = importlib.util.spec_from_file_location(
+        name, _TLA_DIR / "__init__.py", submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "truncmod" in pkg.__all__
+        assert pkg.truncmod is pkg.math.truncmod
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("a,b", [(7, 3), (-7, 3), (7, -3), (-7, -3)])
+def test_truncmod_literals_emit_signed_remainder(a, b):
+    for args in ((a, b), (tl.constexpr(a), tl.constexpr(b))):
+        sem, _ = _scalar_semantic()
+        result = math_src.truncmod(*args, _semantic=sem)
+        assert isinstance(result, tl.tensor) and result.type == tl.int32
+        name, (lhs, rhs) = _last(sem)
+        assert name == "srem"
+        assert (lhs.op, lhs.value) == ("get_int32", a)
+        assert (rhs.op, rhs.value) == ("get_int32", b)
+
+
+@pytest.mark.parametrize("dtype,op", [(tl.int8, "srem"), (tl.int32, "srem"), (tl.int64, "srem"),
+                                      (tl.uint32, "urem"), (tl.uint64, "urem")])
+def test_truncmod_tensor_signedness(dtype, op):
+    sem, _ = _scalar_semantic()
+    a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
+    b = tl.tensor(_ScalarHandle("arg", "b"), dtype)
+    result = math_src.truncmod(a, b, _semantic=sem)
+    assert result.type == dtype
+    assert _last(sem) == (op, (a.handle, b.handle))
+
+
+@pytest.mark.parametrize("dtype,op,constant", [(tl.int8, "srem", "get_int8"),
+                                              (tl.uint32, "urem", "get_uint32")])
+def test_truncmod_literal_preserves_tensor_type(dtype, op, constant):
+    sem, _ = _scalar_semantic()
+    a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
+    result = math_src.truncmod(a, 3, _semantic=sem)
+    assert result.type == dtype
+    name, (lhs, rhs) = _last(sem)
+    assert name == op and lhs is a.handle
+    assert (rhs.op, rhs.value) == (constant, 3)
+
+
+def test_truncmod_rejects_mixed_signedness():
+    for lhs_ty, rhs_ty in ((tl.int32, tl.uint32), (tl.uint64, tl.int64)):
+        sem, builder = _scalar_semantic()
+        a = tl.tensor(_ScalarHandle("arg", "a"), lhs_ty)
+        b = tl.tensor(_ScalarHandle("arg", "b"), rhs_ty)
+        with pytest.raises(TypeError, match="different signedness"):
+            math_src.truncmod(a, b, _semantic=sem)
+        assert not builder.calls
+
+
+@pytest.mark.parametrize("divisor", [0, tl.constexpr(0)])
+def test_truncmod_rejects_literal_zero(divisor):
+    with pytest.raises(ValueError, match="divisor must be nonzero"):
+        math_src.truncmod(7, divisor, _semantic=_NoBuilder())
+
+
+def test_truncmod_invalid_operands():
+    values = [True, 1.5, tl.constexpr(True), tl.constexpr(1.0),
+              tl.tensor("block", tl.block_type(tl.int32, [64])),
+              tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
+              tl.tensor(_ScalarHandle("arg", "f32"), tl.float32), _vec(64, tl.int32),
+              tla_core.buffer("buf", tla_core.buffer_type((64,), tl.int32, "ub"))]
+    for value in values:
+        with pytest.raises(TypeError, match="truncmod a"):
+            math_src.truncmod(value, 2, _semantic=_NoBuilder())
+        with pytest.raises(TypeError, match="truncmod b"):
+            math_src.truncmod(2, value, _semantic=_NoBuilder())
 
 
 # --------------------------------------------------------------------------

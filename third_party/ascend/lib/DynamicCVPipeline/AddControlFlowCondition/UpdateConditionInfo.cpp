@@ -754,29 +754,16 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
   return conditions;
 }
 
-// Return the ancestor of `startOp` that is written directly in `block`.
-// The walk starts at `startOp`, which may already be that ancestor.
-// Returns null when `startOp` is not inside `block`.
-static Operation *topLevelInBlock(Operation *startOp, Block *block) {
-  Operation *opInBlock = nullptr;
-  for (Operation *ancestor = startOp; ancestor;
-       ancestor = ancestor->getParentOp()) {
-    if (ancestor->getBlock() == block)
-      opInBlock = ancestor;
-  }
-  return opInBlock;
-}
-
 // Return true when `op` is textually after `latestOp` in `thenBlock`.
 // `latestOp` is the last matmul kept so far. Both ops may be nested.
 // `opInThen` and `latestInThen` are the ancestors written directly in
-// `thenBlock`. Different ancestors are compared in `thenBlock`. The same
-// ancestor is compared only when `op` and `latestOp` share a block.
-// Otherwise `latestOp` stays earlier.
+// use `findAncestorOpInBlock`. Different ancestors are compared
+// in `thenBlock`. The same ancestor is compared only when `op` and `latestOp`
+// share a block. Otherwise `latestOp` stays earlier.
 static bool isLaterInThenBlock(Operation *op, Operation *latestOp,
                                Block *thenBlock) {
-  Operation *opInThen = topLevelInBlock(op, thenBlock);
-  Operation *latestInThen = topLevelInBlock(latestOp, thenBlock);
+  Operation *opInThen = thenBlock->findAncestorOpInBlock(*op);
+  Operation *latestInThen = thenBlock->findAncestorOpInBlock(*latestOp);
   if (opInThen != latestInThen)
     return latestInThen->isBeforeInBlock(opInThen);
   if (op->getBlock() == latestOp->getBlock())
@@ -791,7 +778,7 @@ static Operation *findLastMatmulOnUserChain(Operation *consumer,
   Block *thenBlock = &ifOp.getThenRegion().front();
   SmallVector<Operation *> worklist;
   DenseSet<Operation *> seen;
-  for (Operation *user : consumer->getResult(0).getUsers())
+  for (Operation *user : consumer->getUsers())
     worklist.push_back(user);
 
   Operation *latestMatmul = nullptr;
@@ -804,7 +791,7 @@ static Operation *findLastMatmulOnUserChain(Operation *consumer,
         latestMatmul = userOp;
       continue;
     }
-    for (Operation *user : userOp->getResult(0).getUsers())
+    for (Operation *user : userOp->getUsers())
       worklist.push_back(user);
   }
   if (!latestMatmul || latestMatmul->getBlock() != thenBlock)
@@ -827,10 +814,8 @@ void UpdateConditionInfoPass::updateCrossCoreControlVars(
   for (int inputGroupIdx : crossCoreInputValues) {
     Operation *insertAfterOp = nullptr;
     if (isAIC) {
-      // inputGroupIdx comes from crossCoreBuffers. The inner key is the
-      // consumer.
-      Operation *consumer =
-          crossCoreBuffers.find(inputGroupIdx)->second.begin()->first;
+      // `inputGroupIdx` selects one group. The inner map has one consumer;
+      Operation *consumer = crossCoreBuffers[inputGroupIdx].begin()->first;
       insertAfterOp = findLastMatmulOnUserChain(consumer, ifOp);
     }
     if (insertAfterOp)

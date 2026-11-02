@@ -20,6 +20,7 @@
  * THE SOFTWARE.
  */
 
+#include "DynamicCVPipeline/Common/BlockDependencyGraph.h"
 #include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
@@ -45,6 +46,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Debug.h"
 #include <optional>
+#include <set>
 #include <utility>
 
 static constexpr const char *DEBUG_TYPE = "merge-small-block";
@@ -704,20 +706,61 @@ selectMergeTarget(SmallVector<int> &candidates,
   return std::nullopt;
 }
 
-static void getBlockIdsInProgramOrder(Block *block,
-                                      CVPipeline::ComputeBlockIdManager &bm,
-                                      SmallVector<int> &ordered,
-                                      DenseMap<int, int> &id2order) {
+/// Returns failure if a cycle is detected in the dependency graph.
+static LogicalResult getBlockIdsInTopoOrder(
+    Block *block, const CVPipeline::MemoryDependenceGraph &memGraph,
+    CVPipeline::ComputeBlockIdManager &bm, SmallVector<int> &ordered,
+    DenseMap<int, int> &id2order) {
   ordered.clear();
   id2order.clear();
-  llvm::SmallDenseSet<int, 4> seen;
-  for (Operation &op : *block) {
-    int bid = bm.getBlockIdByOp(&op);
-    if (bid != -1 && seen.insert(bid).second) {
-      id2order[bid] = ordered.size();
-      ordered.push_back(bid);
+
+  CVPipeline::BlockDependencyGraph graph(block, memGraph, bm);
+  if (failed(graph.buildGraph())) {
+    return failure();
+  }
+
+  // In-degree of every block, keyed by block id.
+  llvm::DenseMap<int, int> indegree;
+  for (auto &entry : graph.blockNodes) {
+    indegree[entry.first] = entry.second->predecessors.size();
+  }
+
+  std::set<int> ready;
+  for (auto &entry : indegree) {
+    if (entry.second == 0) {
+      ready.insert(entry.first);
     }
   }
+
+  while (!ready.empty()) {
+    int nowBlockId = *ready.begin();
+    ready.erase(ready.begin());
+
+    id2order[nowBlockId] = ordered.size();
+    ordered.push_back(nowBlockId);
+
+    CVPipeline::BlockNode *node = graph.getBlockNode(nowBlockId);
+    if (!node) {
+      continue;
+    }
+
+    for (CVPipeline::BlockNode *succ : node->successors) {
+      if (--indegree[succ->blockId] == 0) {
+        ready.insert(succ->blockId);
+      }
+    }
+  }
+
+  // Blocks still carrying a non-zero in-degree belong to a cycle, which should
+  // not occur for a valid dependency graph, create cycle.
+  for (auto &entry : indegree) {
+    if (entry.second > 0) {
+      LOG_DEBUG("Block " << entry.first
+                         << " has non-zero in-degree, create cycle!");
+      return failure();
+    }
+  }
+  return success();
 }
 
 /// Match the pattern inside a small VECTOR block:
@@ -788,9 +831,13 @@ void MergeSmallBlockPass::runOnOperation() {
   SmallVector<int> orderedBlockIds;
   DenseMap<int, int> id2order;
   module.walk([&](Block *block) {
-    getBlockIdsInProgramOrder(block, bm, orderedBlockIds, id2order);
+    if (failed(getBlockIdsInTopoOrder(block, memGraph, bm, orderedBlockIds,
+                                      id2order))) {
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return WalkResult::interrupt();
+    }
     if (orderedBlockIds.size() < 2) {
-      return;
+      return WalkResult::advance();
     }
 
     for (int nowBlockId : orderedBlockIds) {
@@ -844,6 +891,7 @@ void MergeSmallBlockPass::runOnOperation() {
         }
       }
     }
+    return WalkResult::advance();
   });
 }
 

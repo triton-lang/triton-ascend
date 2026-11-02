@@ -301,9 +301,10 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
                           return computeOpCnt > kPriviledgedMaxComputeOpCnt;
                         });
   ready.append(startingVectorBlocks);
+  unsigned head = 0;
 
-  while (!ready.empty()) {
-    auto cur = ready.pop_back_val();
+  while (head < ready.size()) {
+    auto cur = ready[head++];
 
     result.push_back(groupIds[cur]);
 
@@ -313,6 +314,8 @@ GroupAdjacencyGraph::computeTopologicalOrder() {
       }
     }
   }
+
+  ready.clear();
 
   LLVM_DEBUG({
     LOG_DEBUG("Group order: ");
@@ -540,17 +543,17 @@ void ReorderOpsByBlockIdPass::runOnOperation() {
     return;
   }
 
-  // MergeComputeBlockPass sets kSkipExtraReorder when it ran but merged
-  // nothing, in which case the extra reorder is unnecessary. Consume the
-  // marker either way so it does not leak into the output IR.
-  if (auto skip =
-          moduleOp->getAttrOfType<BoolAttr>(CVPipeline::kSkipExtraReorder)) {
-    moduleOp->removeAttr(CVPipeline::kSkipExtraReorder);
-    if (skip.getValue()) {
-      LOG_DEBUG("Skip Extra ReorderOpsByBlockIdPass\n");
-      return;
-    }
-  }
+  // MergeComputeBlockPass sets kMergeComputeBlockApplied to record whether it
+  // actually merged blocks. Skip reorder only when it ran but merged nothing;
+  // consume the marker either way so it does not leak into the output IR.
+  // if (auto applied = moduleOp->getAttrOfType<BoolAttr>(
+  //         CVPipeline::kMergeComputeBlockApplied)) {
+  //   moduleOp->removeAttr(CVPipeline::kMergeComputeBlockApplied);
+  //   if (!applied.getValue()) {
+  //     LOG_DEBUG("Skip reorder: MergeComputeBlock ran but merged nothing");
+  //     return;
+  //   }
+  // }
 
   LOG_DEBUG("Input mlir:\n" << moduleOp << "\n");
   llvm::dbgs().flush();

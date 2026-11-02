@@ -96,7 +96,7 @@
             "architecture_fact",
             "derived_calibration"
           ],
-          "description": "Evidence category: measured result, device configuration, or architecture contract."
+          "description": "Evidence category: isolated measurement, device configuration, architecture contract, or a derived parameter with explicit calibration provenance."
         },
         "source": {
           "type": "string",

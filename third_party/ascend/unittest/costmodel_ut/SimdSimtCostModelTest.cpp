@@ -19,6 +19,7 @@
 
 using mlir::ascend::analyzeLoopTripCountInfos;
 using mlir::ascend::HardwareProfile;
+using mlir::ascend::KernelLaunchCost;
 using mlir::ascend::LogicalStage;
 using mlir::ascend::LogicalStageCost;
 using mlir::ascend::ScopeHandoffCost;
@@ -57,6 +58,26 @@ SimdSimtFeatureSummary triangularBt16StageFeatures() {
 }
 
 } // namespace
+
+TEST(SimdSimtCostModelTest, KernelLaunchCostChargesPhysicalProgramsOnce) {
+  KernelLaunchCost cost;
+  cost.baseSystemCycles = 500.0;
+  cost.incrementalSystemCyclesPerPhysicalProgram = 15.0;
+  cost.overlapNormExponent = 1.6;
+  cost.evidence = "test";
+  ASSERT_TRUE(cost.isValid());
+  EXPECT_DOUBLE_EQ(cost.estimate(0), 500.0);
+  EXPECT_DOUBLE_EQ(cost.estimate(1), 500.0);
+  EXPECT_DOUBLE_EQ(cost.estimate(2), 515.0);
+  EXPECT_DOUBLE_EQ(cost.estimate(28), 905.0);
+  EXPECT_DOUBLE_EQ(cost.estimate(56), 1325.0);
+  EXPECT_DOUBLE_EQ(cost.combineWithBody(1, 200.0), 700.0);
+  EXPECT_DOUBLE_EQ(cost.combineWithBody(28, 0.0), cost.estimate(28));
+  EXPECT_GT(cost.combineWithBody(28, 200.0), cost.estimate(28));
+  EXPECT_LT(cost.combineWithBody(28, 200.0), cost.estimate(28) + 200.0);
+  cost.incrementalSystemCyclesPerPhysicalProgram = -1.0;
+  EXPECT_FALSE(cost.isValid());
+}
 
 namespace {
 
@@ -530,6 +551,7 @@ TEST(SimdSimtCostModelTest, MixedScopeSuperBlockAmortizesOnlyFixedTransitions) {
 
   ASSERT_TRUE(routes->mixed.legal);
   EXPECT_EQ(routes->mixed.routeSuperblockFactor, 4);
+  EXPECT_EQ(routes->mixedFactorPlans.size(), 3u);
   // The 80-cycle fixed transition pair is amortized to 20 cycles.  The
   // 4096-byte input/output handoff remains 48 + 40 cycles per program.
   EXPECT_DOUBLE_EQ(routes->mixed.totalCycles,
@@ -1465,6 +1487,104 @@ TEST(SimdSimtCostModelTest, PureSimtRouteUsesOneUniformSuperBlockFactor) {
   EXPECT_DOUBLE_EQ(routes->allSimt.totalCycles, 4.0);
 }
 
+TEST(SimdSimtCostModelTest,
+     PureSimtSuperBlockKeepsThePhysicalParentLaunchCount) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  table.logicalProgramCountHint = 128;
+  table.physicalCoreCountHint = 32;
+
+  mlir::ascend::LogicalStageCost stage;
+  stage.id = "simt_payload";
+  for (const auto &[factor, cycles] :
+       std::initializer_list<std::pair<int64_t, double>>{{1, 8.0}, {4, 1.0}}) {
+    mlir::ascend::StageImplementationCost cost;
+    cost.implementation = {StageMode::SIMT, factor};
+    cost.totalCycles = cycles;
+    stage.implementations.push_back(cost);
+  }
+  table.stages = {stage};
+
+  auto routes = solveStageRoutes(table, ScopeHandoffCost{});
+  if (!routes)
+    FAIL() << llvm::toString(routes.takeError());
+  const auto &factorFour = routes->allSimtFactorPlans.at(4);
+  EXPECT_EQ(factorFour.runtimePhysicalProgramCount, 32);
+  EXPECT_EQ(factorFour.runtimeSchedulingSlotCount, 32);
+  EXPECT_EQ(factorFour.runtimeLoopIterationCount, 1);
+}
+
+TEST(SimdSimtCostModelTest, PureSimtRejectsTailOnlySuperBlockFactor) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  table.logicalProgramCountHint = 32;
+  table.physicalCoreCountHint = 32;
+  mlir::ascend::LogicalStageCost stage;
+  stage.id = "simt_payload";
+  for (int64_t factor : {1, 4}) {
+    mlir::ascend::StageImplementationCost cost;
+    cost.implementation = {StageMode::SIMT, factor};
+    cost.totalCycles = factor == 1 ? 8.0 : 1.0;
+    stage.implementations.push_back(cost);
+  }
+  table.stages = {stage};
+
+  auto routes = solveStageRoutes(table, ScopeHandoffCost{});
+  if (!routes)
+    FAIL() << llvm::toString(routes.takeError());
+  EXPECT_TRUE(routes->allSimtFactorPlans.at(1).legal);
+  EXPECT_EQ(routes->allSimtFactorPlans.count(4), 0u);
+  EXPECT_EQ(routes->allSimt.routeSuperblockFactor, 1);
+}
+
+TEST(SimdSimtCostModelTest,
+     OverlappingMaskedRowsUseTheirActiveWorkingSetFootprint) {
+  StageCostTable table;
+  table.profileVersion = "unit-test-profile-v1";
+  table.logicalProgramCountHint = 56;
+  table.physicalCoreCountHint = 56;
+  table.simdIrregularTileLargeWorkingSetFullPhysicalMinimumBytes =
+      128 * 1024 * 1024;
+
+  LogicalStageCost dispatch;
+  dispatch.id = "dispatch";
+  dispatch.model = "auto_blockify_dispatch";
+  StageImplementationCost dispatchCost;
+  dispatchCost.implementation = {StageMode::SIMD, 1};
+  dispatch.implementations.push_back(dispatchCost);
+
+  LogicalStageCost reduction;
+  reduction.id = "reduction";
+  reduction.model = "rowwise_reduction";
+  reduction.iterationCount = 22;
+  reduction.features.insideAutoBlockifyV1Loop = true;
+  reduction.workload.loadBytes = 64 * 256 * 4;
+  reduction.workload.storeBytes = 64 * 256 * 4;
+  for (bool store : {false, true}) {
+    mlir::ascend::StageMemoryAccess access;
+    access.shape = {64, 256};
+    access.strides = {150, 1};
+    access.elementBits = 32;
+    access.store = store;
+    access.masked = true;
+    access.activeElementRatio = 150.0 / 256.0;
+    reduction.workload.memoryAccesses.push_back(std::move(access));
+  }
+  StageImplementationCost reductionCost;
+  reductionCost.implementation = {StageMode::SIMD, 1};
+  reductionCost.resources.irregularFullPhysicalMaterialization = 100.0;
+  reductionCost.resources.irregularPhysicalMaterialization = 0.0;
+  reduction.implementations.push_back(reductionCost);
+  table.stages = {dispatch, reduction};
+
+  auto routes = solveStageRoutes(table, ScopeHandoffCost{});
+  if (!routes)
+    FAIL() << llvm::toString(routes.takeError());
+  EXPECT_FALSE(routes->allSimd.diagnostic<bool>(
+      "large_simd_irregular_tile_working_set_applied"));
+  EXPECT_DOUBLE_EQ(routes->allSimd.totalCycles, 0.0);
+}
+
 TEST(SimdSimtCostModelTest, MixedScopeSuperBlockUsesSelectedFactorCost) {
   StageCostTable table;
   table.profileVersion = "unit-test-profile-v1";
@@ -1946,6 +2066,32 @@ TEST(SimdSimtCostModelTest, ClippedDynamicLoopUsesStaticTripCountCap) {
     }
     EXPECT_EQ(maximumIterations, capped ? 14 : 1);
   }
+}
+
+TEST(SimdSimtCostModelTest, LoopTripCountConsumesBoundRuntimeScalarArgument) {
+  mlir::MLIRContext context;
+  context.getOrLoadDialect<mlir::arith::ArithDialect>();
+  context.getOrLoadDialect<mlir::func::FuncDialect>();
+  context.getOrLoadDialect<mlir::scf::SCFDialect>();
+  auto module = mlir::parseSourceString<mlir::ModuleOp>(R"mlir(
+    module {
+      func.func @kernel(
+          %limit: index {ascend.costmodel.runtime_value = 8192 : i64}) {
+        %c0 = arith.constant 0 : index
+        %c32 = arith.constant 32 : index
+        scf.for %i = %c0 to %limit step %c32 {
+        }
+        return
+      }
+    }
+  )mlir",
+                                                        &context);
+  ASSERT_TRUE(module);
+  auto tripCounts = analyzeLoopTripCountInfos(*module);
+  ASSERT_EQ(tripCounts.size(), 1u);
+  EXPECT_EQ(tripCounts.front().constantTripCount, std::optional<int64_t>(256));
+  EXPECT_EQ(tripCounts.front().workloadTripCount, 256);
+  EXPECT_FALSE(tripCounts.front().workloadUsesFallback);
 }
 
 TEST(SimdSimtCostModelTest, AdjacentStructuredLoopsRemainSerialStages) {

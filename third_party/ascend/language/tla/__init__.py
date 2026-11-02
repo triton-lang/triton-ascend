@@ -104,6 +104,7 @@ from .dma import (
     copy_l0c_to_ub,
     copy_l0c_to_l1,
     set_ctrl,
+    set_atomic,
 )
 
 from .view import view, subview, reshape
@@ -187,6 +188,7 @@ __all__ = [
     "copy_l0c_to_ub",
     "copy_l0c_to_l1",
     "set_ctrl",
+    "set_atomic",
     "buffer",
     "buffer_type",
     "vector",

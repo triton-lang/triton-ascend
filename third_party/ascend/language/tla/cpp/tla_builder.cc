@@ -1366,6 +1366,25 @@ void init_tla_builder(py::module &&m) {
                  self.getBuilder().getBoolAttr(enable),
                  self.getBuilder().getI64IntegerAttr(idx));
            })
+      .def("create_tla_set_atomic",
+           [](TLABuilder &self, const std::string &kind, Type type) {
+             hivm::AtomicKind atomicKind;
+             if (kind == "none")
+               atomicKind = hivm::AtomicKind::NONE;
+             else if (kind == "add")
+               atomicKind = hivm::AtomicKind::ADD;
+             else if (kind == "max")
+               atomicKind = hivm::AtomicKind::MAX;
+             else if (kind == "min")
+               atomicKind = hivm::AtomicKind::MIN;
+             else
+               throw std::invalid_argument("unsupported TLA atomic kind: " + kind);
+             auto *ctx = self.getBuilder().getContext();
+             self.create<hivm::SetAtomicOp>(
+                 hivm::AtomicKindAttr::get(ctx, atomicKind),
+                 TypeAttr::get(type));
+           },
+           py::arg("kind"), py::arg("type"))
       .def("create_hivm_load",
            [](TLABuilder &self, Value src, Value dst) {
              checkDmaBuffers(src, dst);

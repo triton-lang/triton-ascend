@@ -143,7 +143,8 @@ def _last(sem):
 
 
 def test_exports_and_module_mode_constants():
-    for name in ("MODE", "POS", "vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv"):
+    for name in ("MODE", "POS", "vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv", "vabs", "vneg",
+                 "vnot", "vrelu", "vsqrt", "vabsdif", "vexpdif"):
         assert name in simd.__all__, f"{name} missing from simd.__all__"
         assert hasattr(simd, name), f"{name} missing from simd"
     assert simd.MODE.ZEROING == "MODE_ZEROING"
@@ -365,6 +366,47 @@ def test_vexp_uses_vexp_op():
     sem = _Semantic()
     simd.vexp(_vec(128, tl.float16), _semantic=sem)
     assert _last(sem)[1][0] == "exp"
+
+
+def test_new_unary_and_binary_ops_use_expected_kinds():
+    for op, kind, dtype in ((simd.vabs, "abs", tl.float32), (simd.vneg, "neg", tl.float32),
+                            (simd.vnot, "not", tl.int32), (simd.vrelu, "relu", tl.int32), (simd.vsqrt, "sqrt",
+                                                                                           tl.float32)):
+        sem = _Semantic()
+        op(_vec(64, dtype), _semantic=sem)
+        name, args = _last(sem)
+        assert (name, args[0]) == ("unary", kind), (op.__name__, sem.builder.calls)
+
+    for op, kind in ((simd.vabsdif, "absdiff"), (simd.vexpdif, "expdif")):
+        sem = _Semantic()
+        op(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=sem)
+        name, args = _last(sem)
+        assert (name, args[0]) == ("binary", kind), (op.__name__, sem.builder.calls)
+
+    mask = _mask(64)
+    for op in (simd.vabs, simd.vneg, simd.vnot, simd.vrelu, simd.vsqrt):
+        sem = _Semantic()
+        dtype = tl.int32 if op in (simd.vnot, simd.vrelu) else tl.float32
+        op(_vec(64, dtype), mask=mask, mode=simd.MODE.MERGING, _semantic=sem)
+        name, call = _last(sem)
+        assert name == "unary"
+        assert call[2] is mask.handle and call[3] == "merging", (op.__name__, call)
+
+    for op in (simd.vabsdif, simd.vexpdif):
+        sem = _Semantic()
+        op(_vec(64, tl.float32), _vec(64, tl.float32), mask=mask, mode=simd.MODE.MERGING, _semantic=sem)
+        name, call = _last(sem)
+        assert name == "binary"
+        assert call[3] is mask.handle and call[4] == "merging", (op.__name__, call)
+
+    with pytest.raises(ValueError, match="vabs does not support element type bf16"):
+        simd.vabs(_vec(128, tl.bfloat16), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="vrelu does not support element type i8"):
+        simd.vrelu(_vec(256, tl.int8), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="vabsdif does not support element type i32"):
+        simd.vabsdif(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="vexpdif does not support element type i32"):
+        simd.vexpdif(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=_Semantic())
 
 
 def test_vdup_uses_masked_broadcast_with_tla_lane_convention():
@@ -734,7 +776,8 @@ def test_new_bindings_and_ave_ops_are_present():
     # each API must map to its own AVE op, not to a reduce/splat stand-in
     for ave_op in ("hivmave::VFDivOp", "hivmave::VFDivFHPOp", "hivmave::VFExpOp", "hivmave::VFBroadcastScalarMaskOp",
                    "hivmave::VFMaxOp", "hivmave::VFMinOp", "hivmave::VMaxUIOp", "hivmave::VMinUIOp",
-                   "hivmave::VFMaxsOp", "hivmave::VMaxsUIOp"):
+                   "hivmave::VFMaxsOp", "hivmave::VMaxsUIOp", "hivmave::VFAbsOp", "hivmave::VFNegOp",
+                   "hivmave::VFNotOp", "hivmave::VFReluOp", "hivmave::VFAbsDiffOp", "hivmave::VFExpdifOp"):
         assert ave_op in cpp, f"{ave_op} missing from tla_builder.cc"
     assert '"divfhp"' in cpp, "VFDivFHPOp builder kind is not dispatched"
     # vdup must not be routed through the unmasked scalar_broadcast

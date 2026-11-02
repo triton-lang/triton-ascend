@@ -35,20 +35,14 @@
 namespace mlir {
 namespace triton {
 
-// Loop iteration times info
-struct IterationTimesInfo {
-  int ifCount = 0;                       // Number of if operations
-  int requiredBuffers = 1;               // Number of required buffers
-  int x = 1;                             // Number of producer buffers
-  SmallVector<scf::IfOp> ifOpsInThisFor; // If operations in this loop
-};
-
 class UpdateLoopIterTimesPass
     : public PassWrapper<UpdateLoopIterTimesPass, OperationPass<ModuleOp>> {
 public:
   UpdateLoopIterTimesPass() = default;
   void runOnOperation() override;
   void setConditionInfo(ControlFlowConditionInfo *info) { this->info = info; }
+
+  llvm::StringRef getArgument() const override { return "update-loop-iter-times"; }
 
 private:
   ControlFlowConditionInfo *info = nullptr;
@@ -57,82 +51,15 @@ private:
                                DenseMap<int, SmallVector<Operation *>> &cmap,
                                DenseMap<int, SmallVector<Operation *>> &vmap);
 
-  int ComputeMainLoopTimes(DenseMap<int, SmallVector<Operation *>> &loopMap,
-                           DenseMap<Operation *, IterationTimesInfo> &infoMap);
-
-  int UpdateForLoopIteration(
-      DenseMap<int, SmallVector<Operation *>> &cmap,
-      DenseMap<int, SmallVector<Operation *>> &vmap,
-      DenseMap<Operation *, IterationTimesInfo> &infoMap);
-
-  int collectForOpsAndUpdateMax(
-      DenseMap<int, SmallVector<Operation *>> &map, int id,
-      SmallVector<Operation *> &allForOps, int &maxIfCount,
-      int &maxRequiredBuffers, int &maxX,
-      DenseMap<Operation *, IterationTimesInfo> &infoMap);
-
   int replaceForOpCounterInIfOps();
+
+  // Rebuilds the ControlFlowConditionInfo from the IR. Used when the pass runs
+  // on its own, i.e. without AddControlFlowConditionPass driving it.
+  LogicalResult buildConditionInfoFromIR(ModuleOp module,
+                                          ControlFlowConditionInfo &info);
 
   int UpdateWhileLoopCondition(
       DenseMap<int, SmallVector<Operation *>> &mainLoopIdMap);
-
-  // Calculate factor = requiredBuffers / x
-  std::pair<int, int> calculateFactor(scf::ForOp forOp);
-
-  // Calculate factor based on intra-core dependencies
-  // Iterates all dependencies and computes the maximum required buffer count
-  // Returns {maxRequiredBuffers, maxX} where:
-  //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
-  //   - maxX: the x value corresponding to maxRequiredBuffers
-  //   - returns {-1, -1} on error
-  std::pair<int, int> calculateIntraDepsFactor(
-      SmallVector<scf::IfOp> &ifOps, DenseMap<Operation *, int> &ifOpIndex,
-      DenseMap<Operation *, SmallVector<Operation *>> &deps);
-
-  // Calculate factor based on cross-core dependencies
-  // For cross-core deps: consumer is in current forOp, producer is in another
-  // mainloop with the same id but in a different scope (cube vs vector)
-  // Returns {maxRequiredBuffers, maxX} where:
-  //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
-  //   - maxX: the x value corresponding to maxRequiredBuffers
-  //   - returns {-1, -1} on error
-  std::pair<int, int>
-  calculateCrossDepsFactor(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-                           DenseMap<Operation *, int> &ifOpIndex,
-                           ConsumerProducerMap &crossDeps);
-
-  // Calculate factor based on iteration dependencies (tensor iter_args
-  // dependencies) For iter deps: consumer and producer are IfOps within the
-  // same forOp Returns {maxRequiredBuffers, maxX} where:
-  //   - maxRequiredBuffers: maximum (m - n + 1) across all dependencies
-  //   - maxX: the x value corresponding to maxRequiredBuffers
-  //   - returns {-1, -1} on error
-  std::pair<int, int>
-  calculateIterDepsFactor(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-                          DenseMap<Operation *, int> &ifOpIndex);
-
-  // Extend for loop iteration count
-  scf::ForOp extendForOpIterationCount(scf::ForOp oldForOp, int ifCount,
-                                       int requiredBuffers, int x,
-                                       IRMapping &mapper,
-                                       SmallVector<scf::IfOp> &ifOpsInThisFor);
-
-  Value computeNewLoopUpperBound(OpBuilder &builder, Location loc,
-                                 scf::ForOp forOp, int ifCount,
-                                 int requiredBuffers, int x);
-
-  scf::ForOp cloneForOpWithNewUpperBound(OpBuilder &builder, Location loc,
-                                         scf::ForOp oldForOp,
-                                         Value newUpperBound,
-                                         IRMapping &mapper);
-
-  int updateCntArgsAfterClone(scf::ForOp oldForOp, IRMapping &mapper,
-                              SmallVector<scf::IfOp> &ifOpsInThisFor);
-
-  void updateMainLoopMaps(Operation *oldForOp, Operation *newForOp,
-                          DenseMap<int, SmallVector<Operation *>> &cmap,
-                          DenseMap<int, SmallVector<Operation *>> &vmap,
-                          DenseMap<Operation *, IterationTimesInfo> &infoMap);
 };
 
 std::unique_ptr<OperationPass<ModuleOp>> createUpdateLoopIterTimesPass();

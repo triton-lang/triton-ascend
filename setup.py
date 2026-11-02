@@ -834,7 +834,7 @@ setup(
     version=TRITON_VERSION,
     author="Philippe Tillet",
     author_email="phil@openai.com",
-    description="A language and compiler for custom Deep Learning operations",
+    description="A language and compiler for custom Deep Learning operations on Huawei Ascend hardware",
     long_description="",
     install_requires=[
         "importlib-metadata; python_version < '3.10'",

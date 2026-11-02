@@ -104,5 +104,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vintlv',
         'create_simd_vdintlv',
         'create_simd_bitcast',
+        'create_simd_preg_binary',
+        'create_simd_preg_unary',
+        'create_simd_vmull',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

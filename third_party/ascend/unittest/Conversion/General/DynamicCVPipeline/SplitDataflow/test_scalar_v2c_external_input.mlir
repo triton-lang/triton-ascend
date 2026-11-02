@@ -20,8 +20,8 @@
 // CHECK: %{{.*}} = tensor.extract
 // CHECK: hivm.hir.pointer_cast({{.*}})
 // CHECK: memref.store %{{.*}}, %{{.*}}[] {ssbuffer.block_id = 0 : i32, ssbuffer.core_type = "VECTOR", ssbuffer.crossCoreDeps = [0 : i32, 1 : i32], ssbuffer.transfer_id = 0 : i32} : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK: hivm.hir.sync_block_set {{.*}}[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 1
-// CHECK: hivm.hir.sync_block_wait {{.*}}[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 1
+// CHECK: hivm.hir.sync_block_set {{.*}}[<VECTOR>, <PIPE_S>, <PIPE_S>] flag = 0
+// CHECK: hivm.hir.sync_block_wait {{.*}}[<CUBE>, <PIPE_S>, <PIPE_S>] flag = 0
 // CHECK: memref.load %{{.*}}[] {ssbuffer.block_id = 1 : i32, ssbuffer.core_type = "CUBE", ssbuffer.crossCoreDeps = [0 : i32, 0 : i32], ssbuffer.transfer_id = 0 : i32} : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark {{.*}} {memref_ext.volatile, {{.*}}} : i32
 // The CUBE op must consume the loaded scalar, not the raw extract.

@@ -22,6 +22,7 @@
 
 #include "TritonToGraph/DotRowCoalescing.h"
 #include "TritonToGraph/ProgramGridTransform.h"
+#include "TritonToGraph/ResourceCostModel.h"
 
 #include "bishengir/Dialect/HACC/Utils/Utils.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
@@ -42,6 +43,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <optional>
 
@@ -201,7 +203,11 @@ static std::optional<RowAddressRange> analyzeRowAddress(Value v, Value pid) {
 }
 
 static int64_t chooseRowCoalescingFactor(int64_t grid, int64_t maxDotRows,
-                                         int64_t maxTensorBytes) {
+                                         int64_t maxTensorBytes,
+                                         uint64_t l0aBudgetBytes,
+                                         uint64_t l0cBudgetBytes,
+                                         int64_t maxL0ABytes,
+                                         int64_t maxL0CBytes) {
   // Profitability policy, not a correctness requirement. Bound the widened M
   // dimension and the largest materialized value, including pointer tensors.
   // This is deliberately conservative, not a claim about peak live UB use or
@@ -210,9 +216,21 @@ static int64_t chooseRowCoalescingFactor(int64_t grid, int64_t maxDotRows,
   constexpr int64_t targetDotRows = 128;
   constexpr int64_t maxLiftedValueBytes = 128 * 1024;
 
+  // The L0 bounds are a correctness requirement, not profitability: the
+  // rewrite reshapes the lifted lhs to [BT*G, K] at each dot, so the lhs and
+  // accumulator tiles grow linearly with the factor while the rhs stays
+  // shared. A zero budget means the target's cube capacities are unknown and
+  // the constraint is disabled.
+  const auto cubeFits = [&](int64_t factor) {
+    return (!l0aBudgetBytes ||
+            static_cast<uint64_t>(maxL0ABytes) <= l0aBudgetBytes / factor) &&
+           (!l0cBudgetBytes ||
+            static_cast<uint64_t>(maxL0CBytes) <= l0cBudgetBytes / factor);
+  };
+
   for (int64_t factor : {32, 16, 8, 4, 2}) {
     if ((!grid || grid % factor == 0) && maxDotRows <= targetDotRows / factor &&
-        maxTensorBytes <= maxLiftedValueBytes / factor) {
+        maxTensorBytes <= maxLiftedValueBytes / factor && cubeFits(factor)) {
       return factor;
     }
   }
@@ -227,7 +245,20 @@ struct RowCandidate {
   bool runtimeGrid = false;
 };
 
-static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn) {
+static int64_t tensorStorageBytes(RankedTensorType tensor) {
+  Type element = tensor.getElementType();
+  const int64_t bytes = isa<triton::PointerType>(element)
+                            ? 8
+                            : (element.getIntOrFloatBitWidth() + 7) / 8;
+  int64_t size = 0;
+  if (__builtin_mul_overflow(tensor.getNumElements(), bytes, &size))
+    return std::numeric_limits<int64_t>::max();
+  return size;
+}
+
+static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn,
+                                                uint64_t l0aBudgetBytes,
+                                                uint64_t l0cBudgetBytes) {
   ModuleOp module = fn->getParentOfType<ModuleOp>();
   auto grid = module->getAttrOfType<IntegerAttr>("hacc.grid_num_tiles");
   if ((grid && (grid.getInt() <= 0 || grid.getInt() > INT32_MAX)) ||
@@ -247,6 +278,10 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn) {
   unsigned pids = 0, loops = 0, dots = 0, stores = 0;
   int64_t maxDotRows = 1;
   int64_t maxTensorBytes = 1;
+  // Cube-tile demands of the original dots; the rewrite widens the lhs and
+  // accumulator M dimension by the factor while the rhs stays shared.
+  int64_t maxL0ABytes = 1;
+  int64_t maxL0CBytes = 1;
   bool safe = true;
   DenseSet<Value> lifted;
 
@@ -300,8 +335,14 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn) {
           (dependent &&
            (!lifted.contains(d.getA()) || lifted.contains(d.getB()))))
         safe = false;
-      else
+      else {
         maxDotRows = std::max(maxDotRows, a.getShape()[0]);
+        maxL0ABytes = std::max(maxL0ABytes, tensorStorageBytes(a));
+        if (auto acc = dyn_cast<RankedTensorType>(d.getC().getType()))
+          maxL0CBytes = std::max(maxL0CBytes, tensorStorageBytes(acc));
+        if (auto res = dyn_cast<RankedTensorType>(d.getD().getType()))
+          maxL0CBytes = std::max(maxL0CBytes, tensorStorageBytes(res));
+      }
       return;
     }
 
@@ -376,8 +417,9 @@ static std::optional<RowCandidate> matchDotRows(triton::FuncOp fn) {
   if (!step || *step <= 0)
     return std::nullopt;
 
-  int64_t rows = chooseRowCoalescingFactor(grid ? grid.getInt() : 0, maxDotRows,
-                                           maxTensorBytes);
+  int64_t rows = chooseRowCoalescingFactor(
+      grid ? grid.getInt() : 0, maxDotRows, maxTensorBytes, l0aBudgetBytes,
+      l0cBudgetBytes, maxL0ABytes, maxL0CBytes);
   if (rows <= 1)
     return std::nullopt;
 
@@ -710,10 +752,16 @@ class DotRowPlan final : public RewritePlan {
   RowCandidate candidate;
   unsigned epoch;
   OwningOpRef<ModuleOp> prepared;
+  // Safe L0 budgets captured at plan creation; zero means the target's cube
+  // capacities are unknown and the factor stays unconstrained.
+  uint64_t l0aBudgetBytes = 0;
+  uint64_t l0cBudgetBytes = 0;
 
   DotRowPlan(RowCandidate candidate, unsigned epoch,
-             OwningOpRef<ModuleOp> prepared)
-      : candidate(candidate), epoch(epoch), prepared(std::move(prepared)) {}
+             OwningOpRef<ModuleOp> prepared, uint64_t l0aBudgetBytes,
+             uint64_t l0cBudgetBytes)
+      : candidate(candidate), epoch(epoch), prepared(std::move(prepared)),
+        l0aBudgetBytes(l0aBudgetBytes), l0cBudgetBytes(l0cBudgetBytes) {}
 
 public:
   GraphOptimizationRuleId getRuleId() const override {
@@ -729,14 +777,17 @@ public:
     if (context.getFunction() != candidate.function)
       return failure();
 
-    auto current = matchDotRows(candidate.function);
+    auto current =
+        matchDotRows(candidate.function, l0aBudgetBytes, l0cBudgetBytes);
     return success(current && current->anchor == candidate.anchor &&
                    current->rowsPerProgram == candidate.rowsPerProgram &&
                    current->runtimeGrid == candidate.runtimeGrid);
   }
 
   static std::unique_ptr<DotRowPlan> create(RowCandidate candidate,
-                                            unsigned epoch) {
+                                            unsigned epoch,
+                                            uint64_t l0aBudgetBytes,
+                                            uint64_t l0cBudgetBytes) {
     // Prepare and verify privately before offering a plan to the scheduler.
     // An unsupported rewrite must leave the input and its diagnostics
     // untouched.
@@ -775,8 +826,8 @@ public:
         return nullptr;
     }
 
-    return std::unique_ptr<DotRowPlan>(
-        new DotRowPlan(candidate, epoch, std::move(sandbox)));
+    return std::unique_ptr<DotRowPlan>(new DotRowPlan(
+        candidate, epoch, std::move(sandbox), l0aBudgetBytes, l0cBudgetBytes));
   }
 
   LogicalResult apply(IRRewriter &rw) override {
@@ -805,15 +856,24 @@ public:
 } // namespace
 
 std::unique_ptr<RewritePlan>
-cfg::createDotRowCoalescingPlan(triton::FuncOp function, unsigned epoch) {
+cfg::createDotRowCoalescingPlan(triton::FuncOp function, unsigned epoch,
+                                const ResourceSnapshot &resources) {
   // Dot row coalescing is supported only on Ascend 950.
   auto module = function->getParentOfType<ModuleOp>();
   if (!module || !hacc::utils::isAscend950(module))
     return nullptr;
 
-  auto candidate = matchDotRows(function);
+  // Zero budgets (unknown cube capacities) leave the factor unconstrained.
+  uint64_t l0aBudgetBytes = 0;
+  uint64_t l0cBudgetBytes = 0;
+  if (resources.hasL0Budgets()) {
+    l0aBudgetBytes = resources.getSafeL0ABudget().value_or(0);
+    l0cBudgetBytes = resources.getSafeL0CBudget().value_or(0);
+  }
+
+  auto candidate = matchDotRows(function, l0aBudgetBytes, l0cBudgetBytes);
   if (!candidate)
     return nullptr;
 
-  return DotRowPlan::create(*candidate, epoch);
+  return DotRowPlan::create(*candidate, epoch, l0aBudgetBytes, l0cBudgetBytes);
 }

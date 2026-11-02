@@ -1,0 +1,145 @@
+# English translations for triton-ascend docs.
+# Copyright (c) 2025 Huawei Technologies Co., Ltd.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: triton-ascend-docs\n"
+
+"POT-Creation-Date: 2026-10-27 00:03+0800\n"
+"PO-Revision-Date: 2026-10-27 00:03+0800\n"
+
+"X-Source-Commit: 33d20cbe0982ab5d5a5f87317aa5058e2ef87789\n"
+
+"X-Skill-Version: 2.0.0\\n"
+
+"Last-Translator: Auto Translation (glm-5.2)\n"
+"Language-Team: English\n"
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "Cube算子开发"
+msgstr "Cube Operator Development"
+
+msgid "Cube算子以矩阵乘或批量矩阵乘为主要计算负载，Triton代码中通常以 `tl.dot` 为核心。Cube算子的关键是围绕M/N/K三个维度设计tile，使A/B tile能高效搬运到片上并在Cube Core上完成累加。"
+msgstr "Cube operators use matrix multiplication or batch matrix multiplication as the primary compute load, and Triton code typically centers on `tl.dot`. The key to Cube operators is designing tiles around the M, N, and K dimensions. This enables A/B tiles to be efficiently moved to on-chip memory and accumulated on the Cube Core."
+
+msgid "Cube简单算子开发"
+msgstr "Simple Cube Operator Development"
+
+msgid "简单Cube算子可参考本仓 [矩阵乘法样例](../examples/05_matrix_multiplication_example.md)。一个最小开发路径包括："
+msgstr "For simple Cube operators, refer to the [Matrix Multiplication sample](../examples/05_matrix_multiplication_example.md) in this repository. A minimal development path includes:"
+
+msgid "明确输入输出shape和stride，例如 `A[M, K]`、`B[K, N]`、`C[M, N]`。"
+msgstr "Specify the input and output shapes and strides, for example, `A[M, K]`, `B[K, N]`, and `C[M, N]`."
+
+msgid "用 `tl.program_id` 映射当前program到输出矩阵的 `(pid_m, pid_n)` tile。"
+msgstr "Use `tl.program_id` to map the current program to the `(pid_m, pid_n)` tile of the output matrix."
+
+msgid "用 `BLOCK_SIZE_M/N/K` 构造A/B的二维偏移。"
+msgstr "Use `BLOCK_SIZE_M/N/K` to construct the 2D offsets of A/B."
+
+msgid "沿K维循环加载A/B子块，并用 `tl.dot` 累加到fp32 accumulator。"
+msgstr "Loop over the K dimension to load A and B sub-blocks, and accumulate them into an fp32 accumulator using `tl.dot`."
+
+msgid "将accumulator转为输出dtype，并用边界mask写回C。"
+msgstr "Convert the accumulator to the output dtype, and write it back to C using the boundary mask."
+
+msgid "核心结构如下："
+msgstr "The core structure is as follows:"
+
+msgid ""
+"@triton.jit\n"
+"def matmul_kernel(a_ptr, b_ptr, c_ptr,\n"
+"                  M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,\n"
+"                  stride_am: tl.constexpr, stride_ak: tl.constexpr,\n"
+"                  stride_bk: tl.constexpr, stride_bn: tl.constexpr,\n"
+"                  stride_cm: tl.constexpr, stride_cn: tl.constexpr,\n"
+"                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):\n"
+"    pid = tl.program_id(0)\n"
+"    num_pid_n = tl.cdiv(N, BLOCK_N)\n"
+"    pid_m = pid // num_pid_n\n"
+"    pid_n = pid % num_pid_n\n"
+"\n"
+"    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)\n"
+"    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)\n"
+"    offs_k = tl.arange(0, BLOCK_K)\n"
+"    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)\n"
+"\n"
+"    for k0 in range(0, K, BLOCK_K):\n"
+"        a = tl.load(a_ptr + offs_m[:, None] * stride_am + (k0 + offs_k)[None, :] * stride_ak,\n"
+"                    mask=(offs_m[:, None] < M) & ((k0 + offs_k)[None, :] < K), other=0.0)\n"
+"        b = tl.load(b_ptr + (k0 + offs_k)[:, None] * stride_bk + offs_n[None, :] * stride_bn,\n"
+"                    mask=((k0 + offs_k)[:, None] < K) & (offs_n[None, :] < N), other=0.0)\n"
+"        acc = tl.dot(a, b, acc)\n"
+"\n"
+"    tl.store(c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn,\n"
+"             acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))\n"
+msgstr ""
+"@triton.jit\n"
+"def matmul_kernel(a_ptr, b_ptr, c_ptr,\n"
+"                  M: tl.constexpr, N: tl.constexpr, K: tl.constexpr,\n"
+"                  stride_am: tl.constexpr, stride_ak: tl.constexpr,\n"
+"                  stride_bk: tl.constexpr, stride_bn: tl.constexpr,\n"
+"                  stride_cm: tl.constexpr, stride_cn: tl.constexpr,\n"
+"                  BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr):\n"
+"    pid = tl.program_id(0)\n"
+"    num_pid_n = tl.cdiv(N, BLOCK_N)\n"
+"    pid_m = pid // num_pid_n\n"
+"    pid_n = pid % num_pid_n\n"
+"\n"
+"    offs_m = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)\n"
+"    offs_n = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)\n"
+"    offs_k = tl.arange(0, BLOCK_K)\n"
+"    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)\n"
+"\n"
+"    for k0 in range(0, K, BLOCK_K):\n"
+"        a = tl.load(a_ptr + offs_m[:, None] * stride_am + (k0 + offs_k)[None, :] * stride_ak,\n"
+"                    mask=(offs_m[:, None] < M) & ((k0 + offs_k)[None, :] < K), other=0.0)\n"
+"        b = tl.load(b_ptr + (k0 + offs_k)[:, None] * stride_bk + offs_n[None, :] * stride_bn,\n"
+"                    mask=((k0 + offs_k)[:, None] < K) & (offs_n[None, :] < N), other=0.0)\n"
+"        acc = tl.dot(a, b, acc)\n"
+"\n"
+"    tl.store(c_ptr + offs_m[:, None] * stride_cm + offs_n[None, :] * stride_cn,\n"
+"             acc, mask=(offs_m[:, None] < M) & (offs_n[None, :] < N))\n"
+
+msgid "简单Cube算子调参时优先关注："
+msgstr "When tuning parameters for simple Cube operators, prioritize the following:"
+
+msgid "`BLOCK_M/N/K` 是否满足硬件支持和UB/L1容量限制。"
+msgstr "Whether `BLOCK_M/N/K` satisfies hardware support and UB/L1 capacity limits."
+
+msgid "K维循环是否可以开启 `multibuffer` 以形成搬运和计算流水。"
+msgstr "Whether to enable `multibuffer` in the K-dimension loop to form a data movement and computation pipeline."
+
+msgid "输出tile是否包含额外bias、scale、activation。如果后处理很轻，可以仍归为Cube算子；如果后处理包含明显Vector归约或跨核同步，应按CV融合算子组织。"
+msgstr "Determine whether the output tile contains additional bias, scale, and activation. If the post-processing is lightweight, it can still be classified as a Cube operator; if the post-processing involves significant Vector reduction or cross-core synchronization, it should be organized as a CV fusion operator."
+
+msgid "Cube复杂算子开发"
+msgstr "Cube Complex Operator Development"
+
+msgid "复杂Cube场景通常来自attention、batched matmul、grouped matmul或形状不规则的矩阵乘。当前 [`Ascend/triton-ascend-ops`](https://github.com/Ascend/triton-ascend-ops) 主分支的复杂案例集中在 `tutorial/best_practice/`，其中 [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) 可以作为复杂Cube核心逻辑的参考：它包含QK、PV两段 `tl.dot`，并展示了KV cache离散索引下如何重组K/V访存。"
+msgstr "Complex Cube scenarios typically originate from attention, batched matmul, grouped matmul, or matrix multiplication with irregular shapes. Currently, the complex cases on the main branch of [`Ascend/triton-ascend-ops`](https://github.com/Ascend/triton-ascend-ops) are located in the `tutorial/best_practice/` directory. The file [`002-decode_grouped_attention.py`](https://github.com/Ascend/triton-ascend-ops/blob/main/tutorial/best_practice/002-decode_grouped_attention.py) serves as a reference for the core logic of complex Cube. It contains two `tl.dot` operations for QK and PV, and demonstrates how to reorganize K/V memory access under discrete KV cache indexing."
+
+msgid "复杂Cube算子建议按以下顺序拆解："
+msgstr "Decompose complex Cube operators in the following order:"
+
+msgid "**先抽出纯矩阵乘核心**：确认每次 `tl.dot` 的输入tile shape、dtype、累加dtype和输出tile shape。"
+msgstr "**Extract the pure matrix multiplication core first**: Confirm the input tile shape, dtype, accumulation dtype, and output tile shape for each `tl.dot`."
+
+msgid "**再处理不规则访存**：如果K/V cache低维离散、高维连续，直接二维load可能退化为标量访存。可先按连续维搬入UB，再通过转置或Ascend扩展接口 `extension.insert_slice` 重组为 `tl.dot` 需要的布局。"
+msgstr "**Next, handle irregular memory access**: If the K/V cache is discrete in the low dimension and contiguous in the high dimension, a direct 2D load may degrade to scalar memory access. First, move the data into the UB along the contiguous dimension. Then, reorganize the data into the layout required by `tl.dot` using transposition or the Ascend extension interface `extension.insert_slice`."
+
+msgid "**把归约和归一化留到边界明确的位置**：例如attention中的 `max/sum/exp` 属于Vector逻辑，若和 `tl.dot` 放在同一kernel，需要转到 [CV融合算子开发](./cv_fusion_operator.md) 的思路。"
+msgstr "**Leave reduction and normalization at positions with clear boundaries**: For example, `max/sum/exp` in attention belongs to Vector logic. If you place them in the same kernel as `tl.dot`, switch to the approach in [CV fusion operator development](./cv_fusion_operator.md)."
+
+msgid "**为长K或长序列设计内层循环**：K维循环要控制单次A/B tile的片上占用；序列维循环要避免一次load过大的K/V block。"
+msgstr "**Design inner loops for long K or long sequences**: The K dimension loop must control the on-chip memory usage of a single A/B tile; the sequence dimension loop must avoid loading an excessively large K/V block at a time."
+
+msgid "**用Autotune管理候选tile**：为常见shape准备多组 `BLOCK_M/N/K` 和 `multibuffer` 配置，让运行时选择最优组合。"
+msgstr "**Managing candidate tiles using Autotune**: Prepare multiple sets of `BLOCK_M/N/K` and `multibuffer` configurations for common shapes, and let the runtime select the optimal combination."
+
+msgid "复杂Cube算子的常见风险是把GPU上的大量program直接迁移到NPU。对于逻辑核相互独立且通过IR安全分析的kernel，后端会自动把逻辑grid映射到可用物理核；不适用的kernel会被自动跳过。如果kernel存在顺序依赖或未通过安全分析，应让每个program通过内层循环处理多个tile。"
+msgstr "A common risk with complex Cube operators is directly migrating a large number of programs from the GPU to the NPU. For kernels with independent logical cores that pass IR safety analysis, the backend automatically maps the logical grid to available physical cores; kernels that do not apply are automatically skipped. If a kernel has sequential dependencies or fails the safety analysis, use an inner loop to have each program process multiple tiles."

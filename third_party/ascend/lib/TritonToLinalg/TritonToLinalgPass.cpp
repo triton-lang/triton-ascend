@@ -1592,7 +1592,8 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {
-    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext());
+    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext(),
+                                                      this->compileOn91095);
   }
 }
 

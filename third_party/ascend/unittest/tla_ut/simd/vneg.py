@@ -115,8 +115,9 @@ def _launch_f32():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.float32, device="npu")
     vneg_f32[(1, )](x.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(-x[0], mask_set),
-                     padded_unary(lambda v: -v, x, s["tiles"], s["lanes"], s["total"], SENTINEL_F)])
+    ref = torch.cat(
+        [ref_rows(-x[0], mask_set),
+         padded_unary(lambda v: -v, x, s["tiles"], s["lanes"], s["total"], SENTINEL_F)])
     return out.cpu(), ref, mask_set
 
 
@@ -127,8 +128,10 @@ def _launch_i32():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.int32, device="npu")
     vneg_i32[(1, )](x.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(-x[0], mask_set),
-                     padded_unary(lambda v: -v, x, s["tiles"], s["lanes"], s["total"], SENTINEL_I, dtype=torch.int32)])
+    ref = torch.cat([
+        ref_rows(-x[0], mask_set),
+        padded_unary(lambda v: -v, x, s["tiles"], s["lanes"], s["total"], SENTINEL_I, dtype=torch.int32)
+    ])
     return out.cpu(), ref, mask_set
 
 

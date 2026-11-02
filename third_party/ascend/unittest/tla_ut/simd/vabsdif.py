@@ -129,8 +129,10 @@ def _launch_f32():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.float32, device="npu")
     vabsdif_f32[(1, )](x.npu(), y.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(torch.abs(x[0] - y[0]), mask_set),
-                     padded_binary(lambda a, b: torch.abs(a - b), x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F)])
+    ref = torch.cat([
+        ref_rows(torch.abs(x[0] - y[0]), mask_set),
+        padded_binary(lambda a, b: torch.abs(a - b), x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F)
+    ])
     return out.cpu(), ref, mask_set
 
 
@@ -152,8 +154,10 @@ def _launch_f16():
     def absdiff_half(a, b):
         return torch.abs(a.float() - b.float()).to(torch.float16)
 
-    ref = torch.cat([ref_rows(absdiff_half(x[0], y[0]), mask_set),
-                     padded_binary(absdiff_half, x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F, dtype=torch.float16)])
+    ref = torch.cat([
+        ref_rows(absdiff_half(x[0], y[0]), mask_set),
+        padded_binary(absdiff_half, x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F, dtype=torch.float16)
+    ])
     return out.cpu(), ref, mask_set
 
 

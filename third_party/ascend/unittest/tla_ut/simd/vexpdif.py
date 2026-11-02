@@ -85,8 +85,10 @@ def _launch():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.float32, device="npu")
     vexpdif_f32[(1, )](x.npu(), y.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(torch.exp(x[0] - y[0]), mask_set),
-                     padded_binary(lambda a, b: torch.exp(a - b), x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F)])
+    ref = torch.cat([
+        ref_rows(torch.exp(x[0] - y[0]), mask_set),
+        padded_binary(lambda a, b: torch.exp(a - b), x, y, s["tiles"], s["lanes"], s["total"], SENTINEL_F)
+    ])
     return out.cpu(), ref, mask_set
 
 

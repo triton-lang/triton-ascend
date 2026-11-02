@@ -115,8 +115,10 @@ def _launch_i32():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.int32, device="npu")
     vnot_i32[(1, )](x.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(torch.bitwise_not(x[0]), mask_set),
-                     padded_unary(torch.bitwise_not, x, s["tiles"], s["lanes"], s["total"], SENTINEL_I, dtype=torch.int32)])
+    ref = torch.cat([
+        ref_rows(torch.bitwise_not(x[0]), mask_set),
+        padded_unary(torch.bitwise_not, x, s["tiles"], s["lanes"], s["total"], SENTINEL_I, dtype=torch.int32)
+    ])
     return out.cpu(), ref, mask_set
 
 
@@ -131,8 +133,10 @@ def _launch_u32():
     out = torch.empty((s["rows"], s["lanes"]), dtype=torch.uint32, device="npu")
     vnot_u32[(1, )](x.npu(), thr.to(torch.int32).npu(), out, **constexprs())
     torch.npu.synchronize()
-    ref = torch.cat([ref_rows(_bitnot_u32(x[0]), mask_set),
-                     padded_unary(_bitnot_u32, x, s["tiles"], s["lanes"], s["total"], SENTINEL_U, dtype=torch.uint32)])
+    ref = torch.cat([
+        ref_rows(_bitnot_u32(x[0]), mask_set),
+        padded_unary(_bitnot_u32, x, s["tiles"], s["lanes"], s["total"], SENTINEL_U, dtype=torch.uint32)
+    ])
     return out.cpu(), ref, mask_set
 
 

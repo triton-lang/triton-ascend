@@ -370,8 +370,8 @@ def test_vexp_uses_vexp_op():
 
 def test_new_unary_and_binary_ops_use_expected_kinds():
     for op, kind, dtype in ((simd.vabs, "abs", tl.float32), (simd.vneg, "neg", tl.float32),
-                            (simd.vnot, "not", tl.int32), (simd.vrelu, "relu", tl.int32),
-                            (simd.vsqrt, "sqrt", tl.float32)):
+                            (simd.vnot, "not", tl.int32), (simd.vrelu, "relu", tl.int32), (simd.vsqrt, "sqrt",
+                                                                                           tl.float32)):
         sem = _Semantic()
         op(_vec(64, dtype), _semantic=sem)
         name, args = _last(sem)

@@ -29,7 +29,7 @@ msdebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `ke
 ./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full
 ```
 
-**方法二**：驱动安装时指定 `--debug` 参数，具体安装操作请参见《CANN 软件安装指南》中的“[安装 NPU 驱动固件](https://www.hiascend.com/document/detail/zh/canncommercial/83RC1/softwareinst/instg/instg_0005.html?Mode=PmIns&InstallType=netconda&OS=openEuler&Software=cannToolKit)”章节。
+**方法二**：驱动安装时指定 `--debug` 参数，具体安装操作请参见《CANN 软件安装指南》中的“[安装 NPU 驱动固件](https://www.hiascend.com/document/detail/zh/CANNCommunityEdition/latest/softwareinst/instg/instg_0107.html)”章节。
 
 ```bash
 ./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --debug
@@ -61,7 +61,7 @@ export TRITON_DISABLE_LINE_INFO=0
 - 部分优化会改变变量生命周期，即使开启变量调试信息，也不能保证每个源码变量始终可打印；
 - msdebug、CANN、驱动、固件、芯片和 Triton-Ascend 需要使用相互兼容的版本。
 
-官方环境和约束说明可参考 [msdebug 使用前准备](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0063.html?framework=mindspore)。
+官方快速入门可参考 [msdebug 快速入门](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/quick_start/msdebug_quick_start.md)。
 
 ## 产品支持情况
 
@@ -414,7 +414,7 @@ llvm-dwarfdump --debug-loclists "$KERNEL_O" | less
 
 如果变量 DIE 存在但没有 `DW_AT_location`，msdebug 知道变量名称，却无法恢复它当前存放的位置，此时按变量名打印失败是预期结果。
 
-官方内存命令和各选项说明可参考 [内存与变量打印](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0067.html?framework=mindspore)。
+官方内存命令和各选项说明可参考 [内存与变量打印功能介绍](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md#%E5%86%85%E5%AD%98%E4%B8%8E%E5%8F%98%E9%87%8F%E6%89%93%E5%8D%B0%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D)。
 
 ## 单步调试功能介绍
 
@@ -571,7 +571,7 @@ Triton 的 `program_id`/Block 会被调度到设备核执行。查询映射：
 
 切换到另一个 AIV 后再次读取，即可比较不同 Block/核的数据。两个核即使都显示 `UB 0x600`，也代表各自核的局部 UB 数据，不是同一物理上下文。
 
-官方核切换示例可参考 [Vector 算子调试示例](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0074.html?framework=mindspore)。
+官方核切换说明可参考 [核切换功能介绍](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md#%E6%A0%B8%E5%88%87%E6%8D%A2%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D)。
 
 ## 检查程序状态功能介绍
 
@@ -891,7 +891,7 @@ llvm-dwarfdump --debug-loc "$KERNEL_O" > dwarf-locations.txt
 ## 参考资料
 
 - [MindStudio Debugger 用户指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)
-- [MindStudio Debugger 工具概述](https://www.hiascend.com/document/detail/zh/mindstudio/830/ODtools/Operatordevelopmenttools/atlasopdev_16_0062.html?framework=mindspore)
+- [msdebug 在线用户指南](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md)
 - [Cuda-gdb官方文档](https://docs.nvidia.com/cuda/cuda-gdb/index.html#single-stepping)
 - [DWARF location list 说明](https://dwarfstd.org/doc/040408.1.html)
 - [LLVM 调试变量说明](https://llvm.org/docs/SourceLevelDebugging.html)

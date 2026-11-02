@@ -37,25 +37,56 @@ __all__ = [
 
 def setup_unified_builder(main_builder, ascend_builder):
     """Set up a unified builder interface by attaching methods from specialized builders."""
-    main_builder._ascend_builder = ascend_builder
+    # Register scope 'with' handlers here so TLA needs no build-time patch.
+    from .dispatch import register_with_dispatch
+
+    register_with_dispatch()
+    # Only attach TLA-specific methods.  The cann setup_unified_builder owns
+    # _ascend_builder and the shared methods; re-attaching or reassigning them
+    # here would shadow the cann versions for every kernel.
     ascend_methods = [
+        'create_tla_barrier',
+        'create_tla_set_flag',
+        'create_tla_wait_flag',
+        'create_tla_sync_all',
+        'create_tla_block_set_flag',
+        'create_tla_block_wait_flag',
         'create_tla_buffer_type',
+        'create_tla_vector_type',
         'create_tla_alloc',
         'create_tla_bind',
         'create_tla_subview',
         'create_tla_reinterpret_cast',
+        'create_tla_collapse_shape',
+        'create_tla_expand_shape',
+        'create_tla_load',
+        'create_tla_store',
+        'create_tla_nd2nz',
+        'create_tla_copy',
+        'create_tla_l12ub',
+        'create_tla_l12bt',
+        'create_tla_l12l0',
+        'create_tla_fixpipe',
+        'create_tla_set_ctrl',
+        'create_tla_get_sub_block_idx',
         'create_hivm_load',
         'create_hivm_store',
+        'create_hivm_debug',
+        'create_hivm_nd2nz',
+        'create_hivm_fixpipe',
+        'create_hivm_mmadl1',
+        # Shared helpers the TLA frontend calls directly.
         'create_annotation_mark',
-        'get_array_attr',
+        'create_scope_op',
+        # TLA-only helpers; the cann extension does not mount parse_attr.
+        'get_scope_entry_block',
         'parse_attr',
-        'is_simt_mode',
-        'get_i64_array_attr',
-        'get_buffer_ty',
-        'get_buffer_ty_with_strides',
         'create_simd_vlds',
         'create_simd_vsts',
+        'create_simd_vsstb',
         'create_simd_binary',
+        'create_simd_vec_scalar',
+        'create_simd_binary_scalar',
         'create_simd_unary',
         'create_simd_vfma',
         'create_simd_vreduce',
@@ -64,14 +95,14 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vcmp',
         'create_simd_vbroadcast',
         'create_simd_scalar',
+        'create_simd_scalar_int',
         'create_simd_vsplat',
+        'create_simd_vdup',
         'create_simd_vcvt',
         'create_simd_pge',
         'create_simd_vsel',
         'create_simd_vintlv',
         'create_simd_vdintlv',
         'create_simd_bitcast',
-        'create_scope_op',
-        'scope_return',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

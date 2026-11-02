@@ -24,7 +24,7 @@ SHAPE = dict(tmax=8, h=256, mhc=2, h_blk=128, ns=2, cores=4)
 SIGNATURE = {"X_ptr": "*bf16", "O_ptr": "*bf16", "num_tokens": "i32"}
 
 
-@triton.jit
+@tla.jit
 def expand_to_mhc_fwd(X_ptr, O_ptr, num_tokens, TMAX: tl.constexpr, H: tl.constexpr, MHC: tl.constexpr,
                       H_BLK: tl.constexpr, NS: tl.constexpr, CORES: tl.constexpr):
     tl.static_assert(H > 0 and H % H_BLK == 0 and H_BLK % 128 == 0,

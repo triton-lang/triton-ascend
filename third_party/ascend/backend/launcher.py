@@ -313,10 +313,16 @@ def _shared_key(fingerprint, sources):
     return hashlib.sha256(json.dumps(inputs, sort_keys=True).encode()).hexdigest()
 
 
-def _build_shared(name, sources, debug=False):
+def _build_shared(name, sources, debug=False, bin_dir=None):
     fingerprint = utils.npu_extension_fingerprint(name, extra_cflags=_LAUNCHER_CFLAGS)
     key = _shared_key(json.dumps(fingerprint, sort_keys=True), tuple(sorted(sources.items())))
-    cache = get_cache_manager(key)
+    # bin_dir roots this shared artifact under a fixed installation directory
+    # instead of TRITON_CACHE_DIR (which PyTorch Inductor repoints per test
+    # case), keeping the artifact location tied to its content key.
+    if bin_dir is not None:
+        cache = utils.bin_cache_manager(key, bin_dir)
+    else:
+        cache = get_cache_manager(key)
     filename = name + sysconfig.get_config_var("EXT_SUFFIX")
     if debug:
         dump = get_dump_manager(key)
@@ -344,6 +350,12 @@ def _load_runtime(path):
 
 
 def get_runtime(npu_utils_path, debug=False):
+    # The launcher bakes the helper's absolute path: a deleted or evicted
+    # artifact must be re-resolved (and rebuilt if needed) before the path is
+    # baked in.
+    if not os.path.exists(npu_utils_path):
+        from triton.backends.ascend.driver import NPUUtils
+        npu_utils_path = NPUUtils().get_so_path()
     print_identity = None
     if knobs.ascend.device_print:
         # CANN/loaded framework replacement requires a new process. Track the
@@ -353,7 +365,11 @@ def get_runtime(npu_utils_path, debug=False):
         print_identity = (bisheng, utils._file_identity(bisheng), version_file,
                           utils._file_identity(version_file) if version_file else None)
     sources = {**_runtime_sources(), **_runtime_config(npu_utils_path, utils.backend_policy, print_identity)}
-    path = _build_shared("__triton_launcher_runtime", sources, debug)
+    # The runtime lands under the backend's in-package bin/ directory (with the
+    # helper), so repointing TRITON_CACHE_DIR no longer strands or rebuilds
+    # the pair; the runtime key embeds the helper's stable location.
+    bin_dir = Path(__file__).with_name("bin")
+    path = _build_shared("__triton_launcher_runtime", sources, debug, bin_dir=bin_dir)
     return _load_runtime(path), path
 
 

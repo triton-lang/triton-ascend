@@ -90,13 +90,27 @@ def _native(compiled):
     return driver.NPULauncher(compiled.src, compiled.metadata)
 
 
-def _run(instance, compiled, args, grid=(1, 1, 1), stream=None):
+def _drain_dispatch_queue():
+    # These helpers reach the launcher directly, bypassing the framework
+    # dispatch queue. Without a barrier a write issued just before the call
+    # (for example a fill_ sentinel) may still be pending on the dispatch
+    # thread, reach the stream after the kernel and overwrite its output,
+    # which makes the assertions below order- and load-dependent. Tests that
+    # measure queued submission keep their launches unordered with
+    # ``barrier=False`` and drain the queue once before they start.
+    torch.npu.synchronize()
+
+
+def _run(instance, compiled, args, grid=(1, 1, 1), stream=None, barrier=True):
+    if barrier:
+        _drain_dispatch_queue()
     if stream is None:
         stream = driver.NPUDriver().get_current_stream()
     instance(*grid, stream, compiled.function, compiled.packed_metadata, None, None, None, *args)
 
 
 def _c_launch(instance, compiled, values, grid=(1, 1, 1)):
+    _drain_dispatch_queue()
     library = ctypes.CDLL(instance.get_launcher_so_path())
     launch = library.triton_launch_kernel
     launch.argtypes = [
@@ -135,6 +149,7 @@ def test_shared_launcher_values_and_export(monkeypatch, taskqueue, dtype, n):
         module = importlib.util.module_from_spec(module_spec)
         module_spec.loader.exec_module(module)
         y.fill_(-3)
+        torch.npu.synchronize()  # Direct submission bypasses the framework queue.
         module.launch(*grid,
                       driver.NPUDriver().get_current_stream(), compiled.function, compiled.packed_metadata, None, None,
                       None, *args)
@@ -198,6 +213,7 @@ def test_value_folded_arguments_preserve_values_and_grid(monkeypatch, tmp_path, 
     assert output.cpu().tolist() == expected
 
     output.fill_(-2)
+    torch.npu.synchronize()  # Direct submission bypasses the framework queue.
     module_spec = importlib.util.spec_from_file_location("__triton_launcher", instance.get_launcher_so_path())
     module = importlib.util.module_from_spec(module_spec)
     module_spec.loader.exec_module(module)
@@ -296,8 +312,11 @@ def test_streams_and_queued_plan_ownership(monkeypatch):
             y = torch.empty_like(x)
             compiled = _copy_add.warmup(x, y, 1024, index + 2, BLOCK=128, grid=(8, ))
             instance = _native(compiled)
+            # Inputs must be ready before the first direct submission; the
+            # launches themselves stay queued to exercise plan ownership.
+            torch.npu.synchronize()
             for _ in range(50):
-                _run(instance, compiled, (x, y, 1024, index + 2, 128), grid=(8, 1, 1))
+                _run(instance, compiled, (x, y, 1024, index + 2, 128), grid=(8, 1, 1), barrier=False)
             pairs.append((x, y, index + 2))
             del instance
     gc.collect()
@@ -402,7 +421,7 @@ def test_workspace_is_released_after_execution(monkeypatch, record_property, tas
     torch.npu.synchronize()
     before = torch.npu.memory_allocated()
     for _ in range(64):
-        _run(instance, compiled, args, grid=(4, 3, 1))
+        _run(instance, compiled, args, grid=(4, 3, 1), barrier=False)
         if sync_each:
             torch.npu.synchronize()
     torch.npu.synchronize()
@@ -432,8 +451,9 @@ def test_workspace_streams_and_queued_plan_ownership(monkeypatch, record_propert
     for _ in range(32):
         for instance, (compiled, args, _, stream_id) in zip(instances, cases):
             # Submit from the default stream's context to explicit, distinct
-            # launch streams. Workspace reuse must follow the launch stream.
-            _run(instance, compiled, args, grid=(4, 3, 1), stream=stream_id)
+            # launch streams. Workspace reuse must follow the launch stream,
+            # so these launches stay unordered.
+            _run(instance, compiled, args, grid=(4, 3, 1), stream=stream_id, barrier=False)
         scratch = torch.empty(65536 * 12, dtype=torch.uint8, device="npu")
         scratch.fill_(165)
         del scratch

@@ -5,7 +5,8 @@ expecttest
 lit
 ninja
 patchelf
-pybind11
+numpy
+scipy
 pytest
 pytest-xdist
 twine

@@ -21,10 +21,35 @@
 # THE SOFTWARE.
 
 __all__ = [
-    "ascend_address_space", "builtin", "CORE", "copy_from_ub_to_l1", "copy", "debug_barrier", "fixpipe",
-    "FixpipeDMAMode", "FixpipeDualDstMode", "FixpipePreQuantMode", "FixpipePreReluMode", "int64", "is_builtin", "MODE",
-    "PIPE", "SYNC_HINT", "EVENT_ID", "IteratorType", "sub_vec_id", "sub_vec_num", "sync_block_all", "sync_block_set",
-    "sync_block_wait", "SYNC_IN_VF", "conv1d", "dot", "conv2d"
+    "ascend_address_space",
+    "builtin",
+    "CORE",
+    "copy_from_ub_to_l1",
+    "copy",
+    "debug_barrier",
+    "fixpipe",
+    "FixpipeDMAMode",
+    "FixpipeDualDstMode",
+    "FixpipePreQuantMode",
+    "FixpipePreReluMode",
+    "int64",
+    "is_builtin",
+    "MODE",
+    "PIPE",
+    "SYNC_HINT",
+    "EVENT_ID",
+    "IteratorType",
+    "sub_vec_id",
+    "sub_vec_num",
+    "sync_block_all",
+    "sync_block_set",
+    "sync_block_wait",
+    "SYNC_IN_VF",
+    "conv1d",
+    "dot",
+    "conv2d",
+    "AddressSpace",
+    "DataLayout",
 ]
 
 import enum
@@ -38,6 +63,7 @@ import triton.language.core as tl
 import triton.extension.buffer.language as bl
 from triton.language.core import _unwrap_if_constexpr
 from triton.backends.ascend.driver import NPUUtils
+from triton.backends.ascend.utils import is_register_based_arch
 
 from . import semantic as semantic
 
@@ -127,6 +153,24 @@ class IteratorType(enum.Enum):
     Opaque = ascend_ir.IteratorType.Opaque
 
 
+class DataLayout(enum.Enum):
+    ND = ascend_ir.DataLayout.ND
+    Fractal = ascend_ir.DataLayout.Fractal
+
+
+class AddressSpace(enum.Enum):
+    Zero = ascend_ir.AddressSpace.Zero
+    GM = ascend_ir.AddressSpace.GM
+    L1 = ascend_ir.AddressSpace.L1
+    L0A = ascend_ir.AddressSpace.L0A
+    L0B = ascend_ir.AddressSpace.L0B
+    L0C = ascend_ir.AddressSpace.L0C
+    UB = ascend_ir.AddressSpace.UB
+    SSBUF = ascend_ir.AddressSpace.SSBUF
+    FixBUF = ascend_ir.AddressSpace.FixBUF
+    BiasBUF = ascend_ir.AddressSpace.BiasBUF
+
+
 class ascend_address_space_base(bl.address_space):
 
     def __init__(self, address_space_value: ascend_ir.AddressSpace) -> None:
@@ -147,6 +191,11 @@ class ascend_address_space_group:
     - ``L0A`` — L0 buffer A (Cube unit input)
     - ``L0B`` — L0 buffer B (Cube unit input)
     - ``L0C`` — L0 buffer C (Cube unit output)
+    - ``GM`` — Global Memory
+    - ``SSBUF`` — Shared Scalar Buffer
+    - ``FixBUF`` — Fix Buffer
+    - ``BiasBUF`` — Bias Buffer
+    - ``Zero`` — default/no address space
 
     Usage with :func:`bl.alloc() <triton.extension.buffer.language.alloc>`::
 
@@ -353,8 +402,8 @@ def fixpipe(
     :return: If dst is None, returns the created tensor; otherwise returns None.
     :rtype: tl.tensor | None
     """
-    if not _semantic.builder.is_910_95():
-        raise RuntimeError("this feature is only supported on Ascend910_95")
+    if not is_register_based_arch(_semantic.builder.options.arch):
+        raise RuntimeError("this feature is only supported on Ascend910_95 and Ascend960")
     if not isinstance(src, tl.tensor):
         raise TypeError("src is not of tensor type")
 

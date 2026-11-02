@@ -30,29 +30,116 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
-from .core import buffer, buffer_type
-from .vf import scope
+from .core import buffer, buffer_type, vector, vector_type
+from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
-from .view import view
+from .dma import (
+    PadMode,
+    EvictionPolicy,
+    AtomicKind,
+    UnitFlagMode,
+    FixpipeDMAMode,
+    FixpipeDualDstMode,
+    FixpipeSubBlock,
+    FixpipePreQuantMode,
+    FixpipePreReluMode,
+    LoadGM2UBParams,
+    StoreUB2GMParams,
+    LoadGM2L1Params,
+    CopyUB2L1Params,
+    CopyL12UBParams,
+    CopyL12BTParams,
+    CopyL12FBParams,
+    CopyL1ToL0Params,
+    FixpipeL0C2GMParams,
+    FixpipeL0C2L1Params,
+    FixpipeL0C2UBParams,
+    load_gm_to_ub,
+    store_ub_to_gm,
+    load_gm_to_l1,
+    copy_ub_to_l1,
+    copy_l1_to_ub,
+    copy_l1_to_bt,
+    copy_l1_to_fb,
+    copy_l1_to_l0,
+    store_l0c_to_gm,
+    copy_l0c_to_ub,
+    copy_l0c_to_l1,
+    set_ctrl,
+)
+from .view import view, reshape
 from .aux_ops import annotate_buffer_versions
 from . import math
 from .math import compensated_rstd
-from .device_assert import device_assert
+from .debug import device_assert, device_print
 
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
 
+# Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
+from . import cube
+
+# Explicit pipeline / global synchronization.
+from . import sync
+from .sync import sub_block_id
+
+
+def jit(fn=None, **kwargs):
+    """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
+    from .jit import TLAJITFunction
+
+    def decorator(f):
+        return TLAJITFunction(f, **kwargs)
+
+    return decorator(fn) if fn is not None else decorator
+
+
 __all__ = [
+    "PadMode",
+    "EvictionPolicy",
+    "AtomicKind",
+    "UnitFlagMode",
+    "FixpipeDMAMode",
+    "FixpipeDualDstMode",
+    "FixpipeSubBlock",
+    "FixpipePreQuantMode",
+    "FixpipePreReluMode",
+    "LoadGM2UBParams",
+    "StoreUB2GMParams",
+    "LoadGM2L1Params",
+    "CopyUB2L1Params",
+    "CopyL12UBParams",
+    "CopyL12BTParams",
+    "CopyL12FBParams",
+    "CopyL1ToL0Params",
+    "FixpipeL0C2GMParams",
+    "FixpipeL0C2L1Params",
+    "FixpipeL0C2UBParams",
+    "load_gm_to_ub",
+    "store_ub_to_gm",
+    "load_gm_to_l1",
+    "copy_ub_to_l1",
+    "copy_l1_to_ub",
+    "copy_l1_to_bt",
+    "copy_l1_to_fb",
+    "copy_l1_to_l0",
+    "store_l0c_to_gm",
+    "copy_l0c_to_ub",
+    "copy_l0c_to_l1",
+    "set_ctrl",
     "buffer",
     "buffer_type",
+    "vector",
+    "vector_type",
 
     # buffer alloc / copy / view
     "alloc_buffer",
     "alloc",
     "copy",
     "view",
+    "reshape",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",
@@ -61,10 +148,21 @@ __all__ = [
     "math",
     "compensated_rstd",
     "device_assert",
+    "device_print",
 
     # aux ops
     "annotate_buffer_versions",
 
     # simd ops
     "simd",
+
+    # cube ops
+    "cube",
+
+    # explicit synchronization
+    "sync",
+    "sub_block_id",
+
+    # kernel decorator
+    "jit",
 ]

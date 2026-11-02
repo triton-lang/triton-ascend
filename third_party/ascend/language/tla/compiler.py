@@ -23,11 +23,9 @@ This does not define a device launcher ABI. Standard Triton ASTSource accepts
 pointer strings; this entry point accepts tla.buffer_type without creating
 pointer tensors or changing Triton's global type parser.
 
-The TLA wiring (``TLA_WITH_DISPATCH`` merged into the ``WITH_DISPATCH``
-registry, ``tla_setup_unified_builder`` mounted in ``CodeGenerator.__init__``)
-is baked into the wheel by the build-time triton-ascend patch, so the plain
-patched ``CodeGenerator`` already handles ``with tla.scope.simd():`` and the
-TLA builder methods; no TLA-specific subclass or runtime dispatch is needed.
+The TLA wiring is self-contained: ``setup_unified_builder`` (mounted in
+``CodeGenerator.__init__`` by the patch) registers the ``with tla.scope.*``
+handlers and attaches the TLA builder methods.
 """
 import re
 from collections import namedtuple
@@ -37,7 +35,14 @@ from triton.compiler.code_generator import (
     CodeGenerator,
     get_jit_fn_file_line,
 )
-from .core import buffer_type
+
+
+def _stamp_tla_mode(module):
+    """Set ``hacc.mode = "tla"`` to select the TLA backend pipeline."""
+    from triton._C.libtriton.ascend import ir as ascend_ir
+
+    builder = ascend_ir.ascendnpu_ir_builder(module.context)
+    module.set_attr("hacc.mode", builder.parse_attr('"tla"'))
 
 
 def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_template", output_dir=None,
@@ -74,6 +79,9 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     if output_dir is not None:
         output_dir.mkdir(parents=True, exist_ok=True)
 
+    # Mark as TLA for the backend pipeline; unconditional (TLA-only entry).
+    _stamp_tla_mode(module)
+
     # Inline JIT helpers before conversion. The MLIR inliner handles both
     # tt.call (Triton dialect interface) and func.call (registered interface).
     pm = ir.pass_manager(context)
@@ -100,14 +108,70 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     pm.run(module, "module")
     if not module.verify():
         raise RuntimeError("triton_to_linalg produced invalid IR")
+    _infer_tla_kernel_mode(module, context)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)
     return module
 
 
+def _kernel_entries(module):
+    """All non-private func.func ops: the ttadapter kernel entry candidates."""
+    operations = []
+    module.walk(operations.append)
+    return [op for op in operations if op.get_name() == "func.func" and op.get_str_attr("sym_visibility") != "private"]
+
+
+def infer_func_core_type(module):
+    """Infer AIC/AIV/MIX from scopes in a single-kernel module.
+
+    The scope classes stamp ``#hivm.tcore_type<...>`` on the emitted
+    ``scope.scope`` ops (see :meth:`tla.scope.mlir_attrs`); the binding
+    exposes no generic attribute reader, so the printed module is parsed.
+    VECTOR -> AIV, CUBE -> AIC.
+    """
+    text = str(module)
+    core_types = set()
+    if "#hivm.tcore_type<CUBE>" in text:
+        core_types.add("AIC")
+    if "#hivm.tcore_type<VECTOR>" in text:
+        core_types.add("AIV")
+    if "AIC" in core_types and "AIV" in core_types:
+        return "MIX"
+    if "AIC" in core_types:
+        return "AIC"
+    if "AIV" in core_types:
+        return "AIV"
+    return None
+
+
+def _infer_tla_kernel_mode(module, context):
+    """Stamp the entry core type, launch mode and VF mode on the kernel entry."""
+    from triton._C.libtriton.ascend import ir as ascend_ir
+
+    entries = _kernel_entries(module)
+    if len(entries) != 1:
+        raise ValueError("expected exactly one public func.func kernel entry")
+    entry = entries[0]
+    core_type = infer_func_core_type(module)
+    if core_type is None:
+        return
+    builder = ascend_ir.tla_builder(context, "")
+    builder.set_op_attr(entry, "hivm.func_core_type", builder.parse_attr(f"#hivm.func_core_type<{core_type}>"))
+    builder.set_op_attr(entry, "mix_mode", builder.get_string_attr("aiv" if core_type == "AIV" else "mix"))
+    module.set_attr("hivm.module_core_type", builder.parse_attr(f"#hivm.module_core_type<{core_type}>"))
+    # MIX only when a SIMT scope exists; the binding can't read dialect-typed
+    # vf_mode, so match it on the printed scope too.
+    scopes = []
+    module.walk(scopes.append)
+    has_simt = any(op.get_name() == "scope.scope" and (
+        op.get_str_attr("vector_mode") == "simt" or "#hivm.vf_mode<SIMT>" in str(op)) for op in scopes)
+    if has_simt:
+        builder.set_op_attr(entry, "hivm.vf_mode", builder.parse_attr("#hivm.vf_mode<MIX>"))
+
+
 def check_ttadapter(module):
-    """Validate the single-AIV-kernel boundary, not a runnable launcher ABI.
+    """Validate the single-kernel boundary, not a runnable launcher ABI.
 
     Operation checks use the IR walk. The two integer ABI attributes are
     checked on the canonical printed entry header because this binding exposes
@@ -120,15 +184,16 @@ def check_ttadapter(module):
     forbidden = [op.get_name() for op in operations if op.get_name().startswith("tt.")]
     if forbidden:
         raise ValueError(f"TTIR operations must not reach npuir: {forbidden}")
-    entries = [
-        op for op in operations if op.get_name() == "func.func" and op.get_str_attr("sym_visibility") != "private"
-    ]
+    entries = _kernel_entries(module)
     if len(entries) != 1:
         raise ValueError("expected exactly one public func.func kernel entry")
     entry = entries[0]
-    for key, value in (("global_kernel", "local"), ("mix_mode", "aiv"), ("parallel_mode", "simd")):
+    for key, value in (("global_kernel", "local"), ("parallel_mode", "simd")):
         if entry.get_str_attr(key) != value:
             raise ValueError(f"kernel entry must have {key} = {value!r}")
+    mix = entry.get_str_attr("mix_mode")
+    if mix not in ("aiv", "mix"):
+        raise ValueError(f"kernel entry mix_mode must be 'aiv' or 'mix', got {mix!r}")
     name = entry.get_str_attr("sym_name")
     header = next((line for line in str(module).splitlines()
                    if re.match(r"\s*func\.func (?:public )?@" + re.escape(name) + r"\(", line)), "")
@@ -143,6 +208,7 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     ``signature`` maps argument names to buffer_type or scalar Triton strings.
     Only top-level constexpr parameters are supported by this offline entry.
     """
+    from triton._C.libtriton.ascend import ir as ascend_ir
     types, constants = [], {}
     for index, name in enumerate(fn.arg_names):
         if name in constexprs:
@@ -150,13 +216,8 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
             constants[(index, )] = constexprs[name]
         else:
             ty = signature[name]
-            if not isinstance(ty, buffer_type):
-                if isinstance(ty, str):
-                    ty = str_to_ty(ty, None)
-                if ty.is_block():
-                    raise TypeError("TLA runtime memory arguments must be buffer_type "
-                                    "or pointer; the entry should tla.view pointers "
-                                    "into GM buffers")
+            if isinstance(ty, str):
+                ty = str_to_ty(ty, None)
             types.append(ty)
     prototype = ASTFunction([], types, constants, {})
     file_name, begin_line = get_jit_fn_file_line(fn)
@@ -164,9 +225,25 @@ def ast_to_ttir(fn, signature, constexprs, context, options, module=None):
     generator = CodeGenerator(context, prototype, gscope=fn.get_capture_scope(), function_name=fn.repr(proxy),
                               jit_fn=fn, is_kernel=True, file_name=file_name, begin_line=begin_line, options=options,
                               codegen_fns={}, module_map={}, module=module, is_gluon=False)
+    arch = getattr(options, "arch", None)
+    # Mount the TLA builder on the code generator before visiting the AST.
+    from triton.language.extra.tla.builder import setup_unified_builder
+
+    tla_builder = ascend_ir.tla_builder(context, arch or "")
+    tla_builder.set_loc(file_name, begin_line, 0)
+    setup_unified_builder(generator.builder, tla_builder)
     generator.visit(fn.parse())
     module = generator.module
     module.context = context
+    # Mirror the runtime Ascend patch (backend._apply_ascend_patch) and inject
+    # #hacc.target<arch> so target-aware verifiers (e.g. FixpipeOp::verify,
+    # which rejects dst=UB / NZ2DN fixpipe unless isAscend950(moduleOp))
+    # behave like the on-device path. The arch string passes through as-is and
+    # must be a TargetDevice enum symbol (e.g. Ascend910_9589): its parse
+    # matches exactly, so family names such as "Ascend950" resolve nowhere.
+    if arch:
+        builder = ascend_ir.ascendnpu_ir_builder(context, arch)
+        module.set_attr("hacc.target", builder.parse_attr(f'#hacc.target<"{arch}">'))
     if not module.verify():
         raise RuntimeError("TLA module verification failed")
     return module

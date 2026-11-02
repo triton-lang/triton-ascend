@@ -66,12 +66,13 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
     pm.addPass(mlir::triton::createAutoBlockifyPass(opts));
   });
 
-  m.def("add_triton_to_structure",
-        [](mlir::PassManager &pm, bool enableMaskFallbackConversion,
-           bool optimizeDynamicOffset) {
-          pm.addPass(mlir::triton::createTritonToStructuredPass(
-              enableMaskFallbackConversion, optimizeDynamicOffset));
-        });
+  m.def("add_triton_to_structure", [](mlir::PassManager &pm,
+                                      bool enableMaskFallbackConversion,
+                                      bool optimizeDynamicOffset,
+                                      bool compileOn91095 = false) {
+    pm.addPass(mlir::triton::createTritonToStructuredPass(
+        enableMaskFallbackConversion, optimizeDynamicOffset, compileOn91095));
+  });
 
   m.def("add_triton_control_flow_opt", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::createTritonControlFlowOptPass());
@@ -151,7 +152,9 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          std::uint64_t mappingUBCapacityBytes,
          std::uint64_t storeCoalescingUBBudgetBytes,
          const std::string &compileMode, std::uint64_t ubSafetyPercent,
-         std::uint64_t reservedUBBytes) {
+         std::uint64_t reservedUBBytes, std::uint64_t mappingL0ACapacityBytes,
+         std::uint64_t mappingL0BCapacityBytes,
+         std::uint64_t mappingL0CCapacityBytes, std::uint64_t l0SafetyPercent) {
         if (ruleMask > std::numeric_limits<std::uint32_t>::max())
           throw py::value_error("rule_mask must fit in uint32_t");
         const auto graphRuleMask =
@@ -181,6 +184,14 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             reservedUBBytes > effectiveMappingUBCapacity)
           throw py::value_error("reserved_ub_bytes must fit in unsigned and "
                                 "not exceed mapping UB");
+        if (mappingL0ACapacityBytes > std::numeric_limits<unsigned>::max() ||
+            mappingL0BCapacityBytes > std::numeric_limits<unsigned>::max() ||
+            mappingL0CCapacityBytes > std::numeric_limits<unsigned>::max())
+          throw py::value_error("mapping L0 capacities must fit in unsigned");
+        if (l0SafetyPercent == 0 || l0SafetyPercent > 100 ||
+            l0SafetyPercent > std::numeric_limits<unsigned>::max())
+          throw py::value_error(
+              "l0_safety_percent must be an unsigned value in [1, 100]");
 
         mlir::triton::cfg::GraphOptimizationOptions options;
         options.enabledRuleMask = graphRuleMask;
@@ -193,6 +204,13 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             static_cast<unsigned>(storeCoalescingUBBudgetBytes);
         options.ubSafetyPercent = static_cast<unsigned>(ubSafetyPercent);
         options.reservedUBBytes = static_cast<unsigned>(reservedUBBytes);
+        options.mappingL0ACapacityBytes =
+            static_cast<unsigned>(mappingL0ACapacityBytes);
+        options.mappingL0BCapacityBytes =
+            static_cast<unsigned>(mappingL0BCapacityBytes);
+        options.mappingL0CCapacityBytes =
+            static_cast<unsigned>(mappingL0CCapacityBytes);
+        options.l0SafetyPercent = static_cast<unsigned>(l0SafetyPercent);
         options.compileMode = compileMode;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
@@ -204,7 +222,11 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("mapping_ub_capacity_bytes") = 0,
       py::arg("store_coalescing_ub_budget_bytes") = 0,
       py::arg("compile_mode") = "simd_simt_template",
-      py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0);
+      py::arg("ub_safety_percent") = 80, py::arg("reserved_ub_bytes") = 0,
+      py::arg("mapping_l0a_capacity_bytes") = 0,
+      py::arg("mapping_l0b_capacity_bytes") = 0,
+      py::arg("mapping_l0c_capacity_bytes") = 0,
+      py::arg("l0_safety_percent") = 80);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {
@@ -458,6 +480,8 @@ runAscendCostModelInProcess(const std::string &mlirText,
 // Forward declaration for ascend_ir bindings (defined in ascend_ir.cc)
 void init_ascend_ir(py::module &&m);
 void init_buffer_ir(py::module &&m);
+// TLA-specific builder bindings (defined in language/tla/cpp/tla_builder.cc)
+void init_tla_builder(py::module &&m);
 
 void init_triton_ascend(py::module &&m) {
   py::module_ libtriton = py::module_::import("triton._C.libtriton");
@@ -496,4 +520,6 @@ void init_triton_ascend(py::module &&m) {
 
   // Initialize ascend IR bindings (ascendnpu_ir_builder, scope/hivm dialects)
   init_ascend_ir(m.def_submodule("ir"));
+  // TLA builder bindings share the same "ir" submodule (def_submodule caches).
+  init_tla_builder(m.def_submodule("ir"));
 }

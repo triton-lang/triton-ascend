@@ -24,7 +24,7 @@ from .aux_ops import annotate_buffer_versions
 
 
 @builtin
-def alloc(shape, dtype, space="ub", versions=1, is_mem_unique=False, _semantic=None):
+def alloc(shape, dtype, space="ub", versions=1, _semantic=None):
     space = _unwrap_if_constexpr(space)
     versions = _unwrap_if_constexpr(versions)
     if space == "gm":
@@ -33,12 +33,10 @@ def alloc(shape, dtype, space="ub", versions=1, is_mem_unique=False, _semantic=N
         raise ValueError("buffer versions must be a positive integer")
     ty = buffer_type(shape, dtype, space)
     buf = buffer(_semantic.builder.create_tla_alloc(ty.to_ir(_semantic.builder)), ty)
-    if _unwrap_if_constexpr(is_mem_unique):
-        _semantic.builder.create_annotation_mark(buf.handle, "mem_unique", _semantic.builder.get_unit_attr())
     annotate_buffer_versions(buf, versions, _semantic=_semantic)
     return buf
 
 
 @builtin
-def alloc_buffer(shape, dtype, space="ub", versions=1, is_mem_unique=False, _semantic=None):
-    return alloc(shape, dtype, space, versions, is_mem_unique, _semantic=_semantic)
+def alloc_buffer(shape, dtype, space="ub", versions=1, _semantic=None):
+    return alloc(shape, dtype, space, versions, _semantic=_semantic)

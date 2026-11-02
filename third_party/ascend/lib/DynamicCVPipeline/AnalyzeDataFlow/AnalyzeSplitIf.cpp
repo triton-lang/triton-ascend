@@ -112,22 +112,6 @@ scanMainLoop(Operation *mainLoopOp,
 
 static bool isMatmulOp(Operation *op) { return isa<linalg::MatmulOp>(op); }
 
-// "Real" tensor compute: arithmetic/reduction compute on tensors, excluding
-// pure data-movement / control-flow-glue ops that are not overlap-able
-// compute. isTensorComputeOp already drops copy/broadcast/fill; we further
-// drop linalg.transpose (a data permutation) and arith.select (control-flow
-// glue selecting between a splitted_if result and the carried value), which
-// the split-if itself emits around the splitted_ifs.
-static bool isRealTensorComputeOp(Operation *op) {
-  if (!CVPipeline::isTensorComputeOp(op)) {
-    return false;
-  }
-  if (isa<linalg::TransposeOp, arith::SelectOp>(op)) {
-    return false;
-  }
-  return true;
-}
-
 // Roll back when ALL of the following hold:
 //   - VECTOR scf.for main loops contain tensor compute ops ONLY inside
 //     splitted_ifs.

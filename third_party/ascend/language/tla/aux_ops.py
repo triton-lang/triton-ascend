@@ -69,4 +69,6 @@ def annotate_buffer_versions(buf, versions, _semantic=None):
     v = _unwrap_if_constexpr(versions)
     if type(v) is not int or isinstance(v, bool) or v < 1:
         raise ValueError(f"buffer versions must be a positive int, got {v!r}")
+    if v == 1:
+        return
     compile_hint_impl(buf, "hivm.multi_buffer", v, _semantic.builder)

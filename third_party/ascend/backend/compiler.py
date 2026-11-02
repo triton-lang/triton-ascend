@@ -18,6 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import _ctypes
 import ctypes
 import functools
 import hashlib
@@ -65,6 +66,7 @@ from triton.backends.ascend.utils import (
     downgrade_llir,
     force_disable_ffts,
     graph_ub_budget_bytes_for_arch,
+    l0_size_in_kbytes_for_arch,
     ub_size_in_kbytes_for_arch,
     get_cann_version_file_hash,
     is_cann_version_at_least,
@@ -287,9 +289,15 @@ def _with_debug_line(npubin_stage, options):
 
 
 def _graph_optimize_kwargs(opt):
+    l0a_kb, l0b_kb, l0c_kb = l0_size_in_kbytes_for_arch(opt.target_arch)
     kwargs = {
         "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
         "compile_mode": opt.compile_mode,
+        # Zero capacities (unknown target) leave the cube L0 checks disabled.
+        "mapping_l0a_capacity_bytes": l0a_kb * 1024,
+        "mapping_l0b_capacity_bytes": l0b_kb * 1024,
+        "mapping_l0c_capacity_bytes": l0c_kb * 1024,
+        "l0_safety_percent": 80,
     }
     rule_mask = getattr(opt, "rule_mask", DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK)
     if rule_mask != DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK:
@@ -380,7 +388,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             distributed.ascend_passes.ttgpuir.add_convert_triton_distributed_to_hivm(pm)
 
         ascend.passes.ttir.add_triton_control_flow_opt(pm)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
         ascend.passes.ttir.add_discrete_mask_access_conversion(pm, compile_on_910_95, compile_mode)
         ascend.passes.ttir.add_triton_to_annotation(pm)
         ascend.passes.ttir.add_triton_to_unstructure(pm, compile_on_910_95, compile_mode)
@@ -388,7 +396,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_hfusion(pm, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_llvm(pm)
         ascend.passes.ttir.add_bubble_up_operation(pm, compile_on_910_95)
-        ascend.passes.ttir.add_triton_to_structure(pm, False, False)
+        ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
         # Restricted to 910_95/950. The merged buffer is written by two disjoint
@@ -440,6 +448,10 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
+        # Infer TLA kernel-mode attributes for backend compiler.
+        if getattr(opt, "enable_tla_mode", False):
+            from triton.language.extra.tla.compiler import _infer_tla_kernel_mode
+            _infer_tla_kernel_mode(mod, mod.context)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
@@ -460,6 +472,27 @@ def __get_metadata_attr_by_callback(lib, postfix: str, metadata, meta_key: str):
         callback_func.restype = ctypes.c_int64
         callback_func.argtypes = []
         metadata[meta_key] = callback_func()
+
+
+def __load_metadata_by_callback(callback_path: str, metadata):
+    # The callback library is only used to evaluate a few constant callbacks,
+    # so unload it once the values have been copied into metadata. Keeping it
+    # mapped leaks several VMAs per compilation, which eventually exhausts
+    # vm.max_map_count in long running processes that JIT many kernels.
+    lib = ctypes.CDLL(callback_path)
+    try:
+        __get_metadata_attr_by_callback(lib, "_infer_task_type_function", metadata, "bs_task_type")
+        __get_metadata_attr_by_callback(lib, "_infer_workspace_shape_function", metadata, "workspace_size")
+        __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata, "sync_block_lock_layout")
+        __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_init_function", metadata, "lock_init_val")
+    finally:
+        handle, lib._handle = lib._handle, None
+        try:
+            _ctypes.dlclose(handle)
+        except (AttributeError, OSError) as exc:
+            # Unloading is an optimisation, so a platform without dlclose or a
+            # failing dlclose must not turn a successful compilation into an error.
+            warnings.warn(f"could not unload {callback_path}: {exc}")
 
 
 def _parse_linalg_metadata(linalg: str, metadata: dict):
@@ -570,6 +603,8 @@ def _parse_ttir_metadata(ttir: str, metadata: dict):
 
 def get_common_bishengir_compile_options(metadata):
     bishengir_target = metadata['target'].arch
+    if _is_a5_target_arch(bishengir_target):
+        bishengir_target = "Ascend950"
     bishengir_target_opt = f"--target={bishengir_target}"
     return [bishengir_target_opt]
 
@@ -588,7 +623,9 @@ def _full_row_copy_compile_options(metadata, compiler_path):
     # A shared noinline load helper loses constant-width specialization when
     # the masked tail also calls it. Scope this to compiler-versioned A5 SIMD
     # loads; other kernels retain the NPU compiler's default inlining policy.
-    if (metadata.get("has_full_row_copy", False) and metadata["target"].arch.startswith("Ascend950")
+    from triton.backends.ascend.utils import is_register_based_arch
+
+    if (metadata.get("has_full_row_copy", False) and is_register_based_arch(metadata["target"].arch)
             and metadata.get("mix_mode") == "aiv" and metadata.get("parallel_mode") == "simd"
             and _supports_full_row_copy_inlining(compiler_path)):
         return ["--enable-lib-call-no-inline=false"]
@@ -712,7 +749,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
         npu_utils = NPUUtils()
-        if npu_utils.has_device_limit():
+        if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
             _compile_option_list += [
                 f"--custom-aic-number={npu_utils.get_aicore_num()}",
             ]
@@ -822,6 +859,8 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
                 "--enable-hfusion-compile=true",
                 "--enable-triton-kernel-compile=true",
             ]
+            if getattr(opt, "enable_tla_mode", False):
+                _compile_option_list += ["--enable-tla-mode=true"]
             _compile_option_list += _full_row_copy_compile_options(metadata, npu_compiler_path)
             # Temporary until the NPU compiler enables batch matmul by default in Q4.
             if metadata.get("enable_hivm_batch_matmul"):
@@ -834,7 +873,6 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         vf_merge_level = metadata["vf_merge_level"]
         if vf_merge_level is not None:
@@ -886,12 +924,7 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
             _dump_kernel_binary(metadata["hash"], bin_path)
 
         if Path(callback_path).is_file():
-            lib = ctypes.CDLL(callback_path)
-            __get_metadata_attr_by_callback(lib, "_infer_task_type_function", metadata, "bs_task_type")
-            __get_metadata_attr_by_callback(lib, "_infer_workspace_shape_function", metadata, "workspace_size")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata,
-                                            "sync_block_lock_layout")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_init_function", metadata, "lock_init_val")
+            __load_metadata_by_callback(callback_path, metadata)
 
         return Path(bin_path).read_bytes()
 
@@ -1060,7 +1093,6 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
         if opt.debug:
             _compile_option_list += ["--mlir-print-ir-after-failure"]
             _compile_option_list += ["--mlir-print-stacktrace-on-diagnostic"]
-            _compile_option_list += ["--bishengir-print-ir-after=hivm-graph-sync-solver"]
 
         if opt.debug:
             _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
@@ -1097,12 +1129,7 @@ def linalg_to_bin_enable_npu_compile_A2_A3(linalg: str, metadata, opt):
             _dump_kernel_binary(metadata["hash"], bin_path)
 
         if Path(callback_path).is_file():
-            lib = ctypes.CDLL(callback_path)
-            __get_metadata_attr_by_callback(lib, "_infer_task_type_function", metadata, "bs_task_type")
-            __get_metadata_attr_by_callback(lib, "_infer_workspace_shape_function", metadata, "workspace_size")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_num_function", metadata,
-                                            "sync_block_lock_layout")
-            __get_metadata_attr_by_callback(lib, "_infer_sync_block_lock_init_function", metadata, "lock_init_val")
+            __load_metadata_by_callback(callback_path, metadata)
 
         return Path(bin_path).read_bytes()
 
@@ -1125,9 +1152,18 @@ def get_libdevice(arch: str):
 
 
 def _is_register_based_target_arch(arch: str) -> bool:
-    # A6 shares the register-based lowering and launch ABI with A5.
-    return isinstance(arch, str) and (arch.startswith(("Ascend910_96", "Ascend960")) or arch.startswith(
-        ("Ascend910_95", "Ascend950")))
+    """Delegate to the arch table in utils.
+
+    Imported lazily to avoid an import cycle: ``utils`` is imported during
+    backend registration and still loading when this module is first pulled
+    in, so the helper is not yet bound at import time.
+    """
+    from triton.backends.ascend.utils import is_register_based_arch
+    return is_register_based_arch(arch)
+
+
+def _is_a5_target_arch(arch: str) -> bool:
+    return isinstance(arch, str) and arch.startswith(("Ascend910_95", "Ascend950"))
 
 
 def _get_libdevice_compile_state() -> bool:
@@ -1195,6 +1231,7 @@ class NPUOptions:
     enable_graph_optimize: bool = True
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
+    deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1
     default_dot_input_precision: str = "ieee"
     allowed_dot_input_precisions: Tuple[str] = ("ieee", "hf32")
@@ -1234,6 +1271,7 @@ class NPUOptions:
     disable_auto_inject_block_sync: bool = None
     enable_mixed_cv: bool = None
     enable_dynamic_cv_pipeline: bool = None
+    enable_tla_mode: bool = field(default=False, init=False)
     enable_cube_block_merge: bool = False
     hfusion_enable_multiple_consumer_fusion: bool = None
     buf_slot_num_of_veccore: int = None
@@ -1387,6 +1425,15 @@ def _get_npu_options_arch(options: NPUOptions) -> str:
 
 NPUOptions.arch = property(_get_npu_options_arch)
 
+
+def _get_compile_on_register_based(options) -> bool:
+    """Modern accessor for the register-based (A5/A6) compile pipeline."""
+    from triton.backends.ascend.utils import is_register_based_arch
+    return is_register_based_arch(options.target_arch)
+
+
+NPUOptions.compile_on_register_based = property(_get_compile_on_register_based)
+
 _INTERNAL_NPU_OPTION_MARKERS = frozenset({
     "target_arch",
     "compile_on_910_95",
@@ -1457,7 +1504,7 @@ def ttir_to_npubin(mod, metadata, opt):
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
                 npu_utils = NPUUtils()
-                if npu_utils.has_device_limit():
+                if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
                     _compile_option_list += [
                         f"--custom-aic-number={npu_utils.get_aicore_num()}",
                         f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",

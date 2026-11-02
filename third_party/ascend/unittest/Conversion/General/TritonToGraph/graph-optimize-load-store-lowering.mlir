@@ -11,7 +11,9 @@
 // GRAPH: math.tan {{.*}} : tensor<3x2xf32>
 // GRAPH: tt.store {{.*}} : tensor<3x2x!tt.ptr<f32>>
 // LOWER-LABEL: func.func @lower_unified_layout(
-// LOWER: call @{{.*}}({{.*}}) : (tensor<3x1xi1>) -> ()
+// The graph rewrite preserves the check; lowering can then prove it safe.
+// LOWER-NOT: call @triton_assert
+// LOWER-NOT: i64
 // LOWER: return
 tt.func @lower_unified_layout(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>) {
   %axis0 = tt.make_range {end = 2 : i32, start = 0 : i32} : tensor<2xi32>
@@ -41,16 +43,16 @@ tt.func @lower_unified_layout(%source: !tt.ptr<f32>, %destination: !tt.ptr<f32>)
   tt.return
 }
 
-// Both automatic and user-authored assertions survive lowering, even when
-// their messages match.
+// An unproven automatic assertion and a user-authored assertion both survive
+// lowering, even when their messages match.
 // LOWER: func.func private @{{.*}}(i1) attributes {msg = "int32 overflow detected for operation mul"}
 // LOWER-LABEL: func.func @lower_user_same_message_assert(
 // LOWER-COUNT-2: call @{{.*}}({{.*}}) : (i1) -> ()
 // LOWER-NOT: call @
 // LOWER: return
-tt.func @lower_user_same_message_assert() {
+tt.func @lower_user_same_message_assert(%dynamic_condition: i1) {
   %true = arith.constant true
-  tt.assert %true, "int32 overflow detected for operation mul" {tt.auto_overflow_assert} : i1
+  tt.assert %dynamic_condition, "int32 overflow detected for operation mul" {tt.auto_overflow_assert} : i1
   tt.assert %true, "int32 overflow detected for operation mul" : i1
   tt.return
 }

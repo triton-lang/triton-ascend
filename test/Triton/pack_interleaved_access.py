@@ -47,8 +47,8 @@ with tempfile.TemporaryDirectory() as tmp:
         print("PASS", name)
 
 
-def fp32_fields(n, width, *, alignment=True, conflict=False, mismatch=False, volatile=False, consumer=False,
-                scalar="f32"):
+def interleaved_fields(n, width, *, alignment=True, conflict=False, mismatch=False, volatile=False, consumer=False,
+                       scalar="f32", copy_only=False):
     """Interleaved reads separated by stores to another aligned row base.
 
     No noalias contract: pointer bases may alias. The field residues, not
@@ -77,7 +77,7 @@ def fp32_fields(n, width, *, alignment=True, conflict=False, mismatch=False, vol
     for j in range(width):
         if j:
             field = 0 if conflict and j == 1 else j
-            value = "%v0" if consumer and j == 1 else "%zero"
+            value = f"%v{j - 1}" if copy_only else "%v0" if consumer and j == 1 else "%zero"
             lines.append(f"tt.store %q{field}, {value}, %mask : {ptr}")
         m = "%other_mask" if mismatch and j == 1 else "%mask"
         attrs = " {isVolatile = true}" if volatile and j == 1 else ""
@@ -86,20 +86,41 @@ def fp32_fields(n, width, *, alignment=True, conflict=False, mismatch=False, vol
         lines.append(f"%a{j} = arith.addf {acc}, %v{j} : {ty}")
     lines += [
         f"%os = tt.splat %out : !tt.ptr<{scalar}> -> {ptr}", f"%op = tt.addptr %os, %i : {ptr}, {idx}",
-        f"tt.store %op, %a{width - 1}, %mask : {ptr}", "tt.return } }"
+        f"tt.store %op, %v{width - 1}, %mask : {ptr}" if copy_only else f"tt.store %op, %a{width - 1}, %mask : {ptr}",
+        "tt.return } }"
     ]
+    if copy_only:
+        # Keep all reads ahead of all writes: only the profitability condition,
+        # not the existing motion/consumer barriers, should reject this case.
+        stores = [line for line in lines if line.startswith("tt.store %q")]
+        lines = [line for line in lines if " = arith.addf " not in line and not line.startswith("tt.store %q")]
+        lines[-1:-1] = stores
     return "\n".join(lines)
 
 
-pair_tests = {f"fp32_n{n}_w{w}": (fp32_fields(n, w), w // 2, w) for n in (32, 64, 128) for w in (2, 4, 8)}
+pair_tests = {f"fp32_n{n}_w{w}": (interleaved_fields(n, w), w // 2, w) for n in (32, 64, 128) for w in (2, 4, 8)}
 pair_tests.update({
-    "fp32_missing_alignment": (fp32_fields(32, 4, alignment=False), 4, 4),
-    "fp32_conflicting_store": (fp32_fields(32, 4, conflict=True), 3, 4),
-    "fp32_different_mask": (fp32_fields(32, 4, mismatch=True), 3, 4),
-    "fp32_volatile": (fp32_fields(32, 4, volatile=True), 3, 4),
-    "fp32_memory_consumer": (fp32_fields(32, 4, consumer=True), 3, 4),
-    "fp32_non_power_stride": (fp32_fields(32, 3), 3, 3),
-    "unsupported_f64": (fp32_fields(32, 4, scalar="f64"), 4, 4),
+    "fp32_missing_alignment": (interleaved_fields(32, 4, alignment=False), 4, 4),
+    "fp32_conflicting_store": (interleaved_fields(32, 4, conflict=True), 3, 4),
+    "fp32_different_mask": (interleaved_fields(32, 4, mismatch=True), 3, 4),
+    "fp32_volatile": (interleaved_fields(32, 4, volatile=True), 3, 4),
+    "fp32_memory_consumer": (interleaved_fields(32, 4, consumer=True), 3, 4),
+    "fp32_non_power_stride": (interleaved_fields(32, 3), 3, 3),
+    "fp16_copy_only": (interleaved_fields(32, 8, scalar="f16", copy_only=True), 8, 8),
+    "fp32_copy_only": (interleaved_fields(32, 8, copy_only=True), 8, 8),
+    "unsupported_f64": (interleaved_fields(32, 4, scalar="f64"), 4, 4),
+})
+pair_tests.update({
+    f"fp16_n{n}_w{w}": (interleaved_fields(n, w, scalar="f16"), max(1, w // 4), w)
+    for n in (32, 64, 128)
+    for w in (2, 4, 8)
+})
+pair_tests.update({
+    "fp16_w8_missing_alignment": (interleaved_fields(32, 8, scalar="f16", alignment=False), 8, 8),
+    "fp16_w8_conflicting_store": (interleaved_fields(32, 8, scalar="f16", conflict=True), 5, 8),
+    "fp16_w8_different_mask": (interleaved_fields(32, 8, scalar="f16", mismatch=True), 5, 8),
+    "fp16_w8_volatile": (interleaved_fields(32, 8, scalar="f16", volatile=True), 5, 8),
+    "fp16_w8_memory_consumer": (interleaved_fields(32, 8, scalar="f16", consumer=True), 5, 8),
 })
 with tempfile.TemporaryDirectory() as tmp:
     for name, (text, loads, stores) in pair_tests.items():
@@ -109,7 +130,7 @@ with tempfile.TemporaryDirectory() as tmp:
         output = subprocess.check_output(command, text=True)
         assert output.count("tt.load ") == loads, (name, output)
         assert output.count("tt.store ") == stores, (name, output)
-        assert "x4xf32>" not in output and "x8xf32>" not in output, name
+        assert "x4xf32>" not in output and "x8xf32>" not in output and "x8xf16>" not in output, name
         assert "tt.noalias" not in output and "scf.if" not in output, name
         if name == "fp32_volatile":
             assert "isVolatile = true" in output

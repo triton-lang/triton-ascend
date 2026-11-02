@@ -29,6 +29,7 @@
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/Support/MathExtras.h"
+#include <algorithm>
 #include <functional>
 #include <optional>
 using namespace mlir;
@@ -84,6 +85,16 @@ Value ptr(Operation *op) {
     return s.getPtr();
   return {};
 }
+// Profitability budget for the SIMT backend, not a hardware transfer limit.
+// Wider tiles can distribute fields over lanes and require communication to
+// reconstruct the original rank-one consumers. Keep each group at most 8 bytes.
+// The rule depends on element width and row stride, never on an operator name
+// or a particular batch/channel shape.
+int64_t packingWidth(Type element, int64_t stride) {
+  if ((!element.isF16() && !element.isF32()) || stride < 2 || stride > 8)
+    return 0;
+  return std::min<int64_t>(stride, 64 / element.getIntOrFloatBitWidth());
+}
 Value mask(Operation *op) {
   if (auto l = dyn_cast<triton::LoadOp>(op))
     return l.getMask();
@@ -105,21 +116,17 @@ std::optional<Group> group(Operation *first) {
   Address a = address(ptr(first));
   int64_t w = rowStride(a.rows);
   // Compile-time layout choice, independent of B/D and runtime pointers.
-  // Half precision uses one masked row tile; float uses aligned field groups.
+  // Half precision may mask the missing first field of the first group.
   // Neither choice expands the set of active addresses.
   Type element = cast<triton::PointerType>(t.getElementType()).getPointeeType();
   bool half = element.isF16();
-  if ((!half && !element.isF32()) || w < 2 || w > 8 ||
-      (half ? a.field > 1 : (a.field >= w || (a.field & 1))))
+  int64_t width = packingWidth(element, w);
+  if (!width || a.field >= w ||
+      (a.field % width != 0 && !(half && a.field == 1)))
     return std::nullopt;
   if (auto l = dyn_cast<triton::LoadOp>(first); l && l.getIsVolatile())
     return std::nullopt;
-  // Keep FP32 fields in 64-bit pairs. A four-column FP32 tile can assign
-  // its columns to different lanes, requiring a layout conversion before
-  // the original rank-one consumers. Two independent pairs express the
-  // same active reads without requesting that column-lane distribution.
-  int64_t width = half ? w : 2;
-  int64_t endField = half ? w : a.field + width;
+  int64_t endField = half && a.field == 1 ? width : a.field + width;
   Group g{{first}, a.rows, width};
   int64_t next = a.field + 1;
   for (Operation *op = first->getNextNode(); op; op = op->getNextNode()) {
@@ -241,12 +248,9 @@ std::optional<Group> sinkingGroup(Operation *first) {
   Address a = address(load.getPtr());
   int64_t w = rowStride(a.rows);
   Type element = cast<triton::PointerType>(t.getElementType()).getPointeeType();
-  if (!element.isF16() && !element.isF32())
-    return std::nullopt;
-  bool single = element.isF32();
-  int64_t width = single ? 2 : w;
-  if (w < 2 || w > 8 || a.field < 0 || a.field + width > w ||
-      (single ? (a.field & 1) : a.field != 0) || !alignedPointer(a.rows, w))
+  int64_t width = packingWidth(element, w);
+  if (!width || a.field < 0 || a.field + width > w || a.field % width != 0 ||
+      !alignedPointer(a.rows, w))
     return std::nullopt;
   Group g{{first}, a.rows, width, true};
   int64_t next = a.field + 1;
@@ -281,12 +285,33 @@ std::optional<Group> sinkingGroup(Operation *first) {
   }
   return std::nullopt;
 }
+// Restrict the profitability heuristic to fields consumed by floating-point
+// arithmetic, directly or through an FP extension. Pure copies/reordering can
+// regress despite fewer loads; this pass does not model their store layout.
+// This is a data-flow condition, not an operator or shape whitelist.
+bool hasArithmeticConsumer(Operation *load) {
+  auto arithmetic = [](Operation *op) {
+    return isa<arith::AddFOp, arith::SubFOp, arith::MulFOp, arith::DivFOp>(op);
+  };
+  for (Operation *user : load->getUsers()) {
+    if (arithmetic(user))
+      return true;
+    if (isa<arith::ExtFOp>(user))
+      for (Operation *consumer : user->getUsers())
+        if (arithmetic(consumer))
+          return true;
+  }
+  return false;
+}
 std::optional<Group> candidateGroup(Operation *op) {
   if (isa<triton::StoreOp>(op))
     return std::nullopt;
-  if (auto g = group(op))
+  auto g = group(op);
+  if (!g)
+    g = sinkingGroup(op);
+  if (g && llvm::all_of(g->ops, hasArithmeticConsumer))
     return g;
-  return sinkingGroup(op);
+  return std::nullopt;
 }
 
 Value reshape(IRRewriter &r, Location l, Value v, ArrayRef<int64_t> shape) {

@@ -114,7 +114,11 @@ std::optional<Group> group(Operation *first) {
     return std::nullopt;
   if (auto l = dyn_cast<triton::LoadOp>(first); l && l.getIsVolatile())
     return std::nullopt;
-  int64_t width = half ? w : (a.field ? (a.field & -a.field) : w);
+  // Keep FP32 fields in 64-bit pairs. A four-column FP32 tile can assign
+  // its columns to different lanes, requiring a layout conversion before
+  // the original rank-one consumers. Two independent pairs express the
+  // same active reads without requesting that column-lane distribution.
+  int64_t width = half ? w : 2;
   int64_t endField = half ? w : a.field + width;
   Group g{{first}, a.rows, width};
   int64_t next = a.field + 1;
@@ -236,12 +240,13 @@ std::optional<Group> sinkingGroup(Operation *first) {
     return std::nullopt;
   Address a = address(load.getPtr());
   int64_t w = rowStride(a.rows);
-  bool single =
-      cast<triton::PointerType>(t.getElementType()).getPointeeType().isF32();
+  Type element = cast<triton::PointerType>(t.getElementType()).getPointeeType();
+  if (!element.isF16() && !element.isF32())
+    return std::nullopt;
+  bool single = element.isF32();
   int64_t width = single ? 2 : w;
   if (w < 2 || w > 8 || a.field < 0 || a.field + width > w ||
-      (single ? (a.field != w - 2) : a.field != 0) ||
-      !alignedPointer(a.rows, w))
+      (single ? (a.field & 1) : a.field != 0) || !alignedPointer(a.rows, w))
     return std::nullopt;
   Group g{{first}, a.rows, width, true};
   int64_t next = a.field + 1;

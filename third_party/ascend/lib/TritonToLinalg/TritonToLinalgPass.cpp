@@ -1368,8 +1368,7 @@ static void inlineCallees(ModuleOp moduleOp, bool pointerCarryingOnly) {
           !isa<triton::ReturnOp>(callee.getBody().front().getTerminator()))
         continue;
 
-      if (pointerCarryingOnly &&
-          !carriesPointerType(call->getOperandTypes()) &&
+      if (pointerCarryingOnly && !carriesPointerType(call->getOperandTypes()) &&
           !carriesPointerType(call->getResultTypes()))
         continue;
 

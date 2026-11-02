@@ -70,7 +70,12 @@ The A3-specific test in #2628 is not counted as a pass on this A5 machine.
 
 Initial validation harness issues were corrected: Viewer needed the wheel's
 console scripts, and launcher tests needed the xdist worker_id fixture. A
-separate wheel-installed run is recorded in launcher-wheel.log.
+separate wheel-installed run passed all 296 tests in 65.66 seconds and is
+recorded in launcher-wheel-host.log. This host-side ABI/grid suite runs without
+LD_PRELOAD; all MSPTI hardware tests use the CANN library preload. An earlier
+wheel-installed launcher run with the preload exceeded its six-minute timeout
+while executing native probe subprocesses; its partial log is retained as
+launcher-wheel.log.
 
 Formatting was checked with YAPF 0.43.0, clang-format 19.1.6 and Ruff 0.9.1.
 The follow-up commit adds tests and this record, and normalizes inherited CRLF
@@ -119,3 +124,5 @@ Server evidence is under .validation/logs and .validation/repro in the candidate
 directory. Build/test/reproducer scripts are /home/j00957045/proton-combined-build.sh,
 /home/j00957045/proton-combined-test.sh and
 /home/j00957045/proton-instrumentation-reproduce.sh.
+The standalone host regression entry is
+/home/j00957045/proton-launcher-host-test.sh.

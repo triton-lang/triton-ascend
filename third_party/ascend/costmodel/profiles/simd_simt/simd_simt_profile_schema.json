@@ -510,6 +510,35 @@
       },
       "additionalProperties": false
     },
+    "kernel_launch_cost": {
+      "type": "object",
+      "required": [
+        "base_system_cycles",
+        "incremental_system_cycles_per_physical_program",
+        "overlap_norm_exponent",
+        "evidence"
+      ],
+      "properties": {
+        "base_system_cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "incremental_system_cycles_per_physical_program": {
+          "type": "number",
+          "minimum": 0
+        },
+        "overlap_norm_exponent": {
+          "type": "number",
+          "minimum": 1,
+          "description": "p-norm exponent used to combine physical-program distribution with the overlapping Stage resource body."
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "additionalProperties": false
+    },
     "kernel_timing": {
       "type": "object",
       "description": "Kernel-boundary residual and SYS_CNT conversion. Boundary curves may be separated by execution route and SuperBlock factor when independent minimal-kernel evidence shows different scalar/control shells.",
@@ -532,7 +561,8 @@
             "status",
             "target",
             "lowering_contract",
-            "task_envelope_system_cycles",
+            "completion_including_launch_system_cycles",
+            "initiation_interval_efficiency",
             "dynamic_cv_first_fill_system_cycles",
             "dynamic_cv_per_iteration_delta_system_cycles",
             "schedule_contract",
@@ -550,9 +580,16 @@
               "type": "string",
               "minLength": 1
             },
-            "task_envelope_system_cycles": {
+            "completion_including_launch_system_cycles": {
               "type": "number",
-              "exclusiveMinimum": 0
+              "exclusiveMinimum": 0,
+              "description": "Completion-inclusive recurrent-task envelope. It already owns launch overlap and is used instead of the generic additive launch envelope."
+            },
+            "initiation_interval_efficiency": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1,
+              "description": "Measured efficiency applied to the symbolic periodic initiation interval; the raw interval remains in diagnostics."
             },
             "dynamic_cv_first_fill_system_cycles": {
               "type": "number",
@@ -584,9 +621,26 @@
           "type": "number",
           "minimum": 0
         },
+        "launch_system_cycles_by_execution_domain": {
+          "type": "object",
+          "description": "Device-task launch envelope. The base is serial; the per-additional-program distribution term overlaps Stage/resource work through the calibrated p-norm.",
+          "required": [
+            "aiv",
+            "aic"
+          ],
+          "properties": {
+            "aiv": {
+              "$ref": "#/definitions/kernel_launch_cost"
+            },
+            "aic": {
+              "$ref": "#/definitions/kernel_launch_cost"
+            }
+          },
+          "additionalProperties": false
+        },
         "boundary_residual_system_cycles_by_physical_program_count": {
           "type": "object",
-          "description": "Measured residual after subtracting the minimal kernel's modeled Stage resource score, keyed by the number of physical programs launched.",
+          "description": "Legacy compatibility fallback used when an execution-domain launch formula is absent, keyed by physical program count.",
           "minProperties": 1,
           "patternProperties": {
             "^[1-9][0-9]*$": {
@@ -627,7 +681,7 @@
         },
         "global_load_boundary_residual_system_cycles_by_route": {
           "type": "object",
-          "description": "One-time residual for kernels containing at least one global load, relative to the minimal store-only boundary kernel and keyed by selected route.",
+          "description": "Route-specific completion reference for single-wave nontrivial global-load paths and dynamic dot loops. Runtime accounting subtracts the execution-domain launch envelope, so this does not duplicate launch or apply to pure direct-memory kernels.",
           "propertyNames": {
             "enum": [
               "all_simd",
@@ -639,6 +693,28 @@
             "type": "number",
             "minimum": 0
           }
+        },
+        "native_indirect_store_completion": {
+          "type": "object",
+          "required": [
+            "maximum_elements",
+            "signed_completion_system_cycles",
+            "evidence"
+          ],
+          "properties": {
+            "maximum_elements": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "signed_completion_system_cycles": {
+              "type": "number"
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         },
         "runtime_argument_setup_by_route": {
           "type": "object",
@@ -1285,6 +1361,26 @@
               "type": "number",
               "minimum": 0
             },
+            "large_minimum_rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "large_maximum_rows": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "large_minimum_extent": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "large_maximum_extent": {
+              "type": "integer",
+              "minimum": 2
+            },
+            "large_additional_completion_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
             "evidence": {
               "type": "string",
               "minLength": 1
@@ -1866,6 +1962,9 @@
           "type": "string",
           "minLength": 1
         },
+        "strided_short_completion": {
+          "$ref": "#/definitions/strided_short_completion"
+        },
         "independent_loop_load_group": {
           "type": "object",
           "required": [
@@ -1901,6 +2000,29 @@
             "maximum_operations": {
               "type": "integer",
               "minimum": 2
+            },
+            "evidence": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "independent_loop_composition_completion": {
+          "type": "object",
+          "required": [
+            "exp_div_pair_system_cycles_per_element",
+            "predicate_select_system_cycles_per_element",
+            "evidence"
+          ],
+          "properties": {
+            "exp_div_pair_system_cycles_per_element": {
+              "type": "number",
+              "minimum": 0
+            },
+            "predicate_select_system_cycles_per_element": {
+              "type": "number",
+              "minimum": 0
             },
             "evidence": {
               "type": "string",
@@ -2206,6 +2328,11 @@
           "type": "string",
           "minLength": 1
         },
+        "large_row_two_reduction_completion_system_cycles": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Per-iteration completion of a large-row, non-power-of-two SIMD Stage containing exactly two reductions."
+        },
         "scalarized_multi_result": {
           "type": "object",
           "required": [
@@ -2417,14 +2544,69 @@
           },
           "additionalProperties": false
         },
+        "strided_short_completion": {
+          "$ref": "#/definitions/strided_short_completion"
+        },
         "masked_strided_load_copy_completion": {
           "$ref": "#/definitions/masked_strided_copy_completion_map"
         },
         "masked_strided_store_copy_completion": {
           "$ref": "#/definitions/masked_strided_copy_completion_map"
         },
-        "strided_short_completion": {
-          "$ref": "#/definitions/strided_short_completion"
+        "masked_strided_store_kernel_startup_system_cycles": {
+          "type": "number",
+          "minimum": 0,
+          "description": "One-time MTE3 establishment for a matched SIMT masked strided-store loop; per-row service stays in the completion curve."
+        }
+      },
+      "additionalProperties": false
+    },
+    "strided_short_completion": {
+      "type": "object",
+      "required": [
+        "description"
+      ],
+      "properties": {
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "patternProperties": {
+        "^(simd|simt)_(load|store)_[a-z0-9_]+$": {
+          "$ref": "#/definitions/strided_short_slot"
+        }
+      },
+      "additionalProperties": false
+    },
+    "strided_short_slot": {
+      "type": "object",
+      "required": [
+        "intercept_system_cycles",
+        "coefficient_system_cycles",
+        "structural_constants",
+        "evidence"
+      ],
+      "properties": {
+        "intercept_system_cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "coefficient_system_cycles": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "structural_constants": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "additionalProperties": false
@@ -3321,6 +3503,14 @@
             "straight_line_completion_elements_per_system_cycle": {
               "type": "number",
               "exclusiveMinimum": 0
+            },
+            "straight_line_kernel_completion_system_cycles": {
+              "type": "number",
+              "minimum": 0
+            },
+            "non_unit_kernel_completion_system_cycles": {
+              "type": "number",
+              "minimum": 0
             },
             "straight_line_completion_evidence": {
               "type": "string",
@@ -4459,7 +4649,7 @@
     },
     "schema_version": {
       "const": 19,
-      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 19 replaces exact-signature route elapsed/completion fits with one generic Stage resource formula and a route-independent kernel boundary."
+      "description": "Machine-readable Stage Route Model hardware-profile layout. Version 19 uses generic Stage resource formulas and may supply a physical-program launch envelope for each execution domain."
     },
     "score_unit": {
       "type": "string",

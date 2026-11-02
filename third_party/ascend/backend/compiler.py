@@ -743,28 +743,31 @@ def _select_backend_resource_aware_factor(report, factor_resources, selected_fac
 
     routes = report_data.get("stage_model", {}).get("all_simt_factor_routes", {})
     legal_scores = {}
+    complete_scores = {}
     routes_by_factor = {}
     for factor_text, route in routes.items():
         try:
             factor = int(factor_text)
             score = float(route["total_system_cycles"])
+            complete_score = float(route.get("complete_kernel_system_cycles", score))
         except (KeyError, TypeError, ValueError):
             continue
         if route.get("legal", False) and factor in factor_resources:
             legal_scores[factor] = score
+            complete_scores[factor] = complete_score
             routes_by_factor[factor] = route
     if not legal_scores:
         return int(selected_factor), {}, report
 
-    adjusted_scores = dict(legal_scores)
+    adjusted_scores = dict(complete_scores)
     private_load_charges = {}
-    for factor, score in legal_scores.items():
+    for factor in legal_scores:
         charge = _backend_private_stack_load_charge(factor_resources[factor], routes_by_factor[factor], factor,
                                                     num_warps, private_load_group_cycles)
         if charge is None:
             continue
         private_load_charges[factor] = charge
-        adjusted_scores[factor] = score + charge["system_cycles"]
+        adjusted_scores[factor] = complete_scores[factor] + charge["system_cycles"]
 
     dominated = set()
     comparisons = []
@@ -815,6 +818,8 @@ def _select_backend_resource_aware_factor(report, factor_resources, selected_fac
         comparisons,
         "base_stage_model_scores": {str(factor): legal_scores[factor]
                                     for factor in ordered_factors},
+        "base_complete_kernel_scores": {str(factor): complete_scores[factor]
+                                        for factor in ordered_factors},
         "backend_adjusted_scores": {str(factor): adjusted_scores[factor]
                                     for factor in ordered_factors},
         "private_stack_load_charges":
@@ -846,17 +851,26 @@ def _select_backend_resource_aware_factor(report, factor_resources, selected_fac
                 top_key = ("logical_programs_per_scheduling_slot"
                            if key == "runtime_logical_programs_per_scheduling_slot" else key)
                 report_data[top_key] = chosen_route[key]
-        chosen_score = adjusted_scores[chosen]
+        private_stack_charge = (private_load_charges[chosen]["system_cycles"]
+                                if chosen in private_load_charges else 0.0)
+        chosen_score = legal_scores[chosen] + private_stack_charge
+        chosen_complete_score = adjusted_scores[chosen]
         candidate_costs = report_data.get("candidate_costs")
         if isinstance(candidate_costs, dict):
             candidate_costs["all_simt_only"] = chosen_score
+        candidate_elapsed_costs = report_data.get("candidate_elapsed_costs")
+        if isinstance(candidate_elapsed_costs, dict):
+            candidate_elapsed_costs["all_simt_only"] = chosen_complete_score
+        complete_candidate_costs = (candidate_elapsed_costs
+                                    if isinstance(candidate_elapsed_costs, dict) else candidate_costs)
+        if isinstance(complete_candidate_costs, dict):
             selectable = report_data.get("selectable_candidates", [])
             if not isinstance(selectable, list) or not selectable:
                 selectable = ["all_simt_only"]
             post_backend_scores = {}
             for candidate in selectable:
                 try:
-                    score = float(candidate_costs[candidate])
+                    score = float(complete_candidate_costs[candidate])
                 except (KeyError, TypeError, ValueError):
                     continue
                 if math.isfinite(score) and score >= 0.0:
@@ -883,12 +897,18 @@ def _select_backend_resource_aware_factor(report, factor_resources, selected_fac
             elapsed["pre_backend_base_selection_score"] = legal_scores[chosen]
             elapsed["base_selection_score"] = chosen_score
             elapsed["superblock_factor"] = chosen
+            for key in ("kernel_launch_execution_domain", "kernel_launch_system_cycles",
+                        "kernel_launch_body_overlap_system_cycles", "complete_fixed_system_cycles",
+                        "runtime_physical_program_count", "runtime_scheduling_slot_count"):
+                if key in chosen_route:
+                    elapsed_key = ("launch_execution_domain" if key == "kernel_launch_execution_domain" else
+                                   "fixed_system_cycles" if key == "complete_fixed_system_cycles" else key)
+                    elapsed[elapsed_key] = chosen_route[key]
             if chosen in private_load_charges:
                 elapsed["backend_private_stack_load_system_cycles"] = (private_load_charges[chosen]["system_cycles"])
-            fixed = float(elapsed.get("fixed_system_cycles", 0.0))
             frequency = float(elapsed.get("system_counter_frequency_mhz", 1000.0))
-            elapsed["predicted_system_counter_cycles"] = fixed + chosen_score
-            elapsed["predicted_microseconds"] = (fixed + chosen_score) / max(1.0, frequency)
+            elapsed["predicted_system_counter_cycles"] = chosen_complete_score
+            elapsed["predicted_microseconds"] = chosen_complete_score / max(1.0, frequency)
     updated_report = json.dumps(report_data, sort_keys=True, separators=(",", ":"))
     return chosen, feedback, updated_report
 

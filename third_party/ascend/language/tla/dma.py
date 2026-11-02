@@ -8,8 +8,8 @@ Shape, dtype and hardware restrictions are checked by the backend verifier.
 from dataclasses import dataclass
 from enum import Enum, IntEnum
 
-from triton.language.core import builtin, float32, _unwrap_if_constexpr
-from .core import buffer
+from triton.language.core import builtin, float32, tensor, _unwrap_if_constexpr
+from .core import buffer, _scalar_index
 
 
 class PadMode(Enum):
@@ -440,6 +440,52 @@ def load_gm_to_ub(src, dst, params=None, _semantic=None):
                                       pad_value=_scalar(p.pad_value, _semantic, src.dtype),
                                       left_padding_num=_scalar(p.left_padding_num, _semantic),
                                       right_padding_num=_scalar(p.right_padding_num, _semantic))
+
+
+@builtin
+def load_gm_to_ub_strided(src, dst, offset, row_stride, rows=None, _semantic=None):
+    """Load contiguous rows from a linear GM view using a runtime row pitch.
+
+    ``src`` is a rank-one, unit-stride GM buffer; ``dst`` is a rank-two UB
+    buffer with unit inner stride. Both have the same element type. The copy
+    writes ``rows`` rows and ``dst.shape[1]`` columns, leaving all other UB
+    elements untouched. ``rows=None`` selects all destination rows.
+
+    ``offset`` and ``row_stride`` are measured in elements relative to the
+    current source view. Source offset and destination offset/pitch are
+    preserved. Each argument may be a signed int32/int64 scalar tensor or a
+    Python integer fitting signed int64.
+    Statically known bounds are checked. At runtime, callers must ensure
+    ``0 <= offset``, ``1 <= rows <= dst.shape[0]``, row pitch at least the
+    copied width, and the full source range in bounds. The native DMA backend
+    checks target-specific dtype, alignment and transfer-size restrictions.
+
+    This emits ordinary memref views and one ``hivm.hir.load``. It does not
+    allocate memory, gather arbitrary indices, pad data or add a barrier.
+    """
+    _route(src, dst, (("gm", "ub"), ))
+    if src.dtype != dst.dtype:
+        raise TypeError("strided GM-to-UB load requires matching element types")
+    if len(src.shape) != 1 or src.strides != (1, ) or len(dst.shape) != 2 or dst.strides[1] != 1:
+        raise ValueError("strided GM-to-UB load requires unit-stride rank-one GM and row-contiguous rank-two UB")
+    width = dst.shape[1]
+    if dst.strides[0] < width:
+        raise ValueError("strided GM-to-UB destination rows must not overlap")
+    rows = dst.shape[0] if _unwrap_if_constexpr(rows) is None else rows
+    offset, row_stride, rows = (_scalar_index(x) for x in (offset, row_stride, rows))
+    if isinstance(offset, int) and offset < 0:
+        raise ValueError("strided GM-to-UB offset must be nonnegative")
+    if isinstance(row_stride, int) and row_stride < width:
+        raise ValueError("strided GM-to-UB row_stride must be at least the copied width")
+    if isinstance(rows, int) and not 1 <= rows <= dst.shape[0]:
+        raise ValueError("strided GM-to-UB rows must fit the destination")
+    if width > src.shape[0] or isinstance(offset, int) and offset + width > src.shape[0]:
+        raise ValueError("strided GM-to-UB load exceeds the source view")
+    if all(isinstance(x, int) for x in (offset, row_stride, rows)):
+        if offset + (rows - 1) * row_stride + width > src.shape[0]:
+            raise ValueError("strided GM-to-UB load exceeds the source view")
+    mixed = [x.handle if isinstance(x, tensor) else x for x in (offset, row_stride, rows)]
+    _semantic.builder.create_tla_load_strided(src.handle, dst.handle, *mixed)
 
 
 @builtin

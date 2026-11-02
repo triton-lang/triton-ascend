@@ -17,7 +17,7 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Workspace sizing for issue #2797 on the native shared-runtime launcher."""
+"""Workspace sizing must use the full 64-bit logical program count."""
 import shutil
 import subprocess
 from pathlib import Path
@@ -32,7 +32,7 @@ AUTO_MAP = launcher.AUTO_MAP
 @pytest.fixture(scope="module")
 def workspace_probe(tmp_path_factory):
     """Build a header-only probe around prepareGrid + checkedMultiply."""
-    source = Path(__file__).with_name("launcher_workspace_probe.cpp")
+    source = Path(__file__).resolve().parents[1] / "launcher_ut" / "launcher_workspace_probe.cpp"
     output = tmp_path_factory.mktemp("workspace-probe") / "probe"
     compiler = shutil.which("c++") or utils._get_bisheng_path()
     subprocess.run([
@@ -50,7 +50,7 @@ def _run(probe, flags, physical, grid, workspace_size):
     return out.split()
 
 
-def test_issue_shape_workspace_is_not_truncated(workspace_probe):
+def test_reported_shape_workspace_is_not_truncated(workspace_probe):
     """262144 x 16384 bytes: the reported shape must exceed 32-bit sizes."""
     values = _run(workspace_probe, 0, 40, (256, 64, 1), 262144)
     logical, physical, total = map(int, values)

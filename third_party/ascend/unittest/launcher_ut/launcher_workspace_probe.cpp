@@ -5,11 +5,12 @@
 #include <cstdlib>
 #include <iostream>
 
-// Header-only probe for issue #2797: workspace sizing must use the full 64-bit
-// program count, while the block count handed to CANN stays 32-bit.
+// Standalone probe for the header-only grid helpers in launcher_args.h: the
+// workspace multiplies the full 64-bit logical program count, while the block
+// count handed to CANN stays 32-bit.
 //
-// usage: workspace_probe <flags> <physical_blocks> <gridX> <gridY> <gridZ>
-// <workspace_size>
+// usage: launcher_workspace_probe <flags> <physical_blocks> <gridX> <gridY>
+// <gridZ> <workspace_size>
 int main(int argc, char **argv) {
   if (argc != 7)
     return 2;

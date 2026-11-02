@@ -46,5 +46,3 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       endif()
   endforeach()
 endif()
-
-add_subdirectory(TTIRLayoutMerge)

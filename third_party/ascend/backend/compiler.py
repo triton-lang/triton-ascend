@@ -333,13 +333,6 @@ def make_ttir(mod, metadata, opt):
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
     pm.run(mod, 'make_ttir')
-    if opt.enable_interleaved_access_packing:
-        pm = ir.pass_manager(mod.context)
-        pm.enable_debug()
-        ascend.passes.ttir.add_pack_interleaved_access(pm)
-        passes.common.add_canonicalizer(pm)
-        passes.common.add_cse(pm)
-        pm.run(mod, 'pack_interleaved_access')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
         print(f"Dumping intermediate results to {dump_manager.cache_dir}")
@@ -613,7 +606,12 @@ def get_common_bishengir_compile_options(metadata):
     if _is_a5_target_arch(bishengir_target):
         bishengir_target = "Ascend950"
     bishengir_target_opt = f"--target={bishengir_target}"
-    return [bishengir_target_opt]
+    options = [bishengir_target_opt]
+    # NPU-IR owns the transformation and scopes it to its SIMT pipeline,
+    # including outlined SIMT modules in mixed-mode compilation.
+    if metadata.get("enable_interleaved_access_packing", False):
+        options.append("--enable-interleaved-access-packing=true")
+    return options
 
 
 @functools.lru_cache()

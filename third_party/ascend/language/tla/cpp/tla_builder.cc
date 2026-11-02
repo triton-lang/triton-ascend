@@ -438,6 +438,12 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "mod") {
               result = self.create<hivmave::VFModOp>(resTy, lhs, rhs, mask)
                            .getResult();
+            } else if (kind == "absdiff") {
+              result = self.create<hivmave::VFAbsDiffOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "expdif") {
+              result = self.create<hivmave::VFExpdifOp>(resTy, lhs, rhs, mask)
+                           .getResult();
             } else if (kind == "max") {
               result = self.create<hivmave::VFMaxOp>(resTy, lhs, rhs, mask)
                            .getResult();
@@ -543,9 +549,18 @@ void init_tla_builder(py::module &&m) {
              std::string mode) -> Value {
             auto resTy = src.getType();
             Value result;
-            if (kind == "neg") {
+            if (kind == "abs") {
+              result =
+                  self.create<hivmave::VFAbsOp>(resTy, src, mask).getResult();
+            } else if (kind == "neg") {
               result =
                   self.create<hivmave::VFNegOp>(resTy, src, mask).getResult();
+            } else if (kind == "not") {
+              result =
+                  self.create<hivmave::VFNotOp>(resTy, src, mask).getResult();
+            } else if (kind == "relu") {
+              result =
+                  self.create<hivmave::VFReluOp>(resTy, src, mask).getResult();
             } else if (kind == "sqrt") {
               result =
                   self.create<hivmave::VFSqrtOp>(resTy, src, mask).getResult();

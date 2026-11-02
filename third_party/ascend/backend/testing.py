@@ -266,7 +266,7 @@ def _collect_prof_result(
 
 
 try:
-    from mspti import KernelMonitor
+    from mspti import KernelMonitor, MsptiResult
 except ImportError:
     KernelMonitor = None
 
@@ -312,12 +312,15 @@ def do_bench_npu_mspti(
             return
         if target_kernel_name is not None and target_kernel_name not in data.name:
             return
-        all_kernel_durations.append(data.end - data.start)
+        all_kernel_durations.append((data.start, data.end - data.start))
 
     monitor = KernelMonitor()
     torch.npu.synchronize()
 
-    monitor.start(callback)
+    result = monitor.start(callback)
+    if result != MsptiResult.MSPTI_SUCCESS:
+        monitor.stop()
+        raise RuntimeError(f"msPTI start failed: {result}")
 
     try:
         total = warmup + active
@@ -328,11 +331,17 @@ def do_bench_npu_mspti(
                     torch.npu.synchronize()
                 fn()
                 torch.npu.synchronize()
-    finally:
         torch.npu.synchronize()
+    except BaseException:
         monitor.stop()
+        raise
+    else:
+        result = monitor.stop()
+        if result != MsptiResult.MSPTI_SUCCESS:
+            raise RuntimeError(f"msPTI stop failed: {result}")
 
-    return _npu_bench_scores([duration / 1e6 for duration in all_kernel_durations], funcs, warmup, active, quantiles,
+    all_kernel_durations.sort(key=lambda row: row[0])
+    return _npu_bench_scores([duration / 1e6 for _, duration in all_kernel_durations], funcs, warmup, active, quantiles,
                              means)
 
 
@@ -379,16 +388,22 @@ def do_bench_npu(
     if _active_limit is not None:
         active = min(active, _active_limit)
         budget = 0
+    profiler_mode = knobs.ascend.bench_profiler_mode.strip().lower()
+    if profiler_mode not in ("auto", "torch_npu", "mspti"):
+        raise ValueError("Invalid TRITON_NPU_BENCH_PROFILER_MODE")
     if not isinstance(funcs, list):
         funcs = [funcs]
         use_autotune = False
     else:
         use_autotune = knobs.ascend.bench_method.lower() == "npu"
 
-    force_fallback = (prof_dir is not None) or keep_res or (target_kernel_name is not None and not use_autotune)
+    force_fallback = (profiler_mode == "torch_npu" or prof_dir is not None or keep_res
+                      or (target_kernel_name is not None and not use_autotune and profiler_mode == "auto"))
     mspti_available = KernelMonitor is not None
     if not force_fallback:
         if not mspti_available:
+            if profiler_mode == "mspti":
+                raise RuntimeError("mspti package not found")
             print("[WARNING] mspti package not found. Falling back to torch_npu.profiler.")
         else:
             _check_mspti_env()
@@ -410,7 +425,10 @@ def do_bench_npu(
                 values = results if isinstance(results, list) else [results]
                 need_fallback = not all(math.isfinite(value) and value > 0 for value in values)
             except Exception:
-                pass
+                if profiler_mode == "mspti":
+                    raise
+            if profiler_mode == "mspti":
+                need_fallback = False
         if need_fallback:
             means.clear()
             batch_dir = os.path.join(base_dir, f"batch_{batch}") if batches > 1 else prof_dir

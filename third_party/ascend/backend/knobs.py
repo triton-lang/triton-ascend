@@ -69,6 +69,7 @@ class ascend_knobs(_knobs.base_knobs):
     bench_measure_budget_ms: str = _knobs.env_str("TRITON_NPU_BENCH_MEASURE_BUDGET_MS", "0")
     bench_max_retries: int = _knobs.env_int("TRITON_NPU_BENCH_MAX_RETRIES", 0)
     bench_cache_mode: str | None = _knobs.env_opt_str("TRITON_NPU_BENCH_CACHE_MODE")
+    bench_profiler_mode: str = _knobs.env_str("TRITON_NPU_BENCH_PROFILER_MODE", "auto")
     bench_single_config: bool = _knobs.env_bool("TRITON_NPU_BENCH_SINGLE_CONFIG", False)
 
     # Launcher / runtime switches.

@@ -69,8 +69,10 @@ from .dma import (
     copy_l0c_to_l1,
     set_ctrl,
 )
+
 from .view import view, subview, reshape
-from .aux_ops import annotate_buffer_versions
+from .aux_ops import annotate_buffer_versions, assume
+
 from . import math
 from .math import compensated_rstd, truncmod
 from .debug import device_assert, device_print
@@ -158,6 +160,7 @@ __all__ = [
 
     # aux ops
     "annotate_buffer_versions",
+    "assume",
 
     # simd ops
     "simd",

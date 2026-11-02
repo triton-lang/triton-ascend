@@ -483,10 +483,10 @@ static void mapStridedShortMemoryCompletion(
 
 namespace {
 
-static void mapMaskedStridedCopyCompletion(
-    const LogicalStage &stage, const StageWorkload &work,
-    const StageModeProfile &profile, StageResourceCycles &resources,
-    llvm::ArrayRef<const StageMemoryAccess *> claimed) {
+static void mapMaskedStridedCopyCompletion(const LogicalStage &stage,
+                                           const StageWorkload &work,
+                                           const StageModeProfile &profile,
+                                           StageResourceCycles &resources) {
   if (stage.costModelKind != StageCostModelKind::IndependentPipelinedLoop ||
       stage.features.synchronizationCount != 0 ||
       stage.features.conditionalBranchCount != 0 ||
@@ -543,12 +543,10 @@ static void mapMaskedStridedCopyCompletion(
   const auto curve = curves->find(stridedAccess->rowStrideBytes());
   if (curve == curves->end())
     return;
-  // A strided access already priced by the closed-form strided-direct
-  // mechanism yields this floor: otherwise both charge the same bytes, and the
-  // measured absolute cost says the closed form is the more accurate of the
-  // two.  Accesses it did not claim keep the floor exactly as before.
-  if (llvm::is_contained(claimed, stridedAccess))
-    return;
+  // The closed-form strided-direct curve is a steady-state marginal, while
+  // this paired masked-copy curve is a completion floor.  They own the same
+  // transfer, so take their maximum even when the strided mechanism claimed
+  // the access; never add them.
   const auto floor =
       curve->second.evaluate(stridedAccess->rowCount(), stage.iterationCount);
   if (floor)
@@ -2355,6 +2353,16 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
                       profile.reductionOperationSetupCycles +
                   work.shuffleLaneSteps / profile.reductionLaneStepsPerCycle
             : work.shuffleLaneSteps / profile.shuffleLanesPerCycle;
+    if (simd && profile.largeRowTwoReductionCompletionCycles > 0.0 &&
+        work.reductionOperations == 2.0 &&
+        work.reductionGeometryCounts.size() == 1) {
+      const auto &[geometry, count] = *work.reductionGeometryCounts.begin();
+      const auto [rows, extent, elementBits] = geometry;
+      if (count > 0.0 && rows > profile.irregularTileSmallRowMaximumRows &&
+          extent > 1 && !llvm::isPowerOf2_64(extent) && elementBits == 32)
+        resources.reduction +=
+            count * profile.largeRowTwoReductionCompletionCycles;
+    }
     if (simd && profile.scalarizedMultiResultReductionMinimumExtent > 0 &&
         profile.scalarizedMultiResultReductionReferenceResults > 0 &&
         profile.scalarizedMultiResultReductionElementsPerCycle > 0.0) {
@@ -2666,8 +2674,7 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
     // old flat-throughput bound without charging those bytes a second time.
     resources.store = std::max(resources.store, resources.storeLayoutService);
   }
-  mapMaskedStridedCopyCompletion(stage, work, profile, resources,
-                                 stridedShortAlreadyClaimed);
+  mapMaskedStridedCopyCompletion(stage, work, profile, resources);
   return materializeControlFlow(stage, mode, resources, profile.controlFlow);
 }
 
@@ -2773,6 +2780,18 @@ mapOrdinaryReduction(const LogicalStage &stage,
   if (!mapped)
     return std::nullopt;
   result.resources = *mapped;
+  if (mode == ReductionMode::SIMD &&
+      modeProfile.largeRowTwoReductionCompletionCycles > 0.0 &&
+      stage.workload.reductionOperations == 2.0 &&
+      stage.workload.reductionGeometryCounts.size() == 1) {
+    const auto &[geometry, count] =
+        *stage.workload.reductionGeometryCounts.begin();
+    const auto [rows, extent, elementBits] = geometry;
+    if (count > 0.0 && rows > modeProfile.irregularTileSmallRowMaximumRows &&
+        extent > 1 && !llvm::isPowerOf2_64(extent) && elementBits == 32)
+      result.resources.reduction +=
+          count * modeProfile.largeRowTwoReductionCompletionCycles;
+  }
   return result;
 }
 
@@ -3612,7 +3631,13 @@ bool StageModeProfile::isValid(StageMode mode) const {
       !finiteNonNegative({loadOperationSetupCycles, storeOperationSetupCycles,
                           reductionOperationSetupCycles,
                           reductionLaneStepsPerCycle,
-                          maskedAccumulatorReductionCompletionSetupCycles}) ||
+                          largeRowTwoReductionCompletionCycles,
+                          maskedAccumulatorReductionCompletionSetupCycles,
+                          maskedStridedStoreKernelStartupCycles,
+                          independentLoopExpDivPairCyclesPerElement,
+                          independentLoopPredicateSelectCyclesPerElement,
+                          straightLinePrefixScanKernelCompletionCycles,
+                          nonUnitPrefixScanKernelCompletionCycles}) ||
       maximumReversePrefixScanExtent < 0)
     return false;
   const bool hasScalarizedMultiResultReduction =
@@ -4100,8 +4125,18 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
   table.simdLoadOperationStartupCycles = profile.simd.loadOperationSetupCycles;
   table.simdIndependentLoadGroupKernelStartupCycles =
       profile.simd.independentLoadGroupKernelStartupCycles;
+  table.simdIndependentLoopExpDivPairCyclesPerElement =
+      profile.simd.independentLoopExpDivPairCyclesPerElement;
+  table.simdIndependentLoopPredicateSelectCyclesPerElement =
+      profile.simd.independentLoopPredicateSelectCyclesPerElement;
+  table.simtMaskedStridedStoreKernelStartupCycles =
+      profile.simt.maskedStridedStoreKernelStartupCycles;
   table.simtStraightLinePrefixScanElementsPerCycle =
       profile.simt.straightLinePrefixScanElementsPerCycle;
+  table.simtStraightLinePrefixScanKernelCompletionCycles =
+      profile.simt.straightLinePrefixScanKernelCompletionCycles;
+  table.simdNonUnitPrefixScanKernelCompletionCycles =
+      profile.simd.nonUnitPrefixScanKernelCompletionCycles;
   table.simtStraightLinePrefixScanCompletionEvidence =
       profile.simt.straightLinePrefixScanCompletionEvidence;
   table.wholeSimdCompletionCurves = profile.simd.wholeSimdCompletionCurves;
@@ -4224,7 +4259,16 @@ StageCostEvaluator::evaluate(const StagePartition &partition,
     logicalCost.localSimtFactors = stage.localSimtFactors;
 
     llvm::SmallVector<StageImplementation> implementations;
-    if (stage.simdLegal &&
+    const bool simdAtomicLowerable = llvm::none_of(
+        stage.workload.atomicWorkloads, [](const AtomicWorkload &atomic) {
+          return atomic.kind == "fadd" && atomic.dataType == "f32" &&
+                 atomic.resultUsed;
+        });
+    const bool simdPrefixScanLowerable =
+        llvm::none_of(stage.workload.prefixScanCounts, [](const auto &entry) {
+          return entry.second > 0.0 && std::get<3>(entry.first) > 1;
+        });
+    if (stage.simdLegal && simdAtomicLowerable && simdPrefixScanLowerable &&
         modeSupportsPrefixScan(stage, profile.simd, StageMode::SIMD))
       implementations.push_back({StageMode::SIMD, 1, false});
     if (stage.simtLegal)

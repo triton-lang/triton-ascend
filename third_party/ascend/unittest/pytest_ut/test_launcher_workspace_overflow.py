@@ -56,7 +56,7 @@ def _generate(workspace_size):
 
 
 def test_workspace_block_count_is_widened_before_multiply():
-    """Issue #2797: gridX * gridY * gridZ must not be truncated to uint32.
+    """gridX * gridY * gridZ must not be truncated to uint32.
 
     Both launch paths used to declare ``uint32_t blockNum4Workspace =
     gridX * gridY * gridZ;``. A grid whose product exceeds 2**32 - 1 wrapped

@@ -22,15 +22,16 @@
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/UpdateLoopIterTimes.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
-#include "bishengir/Dialect/Annotation/IR/Annotation.h"
-#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
-#include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
+#include "mlir/IR/PatternMatch.h"
+#include "mlir/Pass/PassManager.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/Support/Debug.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateLoopIterTimes";
@@ -38,124 +39,9 @@ static constexpr const char *DEBUG_TYPE = "UpdateLoopIterTimes";
 #define LDBG(...) LLVM_DEBUG(DBGS() << __VA_ARGS__ << "\n")
 
 using llvm::DenseMap;
-using llvm::DenseSet;
 using llvm::SmallVector;
 using namespace mlir;
 using namespace triton;
-using namespace hivm;
-
-// Find the IfOp index that an operation belongs to
-// Uses isAncestor to check if the operation is within the IfOp's region
-static int findIfOpIndexInList(Operation *op, SmallVector<scf::IfOp> &ifOps,
-                               llvm::DenseMap<Operation *, int> &ifOpIndex) {
-  for (scf::IfOp ifOp : ifOps) {
-    if (ifOp->isAncestor(op)) {
-      return ifOpIndex[ifOp.getOperation()];
-    }
-  }
-  return -1;
-}
-
-// Filter out entries where consumer op is not inside the specified forOp
-static ConsumerProducerMap
-filterCrossCoreMapByForOp(scf::ForOp forOp, ConsumerProducerMap &crossCoreMap) {
-  ConsumerProducerMap filteredMap;
-  for (auto &entry : crossCoreMap) {
-    Operation *consumerOp = entry.first;
-    if (!forOp->isAncestor(consumerOp)) {
-      continue;
-    }
-    filteredMap[consumerOp] = entry.second;
-  }
-  return filteredMap;
-}
-
-// Find the other side's mainloop with the same mainloop id in the module
-// currentIsCube/currentIsVector indicates which side is the current scope
-// Returns the forOp of the other side's mainloop, or nullptr if not found
-static scf::ForOp getOtherScopeMainloop(ModuleOp module, bool currentIsCube,
-                                        bool currentIsVector, int mainLoopId) {
-  scf::ForOp otherSideForOp = nullptr;
-  int ret = 1;
-
-  module.walk([&](scope::ScopeOp scopeOp) {
-    // Determine this scope's type
-    bool scopeIsCube = false;
-    bool scopeIsVector = false;
-    if (failed(getScopeType(scopeOp, scopeIsCube, scopeIsVector))) {
-      ret = -1;
-      LDBG("failed to get ScopeOp core type!");
-      return mlir::WalkResult::interrupt();
-    }
-
-    // Only proceed when current is cube and scope is vector, or current is
-    // vector and scope is cube
-    bool isOtherSide =
-        (currentIsCube && scopeIsVector) || (currentIsVector && scopeIsCube);
-    if (!isOtherSide) {
-      return WalkResult::advance();
-    }
-
-    // Walk for loops inside this scope to find the one with matching mainloop
-    // id
-    scopeOp.walk([&](Operation *op) {
-      if (op->hasAttr(CVPipeline::kMainLoop)) {
-        // Support both ForOp and WhileOp for mainloop
-        bool isValidLoop = isa<scf::ForOp>(op) || isa<scf::WhileOp>(op);
-        if (!isValidLoop) {
-          LDBG("mainloop must be ForOp or WhileOp!");
-          return WalkResult::advance();
-        }
-
-        // Only cast to ForOp for compatibility with current interface
-        // WhileOp will be skipped in later steps
-        auto targetForOp = dyn_cast<scf::ForOp>(op);
-        if (!targetForOp) {
-          // WhileOp case: skip for now, will be handled separately
-          return WalkResult::advance();
-        }
-
-        auto targetMainLoopId =
-            targetForOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
-        if (targetMainLoopId && targetMainLoopId.getInt() == mainLoopId) {
-          otherSideForOp = targetForOp;
-          return WalkResult::interrupt();
-        }
-      }
-      return WalkResult::advance();
-    });
-
-    if (otherSideForOp) {
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-
-  if (ret == -1) {
-    return nullptr;
-  } else {
-    return otherSideForOp;
-  }
-}
-
-// Check if the current compute block runs first by checking if the first ifOp
-// has any consumer defOp Returns true if the current compute block runs first
-// (no consumer in first ifOp) Returns false if the current compute block runs
-// later (has consumer in first ifOp)
-static bool isRunFirst(SmallVector<scf::IfOp> &ifOps,
-                       ConsumerProducerMap &crossDeps) {
-  if (ifOps.empty()) {
-    return true;
-  }
-  scf::IfOp firstIfOp = ifOps[0];
-  for (auto &entry : crossDeps) {
-    Operation *consumerOp = entry.first;
-    if (consumerOp && firstIfOp->isAncestor(consumerOp)) {
-      return false;
-    }
-  }
-  return true;
-}
 
 // Type definition for IfOp filter function
 // Returns true if the IfOp should be collected, false otherwise
@@ -163,20 +49,6 @@ using IfOpFilter = std::function<bool(scf::IfOp)>;
 
 // Default filter that accepts all IfOps
 static bool defaultIfOpFilter(scf::IfOp ifOp) { return true; }
-
-// Filter that checks if IfOp contains sync_block_wait or sync_block_set op
-static bool syncBlockFilter(scf::IfOp ifOp) {
-  bool containsSyncBlock = false;
-  ifOp.walk([&](Operation *innerOp) {
-    if (isa<hivm::SyncBlockWaitOp>(innerOp) ||
-        isa<hivm::SyncBlockSetOp>(innerOp)) {
-      containsSyncBlock = true;
-      return WalkResult::interrupt();
-    }
-    return WalkResult::advance();
-  });
-  return containsSyncBlock;
-}
 
 // Collect ifOps from forOp based on the provided filter
 // Fills ifOps and ifOpIndexMap with the collected ifOps
@@ -217,631 +89,6 @@ bool collectIfOps(scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
   }
 
   return true;
-}
-
-// Helper function to find the other side's mainloop and collect its ifOps
-// Returns the other side's forOp and fills otherSideIfOps with ifOps from that
-// mainloop Returns nullptr if not found
-static scf::ForOp findOtherSideMainloopAndIfOps(
-    scf::ForOp currentForOp, bool currentIsCube, bool currentIsVector,
-    SmallVector<scf::IfOp> &otherSideIfOps,
-    llvm::DenseMap<Operation *, int> &otherSideIfOpIndexMap) {
-  otherSideIfOps.clear();
-  otherSideIfOpIndexMap.clear();
-
-  // Get current forOp's mainloop id
-  auto currentMainLoopId =
-      currentForOp->getAttrOfType<IntegerAttr>(CVPipeline::kMainLoop);
-  if (!currentMainLoopId) {
-    LDBG("Current forOp does not have main_loop id!");
-    return nullptr;
-  }
-  int mainLoopId = currentMainLoopId.getInt();
-
-  // Find the other side's mainloop with the same mainloop id
-  // Traverse up the parent chain to find ModuleOp
-  Operation *currentOp = currentForOp->getParentOp();
-  ModuleOp module = nullptr;
-  while (currentOp) {
-    if (auto mod = dyn_cast<ModuleOp>(currentOp)) {
-      module = mod;
-      break;
-    }
-    currentOp = currentOp->getParentOp();
-  }
-  if (!module) {
-    LDBG("Can not find ModuleOp in parent chain!");
-    return nullptr;
-  }
-
-  // Find other side mainloop with the same mainloop id
-  scf::ForOp otherSideForOp =
-      getOtherScopeMainloop(module, currentIsCube, currentIsVector, mainLoopId);
-
-  if (!otherSideForOp) {
-    LDBG("Can not find the other side's mainloop with id: " << mainLoopId);
-    return nullptr;
-  }
-
-  // Collect ifOps from the other side's mainloop
-  // Only collect ifOps that contain hivm.hir.sync_block_wait op
-  if (!collectIfOps(otherSideForOp, otherSideIfOps, otherSideIfOpIndexMap,
-                    syncBlockFilter)) {
-    LDBG("Failed to collect ifOps from other side mainloop!");
-    return nullptr;
-  }
-
-  return otherSideForOp;
-}
-
-// calculateFactor computes the buffer factor needed for loop iteration
-// extension Core idea: if producer ifOp (n) and consumer ifOp (m) have
-// dependency, we need (m - n + 1) buffers to support the loop extension This
-// function handles both intra-core and cross-core dependencies Returns
-// {maxRequiredBuffers, x} for computing: ceil(original_iter_count *
-// requiredBuffers / x) + ifCount
-std::pair<int, int> UpdateLoopIterTimesPass::calculateFactor(scf::ForOp forOp) {
-  int maxRequiredBuffers = 1;
-  int maxX = 1;
-
-  // Step1: Collect all IfOps with ssbuffer.if attribute in this for loop
-  SmallVector<scf::IfOp> ifOps;
-  DenseMap<Operation *, int> ifOpIndex;
-  if (!collectIfOps(forOp, ifOps, ifOpIndex)) {
-    LDBG("Failed to collect ifOps!");
-    return {-1, -1};
-  }
-
-  // Step2: Calculate factor based on intra-core dependencies
-  bool hasIntraDeps = info->intraCoreDependentMap.count(forOp) &&
-                      !info->intraCoreDependentMap[forOp].empty();
-  bool hasCrossDeps = !info->crossCoreDependentMap.empty();
-
-  // If no dependencies at all, return factor = 1
-  if (!hasIntraDeps && !hasCrossDeps) {
-    return {1, 1};
-  }
-
-  // Calculate intra-core factor
-  if (hasIntraDeps) {
-    auto &intraDeps = info->intraCoreDependentMap[forOp];
-    auto [intraRequiredBuffers, intraX] =
-        calculateIntraDepsFactor(ifOps, ifOpIndex, intraDeps);
-    if (intraRequiredBuffers == -1 || intraX == -1) {
-      LDBG("calculateIntraDepsFactor failed!");
-      return {-1, -1};
-    }
-    maxRequiredBuffers = intraRequiredBuffers;
-    maxX = intraX;
-  }
-
-  // Calculate cross-core factor and merge with intra-core factor
-  if (hasCrossDeps) {
-    // Filter out entries where consumer op is not inside current forOp
-    ConsumerProducerMap filteredCrossCoreMap =
-        filterCrossCoreMapByForOp(forOp, info->crossCoreDependentMap);
-
-    // for caculating the crossdeps, need to filter ifblocks without
-    // sync_wait/sync_set op
-    SmallVector<scf::IfOp> filterIfOps;
-    DenseMap<Operation *, int> filterIfOpIndex;
-    if (!collectIfOps(forOp, filterIfOps, filterIfOpIndex, syncBlockFilter)) {
-      LDBG("Failed to collect filtered ifOps!");
-      return {-1, -1};
-    }
-
-    auto [crossRequiredBuffers, crossX] = calculateCrossDepsFactor(
-        forOp, filterIfOps, filterIfOpIndex, filteredCrossCoreMap);
-    if (crossRequiredBuffers == -1 || crossX == -1) {
-      LDBG("calculateCrossDepsFactor failed!");
-      return {-1, -1};
-    }
-
-    // Update maxRequiredBuffers/maxX
-    if (crossRequiredBuffers * maxX > maxRequiredBuffers * crossX) {
-      maxRequiredBuffers = crossRequiredBuffers;
-      maxX = crossX;
-    }
-  }
-
-  // Step3: Calculate factor based on iteration dependencies (tensor iter_args
-  // dependencies)
-  bool hasIterDeps = info->tensorIterArgDepsMap.count(forOp) &&
-                     !info->tensorIterArgDepsMap[forOp].empty();
-
-  if (hasIterDeps) {
-    LDBG("find cross-iteration dependency, size: "
-         << info->tensorIterArgDepsMap[forOp].size());
-    auto [iterRequiredBuffers, iterX] =
-        calculateIterDepsFactor(forOp, ifOps, ifOpIndex);
-    if (iterRequiredBuffers == -1 || iterX == -1) {
-      LDBG("calculateIterDepsFactor failed!");
-      return {-1, -1};
-    }
-    // Compare iterRequiredBuffers/iterX vs maxRequiredBuffers/maxX
-    // Take the larger fraction
-    if (iterRequiredBuffers * maxX > maxRequiredBuffers * iterX) {
-      maxRequiredBuffers = iterRequiredBuffers;
-      maxX = iterX;
-    }
-  }
-
-  return {maxRequiredBuffers, maxX};
-}
-
-static int getConsumerIfOpIndex(Operation *consumerOp,
-                                SmallVector<scf::IfOp> &ifOps,
-                                llvm::DenseMap<Operation *, int> &ifOpIndex) {
-  if (!consumerOp) {
-    LDBG("consumerOp is null!");
-    return -1;
-  }
-  int idx = findIfOpIndexInList(consumerOp, ifOps, ifOpIndex);
-  if (idx == -1) {
-    LDBG("Can not find the consumerOp in any ifOps!");
-    return -1;
-  }
-  return idx;
-}
-
-static int getProducerIfOpIndex(SmallVector<Operation *> &producerOps,
-                                SmallVector<scf::IfOp> &ifOps,
-                                llvm::DenseMap<Operation *, int> &ifOpIndex) {
-  if (producerOps.empty()) {
-    LDBG("consumer do not have the producerOps!");
-    return -1;
-  }
-
-  int producerIfOpIndex = -1;
-  for (Operation *producerOp : producerOps) {
-    int currentIndex = findIfOpIndexInList(producerOp, ifOps, ifOpIndex);
-
-    if (currentIndex == -1) {
-      LDBG("ProducerOp not found in any ifOps: " << *producerOp);
-      return -1;
-    }
-
-    // First producer found
-    if (producerIfOpIndex == -1) {
-      producerIfOpIndex = currentIndex;
-    } else {
-      // Check if all producers are in the same ifOp
-      if (currentIndex != producerIfOpIndex) {
-        LDBG("ProducerOps are not in the same ifOp! "
-             << "First producer ifOp index: " << producerIfOpIndex
-             << ", Current producer ifOp index: " << currentIndex);
-        return -1;
-      }
-    }
-  }
-
-  if (producerIfOpIndex == -1) {
-    LDBG("All producerOps are not found in any ifOps!");
-    return -1;
-  }
-
-  return producerIfOpIndex;
-}
-
-std::pair<int, int> UpdateLoopIterTimesPass::calculateIntraDepsFactor(
-    SmallVector<scf::IfOp> &ifOps, DenseMap<Operation *, int> &ifOpIndex,
-    llvm::DenseMap<Operation *, SmallVector<Operation *>> &deps) {
-  int maxRequiredBuffers = 1;
-  int maxX = 1;
-
-  // Iterate all dependencies and calculate required buffer count
-  for (auto &entry : deps) {
-    Operation *consumerOp = entry.first;                 // Consumer operation
-    SmallVector<Operation *> producerOps = entry.second; // Producer op list
-    int x = producerOps.size();                          // Producer op count
-
-    // Find the IfOp index that consumer belongs to (ConsumerIdx)
-    int ConsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
-    if (ConsumerIdx == -1) {
-      return {-1, -1};
-    }
-
-    // Find the IfOp index that producer belongs to (producerIdx)
-    int producerIdx = getProducerIfOpIndex(producerOps, ifOps, ifOpIndex);
-    if (producerIdx == -1) {
-      return {-1, -1};
-    }
-
-    // If consumer is after producer (ConsumerIdx > producerIdx), calculate
-    // required buffer count ConsumerIdx - producerIdx + 1 represents the buffer
-    // count needed to cover this distance
-    if (ConsumerIdx <= producerIdx) {
-      LDBG("producer is after the consumer!");
-      return {-1, -1};
-    }
-    int requiredBuffers = ConsumerIdx - producerIdx + 1;
-
-    // Update maxRequiredBuffers/maxX
-    if (requiredBuffers * maxX > maxRequiredBuffers * x) {
-      maxRequiredBuffers = requiredBuffers;
-      maxX = x;
-    }
-  }
-
-  return {maxRequiredBuffers, maxX};
-}
-
-// calculateCrossDepsFactor computes the buffer factor based on cross-core
-// dependencies For cross-core deps consumer is in current forOp (one side: cube
-// or vector) producer is in another mainloop with the same id but in the other
-// scope
-std::pair<int, int> UpdateLoopIterTimesPass::calculateCrossDepsFactor(
-    scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-    DenseMap<Operation *, int> &ifOpIndex, ConsumerProducerMap &crossDeps) {
-  int maxRequiredBuffers = 1;
-  int maxX = 1;
-
-  // Determine current forOp's scope type (cube or vector)
-  bool currentIsCube = false;
-  bool currentIsVector = false;
-  Operation *currentScope = forOp->getParentOp();
-  while (currentScope) {
-    if (isa<scope::ScopeOp>(currentScope)) {
-      break;
-    }
-    currentScope = currentScope->getParentOp();
-  }
-  if (failed(getScopeType(currentScope, currentIsCube, currentIsVector))) {
-    LDBG("Current forOp is not in a valid cube or vector scope!");
-    return {-1, -1};
-  }
-
-  // Find the other side scope's mainloop and collect its ifOps
-  SmallVector<scf::IfOp> otherSideIfOps;
-  DenseMap<Operation *, int> otherSideIfOpIndexMap;
-  scf::ForOp otherSideForOp =
-      findOtherSideMainloopAndIfOps(forOp, currentIsCube, currentIsVector,
-                                    otherSideIfOps, otherSideIfOpIndexMap);
-
-  if (!otherSideForOp) {
-    LDBG("Failed to find other side mainloop or its ifOps!");
-    return {-1, -1};
-  }
-
-  // Check if the first ifOp has any consumer op in crossDeps
-  // If not, it means the current compute block executes first, need to subtract
-  // 1 from requiredBuffers
-  bool runFirst = isRunFirst(ifOps, crossDeps);
-
-  // Iterate all cross-core dependencies
-  for (auto &entry : crossDeps) {
-    Operation *consumerOp = entry.first; // Consumer operation
-    for (SmallVector<Operation *> &producerOps : entry.second) {
-      int x = producerOps.size(); // Producer op count (one buffer has
-                                  // two ops in different scope)
-      // some special buffer is not Symmetrical
-      if (producerOps.size() == 1) {
-        x = 1;
-      }
-
-      // Find the IfOp index that consumer belongs to (comsumerIdx)
-      int comsumerIdx = getConsumerIfOpIndex(consumerOp, ifOps, ifOpIndex);
-      if (comsumerIdx == -1) {
-        return {-1, -1};
-      }
-
-      // Find producer's position in the other side's ifOps (producerIdx)
-      int producerIdx = getProducerIfOpIndex(producerOps, otherSideIfOps,
-                                             otherSideIfOpIndexMap);
-      if (producerIdx == -1) {
-        return {-1, -1};
-      }
-
-      // If consumer is after producer (comsumerIdx >= producerIdx), calculate
-      // required buffer count comsumerIdx - producerIdx + 1 represents the
-      // buffer count needed to cover this distance If the current compute
-      // block executes first (firstIfOp has no consumer), subtract 1
-      if (comsumerIdx < producerIdx) {
-        // case : C1 -> V1V2V3 -> C2
-        // in this case comsumerIdx < producerIdx, crossDeps hard to process, do
-        // not change the loop iteration times
-        LDBG("there is complex case!");
-        return {1, 1};
-      }
-      int requiredBuffers = comsumerIdx - producerIdx + 1;
-      if (runFirst) {
-        requiredBuffers = requiredBuffers - 1;
-      }
-      LDBG("consumer : " << *consumerOp);
-      LDBG("consumer comsumerIdx: " << comsumerIdx
-                                    << ", producerIdx: " << producerIdx);
-      LDBG("requiredBuffers: " << requiredBuffers);
-      LDBG("buffer: " << x);
-      LDBG("runFirst: " << runFirst);
-
-      // Update max value using fraction comparison to avoid precision issues
-      // Comparing requiredBuffers/maxX vs maxRequiredBuffers/x is equivalent to
-      // comparing requiredBuffers * maxX vs maxRequiredBuffers * x
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
-        maxRequiredBuffers = requiredBuffers;
-        maxX = x;
-      }
-    }
-  }
-
-  return {maxRequiredBuffers, maxX};
-}
-
-// calculateIterDepsFactor computes the buffer factor based on iteration
-// dependencies For iter deps: consumer and producer are IfOps within the same
-// forOp Core idea: iteration dependencies are special - consume first, then
-// produce So if consumer ifOp (comsumerIdx) and producer ifOp (producerIdx)
-// have dependency, we need (producerIdx - comsumerIdx) buffers to support the
-// loop extension This function iterates all dependencies from
-// tensorIterArgDepsMap and finds the maximum required buffer count
-std::pair<int, int> UpdateLoopIterTimesPass::calculateIterDepsFactor(
-    scf::ForOp forOp, SmallVector<scf::IfOp> &ifOps,
-    DenseMap<Operation *, int> &ifOpIndex) {
-  int maxRequiredBuffers = 1;
-  int maxX = 1;
-
-  // Check if this forOp has iteration dependencies
-  if (!info->tensorIterArgDepsMap.count(forOp)) {
-    return {maxRequiredBuffers, maxX};
-  }
-
-  auto &iterArgDepsVec = info->tensorIterArgDepsMap[forOp];
-
-  // Iterate all tensor iter_args dependencies in this forOp
-  // tensorIterArgDepsMap now stores a SmallVector of TensorIterArgIfOpRelation
-  for (TensorIterArgIfOpRelation &relation : iterArgDepsVec) {
-    scf::IfOp producerIfOp = relation.producer;
-    llvm::SmallVector<scf::IfOp> &consumerIfOps = relation.consumers;
-
-    // Skip if no producer or consumers
-    if (!producerIfOp || consumerIfOps.empty()) {
-      continue;
-    }
-
-    // x is the number of producer buffers (1 for iteration dependencies)
-    int x = 1;
-
-    // Get producer IfOp index (producerIdx)
-    auto producerIt = ifOpIndex.find(producerIfOp.getOperation());
-    if (producerIt == ifOpIndex.end()) {
-      LDBG("Producer IfOp not found in ifOps list!");
-      return {-1, -1};
-    }
-    int producerIdx = producerIt->second;
-
-    // For each consumer IfOp, find its index (comsumerIdx)
-    // Calculate requiredBuffers = producerIdx - comsumerIdx (consume first,
-    // then produce)
-    for (scf::IfOp consumerIfOp : consumerIfOps) {
-      // Find consumer IfOp index in ifOps list
-      auto consumerIt = ifOpIndex.find(consumerIfOp.getOperation());
-      if (consumerIt == ifOpIndex.end()) {
-        LDBG("Consumer IfOp not found in ifOps list!");
-        return {-1, -1};
-      }
-      int comsumerIdx = consumerIt->second;
-
-      if (producerIdx <= comsumerIdx) {
-        LDBG("Producer IfOp index (producerIdx) is not greater than consumer "
-             "IfOp index "
-             "(comsumerIdx)!");
-        LDBG("arg value: " << relation.iterArg);
-        LDBG("Producer IfOp index producerIdx: " << producerIdx);
-        LDBG("consumer IfOp index comsumerIdx: " << comsumerIdx);
-        return {-1, -1};
-      }
-      int requiredBuffers = producerIdx - comsumerIdx + 1;
-      LDBG("consumerIfOp : " << consumerIfOp);
-      LDBG("consumer comsumerIdx: " << comsumerIdx
-                                    << ", producerIdx: " << producerIdx);
-      LDBG("requiredBuffers: " << requiredBuffers);
-
-      if (requiredBuffers * maxX > maxRequiredBuffers * x) {
-        maxRequiredBuffers = requiredBuffers;
-        maxX = x;
-      }
-    }
-  }
-
-  return {maxRequiredBuffers, maxX};
-}
-
-// Part 1: Compute new loop upper bound and create arithmetic ops
-Value UpdateLoopIterTimesPass::computeNewLoopUpperBound(
-    OpBuilder &builder, Location loc, scf::ForOp forOp, int ifCount,
-    int requiredBuffers, int x) {
-  Value originalLowerBound = forOp.getLowerBound();
-  Value originalUpperBound = forOp.getUpperBound();
-  Value originalStep = forOp.getStep();
-  Type ubType = originalStep.getType();
-
-  // Helper lambda to create constant value based on type
-  auto createConstant = [&](int val) -> Value {
-    if (ubType.isIndex()) {
-      return builder.create<arith::ConstantIndexOp>(loc, val);
-    } else if (auto intType = dyn_cast<IntegerType>(ubType)) {
-      return builder.create<arith::ConstantIntOp>(loc, intType, val);
-    } else {
-      auto indexVal = builder.create<arith::ConstantIndexOp>(loc, val);
-      return builder.create<arith::IndexCastOp>(loc, ubType, indexVal);
-    }
-  };
-
-  // Helper lambda to create ceil division op based on type
-  auto createCeilDiv = [&](Value lhs, Value rhs) -> Value {
-    if (ubType.isIndex()) {
-      return builder.create<arith::CeilDivUIOp>(loc, lhs, rhs);
-    } else if (auto intType = dyn_cast<IntegerType>(ubType)) {
-      if (intType.isSigned()) {
-        return builder.create<arith::CeilDivSIOp>(loc, lhs, rhs);
-      } else {
-        return builder.create<arith::CeilDivUIOp>(loc, lhs, rhs);
-      }
-    } else {
-      return builder.create<arith::CeilDivUIOp>(loc, lhs, rhs);
-    }
-  };
-
-  // Create constant values
-  Value ifCountValue = createConstant(ifCount);
-  Value requiredBuffersValue = createConstant(requiredBuffers);
-  Value xValue = createConstant(x);
-
-  // Calculate: rangeDiff = upperBound - lowerBound
-  Value rangeDiff = builder.create<arith::SubIOp>(loc, originalUpperBound,
-                                                  originalLowerBound);
-
-  // Calculate: iterCount = ceil(rangeDiff / step)
-  Value iterCount = createCeilDiv(rangeDiff, originalStep);
-
-  // Calculate: scaledIterCount = iterCount * requiredBuffers
-  Value scaledIterCount =
-      builder.create<arith::MulIOp>(loc, iterCount, requiredBuffersValue);
-
-  // Calculate: ceiledScaledIterCount = ceil(scaledIterCount / x)
-  Value ceiledScaledIterCount = createCeilDiv(scaledIterCount, xValue);
-
-  // Calculate: newIterCount = ceiledScaledIterCount + ifCount
-  Value newIterCount =
-      builder.create<arith::AddIOp>(loc, ceiledScaledIterCount, ifCountValue);
-
-  // Calculate: totalSteps = step * newIterCount
-  Value totalSteps =
-      builder.create<arith::MulIOp>(loc, originalStep, newIterCount);
-
-  // Calculate: newUpperBound = lowerBound + totalSteps
-  Value newUpperBound =
-      builder.create<arith::AddIOp>(loc, originalLowerBound, totalSteps);
-
-  return newUpperBound;
-}
-
-// Part 2: Clone for loop with new upper bound
-scf::ForOp UpdateLoopIterTimesPass::cloneForOpWithNewUpperBound(
-    OpBuilder &builder, Location loc, scf::ForOp oldForOp, Value newUpperBound,
-    IRMapping &mapper) {
-  Value originalLowerBound = oldForOp.getLowerBound();
-  Value originalStep = oldForOp.getStep();
-
-  SmallVector<Value> newInitArgs(oldForOp.getInitArgs().begin(),
-                                 oldForOp.getInitArgs().end());
-
-  auto newForOp = builder.create<scf::ForOp>(
-      loc, originalLowerBound, newUpperBound, originalStep, newInitArgs);
-
-  // Copy attributes from old forOp
-  for (auto &attr : oldForOp->getAttrs()) {
-    newForOp->setAttr(attr.getName(), attr.getValue());
-  }
-
-  // Map induction variable and iter args
-  mapper.map(oldForOp.getInductionVar(), newForOp.getInductionVar());
-
-  for (auto [oldArg, newArg] :
-       llvm::zip(oldForOp.getRegionIterArgs(), newForOp.getRegionIterArgs())) {
-    mapper.map(oldArg, newArg);
-  }
-
-  Block *oldBlock = oldForOp.getBody();
-  Block *newBlock = newForOp.getBody();
-
-  // Replace block arguments
-  unsigned totalArgs = oldBlock->getNumArguments();
-  for (unsigned i = 0; i < totalArgs; ++i) {
-    BlockArgument oldArg = oldBlock->getArgument(i);
-    BlockArgument newArg = newBlock->getArgument(i);
-    oldArg.replaceAllUsesWith(newArg);
-  }
-
-  Operation *oldTerminator = oldBlock->getTerminator();
-
-  // Clone operations in the loop body
-  builder.setInsertionPointToStart(newBlock);
-  for (Operation &op :
-       llvm::make_early_inc_range(oldBlock->without_terminator())) {
-    builder.clone(op, mapper);
-  }
-
-  // Create new yield operation
-  auto oldYield = cast<scf::YieldOp>(oldTerminator);
-  SmallVector<Value> newYieldOperands;
-  for (unsigned i = 0; i < oldYield.getNumOperands(); ++i) {
-    newYieldOperands.push_back(mapper.lookupOrDefault(oldYield.getOperand(i)));
-  }
-
-  builder.setInsertionPointToEnd(newBlock);
-  builder.create<scf::YieldOp>(loc, newYieldOperands);
-
-  // Handle results replacement
-  unsigned numOriginalResults = oldForOp.getNumResults();
-  if (numOriginalResults > 0) {
-    SmallVector<Value> originalResults;
-    for (unsigned i = 0; i < numOriginalResults; ++i) {
-      originalResults.push_back(newForOp.getResult(i));
-    }
-    oldForOp.replaceAllUsesWith(originalResults);
-  }
-
-  return newForOp;
-}
-
-// Part 3: Update cntArgs mapping after cloning
-int UpdateLoopIterTimesPass::updateCntArgsAfterClone(
-    scf::ForOp oldForOp, IRMapping &mapper,
-    SmallVector<scf::IfOp> &ifOpsInThisFor) {
-  // Update cntArgs for each old ifOp
-  for (scf::IfOp oldIfOp : ifOpsInThisFor) {
-    scf::IfOp newIfOp = dyn_cast<scf::IfOp>(mapper.lookupOrDefault(oldIfOp));
-    if (!newIfOp)
-      continue;
-
-    Value oldCntVal = info->cntArgs[oldIfOp];
-    Value newCntVal = mapper.lookupOrDefault(oldCntVal);
-    LDBG("updating CntArgs After Clone...");
-    LDBG("oldCntVal: " << oldCntVal);
-    LDBG("newCntVal: " << newCntVal);
-
-    // Remove old entry and add new entry
-    info->cntArgs.erase(oldIfOp);
-    info->cntArgs[newIfOp] = newCntVal;
-  }
-  return 0;
-}
-
-// Extend for loop iteration count
-scf::ForOp UpdateLoopIterTimesPass::extendForOpIterationCount(
-    scf::ForOp oldForOp, int ifCount, int requiredBuffers, int x,
-    IRMapping &mapper, SmallVector<scf::IfOp> &ifOpsInThisFor) {
-  OpBuilder builder(oldForOp);
-  Location loc = oldForOp.getLoc();
-
-  // Part 1: Compute new loop upper bound
-  Value newUpperBound = computeNewLoopUpperBound(builder, loc, oldForOp,
-                                                 ifCount, requiredBuffers, x);
-  if (!newUpperBound) {
-    LDBG("computeNewLoopUpperBound failed!");
-    return nullptr;
-  }
-
-  // Part 2: Clone for loop with new upper bound
-  scf::ForOp newForOp = cloneForOpWithNewUpperBound(builder, loc, oldForOp,
-                                                    newUpperBound, mapper);
-  if (!newForOp) {
-    LDBG("cloneForOpWithNewUpperBound failed!");
-    return nullptr;
-  } else {
-    LDBG("cloneForOpWithNewUpperBound Success!");
-    LDBG("new ForOp: " << newForOp);
-    LDBG("old ForOp: " << oldForOp);
-  }
-
-  // Part 3: Update cntArgs mapping
-  if (updateCntArgsAfterClone(oldForOp, mapper, ifOpsInThisFor) != 0) {
-    LDBG("updateCntArgsAfterClone failed!");
-    return nullptr;
-  }
-
-  return newForOp;
 }
 
 // Update WhileOp condition based on ifblock conditions
@@ -1073,196 +320,416 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
   return ret;
 }
 
-// Input: loopMap： {mainloop_id: [loopOp1, loopOp2], ...}
-// Output: infoMap: {loopOp: extraIterationTimesInfo, ...}
-int UpdateLoopIterTimesPass::ComputeMainLoopTimes(
-    DenseMap<int, SmallVector<Operation *>> &loopMap,
-    DenseMap<Operation *, IterationTimesInfo> &infoMap) {
-  for (auto &entry : loopMap) {
-    for (Operation *loopOp : entry.second) {
-      if (isa<scf::WhileOp>(loopOp)) {
+
+// Returns the number of the main loop's body argument that holds the counter
+// of `ifOp`, or -1 when the counter of the block is unknown.
+static int getCounterArgNumber(scf::ForOp forOp, scf::IfOp ifOp,
+                               const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
+  Value counter = cntArgs.lookup(ifOp);
+  if (!counter) {
+    return -1;
+  }
+  auto arg = dyn_cast<BlockArgument>(counter);
+  if (!arg || arg.getOwner() != forOp.getBody()) {
+    return -1;
+  }
+  // The body of the while holds the same arguments as the body of the for:
+  // the induction variable comes first, the iter args after it.
+  return static_cast<int>(arg.getArgNumber());
+}
+
+// Builds the condition of the while loop.
+//
+// The loop keeps running while at least one of the ssbuffer.if computation
+// blocks has not reached the loop upper bound yet, i.e. the condition is the
+// OR of "counter < upperBound" over all the blocks. The loop therefore exits
+// only when every block ran as often as the upper bound asks for.
+//
+// The counters are the loop carried values of the main loop, so the condition
+// has to compare the arguments of the 'before' region.
+static Value buildWhileCondition(scf::ForOp forOp, Block *beforeBlock,
+                                  const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
+                                  OpBuilder &builder, Location loc) {
+  Value upperBound = forOp.getUpperBound();
+  Value condition;
+  for (Operation &op : forOp.getBody()->without_terminator()) {
+    auto ifOp = dyn_cast<scf::IfOp>(op);
+    if (!ifOp || !ifOp->hasAttr(CVPipeline::kIf)) {
+      continue;
+    }
+    int argNumber = getCounterArgNumber(forOp, ifOp, cntArgs);
+    if (argNumber < 0) {
+      LDBG("no counter known for the ssbuffer.if, it does not take part in "
+           "the loop condition");
+      continue;
+    }
+    Value counter = beforeBlock->getArgument(argNumber);
+    if (counter.getType() != upperBound.getType()) {
+      LDBG("the counter of the ssbuffer.if and the loop upper bound have "
+           "different types");
+      continue;
+    }
+    Value cmp = builder.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::slt, counter, upperBound);
+    if (!condition) {
+      condition = cmp;
+      continue;
+    }
+    condition = builder.create<arith::OrIOp>(loc, condition, cmp);
+  }
+  return condition;
+}
+
+// Rewrite a main-loop scf.for into an equivalent scf.while.
+//
+// This mirrors upstream's `ForLoopLoweringPattern`
+// (mlir/lib/Dialect/SCF/Transforms/ForToWhile.cpp) with one extra guard: only
+// loops carrying the `ssbuffer.main_loop` tag are rewritten, every other
+// scf.for is left untouched.
+//
+// The upstream pattern is internal to its translation unit, so it cannot be
+// reused with a filter; the conversion body is copied here instead.
+static LogicalResult convertMainLoopForToWhile(
+    scf::ForOp forOp, const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
+    RewriterBase &rewriter) {
+  Location loc = forOp.getLoc();
+  // Loop-carried values of the while: the induction variable comes first,
+  // followed by the for loop's iter args.
+  SmallVector<Type> lcvTypes;
+  SmallVector<Location> lcvLocs;
+  lcvTypes.push_back(forOp.getInductionVar().getType());
+  lcvLocs.push_back(forOp.getInductionVar().getLoc());
+  for (Value value : forOp.getInitArgs()) {
+    lcvTypes.push_back(value.getType());
+    lcvLocs.push_back(value.getLoc());
+  }
+
+  SmallVector<Value> initArgs;
+  initArgs.push_back(forOp.getLowerBound());
+  llvm::append_range(initArgs, forOp.getInitArgs());
+
+  // Carry over the for loop's discardable attributes (ssbuffer.main_loop,
+  // DataUse, ...) so the while loop keeps the same tagging.
+  auto whileOp = rewriter.create<scf::WhileOp>(forOp.getLoc(), lcvTypes,
+                                               initArgs, forOp->getAttrs());
+
+  // 'before' region holds the loop condition and forwards the iteration
+  // arguments to the 'after' region.
+  auto *beforeBlock = rewriter.createBlock(
+      &whileOp.getBefore(), whileOp.getBefore().begin(), lcvTypes, lcvLocs);
+  rewriter.setInsertionPointToStart(whileOp.getBeforeBody());
+  Value condition = buildWhileCondition(forOp, beforeBlock, cntArgs, rewriter,
+                                        whileOp.getLoc());
+  if (!condition) {
+    // The main loop holds no ssbuffer.if block to drive it, fall back to the
+    // induction variable.
+    // `unsignedCmp` is an operation property, so it is not carried over to
+    // the while op; the comparison predicate has to be selected explicitly.
+    arith::CmpIPredicate predicate = forOp.getUnsignedCmp()
+                                         ? arith::CmpIPredicate::ult
+                                         : arith::CmpIPredicate::slt;
+    condition = rewriter.create<arith::CmpIOp>(
+        whileOp.getLoc(), predicate, beforeBlock->getArgument(0),
+        forOp.getUpperBound());
+  }
+  rewriter.create<scf::ConditionOp>(whileOp.getLoc(), condition,
+                                    beforeBlock->getArguments());
+
+  // 'after' region holds the induction variable increment and the loop body.
+  // The while op returns an extra value (the induction variable), so the
+  // yields of the source for loop contain only the iter args.
+  auto *afterBlock = rewriter.createBlock(
+      &whileOp.getAfter(), whileOp.getAfter().begin(), lcvTypes, lcvLocs);
+
+  rewriter.setInsertionPointToEnd(afterBlock);
+  auto ivIncOp = rewriter.create<arith::AddIOp>(
+      whileOp.getLoc(), afterBlock->getArgument(0), forOp.getStep());
+
+  // Rewrite uses of the for loop's block arguments to the while loop's
+  // 'after' arguments.
+  for (const auto &barg : llvm::enumerate(forOp.getBody(0)->getArguments())) {
+    rewriter.replaceAllUsesWith(barg.value(),
+                                afterBlock->getArgument(barg.index()));
+  }
+
+  // Inline the for loop body into the 'after' region.
+  for (auto &arg : llvm::make_early_inc_range(*forOp.getBody())) {
+    rewriter.moveOpBefore(&arg, afterBlock, afterBlock->end());
+  }
+
+  // Prepend the incremented induction variable to the yielded values.
+  for (auto yieldOp : afterBlock->getOps<scf::YieldOp>()) {
+    SmallVector<Value> yieldOperands = yieldOp.getOperands();
+    yieldOperands.insert(yieldOperands.begin(), ivIncOp.getResult());
+    rewriter.modifyOpInPlace(yieldOp,
+                             [&]() { yieldOp->setOperands(yieldOperands); });
+  }
+
+  // The while op returns one extra value, so the for loop's results are
+  // remapped to the while op's results starting from index 1.
+  for (const auto &arg : llvm::enumerate(forOp.getResults())) {
+    rewriter.replaceAllUsesWith(arg.value(),
+                                whileOp.getResult(arg.index() + 1));
+  }
+
+  rewriter.eraseOp(forOp);
+  // Note: the while op must not be printed before its regions are filled in,
+  // the asm printer verifies every op it prints.
+  LDBG("converted main loop scf.for at " << loc << " into scf.while");
+  return success();
+}
+
+// Convert every main loop tagged with `ssbuffer.main_loop` from scf.for into
+// scf.while.
+static LogicalResult convertMainLoopsToWhile(
+    ModuleOp module, const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
+  // Collect the tagged main loops up front: the conversion rewrites the loop
+  // body, so walking the IR while modifying it is not safe.
+  SmallVector<scf::ForOp> mainLoops;
+  module.walk([&](scf::ForOp forOp) {
+    if (forOp->hasAttr(CVPipeline::kMainLoop)) {
+      mainLoops.push_back(forOp);
+    }
+  });
+
+  if (mainLoops.empty()) {
+    LDBG("no main loop found, nothing to convert");
+    return success();
+  }
+
+  // The rewrite is driven manually instead of through the greedy pattern
+  // driver: the driver also drops "trivially dead" ops, which would delete
+  // loops whose body has no side effect.
+  IRRewriter rewriter(module.getContext());
+  for (scf::ForOp forOp : mainLoops) {
+    rewriter.setInsertionPoint(forOp);
+    if (failed(convertMainLoopForToWhile(forOp, cntArgs, rewriter))) {
+      module.emitError() << "Failed to convert main loop scf.for into "
+                            "scf.while";
+      return failure();
+    }
+  }
+  return success();
+}
+
+// ---------------------------------------------------------------------------
+// Standalone mode: rebuild the ControlFlowConditionInfo from the IR.
+//
+// UpdateLoopIterTimesPass is normally driven by AddControlFlowConditionPass,
+// which shares its ControlFlowConditionInfo with the preceding sub-passes.
+// When the pass runs on its own (`triton-opt --update-loop-iter-times`) there
+// is no such info, but everything the info holds has already been
+// materialised in the IR by the preceding sub-passes:
+//   * the dependency maps are derived from the ssbuffer.intraDeps and
+//     ssbuffer.crossCoreDeps attributes (InitDependentMapPass),
+//   * the tensor iter_arg relations are derived from the uses of the tensor
+//     iter_args of the main loops,
+//   * the counter of an ssbuffer.if is the main loop iter_arg that the if's
+//     condition compares against the main loop upper bound.
+// ---------------------------------------------------------------------------
+
+// Returns true if `value` is one of the main loop's region iter args.
+static bool isMainLoopIterArg(scf::ForOp forOp, Value value) {
+  auto arg = dyn_cast<BlockArgument>(value);
+  return arg && arg.getOwner() == forOp.getBody();
+}
+
+// Traces `value` back to the main loop iter_arg it originates from. A counter
+// can be used through its latest value, i.e. the result of the if op that
+// updated it, so the trace follows the arithmetic and the if results as well.
+static Value traceToMainLoopIterArg(scf::ForOp forOp, Value value,
+                                    unsigned depth = 0) {
+  constexpr unsigned maxDepth = 8;
+  if (depth > maxDepth) {
+    return nullptr;
+  }
+  if (isMainLoopIterArg(forOp, value)) {
+    return value;
+  }
+
+  Operation *defOp = value.getDefiningOp();
+  if (!defOp) {
+    return nullptr;
+  }
+
+  // counter + step still points at the counter iter arg.
+  if (auto addOp = dyn_cast<arith::AddIOp>(defOp)) {
+    if (Value lhs = traceToMainLoopIterArg(forOp, addOp.getLhs(), depth + 1))
+      return lhs;
+    return traceToMainLoopIterArg(forOp, addOp.getRhs(), depth + 1);
+  }
+
+  // The latest value of a counter is a result of the if op that updated it.
+  auto result = dyn_cast<OpResult>(value);
+  if (!result) {
+    return nullptr;
+  }
+  auto ifOp = dyn_cast<scf::IfOp>(result.getOwner());
+  if (!ifOp) {
+    return nullptr;
+  }
+  unsigned index = result.getResultNumber();
+  for (Region *region : ifOp.getRegions()) {
+    auto yieldOp =
+        dyn_cast<scf::YieldOp>(region->getBlocks().front().getTerminator());
+    if (!yieldOp || index >= yieldOp.getNumOperands()) {
+      continue;
+    }
+    if (Value operand =
+            traceToMainLoopIterArg(forOp, yieldOp.getOperand(index), depth + 1))
+      return operand;
+  }
+  return nullptr;
+}
+
+// Finds the counter of `ifOp`: the main loop iter_arg that the if's condition
+// compares against the main loop upper bound.
+static Value findIfOpCounter(scf::ForOp forOp, scf::IfOp ifOp) {
+  Value upperBound = forOp.getUpperBound();
+  SmallVector<Value> worklist;
+  worklist.push_back(ifOp.getCondition());
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    Operation *defOp = value.getDefiningOp();
+    if (!defOp) {
+      continue;
+    }
+    if (auto cmpOp = dyn_cast<arith::CmpIOp>(defOp)) {
+      if (cmpOp.getPredicate() != arith::CmpIPredicate::slt ||
+          cmpOp.getRhs() != upperBound) {
+        continue;
+      }
+      if (Value counter = traceToMainLoopIterArg(forOp, cmpOp.getLhs()))
+        return counter;
+      continue;
+    }
+    // The conditions of an if op are combined with arith.andi.
+    if (auto andOp = dyn_cast<arith::AndIOp>(defOp)) {
+      worklist.push_back(andOp.getLhs());
+      worklist.push_back(andOp.getRhs());
+    }
+  }
+  return nullptr;
+}
+
+// Collects the counter of every ssbuffer.if of the main loops.
+static void collectIfOpCounters(ModuleOp module,
+                                ControlFlowConditionInfo &info) {
+  module.walk([&](scf::ForOp forOp) {
+    if (!forOp->hasAttr(CVPipeline::kMainLoop)) {
+      return;
+    }
+    SmallVector<scf::IfOp> ifOps;
+    llvm::DenseMap<Operation *, int> ifOpIndex;
+    if (!collectIfOps(forOp, ifOps, ifOpIndex)) {
+      return;
+    }
+    for (scf::IfOp ifOp : ifOps) {
+      Value counter = findIfOpCounter(forOp, ifOp);
+      if (!counter) {
+        LDBG("Can not find the counter of the if op: " << ifOp);
+        continue;
+      }
+      info.cntArgs[ifOp] = counter;
+    }
+  });
+}
+
+// Rebuilds the tensor iter_arg dependency relations of the main loops: for
+// every tensor iter_arg, the ssbuffer.if that produces it and the ssbuffer.if
+// ops that consume it.
+static void collectTensorIterArgDeps(ModuleOp module,
+                                     ControlFlowConditionInfo &info) {
+  module.walk([&](Operation *op) {
+    if (!op->hasAttr(CVPipeline::kMainLoop)) {
+      return;
+    }
+    auto forOp = dyn_cast<scf::ForOp>(op);
+    if (!forOp) {
+      return;
+    }
+
+    for (BlockArgument iterArg : forOp.getRegionIterArgs()) {
+      if (!isa<TensorType>(iterArg.getType())) {
         continue;
       }
 
-      scf::ForOp forOp = dyn_cast<scf::ForOp>(loopOp);
-      if (!forOp) {
-        LDBG("currently only support forOp!");
-        return -1;
-      }
+      scf::IfOp producerIfOp;
+      SmallVector<scf::IfOp> consumerIfOps;
+      for (OpOperand &use : iterArg.getUses()) {
+        Operation *user = use.getOwner();
 
-      // Collect if operations in this loop
-      IterationTimesInfo iterInfo;
-      if (info->cntArgs.empty()) {
-        LDBG("cntArgs is empty, no ifblock is contained!");
-        return -1;
-      }
-      for (auto &[ifOp, cntVal] : info->cntArgs) {
-        if (ifOp->hasAttr(CVPipeline::kIf)) {
-          auto parentOp = ifOp->getParentOp();
-          if (parentOp->hasAttr(CVPipeline::kMainLoop) &&
-              isa<scf::ForOp>(parentOp)) {
-            if (parentOp == forOp.getOperation()) {
-              iterInfo.ifCount++;
-              iterInfo.ifOpsInThisFor.push_back(ifOp);
-            }
-          } else {
-            LDBG("Get wrong ifblock structure: ifblock's parentOp is not "
-                 "mainloop!");
-            LDBG("ifblock Op: " << ifOp);
-            LDBG("Parent Op: " << *parentOp);
-            return -1;
+        // The ssbuffer.if the use belongs to.
+        scf::IfOp ifOp;
+        for (Operation *curr = user; curr && curr != op;
+             curr = curr->getParentOp()) {
+          auto currIf = dyn_cast<scf::IfOp>(curr);
+          if (currIf && currIf->hasAttr(CVPipeline::kIf)) {
+            ifOp = currIf;
+            break;
           }
-        } else {
-          LDBG("ifOp in cntArgs does not contain ssbuffer.if Attribute\n ifOp: "
-               << ifOp);
-          return -1;
+        }
+        if (!ifOp) {
+          continue;
+        }
+
+        // Only the terminator of the ssbuffer.if produces the iter_arg.
+        bool isProducer = isa<scf::YieldOp>(user) &&
+                          user->getParentOp() == ifOp.getOperation();
+        if (isProducer) {
+          if (producerIfOp && producerIfOp != ifOp) {
+            // Ambiguous producer, drop the relation.
+            producerIfOp = nullptr;
+            break;
+          }
+          producerIfOp = ifOp;
+          continue;
+        }
+        if (producerIfOp == ifOp) {
+          continue;
+        }
+        if (!llvm::is_contained(consumerIfOps, ifOp)) {
+          consumerIfOps.push_back(ifOp);
         }
       }
 
-      // Calculate factor
-      auto [requiredBuffers, x] = calculateFactor(forOp);
-      if (requiredBuffers == -1 || x == -1) {
-        LDBG("calculateFactor failed!");
-        return -1;
-      }
-      iterInfo.requiredBuffers = requiredBuffers;
-      iterInfo.x = x;
-      infoMap[loopOp] = iterInfo;
-    }
-  }
-  return 0;
-}
-
-int UpdateLoopIterTimesPass::collectForOpsAndUpdateMax(
-    DenseMap<int, SmallVector<Operation *>> &map, int id,
-    SmallVector<Operation *> &allForOps, int &maxIfCount,
-    int &maxRequiredBuffers, int &maxX,
-    DenseMap<Operation *, IterationTimesInfo> &infoMap) {
-  if (map.count(id)) {
-    for (Operation *loopOp : map[id]) {
-      if (!isa<scf::ForOp>(loopOp)) {
+      if (!producerIfOp || consumerIfOps.empty()) {
         continue;
       }
-
-      allForOps.push_back(loopOp);
-      if (infoMap.count(loopOp)) {
-        IterationTimesInfo &iterInfo = infoMap[loopOp];
-        if (iterInfo.ifCount > maxIfCount) {
-          maxIfCount = iterInfo.ifCount;
-        }
-        // requiredBuffers/x > maxRequiredBuffers/maxX =
-        // requiredBuffers * maxX > maxRequiredBuffers * x
-        if (iterInfo.requiredBuffers * maxX > maxRequiredBuffers * iterInfo.x) {
-          maxRequiredBuffers = iterInfo.requiredBuffers;
-          maxX = iterInfo.x;
-        }
-      } else {
-        LDBG("mainloop Op: " << *loopOp << " do not include in infoMap!");
-        return -1;
-      }
+      TensorIterArgIfOpRelation relation;
+      relation.iterArg = iterArg;
+      relation.producer = producerIfOp;
+      relation.consumers = consumerIfOps;
+      info.tensorIterArgDepsMap[op].push_back(relation);
     }
-  }
-  return 0;
+  });
 }
 
-void UpdateLoopIterTimesPass::updateMainLoopMaps(
-    Operation *oldForOp, Operation *newForOp,
-    DenseMap<int, SmallVector<Operation *>> &cmap,
-    DenseMap<int, SmallVector<Operation *>> &vmap,
-    DenseMap<Operation *, IterationTimesInfo> &infoMap) {
-  // Update cmap
-  for (auto &entry : cmap) {
-    for (Operation *&op : entry.second) {
-      if (op == oldForOp) {
-        op = newForOp;
-      }
+// Rebuilds the whole ControlFlowConditionInfo from the IR.
+LogicalResult UpdateLoopIterTimesPass::buildConditionInfoFromIR(
+    ModuleOp module, ControlFlowConditionInfo &info) {
+  // The dependency maps are derived from the ssbuffer.intraDeps and
+  // ssbuffer.crossCoreDeps attributes, exactly like InitDependentMapPass does
+  // inside the AddControlFlowCondition pipeline.
+  {
+    PassManager pm(module.getContext(), module.getOperationName());
+    std::unique_ptr<InitDependentMapPass> initDependentMapPass(
+        new InitDependentMapPass());
+    initDependentMapPass->setConditionInfo(&info);
+    pm.addPass(std::move(initDependentMapPass));
+    if (failed(runPipeline(pm, module))) {
+      LDBG("InitDependentMapPass failed while rebuilding the condition info!");
+      return failure();
     }
   }
-  // Update vmap
-  for (auto &entry : vmap) {
-    for (Operation *&op : entry.second) {
-      if (op == oldForOp) {
-        op = newForOp;
-      }
-    }
-  }
-  // Update infoMap
-  auto it = infoMap.find(oldForOp);
-  if (it != infoMap.end()) {
-    IterationTimesInfo iterInfo = std::move(it->second);
-    infoMap.erase(it);
-    infoMap[newForOp] = std::move(iterInfo);
-  }
-}
-
-int UpdateLoopIterTimesPass::UpdateForLoopIteration(
-    DenseMap<int, SmallVector<Operation *>> &cmap,
-    DenseMap<int, SmallVector<Operation *>> &vmap,
-    DenseMap<Operation *, IterationTimesInfo> &infoMap) {
-  int ret = 0;
-  // Collect all mainloop ids
-  DenseSet<int> allIds;
-  for (auto &entry : cmap) {
-    allIds.insert(entry.first);
-  }
-  for (auto &entry : vmap) {
-    allIds.insert(entry.first);
+  if (CVPipeline::hasFallbackAttr(module)) {
+    LDBG("InitDependentMapPass failed while rebuilding the condition info!");
+    return failure();
   }
 
-  // For each mainloop id, calculate max values and update all related loops
-  SmallVector<Operation *> allForOps;
-  for (int id : allIds) {
-    int maxIfCount = 0;
-    int maxRequiredBuffers = 1;
-    int maxX = 1;
-
-    // Collect all loops with same id from cmap and vmap
-    SmallVector<Operation *> sameIdForOps;
-    ret = collectForOpsAndUpdateMax(cmap, id, sameIdForOps, maxIfCount,
-                                    maxRequiredBuffers, maxX, infoMap);
-    if (ret != 0)
-      return -1;
-    ret = collectForOpsAndUpdateMax(vmap, id, sameIdForOps, maxIfCount,
-                                    maxRequiredBuffers, maxX, infoMap);
-    if (ret != 0)
-      return -1;
-
-    // Update all loops with this id using the same max values
-    for (Operation *loopOp : sameIdForOps) {
-      if (maxIfCount == 0) {
-        LDBG("no ifblock in mainloop!");
-        return -1;
-      }
-
-      scf::ForOp oldForOp = dyn_cast<scf::ForOp>(loopOp);
-      if (!oldForOp) {
-        LDBG("do not surpport other loop op except forOp!");
-        return -1;
-      }
-
-      IterationTimesInfo &iterInfo = infoMap[loopOp];
-      IRMapping mapper;
-      scf::ForOp newForOp =
-          extendForOpIterationCount(oldForOp, maxIfCount, maxRequiredBuffers,
-                                    maxX, mapper, iterInfo.ifOpsInThisFor);
-      if (!newForOp) {
-        LDBG("extendForOpIterationCount failed!");
-        return -1;
-      }
-      updateMainLoopMaps(loopOp, newForOp.getOperation(), cmap, vmap, infoMap);
-      allForOps.push_back(loopOp);
-    }
-  }
-
-  // Delete old forOp after cntArgs and maps have been updated
-  for (Operation *loopOp : allForOps) {
-    if (!loopOp) {
-      LDBG("erasing error: loopOp is nullptr, there are nested mainloop!");
-      return -1;
-    }
-    loopOp->erase();
-  }
-  return 0;
+  collectTensorIterArgDeps(module, info);
+  collectIfOpCounters(module, info);
+  return success();
 }
 
 void UpdateLoopIterTimesPass::runOnOperation() {
@@ -1275,6 +742,21 @@ void UpdateLoopIterTimesPass::runOnOperation() {
   LDBG("before updateloopitertimes:\n" << module);
   LDBG("\nEnter UpdateLoopIterTimesPass!");
 
+  // The pass is normally driven by AddControlFlowConditionPass, which shares
+  // its ControlFlowConditionInfo with the preceding sub-passes. Running the
+  // pass on its own leaves the info unset, in that case it is rebuilt from
+  // the IR.
+  ControlFlowConditionInfo localInfo;
+  if (!info) {
+    LDBG("no condition info provided, rebuild it from the IR");
+    if (failed(buildConditionInfoFromIR(module, localInfo))) {
+      LDBG("Failed to rebuild the condition info from the IR!");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+      return;
+    }
+    info = &localInfo;
+  }
+
   int ret = 0;
   // step1: Get mainloop id to loop operation mapping, separated into cube and
   // vector
@@ -1286,45 +768,36 @@ void UpdateLoopIterTimesPass::runOnOperation() {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
-  // step2: Calculate info for each loop operation, store into the same
-  // iterationTimesinfoMap
-  DenseMap<Operation *, IterationTimesInfo> infoMap;
-  ret = ComputeMainLoopTimes(cmap, infoMap);
-  if (ret != 0) {
-    LDBG("ComputeMainLoopTimes from cube Failed!");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-  }
-  ret = ComputeMainLoopTimes(vmap, infoMap);
-  if (ret != 0) {
-    LDBG("ComputeMainLoopTimes from vector Failed!");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-  }
-
-  // step3: Update loop iteration count (process loop operations with same id
-  // from both cmap and vmap)
-  ret = UpdateForLoopIteration(cmap, vmap, infoMap);
-  if (ret != 0) {
-    LDBG("Update ForLoop Iteration Failed!");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-  }
-  LDBG("after UpdateForLoopIteration:\n" << module);
-
-  // step4: Replace loop counter by if blocks' counter
+  // step2: Replace loop counter by if blocks' counter
   ret = replaceForOpCounterInIfOps();
   if (ret != 0) {
     LDBG("replaceForOpCounterInIfOps Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 
-  // step5: Update WhileOp condition based on ifblock conditions
-  ret = UpdateWhileLoopCondition(cmap);
-  if (ret != 0) {
-    LDBG("UpdateWhileLoopCondition from cube Failed!");
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+  // step3: Update WhileOp condition based on ifblock conditions
+  // The whileBlockArgMap is only filled by the preceding sub-passes, so the
+  // step is skipped when the pass runs on its own and the map is empty.
+  if (!info->whileBlockArgMap.empty()) {
+    ret = UpdateWhileLoopCondition(cmap);
+    if (ret != 0) {
+      LDBG("UpdateWhileLoopCondition from cube Failed!");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
+    ret = UpdateWhileLoopCondition(vmap);
+    if (ret != 0) {
+      LDBG("UpdateWhileLoopCondition from vector Failed!");
+      CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    }
+  } else {
+    LDBG("no whileBlockArgMap, skip updating the while op conditions");
   }
-  ret = UpdateWhileLoopCondition(vmap);
-  if (ret != 0) {
-    LDBG("UpdateWhileLoopCondition from vector Failed!");
+
+  // step4: Convert the main loops from scf.for into scf.while. The while loop
+  // keeps the upper bound of the for loop and its condition is built from the
+  // counters of the ssbuffer.if blocks.
+  if (failed(convertMainLoopsToWhile(module, info->cntArgs))) {
+    LDBG("convert main loops to while Failed!");
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
   }
 

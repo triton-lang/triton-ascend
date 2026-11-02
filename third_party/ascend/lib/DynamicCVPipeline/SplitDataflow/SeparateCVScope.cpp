@@ -375,8 +375,8 @@ static bool canSkipForwardingUse(OpOperand &use, StringRef scopeType) {
   return false;
 }
 
-// Preserve yield-to-result tracking only when loop-carry evidence and
-// mixed-scope sibling results require it.
+// Preserve live scalar loop carries even without a matching sibling result.
+// Other values retain the mixed-scope sibling requirement.
 static bool shouldPreserveFromYield(Operation *yieldOwner,
                                     unsigned operandIndex,
                                     StringRef scopeType) {
@@ -384,6 +384,11 @@ static bool shouldPreserveFromYield(Operation *yieldOwner,
       needsLoopCarryPreserve(yieldOwner, operandIndex, scopeType);
   if (!preserveLoopCarry) {
     return false;
+  }
+
+  if (operandIndex < yieldOwner->getNumResults() &&
+      yieldOwner->getResult(operandIndex).getType().isIntOrIndex()) {
+    return true;
   }
 
   auto loopOp = dyn_cast<LoopLikeOpInterface>(yieldOwner);

@@ -58,17 +58,34 @@ struct ResourceSnapshot {
   uint64_t reservedUBBytes = 0;
   unsigned ubSafetyPercent = 80;
 
-  bool isKnown() const;
-  std::optional<uint64_t> getSafeUBBudget() const;
+  // Cube (matrix-multiply) on-chip buffer capacities in bytes. A zero
+  // capacity leaves the corresponding L0 budget unknown and disables the
+  // L0A/L0B/L0C candidate checks (legacy behavior). Sizes per arch:
+  // 950 (A5): L0A 64K, L0B 64K, L0C 256K; 910 (A3): L0A 64K, L0B 64K,
+  // L0C 128K.
+  uint64_t l0aCapacityBytes = 0;
+  uint64_t l0bCapacityBytes = 0;
+  uint64_t l0cCapacityBytes = 0;
+  unsigned l0SafetyPercent = 80;
 
-  static ResourceSnapshot fromExplicit(uint64_t ubCapacityBytes,
-                                       unsigned ubSafetyPercent = 80,
-                                       uint64_t reservedUBBytes = 0);
+  bool isKnown() const;
+  // True only when every cube buffer capacity is populated; the candidate
+  // L0 checks are enforced only when this holds.
+  bool hasL0Budgets() const;
+  std::optional<uint64_t> getSafeUBBudget() const;
+  std::optional<uint64_t> getSafeL0ABudget() const;
+  std::optional<uint64_t> getSafeL0BBudget() const;
+  std::optional<uint64_t> getSafeL0CBudget() const;
 
   static ResourceSnapshot
-  fromHardwareConfig(const ascend::HardwareConfig &hardware,
-                     unsigned ubSafetyPercent = 80,
-                     uint64_t reservedUBBytes = 0);
+  fromExplicit(uint64_t ubCapacityBytes, unsigned ubSafetyPercent = 80,
+               uint64_t reservedUBBytes = 0, uint64_t l0aCapacityBytes = 0,
+               uint64_t l0bCapacityBytes = 0, uint64_t l0cCapacityBytes = 0,
+               unsigned l0SafetyPercent = 80);
+
+  static ResourceSnapshot fromHardwareConfig(
+      const ascend::HardwareConfig &hardware, unsigned ubSafetyPercent = 80,
+      uint64_t reservedUBBytes = 0, unsigned l0SafetyPercent = 80);
 };
 
 struct LiveTensorInterval {
@@ -89,6 +106,18 @@ struct LiveByteEstimate {
 std::optional<uint64_t> getStaticTensorBytes(Type type);
 
 LiveByteEstimate estimatePeakLiveBytes(Operation *root);
+
+// Standalone cube-buffer query for rules: returns true when the
+// matrix-multiply tiles under `root` exceed the safe L0A/L0B/L0C budgets of
+// `resources` (tt.dot/tt.dot_scaled lhs tiles map to L0A, rhs tiles to L0B,
+// accumulators/results to L0C; each buffer serves one cube tile set at a
+// time, so the per-buffer maximum over all dot sites bounds the demand).
+// Returns false when the snapshot carries no L0 capacities (target unknown,
+// query disabled) or the function has no dot sites. Unanalyzable tiles
+// (dynamic shape, unknown element type) report true: the demand cannot be
+// proven to fit. The resource model imposes no policy; callers decide what
+// to do with the answer.
+bool exceedsCubeBudgets(Operation *root, const ResourceSnapshot &resources);
 
 struct CandidatePlan {
   uint64_t tensorizeFactor = 1;

@@ -1,13 +1,18 @@
+import contextlib
 import json
 import os
 import sys
 import warnings
+from pathlib import Path
 from unittest.mock import MagicMock
+from types import SimpleNamespace
 
 import pytest
 
 import triton
+import triton.language as tl
 import triton.backends.ascend.compiler as compiler
+from triton._C.libtriton import ir
 from triton.backends.ascend import utils
 from triton.backends.compiler import GPUTarget
 
@@ -37,6 +42,26 @@ def _write_acl_config(cfg_dir, config):
     with open(cfg_path, "w") as f:
         json.dump(config, f)
     return cfg_path
+
+
+@pytest.mark.parametrize(
+    "arch, filename",
+    [
+        ("Ascend910B1", "libdevice.220.bc"),
+        ("Ascend910_9391", "libdevice.220.bc"),
+        ("Ascend910_9581", "libdevice.10.bc"),
+        ("Ascend950PR_9579", "libdevice.10.bc"),
+        ("Ascend910_9691", "libdevice.9201.bc"),
+        ("Ascend960", "libdevice.9201.bc"),
+    ],
+)
+def test_get_libdevice_selects_architecture_specific_bitcode(arch, filename):
+    assert Path(compiler.get_libdevice(arch)).name == filename
+
+
+def test_get_libdevice_rejects_unsupported_architecture():
+    with pytest.raises(ValueError, match="unsupported Ascend architecture"):
+        compiler.get_libdevice("unknown")
 
 
 def test_get_simt_stack_limit_default(monkeypatch):
@@ -147,7 +172,7 @@ def test_empty_options_expose_all_legacy_names(backend):
     assert utils._DEPRECATED_NPU_OPTIONS <= options.__dict__.keys()
     assert options.__dict__["arch"] == options.arch == backend.target.arch
     assert options.__dict__["warp_size"] == 32
-    assert options.__dict__["use_bytecode"] is True
+    assert options.__dict__["use_bytecode"] is False
     assert options.__dict__["enable_vf_fusion"] is None
 
 
@@ -159,6 +184,91 @@ def test_active_options_keep_explicit_values(backend):
     assert options.enable_mixed_cv is True
     assert options.enable_dynamic_cv_pipeline is False
     assert options.num_warps == 16
+
+
+@pytest.mark.parametrize("dtype, deprecated", [
+    (tl.float8e5, False),
+    (tl.float8e4nv, False),
+    (tl.float8e4b8, False),
+    (tl.float8e5b16, False),
+    (tl.float8e4b8, True),
+    (tl.float8e5b16, True),
+])
+def test_fp8_dot_frontend_options(backend, dtype, deprecated):
+
+    @triton.jit
+    def kernel(dtype: tl.constexpr):
+        a = tl.full((64, 64), 0.0, dtype)
+        tl.dot(a, a)
+
+    raw = {"deprecated_fp8_dot_operand_dtypes": (str(dtype), )} if deprecated else {}
+    options = backend.parse_options(raw)
+    source = triton.compiler.ASTSource(kernel, {"dtype": "constexpr"}, {"dtype": dtype})
+    context = ir.context()
+    ir.load_dialects(context)
+    backend.load_dialects(context)
+    warning = pytest.warns(UserWarning, match="upcasted to fp16") if deprecated else contextlib.nullcontext()
+    with warning:
+        module = source.make_ir(backend.target, options, backend.get_codegen_implementation(options),
+                                backend.get_module_map(), context)
+
+    assert module.verify()
+    dot = next(line for line in str(module).splitlines() if "tt.dot " in line)
+    software_fp8 = str(dtype) in getattr(options, "software_fp8_dtypes", ())
+    assert ("tensor<64x64xf16>" in dot) == (deprecated or software_fp8)
+
+
+def test_text_pipeline_uses_ttadapter_directly(backend, monkeypatch):
+    options = backend.parse_options({})
+    stages = {}
+    backend.add_stages(stages, options, language=None)
+    assert list(stages) == ["ttir", "ttadapter", "npubin"]
+
+    def no_bridge(*args, **kwargs):
+        pytest.fail("text compatibility stage must not launch a subprocess")
+
+    monkeypatch.setattr(compiler.subprocess, "run", no_bridge)
+    text = "module { /* overridden BishengIR text */ }"
+    monkeypatch.setattr(compiler, "ttir_to_linalg", lambda *args, **kwargs: text)
+    assert stages["ttadapter"](object(), {"hash": "text-export-test"}) == text
+    consumed = []
+
+    def compile_text(src, metadata, options):
+        consumed.append(src)
+        return b"npubin"
+
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_910_95", compile_text)
+    monkeypatch.setattr(compiler, "linalg_to_bin_enable_npu_compile_A2_A3", compile_text)
+    monkeypatch.setattr(compiler, "rewrite_debug_line", lambda artifact, **kwargs: artifact)
+    assert stages["npubin"](text, {}) == b"npubin"
+    assert consumed == [text]
+
+
+@pytest.mark.parametrize("extension", ["mlirbc", "bcmlir"])
+def test_reject_retired_bridge_override(backend, extension):
+    with pytest.raises(ValueError, match="stages have been removed"):
+        backend.parse_options({"ir_override": f"kernel.{extension}"})
+
+
+def test_ubtuner_uses_ttadapter_without_bridge_stage(monkeypatch):
+    from triton.backends.ascend.runtime.ubtuner import UBConfig, UBTuner
+
+    text = "module { /* directly consumable ttadapter */ }"
+    compiled = SimpleNamespace(asm={"ttadapter": text})
+    tuner = object.__new__(UBTuner)
+    tuner.fn = SimpleNamespace(run=lambda *args, **kwargs: compiled)
+    monkeypatch.setattr(tuner, "_create_npu_options", lambda metadata: object())
+    monkeypatch.setattr(tuner, "_get_benefit_cost", lambda *args: {})
+    expected = UBConfig()
+    consumed = []
+
+    def try_algorithms(algorithms, benefit_cost, available_options, linalg_ir, metadata, options):
+        consumed.append(linalg_ir)
+        yield expected
+
+    monkeypatch.setattr(tuner, "_try_algorithms", try_algorithms)
+    assert tuner._find_best_config() is expected
+    assert consumed == [text]
 
 
 _IGNORED_OPTIONS = sorted(utils._DEPRECATED_NPU_OPTIONS - utils._DEPRECATED_NPU_OPTION_ROUTES.keys() -
@@ -193,7 +303,7 @@ def test_legacy_bisheng_options_launch_uses_backend_defaults(backend, value):
         options, signature, constexprs, attrs = kernel._pack_args(backend, kwargs, {}, [], None)
 
     assert kwargs == {"bisheng_options": value}
-    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice()
+    assert options.bisheng_options == "-cce-link-aicore-ll-module " + compiler.get_libdevice(options.target_arch)
     assert options.__dict__ == baseline.__dict__
     assert options.hash() == baseline.hash()
     assert signature == constexprs == attrs == {}
@@ -280,3 +390,135 @@ def test_unknown_options_remain_available_for_jit_validation(backend):
 
     assert raw == {"unknown_compile_option": True}
     assert "unknown_compile_option" not in options.__dict__
+
+
+def test_save_temps_isolates_same_hash_compilations(monkeypatch, tmp_path):
+    monkeypatch.setattr(compiler, "get_dump_manager", lambda key: MagicMock(cache_dir=str(tmp_path)))
+    first = Path(compiler._get_save_temps_dir("same-hash"))
+    (first / "kernel.ll").write_text("first compilation")
+    second = Path(compiler._get_save_temps_dir("same-hash"))
+    (second / "kernel.ll").write_text("second compilation")
+
+    assert first != second
+    assert first.parent == second.parent == tmp_path
+    assert (first / "kernel.ll").read_text() == "first compilation"
+    assert (second / "kernel.ll").read_text() == "second compilation"
+
+
+# The callback library is loaded to evaluate a few int64 constants and is then
+# released, so these tests pin the cleanup contract without dlopen'ing anything.
+_CALLBACK_SYMBOLS = {
+    "_infer_task_type_function": 11,
+    "_infer_workspace_shape_function": 22,
+    "_infer_sync_block_lock_num_function": 33,
+    "_infer_sync_block_lock_init_function": 44,
+}
+
+_CALLBACK_METADATA = {
+    "bs_task_type": 11,
+    "workspace_size": 22,
+    "sync_block_lock_layout": 33,
+    "lock_init_val": 44,
+}
+
+# Two leading underscores, so bind the helper once instead of writing an
+# attribute access that a class body would mangle.
+_load_metadata_by_callback = getattr(compiler, "__load_metadata_by_callback")
+
+
+class _FakeCallback:
+    """Stand in for a ctypes function pointer returning an int64 constant."""
+
+    def __init__(self, value):
+        self.value = value
+        self.restype = None
+        self.argtypes = None
+
+    def __call__(self):
+        if isinstance(self.value, BaseException):
+            raise self.value
+        return self.value
+
+
+class _FakeLib:
+    """Stand in for ctypes.CDLL: only the declared symbols resolve, like dlsym."""
+
+    def __init__(self, handle, kernel_name, symbols):
+        self._handle = handle
+        for postfix, value in symbols.items():
+            setattr(self, kernel_name + postfix, _FakeCallback(value))
+
+
+def test_metadata_is_read_before_the_callback_library_is_unloaded(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes",
+                        SimpleNamespace(dlclose=lambda handle: closed.append((handle, dict(metadata)))))
+
+    _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}
+    assert len(closed) == 1
+    handle, metadata_at_close = closed[0]
+    # The handle must still be the one dlopen reported, and every callback must
+    # already have been copied, because nothing may read the library afterwards.
+    assert handle == 0xBEEF
+    assert metadata_at_close == metadata
+
+
+def test_callback_library_is_unloaded_once_when_a_callback_raises(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    symbols = dict(_CALLBACK_SYMBOLS, _infer_sync_block_lock_num_function=OSError("callback exploded"))
+    lib = _FakeLib(0xBEEF, "triton_add", symbols)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=closed.append))
+
+    with pytest.raises(OSError, match="callback exploded"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert closed == [0xBEEF]
+    assert metadata == {"kernel_name": "triton_add", "bs_task_type": 11, "workspace_size": 22}
+
+
+def test_callback_library_is_unloaded_when_no_symbol_resolves(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    closed = []
+    lib = _FakeLib(0xBEEF, "triton_add", {})
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=closed.append))
+
+    _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add"}
+    assert closed == [0xBEEF]
+
+
+def test_missing_dlclose_warns_without_failing_the_compilation(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace())
+
+    with pytest.warns(UserWarning, match="could not unload /nonexistent/libkernel.so"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}
+
+
+def test_failing_dlclose_warns_without_failing_the_compilation(monkeypatch):
+    metadata = {"kernel_name": "triton_add"}
+    lib = _FakeLib(0xBEEF, "triton_add", _CALLBACK_SYMBOLS)
+
+    def failing_dlclose(handle):
+        raise OSError("cannot unload")
+
+    monkeypatch.setattr(compiler.ctypes, "CDLL", lambda path: lib)
+    monkeypatch.setattr(compiler, "_ctypes", SimpleNamespace(dlclose=failing_dlclose))
+
+    with pytest.warns(UserWarning, match="could not unload /nonexistent/libkernel.so: cannot unload"):
+        _load_metadata_by_callback("/nonexistent/libkernel.so", metadata)
+
+    assert metadata == {"kernel_name": "triton_add", **_CALLBACK_METADATA}

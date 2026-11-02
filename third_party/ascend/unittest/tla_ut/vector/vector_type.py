@@ -119,6 +119,31 @@ def test_truncmod_scalar_ir(output_dir=None):
         lower_offline(module, ctx, output_dir)
 
 
+@tr.jit
+def _scalar_sqrt(out, x):
+    root = tla.sqrt(x)
+    with tla.scope.simd():
+        tla.simd.vsts(out[0], tla.simd.vdup(root, tl.float32), dist="NORM_B32")
+
+
+@tr.jit
+def _vector_sqrt(out):
+    with tla.scope.simd():
+        x = tla.simd.vlds(out[0])
+        tla.simd.vsts(out[0], tla.sqrt(x), dist="NORM_B32")
+
+
+def test_sqrt_ir(output_dir=None):
+    for kernel, signature in (
+        (_scalar_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub"), "x": "fp32"}),
+        (_vector_sqrt, {"out": tla.buffer_type((64, ), tl.float32, "ub")}),
+    ):
+        module, ctx = compile_offline(kernel, signature, {}, output_dir)
+        text = str(module)
+        assert ("math.sqrt" if kernel is _scalar_sqrt else "ave.hir.vsqrt") in text, text
+        lower_offline(module, ctx, output_dir)
+
+
 def test_scalar_where_ir(output_dir=None):
     # vci materializes an i32 vector, so the UB view must be int32 (f32 here
     # made the vsts dtype mismatch).

@@ -101,6 +101,9 @@ public:
 private:
   mlir::ModuleOp module;
   int transferIndex = 0;
+  // Cleared when the kernel cannot afford the longer flag live ranges that
+  // bracketing the enclosing loop creates.
+  bool grantHoistAllowed = true;
   int markAllocIndex = 0;
   int intraDepsGroupId = 0;
 
@@ -108,6 +111,9 @@ private:
   llvm::DenseSet<int> singleLoopSet;
 
   llvm::DenseMap<mlir::Value, mlir::Value> ndnzValueMapping;
+  // The buffer pair createTransferAllocs made for each transfer.
+  llvm::DenseMap<int, llvm::SmallVector<mlir::Operation *, 2>>
+      transferAllocsByIndex;
   SSBufferManager ssbufferManager;
 
   void analyzeLoopInclusion();

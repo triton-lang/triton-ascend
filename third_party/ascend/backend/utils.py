@@ -800,6 +800,29 @@ def _build_npu_ext(obj_name: str, header_or_src_path, src_path=None, *, kernel_l
     return so_path
 
 
+def bin_cache_manager(key, bin_dir):
+    """Return a FileCacheManager rooted at a fixed directory (default: backend bin/).
+
+    Shared host artifacts (npu_utils.so, the launcher runtime) must not live
+    under TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a
+    fresh temporary root around every test case, stranding artifacts built
+    under earlier roots. This manager keeps the default file cache's exact
+    semantics (key sub-directory, flock coordination, atomic put) under an
+    installation-fixed directory, while custom managers configured via
+    knobs.cache.manager_class stay scoped to the per-kernel artifacts they
+    are meant to serve. Constructed via __new__ to keep the FileCacheManager
+    type (checked by build coordination) without triggering knob/env reads
+    or directory creation under a TRITON_CACHE_DIR that may be repointed.
+    """
+    from triton.runtime.cache import FileCacheManager, _base32
+    cache = FileCacheManager.__new__(FileCacheManager)
+    cache.key = _base32(key)
+    cache.cache_dir = os.path.join(str(bin_dir), cache.key)
+    cache.lock_path = os.path.join(cache.cache_dir, "lock")
+    os.makedirs(cache.cache_dir, exist_ok=True)
+    return cache
+
+
 def _npu_elf_info(path):
     """Read installation identifiers without hashing large LLVM shared libraries."""
     with open(path, "rb") as stream:
@@ -874,7 +897,7 @@ def _npu_compiler_identity(compiler):
             return None
         paths = {compiler, interpreter}
         for line in output.splitlines():
-            if re.fullmatch(r"\s*linux-vdso\.so\.\d+ \(0x[0-9a-f]+\)\s*", line):
+            if re.fullmatch(r"\s*(?:linux-vdso\.so\.\d+\s*)?\(0x[0-9a-f]+\)\s*", line):
                 continue
             match = re.fullmatch(r"\s*(?:\S+ => )?(/\S+) \(0x[0-9a-f]+\)\s*", line)
             if not match:
@@ -1112,6 +1135,25 @@ def ub_size_in_kbytes_for_arch(arch: str) -> int:
     """
     entry = _match_arch_entry(arch)
     return entry[1] if entry is not None else 0
+
+
+def l0_size_in_kbytes_for_arch(arch: str) -> tuple:
+    """Return the raw (L0A, L0B, L0C) cube-buffer capacities in KiB.
+
+    L0A holds the cube lhs tile, L0B the cube rhs tile, and L0C the
+    accumulator. Known targets: Ascend950/Ascend910_95 (A5) provide
+    64/64/256 KiB; the Ascend910 (A3) family provides 64/64/128 KiB.
+    Unknown and empty targets fail closed (zero capacities) so the
+    graph-optimization L0A/L0B/L0C checks stay disabled rather than
+    guessing a capacity.
+    """
+    if not isinstance(arch, str) or not arch:
+        return (0, 0, 0)
+    if arch.startswith(("Ascend910_95", "Ascend950")):
+        return (64, 64, 256)
+    if arch.startswith(("Ascend910A", "Ascend910B", "Ascend910D", "Ascend910_93", "Ascend310B")):
+        return (64, 64, 128)
+    return (0, 0, 0)
 
 
 def graph_ub_budget_bytes_for_arch(arch: str) -> int:

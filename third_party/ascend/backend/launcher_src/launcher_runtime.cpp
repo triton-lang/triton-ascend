@@ -25,9 +25,7 @@
 #include "launcher_profiler.h"
 #include <Python.h>
 #include <cstdio>
-#include <map>
 #include <mutex>
-#include <tuple>
 #include <type_traits>
 #include <utility>
 
@@ -104,38 +102,6 @@ inline cann_error getFfts(cann_stream stream, void **out) {
   return ret;
 }
 
-static cann_error initializeLocks(const TritonNpuLaunchSpecV1 &spec,
-                                  const LockLayout &locks, void *dst,
-                                  cann_stream stream) {
-  using Key = std::tuple<uint64_t, uint64_t, uint64_t, int64_t>;
-  static std::mutex mutex;
-  // Keep immutable pinned templates for process lifetime: queued copies and
-  // captured graphs can outlive the launch plan that first used them.
-  static std::map<Key, void *> templates;
-  const void *src;
-  {
-    std::lock_guard<std::mutex> guard(mutex);
-    auto &cached = templates[{spec.ordered_locks, spec.unordered_locks,
-                              locks.participants, spec.lock_init_value}];
-    if (!cached) {
-      void *data = nullptr;
-      auto ret = cann_malloc_host(&data, locks.bytes);
-      if (ret != CANN_SUCCESS)
-        return ret;
-      auto *init = static_cast<int64_t *>(data);
-      std::fill_n(init, locks.elements,
-                  spec.unordered_locks ? 0 : spec.lock_init_value);
-      for (uint64_t i = 0; i < spec.unordered_locks; ++i)
-        init[locks.orderedElements + i * locks.unorderedStride] =
-            locks.participants;
-      cached = data;
-    }
-    src = cached;
-  }
-  return cann_memcpy_async(dst, locks.bytes, src, locks.bytes,
-                           CANN_MEMCPY_HOST_TO_DEVICE, stream);
-}
-
 static cann_error execute(Invocation &call) {
   // Framework queues can retain copies of the handler after it has run. Keep
   // the workspace owner on this execution's stack, not in the retained call.
@@ -170,11 +136,20 @@ static cann_error execute(Invocation &call) {
     auto locks = prepareLocks(spec, blocks);
     lock = allocate(locks.bytes, call.stream, true);
     cann_error ret;
-    if (!spec.unordered_locks && !spec.lock_init_value) {
+    if (spec.unordered_locks) {
+      std::vector<int64_t> init(locks.elements, 0);
+      for (uint64_t i = 0; i < spec.unordered_locks; ++i)
+        init[locks.orderedElements + i * locks.unorderedStride] =
+            locks.participants;
+      ret = cann_memcpy(lock.data, locks.bytes, init.data(), locks.bytes,
+                        CANN_MEMCPY_HOST_TO_DEVICE);
+    } else if (!spec.lock_init_value) {
       ret = cann_memset_async(lock.data, locks.bytes, 0, locks.bytes,
                               call.stream);
     } else {
-      ret = initializeLocks(spec, locks, lock.data, call.stream);
+      std::vector<int64_t> init(locks.elements, spec.lock_init_value);
+      ret = cann_memcpy(lock.data, locks.bytes, init.data(), locks.bytes,
+                        CANN_MEMCPY_HOST_TO_DEVICE);
     }
     if (ret != CANN_SUCCESS)
       return ret;

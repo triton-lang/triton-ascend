@@ -23,15 +23,17 @@
 #ifndef TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_SPLIT_DATAFLOW_FLAG_ID_REUSE_H
 #define TRITON_ADAPTER_DYNAMIC_CV_PIPELINE_SPLIT_DATAFLOW_FLAG_ID_REUSE_H
 
-#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
+#include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/SmallSet.h"
+#include "llvm/ADT/SmallVector.h"
+
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
-#include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/SmallSet.h"
-#include "llvm/ADT/SmallVector.h"
+
+#include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 
 namespace mlir {
 namespace triton {
@@ -47,7 +49,7 @@ public:
 
 private:
   static int getFlagId(Operation *op);
-  bool hasPath(llvm::SmallSet<Operation *, CVPipeline::INIT_SIZE> &visited,
+  bool hasPath(llvm::SmallSet<Operation *, CVPipeline::kInitSize> &visited,
                Operation *from, Operation *to);
   void preworkForAnalyze(const llvm::SmallVector<Operation *> &syncOps);
 

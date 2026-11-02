@@ -17,53 +17,38 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
-"""Buffer-to-buffer DMA. No tensor materialization or bind_buffer annotation."""
+"""Compatibility dispatcher; new code can use load/store/copy route APIs."""
 from triton.language.core import builtin
-from .core import buffer
+from . import dma
 
-
-def _fixpipe_dma_mode(dst):
-    # Match InsertLoadStoreForMixCV::getInsertedFixpipeDmaMode: a 2D ND dst
-    # uses NZ2ND (drop NZ to ND); a 4D fractal dst keeps NZ (NZ2NZ).
-    # TODO: Replace it with explicit fixpipe API with mode.
-    return "nz2nd" if len(dst.shape) == 2 else "normal"
-
-
-def _is_zn_fractal(nz, nd):
-    """Whether 4-D ``nz`` is the zN-fractal expansion of 2-D ``nd``.
-
-    Only the layout-transform DMAs need this relation: ``nd2nz`` (gm->l1)
-    writes the fractal of an ND source and ``fixpipe`` (l0c->gm) reads it back
-    into ND; plain load/store require identical shapes instead.  npuir gives
-    ND2NZOp/NZ2NDOp no verifier and FixpipeOp::verify only checks the dma_mode
-    and pre-quant contract, so the fractal relation is validated here.
-    """
-    if len(nz) != 4 or len(nd) != 2:
-        return False
-    b0, b1 = nz[2], nz[3]
-    if b0 <= 0 or b1 <= 0:
-        return False
-    return nd[0] % b0 == 0 and nd[1] % b1 == 0 and \
-        nz[0] == nd[1] // b1 and nz[1] == nd[0] // b0
+_COPY_ROUTES = {
+    ("gm", "ub"): dma.load_gm_to_ub,
+    ("ub", "gm"): dma.store_ub_to_gm,
+    ("gm", "l1"): dma.load_gm_to_l1,
+    ("ub", "l1"): dma.copy_ub_to_l1,
+    ("l1", "ub"): dma.copy_l1_to_ub,
+    ("l1", "bt"): dma.copy_l1_to_bt,
+    ("l1", "fb"): dma.copy_l1_to_fb,
+    ("l1", "l0a"): dma.copy_l1_to_l0,
+    ("l1", "l0b"): dma.copy_l1_to_l0,
+    ("l0c", "gm"): dma.store_l0c_to_gm,
+    ("l0c", "ub"): dma.copy_l0c_to_ub,
+    ("l0c", "l1"): dma.copy_l0c_to_l1,
+}
+_FIXPIPE_PARAMS = {
+    "gm": dma.FixpipeL0C2GMParams,
+    "ub": dma.FixpipeL0C2UBParams,
+    "l1": dma.FixpipeL0C2L1Params,
+}
 
 
 @builtin
-def copy(src, dst, _semantic=None):
-    if not isinstance(src, buffer) or not isinstance(dst, buffer):
-        raise TypeError("tla.copy expects two tla.buffer operands; pointer/tensor arguments are unsupported")
-    # Only the nd2nz / fixpipe paths may pair ND with its zN fractal; other
-    # DMAs need identical shapes.
-    nd2nz = ((src.space, dst.space) == ("gm", "l1") and _is_zn_fractal(dst.shape, src.shape))
-    nz2nd = (src.space == "l0c" and _is_zn_fractal(src.shape, dst.shape))
-    if (src.shape != dst.shape and not (nd2nz or nz2nd)) or src.dtype != dst.dtype:
-        raise ValueError("DMA source and destination must have matching shape and element type")
-    if (src.space, dst.space) == ("gm", "ub"):
-        _semantic.builder.create_hivm_load(src.handle, dst.handle)
-    elif (src.space, dst.space) == ("ub", "gm"):
-        _semantic.builder.create_hivm_store(src.handle, dst.handle)
-    elif (src.space, dst.space) == ("gm", "l1"):
-        _semantic.builder.create_hivm_nd2nz(src.handle, dst.handle)
-    elif src.space == "l0c":
-        _semantic.builder.create_hivm_fixpipe(src.handle, dst.handle, _fixpipe_dma_mode(dst))
-    else:
+def copy(src, dst, params=None, _semantic=None):
+    dma._buffers(src, dst)
+    route = _COPY_ROUTES.get((src.space, dst.space))
+    if route is None:
         raise ValueError(f"tla.copy unsupported space pair {(src.space, dst.space)}")
+    if src.space == "l0c" and dma._unwrap_if_constexpr(params) is None:
+        mode = dma.FixpipeDMAMode.NZ2ND if len(dst.shape) == 2 else dma.FixpipeDMAMode.NZ2NZ
+        params = _FIXPIPE_PARAMS[dst.space](dma_mode=mode)
+    route(src, dst, params, _semantic=_semantic)

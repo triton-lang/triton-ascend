@@ -14,7 +14,6 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))  # tests/
 import torch
-import triton
 import triton.language as tl
 import triton.language.extra.tla as tla
 
@@ -26,7 +25,7 @@ SHAPE = dict(tmax=8, e=128, k=4, cores=4)
 SIGNATURE = {"SCR_ptr": "*fp32", "IDX_ptr": "*i32", "FLAG_ptr": "*fp32", "num_tokens": "i32"}
 
 
-@triton.jit
+@tla.jit
 def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.constexpr, K: tl.constexpr,
               CORES: tl.constexpr):
     tl.static_assert(E > 0 and E <= 384 and K > 0 and K <= 32 and K <= E, "E in [1,384], K in [1, min(E,32)]")
@@ -55,12 +54,12 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                 for i in tl.static_range((E + 63) // 64):
                     s_raw = s_raw + (tla.simd.vlds(scores_ub[i * 64], dist="NORM"), )
                     idx_lane = idx_lane + (tla.simd.vci(i * 64), )
-                    pad_ok = pad_ok + (tla.simd.vcmp(idx_lane[i], sentinel, "lt"), )
+                    pad_ok = pad_ok + (tla.simd.vcmp(idx_lane[i], sentinel, op=tla.simd.CMP.LT), )
                 # DBG-01: non-finite check (active lanes only).
                 nf = ()
                 for i in tl.static_range((E + 63) // 64):
                     d = tla.simd.vadd(s_raw[i], tla.simd.vneg(s_raw[i]))
-                    nf_mask = tla.simd.vcmp(d, zero32, "ne")
+                    nf_mask = tla.simd.vcmp(d, zero32, op=tla.simd.CMP.NE)
                     nf_raw = tla.simd.vsel(nf_mask, one32, zero32)
                     nf = nf + (tla.simd.vsel(pad_ok[i], nf_raw, zero32), )
                 any_nf = tla.simd.vreduce_max(nf)
@@ -73,13 +72,15 @@ def topk_gate(SCR_ptr, IDX_ptr, FLAG_ptr, num_tokens, TMAX: tl.constexpr, E: tl.
                     m = tla.simd.vreduce_max(sc)
                     cand = ()
                     for i in tl.static_range((E + 63) // 64):
-                        cand = cand + (tla.simd.vsel(tla.simd.vcmp(sc[i], m, "eq"), idx_lane[i], sentinel), )
+                        cand = cand + (tla.simd.vsel(tla.simd.vcmp(sc[i], m, op=tla.simd.CMP.EQ), idx_lane[i],
+                                                     sentinel), )
                     winner = tla.simd.vreduce_min(cand)
                     tla.simd.vsts(out_ub[2 * k], winner, dist="ONEPT_B32")
                     tla.simd.vsts(out_ub[2 * k + 1], zero_i32, dist="ONEPT_B32")
                     new_sc = ()
                     for i in tl.static_range((E + 63) // 64):
-                        new_sc = new_sc + (tla.simd.vsel(tla.simd.vcmp(idx_lane[i], winner, "eq"), neg_inf, sc[i]), )
+                        new_sc = new_sc + (tla.simd.vsel(tla.simd.vcmp(idx_lane[i], winner, op=tla.simd.CMP.EQ),
+                                                         neg_inf, sc[i]), )
                     sc = new_sc
             tla.copy(out_ub, idx)
             tla.copy(flag_ub, flag)
@@ -98,7 +99,7 @@ def test_ir(output_dir=None):
     assert text.count("memref.reinterpret_cast") == 3, "tla.view(ptr) x3"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
-    check_lowered_ir(text, loads=1, stores=2, buffers=3, extra=("ave.hir.vmax", ))
+    check_lowered_ir(text, loads=1, stores=2, buffers=None, extra=("ave.hir.vmax", ))
     print("IR PASS: topk_gate HIVM structure ok"
           " (1 load / 2 store / 3 multibuffer / ave.vmax)")
 

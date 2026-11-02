@@ -27,7 +27,8 @@
 #   * STRIDE > 2 / odd       -> V1 should rewrite tt.load -> tt.indirect_load
 #   * STRIDE == 2, even size -> DeinterleaveStatusOptimization handles (V1 yields)
 #   * STRIDE == 2, odd size  -> V1 should rewrite (deinterleave precondition fails)
-#   * Permuted layout        -> ImplicitPermute handles (V1 must not touch)
+#   * Permuted layout        -> TritonToStructured ImplicitPermute handles
+#                              (V1 must not touch; tag ImplicitPermuteHandled)
 #   * Last-axis stride == 1  -> No rewrite (normal strided memref.copy)
 #
 # Verifies correctness only -- to confirm which path actually fired, dump IR

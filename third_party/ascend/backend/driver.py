@@ -78,7 +78,11 @@ class NPUUtils(object):
         fingerprint = json.dumps(_ascend_utils.npu_extension_fingerprint("npu_utils", extra_cflags=_NPU_UTILS_CFLAGS),
                                  sort_keys=True)
         key = _npu_utils_key(src, fingerprint)
-        cache = get_cache_manager(key)
+        # The helper lands under the backend's in-package bin/ directory, not
+        # TRITON_CACHE_DIR: PyTorch Inductor repoints that directory to a fresh
+        # temporary root around every test case, which would strand the helper
+        # (and any launcher runtime that baked its path) under earlier roots.
+        cache = _ascend_utils.bin_cache_manager(key, Path(dirname) / "bin")
         fname = "npu_utils.so"
 
         def build():

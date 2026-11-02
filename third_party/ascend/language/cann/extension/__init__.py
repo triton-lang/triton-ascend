@@ -44,6 +44,8 @@ from .core import (
     conv1d,
     dot,
     conv2d,
+    AddressSpace,
+    DataLayout,
 )
 
 from .scope import scope
@@ -106,9 +108,11 @@ __all__ = [
     "SYNC_IN_VF",
     "conv1d",
     "conv2d",
+    "DataLayout",
 
     # address space
     "ascend_address_space",
+    "AddressSpace",
 
     # ascend IR affine (MLIR)
     "affine_expr",

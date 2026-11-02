@@ -45,11 +45,14 @@ def output_dir():
     return None
 
 
+@pytest.hookimpl(wrapper=True)
 def pytest_collect_file(file_path, parent):
-    """Collect every *.py as a test module (cases are named by op, not test_*)."""
+    """Extend normal collection to op-named files without collecting modules twice."""
+    collectors = yield
     if file_path.suffix == ".py" and file_path.name != "conftest.py":
-        return pytest.Module.from_parent(parent, path=file_path)
-    return None
+        if not any(isinstance(collector, pytest.Module) for collector in collectors):
+            collectors.append(pytest.Module.from_parent(parent, path=file_path))
+    return collectors
 
 
 def pytest_collection_modifyitems(config, items):
@@ -57,5 +60,6 @@ def pytest_collection_modifyitems(config, items):
     stage = os.environ.get("TLA_TEST_STAGE", "all")
     enabled = {"test_compile": do_compile, "test_run": do_run}
     for item in items:
-        if not enabled.get(item.name, True):
+        # Parametrized item.name includes [case]; stage selection uses the function name.
+        if not enabled.get(getattr(item, "originalname", item.name), True):
             item.add_marker(pytest.mark.skip(reason=f"{item.name} skipped (TLA_TEST_STAGE={stage})"))

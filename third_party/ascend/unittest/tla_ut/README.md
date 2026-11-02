@@ -17,12 +17,15 @@ The default `all` auto-degrades to `ir` when no NPU is available.
   `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,
   `hardware_spec`), the runtime-N long-vector case (`simd_tail`), and the
   tilelang-derived `vecadd`.
-- `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...).
+- `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...),
+  including `subview.py` for compact/pitched aliases and offset-preserving reshape.
 - `sync/` — `sync_pipe` (intra-core pipes) and `sync_block` (cross-core block flags, INTER/SUBBLOCK/BLOCK).
 - `dma/` — explicit load/store/copy/fixpipe/nd2nz cases.
-- `cube/` — matmul / mixed-core cases.
+- `cube/` — matmul / mixed-core cases, including `mmad.py` for transposed
+  operands and actual extents, and `mmad_frontend_contract.py` for host contracts.
 - `utils/` — shared helpers.
 - `simd_frontend_contract.py` — host-only SIMD frontend contract tests.
+- `view_frontend_contract.py` — host-only buffer-view bounds/layout contracts.
 
 ## How to verify
 
@@ -55,3 +58,25 @@ Host-only SIMD contract tests do not need a build or NPU:
 ```bash
 pytest third_party/ascend/unittest/tla_ut -k simd_frontend
 ```
+
+## MMAD and subview coverage
+
+API contracts and examples:
+[MMAD](../../../../docs/en/triton_api_extension/tla/mmad.md) and
+[subview/reshape](../../../../docs/en/triton_api_extension/tla/subview.md).
+From the repository root, use the rebuilt TLA frontend and native bindings:
+
+```bash
+TLA_TEST_STAGE=run pytest -q \
+  third_party/ascend/unittest/tla_ut/cube/mmad.py \
+  third_party/ascend/unittest/tla_ut/cube/mmad_frontend_contract.py \
+  third_party/ascend/unittest/tla_ut/vector/subview.py \
+  third_party/ascend/unittest/tla_ut/view_frontend_contract.py
+```
+
+The device cases include IR verification, binary generation and numerical
+checks. MMAD uses non-square FP16/BF16 operands and CPU FP32 references;
+subview checks exact values and the full backing allocation, including guards,
+for compact, pitched, static-offset, runtime-offset and nested-offset aliases.
+Set `TLA_TEST_STAGE=ir` for only the IR and host-contract checks. Existing
+`cube/gemm_basic_v2.py` provides a separate default-MMAD/UnitFlag regression.

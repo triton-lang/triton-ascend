@@ -26,8 +26,9 @@
   ``memref.reinterpret_cast`` carrying the linear offset ``sum(off_i*stride_i)``
   and the full sizes/strides -- npuir's form, valid for any stride/offset.
   ``strides`` are the final memref strides, defaulting to row-major.
-- Buffer tile: ``view(buf, sizes, strides, offsets)``.  Lowers to a
-  ``memref.subview``; strides are relative to the source view.
+- Buffer tile: ``subview(buf, offsets, sizes, strides)`` or the compatible
+  ``view(buf, sizes, strides, offsets)``. Lowers to a ``memref.subview``;
+  offsets and strides are relative to the source view.
 
 ``space`` only applies to a pointer entry; a buffer's space is its own.
 """
@@ -99,16 +100,37 @@ def _bind(src, ty, semantic):
 
 
 @builtin
+def subview(src, offsets, sizes, strides=None, _semantic=None):
+    """Alias a rank-preserving slice of a buffer without copying data.
+
+    ``sizes`` and ``strides`` contain positive compile-time integers; strides
+    default to one and multiply the source strides. ``offsets`` may contain
+    scalar integers or integer tensors, relative to the source view. Static
+    out-of-bounds slices are rejected; dynamic offsets must be in bounds at
+    runtime. The source dtype and memory space are preserved.
+
+    This maps directly to ``memref.subview``. It preserves the source pitch:
+    a compact prefix with a different pitch can instead be expressed by
+    flattening, taking a one-dimensional subview, and reshaping that subview.
+    """
+    if not isinstance(src, buffer):
+        raise TypeError("tla.subview expects a tla.buffer, "
+                        f"got {type(src).__name__}")
+    sizes = _shape(sizes)
+    steps = (1, ) * len(sizes) if strides is None else _shape(strides)
+    offsets = tuple(offsets)
+    if not (len(sizes) == len(src.shape) == len(steps) == len(offsets)):
+        raise ValueError("subview sizes, offsets and strides must match source rank")
+    return _subview(src, sizes, steps, offsets, _semantic)
+
+
+@builtin
 def view(src, shape, strides=None, offsets=None, space="gm", _semantic=None):
     if isinstance(src, buffer):
         if space != "gm":
             raise ValueError("view space is ignored for a buffer source")
-        sizes = _shape(shape)
-        steps = (1, ) * len(sizes) if strides is None else _shape(strides)
-        offsets = (0, ) * len(sizes) if offsets is None else tuple(offsets)
-        if not (len(sizes) == len(src.shape) == len(steps) == len(offsets)):
-            raise ValueError("view sizes, offsets and strides must match source rank")
-        return _subview(src, sizes, steps, offsets, _semantic)
+        offsets = (0, ) * len(src.shape) if offsets is None else offsets
+        return subview(src, offsets, shape, strides, _semantic=_semantic)
     if isinstance(src, tensor) and src.dtype.is_ptr():
         sizes = _shape(shape)
         strides = _row_major_strides(sizes) if strides is None else _shape(strides)
@@ -128,10 +150,10 @@ def reshape(src, shape, _semantic=None):
     with explicit reassociation indices (mirrors npuir's
     CanonicalizeTensorReshape): first flatten the source to 1-D when its rank
     is > 1, then unflatten to the target shape when its rank is > 1, so a pure
-    flatten/unflatten emits a single op.  The source must be an
-    identity-layout buffer (alloc or reshape result), so strided tiles need
-    ``tla.view`` first and are rejected here.  The element count is preserved
-    exactly.
+    flatten/unflatten emits a single op. A contiguous subview is supported,
+    including a nonzero or dynamic offset: the offset is preserved in the
+    result type and is never reset to the allocation origin. Non-contiguous
+    slices are rejected. The element count is preserved exactly.
     """
     if not isinstance(src, buffer):
         raise TypeError("tla.reshape expects a tla.buffer, "
@@ -141,17 +163,17 @@ def reshape(src, shape, _semantic=None):
     if numel != _numel(src.shape):
         raise ValueError(f"tla.reshape element count mismatch: "
                          f"{src.shape} -> {sizes}")
-    if src.strides != _row_major_strides(src.shape) or src.offset != 0:
+    if src.strides != _row_major_strides(src.shape):
         raise ValueError("tla.reshape requires a contiguous row-major buffer; "
                          "use tla.view for strided tiles")
     if sizes == src.shape:
         return src  # no-op reshape
     b = _semantic.builder
-    ty = buffer_type(sizes, src.dtype, src.space)
+    ty = buffer_type(sizes, src.dtype, src.space, offset=src.offset)
     dst_ty = ty.to_ir(b)
     handle = src.handle
     if len(src.shape) > 1:  # flatten to 1-D
-        flat_ty = buffer_type((numel, ), src.dtype, src.space).to_ir(b)
+        flat_ty = buffer_type((numel, ), src.dtype, src.space, offset=src.offset).to_ir(b)
         handle = b.create_tla_collapse_shape(handle, flat_ty, [list(range(len(src.shape)))])
     if len(sizes) > 1:  # unflatten from 1-D to the target shape
         handle = b.create_tla_expand_shape(handle, dst_ty, [list(range(len(sizes)))])

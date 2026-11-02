@@ -20,8 +20,8 @@
 """Cube-core primitives for TLA (hivm.hir.mmadL1).
 
 ``mmad`` computes ``C = A x B (+C)`` with A=(M,K)/B=(K,N) in L1 and C in L0C.
-Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Only
-``transpose_b`` is exposed; ``transpose_a`` folds into the GM->L1 copy.
+Inputs may use logical 2-D shapes or physical 4-D NZ shapes. Transposition
+is applied to the logical matrix dimensions represented by each L1 buffer.
 """
 from triton.language.core import builtin, _unwrap_if_constexpr
 from .core import buffer
@@ -46,8 +46,18 @@ def _logical_shape(shape):
 
 @builtin
 def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *, unit_flag_group_id=None,
-         _semantic=None):
+         transpose_a=False, real_m=None, real_k=None, real_n=None, _semantic=None):
     """Multiply L1 buffers into L0C, optionally clearing the accumulator first.
+
+    ``transpose_a`` and ``transpose_b`` transpose the logical matrices stored
+    in the input buffers. A=(K,M), B=(K,N), transpose_a=True computes C=(M,N);
+    the transpose is carried by MMAD rather than a separate data movement.
+
+    ``real_m``, ``real_k`` and ``real_n`` restrict the computation to a leading
+    submatrix after transposition. Explicit extents must be positive
+    compile-time multiples of 16 within the corresponding input dimensions.
+    Omitted extents use the full dimensions. The L0C buffer must have exactly
+    the actual (real_m, real_n) logical shape, matching its packed output layout.
 
     ``unit_flag_ctrl`` and ``unit_flag_group_id`` pass through to HIVM's
     UnitFlag interface. None leaves each attribute unset; modes 0/2/3 mean
@@ -68,10 +78,27 @@ def mmad(a, b, acc, transpose_b=False, clear_accum=False, unit_flag_ctrl=None, *
     # dims must agree.
     m, k = _logical_shape(a.shape)
     k2, n = _logical_shape(b.shape)
-    if k != k2 or _logical_shape(acc.shape) != (m, n):
-        raise ValueError("tla.mmad shape mismatch: a=(M,K), b=(K,N), acc=(M,N)")
+    transpose_a = bool(_unwrap_if_constexpr(transpose_a))
+    transpose_b = bool(_unwrap_if_constexpr(transpose_b))
+    if transpose_a:
+        m, k = k, m
+    if transpose_b:
+        k2, n = n, k2
+    if k != k2:
+        raise ValueError("tla.mmad reduction dimensions must match after transposition")
+    actual = []
+    for name, bound, extent in zip(("real_m", "real_k", "real_n"), (m, k, n), (real_m, real_k, real_n)):
+        extent = _unwrap_if_constexpr(extent)
+        if extent is None:
+            extent = bound
+        elif type(extent) is not int or extent <= 0 or extent > bound or extent % 16:
+            raise ValueError(f"tla.mmad {name} must be a positive multiple of 16 within {bound}")
+        actual.append(extent)
+    m, k, n = actual
+    if _logical_shape(acc.shape) != (m, n):
+        raise ValueError("tla.mmad acc must have the actual (real_m, real_n) shape")
     unit_flag_ctrl, unit_flag_group_id = _unit_flag_args(unit_flag_ctrl, unit_flag_group_id)
     _semantic.builder.create_hivm_mmadl1(a.handle, b.handle, acc.handle,
                                          init_condition=bool(_unwrap_if_constexpr(clear_accum)), real_m=m, real_k=k,
-                                         real_n=n, transpose_b=bool(_unwrap_if_constexpr(transpose_b)),
-                                         unit_flag_ctrl=unit_flag_ctrl, unit_flag_group_id=unit_flag_group_id)
+                                         real_n=n, transpose_b=transpose_b, unit_flag_ctrl=unit_flag_ctrl,
+                                         unit_flag_group_id=unit_flag_group_id, transpose_a=transpose_a)

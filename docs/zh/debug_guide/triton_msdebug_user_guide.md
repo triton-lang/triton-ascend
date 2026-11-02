@@ -1,10 +1,10 @@
-# Triton msdebug 使用指南
+# Triton msDebug 使用指南
 
 ## 简介
 
-MindStudio Debugger（msdebug）用于调试运行在昇腾 NPU 上的设备程序，支持源码断点、单步、变量与内存查看、寄存器读取、核切换、运行状态查询和异常算子 Core Dump 解析等功能。
+msDebug用于调试运行在昇腾 NPU 上的设备程序，支持源码断点、单步、变量与内存查看、寄存器读取、核切换、运行状态查询和异常算子 Core Dump 解析等功能。
 
-msdebug 适合排查以下问题：
+msDebug 适合排查以下问题：
 
 - Triton Kernel 运行结果错误；
 - `tl.load`、计算或 `tl.store` 阶段的数据不符合预期；
@@ -14,16 +14,16 @@ msdebug 适合排查以下问题：
 - 需要分析异常现场生成的 `.core` 文件；
 - 源码断点、行号映射或变量调试信息异常。
 
-msdebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `kernel.o` 之前已经编译失败，应使用 IR Dump、编译日志以及 GDB/LLDB 调试 `triton-opt` 或编译器进程。
+msDebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `kernel.o` 之前已经编译失败，应使用 IR Dump、编译日志以及 GDB/LLDB 调试 `triton-opt` 或编译器进程。
 
 ## 使用前准备
 
 ### 环境准备
 
-- 请参考 [MindStudio Debugger 安装指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/install_guide/msdebug_install_guide.md)安装 msdebug 工具。
-- 若要使能 msdebug 工具，需通过以下两种方法安装 NPU 驱动固件（CANN 8.1.RC1 之后的版本且驱动为 25.0.RC1 之后的版本，推荐使用方法一）。
+- 请参考 [msDebug 安装指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/install_guide/msdebug_install_guide.md)安装 msDebug 工具。
+- 若要使能 msDebug 工具，需通过以下两种方法安装 NPU 驱动固件（CANN 8.1.RC1 之后的版本且驱动为 25.0.RC1 之后的版本，推荐使用方法一）。
 
-**方法一**：驱动安装时指定 `--full` 参数，然后再使用 root 用户执行 `echo 1 > /proc/debug_switch` 命令启用调试通道，msdebug 工具便可正常使用。
+**方法一**：驱动安装时指定 `--full` 参数，然后再使用 root 用户执行 `echo 1 > /proc/debug_switch` 命令启用调试通道，msDebug 工具便可正常使用。
 
 ```bash
 ./Ascend-hdk-<chip_type>-npu-driver_<version>_linux-<arch>.run --full
@@ -37,7 +37,7 @@ msdebug 不用于调试 Triton 编译器 Pass 本身。如果程序在生成 `ke
 
 ### 为 Triton Kernel 生成调试信息
 
-当前 Triton-Ascend 启用 msdebug 功能需要开启以下环境变量：
+当前 Triton-Ascend 启用 msDebug 功能需要开启以下环境变量：
 
 ```bash
 export LLVM_EXTRACT_DI_LOCAL_VARIABLES=1
@@ -54,22 +54,22 @@ export TRITON_DISABLE_LINE_INFO=0
 ### 约束
 
 - 调试通道权限较高，不建议在生产环境长期启用；
-- 同一 Device 建议只启动一个 msdebug 会话，并暂停其他算子任务；
+- 同一 Device 建议只启动一个 msDebug 会话，并暂停其他算子任务；
 - 被调 Python 程序最好只调用一个目标 Triton Kernel；
 - 首次排查时建议关闭 Autotune，固定一组 `BLOCK_SIZE`、`num_warps` 等编译参数；
-- 在线 msdebug 和异常算子 Dump 使用同一调试通道时可能冲突，不应同时开启；
+- 在线 msDebug 和异常算子 Dump 使用同一调试通道时可能冲突，不应同时开启；
 - 部分优化会改变变量生命周期，即使开启变量调试信息，也不能保证每个源码变量始终可打印；
-- msdebug、CANN、驱动、固件、芯片和 Triton-Ascend 需要使用相互兼容的版本。
+- msDebug、CANN、驱动、固件、芯片和 Triton-Ascend 需要使用相互兼容的版本。
 
-官方快速入门可参考 [msdebug 快速入门](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/quick_start/msdebug_quick_start.md)。
+官方快速入门可参考 [msDebug 快速入门](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/quick_start/msdebug_quick_start.md)。
 
 ## 产品支持情况
 
-官方 msdebug 当前文档列出了昇腾 A2、A3、310P 以及 950 系列等产品形态，但具体功能范围仍取决于 msdebug、驱动和 CANN 版本。
+官方 msDebug 当前文档列出了昇腾 A2、A3、310P 以及 950 系列等产品形态，但具体功能范围仍取决于 msDebug、驱动和 CANN 版本。
 
 对于 Triton 场景，还必须确认当前 Triton-Ascend 后端支持目标芯片。可以通过编译日志、Kernel Dump 中的目标信息或 Triton 后端 Target 信息确认实际架构。
 
-SIMD、SIMT、AIC、AIV、Core Dump 和局部变量打印的支持范围可能不同。本文中的功能均应以本机 msdebug 的 `help` 输出和对应版本发行说明为准。
+SIMD、SIMT、AIC、AIV、Core Dump 和局部变量打印的支持范围可能不同。本文中的功能均应以本机 msDebug 的 `help` 输出和对应版本发行说明为准。
 
 ## 命令参考
 
@@ -240,7 +240,7 @@ Quitting LLDB will kill one or more processes. Do you really want to proceed: [Y
 
 ### 功能说明
 
-msdebug 可以在 Triton Python Kernel 源码的指定行设置断点。设备 PC 与 Python 行号的对应关系来自 `kernel.o` 中的 DWARF 行表。
+msDebug 可以在 Triton Python Kernel 源码的指定行设置断点。设备 PC 与 Python 行号的对应关系来自 `kernel.o` 中的 DWARF 行表。
 
 ### 注意事项
 
@@ -249,7 +249,7 @@ msdebug 可以在 Triton Python Kernel 源码的指定行设置断点。设备 P
 - 仅用于组织代码的 Python 语句、装饰器或被编译期消除的表达式不一定有设备地址；
 - Triton JIT 模块在执行 `r` 后才装载，因此运行前断点显示 pending 通常是正常现象；
 - 一条 Triton 语句可能扩展成多条地址计算、cast、memref 和 load/store 指令，断点可能解析出多个 Location；
-- `debug_line_rewriter.py`、Location 归一化 Pass 和调试 NOP 会影响最终可停位置，但 msdebug 本身不会重新生成缺失的行表。
+- `debug_line_rewriter.py`、Location 归一化 Pass 和调试 NOP 会影响最终可停位置，但 msDebug 本身不会重新生成缺失的行表。
 
 ### 使用示例
 
@@ -291,7 +291,7 @@ pending 的含义是“当前尚未装载包含该源码行的设备模块”，
 
 ### 功能说明
 
-Triton 源码中的变量可能位于寄存器、UB 或 GM，也可能只是编译器 SSA 值，没有固定内存地址。msdebug 可以在断点停止后打印当前 PC 可用的变量，并读取当前焦点核的内存。
+Triton 源码中的变量可能位于寄存器、UB 或 GM，也可能只是编译器 SSA 值，没有固定内存地址。msDebug 可以在断点停止后打印当前 PC 可用的变量，并读取当前焦点核的内存。
 
 ### 注意事项
 
@@ -315,7 +315,7 @@ Triton 源码中的变量可能位于寄存器、UB 或 GM，也可能只是编�
 (msdebug) p z
 ```
 
-若变量信息可用，msdebug 会显示变量值、地址或其所在位置；如果显示 `<unavailable>`，应判断当前 PC 是否处于变量有效范围。
+若变量信息可用，msDebug 会显示变量值、地址或其所在位置；如果显示 `<unavailable>`，应判断当前 PC 是否处于变量有效范围。
 
 #### 打印所有局部变量
 
@@ -360,7 +360,7 @@ Triton 编译后的变量名可能与 Python 源码名不同，也可能只保�
 
 #### 处理默认读取上限
 
-当读取超过默认上限时，msdebug 可能提示：
+当读取超过默认上限时，msDebug 可能提示：
 
 ```text
 Normally, 'memory read' will not read over 1024 bytes of data.
@@ -412,7 +412,7 @@ llvm-dwarfdump --debug-loclists "$KERNEL_O" | less
 - Location 是寄存器、UB 地址还是其他表达式；
 - 同名变量是否属于另一个编译单元或词法作用域。
 
-如果变量 DIE 存在但没有 `DW_AT_location`，msdebug 知道变量名称，却无法恢复它当前存放的位置，此时按变量名打印失败是预期结果。
+如果变量 DIE 存在但没有 `DW_AT_location`，msDebug 知道变量名称，却无法恢复它当前存放的位置，此时按变量名打印失败是预期结果。
 
 官方内存命令和各选项说明可参考 [内存与变量打印功能介绍](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md#%E5%86%85%E5%AD%98%E4%B8%8E%E5%8F%98%E9%87%8F%E6%89%93%E5%8D%B0%E5%8A%9F%E8%83%BD%E4%BB%8B%E7%BB%8D)。
 
@@ -487,11 +487,11 @@ llvm-dwarfdump --debug-line "$KERNEL_O"
 
 ### 功能说明
 
-当 Triton Kernel 长时间不返回时，可通过 `Ctrl+C` 中断在 msdebug 内启动的程序，查看当前停止位置。
+当 Triton Kernel 长时间不返回时，可通过 `Ctrl+C` 中断在 msDebug 内启动的程序，查看当前停止位置。
 
 ### 注意事项
 
-- 只能中断由当前 msdebug 会话启动的程序；
+- 只能中断由当前 msDebug 会话启动的程序；
 - 卡住可能来自 Kernel 死循环、核间同步、等待事件或错误的控制流；
 - 根据官方当前约束，`Ctrl+C` 中断后主要支持调试信息展示和核切换；单步、寄存器读取、变量/内存打印和 `continue` 可能不可用；
 - 因此，`Ctrl+C` 主要用于确认各核卡在什么位置，而不是替代普通断点调试。
@@ -673,7 +673,7 @@ Triton 的 `program_id`/Block 会被调度到设备核执行。查询映射：
 
 ### 功能说明
 
-如果目标 Triton Kernel 在当前芯片和后端上以受 msdebug 支持的 SIMT 方式执行，可以查询并切换 SIMT 线程。SIMD Kernel 或不支持 SIMT 调试的版本不适用本节。
+如果目标 Triton Kernel 在当前芯片和后端上以受 msDebug 支持的 SIMT 方式执行，可以查询并切换 SIMT 线程。SIMD Kernel 或不支持 SIMT 调试的版本不适用本节。
 
 ### 使用示例
 
@@ -697,7 +697,7 @@ Triton 的 `program_id`/Block 会被调度到设备核执行。查询映射：
 (msdebug) var
 ```
 
-若命令不受支持或没有线程信息，应先确认 Kernel 编程模式、芯片和 msdebug 版本，而不是把它判断为 Triton 行号问题。
+若命令不受支持或没有线程信息，应先确认 Kernel 编程模式、芯片和 msDebug 版本，而不是把它判断为 Triton 行号问题。
 
 ## 解析异常算子 Dump 文件功能介绍
 
@@ -707,7 +707,7 @@ NPU 发生硬件异常时，可以生成异常算子 Core Dump，离线恢复异
 
 ### 注意事项
 
-- 开启异常算子 Dump 后，不应同时使用在线 msdebug；
+- 开启异常算子 Dump 后，不应同时使用在线 msDebug；
 - 必须尽量使用异常现场完全匹配的 `kernel.o`；
 - Python 源码相同不代表二进制相同，Block Size、Autotune、编译器版本和后端选项都会改变二进制；
 - 硬件可能在产生异常后继续执行若干指令再上报，因此 Core 中部分内存和寄存器可能不是最初故障瞬间的值；
@@ -718,7 +718,7 @@ NPU 发生硬件异常时，可以生成异常算子 Core Dump，离线恢复异
 
 #### 生成异常算子 Core 文件
 
-在线 msdebug 退出后，在普通终端设置：
+在线 msDebug 退出后，在普通终端设置：
 
 ```bash
 export ASCEND_DUMP_SCENE=aic_err_detail_dump
@@ -791,7 +791,7 @@ msdebug --core /data/ascend_core_dump/<error>.core
 
 ## 常见问题
 
-### msdebug 初始化失败并提示 `0x20102`
+### msDebug 初始化失败并提示 `0x20102`
 
 典型信息：
 
@@ -821,11 +821,11 @@ llvm-dwarfdump --debug-info "$KERNEL_O" | less
 llvm-dwarfdump --debug-loc "$KERNEL_O" | less
 ```
 
-如果变量存在但没有 Location，或当前 PC 不在 Location List 范围内，msdebug 无法打印该变量。
+如果变量存在但没有 Location，或当前 PC 不在 Location List 范围内，msDebug 无法打印该变量。
 
-### 可以用 msdebug 给 `NormalizeDebugLineLocations.cpp` 下断点吗
+### 可以用 msDebug 给 `NormalizeDebugLineLocations.cpp` 下断点吗
 
-不可以。它是主机侧 MLIR Pass，应使用编译日志、Pass 前后 IR、GDB/LLDB 调试 `triton-opt`。msdebug 调试的是已经装载到 NPU 的 `kernel.o`。
+不可以。它是主机侧 MLIR Pass，应使用编译日志、Pass 前后 IR、GDB/LLDB 调试 `triton-opt`。msDebug 调试的是已经装载到 NPU 的 `kernel.o`。
 
 ### 读出的 UB 数据不符合预期
 
@@ -842,7 +842,7 @@ llvm-dwarfdump --debug-loc "$KERNEL_O" | less
 
 ### `LD_PRELOAD detected` 是否需要处理
 
-该警告单独出现时通常不是失败原因。如果 msdebug 后续可以初始化、命中断点并读取设备信息，可以先保留当前环境。只有发生库冲突、符号加载失败或进程初始化失败时，再核对 `LD_PRELOAD` 指向的库。
+该警告单独出现时通常不是失败原因。如果 msDebug 后续可以初始化、命中断点并读取设备信息，可以先保留当前环境。只有发生库冲突、符号加载失败或进程初始化失败时，再核对 `LD_PRELOAD` 指向的库。
 
 ## 附录：`kernel.o` 调试信息检查
 
@@ -886,12 +886,12 @@ llvm-dwarfdump --debug-line "$KERNEL_O" > dwarf-line.txt
 llvm-dwarfdump --debug-loc "$KERNEL_O" > dwarf-locations.txt
 ```
 
-提交 Triton-Ascend 调试问题时，建议同时提供最小 Python 用例、版本信息、环境变量、完全匹配的 `kernel.o`、上述 DWARF 输出、msdebug 会话日志、目标 Device/核/Block 和实际停止 PC。
+提交 Triton-Ascend 调试问题时，建议同时提供最小 Python 用例、版本信息、环境变量、完全匹配的 `kernel.o`、上述 DWARF 输出、msDebug 会话日志、目标 Device/核/Block 和实际停止 PC。
 
 ## 参考资料
 
-- [MindStudio Debugger 用户指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)
-- [msdebug 在线用户指南](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md)
+- [msDebug 用户指南](https://gitcode.com/Ascend/msdebug/blob/master/docs/zh/user_guide/msdebug_user_guide.md)
+- [msDebug 在线用户指南](https://www.hiascend.com/document/detail/zh/mindstudio/latest/msOT/Operatordevelopmenttools/docs/zh/user_guide/msdebug_user_guide.md)
 - [Cuda-gdb官方文档](https://docs.nvidia.com/cuda/cuda-gdb/index.html#single-stepping)
 - [DWARF location list 说明](https://dwarfstd.org/doc/040408.1.html)
 - [LLVM 调试变量说明](https://llvm.org/docs/SourceLevelDebugging.html)

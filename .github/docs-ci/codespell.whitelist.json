@@ -242,5 +242,6 @@
   "shmem",
   "SHMEM",
   "msdebug",
-  "LLDB"
+  "LLDB",
+  "msDebug"
 ]

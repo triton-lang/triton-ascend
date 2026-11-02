@@ -36,6 +36,10 @@ API                           AVE op
 ``vmax`` / ``vmin``           ``ave.hir.vmax``/``vmin``, ``vumax``/``vumin`` if unsigned
 ``vmaxs``                     ``ave.hir.vmaxs`` / ``ave.hir.vumaxs``
 ``vexp``                      ``ave.hir.vexp``
+``vabs`` / ``vneg``           ``ave.hir.vabs`` / ``ave.hir.vneg``
+``vnot`` / ``vrelu``          ``ave.hir.vnot`` / ``ave.hir.vrelu``
+``vsqrt``                     ``ave.hir.vsqrt``
+``vabsdif`` / ``vexpdif``     ``ave.hir.vabs_diff`` / ``ave.hir.vexpdif``
 ``vdup`` / ``vdups``          ``ave.hir.broadcast`` (masked ``vdups``)
 ``vdupv``                     ``ave.hir.vector_broadcast`` (lowest/highest lane)
 ============================  ==========================================
@@ -116,10 +120,15 @@ __all__ = [
     "vmod",
     "vfma",
     "vsel",
+    "vabs",
     "vneg",
+    "vnot",
+    "vrelu",
     "vsqrt",
     "vrsqrt",
     "vexp",
+    "vabsdif",
+    "vexpdif",
     "vreduce",
     "vcmax",
     "vcmin",
@@ -273,6 +282,65 @@ _OP_ELEM_SUPPORT = {
     # VFExpOp lowers only for F16/F32 (no lib fallback: the op has no
     # getOpLibraryCallName override), so everything else is rejected up front.
     "vexp": {
+        "float": ("f16", "f32"),
+        "signed": (),
+        "unsigned": (),
+        "hint": "f16/f32",
+    },
+    # VFAbsOp lowers to VabsXInstrOp for 8/16/32-bit elements and to the
+    # 64-bit library wrapper for i64.  It is a signed absolute value, so
+    # unsigned integer inputs are rejected rather than silently using signed
+    # hardware semantics.
+    "vabs": {
+        "float": ("f16", "f32"),
+        "signed": ("i8", "i16", "i32", "i64"),
+        "unsigned": (),
+        "hint": "f16/f32/i8/i16/i32/i64",
+    },
+    # VFNegOp is two's-complement negation; the bit pattern is the same for
+    # signed and unsigned integers, so both frontend signedness variants are
+    # accepted.  i64/u64 use the dedicated 64-bit library wrappers.
+    "vneg": {
+        "float": ("f16", "f32"),
+        "signed": ("i8", "i16", "i32", "i64"),
+        "unsigned": ("i8", "i16", "i32", "i64"),
+        "hint": "f16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
+    },
+    # VFNotOp is bitwise-not; all integer widths and float bit patterns are
+    # accepted, including the 64-bit library wrappers.
+    "vnot": {
+        "float": ("f16", "f32"),
+        "signed": ("i8", "i16", "i32", "i64"),
+        "unsigned": ("i8", "i16", "i32", "i64"),
+        "hint": "f16/f32/i8/i16/i32/i64 and u8/u16/u32/u64",
+    },
+    # VFReluOp has no dedicated 8/16/64-bit lowering; the direct RegBase
+    # intrinsic covers f16/f32/i32 only.  Unsigned i32 would use signed
+    # semantics, so it is rejected as well.
+    "vrelu": {
+        "float": ("f16", "f32"),
+        "signed": ("i32", ),
+        "unsigned": (),
+        "hint": "f16/f32/i32",
+    },
+    # VFSqrtOp lowers only to the f16/f32 SFU intrinsic; there is no integer
+    # or 64-bit library fallback.
+    "vsqrt": {
+        "float": ("f16", "f32"),
+        "signed": (),
+        "unsigned": (),
+        "hint": "f16/f32",
+    },
+    # VFAbsDiffOp covers f16/f32 through VabsdifSXInstrOp.  The unsigned
+    # intrinsic exists in the dialect but is not wired into the lowering yet.
+    "vabsdif": {
+        "float": ("f16", "f32"),
+        "signed": (),
+        "unsigned": (),
+        "hint": "f16/f32",
+    },
+    # VFExpdifOp computes exp(lhs - rhs) and lowers only for f16/f32.
+    "vexpdif": {
         "float": ("f16", "f32"),
         "signed": (),
         "unsigned": (),
@@ -776,6 +844,17 @@ def _binary(name, lhs, rhs, _semantic, mask=None, mode=MODE.ZEROING):
     return vector(handle, lhs.type)
 
 
+def _binary_op(op, kind, lhs, rhs, _semantic, mask=None, mode=MODE.ZEROING):
+    """Binary op with the per-op dtype contract applied before the builder call."""
+    _require_vector(lhs, "lhs")
+    _require_vector(rhs, "rhs")
+    if lhs.type != rhs.type:
+        raise ValueError(f"{op} requires same-typed operands, "
+                         f"got {lhs.type} and {rhs.type}")
+    _require_elem_support(op, _elem_tag(lhs.dtype), _is_unsigned(lhs.dtype))
+    return _binary(kind, lhs, rhs, _semantic, mask=mask, mode=mode)
+
+
 @builtin
 def vmul(lhs, rhs, _semantic=None) -> vector:
     """
@@ -1183,6 +1262,72 @@ def vsub(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
 
 @builtin
+def vabsdif(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Fused absolute difference (``ave.hir.vabs_diff``).
+
+    Computes ``abs(lhs - rhs)`` in one instruction.  Both operands must have
+    the same dtype and lane count.  This op performs no broadcasting and no
+    implicit dtype conversion.
+
+    Supported element types: f16/f32.  Full-register lane counts are 128 and
+    64 respectively.  The AVE dialect also has integer absolute-difference
+    intrinsics, but they are not wired into the current TLA lowering.
+
+    :param lhs: Minuend vector register.
+    :type lhs: tla.vector
+    :param rhs: Subtrahend vector register with the same dtype and lane count.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+    """
+    return _binary_op("vabsdif", "absdiff", lhs, rhs, _semantic, mask=mask, mode=mode)
+
+
+@builtin
+def vexpdif(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Fused exponential difference (``ave.hir.vexpdif``).
+
+    Computes ``exp(lhs - rhs)`` in one instruction.  Both operands must have
+    the same dtype and lane count.  This op performs no broadcasting and no
+    implicit dtype conversion.
+
+    Supported element types: f32 in the validated TLA contract.  The AVE TD,
+    intrinsic lowering and CCE stub also list f16, but the f16 simulator path
+    is not part of the current stable test contract.  f32 uses 64 lanes;
+    f16, when used, uses 128 lanes.
+
+    :param lhs: First vector register.
+    :type lhs: tla.vector
+    :param rhs: Second vector register with the same dtype and lane count.
+    :type rhs: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as the inputs.
+    :rtype: tla.vector
+
+    .. note::
+        ``vexpdif`` is the fused ``exp(lhs - rhs)`` instruction.  Do not
+        assume it is interchangeable with ``vexp(lhs - rhs)`` for all
+        precisions; the fused instruction has its own hardware rounding.
+    """
+    return _binary_op("vexpdif", "expdif", lhs, rhs, _semantic, mask=mask, mode=mode)
+
+
+@builtin
 def vor(lhs, rhs, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """Elementwise bitwise OR under an optional predicate."""
     return _masked_binary("or", lhs, rhs, mask, mode, _semantic)
@@ -1278,16 +1423,173 @@ def _unary(name, src, _semantic):
     return vector(handle, src.type)
 
 
-@builtin
-def vneg(src, _semantic=None) -> vector:
-    """Elementwise negate (``ave.hir.vneg``)."""
-    return _unary("neg", src, _semantic)
+def _unary_op(op, kind, src, mask, mode, _semantic):
+    """Unary op with the per-op dtype contract applied before the builder call."""
+    _require_vector(src, "src")
+    mode = _check_mode(mode)
+    _require_elem_support(op, _elem_tag(src.dtype), _is_unsigned(src.dtype))
+    lanes = src.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_unary(kind, src.handle, mask.handle, _MODE_BUILDER_NAMES[mode])
+    return vector(handle, src.type)
 
 
 @builtin
-def vsqrt(src, _semantic=None) -> vector:
-    """Elementwise square root (``ave.hir.vsqrt``)."""
-    return _unary("sqrt", src, _semantic)
+def vabs(src, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Elementwise absolute value (``ave.hir.vabs``).
+
+    Computes ``abs(src)`` for each active lane and returns a vector with the
+    same dtype and lane count as ``src``.  The operation is a signed absolute
+    value; unsigned integer registers are rejected instead of being silently
+    interpreted with signed hardware semantics.
+
+    Supported element types: f16/f32 and signed i8/i16/i32/i64.  Full-register
+    lane counts are 256 (i8), 128 (i16/f16), 64 (i32/f32), and 64 for i64
+    (4096-bit).
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    .. note::
+        For unsigned integer values use an explicit select/compare sequence
+        when the value range can include the sign bit.
+    """
+    return _unary_op("vabs", "abs", src, mask, mode, _semantic)
+
+
+@builtin
+def vneg(src, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Elementwise negation (``ave.hir.vneg``).
+
+    Computes two's-complement negation for integer registers and floating
+    point negation for f16/f32.  The result has the same dtype and lane count
+    as ``src``; no implicit dtype conversion is performed.
+
+    Supported element types: f16/f32 and signed or unsigned 8/16/32/64-bit
+    integers.  Full-register lane counts are 256 (8-bit), 128 (16-bit/f16),
+    64 (32-bit/f32), and 64 for 64-bit integers (4096-bit).  The 64-bit forms
+    use the dedicated 2xVL library wrappers.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+    """
+    return _unary_op("vneg", "neg", src, mask, mode, _semantic)
+
+
+@builtin
+def vnot(src, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Elementwise bitwise NOT (``ave.hir.vnot``).
+
+    Inverts every bit of each active lane.  For floating-point registers this
+    is a bit-pattern operation, not a logical negation and not a comparison
+    result.  The returned vector has the same dtype and lane count as ``src``.
+
+    Supported element types: f16/f32 and signed or unsigned 8/16/32/64-bit
+    integers.  Full-register lane counts are 256 (8-bit), 128 (16-bit/f16),
+    64 (32-bit/f32), and 64 for 64-bit integers (4096-bit).
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    .. note::
+        This is a bitwise operation.  For logical conditions use
+        :func:`vcmp` and :func:`vsel`.
+    """
+    return _unary_op("vnot", "not", src, mask, mode, _semantic)
+
+
+@builtin
+def vrelu(src, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Elementwise rectified linear unit (``ave.hir.vrelu``).
+
+    Computes ``max(src, 0)`` for each active lane.  The result has the same
+    dtype and lane count as ``src``; no implicit dtype conversion is
+    performed.
+
+    Supported element types: f16/f32/i32.  Full-register lane counts are 128
+    (f16), 64 (f32), and 64 (i32).  There is no dedicated 8/16/64-bit or
+    unsigned-integer ReLU lowering.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    .. note::
+        For other dtypes use ``vmax(src, vsplat(0, dtype))``.
+    """
+    return _unary_op("vrelu", "relu", src, mask, mode, _semantic)
+
+
+@builtin
+def vsqrt(src, mask=None, mode=MODE.ZEROING, precision=None, _semantic=None) -> vector:
+    """Elementwise square root (``ave.hir.vsqrt``).
+
+    Computes the square root of each active lane using the hardware SFU
+    instruction.  The result has the same dtype and lane count as ``src``.
+    Negative inputs follow the hardware specification; this wrapper does not
+    clamp or sanitize them.
+
+    Supported element types: f16/f32.  Full-register lane counts are 128 and
+    64 respectively.  There is no integer or 64-bit square-root lowering.
+
+    :param src: Source vector register.
+    :type src: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true ``pge <ALL>`` mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode.  ``MODE.ZEROING`` emits the bare masked
+        AVE op; ``MODE.MERGING`` emits the same op plus a same-typed ``+0``
+        merge source selected by ``ave.hir.vsel``.  ``MERGING`` does not
+        preserve previous destination lanes.
+    :type mode: tla.simd.MODE
+    :param precision: ``None`` or ``'ftz_true'`` keeps the hardware SFU
+        instruction.  Other precision tiers have no committed AVE lowering
+        and are rejected.
+    :type precision: str or None
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+    """
+    _normalize_precision(precision, "vsqrt")
+    return _unary_op("vsqrt", "sqrt", src, mask, mode, _semantic)
 
 
 @builtin

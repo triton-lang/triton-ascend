@@ -465,6 +465,29 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
+static bool isAxisDiscreteMask(Value mask) {
+  if (auto andOp = mask.getDefiningOp<arith::AndIOp>())
+    return isAxisDiscreteMask(andOp.getLhs()) &&
+           isAxisDiscreteMask(andOp.getRhs());
+  return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
+}
+
+static bool isAxisDiscreteMaskLoad(triton::LoadOp op) {
+  auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
+  auto maskType = dyn_cast<RankedTensorType>(op.getMask().getType());
+  
+  // FIXME: Only 2D pointers and masks are currently supported. The
+  // axis-discrete mask optimization needs generalizing to other ranks.
+  if (!ptrType || !maskType || ptrType.getRank() != 2)
+    return false;
+  auto shape = ptrType.getShape();
+  if (shape[0] <= 0 || shape[1] <= 0)
+    return false;
+  if (maskType.getShape() != shape)
+    return false;
+  return isAxisDiscreteMask(op.getMask());
+}
+
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   using OpRewritePattern<triton::StoreOp>::OpRewritePattern;
 
@@ -574,7 +597,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
         ptrType && ptrType.getShape().size() <= 5;
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
-        rankWithinIndirectFastPathLimit) {
+        rankWithinIndirectFastPathLimit &&
+        !isAxisDiscreteMaskLoad(op)) {
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();
@@ -695,7 +719,7 @@ struct DiscreteMaskAtomicConversion
     }
 
     auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
-    FailureOr<mlir::Value> fill = specializeTypelessValueToConstant(
+    FailureOr<Value> fill = specializeTypelessValueToConstant(
         typelessVal, src.getType(), loc, rewriter);
     if (failed(fill)) {
       LLVM_DEBUG({

@@ -2,7 +2,7 @@
 
 Stages: ir (offline HIVM), compile (kernel artifacts), run (numerics).
 Rows: 0 full-mask, 1 prefix ZEROING, 2 all-false ZEROING, 3 prefix MERGING
-(TLA MERGING merges a +0 source, so inactive lanes read 0 in rows 1..3).
+(MERGING keeps the source vector on the inactive lanes).
 """
 import os
 import sys
@@ -62,6 +62,7 @@ def _launch():
     ref[0] = full
     ref[1, :s["active"]] = full[:s["active"]]
     ref[3, :s["active"]] = full[:s["active"]]
+    ref[3, s["active"]:] = x[s["active"]:]
     return out, ref
 
 

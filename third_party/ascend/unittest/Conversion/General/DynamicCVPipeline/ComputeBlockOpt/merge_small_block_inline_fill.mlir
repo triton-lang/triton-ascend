@@ -39,12 +39,14 @@ func.func @constant_fill_add(%scalar: f32, %input: tensor<8xf32>) -> (tensor<8xf
 
 // -----
 
-// A constant fill consumed by math.exp is real work: 4 ops must stay separate.
+// Constant fills are excluded from the compute count regardless of their users.
+// The three remaining compute ops can merge into block 220.
 // CHECK-LABEL: func.func @constant_fill_math(
 func.func @constant_fill_math(%scalar: f32, %input: tensor<8xf32>) -> (tensor<8xf32>) {
   %zero = arith.constant 0.0 : f32
   %empty = tensor.empty() {ssbuffer.block_id = 210 : i32, ssbuffer.core_type = "VECTOR"} : tensor<8xf32>
-  // CHECK: linalg.fill {ssbuffer.block_id = 210 : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: %[[FILL:[a-zA-Z0-9_]+]] = linalg.fill {ssbuffer.block_id = 220 : i32, ssbuffer.core_type = "VECTOR"}
+  // CHECK: math.exp %[[FILL]] {ssbuffer.block_id = 220 : i32, ssbuffer.core_type = "VECTOR"}
   %fill = linalg.fill {ssbuffer.block_id = 210 : i32, ssbuffer.core_type = "VECTOR"} ins(%zero : f32) outs(%empty : tensor<8xf32>) -> tensor<8xf32>
   %x = math.exp %fill {ssbuffer.block_id = 210 : i32, ssbuffer.core_type = "VECTOR"} : tensor<8xf32>
   %y = arith.addf %x, %x {ssbuffer.block_id = 210 : i32, ssbuffer.core_type = "VECTOR"} : tensor<8xf32>

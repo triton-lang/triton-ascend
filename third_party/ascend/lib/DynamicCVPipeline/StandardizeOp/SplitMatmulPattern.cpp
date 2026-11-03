@@ -687,7 +687,8 @@ static std::optional<SplitInfo> shouldSplit(linalg::MatmulOp matmulOp,
   Value outerInValue = matmulInput.bias;
   auto outerOutValue = searchInArgsChain(
       matmulOp.getResult(0), argsLimitedInMatmul, mayNotExec, outerInValue);
-  if (utils::getAnnotateOpWithAttr(outerOutValue, kMatmulAtLeastOnceHint)
+  if (utils::getAnnotateOpWithAttr(outerOutValue,
+                                   CVPipeline::kMatmulAtLeastOnceHint)
           .has_value()) {
     mayNotExec = false;
   }

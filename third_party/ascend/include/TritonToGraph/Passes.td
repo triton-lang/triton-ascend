@@ -73,6 +73,8 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
   let summary = "Optimize Triton IR with graph analyses";
   let constructor = "mlir::triton::cfg::createGraphOptimizePass()";
   let options = [
+    Option<"compileOn91095", "compile-on-910-95", "bool", "false",
+           "Enable A5-only pre-graph rewrites relying on Ascend 910_95 templates">,
     Option<"ruleMask", "rule-mask", "uint64_t", "3071",
            "Bitmask of known 32-bit graph rule identities; default 3071 preserves the legacy native bundle and enables IAT/PTSM. RLF/IPBE/SCP/CBAF remain explicit opt-in">,
     Option<"maxRewritesPerFunction", "max-rewrites-per-function", "uint64_t",
@@ -87,6 +89,14 @@ def GraphOptimize : Pass<"graph-optimize", "mlir::ModuleOp"> {
            "Percent of UB capacity available to resource candidates">,
     Option<"reservedUBBytes", "reserved-ub-bytes", "uint64_t", "0",
            "UB bytes reserved for lowering/backend workspace before candidate budgeting">,
+    Option<"mappingL0ACapacityBytes", "mapping-l0a-capacity-bytes", "uint64_t", "0",
+           "Physical L0A (cube lhs) buffer capacity in bytes; zero disables L0A candidate checks">,
+    Option<"mappingL0BCapacityBytes", "mapping-l0b-capacity-bytes", "uint64_t", "0",
+           "Physical L0B (cube rhs) buffer capacity in bytes; zero disables L0B candidate checks">,
+    Option<"mappingL0CCapacityBytes", "mapping-l0c-capacity-bytes", "uint64_t", "0",
+           "Physical L0C (cube accumulator) buffer capacity in bytes; zero disables L0C candidate checks">,
+    Option<"l0SafetyPercent", "l0-safety-percent", "uint64_t", "80",
+           "Percent of L0A/L0B/L0C capacity available to resource candidates">,
     Option<"compileMode", "compile-mode", "std::string", "\"simd_simt_template\"",
            "Compilation mode; legacy elementwise RowCoalescing is enabled only for simt_only">,
   ];

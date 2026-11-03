@@ -109,12 +109,13 @@ def test_workspace_block_count_is_widened_before_multiply():
 
 
 def test_workspace_size_absent_when_kernel_needs_none():
-    """无需 workspace 时，不生成 workspace 大小计算与内存申请。
+    """No workspace sizing or allocation when the kernel needs none.
 
-    blockNum4Workspace 的声明是无条件出现在模板里的：它只是
-    totalWorkSpaceSize 的被乘数，声明本身不申请任何内存。真正按
-    workspace_size > 0 条件生成的是 totalWorkSpaceSize 的计算和
-    allocate_memory 调用，因此这里校验这两者不出现。
+    The blockNum4Workspace declaration is unconditional in the template: it is
+    only the multiplier of totalWorkSpaceSize, so declaring it allocates
+    nothing. What is gated on workspace_size > 0 is the totalWorkSpaceSize
+    computation and the allocate_memory call, so this checks that neither
+    appears.
     """
     src = _generate(-1)
     assert "totalWorkSpaceSize" not in src

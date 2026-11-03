@@ -27,6 +27,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/LogicalResult.h"
 
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/Pass/Pass.h"
@@ -45,6 +46,32 @@ using namespace mlir;
 using namespace CVPipeline;
 
 namespace {
+
+/// Stamps `attrs` on `op` and on every op nested in its regions.
+///
+/// The scope's tags describe the packed unit as a whole - `block_id` names the
+/// block the unit runs in, `core_type` the core - and the passes that read them
+/// look at an op's own attributes only, never at an enclosing op's. When the
+/// body comes out of the scope, a loop keeps its own region, so stamping the
+/// moved-out ops alone would leave the work inside the loop untagged and every
+/// later match would read it as unclassified.
+static void stampUnitAttrs(Operation *op, ArrayRef<NamedAttribute> attrs) {
+  for (const NamedAttribute &attr : attrs) {
+    op->setAttr(attr.getName(), attr.getValue());
+  }
+  // A linalg op's region holds its payload, not a unit of work of its own; the
+  // classifier never tags those ops either.
+  if (op->getDialect() && isa<linalg::LinalgDialect>(op->getDialect())) {
+    return;
+  }
+  for (Region &region : op->getRegions()) {
+    for (Block &block : region) {
+      for (Operation &nested : block) {
+        stampUnitAttrs(&nested, attrs);
+      }
+    }
+  }
+}
 
 class UnpackScopePass
     : public PassWrapper<UnpackScopePass, OperationPass<ModuleOp>> {
@@ -68,31 +95,25 @@ public:
 
     for (scope::ScopeOp scopeOp : scopes) {
       llvm::SmallVector<Operation *> unpackedOps;
-      auto attrs = scopeOp->getAttrs();
+      // `ssbuffer.load` marks the packed unit; it is a property of the scope,
+      // not of the work inside it, so the unpacked ops must not inherit it.
+      SmallVector<NamedAttribute> attrs;
+      for (const NamedAttribute &attr : scopeOp->getAttrs()) {
+        if (attr.getName() == kScopeLoadAttr) {
+          continue;
+        }
+        attrs.push_back(attr);
+      }
       if (unpackScopeOp(scopeOp, &unpackedOps).failed()) {
         LOG_DEBUG("Failed to unpack scopeOp: " << scopeOp << "\n");
         setFallbackAttr(module, ERRCODE_FAILED);
         return;
       }
-      for (auto *op : unpackedOps) {
-        // Nothing stamps `block_id` on the ops inside a scope body, so their
-        // attrs are either empty or exactly the scope's `block_id`. Both are a
-        // subset of the scope's attrs, hence the whole AttributeArray can be
-        // shared instead of copied per attribute. The scope is trusted to carry
-        // `block_id`; a scope without it is an upstream bug and is reported by
-        // the passes that consume `block_id` afterwards.
-        auto canReuseAttrs = op->getAttrs().size() == 0;
-        if (op->getAttrs().size() == 1) {
-          canReuseAttrs = op->hasAttr(kBlockId);
-        }
-        if (canReuseAttrs) {
-          // Empty/reusable attrs: share the global attr list (in MLIRContext).
-          op->setAttrs(attrs);
-        } else {
-          for (const auto attr : attrs) {
-            op->setAttr(attr.getName(), attr.getValue());
-          }
-        }
+      // The scope is trusted to carry `block_id`; a scope without it is an
+      // upstream bug and is reported by the passes that consume `block_id`
+      // afterwards.
+      for (Operation *op : unpackedOps) {
+        stampUnitAttrs(op, attrs);
       }
     }
   }

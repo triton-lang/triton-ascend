@@ -40,6 +40,9 @@ FailureOr<unsigned> getIntegerWidth(Type type);
 Type getElementTypeOrSelf(Type type);
 FailureOr<OpFoldResult> typedZero(Type scalarType, OpBuilder &builder);
 FailureOr<llvm::APInt> getIntegerConstant(OpFoldResult value, unsigned width);
+/// Bounded divisibility proof from local integer expressions and hints.
+bool isKnownMultiple(OpFoldResult operand, uint64_t divisor,
+                     unsigned depth = 8);
 FailureOr<OpFoldResult> foldOrCreateBinary(BinaryKind kind, OpFoldResult lhs,
                                            OpFoldResult rhs, Type resultType,
                                            OpBuilder &builder, Location loc);

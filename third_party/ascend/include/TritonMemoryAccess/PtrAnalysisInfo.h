@@ -27,8 +27,17 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/Support/LogicalResult.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/ADT/SmallVector.h"
 #include <optional>
+
+namespace mlir::arith {
+class SelectOp;
+}
+namespace mlir::triton {
+class MakeTensorPtrOp;
+class AdvanceOp;
+} // namespace mlir::triton
 
 namespace mlir::triton::ptr {
 
@@ -120,6 +129,71 @@ namespace mlir::triton::ptr::detail {
 bool isOrdinaryPtrType(Type type);
 bool isBlockPtrType(Type type);
 
+// Initial result construction.
+/// Build invariant axes for a known-uniform integer value and obtain an index
+/// origin from scalar/value. May create extraction and cast helpers.
+OffsetInfo buildUniformOffsetInfo(Value value, OpBuilder &builder,
+                                  OpFoldResult scalar = {});
+/// Build integer facts from the value itself, without analyzing its operands.
+/// May extract and cast an available uniform origin.
+FailureOr<PtrInfo> buildIntegerInfo(Value value, OpBuilder &builder);
+/// Use an ordinary scalar pointer as the base, with known zero offsets.
+PtrInfo buildScalarPtrInfo(Value value, OpBuilder &builder);
+
+// Integer offset combinations.
+/// These operations consume analyzed inputs at the caller-selected insertion
+/// point. They do not recursively query operands or change session state.
+PtrInfo combineElementwise(Value value, const PtrInfo &lhs, const PtrInfo &rhs,
+                           OpBuilder &builder);
+FailureOr<OffsetInfo> addOffsets(OpFoldResult complete, const OffsetInfo &lhs,
+                                 const OffsetInfo &rhs, bool subtract,
+                                 OpBuilder &builder, Location loc);
+FailureOr<OffsetInfo> scaleOffsets(OpFoldResult complete,
+                                   const OffsetInfo &source, OpFoldResult scale,
+                                   OpBuilder &builder, Location loc);
+PtrInfo refineDivRem(Value value, const PtrInfo &lhsInfo,
+                     const PtrInfo &rhsInfo, const PtrInfo &fallback,
+                     bool divide, OpBuilder &builder);
+
+// Offset shape transformations.
+FailureOr<OffsetInfo> broadcastOffsets(OpFoldResult complete, Type target,
+                                       const OffsetInfo &source,
+                                       OpBuilder &builder);
+FailureOr<OffsetInfo> expandDimsOffsets(OpFoldResult complete, Type target,
+                                        const OffsetInfo &source, unsigned axis,
+                                        OpBuilder &builder);
+FailureOr<OffsetInfo> reshapeOffsets(OpFoldResult complete,
+                                     RankedTensorType target,
+                                     const OffsetInfo &source,
+                                     OpBuilder &builder, Location loc);
+FailureOr<OffsetInfo>
+sliceOffsets(OpFoldResult complete, RankedTensorType target,
+             const OffsetInfo &source, ArrayRef<OpFoldResult> starts,
+             ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
+             OpBuilder &builder, Location loc);
+
+// Ordinary pointer offset accumulation.
+/// Widen the integer increment before adding it to the parent's address offset.
+FailureOr<PtrInfo> addPtrOffsets(Value value, const PtrInfo &parent,
+                                 const OffsetInfo &delta, OpBuilder &builder);
+
+// Selection and insertion of analyzed results.
+PtrInfo combineSelectInfo(arith::SelectOp op, const PtrInfo &lhsInfo,
+                          const PtrInfo &rhsInfo, OpBuilder &builder);
+FailureOr<PtrInfo> insertPtrOffsets(
+    Value value, const PtrInfo &source, const PtrInfo &dest, Type sourceType,
+    llvm::function_ref<Value(Value, Value)> insert, OpBuilder &builder);
+
+// Block descriptor construction and coordinate updates.
+FailureOr<PtrInfo> makeBlockInfo(triton::MakeTensorPtrOp op,
+                                 const PtrInfo &base,
+                                 ArrayRef<OpFoldResult> coordinates,
+                                 OpBuilder &builder);
+FailureOr<PtrInfo> advanceBlockInfo(triton::AdvanceOp op, const PtrInfo &parent,
+                                    ArrayRef<OpFoldResult> delta,
+                                    OpBuilder &builder);
+
+// Binding validation and dependency collection.
 bool validOffsetBinding(Value boundary, const OffsetInfo &components);
 bool validBlockPtrBinding(Value value, const PtrInfo &components);
 bool validPtrBinding(Value boundary, const PtrInfo &components);

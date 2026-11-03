@@ -32,8 +32,8 @@
 namespace mlir::triton::ptr {
 /// Concrete integer/pointer rules. All recursive input queries use the current
 /// context.analyze through a borrowed callback. Parsers live in the
-/// implementation file and combine already analyzed inputs with shared Info
-/// utilities.
+/// implementation file and delegate result construction and transformations to
+/// PtrAnalysisInfo, using shared numerical and materialization utilities.
 class CommonPtrRules {
 public:
   using Result = PtrInfo;
@@ -54,14 +54,6 @@ public:
                                    OpBuilder &builder) const;
 
 private:
-  // Elementwise combinations.
-  /// Combine already analyzed operands at the caller-selected insertion point.
-  Result combineElementwise(Value value, const PtrInfo &lhs, const PtrInfo &rhs,
-                            OpBuilder &builder) const;
-  Result refineDivRem(Value value, const Result &lhs, const Result &rhs,
-                      const Result &fallback, bool divide,
-                      OpBuilder &builder) const;
-
   // Shape and selection rules.
   FailureOr<Result> parseSplat(triton::SplatOp op, Analyze analyze,
                                OpBuilder &builder) const;

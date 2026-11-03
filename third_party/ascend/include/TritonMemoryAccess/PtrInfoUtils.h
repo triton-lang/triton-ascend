@@ -116,34 +116,38 @@ struct ConcreteArithmetic {
   }
 };
 
-// Axis queries and normalization.
+// Compare identity or integer constants in the 64-bit descriptor domain.
+bool equalConstant(OpFoldResult lhs, OpFoldResult rhs);
+bool zero(OpFoldResult value);
+
+// Uniform origin materialization.
+/// Populate a missing origin once all axes are invariant. May extract and cast
+/// the value, placing helper IR after its actual scalar source.
+void setUniformOrigin(OffsetInfo &info, Value value, OpBuilder &builder,
+                      OpFoldResult scalar = {});
+
+// Address types and complete offset values.
+// Logical descriptors use index; complete tensor offsets use i64 storage.
+Type addressValueType(Type source, OpBuilder &builder);
+Type addressStorageType(Type source, OpBuilder &builder);
+/// Use fullOffsets or a uniform origin; sign-extend without narrowing and splat
+/// scalars to tensor targets at the caller's insertion point when necessary.
+FailureOr<Value> materializeFullOffset(const OffsetInfo &info, Type target,
+                                       OpBuilder &builder, Location loc);
+
+// Axis alignment, queries and normalization.
+/// Express compatible axes in the same sub-axis partition, if provable.
+LogicalResult alignAxes(AxisInfo &lhs, AxisInfo &rhs,
+                        ConcreteArithmetic &arithmetic);
 SmallVector<OpFoldResult> axisStrides(const OffsetInfo &info);
 LogicalResult normalizeAxes(OffsetInfo &info, OpBuilder &builder);
 
-// Arithmetic combinations.
-FailureOr<OffsetInfo> addOffsets(OpFoldResult complete, const OffsetInfo &lhs,
-                                 const OffsetInfo &rhs, bool subtract,
-                                 OpBuilder &builder, Location loc);
-FailureOr<OffsetInfo> scaleOffsets(OpFoldResult complete,
-                                   const OffsetInfo &source, OpFoldResult scale,
-                                   OpBuilder &builder, Location loc);
-
-// Shape transformations.
-FailureOr<OffsetInfo> broadcastOffsets(OpFoldResult complete, Type target,
-                                       const OffsetInfo &source,
-                                       OpBuilder &builder);
-FailureOr<OffsetInfo> expandDimsOffsets(OpFoldResult complete, Type target,
-                                        const OffsetInfo &source, unsigned axis,
-                                        OpBuilder &builder);
-FailureOr<OffsetInfo> reshapeOffsets(OpFoldResult complete,
-                                     RankedTensorType target,
-                                     const OffsetInfo &source,
-                                     OpBuilder &builder, Location loc);
-FailureOr<OffsetInfo>
-sliceOffsets(OpFoldResult complete, RankedTensorType target,
-             const OffsetInfo &source, ArrayRef<OpFoldResult> starts,
-             ArrayRef<OpFoldResult> steps, ArrayRef<bool> dropped,
-             OpBuilder &builder, Location loc);
+// Divisibility proofs and exact unit conversion.
+bool canDivideDecomposition(const OffsetInfo &info, uint64_t divisor);
+/// After the full value is proved divisible, convert descriptor fields whose
+/// exact division can also be proved. Leave fullOffsets to the caller.
+void divideDecomposition(OffsetInfo &info, uint64_t divisor, OpBuilder &builder,
+                         Location loc);
 
 // Range proofs for an existing decomposition.
 bool decompositionFitsSigned(const OffsetInfo &info, unsigned width);

@@ -109,6 +109,9 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
     if not module.verify():
         raise RuntimeError("triton_to_linalg produced invalid IR")
     _infer_tla_kernel_mode(module, context)
+    # Native stores need named VF argument effects for npuir's sync solver.
+    # The binding is a no-op unless the module contains a native scatter.
+    ascend_binding.ir.prepare_native_simd_memory(module)
     if output_dir is not None:
         (output_dir / "01_linalg.mlir").write_text(str(module))
     check_ttadapter(module)

@@ -120,6 +120,26 @@ class _Recorder:
     def create_simd_vcvt(self, *args):
         return self._record("vcvt", *args)
 
+    def create_simd_pred_pack(self, *args):
+        return self._record("pred_pack", *args)
+
+    def create_simd_pred_interleave(self, *args):
+        self._record("pred_interleave", *args)
+        return _Handle("lo"), _Handle("hi")
+
+    def create_simd_vselr(self, *args):
+        return self._record("vselr", *args)
+
+    def create_simd_group_reduce(self, *args):
+        return self._record("group_reduce", *args)
+
+    def create_simd_vintlv(self, *args):
+        self._record("vintlv", *args)
+        return _Handle("low_data"), _Handle("high_data")
+
+    def create_simd_vscatter(self, *args):
+        self._record("vscatter", *args)
+
     def create_simd_vunpack(self, *args):
         return self._record("vunpack", *args)
 
@@ -1050,3 +1070,93 @@ def test_byte_gather_native_predicate_routing(masked, mode):
     else:
         assert not splits and gathers[0][3] is gathers[1][3]
     assert all(name != "vsel" for name, _ in calls)
+
+
+@pytest.mark.parametrize("op,lanes,out_lanes", [(simd.ppack, 64, 128), (simd.ppack, 128, 256), (simd.punpack, 256, 128),
+                                                (simd.punpack, 128, 64)])
+@pytest.mark.parametrize("part,number", [(simd.PART.LOWER, 0), (simd.PART.HIGHER, 1)])
+def test_native_predicate_pack_contract(op, lanes, out_lanes, part, number):
+    sem, src = _Semantic(), _mask(lanes)
+    result = op(src, part=part, _semantic=sem)
+    assert result.type == simd.vector_type(out_lanes, tl.int1)
+    assert _last(sem) == ("pred_pack", (src.handle, op is simd.punpack, number))
+
+
+@pytest.mark.parametrize("op", (simd.ppack, simd.punpack))
+def test_native_predicate_pack_invalid(op):
+    for src, part in ((_mask(32), simd.PART.LOWER), (_vec(128, tl.int16), simd.PART.LOWER),
+                      (_mask(128), simd.PART.EVEN), (_mask(256 if op is simd.ppack else 64), simd.PART.LOWER)):
+        with pytest.raises((ValueError, TypeError)):
+            op(src, part=part, _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("op", (simd.pintlv, simd.pdintlv))
+@pytest.mark.parametrize("lanes", (64, 128, 256))
+def test_native_predicate_interleave_contract(op, lanes):
+    sem, a, b = _Semantic(), _mask(lanes), _mask(lanes)
+    lo, hi = op(a, b, _semantic=sem)
+    assert lo.type == hi.type == a.type
+    assert _last(sem) == ("pred_interleave", (a.handle, b.handle, op is simd.pdintlv))
+    with pytest.raises(ValueError):
+        op(a, _mask(128 if lanes != 128 else 64), _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("op,kind", [(simd.vcgadd, "add"), (simd.vcgmax, "max"), (simd.vcgmin, "min")])
+@pytest.mark.parametrize("dtype,unsigned", [(tl.int16, False), (tl.uint16, True), (tl.float16, False)])
+def test_native_group_reduce_contract(op, kind, dtype, unsigned):
+    sem, src, mask = _Semantic(), _vec(128, dtype), _mask(128)
+    result = op(src, mask, mode=simd.MODE.MERGING, _semantic=sem)
+    assert result.type == src.type
+    assert sem.builder.calls == [("group_reduce", (kind, src.handle, mask.handle, unsigned))]
+    for kwargs in (dict(mask=_mask(256)), dict(mode="invalid")):
+        with pytest.raises(ValueError):
+            op(src, _semantic=_Semantic(), **kwargs)
+    for bad in (_vec(128, tl.bfloat16), _vec(64, tl.int64), _vec(64, tl.float16)):
+        with pytest.raises(ValueError):
+            op(bad, _semantic=_Semantic())
+
+
+def test_vselr_contract_and_validation():
+    sem, src, index = _Semantic(), _vec(256, tl.int8), _vec(256, tl.uint8)
+    result = simd.vselr(src, index, _semantic=sem)
+    assert result.type == src.type and sem.builder.calls == [("vselr", (src.handle, index.handle))]
+    for idx in (_vec(256, tl.int8), _vec(128, tl.uint16), _vec(128, tl.uint8)):
+        with pytest.raises(ValueError):
+            simd.vselr(src, idx, _semantic=_Semantic())
+    with pytest.raises(ValueError):
+        simd.vselr(src, index, _mask(128), _semantic=_Semantic())
+    with pytest.raises(ValueError):
+        simd.vselr(src, index, mode="bad", _semantic=_Semantic())
+
+
+def test_vscatter_contract_and_validation():
+    sem, src, index, mask = _Semantic(), _vec(64, tl.float32), _vec(64, tl.uint32), _mask(64)
+    buf = _buffer(tl.float32, shape=(1024, ))
+    assert simd.vscatter(buf[32], index, src, mask, _semantic=sem) is None
+    name, args = _last(sem)
+    assert name == "vscatter" and args[0] is buf.handle and args[1].ty == 32
+    assert args[2:] == (src.handle, index.handle, mask.handle)
+    for b, i, s, m in ((_buffer(tl.float32, space="gm"), index, src, mask), (buf, _vec(128, tl.uint16), src, mask),
+                       (buf, index, src, _mask(128)), (buf, index, _vec(64, tl.int32),
+                                                       mask), (_buffer(tl.float32, strides=(2, )), index, src, mask)):
+        with pytest.raises((TypeError, ValueError)):
+            simd.vscatter(b[0], i, s, m, _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("masked", (False, True))
+def test_byte_scatter_native_predicate_routing(masked):
+    sem = _Semantic()
+    mask = _mask(256) if masked else None
+    src = _vec(256, tl.uint8)
+    indices = (_vec(128, tl.uint16), _vec(128, tl.uint16))
+    simd.vscatter(_buffer(tl.uint8, shape=(1024,))[0], indices, src, mask, _semantic=sem)
+    scatters = [args for name, args in sem.builder.calls if name == "vscatter"]
+    assert len(scatters) == 2
+    assert [args[2].ty for args in scatters] == ["low_data", "high_data"]
+    assert [args[3] for args in scatters] == [idx.handle for idx in indices]
+    splits = [args for name, args in sem.builder.calls if name == "gather_masks"]
+    if masked:
+        assert splits == [(mask.handle,)]
+        assert [args[4].ty for args in scatters] == ["low_mask", "high_mask"]
+    else:
+        assert not splits and scatters[0][4] is scatters[1][4]

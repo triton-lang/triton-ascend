@@ -102,6 +102,15 @@ __all__ = [
     "pld",
     "pst",
     "vgather",
+    "ppack",
+    "punpack",
+    "pintlv",
+    "pdintlv",
+    "vselr",
+    "vcgadd",
+    "vcgmax",
+    "vcgmin",
+    "vscatter",
     "vld",
     "vsts",
     "vsstb",
@@ -1899,6 +1908,205 @@ def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", sign
     handle = _semantic.builder.create_simd_vcvt("extsi" if signed else "extui", src.handle, mask.handle, out_tag, part,
                                                 "round", False, _MODE_BUILDER_NAMES[mode], pp, apply_mask)
     return vector(handle, vector_type(lanes, target_dtype))
+
+
+def _predicate_lanes(src, name):
+    _require_vector(src, name)
+    if src.dtype != tl.int1 or src.type.lanes not in (64, 128, 256):
+        raise ValueError(f"{name} requires a 64/128/256-lane predicate")
+    return src.type.lanes
+
+
+def _predicate_pack(src, part, unpack, _semantic):
+    lanes = _predicate_lanes(src, "punpack" if unpack else "ppack")
+    part = _unwrap_if_constexpr(part)
+    if part not in (PART.LOWER, PART.HIGHER):
+        raise ValueError("predicate pack/unpack part must be LOWER or HIGHER")
+    allowed = (256, 128) if unpack else (128, 64)
+    if lanes not in allowed:
+        raise ValueError(f"{'punpack' if unpack else 'ppack'} requires {allowed} logical lanes")
+    out_lanes = lanes // 2 if unpack else lanes * 2
+    handle = _semantic.builder.create_simd_pred_pack(src.handle, unpack, int(part == PART.HIGHER))
+    return vector(handle, vector_type(out_lanes, tl.int1))
+
+
+@builtin
+def ppack(src, part=PART.LOWER, _semantic=None):
+    """Pack a 64/128-lane predicate into half of a 128/256-lane predicate.
+
+    LOWER/HIGHER places all source lanes in the first/second result half;
+    the other half is false. This changes density by two using native ppack.
+    """
+    return _predicate_pack(src, part, False, _semantic)
+
+
+@builtin
+def punpack(src, part=PART.LOWER, _semantic=None):
+    """Select LOWER/HIGHER half of a 256/128-lane predicate, returning 128/64 lanes.
+
+    The selected logical bits are unchanged; native punpack adjusts their
+    physical spacing to the wider data-lane density. No extra mask or mode.
+    """
+    return _predicate_pack(src, part, True, _semantic)
+
+
+def _predicate_interleave(a, b, inverse, _semantic):
+    lanes = _predicate_lanes(a, "predicate interleave")
+    _predicate_lanes(b, "predicate interleave")
+    if a.type != b.type:
+        raise ValueError("predicate interleave requires identical mask densities")
+    lo, hi = _semantic.builder.create_simd_pred_interleave(a.handle, b.handle, inverse)
+    return vector(lo, a.type), vector(hi, a.type)
+
+
+@builtin
+def pintlv(src0, src1, _semantic=None):
+    """Interleave logical predicate lanes; return the first and second halves.
+
+    Inputs must have identical 256/128/64-lane density, selecting native
+    pintlv.b8/b16/b32 respectively. Output density matches the inputs.
+    """
+    return _predicate_interleave(src0, src1, False, _semantic)
+
+
+@builtin
+def pdintlv(src0, src1, _semantic=None):
+    """Deinterleave two concatenated predicates into even and odd logical lanes.
+
+    Inverse of pintlv at matching 256/128/64-lane density. Both outputs have
+    the input density; padding physical bits are not exposed as logical lanes.
+    """
+    return _predicate_interleave(src0, src1, True, _semantic)
+
+
+@builtin
+def vselr(src, index, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Permute a full register: result[i] = src[index[i]], using native vselr.
+
+    Supports integer 8/16/32-bit, f16/bf16/f32 and fp8e4nv/fp8e5. Indices
+    must be a full unsigned register with the same lane width, and every
+    index must be in range (including masked-off lanes). Repeated indices
+    are allowed. An optional result mask zeros inactive lanes in both modes;
+    preserving old values requires explicit vsel. No UB round-trip.
+    """
+    _require_vector(src, "src")
+    _require_vector(index, "index")
+    tag = _elem_tag(src.dtype)
+    if tag not in ("i8", "i16", "i32", "f16", "bf16", "f32", "fp8e4nv", "fp8e5"):
+        raise ValueError("vselr supports 8/16/32-bit data")
+    bits, lanes = _ELEM_SPECS[tag], _lanes_for(tag)
+    if src.type.lanes != lanes or index.type != vector_type(lanes, {8: tl.uint8, 16: tl.uint16, 32: tl.uint32}[bits]):
+        raise ValueError("vselr requires a full source and same-width unsigned indices")
+    _check_mode(mode)
+    if mask is not None:
+        _check_mask(mask, lanes)
+    result = vector(_semantic.builder.create_simd_vselr(src.handle, index.handle), src.type)
+    if mask is not None:
+        result = vsel(mask, result, vsplat(0, src.dtype, _semantic=_semantic), _semantic=_semantic)
+    return result
+
+
+def _group_reduce_native(kind, src, mask, mode, _semantic):
+    _require_vector(src, "src")
+    tag = _elem_tag(src.dtype)
+    if tag not in ("i8", "i16", "i32", "f16", "f32") or src.type.lanes != _lanes_for(tag):
+        raise ValueError("group reduction requires a full i8/i16/i32/f16/f32 register")
+    _check_mode(mode)
+    mask = _mask_for(mask, src.type.lanes, _semantic)
+    handle = _semantic.builder.create_simd_group_reduce(kind, src.handle, mask.handle, _is_unsigned(src.dtype))
+    return vector(handle, src.type)
+
+
+@builtin
+def vcgadd(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Sum active lanes in each 32-byte group with one native group reduction.
+
+    Returns a full register: eight group results in lanes 0..7, zeros after.
+    Mask density matches the source. Empty groups sum to zero; integer sums
+    wrap to the input width. Floating sums use the hardware reduction order.
+    Both modes use the same native result, with no old destination operand.
+    """
+    return _group_reduce_native("add", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmax(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Maximum of active lanes per 32-byte group; eight results then zeros.
+
+    Same full-register and mask contract as vcgadd. Empty groups use the
+    native maximum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python max.
+    """
+    return _group_reduce_native("max", src, mask, mode, _semantic)
+
+
+@builtin
+def vcgmin(src, mask=None, mode=MODE.ZEROING, _semantic=None):
+    """Minimum of active lanes per 32-byte group; eight results then zeros.
+
+    Same full-register and mask contract as vcgadd. Empty groups use the
+    native minimum-reduction identity. Floating special values follow the
+    target's native reduction semantics, not a sequential Python min.
+    """
+    return _group_reduce_native("min", src, mask, mode, _semantic)
+
+
+@builtin
+def vscatter(ptr, index, src, mask=None, _semantic=None):
+    """Scatter a full data register to contiguous UB using element indices.
+
+    Supports integers 8/16/32-bit and f16/bf16/f32. 16/32-bit data uses one
+    uint16/uint32 index register. Packed 8-bit data uses two uint16 index
+    registers and two scatters after interleaving data into hardware slots.
+    The mask has the source lane count; inactive locations are not written.
+    Active addresses must be in bounds and distinct across both index halves.
+    No atomicity or deterministic duplicate-index overwrite is provided.
+    A scalar buffer base offset is in elements, including subview offsets.
+    Before an aliasing vector load in the same SIMD scope, issue
+    membar("VST_VLD"), as for vsts; DMA dependencies are inferred separately.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    else:
+        offsets = [0]
+    _require_vector(src, "src")
+    if not isinstance(ptr, buffer) or ptr.space != "ub":
+        raise TypeError("vscatter requires a UB buffer")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ) or len(offsets) != 1:
+        raise ValueError("vscatter requires contiguous one-dimensional memory")
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int and not 0 <= offset < ptr.shape[0]:
+        raise ValueError("vscatter base offset is outside the buffer")
+    tag = _elem_tag(src.dtype)
+    if ptr.dtype != src.dtype or tag not in ("i8", "i16", "i32", "f16", "bf16", "f32"):
+        raise ValueError("vscatter requires matching 8/16/32-bit integer or f16/bf16/f32 data")
+    bits, lanes = _ELEM_SPECS[tag], _lanes_for(tag)
+    if src.type.lanes != lanes:
+        raise ValueError("vscatter requires a full data register")
+    supplied_mask = mask is not None
+    mask = _mask_for(mask, lanes, _semantic)
+    base, offsets = _resolve_base_and_indices(ptr, offsets, _semantic)
+    if bits == 8:
+        if isinstance(index, tl.tuple):
+            index = index.values
+        if not isinstance(index, (tuple, list)) or len(index) != 2:
+            raise ValueError("8-bit vscatter requires two uint16 index registers")
+        for idx in index:
+            _require_vector(idx, "index")
+            if idx.type != vector_type(128, tl.uint16):
+                raise ValueError("8-bit vscatter indices must have 128 uint16 lanes")
+        lo, hi = vintlv(src, vsplat(0, src.dtype, _semantic=_semantic), _semantic=_semantic)
+        if supplied_mask:
+            ml, mh = _semantic.builder.create_simd_gather_masks(mask.handle)
+        else:
+            ml = mh = mask.handle
+        _semantic.builder.create_simd_vscatter(base, offsets[0], lo.handle, index[0].handle, ml)
+        _semantic.builder.create_simd_vscatter(base, offsets[0], hi.handle, index[1].handle, mh)
+    else:
+        _require_vector(index, "index")
+        if index.type != vector_type(lanes, tl.uint32 if bits == 32 else tl.uint16):
+            raise ValueError("vscatter index width must match the data width")
+        _semantic.builder.create_simd_vscatter(base, offsets[0], src.handle, index.handle, mask.handle)
 
 
 @builtin

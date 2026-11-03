@@ -452,6 +452,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         if getattr(opt, "enable_tla_mode", False):
             from triton.language.extra.tla.compiler import _infer_tla_kernel_mode
             _infer_tla_kernel_mode(mod, mod.context)
+            ascend.ir.prepare_native_simd_memory(mod)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)

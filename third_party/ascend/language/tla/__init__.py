@@ -30,7 +30,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
-from .core import buffer, buffer_type, vector, vector_type
+from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
@@ -97,6 +97,7 @@ def jit(fn=None, **kwargs):
 
 
 __all__ = [
+    "AddressSpace",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",

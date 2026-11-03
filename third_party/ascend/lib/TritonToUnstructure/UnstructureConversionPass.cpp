@@ -415,7 +415,8 @@ LogicalResult tryRewriteIndirectFastPath(MemAccOpTy op, Location loc,
     auto resultType = op.getType();
     auto indirect = rewriter.create<triton::ascend::IndirectLoadOp>(
         loc, resultType, srcPtr, ptrOffset, mask, other,
-        ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
+        op.getIsVolatile() ||
+            ConverterUtils::requiresVolatileIndirectLoad(op.getPtr(), op));
     rewriter.replaceOp(op, indirect.getResult());
     LLVM_DEBUG({
       auto &os = llvm::dbgs();

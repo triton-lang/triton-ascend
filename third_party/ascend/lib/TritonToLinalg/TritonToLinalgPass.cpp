@@ -36,6 +36,7 @@
 #include "ascend/include/TritonToLinalg/HoistBroadcast.h"
 #include "ascend/include/TritonToLinalg/LoadStoreConverter.h"
 #include "ascend/include/TritonToLinalg/MarkTensorKindPass.h"
+#include "ascend/include/TritonToLinalg/ProvenOverflowAssert.h"
 #include "ascend/include/TritonToLinalg/TritonOpConverter.h"
 #include "ascend/include/TritonToLinalg/TritonToLinalgPass.h"
 #include "ascend/include/TritonToStructured/CannonicalizerConverter.h"
@@ -1858,6 +1859,10 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+
+  // Retire only statically proven automatic checks while their TTIR producers
+  // are still available. The normal cleanup below removes check-only tensors.
+  eliminateProvenOverflowAssertions(moduleOp);
 
   // CUBE requirements affect normalization itself. SIMT requirements must also
   // account for indirect accesses introduced by that normalization.

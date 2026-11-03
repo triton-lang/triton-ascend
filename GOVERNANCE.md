@@ -56,7 +56,7 @@ Promotion is collectively reviewed by existing `Maintainers`, considering contri
 
 ## Nomination and Removal
 
-### Principles
+### Rules
 
 - Membership is based on individual capability, demonstrated through contributions, reviews, and discussions
 - Candidates must agree with Triton-Ascend's principles and maintain consistent behavior

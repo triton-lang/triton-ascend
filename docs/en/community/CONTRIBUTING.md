@@ -1,20 +1,11 @@
 # Contributing Guidelines
 
-- [Getting Started](#getting-started)
-- [Developer Certificate of Origin (DCO)](#dco)
-- [Development Guide](#development-guide)
-  - [Code Style](#code-style)
-  - [Fork-Pull Development Workflow](#fork-pull-development-workflow)
-  - [CI Gate Exception Handling](#ci-gate-exception-handling)
-  - [Issue Guidelines](#issue-guidelines)
-  - [Submitting PRs](#submitting-prs)
-
-<h2 id="getting-started">Getting Started</h2>
+## Getting Started
 
 - Fork the Triton-Ascend repository on [GitHub](https://github.com/triton-lang/triton-ascend).
 - Read [README.md](https://github.com/triton-lang/triton-ascend/blob/main/README.md) for project information and instructions on setting up the development environment.
 
-<h2 id="dco">Developer Certificate of Origin (DCO)</h2>
+## Developer Certificate of Origin (DCO)
 
 All commits must include a `Signed-off-by:` line. Use `git commit -s` to add it automatically:
 
@@ -24,15 +15,9 @@ git commit -s -m "your commit message"
 
 This appends a line such as `Signed-off-by: Your Name <your.email@example.com>` to the end of the commit message, indicating that you certify the origin and authorization of the contribution.
 
-<h2 id="development-guide">Development Guide</h2>
+## Development Guide
 
-- **[Code Style](#code-style)**
-- **[Fork-Pull Development Workflow](#fork-pull-development-workflow)**
-- **[CI Gate Exception Handling](#ci-gate-exception-handling)**
-- **[Issue Guidelines](#issue-guidelines)**
-- **[Submitting PRs](#submitting-prs)**
-
-<h2 id="code-style">Code Style</h2>
+### Code Style
 
 Please follow the coding guidelines below to keep Triton-Ascend easy to develop, maintain, and review.
 
@@ -48,7 +33,7 @@ Please follow the coding guidelines below to keep Triton-Ascend easy to develop,
 
   We encourage developers to refactor our code to eliminate "code smells". Refactored code should also follow the coding style and testing style requirements. When you receive a warning, you need to refactor the code to be merged.
 
-<h2 id="fork-pull-development-workflow">Fork-Pull Development Workflow</h2>
+### Fork-Pull Development Workflow
 
 1. Fork the Triton-Ascend project
 
@@ -98,7 +83,7 @@ Please follow the coding guidelines below to keep Triton-Ascend easy to develop,
 
    After pushing the code to your remote repository, you need to create a Pull Request between your new branch and the Triton-Ascend main branch. After the merge request is created, "Jenkins CI" will automatically set up a build pipeline test for you. Please merge your Pull Request into the upstream main branch as soon as possible to reduce merge risks.
 
-<h2 id="ci-gate-exception-handling">CI Gate Exception Handling</h2>
+### CI Gate Exception Handling
 
 CI gate exceptions mainly include the following cases. Please resolve the gate exception issues according to the relevant prompt information.
 
@@ -114,7 +99,7 @@ CI gate exceptions mainly include the following cases. Please resolve the gate e
 
   Find the test cases that failed in the CI pipeline according to the prompt information, check the cause, and re-run the CI pipeline after resolving it.
 
-<h2 id="issue-guidelines">Issue Guidelines</h2>
+### Issue Guidelines
 
 A good way to contribute to the project is to send a detailed report when you encounter a problem. We always appreciate well-written and thorough bug reports, and we thank you for them!
 
@@ -135,7 +120,7 @@ Issue consultation:
 - If an issue has been open for a long time, please pre-check it before solving it.
 - If you solved an issue you reported yourself, let others know before closing the issue.
 
-<h2 id="submitting-prs">Submitting PRs</h2>
+### Submitting PRs
 
 - Propose your idea as an issue on [GitHub](https://github.com/triton-lang/triton-ascend).
 - If the new feature to be developed requires extensive design details, you should also submit a design proposal.

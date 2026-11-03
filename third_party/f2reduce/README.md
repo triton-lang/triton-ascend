@@ -1,14 +1,14 @@
-# f2reduce: a MIT-licenced library for Gaussian elimination over GF(2)
+# f2reduce: a MIT-licensed library for Gaussian elimination over GF(2)
 
 This is a very lightweight implementation for converting a binary matrix
 to row reduced echelon form. It incorporates the following optimisations:
 
- - Kronrod's algorithm ('method of four Russians');
- - Designed to properly autovectorise in both GCC and LLVM;
- - Attempts to ensure that memory loads/stores are cache-aligned;
- - Designed to achieve high instruction-level parallelism;
- - Able to use AVX512's `vpternlogq` instruction if present;
- - Minimal memory overhead (a few megabytes).
+- Kronrod's algorithm ('method of four Russians');
+- Designed to properly autovectorise in both GCC and LLVM;
+- Attempts to ensure that memory loads/stores are cache-aligned;
+- Designed to achieve high instruction-level parallelism;
+- Able to use AVX512's `vpternlogq` instruction if present;
+- Minimal memory overhead (a few megabytes).
 
 There are no architecture-specific intrinsics or assembly, so this should
 work well on any architecture where the compiler can autovectorise.
@@ -18,10 +18,10 @@ For simplicity, we do not use Strassen, so our performance is overtaken by
 
 For all other cases, we have several advantages over M4RI:
 
- - Substantially better performance on small, wide, or low-rank matrices;
- - MIT-licenced rather than GPL-licenced;
- - No assumptions about the processor architecture;
- - No configuration required (`-O3 -march=native` is enough).
+- Substantially better performance on small, wide, or low-rank matrices;
+- MIT-licensed rather than GPL-licensed;
+- No assumptions about the processor architecture;
+- No configuration required (`-O3 -march=native` is enough).
 
 We expose a single function with the following signature:
 
@@ -48,11 +48,7 @@ has C-linkage so can be called from any C/C++ code.
 `-O3 -march=native` flags to produce a static library and include the header
 file `f2reduce.h` in your project.
 
-The automated test suite has dependencies on [M4RI][1] (for benchmarking
-timings against M4RI and checking that implementations agree), [GoogleTest][2]
-(for unit testing), and [cpads][3] (for high-quality pseudo-random number
-generation). Downloading of the dependencies and building of the test suite
-is automated by [CMake][4].
+The automated test suite has dependencies on [M4RI][1] (for benchmarking timings against M4RI and checking that implementations agree), [GoogleTest][2] (for unit testing), and [cpads][3] (for high-quality pseudo-random numbergeneration). Downloading of the dependencies and building of the test suite is automated by [CMake][4].
 
 To build the test suite, you need to manually append `add_subdirectory(test)`
 to the end of the `CMakeLists.txt` file. This is so that `f2reduce` does not

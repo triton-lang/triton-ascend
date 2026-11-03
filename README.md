@@ -15,14 +15,15 @@ Triton-Ascend
 </p>
 
 <p align="center">
-| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Ascend</b></a> |
+| <a href="https://triton-ascend.readthedocs.io/en/latest/"><b>Official Documentation</b></a> | <a href="https://www.hiascend.com/cn/developer/operator?tag=triton&tab=triton"><b>Operator Development User Journey</b></a> | <a href="https://docs.google.com/document/d/1qfat2wZtO2nfZb5FC2dWAcR6sTqgTNSvvh7MzTDoI4s/edit?pli=1&tab=t.0"><b>Community Meetings</b></a> | <a href="https://www.hiascend.com/"><b>About Huawei Ascend</b></a> |
 </p>
 
 ---
 
 ## 🔥 Latest News
 
-- [2026.10.15] Triton-Ascend 3.6.0 official releases are now available
+- [2026.10.29] Triton-Ascend 3.6.0.post2 official releases are now available
+- [2026.10.15] Triton-Ascend 3.2.2.post2 and 3.6.0 official releases are now available
 - [2026.07.31] Triton-Ascend 3.2.2 official release is now available
 - [2026.04.30] Triton-Ascend 3.2.1 official release is now available
 - [2026.01.20] Triton-Ascend 3.2.0 official release is now available
@@ -32,7 +33,7 @@ Triton-Ascend
 <summary>More latest news</summary>
 
 - [2025.11.14] Triton-Ascend 3.2.0rc4 pre-release is now available:<br>- [Extended the tt.fp_to_fp interface to add FP8 type conversion support](https://gitcode.com/Ascend/triton-ascend/pull/891) <br>- [Added the scatter_ub_to_out interface to support efficient data scatter operations from UB to GM](https://gitcode.com/Ascend/triton-ascend/pull/864)
-- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and sglang open-source repositories
+- [2025.09.30] Improved Scan/Sort Triton Python APIs, supporting non-contiguous memory access, and completed adaptation of key Triton operators in vLLM and SGlang open-source repositories
 - [2025.09.19] Supported Triton-Ascend [nightly package](https://test.pypi.org/project/triton-ascend/#history) extraction
 - [2025.08.15] Improved Atomic-class Triton Python API support, completed adaptation of key Triton operators in the Flaggems open-source repository, and provided reference examples for high-performance implementations of simple operators such as Matmul
 - [2025.06.30] Supported 85% of Triton Python APIs, supporting contiguous memory access, covering basic usage scenarios
@@ -49,9 +50,9 @@ Triton-Ascend
 
 #### Hardware Requirements
 
-Supported operating systems: linux (aarch64/x86_64)
+Supported operating systems: Linux (aarch64/x86_64)
 
-Supported Ascend products: Atlas A2 products\Atlas A3 products\Ascend 950PR&950DT products
+Supported Huawei Ascend products: Atlas A2 products/Atlas A3 products/Ascend 950PR&950DT products
 
 Minimum hardware configuration: single card with 32GB memory (recommended)
 
@@ -61,13 +62,13 @@ Determine and install the Python, CANN, and TorchNPU software versions. This ste
 
 - Python version selection: py3.10-py3.13 are all supported.
 
-- CANN version selection: You can visit the Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
+- CANN version selection: You can visit the Huawei Ascend community website and follow the <a href="https://www.hiascend.com/cann/download" style="text-decoration: none; color: #0066cc;">community software installation guide</a> to complete the CANN installation and configuration. It is recommended to download and install version 9.2.0.
 
 - TorchNPU version selection: The currently bundled TorchNPU version is 2.10.0.post7.
 
-### Accessing Ascend NPU
+### Accessing Huawei Ascend NPU
 
-If you need to access Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
+If you need to access Huawei Ascend NPU computing resources for development or testing, please visit the [HiDevLab - Online Development](https://hidevlab.huawei.com/online-develop-intro) page on the HiDevLab platform to apply for free access.
 
 ### Quick Installation
 
@@ -99,8 +100,10 @@ pip install ninja cmake wheel pybind11 # build-time dependencies
 ```bash
 git clone https://github.com/triton-lang/triton-ascend.git && cd triton-ascend
 git checkout main
-pip install -e .
+pip install -e . --extra-index-url=https://repo.huaweicloud.com/repository/pypi/simple
 ```
+
+> Tip: Pass `--no-build-isolation` to `pip install` to make nop builds faster.
 
 #### Custom LLVM Build (Optional)
 
@@ -143,6 +146,22 @@ TRITON_WHEEL_NAME="triton-ascend" \
 TRITON_APPEND_CMAKE_ARGS="-DTRITON_BUILD_UT=OFF" \
 python3 setup.py install
 ```
+
+#### Verify the Installation
+
+Run:
+
+```bash
+python3 -c "import triton.backends.ascend as ascend;print('triton-ascend version:', ascend.__version__)"
+```
+
+If the output is:
+
+```bash
+triton-ascend version: <version>
+```
+
+Triton-Ascend is installed successfully.
 
 </details>
 </div>

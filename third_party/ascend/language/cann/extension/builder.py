@@ -76,7 +76,6 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_annotation_mark',
         'create_bind_buffer',
         'create_debug_barrier',
-        'is_910_95',
         "sync_block_set",
         "sync_block_wait",
         "create_convert_layout",

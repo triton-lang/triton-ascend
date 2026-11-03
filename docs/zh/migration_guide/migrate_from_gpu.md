@@ -32,7 +32,7 @@ GPU上常见的写法会把grid设计为大量逻辑program，由硬件和运行
 
 完成设备替换后，需要继续检查单个program内的数据搬运方式：
 
-- Vector算子场景下要求32字节访存对齐，cube-vector融合算子场景下要求512字节对齐。
+- Vector算子场景下要求32Byte访存对齐，cube-vector融合算子场景下要求512字节对齐。
 - 保留tail mask，确认边界元素不会越界访问。
 - 检查一次tile的片上内存占用，避免触发UB空间溢出。
 - 移除或替换GPU专属同步API，例如CUDA thread、stream、event或kernel synchronize相关接口。
@@ -154,7 +154,7 @@ def test_npu_1d(shape, dtype):
 NPU的coreDim参数不能超过UINT16_MAX（65535）。当处理大规模数据时，简单的grid划分可能导致该限制被突破。
 
 案例：zeros_like函数优化
-数据规模：N = 1073741824，原始BLOCK_SIZE = 2048，计算得到的coreDim = 524288 > 65535（超限）
+数据规模：N = 1073741824，原始BLOCK_SIZE = 2048，计算得到的coreDim = 524288 > 65535（超限）。
 
 解决思路1：
 后端会对通过IR安全分析的kernel自动启用block mapping，无需再设置环境变量。需要确认各逻辑program之间不存在顺序依赖；如果编译器提示自动block mapping已跳过，请采用解决思路2中的显式tiling。
@@ -252,7 +252,7 @@ def zeros_like(x, *, dtype=None, layout=None, device=None, pin_memory=None, memo
     return out
 ```
 
-### 动态计算适合的BLOCK_SIZE以避免coreDim超限
+### 动态计算合适的BLOCK_SIZE以避免coreDim超限
 
 ```diff
 optimal_block_size = 32768  # 根据计算得出的优化值
@@ -269,7 +269,7 @@ return out
 在某些情况下，解决了coreDim问题后可能引发新的UB溢出问题。这通常发生在增大BLOCK_SIZE后，单个线程块需要处理的数据量超出了NPU的UB缓存容量。
 
 案例：
-数据规模：N = 1073741824，原始BLOCK_SIZE = 4096，计算得到的coreDim = 262144 > 65535（超限），调整为BLOCK_SIZE = 32768后，coreDim = 32768（合规），但出现UB溢出
+数据规模：N = 1073741824，原始BLOCK_SIZE = 4096，计算得到的coreDim = 262144 > 65535（超限），调整为BLOCK_SIZE = 32768后，coreDim = 32768（合规），但出现UB溢出。
 
 解决思路：
 引入BLOCK_SIZE_SUB参数，将大块进一步细分，在保持合理coreDim的同时控制内存使用。
@@ -360,21 +360,21 @@ def masked_fill(inp, expand_mask, value):
 
 ### 为什么会出现UBSIZE超出内存的错误
 
-切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(128, 32)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问内容，在最内轴新增一个大小为1的轴，变为(64, 32, 4)，由于硬件要求vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128, 1)
+切分不合理，存在过多的非对齐访存或者运算，例如对(64, 32)二维数据搬运，对应stride(128, 32)，如果是对齐数据的访存，对应的stride(32, 1)。对于非对齐访问的数据，在最内轴新增一个大小为1的轴，变为(64, 32, 4)，由于硬件要求Vector算子场景ub内存32Byte对齐，假设type=float16，对应stride应该为(12832, 128, 1)。
 
 ### 离散访存代码逐行对比观察scalar低效映射
 
-设置环境变量TRITON_DEBUG=1，保存~/.triton/cache/xxx.ttadapter，然后执行
+设置环境变量TRITON_DEBUG=1，保存~/.triton/cache/xxx.ttadapter，然后执行：
 
 ```diff
 bishengir-compile xxx.ttadapter --target=Ascend910B3 --enable-auto-multi-buffer=True --enable-hfusion-compile=true --enable-hivm-compile=true --enable-triton-kernel-compile=true --hivm-compile-args=bishengir-print-ir-after=hivm-inject-sync
 ```
 
-会有输出IR，对比Triton算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
+会输出IR，对比Triton算子逻辑与IR内部的操作，观察是否有未映射成指令的操作。
 观察HIVM IR阶段是否存在纯scalar搬运或者计算，没有映射为SIMD指令，这会成为性能瓶颈。
 
 问题：离散访存 && scalar低效映射
-b[1024, 32] = a[1024, 32]  Triton原先写法利用thread的方式对[1024,32]中的最低维度32绑定线程块，再对1024切16，分为[64，16，32]，再对64绑定线程块
+b[1024, 32] = a[1024, 32] Triton原先写法利用thread的方式将线程块绑定到[1024, 32]中的最低维度32，再对1024切16，分为[64, 16, 32]，再对64绑定线程块。
 
 ```diff
 chunk_fwd_kernel_o[(NT, B * H)](
@@ -392,8 +392,8 @@ chunk_fwd_kernel_o[(NT, B * H)](
 
 优化思路
 
-调整block_ptr的shape/stride:
-把 (1024, 32) 看成二维矩阵，最低维度32是连续的，所以stride应该是 (32, 1)，而不是 (32,)，这样每个线程块能访问连续的32元素。让线程块绑定到行维度（1024），每个线程处理一整行的32元素。这样访存就是连续的，亲和性好。
+调整block_ptr的shape/stride：
+把 (1024, 32) 看成二维矩阵，最低维度32是连续的，所以stride应该是 (32, 1)，而不是 (32,)，这样每个线程块能访问连续的32个元素。让线程块绑定到行维度（1024），每个线程处理一整行的32个元素。这样访存就是连续的，亲和性好。
 
 比如：
 

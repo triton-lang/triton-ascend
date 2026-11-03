@@ -1,4 +1,4 @@
-# Roadmap指导
+# Roadmap指南
 
 使用 GitHub Issue 来跟踪和管理各组织的计划及中长期目标。本文档为社区项目编写路线图类 Issue 提供参考和规范，以帮助创建和维护高质量的路线图。
 
@@ -65,7 +65,7 @@ Issue: [Related Issue link]
 
 ## 1. 标题格式
 
-**格式：** `[Roadmap] <Project Name> Roadmap <Time Range>`，季度发布使用 Q1/Q2/Q3/Q4 标记，半年度发布使用 H1/H2 标记
+**格式：** `[Roadmap] <Project Name> Roadmap <Time Range>`，季度发布使用Q1/Q2/Q3/Q4标记，半年度发布使用H1/H2标记
 
 **示例：**
 
@@ -76,7 +76,7 @@ Issue: [Related Issue link]
 
 ### 2.1 开篇描述（可选）
 
-提供项目概述、愿景或整体方向的简要总结。例如，简要描述 Triton-Ascend 本季度在上游对齐、后端性能和算子覆盖方面的目标。
+提供项目概述、愿景或整体方向的简要总结。例如，简要描述Triton-Ascend本季度在上游对齐、后端性能和算子覆盖方面的目标。
 
 ### 2.2 重点方向章节
 
@@ -163,7 +163,7 @@ PR: [Related PR link]         [optional]
 
 ### 5.1 🙋 欢迎贡献标记
 
-对于特别欢迎社区开发者贡献的工作项，建议使用 **[🙋 欢迎贡献]** 标记来标识：
+对于特别欢迎社区开发者贡献的工作项，建议使用 **[🙋 Help Wanted]** 标记来标识：
 
 ```markdown
 - [ ] **FP8 dtype and mixed-precision ops support [🙋 Help Wanted]**

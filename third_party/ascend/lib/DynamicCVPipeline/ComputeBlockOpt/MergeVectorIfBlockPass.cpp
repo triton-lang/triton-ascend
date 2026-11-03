@@ -20,19 +20,22 @@
  * THE SOFTWARE.
  */
 
-#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
-#include "DynamicCVPipeline/Common/Utils.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
-#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
-#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+#include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/Debug.h"
+
 #include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/Operation.h"
-#include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/SmallVector.h"
-#include "llvm/Support/Debug.h"
+
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Common.h"
+#include "ascend/include/DynamicCVPipeline/ComputeBlockOpt/Passes.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/Common.h"
+#include "ascend/include/DynamicCVPipeline/PlanComputeBlock/ComputeBlockIdManager.h"
+
+#include "DynamicCVPipeline/Common/MemoryEffectsTracker.h"
+#include "DynamicCVPipeline/Common/Utils.h"
 
 static constexpr const char *DEBUG_TYPE = "merge-vector-if-block";
 #define LOG_DEBUG(...)                                                         \
@@ -111,7 +114,7 @@ static LogicalResult getUpstreamBlockId(scf::IfOp ifOp,
                                         CVPipeline::ComputeBlockIdManager &bm,
                                         int &target) {
   Block *parent = ifOp->getBlock();
-  llvm::SmallDenseSet<int, CVPipeline::INIT_SIZE> ids;
+  llvm::SmallDenseSet<int, CVPipeline::kInitSize> ids;
 
   auto addSource = [&](Value v) {
     Operation *def = v.getDefiningOp();
@@ -198,7 +201,7 @@ collectDownstreamBlockIds(scf::IfOp ifOp, int target,
 
   // Collect the users with the program order.
   SmallVector<int> ordered;
-  llvm::SmallDenseSet<int, CVPipeline::INIT_SIZE> seen;
+  llvm::SmallDenseSet<int, CVPipeline::kInitSize> seen;
   for (Operation &op : *parent) {
     if (!userAnchors.contains(&op)) {
       continue;

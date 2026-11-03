@@ -1,4 +1,4 @@
-# 向量相加 （Vector Addition）
+# 向量相加（Vector Addition）
 
 在本节中，我们将使用 Triton 编写一个简单的向量相加的程序。
 在此过程中，你会学习到：
@@ -27,7 +27,7 @@ def add_kernel(x_ptr,  # 指向第一个输入向量的指针。
     # 不同的数据由不同的“process”来处理，因此需要分配：
     pid = tl.program_id(axis=0)  # 使用 1D 启动网格，因此轴为 0。
     # 该程序将处理相对初始数据偏移的输入。
-    # 例如，如果有一个长度为 256, 块大小为 64 的向量，程序将各自访问 [0:64, 64:128, 128:192, 192:256] 的元素。
+    # 例如，如果有一个长度为 256、 块大小为 64 的向量，程序将各自访问 [0:64, 64:128, 128:192, 192:256] 的元素。
     # 注意 offsets 是指针列表：
     block_start = pid * BLOCK_SIZE
     offsets = block_start + tl.arange(0, BLOCK_SIZE)

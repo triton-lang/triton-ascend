@@ -35,7 +35,6 @@ include_directories(${ASCENDNPU_IR_BINARY_DIR}/bishengir/include) # Tablegen'd f
 # are created by add_subdirectory(lib).
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/costmodel/include)
 
-add_subdirectory(bin)
 add_subdirectory(include)
 add_subdirectory(lib)
 
@@ -133,6 +132,7 @@ endif()
 add_triton_plugin(TritonAscend
   ${CMAKE_CURRENT_SOURCE_DIR}/triton_ascend.cc
   ${CMAKE_CURRENT_SOURCE_DIR}/ascend_ir.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/language/tla/cpp/tla_builder.cc
   LINK_LIBS
   AutoBlockifyV1
   TTIRLayoutMerge
@@ -140,6 +140,7 @@ add_triton_plugin(TritonAscend
   TritonToLinalg
   BiShengIRScopeDialect
   BiShengIRHIVMDialect
+  MLIRAVEDialect
 )
 
 # Keep canonical Cost Model profiles under costmodel/profiles.  Python's

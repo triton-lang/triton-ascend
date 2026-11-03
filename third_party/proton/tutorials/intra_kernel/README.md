@@ -18,22 +18,29 @@ The Proton intra-kernel profiler captures fine-grained timing information within
 **Example**: Vector addition kernel with external instrumentation injection
 
 **Workflow**:
+
 1. **Generate TTGIR dump files**:
+
    ```bash
    ../../scripts/dump_ttgir.sh python3 example_override.py --increase-accuracy
    ```
+
    Creates original TTGIR files in `ttgir_dump/` directory
 
 2. **Insert profiling instrumentation**:
+
    ```bash
    ./insert_proton_records
    ```
+
    Modifies TTGIR files by adding `proton.record` operators at profiling points
 
 3. **Execute with TTGIR override**:
+
    ```bash
    TRITON_ALWAYS_COMPILE=1 TRITON_KERNEL_OVERRIDE=1 TRITON_OVERRIDE_DIR=ttgir_dump python3 example_override.py --increase-accuracy
    ```
+
    - `TRITON_ALWAYS_COMPILE=1`: Forces recompilation on each run
    - `TRITON_KERNEL_OVERRIDE=1`: Enables TTGIR override mechanism
    - `TRITON_OVERRIDE_DIR=ttgir_dump`: Specifies directory with modified TTGIR files
@@ -44,8 +51,8 @@ The Proton intra-kernel profiler captures fine-grained timing information within
 
 **Example**: Triton vector-add and Gluon matrix multiplication using NVIDIA Hopper architecture features (WGMMA, TMA)
 
-
 **Command Line Options**:
+
 ```bash
 # Timeline trace mode (default)
 python3 example_dsl.py
@@ -85,7 +92,7 @@ python3 example_dsl.py --increase-accuracy
 
 | Option | Description | Use Case |
 |--------|-------------|----------|
-| `clock32` | Records events in 32-bit clock format for lower overhead | normal kernels (<4 seconds @ 1GHz) |
+| `clock32` | Records events in 32-bit clock format for lower overhead | normal kernels (<4s @ 1GHz) |
 | `time_shift` | Deducts constant profiling overhead from timeline trace | Mitigate Proton runtime overhead for cleaner traces |
 | `sched_stores` | Provides more cycle-accurate operation latency measurement | Accurate single operation latency measure |
 | `sched_barriers` | Constrains AMD instruction scheduling within proton scopes | AMD GPU profiling |

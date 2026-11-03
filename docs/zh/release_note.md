@@ -2,58 +2,20 @@
 
 Triton-Ascend 版本提供了一个稳定的代码基础快照，封装成可以通过 PyPI 轻松安装的二进制包。此外，版本发布代表着开发团队可以向社区正式宣布新功能的可用性、已完成的改进以及可能影响用户的变化（例如破坏性变更）。
 
-## 发布兼容性矩阵
-
-以下是 Triton-Ascend 版本的发布兼容性矩阵：
-
-| Triton-Ascend 版本  | Manylinux 版本 | 硬件平台 | 硬件产品 |
-| --- | --- | --- | --- |
-| 3.6.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
-| 3.2.2 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
-| 3.2.1 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品、Ascend 950PR&950DT系列产品|
-| 3.2.0 | glibc 2.27+, x86-64, aarch64  | Ascend NPU | Atlas A2系列产品、Atlas A3系列产品|
-
-注：3.2.0版本在[gitcode(AtomGit)](https://gitcode.com/Ascend/triton-ascend/releases) 上归档，3.2.1版本及以上均已迁移至[github](https://github.com/triton-lang/triton-ascend/releases)。
-
 ## 发布计划
 
 以下是 Triton-Ascend 的发布计划。请注意：补丁版本是可选的。
 
-| 主版本    | 发布分支切出时间   | 发布日期         | 补丁发布日期 |
-|--------|------------|--------------|--------|
-| 3.6.0  | 2026年9月30日 | 2026年10月15日  | ---    |
-| 3.2.2  | 2026年7月15日 | 2026年7月31日   | ---    |
+| 主版本         | 发布分支切出时间    | 发布日期        | 版本性质 |
+|-------------|-------------|-------------|------|
+| 3.6.0.post2 | 2026年10月15日 | 2026年10月29日 | 补丁版本 |
+| 3.6.0       | 2026年9月30日  | 2026年10月15日 | 正式版本 |
+| 3.2.2.post2 | 2026年9月30日  | 2026年10月15日 | 补丁版本 |
+| 3.2.2       | 2026年7月15日  | 2026年7月31日  | 正式版本 |
+| 3.2.1       | 2026年4月15日  | 2026年5月6日   | 正式版本 |
+| 3.2.0       | 2025年12月08日 | 2026年1月     | 正式版本 |
 
-## 版本亮点
-
-### Triton-Ascend 3.6.0
-
-**首次发布：Ascend NPU 支持**
-
-Triton-Ascend 全面升级配套上游 Triton 3.6.0 版本，同步社区最新特性与优化，提升算子开发与运行体验。
-
-#### 主要特性
-
-1. **编译能力增强**
-   - 自动寻优（autotune)新增磁盘缓存能力，加速autotune重复编译场景下的编译开销
-   - 识别冗余编译选项，明确废弃策略，提升编译选项的可维护性
-
-2. **性能优化**
-   - 优化算子发射流程，缩短任务下发流程
-   - 动态CV流水排布能力增强，压缩编译耗时
-   - 新增multibuffer_mode 字典参数，使用多级缓冲调度，提升编译效率及多缓冲编译能力
-
-3. **开发者工具**
-   - 支持msdebug的上板交互式调试能力，支持设备端实时调试
-
-#### 已知限制
-
-1. **数据类型**: 部分数据类型支持仍在完善中
-2. **算子覆盖**: 正在持续扩展支持的算子集合
-
-#### 迁移指南
-
-对于现有 Triton GPU 用户迁移到 Ascend NPU，详见 [GPU Triton算子迁移](./migration_guide/migrate_from_gpu.md)
+注：3.2.0版本在[gitcode(AtomGit)](https://gitcode.com/Ascend/triton-ascend/releases) 上归档，3.2.1版本及以上均已迁移至[github](https://github.com/triton-lang/triton-ascend/releases)。
 
 ## 版本发布策略
 
@@ -80,12 +42,13 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 - **维护（Maintenance）**：仅接受关键缺陷修复和安全补丁；不再发布功能改进
 - **停止维护（End of Life）**：不再接受任何修复；分支维护已停止
 
-| 分支              | 状态     | Triton 版本 | Triton-Ascend 发布                        | 维护截止 |
-|-----------------| -------- | ------------ |-----------------------------------------| -------- |
-| `main`          | `活跃`   | `3.6.0`      | /                                       | /        |
-| `release/3.2.2` | `活跃`   | `3.2.0`      | `3.2.2`                    | /        |
-| `release/3.2.1` | `维护`   | `3.2.0`      | `3.2.1`                                 | /        |
-| `release/3.2.x` | `维护`   | `3.2.0`      | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /        |
+| 分支                    | 状态     | Triton 版本 | Triton-Ascend 发布                         | 维护截止 |
+|-----------------------| -------- |-----------|------------------------------------------| -------- |
+| `main`                | `活跃`   | `3.6.0`   | /                                        | /        |
+| `release/3.6.0`       | `活跃`   | `3.6.0`   | `3.6.0.post2`，`3.6.0`                    | /        |
+| `release/3.2.2`       | `维护`   | `3.2.0`   | `3.2.2.post2`，`3.2.2`                    | /        |
+| `release/3.2.1`       | `维护`   | `3.2.0`   | `3.2.1`                                  | /        |
+| `release/3.2.x`       | `维护`   | `3.2.0`   | `3.2.0rc2`，`3.2.0rc3`，`3.2.0rc4`，`3.2.0` | /        |
 
 ## 发布周期
 
@@ -93,25 +56,15 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
 - **rc 版本**：与上游 Triton 版本节奏同步发布，供用户早期测试
 - **post 版本**：根据需要发布，用于修复现有稳定版本中的问题
 
-### 发布时间线
-
-| 日期         | 事件                |
-|------------|-------------------|
-| 2026-07-31 | 发布稳定版本 `3.2.2`    |
-| 2026-05-06 | 发布稳定版本 `3.2.1`    |
-| 2026-01-21 | 发布稳定版本 `3.2.0`    |
-| 2025-11-14 | 发布预览版本 `3.2.0rc4` |
-| 2025-11-12 | 发布预览版本 `3.2.0rc3` |
-| 2025-05-26 | 发布预览版本 `3.2.0rc2` |
-
 <a id="version-compatibility-matrix"></a>
 
 ## 版本推荐配套
 
 | Triton-Ascend |  PyTorch | TorchNPU安装包     | CANN    | SHMEM  | LLVM commit hash | Python              | LLVM 补丁 |
 |---------------|---------|-----------------|---------|--------|------------------|---------------------|-----------|
-| `main`        | `2.10.0` | `2.10.0.post7`  | `9.2.0` | v1.7.0 | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
-| `3.6.0`       | `2.10.0` | `2.10.0.post7`  | `9.2.0` | v1.7.0 | `f6ded0b`        | `3.10~3.13`             | - |
+| `main`        | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.9~3.13`          | [llvm_patch_f6ded0b.patch](https://github.com/triton-lang/triton-ascend/blob/main/third_party/ascend/patch/llvm_patch_f6ded0b.patch) |
+| `3.6.0`       | `2.10.0` | `2.10.0.post7`  | `9.2.0` | `v1.7.0` | `f6ded0b`        | `3.10~3.13`             | - |
+| `3.2.2.post2` | `2.7.1`  | `2.7.1.post11` | `9.2.0` | `v1.7.0` | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
 | `3.2.2`       | `2.7.1` | `2.7.1.post8`   | `9.1.0` | -      | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
 | `3.2.1`       | `2.7.1` | `2.7.1.post8`   | `9.0.0` | -      | `b5cc222`        | `3.9`(x86), `3.10-3.13` | -         |
 | `3.2.0`       | `2.6.0` | `2.6.0`         | `8.5.0` | -      | `b5cc222`        | `3.9-3.11`       | -         |
@@ -141,7 +94,9 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
     <tr><td>3.2.0</td><td>2.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.1</td><td>/</td><td>2.7.1</td><td>2.8.0</td><td>2.9.1</td><td>2.10.0</td><td>/</td></tr>
     <tr><td>3.2.2</td><td>/</td><td>2.7.1.post8</td><td>/</td><td>2.9.0.post6</td><td>2.10.0.post4</td><td>/</td></tr>
+    <tr><td>3.2.2.post2</td><td>/</td><td>2.7.1.post11</td><td>/</td><td>2.9.0.post9</td><td>2.10.0.post7</td><td>/</td></tr>
     <tr><td>3.6.0</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>
+    <tr><td>3.6.0.post2</td><td>/</td><td>/</td><td>/</td><td>/</td><td>2.10.0.post7</td><td>2.13.0</td></tr>
   </tbody>
 </table>
 
@@ -172,6 +127,8 @@ Triton-Ascend 遵循 [PEP 440](https://peps.python.org/pep-0440/) 版本规范�
     <tr><td>3.2.0</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.1</td><td>/</td><td>Y</td><td>/</td><td>/</td><td>/</td><td>Y</td><td>/</td><td>/</td></tr>
     <tr><td>3.2.2</td><td>/</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td><td>/</td></tr>
+    <tr><td>3.2.2.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
     <tr><td>3.6.0</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
+    <tr><td>3.6.0.post2</td><td>Y</td><td>Y</td><td>Y</td><td>Y</td><td>/</td><td>/</td><td>Y</td><td>Y</td></tr>
   </tbody>
 </table>

@@ -1828,7 +1828,7 @@ ScanConverter::convertToTargetOp(triton::ScanOp op,
 
     auto memrefType = MemRefType::get(shape, elementType);
     Value inputMemRef =
-        rewriter.create<bufferization::ToBufferOp>(loc, memrefType, scanInput);
+        rewriter.create<bufferization::ToMemrefOp>(loc, memrefType, scanInput);
 
     // Wrap scan logic in a scope with UB address space for the output buffer.
     auto tensorResultType = RankedTensorType::get(shape, elementType);
@@ -2003,7 +2003,7 @@ LogicalResult ScanConverter::convertToTargetOpExtended(
     memRefTypes.push_back(memRefTy);
     // Convert input tensors to MemRefs
     inputMemRefs.push_back(
-        rewriter.create<bufferization::ToBufferOp>(loc, memRefTy, operands[i]));
+        rewriter.create<bufferization::ToMemrefOp>(loc, memRefTy, operands[i]));
     // Allocate MemRefs for outputs
     outputMemRefs.push_back(rewriter.create<memref::AllocOp>(loc, memRefTy));
   }
@@ -2310,6 +2310,12 @@ LogicalResult ExternElementwiseClOpConverter::matchAndRewrite(
                         mlir::StringAttr::get(customOp->getContext(), sym));
       customOp->setAttr("arg_attrs", argAttrsArray);
       customOp.setInlineMode(hivm::InlineMode::AlwaysInline);
+
+      // The frontend owns the libdevice workspace ABI and size calculation.
+      for (StringRef name : {"extra_buffers_types", "extra_buffers_sizes"}) {
+        if (Attribute attr = op->getAttr(name))
+          customOp->setAttr(name, attr);
+      }
 
       // Restore the result's shape and element type
       Value finalResult = customOp.getResults().front();
@@ -2732,7 +2738,8 @@ MatmulConverter::matchAndRewrite(triton::DotOp op, OpAdaptor adaptor,
   };
 
   Operation *matmulOp;
-  if (mlir::isa<mlir::FloatType>(elemTy) && !elemTy.isF32()) {
+  if (mlir::isa<mlir::FloatType>(elemTy) &&
+      elemTy.getIntOrFloatBitWidth() < 32) {
     RankedTensorType opcFp32Ty =
         RankedTensorType::get(dstType.getShape(), rewriter.getF32Type());
     Value opcFp32 = rewriter.create<arith::ExtFOp>(op.getLoc(), opcFp32Ty, opc);
@@ -2864,7 +2871,7 @@ static Value zeroPadDimTo(Value v, int64_t dim, int64_t target,
   } else {
     auto srcBufferTy = MemRefType::get(t.getShape(), elemTy);
     Value srcBuffer =
-        rewriter.create<bufferization::ToBufferOp>(loc, srcBufferTy, v);
+        rewriter.create<bufferization::ToMemrefOp>(loc, srcBufferTy, v);
     rewriter.create<memref::CopyOp>(loc, srcBuffer, subview);
   }
 
@@ -3108,12 +3115,35 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
+  if ((isFP8Input || isFP4Input) && !lhsScale) {
+    auto lhsTy = cast<RankedTensorType>(lhs.getType());
+    int64_t k = lhsTy.getShape().back();
+    if (lhsElemType == triton::ScaleDotElemType::E2M1 && op.getLhsKPack())
+      k *= 2;
+    auto defaultScaleTy = RankedTensorType::get(
+        {dstType.getDimSize(dstType.getRank() - 2), (k + 31) / 32},
+        rewriter.getI8Type());
+    // The native MX path uses E8M0, whose encoding of one is 127.
+    Value defaultScaleVal =
+        rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(127));
+    Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
+        loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
+    lhsScale = rewriter
+                   .create<linalg::FillOp>(loc, ValueRange{defaultScaleVal},
+                                           ValueRange{defaultScaleEmpty})
+                   .getResult(0);
+  }
   if (isFP8Input || isFP4Input) {
     if (!rhsScale) {
-      RankedTensorType defaultScaleTy =
-          RankedTensorType::get({1}, rewriter.getI8Type());
-      Value defaultScaleVal =
-          rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(1));
+      auto rhsTy = cast<RankedTensorType>(rhs.getType());
+      int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
+      if (rhsElemType == triton::ScaleDotElemType::E2M1 && op.getRhsKPack())
+        k *= 2;
+      auto defaultScaleTy = RankedTensorType::get(
+          {dstType.getShape().back(), (k + 31) / 32}, rewriter.getI8Type());
+      // E8M0 encodes a scale factor of one with exponent bias 127.
+      Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
+          loc, rewriter.getI8IntegerAttr(127));
       Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
           loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
       rhsScale = rewriter

@@ -6,11 +6,11 @@
 
 ### 基本步骤
 
-1. **获取参考结果**（Golden）：使用等价 Torch 算子在 CPU/GPU/NPU 上计算结果或者相同 Triton 算子在 CPU/GPU 上的计算结果
+1. **获取参考结果**（Golden）：使用等价Torch算子在CPU/GPU/NPU上计算结果或者相同Triton算子在CPU/GPU上的计算结果
 
-2. **获取 Triton 结果**：在昇腾 NPU 上运行 Triton kernel 得到计算结果
+2. **获取 Triton 结果**：在昇腾NPU上运行Triton kernel得到计算结果
 
-3. **对比判断**：使用 `torch.testing.assert_close` 判断是否满足精度要求
+3. **对比判断**：使用`torch.testing.assert_close`判断是否满足精度要求
 
 ### 示例：向量加法（Vector Add）
 
@@ -72,13 +72,13 @@ def compare_precision(cal, ref, rtol=1e-3, atol=1e-3):
     tensor_dtype = cal.dtype
 
     if tensor_dtype == torch.float16:
-        torch.testing.assert_close(ref, cal, rtol=rtol, atol=atol, equal_nan=True)
+        torch.testing.assert_close(cal, ref, rtol=rtol, atol=atol, equal_nan=True)
 
     elif tensor_dtype == torch.bfloat16:
-        torch.testing.assert_close(ref, cal, rtol=5e-3, atol=5e-3, equal_nan=True)
+        torch.testing.assert_close(cal, ref, rtol=5e-3, atol=5e-3, equal_nan=True)
 
     elif tensor_dtype == torch.float32:
-        torch.testing.assert_close(ref, cal, rtol=1e-5, atol=1e-5, equal_nan=True)
+        torch.testing.assert_close(cal, ref, rtol=1e-5, atol=1e-5, equal_nan=True)
 
     elif tensor_dtype in [torch.int64, torch.int32, torch.int16, torch.int8]:
         assert torch.equal(cal, ref), f"Integer tensors are not equal for dtype {tensor_dtype}"

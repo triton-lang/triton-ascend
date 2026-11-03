@@ -12,6 +12,7 @@ add_subdirectory(TritonControlFlowOpt)
 add_subdirectory(DiscreteMaskAccessConversion)
 add_subdirectory(TritonToUnstructure)
 add_subdirectory(TritonToLLVM)
+add_subdirectory(TritonToTensorView)
 add_subdirectory(DynamicCVPipeline)
 add_subdirectory(LibEntry)
 

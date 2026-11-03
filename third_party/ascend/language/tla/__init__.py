@@ -30,6 +30,8 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
+from triton.language.core import make_partition_view, make_strided_view, make_gather_scatter_view
+
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
@@ -97,6 +99,9 @@ def jit(fn=None, **kwargs):
 
 
 __all__ = [
+    "make_partition_view",
+    "make_strided_view",
+    "make_gather_scatter_view",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",

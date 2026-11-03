@@ -98,3 +98,10 @@ private:
     return builder->getUnknownLoc();
   }
 };
+
+namespace pybind11 {
+template <typename type_, typename... options> class class_;
+}
+namespace ir {
+pybind11::class_<TritonOpBuilder> *getBuilderClass();
+}

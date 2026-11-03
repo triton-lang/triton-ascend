@@ -108,6 +108,9 @@ __all__ = [
     "vadd",
     "vadds",
     "vaddc",
+    "vshl",
+    "vshls",
+    "vshr",
     "vdiv",
     "vmax",
     "vmin",
@@ -126,6 +129,8 @@ __all__ = [
     "vrelu",
     "vsqrt",
     "vrsqrt",
+    "vlrelu",
+    "vprelu",
     "vexp",
     "vabsdif",
     "vexpdif",
@@ -137,6 +142,7 @@ __all__ = [
     "vfull",
     "vsplat",
     "vtruncf",
+    "vpack",
     "vreduce_sum",
     "vreduce_max",
     "vreduce_min",
@@ -341,6 +347,40 @@ _OP_ELEM_SUPPORT = {
     },
     # VFExpdifOp computes exp(lhs - rhs) and lowers only for f16/f32.
     "vexpdif": {
+        "float": ("f16", "f32"),
+        "signed": (),
+        "unsigned": (),
+        "hint": "f16/f32",
+    },
+    # AVE_ShiftOp / AVE_ShiftVecScalarOp lower only the 8/16/32-bit
+    # register forms.  The AVE TD accepts I64, but HIVMVShiftOpLowering has no
+    # 64-bit path; CCE vector vshl/vshr also has no i64 overload.
+    "vshl": {
+        "float": (),
+        "signed": ("i8", "i16", "i32"),
+        "unsigned": ("i8", "i16", "i32"),
+        "hint": "i8/i16/i32 and u8/u16/u32",
+    },
+    "vshr": {
+        "float": (),
+        "signed": ("i8", "i16", "i32"),
+        "unsigned": ("i8", "i16", "i32"),
+        "hint": "i8/i16/i32 and u8/u16/u32",
+    },
+    "vshls": {
+        "float": (),
+        "signed": ("i8", "i16", "i32"),
+        "unsigned": ("i8", "i16", "i32"),
+        "hint": "i8/i16/i32 and u8/u16/u32",
+    },
+    # AVE_VFLRelusOp / AVE_VFPReluOp: f16/f32 only.
+    "vlrelu": {
+        "float": ("f16", "f32"),
+        "signed": (),
+        "unsigned": (),
+        "hint": "f16/f32",
+    },
+    "vprelu": {
         "float": ("f16", "f32"),
         "signed": (),
         "unsigned": (),
@@ -947,6 +987,134 @@ def vadds(src: vector, scalar, mask: vector = None, mode: tl.constexpr = MODE.ZE
     handle = _semantic.builder.create_simd_binary_scalar("adds", src.handle, scalar_handle, mask.handle,
                                                          _MODE_BUILDER_NAMES[mode])
     return vector(handle, src.type)
+
+
+def _shift_sign(src, op):
+    """Validate a shift dtype and return the AVE ``sign`` operand."""
+    tag = _elem_tag(src.dtype)
+    unsigned = _is_unsigned(src.dtype)
+    _require_elem_support(op, tag, unsigned)
+    return not unsigned
+
+
+def _check_shift_scalar(scalar):
+    """Reject compile-time shift amounts that do not fit the CCE int16 slot."""
+    value = _unwrap_if_constexpr(scalar)
+    if isinstance(value, int) and not isinstance(value, bool):
+        if not -32768 <= value <= 32767:
+            raise ValueError(f"shift scalar {value} does not fit int16")
+
+
+@builtin
+def vshl(src0: vector, src1: vector, mask: vector = None, mode: tl.constexpr = MODE.ZEROING, _semantic=None) -> vector:
+    """
+    Elementwise vector left shift (``ave.hir.vshl``).
+
+    :param src0: value vector register
+    :param src1: shift-amount vector register, same type as ``src0``
+    :param mask: predicate register; defaults to an all-true mask
+    :param mode: ``MODE.ZEROING`` (default) or ``MODE.MERGING``
+    Supported element types: i8/i16/i32 and u8/u16/u32.  The AVE shift
+    lowering has no i64 path and CCE has no i64 vector-shift overload.
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    if src0.type != src1.type:
+        raise ValueError(f"vshl requires same-typed operands, got {src0.type} and {src1.type}")
+    sign = _shift_sign(src0, "vshl")
+    mode = _check_mode(mode)
+    lanes = src0.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_shift("shl", src0.handle, src1.handle, mask.handle, sign,
+                                                 _MODE_BUILDER_NAMES[mode])
+    return vector(handle, src0.type)
+
+
+@builtin
+def vshr(src0: vector, src1: vector, mask: vector = None, mode: tl.constexpr = MODE.ZEROING, _semantic=None) -> vector:
+    """
+    Elementwise vector right shift (``ave.hir.vshr``).
+
+    The AVE ``sign`` operand selects arithmetic (signed) or logical (unsigned)
+    right shift from the frontend dtype.  Supported element types:
+    i8/i16/i32 and u8/u16/u32.
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    if src0.type != src1.type:
+        raise ValueError(f"vshr requires same-typed operands, got {src0.type} and {src1.type}")
+    sign = _shift_sign(src0, "vshr")
+    mode = _check_mode(mode)
+    lanes = src0.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_shift("shr", src0.handle, src1.handle, mask.handle, sign,
+                                                 _MODE_BUILDER_NAMES[mode])
+    return vector(handle, src0.type)
+
+
+@builtin
+def vshls(src: vector, scalar, mask: vector = None, mode: tl.constexpr = MODE.ZEROING, _semantic=None) -> vector:
+    """
+    Elementwise left shift by a scalar amount (``ave.hir.vshls``).
+
+    :param src: value vector register
+    :param scalar: constexpr integer or scalar tensor of the register's dtype
+    :param mask: predicate register; defaults to an all-true mask
+    :param mode: ``MODE.ZEROING`` (default) or ``MODE.MERGING``
+    The scalar is materialized at the vector element type to satisfy the AVE
+    ``AVE_ShiftVecScalarOp`` contract; compile-time values must fit int16.
+    """
+    _require_vector(src, "src")
+    sign = _shift_sign(src, "vshls")
+    _check_shift_scalar(scalar)
+    tag = _elem_tag(src.dtype)
+    scalar_handle = _make_scalar(scalar, src.dtype, tag, "vshls", _semantic)
+    mode = _check_mode(mode)
+    lanes = src.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_shift_scalar("shls", src.handle, scalar_handle, mask.handle, sign,
+                                                        _MODE_BUILDER_NAMES[mode])
+    return vector(handle, src.type)
+
+
+@builtin
+def vlrelu(src: vector, alpha, mask: vector = None, _semantic=None) -> vector:
+    """
+    Leaky ReLU with a scalar slope (``ave.hir.vlrelus``).
+
+    ``dst = src >= 0 ? src : alpha * src``.  Only f16/f32 are supported; the
+    scalar is materialized at the vector element type.
+    """
+    _require_vector(src, "src")
+    tag = _elem_tag(src.dtype)
+    unsigned = _is_unsigned(src.dtype)
+    _require_elem_support("vlrelu", tag, unsigned)
+    scalar_handle = _make_scalar(alpha, src.dtype, tag, "vlrelu", _semantic)
+    lanes = src.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_binary_scalar("lrelus", src.handle, scalar_handle, mask.handle, "zeroing")
+    return vector(handle, src.type)
+
+
+@builtin
+def vprelu(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> vector:
+    """
+    Parametric ReLU with per-lane slopes (``ave.hir.vprelu``).
+
+    ``src1`` holds one slope per lane and must match ``src0`` exactly.  Only
+    f16/f32 are supported.
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    if src0.type != src1.type:
+        raise ValueError(f"vprelu requires same-typed operands, got {src0.type} and {src1.type}")
+    tag = _elem_tag(src0.dtype)
+    unsigned = _is_unsigned(src0.dtype)
+    _require_elem_support("vprelu", tag, unsigned)
+    lanes = src0.shape[0]
+    mask = _resolve_mask(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_binary("prelu", src0.handle, src1.handle, mask.handle, "zeroing")
+    return vector(handle, src0.type)
 
 
 @builtin
@@ -2153,6 +2321,42 @@ def vtruncf(src, target_dtype, mask=None, part="part_even", _semantic=None) -> v
     _check_mask(mask, src.type.lanes)
     handle = _semantic.builder.create_simd_vcvt("truncf", src.handle, mask.handle, out_tag, part)
     return vector(handle, vector_type(out_lanes, target_dtype))
+
+
+@builtin
+def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vector:
+    """
+    Pack wider lanes to narrower lanes (``ave.hir.vpack``).
+
+    :param src: source vector register
+    :param part: ``part_even`` (default, low destination half) or
+        ``part_odd`` (high destination half), matching :func:`vextf` /
+        :func:`vtruncf`
+    :return: vector with twice as many lanes and half the element width
+
+    The AVE verifier only permits b16 -> b8 and b32 -> b16 narrowing, so the
+    supported source types are i16/u16 and i32/u32.  The low/high selector
+    chooses which half of the destination register receives the narrowed
+    bytes; the other half is unspecified for a single ``part_even`` /
+    ``part_odd`` call.  Issue a matching operation into the same destination
+    when both halves must be defined.
+    """
+    _require_vector(src, "src")
+    part = ss.check_part(_unwrap_if_constexpr(part))
+    tag = _elem_tag(src.dtype)
+    unsigned = _is_unsigned(src.dtype)
+    if tag == "i16":
+        out_tag, out_bits, out_name = "i8", 8, "uint8" if unsigned else "int8"
+    elif tag == "i32":
+        out_tag, out_bits, out_name = "i16", 16, "uint16" if unsigned else "int16"
+    else:
+        raise ValueError(f"vpack supports only i16/u16 and i32/u32 sources, got {src.dtype}")
+    out_lanes = src.shape[0] * _ELEM_SPECS[tag] // out_bits
+    ss.check_total_bits(out_lanes, out_bits, "vpack result")
+    out_dtype = tl.dtype(out_name)
+    part_code = 0 if part == "part_even" else 1
+    handle = _semantic.builder.create_simd_vpack(src.handle, part_code, out_tag, out_lanes)
+    return vector(handle, vector_type(out_lanes, out_dtype))
 
 
 @builtin

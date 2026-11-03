@@ -96,6 +96,15 @@ class _Recorder:
     def create_simd_binary_scalar(self, kind, vec, scalar, mask, mode):
         return self._record("binary_scalar", kind, vec, scalar, mask, mode)
 
+    def create_simd_shift(self, kind, lhs, rhs, mask, sign, mode):
+        return self._record("shift", kind, lhs, rhs, mask, sign, mode)
+
+    def create_simd_shift_scalar(self, kind, vec, scalar, mask, sign, mode):
+        return self._record("shift_scalar", kind, vec, scalar, mask, sign, mode)
+
+    def create_simd_vpack(self, src, part, out_elem_tag, out_lanes):
+        return self._record("vpack", src, part, out_elem_tag, out_lanes)
+
     def create_simd_unary(self, kind, src, mask, mode):
         return self._record("unary", kind, src, mask, mode)
 
@@ -144,7 +153,7 @@ def _last(sem):
 
 def test_exports_and_module_mode_constants():
     for name in ("MODE", "POS", "vdiv", "vmax", "vmin", "vmaxs", "vexp", "vdup", "vdups", "vdupv", "vabs", "vneg",
-                 "vnot", "vrelu", "vsqrt", "vabsdif", "vexpdif"):
+                 "vnot", "vrelu", "vsqrt", "vabsdif", "vexpdif", "vpack", "vshl", "vshls", "vshr", "vlrelu", "vprelu"):
         assert name in simd.__all__, f"{name} missing from simd.__all__"
         assert hasattr(simd, name), f"{name} missing from simd"
     assert simd.MODE.ZEROING == "MODE_ZEROING"
@@ -177,6 +186,23 @@ def test_signatures_match_api_list():
 
     p = inspect.signature(simd.vmaxs).parameters
     assert list(p) == ["src0", "scalar", "mask", "mode", "_semantic"]
+
+    p = inspect.signature(simd.vpack).parameters
+    assert list(p) == ["src", "part", "_semantic"]
+    assert p["part"].default == "part_even"
+
+    p = inspect.signature(simd.vshl).parameters
+    assert list(p) == ["src0", "src1", "mask", "mode", "_semantic"]
+    assert p["mode"].default == simd.MODE.ZEROING
+
+    p = inspect.signature(simd.vshls).parameters
+    assert list(p) == ["src", "scalar", "mask", "mode", "_semantic"]
+
+    p = inspect.signature(simd.vlrelu).parameters
+    assert list(p) == ["src", "alpha", "mask", "_semantic"]
+
+    p = inspect.signature(simd.vprelu).parameters
+    assert list(p) == ["src0", "src1", "mask", "_semantic"]
 
     p = inspect.signature(simd.vexp).parameters
     assert list(p) == ["src", "mask", "mode", "precision", "_semantic"]
@@ -407,6 +433,66 @@ def test_new_unary_and_binary_ops_use_expected_kinds():
         simd.vabsdif(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=_Semantic())
     with pytest.raises(ValueError, match="vexpdif does not support element type i32"):
         simd.vexpdif(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=_Semantic())
+
+
+def test_phase1_extended_ops_use_expected_builder_calls():
+    sem = _Semantic()
+    out = simd.vpack(_vec(128, tl.int16), part="part_odd", _semantic=sem)
+    name, args = _last(sem)
+    assert (name, args[1], args[2], args[3]) == ("vpack", 1, "i8", 256)
+    assert out.shape[0] == 256 and out.dtype == tl.int8
+
+    sem = _Semantic()
+    simd.vpack(_vec(64, tl.uint32), _semantic=sem)
+    name, args = _last(sem)
+    assert (name, args[1], args[2], args[3]) == ("vpack", 0, "i16", 128)
+
+    with pytest.raises(ValueError, match="vpack supports only"):
+        simd.vpack(_vec(64, tl.float32), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="part"):
+        simd.vpack(_vec(128, tl.int16), part="part_middle", _semantic=_Semantic())
+
+    for op, kind, dtype in ((simd.vshl, "shl", tl.int32), (simd.vshr, "shr", tl.int32)):
+        sem = _Semantic()
+        op(_vec(64, dtype), _vec(64, dtype), _semantic=sem)
+        name, args = _last(sem)
+        assert (name, args[0], args[4]) == ("shift", kind, True)
+
+    sem = _Semantic()
+    simd.vshr(_vec(64, tl.uint32), _vec(64, tl.uint32), _semantic=sem)
+    assert _last(sem)[1][4] is False
+
+    sem = _Semantic()
+    simd.vshls(_vec(64, tl.int32), 3, _semantic=sem)
+    name, args = _last(sem)
+    assert (name, args[0], args[4]) == ("shift_scalar", "shls", True)
+
+    for value in (32767, -32768):
+        sem = _Semantic()
+        simd.vshls(_vec(64, tl.int32), value, _semantic=sem)
+        assert _last(sem)[0] == "shift_scalar"
+    for value in (32768, -32769):
+        with pytest.raises(ValueError, match="does not fit int16"):
+            simd.vshls(_vec(64, tl.int32), value, _semantic=_Semantic())
+
+    sem = _Semantic()
+    simd.vlrelu(_vec(64, tl.float32), 0.25, _semantic=sem)
+    name, args = _last(sem)
+    assert (name, args[0]) == ("binary_scalar", "lrelus")
+
+    sem = _Semantic()
+    simd.vprelu(_vec(64, tl.float16), _vec(64, tl.float16), _semantic=sem)
+    name, args = _last(sem)
+    assert (name, args[0]) == ("binary", "prelu")
+
+    for call in (
+            lambda s: simd.vshl(_vec(64, tl.int64), _vec(64, tl.int64), _semantic=s),
+            lambda s: simd.vshr(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=s),
+            lambda s: simd.vlrelu(_vec(64, tl.bfloat16), 0.25, _semantic=s),
+            lambda s: simd.vprelu(_vec(64, tl.int32), _vec(64, tl.int32), _semantic=s),
+    ):
+        with pytest.raises(ValueError, match="does not support element type"):
+            call(_Semantic())
 
 
 def test_vdup_uses_masked_broadcast_with_tla_lane_convention():
@@ -770,14 +856,17 @@ def test_every_python_builder_call_is_bound_and_whitelisted():
 def test_new_bindings_and_ave_ops_are_present():
     cpp = (_TLA_DIR / "cpp" / "tla_builder.cc").read_text()
     builder_py = (_TLA_DIR / "builder.py").read_text()
-    for name in ("create_simd_binary_scalar", "create_simd_vdup", "create_simd_scalar_int"):
+    for name in ("create_simd_binary_scalar", "create_simd_vdup", "create_simd_scalar_int", "create_simd_shift",
+                 "create_simd_shift_scalar", "create_simd_vpack"):
         assert f'"{name}"' in cpp, f"{name} not bound"
         assert f"'{name}'" in builder_py, f"{name} not whitelisted"
     # each API must map to its own AVE op, not to a reduce/splat stand-in
     for ave_op in ("hivmave::VFDivOp", "hivmave::VFDivFHPOp", "hivmave::VFExpOp", "hivmave::VFBroadcastScalarMaskOp",
                    "hivmave::VFMaxOp", "hivmave::VFMinOp", "hivmave::VMaxUIOp", "hivmave::VMinUIOp",
                    "hivmave::VFMaxsOp", "hivmave::VMaxsUIOp", "hivmave::VFAbsOp", "hivmave::VFNegOp",
-                   "hivmave::VFNotOp", "hivmave::VFReluOp", "hivmave::VFAbsDiffOp", "hivmave::VFExpdifOp"):
+                   "hivmave::VFNotOp", "hivmave::VFReluOp", "hivmave::VFAbsDiffOp", "hivmave::VFExpdifOp",
+                   "hivmave::VFVpackOp", "hivmave::VFShlOp", "hivmave::VFShrOp", "hivmave::VFShlsOp",
+                   "hivmave::VFLRelusOp", "hivmave::VFPReluOp"):
         assert ave_op in cpp, f"{ave_op} missing from tla_builder.cc"
     assert '"divfhp"' in cpp, "VFDivFHPOp builder kind is not dispatched"
     # vdup must not be routed through the unmasked scalar_broadcast

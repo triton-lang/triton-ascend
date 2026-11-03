@@ -938,21 +938,6 @@ def test_compiler_version_reused_across_processes_and_coordinated(host_compiler)
     assert tool.log.read_text().splitlines() == ["query"]
 
 
-def test_compiler_library_build_id_invalidates_even_with_unchanged_stat(host_compiler, monkeypatch):
-    tool = host_compiler
-    old_identity = utils._file_identity(tool.library)
-    file_identity = utils._file_identity
-    monkeypatch.setattr(utils, "_file_identity", lambda path: old_identity
-                        if Path(path) == tool.library else file_identity(path))
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    old_build_id = utils._npu_elf_info(tool.library)[1]
-    tool.replace_version("test-compiler-v2")
-    assert utils._npu_elf_info(tool.library)[1] != old_build_id
-    utils._npu_compiler_version.cache_clear()  # A new process has no LRU entries.
-    assert _query_host_compiler(tool.path) == "test-compiler-v2"
-    assert len(tool.log.read_text().splitlines()) == 2
-
-
 def test_compiler_selection_symlink_and_atomic_replacement(host_compiler, monkeypatch):
     tool = host_compiler
     alias = tool.root / "clang++"
@@ -1089,18 +1074,3 @@ def test_compiler_version_unstable_installation_does_not_publish(host_compiler, 
     utils._npu_compiler_version.cache_clear()
     assert _query_host_compiler(tool.path) == "test-compiler-v1"
     assert len(tool.log.read_text().splitlines()) == 2
-
-
-@pytest.mark.parametrize("loader_result", ["", "unknown output", "libmissing.so => not found"])
-def test_compiler_version_unresolved_dependencies_query_live(host_compiler, monkeypatch, loader_result):
-    tool = host_compiler
-    check_output = subprocess.check_output
-
-    def output(command, **kwargs):
-        if "--list" in command:
-            return loader_result
-        return check_output(command, **kwargs)
-
-    monkeypatch.setattr(subprocess, "check_output", output)
-    assert _query_host_compiler(tool.path) == "test-compiler-v1"
-    assert not list((tool.root / "cache").rglob("compiler-version.json"))

@@ -67,7 +67,7 @@ class NPUUtils(object):
             self.npu_utils_mod = None
 
     def get_so_path(self):
-        if self._cache_path is None:
+        if self._cache_path is None or not os.path.exists(self._cache_path):
             self._cache_path = self._build_or_get_cached_so()
         return self._cache_path
 

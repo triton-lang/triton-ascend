@@ -30,7 +30,6 @@ except ImportError:
     from wheel.bdist_wheel import bdist_wheel
 
 from .build_npuir import build_npuir
-from .proton_patch import set_proton_patch
 
 _THIS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _THIS_DIR.parents[2]
@@ -118,13 +117,31 @@ def _get_ascend_llvm_package_info(base_dir):
     return {"name": name, "sym_name": sym_name, "url": url}
 
 
-def _apply_patch(patch_path):
+def _apply_patch(patch_path, reverse=False):
     try:
-        subprocess.run(["git", "apply", patch_path], check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
+        command = ["git", "apply"] + (["--reverse"] if reverse else []) + [str(patch_path)]
+        subprocess.run(command, check=True, stdout=subprocess.DEVNULL, cwd=str(_REPO_ROOT))
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"patch({patch_path}) failed,cmd={e.cmd}, retcode={e.returncode}") from e
     except FileNotFoundError:
         raise RuntimeError(f"patch({patch_path}) not found.")
+
+
+def _apply_proton_patch(enabled):
+    """Toggle the Proton patch without resetting local source changes."""
+    patch_path = _REPO_ROOT / "third_party" / "ascend" / "patch" / "proton_patch.patch"
+    command = ["git", "apply", "--check", "--whitespace=nowarn"]
+    # Check the opposite direction to detect the desired state already exists.
+    already_applied = ["--reverse"] if enabled else []
+    result = subprocess.run(command + already_applied + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True)
+    if result.returncode == 0:
+        return
+    direction = [] if enabled else ["--reverse"]
+    result = subprocess.run(command + direction + [str(patch_path)], cwd=_REPO_ROOT, capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError("Proton patch conflicts with local changes or is incomplete; "
+                           "no files were changed. Resolve the conflict before rebuilding.\n" + result.stderr)
+    _apply_patch(patch_path, reverse=not enabled)
 
 
 def checkout_file(files):
@@ -557,7 +574,7 @@ def patch_module(mod):
             return cmake_args
 
         def run(self):
-            set_proton_patch(mod.check_env_flag("TRITON_BUILD_PROTON", "OFF"), _REPO_ROOT)
+            _apply_proton_patch(mod.check_env_flag("TRITON_BUILD_PROTON", "OFF"))
             _apply_triton_ascend_patch()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \

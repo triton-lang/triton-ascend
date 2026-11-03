@@ -1,8 +1,0 @@
-{
-  "base_commit": "2a00c6052a110b6f52a2912d1eb8641ba135d9c3",
-  "source_commit": "be46d818e7d2447c898f9bc7b60c5a0a11b34198",
-  "source_branch": "codex/proton-upstream-boundaries-20261103",
-  "base_tree": "d21a056fdb0dde3e515758e58781b4c677f7a617",
-  "source_tree": "d296fa3c3a71b529351c482fb3fbb1e558712eff",
-  "patch_sha256": "624010a8e7c97dc847368b6a8e38efa819375ee94d87aab9da12b475232d9111"
-}

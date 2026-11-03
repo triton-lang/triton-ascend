@@ -2023,8 +2023,7 @@ static double workingSetBytesPerIteration(const StageWorkload &workload) {
       continue;
 
     const int64_t strideBytes = std::abs(access.rowStrideBytes());
-    const int64_t additionalRowBytes =
-        strideBytes == 0 ? 0 : std::min(strideBytes, activeRowBytes);
+    const int64_t additionalRowBytes = std::min(strideBytes, activeRowBytes);
     const double accessBytes =
         static_cast<double>(activeRowBytes) +
         static_cast<double>(rows - 1) * additionalRowBytes;
@@ -2953,7 +2952,6 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       plan.runtimePhysicalProgramCount == 1 &&
       costTable.simtStraightLinePrefixScanElementsPerCycle > 0.0) {
     bool hasStraightLineScan = false;
-    std::optional<size_t> straightLineScanOwner;
     for (size_t index = 0; index < costTable.stages.size(); ++index) {
       const LogicalStageCost &stage = costTable.stages[index];
       const bool matches =
@@ -2962,8 +2960,6 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
           !stage.features.isGridStrideLoopShell &&
           !stage.features.insideGridStrideLoopBody;
       hasStraightLineScan |= matches;
-      if (matches)
-        straightLineScanOwner = index;
     }
     if (hasStraightLineScan) {
       for (size_t index = 0; index < costTable.stages.size(); ++index) {

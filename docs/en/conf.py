@@ -51,15 +51,6 @@ myst_dollar_math = True
 # index.md headings sharing names with category headings in main index.md.
 suppress_warnings = ["autosectionlabel"]
 
-# Suppress duplicate autosectionlabel warnings caused by subdirectory
-# index.md headings sharing names with category headings in main index.md.
-suppress_warnings = ["autosectionlabel"]
-
-# -- MyST configuration -------------------------------------------------------
-# Enable dollar-math extension so that $$...$$ and $...$ syntax is parsed.
-myst_enable_extensions = ['dollarmath']
-myst_dollar_math = True
-
 autosummary_generate = True
 
 _readthedocs_lang = os.environ.get('READTHEDOCS_LANGUAGE')

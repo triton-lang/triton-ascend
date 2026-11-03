@@ -19,7 +19,7 @@ set -eu
 # ── 1. Language mapping ────────────────────────────────────────────────────
 
 case "$READTHEDOCS_LANGUAGE" in
-  en)          lang="en" ;;
+  en)          lang="zh" ;;
   zh-cn|zh_CN) lang="zh" ;;
   *)
     echo "Unrecognised READTHEDOCS_LANGUAGE=[${READTHEDOCS_LANGUAGE}]; aborting."

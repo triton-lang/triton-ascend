@@ -974,6 +974,7 @@ def test_default_compile_mode_keeps_the_91095_layout_memory_gate_prepared(compil
         ("Ascend910_9589", True, 1),
         ("Ascend910_9691", True, 0),
         ("Ascend910B1", False, 0),
+        (None, False, 0),
     ),
 )
 def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
@@ -1012,6 +1013,7 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
         "ascend",
         SimpleNamespace(passes=SimpleNamespace(ttir=ttir_passes)),
     )
+    monkeypatch.setattr(compiler_module, "distributed", None)
     monkeypatch.setattr(compiler_module, "_serialize_module", lambda _mod, _opt: "module {}")
     monkeypatch.setattr(compiler_module, "_is_auto_map_parallel_blocks_enabled", lambda: False)
     monkeypatch.setattr(compiler_module, "_get_auto_blockify_blacklist_reasons", lambda _ttir: [])
@@ -1020,18 +1022,19 @@ def test_ttir_to_linalg_merge_concat_load_buffer_is_a5_only(
 
     metadata = {
         "compile_on_910_95": compile_on_910_95,
-        "target": SimpleNamespace(arch=arch),
         "enable_dynamic_cv_pipeline": False,
     }
+    if arch is not None:
+        metadata["target"] = SimpleNamespace(arch=arch)
     options = SimpleNamespace(
         debug=False,
         compile_mode="simd",
-        target_arch=arch,
+        target_arch=arch or "Ascend910B1",
         enable_tla_mode=False,
     )
 
     assert compiler_module.ttir_to_linalg(_FakeModule(events), metadata, options) == "module {}"
-    assert merge_calls == [arch] * expected_calls
+    assert merge_calls == ([] if arch is None else [arch] * expected_calls)
     assert events[-1] == "run_row"
 
 

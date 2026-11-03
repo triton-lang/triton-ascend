@@ -2,7 +2,7 @@
 
 Stages: ir (offline HIVM), compile (kernel artifacts), run (numerics).
 Rows: 0 full-mask, 1 prefix ZEROING, 2 all-false ZEROING, 3 prefix MERGING
-(TLA MERGING merges a +0 source, so inactive lanes read 0 in rows 1..3).
+(MERGING keeps acc on the inactive lanes, CANN's dst-preserving predicate).
 """
 import os
 import sys
@@ -71,6 +71,7 @@ def _reference(x, y):
     ref[0] = full
     ref[1, :SHAPE["active"]] = full[:SHAPE["active"]]
     ref[3, :SHAPE["active"]] = full[:SHAPE["active"]]
+    ref[3, SHAPE["active"]:] = x[SHAPE["active"]:]
     return ref
 
 

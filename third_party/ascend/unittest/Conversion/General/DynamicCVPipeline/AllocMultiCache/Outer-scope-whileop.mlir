@@ -1,45 +1,30 @@
-// RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s
+// RUN: triton-opt --add_multi_buffer_outer_scope %s | FileCheck %s --implicit-check-not=scf.if --implicit-check-not=ssbuffer.cross_buffer
 
-// Test: C→V transfer with scf.while (main_loop) in double-buffer mode.
-// - pin inter_core_buf_count=2: polling branch (scf.if dispatch) now
-//   supported for scf.while, as the polling condition is inserted at
-//   while-body start (dominance fix); supersedes the pin-to-1 workaround
-// - wrong insertion order still rejected by verifier
-//   (operand-defined-after-use)
-// - CHECK locks double-buffer output: two mutually-exclusive transfer
-//   groups (even/odd flags) + double-buffer selection
-
+// Double-buffer selection for while/for and while/while core pairs. There
+// must be one physical transfer and one flag SSA value per handshake, with
+// both static seed/drain tokens retained outside the rotating loop.
 // CHECK-LABEL: func.func @tc_while_ctov_sender
 // CHECK: tightly_coupled_buffer
-// while gets injected counter iter_arg
 // CHECK: scf.while {{.*}} : (i32, i32) -> (i32, i32)
-// polling condition computed at body start
 // CHECK: arith.remsi
 // CHECK: arith.cmpi eq
-// two mutually-exclusive transfer groups: even flag=3 / odd flag=7
-// CHECK: scf.if
-// CHECK: sync_block_wait {{.*}} flag = 3
-// CHECK: } else {
-// CHECK: sync_block_wait {{.*}} flag = 7
-// CHECK: ssbuffer.cross_buffer
-// double-buffer selection
-// CHECK: memref.memory_space_cast
-// CHECK: } else {
-// CHECK: memref.memory_space_cast
-// CHECK: sync_block_set {{.*}} flag = 3
-// CHECK: } else {
-// CHECK: sync_block_set {{.*}} flag = 7
+// CHECK: %[[VF:.*]] = arith.select {{.*}} : i64
+// CHECK: sync_block_wait {{.*}} flag = %[[VF]]
+// CHECK: %[[VB:.*]] = arith.select {{.*}} : memref<128xf16, #hivm.address_space<ub>>
+// CHECK: memref.memory_space_cast %[[VB]]
+// CHECK: bufferization.to_tensor
+// CHECK: sync_block_set {{.*}} flag = %[[VF]]
 // CHECK: ssbuffer.iterCounter
 // CHECK: ssbuffer.main_loop
-// cross-core initial signals for both flags + CUBE-side waits
 // CHECK: sync_block_set {{.*}} flag = 3
 // CHECK: sync_block_set {{.*}} flag = 7
 // CHECK: sync_block_wait {{.*}} flag = 3
 // CHECK: sync_block_wait {{.*}} flag = 7
-// CUBE side: fixpipe double-buffer selection
-// CHECK: hivm.hir.fixpipe
-// CHECK: } else {
-// CHECK: hivm.hir.fixpipe
+// CHECK: %[[CF:.*]] = arith.select {{.*}} : i64
+// CHECK: sync_block_wait {{.*}} flag = %[[CF]]
+// CHECK: %[[CB:.*]] = arith.select {{.*}} : memref<128xf16, #hivm.address_space<ub>>
+// CHECK: hivm.hir.fixpipe {{.*}}outs(%[[CB]]
+// CHECK: sync_block_set {{.*}} flag = %[[CF]]
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">, ssbuffer.inter_core_buf_count = 2 : i32} {
 func.func @tc_while_ctov_sender() {
@@ -83,37 +68,23 @@ func.func @tc_while_ctov_sender() {
 }
 
 
-// Test: Both sender and receiver use scf.while with main_loop
-// - both whiles get counter injection + two mutually-exclusive groups
-
+// Both cores use scf.while; the injected counters must still dominate
+// both selections. Each side shares its selected flag between wait and set.
 // CHECK-LABEL: func.func @tc_while_both_sides
-// CHECK: tightly_coupled_buffer
-// VECTOR while: counter injection + two mutually-exclusive groups (flag 6/8)
 // CHECK: scf.while {{.*}} : (i32, i32) -> (i32, i32)
 // CHECK: arith.remsi
 // CHECK: arith.cmpi eq
-// CHECK: scf.if
-// CHECK: sync_block_wait {{.*}} flag = 6
-// CHECK: } else {
-// CHECK: sync_block_wait {{.*}} flag = 8
-// CHECK: ssbuffer.cross_buffer
-// CHECK: memref.memory_space_cast
-// CHECK: } else {
-// CHECK: memref.memory_space_cast
-// CHECK: sync_block_set {{.*}} flag = 6
-// CHECK: } else {
-// CHECK: sync_block_set {{.*}} flag = 8
-// CHECK: ssbuffer.iterCounter
-// CHECK: sync_block_set {{.*}} flag = 6
-// CHECK: sync_block_set {{.*}} flag = 8
-// CHECK: sync_block_wait {{.*}} flag = 6
-// CHECK: sync_block_wait {{.*}} flag = 8
-// CUBE while: same counter injection + fixpipe double-buffer selection
+// CHECK: %[[VF:.*]] = arith.select {{.*}} : i64
+// CHECK: sync_block_wait {{.*}} flag = %[[VF]]
+// CHECK: %[[VB:.*]] = arith.select {{.*}} : memref<128xf16, #hivm.address_space<ub>>
+// CHECK: memref.memory_space_cast %[[VB]]
+// CHECK: sync_block_set {{.*}} flag = %[[VF]]
 // CHECK: scf.while {{.*}} : (i32, i32) -> (i32, i32)
-// CHECK: hivm.hir.fixpipe
-// CHECK: } else {
-// CHECK: hivm.hir.fixpipe
-// CHECK: ssbuffer.iterCounter
+// CHECK: %[[CF:.*]] = arith.select {{.*}} : i64
+// CHECK: sync_block_wait {{.*}} flag = %[[CF]]
+// CHECK: %[[CB:.*]] = arith.select {{.*}} : memref<128xf16, #hivm.address_space<ub>>
+// CHECK: hivm.hir.fixpipe {{.*}}outs(%[[CB]]
+// CHECK: sync_block_set {{.*}} flag = %[[CF]]
 
 func.func @tc_while_both_sides() {
   %c0_i32 = arith.constant 0 : i32

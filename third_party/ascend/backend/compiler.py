@@ -533,6 +533,7 @@ def _parse_linalg_metadata(linalg: str, metadata: dict):
     # Note: Compiled Kernel requires to estimate size of shared memory to occupy
     # Currently, NPU backend does not limit on shared memory
     metadata["shared"] = 1
+    metadata["cross_buffer_select"] = "hivm.cross_buffer_select" in linalg
     module_attrs = re.search(r'\bmodule(?:\s+@\w+)?\s+attributes\s*\{([^}]*)\}', linalg)
     metadata["has_full_row_copy"] = bool(module_attrs and re.search(r'\btt\.full_row_copy\b', module_attrs.group(1)))
     # Force disable auto tile and bind subblock if attribute is present in module
@@ -890,6 +891,15 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         if opt.debug:
             _compile_option_list += [f"--save-temps={_get_save_temps_dir(metadata['hash'])}"]
+
+        if metadata.get("cross_buffer_select"):
+            capability = Path(npu_compiler_path).parent.parent / "lib" / "cross-buffer-select-v1"
+            if not capability.is_file():
+                raise RuntimeError(
+                    "Inter-core buffer selects require the NPU-IR select-support patch. "
+                    "Rebuild the BishengIR payload with TRITON_BUILD_NPUIR=ON; "
+                    "see third_party/ascend/patch/outer-buffer-select.md."
+                )
 
         cmd_list = ([npu_compiler_path, ttadapter_path] + _compile_option_list + ["-o", bin_file])
 

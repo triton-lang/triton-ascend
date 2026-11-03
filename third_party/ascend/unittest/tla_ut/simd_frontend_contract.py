@@ -117,11 +117,40 @@ class _Recorder:
     def create_simd_scalar_int(self, elem_tag, value):
         return self._record("scalar_int", elem_tag, value)
 
+    def create_simd_vcvt(self, *args):
+        return self._record("vcvt", *args)
+
+    def create_simd_vunpack(self, *args):
+        return self._record("vunpack", *args)
+
+    def create_simd_pld(self, *args):
+        return self._record("pld", *args)
+
+    def create_simd_pst(self, *args):
+        return self._record("pst", *args)
+
+    def create_simd_vgather(self, *args):
+        return self._record("vgather", *args)
+
+    def create_simd_gather_masks(self, mask):
+        self._record("gather_masks", mask)
+        return _Handle("low_mask"), _Handle("high_mask")
+
+    def create_simd_vdintlv(self, *args):
+        self._record("vdintlv", *args)
+        return _Handle("even"), _Handle("odd")
+
+    def create_simd_bitcast(self, *args):
+        return self._record("bitcast", *args)
+
 
 class _Semantic:
 
     def __init__(self):
         self.builder = _Recorder()
+
+    def to_tensor(self, value):
+        return tl.tensor(_Handle(value), tl.int32)
 
 
 def _vec(lanes, dtype):
@@ -135,6 +164,166 @@ def _mask(lanes, dtype=None):
 def _last(sem):
     assert sem.builder.calls, "no builder call recorded"
     return sem.builder.calls[-1]
+
+
+def _buffer(dtype=None, shape=(128, ), space="ub", strides=None, offset=0):
+    from tla_src.core import buffer_type
+    return simd.buffer(_Handle("buffer"), buffer_type(shape, dtype or tl.uint8, space, strides, offset))
+
+
+@pytest.mark.parametrize("width", (8, 16, 32))
+@pytest.mark.parametrize("dist", ("NORM", "US", "DS"))
+@pytest.mark.parametrize("access", (False, True))
+def test_predicate_memory_dispatch(width, dist, access):
+    buf, sem = _buffer(), _Semantic()
+    pred = simd.pld(buf[32] if access else buf, None if access else [32], width=tl.constexpr(width), dist=dist,
+                    _semantic=sem)
+    name, args = _last(sem)
+    assert pred.type == simd.vector_type(2048 // width, tl.int1)
+    assert name == "pld" and args[0] is buf.handle and args[1][0].ty == 32
+    assert args[2:] == (2048 // width, dist, f"pb{width}")
+    if access:
+        simd.pst(buf[32], pred, _semantic=sem)
+    else:
+        simd.pst(buf, [32], pred, _semantic=sem)
+    name, args = _last(sem)
+    assert name == "pst" and args[0] is buf.handle and args[1][0].ty == 32
+    assert args[2:] == (pred.handle, f"pb{width}")
+
+
+@pytest.mark.parametrize("buf", [
+    _buffer(space="gm"),
+    _buffer(dtype=tl.int1),
+    _buffer(dtype=tl.int16),
+    _buffer(shape=(16, 16)),
+    _buffer(strides=(2, )),
+    _buffer(offset=1),
+])
+@pytest.mark.parametrize("op", ("pld", "pst"))
+def test_predicate_memory_rejects_invalid_buffers(buf, op):
+    with pytest.raises((TypeError, ValueError)):
+        if op == "pld":
+            simd.pld(buf[0], _semantic=_Semantic())
+        else:
+            simd.pst(buf[0], _mask(64), _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("offset", (-32, 1, 128, 0.5, True))
+@pytest.mark.parametrize("op", ("pld", "pst"))
+def test_predicate_memory_rejects_invalid_offsets(offset, op):
+    with pytest.raises((TypeError, ValueError)):
+        if op == "pld":
+            simd.pld(_buffer()[offset], _semantic=_Semantic())
+        else:
+            simd.pst(_buffer()[offset], _mask(64), _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("width", (1, 64, True, "8"))
+def test_pld_rejects_invalid_density(width):
+    with pytest.raises(ValueError, match="width"):
+        simd.pld(_buffer()[0], width=width, _semantic=_Semantic())
+
+
+def test_predicate_memory_bounds_and_layout_controls():
+    with pytest.raises(ValueError):
+        simd.pld(_buffer()[0], dist="NORM_B8", _semantic=_Semantic())
+    with pytest.raises(ValueError, match="outside"):
+        simd.pld(_buffer(shape=(32, ))[0], dist="DS", _semantic=_Semantic())
+    for lanes in (64, 128, 256):
+        # Exact-sized stores are valid; one byte less must be rejected.
+        simd.pst(_buffer(shape=(lanes // 8, ))[0], _mask(lanes), _semantic=_Semantic())
+        with pytest.raises(ValueError, match="outside"):
+            simd.pst(_buffer(shape=(lanes // 8 - 1, ))[0], _mask(lanes), _semantic=_Semantic())
+    for pred in (_mask(32), _mask(64, tl.int32)):
+        with pytest.raises(ValueError, match="predicate"):
+            simd.pst(_buffer()[0], pred, _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("op", (simd.vgather, simd.vld))
+@pytest.mark.parametrize("dtype,index_dtype,lanes", [
+    (tl.float32, tl.uint32, 64),
+    (tl.float16, tl.uint16, 128),
+    (tl.bfloat16, tl.uint16, 128),
+    (tl.int32, tl.uint32, 64),
+])
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+def test_indexed_load_dispatch(op, dtype, index_dtype, lanes, mode):
+    buf, index, mask, sem = _buffer(dtype), _vec(lanes, index_dtype), _mask(lanes), _Semantic()
+    result = op(buf[3], index, mask, mode=mode, _semantic=sem)
+    assert result.type == simd.vector_type(lanes, dtype)
+    calls = [args for name, args in sem.builder.calls if name == "vgather"]
+    assert len(calls) == 1
+    assert calls[0][0] is buf.handle and calls[0][1][0].ty == 3
+    assert calls[0][2] is index.handle and calls[0][3] is mask.handle
+    assert calls[0][-1] == lanes
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+
+@pytest.mark.parametrize("buf,index,mask", [
+    (_buffer(tl.int64), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, space="gm"), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, shape=(16, 16)), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32, strides=(2, )), _vec(64, tl.uint32), None),
+    (_buffer(tl.float32), _vec(32, tl.uint32), None),
+    (_buffer(tl.float32), _vec(64, tl.int32), None),
+    (_buffer(tl.float16), _vec(128, tl.uint32), None),
+    (_buffer(tl.float32), _vec(64, tl.uint32), _mask(128)),
+    (_buffer(tl.uint8), _vec(128, tl.uint16), None),
+    (_buffer(tl.uint8), (_vec(128, tl.uint16), ), None),
+    (_buffer(tl.uint8), (_vec(128, tl.uint16), _vec(64, tl.uint32)), None),
+])
+def test_indexed_load_rejects_invalid_operands(buf, index, mask):
+    with pytest.raises((TypeError, ValueError)):
+        simd.vld(buf, index, mask, _semantic=_Semantic())
+
+
+def test_indexed_load_rejects_bad_base_and_mode():
+    for offset in (-1, 128, 0.5):
+        with pytest.raises((TypeError, ValueError)):
+            simd.vgather(_buffer(tl.float32)[offset], _vec(64, tl.uint32), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="invalid mode"):
+        simd.vld(_buffer(tl.float32), _vec(64, tl.uint32), mode="unknown", _semantic=_Semantic())
+
+
+def test_vunpack_rejects_ignored_selectors_and_partial_registers():
+    for src, dst, kwargs in [(_vec(256, tl.int8), tl.int16, dict(pp="pp1")),
+                             (_vec(256, tl.int8), tl.int32, dict(part=simd.PART.ODD)), (_vec(128,
+                                                                                             tl.int8), tl.int16, {})]:
+        with pytest.raises(ValueError):
+            simd.vunpack(src, dst, _semantic=_Semantic(), **kwargs)
+
+
+@pytest.mark.parametrize("signed", (False, True))
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+def test_vunpack_result_mask_and_selectors(signed, mode):
+    sem = _Semantic()
+    mask = _mask(64)
+    result = simd.vunpack(_vec(256, tl.int8), tl.int32, mask, pp="pp3", signed=signed, mode=mode, _semantic=sem)
+    name, args = _last(sem)
+    assert result.type == simd.vector_type(64, tl.int32)
+    assert name == "vcvt" and args[0] == ("extsi" if signed else "extui")
+    assert args[2] is mask.handle
+    assert args[-3:] == ("merging" if mode == simd.MODE.MERGING else "zeroing", "pp3", True)
+
+
+@pytest.mark.parametrize("kwargs", [
+    dict(pp="pp4"),
+    dict(part="unknown"),
+    dict(signed=1),
+    dict(mode="unknown"),
+    dict(mask=_mask(256)),
+    dict(mask=_mask(64, tl.int32))
+])
+def test_vunpack_rejects_invalid_controls(kwargs):
+    with pytest.raises(ValueError):
+        simd.vunpack(_vec(256, tl.int8), tl.int32, _semantic=_Semantic(), **kwargs)
+
+
+@pytest.mark.parametrize("src,dst", [(tl.float16, tl.int32), (tl.int8, tl.float16), (tl.int16, tl.int8),
+                                     (tl.int32, tl.int64)])
+def test_vunpack_rejects_unsupported_widths(src, dst):
+    with pytest.raises(ValueError, match="supports integer"):
+        simd.vunpack(_vec(64, src), dst, _semantic=_Semantic())
 
 
 # --------------------------------------------------------------------------
@@ -813,3 +1002,51 @@ def test_public_names_are_defined_and_documented():
         assert ast.get_docstring(node), f"{name} has no docstring"
     for name in ("membar", "pge", "vci"):
         assert f'"{name}"' in src
+
+
+@pytest.mark.parametrize("part,number", [(simd.PART.LOWER, 0), (simd.PART.HIGHER, 1)])
+@pytest.mark.parametrize("signed", (False, True))
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+def test_native_vunpack_unmasked_is_one_operation(part, number, signed, mode):
+    sem = _Semantic()
+    src = _vec(256, tl.int8)
+    result = simd.vunpack(src, tl.int16, part=part, signed=signed, mode=mode, _semantic=sem)
+    assert result.type == simd.vector_type(128, tl.int16)
+    assert sem.builder.calls == [("vunpack", (src.handle, "i16", number, signed))]
+
+
+def test_native_vunpack_mask_and_invalid_width():
+    sem, mask = _Semantic(), _mask(128)
+    simd.vunpack(_vec(256, tl.int8), tl.int16, mask, part=simd.PART.HIGHER, _semantic=sem)
+    assert _last(sem)[0] == "vsel" and _last(sem)[1][0] is mask.handle
+    with pytest.raises(ValueError):
+        simd.vunpack(_vec(256, tl.int8), tl.int32, part=simd.PART.LOWER, _semantic=_Semantic())
+    with pytest.raises(ValueError):
+        simd.vunpack(_vec(256, tl.int8), tl.int16, _mask(64), part=simd.PART.LOWER, _semantic=_Semantic())
+
+
+def test_unmasked_strided_vunpack_omits_result_select():
+    sem = _Semantic()
+    simd.vunpack(_vec(256, tl.int8), tl.int16, _semantic=sem)
+    assert _last(sem)[0] == "vcvt" and _last(sem)[1][-1] is False
+
+
+@pytest.mark.parametrize("masked", (False, True))
+@pytest.mark.parametrize("mode", (simd.MODE.ZEROING, simd.MODE.MERGING))
+def test_byte_gather_native_predicate_routing(masked, mode):
+    sem = _Semantic()
+    mask = _mask(256) if masked else None
+    indices = (_vec(128, tl.uint16), _vec(128, tl.uint16))
+    result = simd.vgather(_buffer(tl.uint8, shape=(1024, ))[0], indices, mask, mode=mode, _semantic=sem)
+    assert result.type == simd.vector_type(256, tl.uint8)
+    calls = sem.builder.calls
+    splits = [args for name, args in calls if name == "gather_masks"]
+    gathers = [args for name, args in calls if name == "vgather"]
+    assert len(gathers) == 2
+    assert gathers[0][2] is indices[0].handle and gathers[1][2] is indices[1].handle
+    if masked:
+        assert splits == [(mask.handle, )]
+        assert [args[3].ty for args in gathers] == ["low_mask", "high_mask"]
+    else:
+        assert not splits and gathers[0][3] is gathers[1][3]
+    assert all(name != "vsel" for name, _ in calls)

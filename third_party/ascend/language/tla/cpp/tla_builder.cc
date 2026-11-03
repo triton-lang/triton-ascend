@@ -28,6 +28,7 @@
 #include "bishengir/Dialect/Scope/IR/Scope.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
@@ -362,7 +363,145 @@ void init_tla_builder(py::module &&m) {
                             /*isSet=*/false);
           },
           py::arg("mode"), py::arg("pipe"), py::arg("flag"))
-      // SIMD vector-register ops (AVE dialect, ave.hir.*).
+      // SIMD vector-register ops (AVE and native LLVM intrinsics).
+      .def(
+          "create_simd_gather_masks",
+          [](TLABuilder &self, Value mask) -> std::pair<Value, Value> {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto predTy = VectorType::get({256}, builder.getI1Type());
+            if (mask.getType() != predTy)
+              throw std::invalid_argument(
+                  "byte gather requires a 256-lane predicate");
+            ctx->getOrLoadDialect<LLVM::LLVMDialect>();
+            auto pairTy =
+                LLVM::LLVMStructType::getLiteral(ctx, {predTy, predTy});
+            // Byte gather consumes the even bits of each predicate.
+            // Duplicating each bit with pintlv produces the correct two
+            // halves without materializing masks in data registers.
+            Value pair =
+                self.create<LLVM::CallIntrinsicOp>(
+                        pairTy, builder.getStringAttr("llvm.hivm.pintlv.b8"),
+                        ValueRange{mask, mask})
+                    .getResult(0);
+            Value low = self.create<LLVM::ExtractValueOp>(pair, 0);
+            Value high = self.create<LLVM::ExtractValueOp>(pair, 1);
+            return {low, high};
+          },
+          py::arg("mask"))
+      .def(
+          "create_simd_vunpack",
+          [](TLABuilder &self, Value src, py::object elem, int32_t part,
+             bool isSigned) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto srcTy = dyn_cast<VectorType>(src.getType());
+            auto dstElem = resolveSimdElementType(ctx, elem);
+            if (!srcTy || srcTy.getRank() != 1 ||
+                !isa<IntegerType>(srcTy.getElementType()) ||
+                !isa<IntegerType>(dstElem))
+              throw std::invalid_argument(
+                  "native vunpack requires integer vectors");
+            unsigned srcBits = srcTy.getElementType().getIntOrFloatBitWidth();
+            unsigned dstBits = dstElem.getIntOrFloatBitWidth();
+            if ((srcBits != 8 && srcBits != 16) || dstBits != 2 * srcBits ||
+                srcTy.getNumElements() * srcBits != 2048 ||
+                (part != 0 && part != 1))
+              throw std::invalid_argument(
+                  "native vunpack requires 8->16 or 16->32 and LOWER/HIGHER");
+            ctx->getOrLoadDialect<LLVM::LLVMDialect>();
+            auto dstTy = VectorType::get({2048 / int64_t(dstBits)}, dstElem);
+            Value selector = self.create<arith::ConstantIntOp>(part, 32);
+            // LLVM call_intrinsic reaches the same target intrinsic as the
+            // Regbase op without linking a second copy of its dialect.
+            return self
+                .create<LLVM::CallIntrinsicOp>(
+                    dstTy,
+                    builder.getStringAttr(isSigned ? "llvm.hivm.vsunpack"
+                                                   : "llvm.hivm.vzunpack"),
+                    ValueRange{src, selector})
+                .getResult(0);
+          },
+          py::arg("src"), py::arg("elem"), py::arg("part"), py::arg("signed"))
+      .def(
+          "create_simd_vgather",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, py::object elem, int32_t lanes) -> Value {
+            auto &builder = self.getBuilder();
+            auto vecTy = VectorType::get(
+                {lanes}, resolveSimdElementType(builder.getContext(), elem));
+            auto indicesIdx = toIndexValues(self, indices);
+            return self
+                .create<hivmave::VFGatherOp>(vecTy, ptr, ValueRange(indicesIdx),
+                                             index, mask)
+                .getResult();
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("elem"), py::arg("lanes"))
+      .def(
+          "create_simd_pst",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val,
+             const std::string &pb) {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
+            if (!pbEnum || (pb != "pb8" && pb != "pb16" && pb != "pb32"))
+              throw std::invalid_argument("invalid predicate store density");
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate store needs one byte offset");
+            auto memTy = cast<MemRefType>(ptr.getType());
+            auto bitsTy = MemRefType::get({256}, builder.getI1Type(),
+                                          MemRefLayoutAttrInterface{},
+                                          memTy.getMemorySpace());
+            auto indicesIdx = toIndexValues(self, indices);
+            ptr = self.create<memref::ViewOp>(bitsTy, ptr, indicesIdx.front(),
+                                              ValueRange{});
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            Value mask = self.create<hivmave::VFPgeOp>(
+                val.getType(), hivmave::PgePattern::ALL);
+            auto op = self.create<hivmave::VFMaskedStoreOp>(
+                hivmave::StoreDistAttr::get(ctx, hivmave::StoreDist::NORM_B8),
+                ptr, ValueRange{zero}, mask, val);
+            op->setAttr("functionType",
+                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("val"), py::arg("pb"))
+      .def(
+          "create_simd_pld",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             int32_t lanes, const std::string &dist,
+             const std::string &pb) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto distEnum = hivmave::symbolizeLoadDist(dist);
+            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
+            if (!distEnum || !pbEnum ||
+                (dist != "NORM" && dist != "US" && dist != "DS") ||
+                (pb != "pb8" && pb != "pb16" && pb != "pb32"))
+              throw std::invalid_argument(
+                  "invalid predicate load distribution");
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate load needs one byte offset");
+            auto vecTy = VectorType::get({lanes}, builder.getI1Type());
+            auto indicesIdx = toIndexValues(self, indices);
+            auto memTy = cast<MemRefType>(ptr.getType());
+            auto bitsTy = MemRefType::get({256}, builder.getI1Type(),
+                                          MemRefLayoutAttrInterface{},
+                                          memTy.getMemorySpace());
+            ptr = self.create<memref::ViewOp>(bitsTy, ptr, indicesIdx.front(),
+                                              ValueRange{});
+            Value zero = self.create<arith::ConstantIndexOp>(0);
+            auto op = self.create<hivmave::VFLoadOp>(
+                vecTy, hivmave::LoadDistAttr::get(ctx, *distEnum), ptr,
+                ValueRange{zero});
+            op->setAttr("functionType",
+                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
+            return op.getResult(0);
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("lanes"), py::arg("dist"),
+          py::arg("pb"))
       .def(
           "create_simd_vlds",
           [](TLABuilder &self, Value &ptr, std::vector<Value> &indices,
@@ -785,7 +924,8 @@ void init_tla_builder(py::module &&m) {
           "create_simd_vcvt",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
              py::object out_elem_tag, std::string &part, std::string &round,
-             bool sat, std::string mode) -> Value {
+             bool sat, std::string mode, const std::string &pp,
+             bool applyMask) -> Value {
             auto &builder = self.getBuilder();
             auto *ctx = builder.getContext();
             auto outElemTy = resolveSimdElementType(ctx, out_elem_tag);
@@ -817,6 +957,45 @@ void init_tla_builder(py::module &&m) {
               result =
                   self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
                       .getResult();
+            } else if (kind == "extsi" || kind == "extui") {
+              if (mode != "zeroing" && mode != "merging")
+                throw std::invalid_argument("unknown simd mode: " + mode);
+              auto ppEnum = hivmave::symbolizeVCVT_PPType(pp);
+              if (!ppEnum)
+                throw std::invalid_argument("unknown vcvt pp: " + pp);
+              auto ppAttr = hivmave::VCVT_PPTypeAttr::get(ctx, *ppEnum);
+              bool factor4 = srcTy.getElementType().isInteger(8) &&
+                             outElemTy.isInteger(32);
+              // Widening tests the predicate at the selected *source* lane.
+              // A result-width predicate has zero bits at odd/pp1..3 source
+              // positions. Convert all source lanes, then predicate the result.
+              auto nativeMaskTy = VectorType::get({srcTy.getNumElements()},
+                                                  builder.getI1Type());
+              Value nativeMask = self.create<hivmave::VFPgeOp>(
+                  nativeMaskTy,
+                  hivmave::PgePatternAttr::get(ctx, hivmave::PgePattern::ALL));
+              // The verifier requires exactly one selector: pp for 8->32,
+              // part for factor-two extensions. Keep existing vcvt ABI
+              // defaults.
+              if (kind == "extsi") {
+                auto op = self.create<hivmave::VFExtSIOp>(
+                    outVecTy, src, nativeMask, partAttr, ppAttr);
+                if (factor4)
+                  op.removePartAttr();
+                else
+                  op.removePpAttr();
+                result = op.getResult();
+              } else {
+                auto op = self.create<hivmave::VFExtUIOp>(
+                    outVecTy, src, nativeMask, partAttr, ppAttr);
+                if (factor4)
+                  op.removePartAttr();
+                else
+                  op.removePpAttr();
+                result = op.getResult();
+              }
+              return applyMask ? applySimdMode(self, result, mask, "merging")
+                               : result;
             } else if (kind == "s2f" || kind == "u2f") {
               // int -> fp conversion, sign chosen by the source dtype.
               // ISA attribute rules (VFSIntToFpOp/VFUIntToFpOp::verify):
@@ -876,7 +1055,8 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("src"), py::arg("mask"),
           py::arg("out_elem_tag"), py::arg("part"), py::arg("round") = "round",
-          py::arg("sat") = true, py::arg("mode") = "zeroing")
+          py::arg("sat") = true, py::arg("mode") = "zeroing",
+          py::arg("pp") = "pp0", py::arg("apply_mask") = true)
       .def(
           "create_simd_pge",
           [](TLABuilder &self, std::string &pattern, int32_t lanes) -> Value {

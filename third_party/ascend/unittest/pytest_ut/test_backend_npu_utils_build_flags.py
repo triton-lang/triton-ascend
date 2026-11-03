@@ -225,6 +225,7 @@ def test_npu_utils_initialization_builds_and_caches_shared_object(monkeypatch, t
 
     fake_cache = FakeCache()
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: fake_cache)
+    monkeypatch.setattr(driver._ascend_utils, "bin_cache_manager", lambda key, bin_dir: fake_cache)
     monkeypatch.setattr(driver, "_build_npu_ext", lambda *args, **kwargs: str(built_so))
 
     npu_utils = driver.NPUUtils()
@@ -267,6 +268,8 @@ def test_npu_utils_cache_key_uses_build_fingerprint_and_source(monkeypatch, tmp_
         lambda name: version_calls.append(name) or versions[name],
     )
     monkeypatch.setattr(driver, "get_cache_manager", lambda key: captured_keys.append(key) or FakeCache())
+    monkeypatch.setattr(driver._ascend_utils, "bin_cache_manager",
+                        lambda key, bin_dir: captured_keys.append(key) or FakeCache())
 
     npu_utils = driver.NPUUtils()
     source = (DEFAULT_DRIVER_PATH.parent / "npu_utils.cpp").read_text()

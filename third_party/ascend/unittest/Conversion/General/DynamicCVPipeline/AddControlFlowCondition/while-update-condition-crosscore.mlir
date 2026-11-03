@@ -5,7 +5,9 @@
 // every cross-core edge is described by the difference of the two block
 // counters: the consumer waits for c_producer - c_consumer > 0, the producer
 // waits for c_producer - c_consumer < N. Each block owns exactly one counter
-// and only bumps that one (load/addi/store).
+// and only bumps that one. The counter has a single writer, so the update
+// reuses the value that the conditions of the block already loaded
+// (addi/store, no second load).
 
 // CHECK-LABEL: func.func @while_update_condition_crosscore
 
@@ -31,9 +33,9 @@
 // CHECK: %[[CROSS5:.*]] = arith.andi %[[SGT5]], %[[SLT5]]
 // CHECK: %[[AND5:.*]] = arith.andi %[[CROSS5]], %{{.*}}
 // CHECK: scf.if %[[AND5]]
-// The block bumps only its own counter (the vector copy it already read).
-// CHECK: %[[LD_OWN5:.*]] = memref.load %[[MEM_V5]][] : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK: %[[ADD5:.*]] = arith.addi %[[LD_OWN5]], %{{.*}} : i32
+// The block bumps only its own counter: the value it already read for the
+// conditions is reused, the counter is not loaded again.
+// CHECK: %[[ADD5:.*]] = arith.addi %[[LD_V5]], %{{.*}} : i32
 // CHECK: memref.store %[[ADD5]], %[[MEM_V5]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 5
 
@@ -46,15 +48,14 @@
 // CHECK: %[[SGT6:.*]] = arith.cmpi sgt, %[[DIFF_IN6]], %{{.*}} : i32
 // CHECK: %[[AND6:.*]] = arith.andi %[[SGT6]], %{{.*}}
 // CHECK: scf.if %[[AND6]]
-// CHECK: %[[LD_OWN6:.*]] = memref.load %[[MEM_V6]][] : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK: %[[ADD6:.*]] = arith.addi %[[LD_OWN6]], %{{.*}} : i32
+// CHECK: %[[ADD6:.*]] = arith.addi %[[LD_V6]], %{{.*}} : i32
 // CHECK: memref.store %[[ADD6]], %[[MEM_V6]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 6
 
 // Cube if=0: producer of the vector block, so it waits until it is less than
 // N rounds ahead of the consumer. The two vector cores own separate counter
 // copies, so the cube compares against both of them.
-// CHECK: %[[LD_OWN0:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
+// CHECK: %[[LD_OWN0:.*]] = memref.load %[[MEM_OWN0:.*]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark %[[LD_OWN0]] {memref_ext.volatile}
 // CHECK: %[[LD_V0:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: annotation.mark %[[LD_V0]] {memref_ext.volatile}
@@ -67,9 +68,9 @@
 // CHECK: %[[CROSS0:.*]] = arith.andi %[[SLT0]], %[[SLT1]]
 // CHECK: %[[AND0:.*]] = arith.andi %[[CROSS0]], %{{.*}}
 // CHECK: scf.if %[[AND0]]
-// CHECK: %[[LD_UP0:.*]] = memref.load %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
-// CHECK: %[[ADD0:.*]] = arith.addi %[[LD_UP0]], %{{.*}} : i32
-// CHECK: memref.store %[[ADD0]], %{{.*}}[] : memref<i32, #hivm.address_space<ssbuf>>
+// The cube reuses the value of its own counter that it already read.
+// CHECK: %[[ADD0:.*]] = arith.addi %[[LD_OWN0]], %{{.*}} : i32
+// CHECK: memref.store %[[ADD0]], %[[MEM_OWN0]][] : memref<i32, #hivm.address_space<ssbuf>>
 // CHECK: } {{.*}}ssbuffer.if = 0
 
 // CHECK: scf.yield

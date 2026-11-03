@@ -62,6 +62,9 @@ public:
 private:
   SmallVector<SmallVector<Value>> allocSSBuffer(ModuleOp module);
 
+  // Place the PIPE_S synchronization around the counter initialization.
+  void insertCounterInitPipeS(ModuleOp module);
+
   int updateIfConds(ModuleOp module,
                     SmallVector<SmallVector<Value>> ssbufferPtrs);
 
@@ -223,21 +226,27 @@ private:
   //                  cube target   -> {the single copy}.
   SmallVector<Value>
   getBlockCounterMemrefs(bool isAIC, scf::IfOp targetBlock,
-                          DenseMap<int, Value> &vectorSSBufferMemrefs,
-                          ArrayRef<SmallVector<Value>> ssbufferPtrs);
+                         DenseMap<int, Value> &vectorSSBufferMemrefs,
+                         ArrayRef<SmallVector<Value>> ssbufferPtrs);
 
   // Cross-core conditions of `ifOp`: consumer difference, producer difference
   // and the cube side alignment condition.
-  Value addCrossCoreBlockConditions(
-      OpBuilder &builder, Location loc, scf::IfOp ifOp, bool isAIC,
-      Value zeroConst, DenseMap<int, Value> &vectorSSBufferMemrefs,
-      SmallVector<SmallVector<Value>> ssbufferPtrs);
+  // The counters that are read by the conditions are collected in
+  // `loadedCounters`, the update of the counter of the block reuses them.
+  Value
+  addCrossCoreBlockConditions(OpBuilder &builder, Location loc, scf::IfOp ifOp,
+                              bool isAIC, Value zeroConst,
+                              DenseMap<int, Value> &vectorSSBufferMemrefs,
+                              SmallVector<SmallVector<Value>> ssbufferPtrs,
+                              DenseMap<Value, Value> &loadedCounters);
 
-  // Bump the counter owned by `ifOp` in the then block.
+  // Bump the counter owned by `ifOp` in the then block. The value that the
+  // conditions loaded is reused, the counter has a single writer.
   void updateBlockCounterVars(OpBuilder &builder, Location loc, scf::IfOp ifOp,
                               bool isAIC, Value oneConst,
                               DenseMap<int, Value> &vectorSSBufferMemrefs,
-                              SmallVector<SmallVector<Value>> ssbufferPtrs);
+                              SmallVector<SmallVector<Value>> ssbufferPtrs,
+                              const DenseMap<Value, Value> &loadedCounters);
 
   DenseMap<Value, Value> controlVarToLatestValue;
   SmallVector<Value> currentUsedVars;
@@ -247,6 +256,10 @@ private:
   llvm::DenseMap<scf::IfOp, TensorIterArgIfOpVars> tensorIterArgIfOpVars;
   // Owner of every counter slot, indexed by slot number.
   SmallVector<scf::IfOp> blockCounterOwners;
+  // First and last op of the counter initialization block, the PIPE_S
+  // synchronization is placed around them.
+  Operation *counterInitFirstOp = nullptr;
+  Operation *counterInitLastOp = nullptr;
   // Dynamic addresses of the vector side counters, cached per scope:
   // scope op -> (slot -> address of the copy of the running core).
   llvm::DenseMap<Operation *, DenseMap<int, Value>> vectorSSBufferMemrefCache;

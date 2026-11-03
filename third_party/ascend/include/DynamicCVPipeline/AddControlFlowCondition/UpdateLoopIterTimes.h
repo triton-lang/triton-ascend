@@ -42,7 +42,9 @@ public:
   void runOnOperation() override;
   void setConditionInfo(ControlFlowConditionInfo *info) { this->info = info; }
 
-  llvm::StringRef getArgument() const override { return "update-loop-iter-times"; }
+  llvm::StringRef getArgument() const override {
+    return "update-loop-iter-times";
+  }
 
 private:
   ControlFlowConditionInfo *info = nullptr;
@@ -56,7 +58,7 @@ private:
   // Rebuilds the ControlFlowConditionInfo from the IR. Used when the pass runs
   // on its own, i.e. without AddControlFlowConditionPass driving it.
   LogicalResult buildConditionInfoFromIR(ModuleOp module,
-                                          ControlFlowConditionInfo &info);
+                                         ControlFlowConditionInfo &info);
 
   int UpdateWhileLoopCondition(
       DenseMap<int, SmallVector<Operation *>> &mainLoopIdMap);

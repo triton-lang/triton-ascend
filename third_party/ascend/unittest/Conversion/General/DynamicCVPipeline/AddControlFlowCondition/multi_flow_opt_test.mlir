@@ -48,9 +48,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %reshape_14 = tensor.empty() {ssbuffer.block_id = 5 : i32} : tensor<8x8x16x16xf16>
         hivm.hir.copy ins(%reshape_14 : tensor<8x8x16x16xf16>) outs(%alloc0 : memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) {ssbuffer.block_id = 5 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [2 : i32, 1 : i32]}
         // The block counter of the vector block 5 has a single writer: the
-        // producer block itself.
-        // CHECK:       %[[V5N:.+]] = memref.load
-        // CHECK:       %[[V5N1:.+]] = arith.addi %[[V5N]]
+        // producer block itself. The value that the conditions of the block
+        // already loaded is reused.
+        // CHECK:       %[[V5N1:.+]] = arith.addi %[[V5]]
         // CHECK:       memref.store %[[V5N1]]
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 5 : i32}
 
@@ -64,9 +64,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_set {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 3 : i32}[<VECTOR>, <PIPE_V>, <PIPE_FIX>] flag = 4
         %memspacecast_16 = memref.memory_space_cast %alloc_6 {ssbuffer.block_id = 6 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [1, 0]} : memref<128x128xf32, #hivm.address_space<ub>> to memref<128x128xf32>
         // The block counter of the vector block 6 has a single writer: the
-        // consumer block itself.
-        // CHECK:       %[[V6N:.+]] = memref.load
-        // CHECK:       %[[V6N1:.+]] = arith.addi %[[V6N]]
+        // consumer block itself. The value that the conditions of the block
+        // already loaded is reused.
+        // CHECK:       %[[V6N1:.+]] = arith.addi %[[V6]]
         // CHECK:       memref.store %[[V6N1]]
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 6 : i32}
         scf.yield %arg17, %arg18 : i32, i32
@@ -101,9 +101,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_wait {ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %30 = tensor.empty() {ssbuffer.block_id = 0 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 0 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [0 : i32, 1 : i32]} ins(%30 : tensor<128x128xf32>) outs(%alloc_6 : memref<128x128xf32, #hivm.address_space<ub>>)
-        // The block counter of the cube block 0 has a single writer.
-        // CHECK:       %[[CB0N:.+]] = memref.load
-        // CHECK:       %[[CB0N1:.+]] = arith.addi %[[CB0N]]
+        // The block counter of the cube block 0 has a single writer. The
+        // value that the conditions of the block already loaded is reused.
+        // CHECK:       %[[CB0N1:.+]] = arith.addi %[[CB0]]
         // CHECK:       memref.store %[[CB0N1]]
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 0 : i32}
 
@@ -119,9 +119,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         hivm.hir.sync_block_wait {ssbuffer.block_id = 2 : i32, ssbuffer.transfer_id = 1 : i32}[<CUBE>, <PIPE_MTE3>, <PIPE_MTE1>] flag = 2
         %31 = tensor.empty() {ssbuffer.block_id = 2 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 2 : i32, ssbuffer.transfer_id = 1 : i32, ssbuffer.crossCoreDeps = [3 : i32, 1 : i32]} ins(%31 : tensor<128x128xf32>) outs(%alloc_6a : memref<128x128xf32, #hivm.address_space<ub>>)
-        // The block counter of the cube block 2 has a single writer.
-        // CHECK:       %[[CB2N:.+]] = memref.load
-        // CHECK:       %[[CB2N1:.+]] = arith.addi %[[CB2N]]
+        // The block counter of the cube block 2 has a single writer. The
+        // value that the conditions of the block already loaded is reused.
+        // CHECK:       %[[CB2N1:.+]] = arith.addi %[[CB2]]
         // CHECK:       memref.store %[[CB2N1]]
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 2 : i32}
 
@@ -153,9 +153,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
         %321 = hivm.hir.convert_layout %alloc_5 output_shape [128, 128] {dstLayout = #hivm.data_layout<ND>, srcLayout = #hivm.data_layout<nZ>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 0 : i32, ssbuffer.crossCoreDeps = [2 : i32, 0 : i32]} : (memref<8x8x16x16xf16, #hivm.address_space<cbuf>>) -> memref<128x128xf16, #hivm.address_space<cbuf>>
         %40 = tensor.empty() {ssbuffer.block_id = 1 : i32} : tensor<128x128xf32>
         hivm.hir.fixpipe {dma_mode = #hivm.dma_mode<nz2nd>, ssbuffer.block_id = 1 : i32, ssbuffer.transfer_id = 2 : i32, ssbuffer.crossCoreDeps = [1 : i32, 1 : i32]} ins(%40 : tensor<128x128xf32>) outs(%alloc_7 : memref<128x128xf32, #hivm.address_space<ub>>)
-        // The block counter of the cube block 1 has a single writer.
-        // CHECK:       %[[CB1N:.+]] = memref.load
-        // CHECK:       %[[CB1N1:.+]] = arith.addi %[[CB1N]]
+        // The block counter of the cube block 1 has a single writer. The
+        // value that the conditions of the block already loaded is reused.
+        // CHECK:       %[[CB1N1:.+]] = arith.addi %[[CB1]]
         // CHECK:       memref.store %[[CB1N1]]
         // CHECK:       } {hivm.matmul_limited_in_cube, ssbuffer.if = 1 : i32}
         scf.yield %arg17, %arg18 : i32, i32

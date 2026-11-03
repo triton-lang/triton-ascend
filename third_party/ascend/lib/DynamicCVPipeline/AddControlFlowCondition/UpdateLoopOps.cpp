@@ -32,7 +32,6 @@
 #include "llvm/Support/Debug.h"
 
 static constexpr const char *DEBUG_TYPE = "UpdateLoopOps";
-static constexpr int kPipeSFlagId = 15;
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
   LLVM_DEBUG({                                                                 \
@@ -402,90 +401,6 @@ LogicalResult UpdateLoopOpsPass::addBlockCountersAndInnerDepConds(
   return success();
 }
 
-// Returns the first main_loop op (scf.for or scf.while with
-// ssbuffer.main_loop) nested in `scopeOp`, nullptr when there is none.
-static Operation *findFirstMainLoop(scope::ScopeOp scopeOp) {
-  Operation *mainLoop = nullptr;
-  scopeOp.walk([&](Operation *op) {
-    if (!mainLoop && isMainLoopOp(op)) {
-      mainLoop = op;
-    }
-  });
-  return mainLoop;
-}
-
-// Insert the one-shot PIPE_S handshake between the cube core and the vector
-// core.
-//
-// The block counters are initialized in front of the first scope of the
-// module, so the vector scope signals the cube scope that the counters are
-// ready and the cube scope waits for that signal before entering its main
-// loop. The signal is unconditional on both sides, it can never deadlock.
-//
-// No per iteration synchronization is needed any more: every block counter
-// has a single writer (the block owning it), so the read-modify-write race
-// between the two cores is gone.
-LogicalResult UpdateLoopOpsPass::insertInterCorePipeS(ModuleOp module) {
-  // Without cross core dependencies there is no counter to synchronize.
-  if (!info || info->crossCoreDependentMap.empty()) {
-    return success();
-  }
-
-  auto cubeCoreType =
-      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::CUBE);
-  auto vectorCoreType =
-      hivm::TCoreTypeAttr::get(module.getContext(), hivm::TCoreType::VECTOR);
-  auto pipeType = PipeAttr::get(module.getContext(), hivm::PIPE::PIPE_S);
-
-  // The scope of every core type. A kernel runs one cube core and one vector
-  // core, so only one scope per core type is used.
-  scope::ScopeOp vectorScope;
-  scope::ScopeOp cubeScope;
-  module.walk([&](scope::ScopeOp scopeOp) {
-    auto scopeTypeAttr =
-        scopeOp->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type");
-    if (!scopeTypeAttr) {
-      return;
-    }
-    if (scopeTypeAttr == vectorCoreType && !vectorScope) {
-      vectorScope = scopeOp;
-    } else if (scopeTypeAttr == cubeCoreType && !cubeScope) {
-      cubeScope = scopeOp;
-    }
-  });
-
-  if (!vectorScope || !cubeScope) {
-    return success();
-  }
-
-  Operation *vectorMainLoop = findFirstMainLoop(vectorScope);
-  Operation *cubeMainLoop = findFirstMainLoop(cubeScope);
-  if (!vectorMainLoop || !cubeMainLoop) {
-    // Only one of the two cores runs a main loop, there is nothing to
-    // synchronize.
-    return success();
-  }
-
-  // The vector scope signals that the counters are initialized. Both vector
-  // cores execute the scope, so the cube sees the signal of both of them.
-  {
-    OpBuilder builder(vectorMainLoop);
-    auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), kPipeSFlagId);
-    builder.create<SyncBlockSetOp>(vectorMainLoop->getLoc(), vectorCoreType,
-                                    pipeType, pipeType, flagAttr);
-  }
-
-  // The cube scope waits for the signal before it reads any counter.
-  {
-    OpBuilder builder(cubeMainLoop);
-    auto flagAttr = builder.getIntegerAttr(builder.getI64Type(), kPipeSFlagId);
-    builder.create<SyncBlockWaitOp>(cubeMainLoop->getLoc(), cubeCoreType,
-                                    pipeType, pipeType, flagAttr);
-  }
-
-  return success();
-}
-
 // Analyzes producer/consumer relationship between tensor iter_args in
 // main_loop and ssbuffer.if. Downstream only acts on forOp (whileOp future
 // use).
@@ -631,12 +546,6 @@ void UpdateLoopOpsPass::runOnOperation() {
   // forOp from info-driven sets (no-ops when empty); whileOp unconditionally.
   if (infoToUse &&
       (failed(addBlockCountersAndInnerDepConds(module, infoToUse)))) {
-    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
-    return;
-  }
-
-  // Insert PIPE_S inter-core synchronization
-  if (failed(insertInterCorePipeS(module))) {
     CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
     return;
   }

@@ -62,6 +62,36 @@ TEST_F(CircularLayoutParserTest, WrongPreamble) {
   EXPECT_THROW(parser.parse(), ParserException);
 }
 
+TEST_F(CircularLayoutParserTest, WrongPreambleBestEffortIsExplicitAndVisible) {
+  config.numBlocks = 1;
+  config.uidVec = {0};
+  config.errorPolicy = ParserConfig::ErrorPolicy::BestEffort;
+  testData = {0, 0, 0, 0};
+  auto buffer = ByteSpan(testData.data(), testData.size());
+  auto parser = CircularLayoutParser(buffer, config);
+  testing::internal::CaptureStderr();
+  EXPECT_NO_THROW(parser.parse());
+  EXPECT_NE(testing::internal::GetCapturedStderr().find("Invalid preamble"),
+            std::string::npos);
+}
+
+TEST_F(CircularLayoutParserTest, BestEffortDoesNotHideTruncatedBuffer) {
+  config.numBlocks = 1;
+  config.uidVec = {0};
+  config.errorPolicy = ParserConfig::ErrorPolicy::BestEffort;
+  testData = {0xef, 0xbe, 0xad, 0xde};
+  auto buffer = ByteSpan(testData.data(), testData.size());
+  auto parser = CircularLayoutParser(buffer, config);
+  EXPECT_THROW(parser.parse(), BufferException);
+}
+
+TEST_F(CircularLayoutParserTest, StructuralErrorsRemainErrors) {
+  EXPECT_EQ(PreambleException("bad preamble").severity,
+            ExceptionSeverity::ERROR);
+  EXPECT_EQ(ClockOverflowException("overflow").severity,
+            ExceptionSeverity::ERROR);
+}
+
 TEST_F(CircularLayoutParserTest, SingleEvent) {
   testData = {
       // header

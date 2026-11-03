@@ -14,7 +14,6 @@
 #include "Utility/Numeric.h"
 #include "Utility/String.h"
 #include <algorithm>
-#include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -124,30 +123,13 @@ getUnitIdVector(const std::map<std::string, std::string> &modeOptions,
 
 } // namespace
 
-int64_t getAscendTimeShiftCost(const Runtime &runtime) {
-  const auto socName = runtime.getSocName();
-
-  // Ascend910_9382 (A3) records the system counter without the legacy
-  // twelve-cycle correction. Applying that correction creates negative trace
-  // durations on A3.
-  if (socName.find("Ascend910_9382") != std::string::npos)
-    return 0;
-
-  // Preserve the correction validated for the legacy 910A/910B names. Other
-  // SoCs remain uncalibrated until they have a platform-specific measurement.
-  if (socName.find("Ascend910A") != std::string::npos ||
-      socName.find("Ascend910B") != std::string::npos)
-    return 12;
-
-  return 0;
-}
-
 std::shared_ptr<ParserConfig>
 InstrumentationProfiler::getParserConfig(uint64_t functionId,
                                          size_t bufferSize) const {
   // Only support circular layout parser for now, but we will extend the support
   // to other parsers in the future
   auto config = std::make_shared<CircularLayoutParserConfig>();
+  config->errorPolicy = runtime->getParserErrorPolicy();
   config->scratchMemSize =
       functionMetadata.at(functionId).getScratchMemorySize();
   if (!(modeOptions.count("granularity") == 0 ||
@@ -179,8 +161,21 @@ void InstrumentationProfiler::initFunctionMetadata(
     const std::vector<std::pair<size_t, size_t>> &scopeIdParentPairs,
     const std::string &metadataPath) {
   if (functionScopeIdNames.count(functionId)) {
-    // Idempotent: a duplicate function id can arrive on JIT cache hits.
-    return;
+    if (runtime->allowRepeatedFunctionMetadata() &&
+        functionNames.at(functionId) == functionName &&
+        scopeIdPairs.size() == functionScopeIdNames.at(functionId).size() &&
+        functionScopeIdNames.at(functionId) ==
+            std::map<size_t, std::string>(scopeIdPairs.begin(),
+                                          scopeIdPairs.end()) &&
+        functionScopeIdParents.at(functionId) ==
+            std::map<size_t, size_t>(scopeIdParentPairs.begin(),
+                                     scopeIdParentPairs.end()) &&
+        functionMetadata.at(functionId) ==
+            InstrumentationMetadata(metadataPath))
+      return;
+    throw std::runtime_error(
+        "Duplicate function id: " + std::to_string(functionId) +
+        " for function " + functionName);
   }
   functionNames[functionId] = functionName;
   for (auto &pair : scopeIdPairs) {
@@ -200,6 +195,7 @@ void InstrumentationProfiler::initFunctionMetadata(
     auto parentId = pair.second;
     scopeIdParentMap[scopeId] = parentId;
   }
+  functionScopeIdParents[functionId] = scopeIdParentMap;
   for (auto &[scopeId, name] : functionScopeIdNames[functionId]) {
     std::vector<Context> contexts = {name};
     auto currentId = scopeId;
@@ -226,8 +222,7 @@ void InstrumentationProfiler::enterInstrumentedOp(uint64_t streamId,
 
 void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
                                                  uint64_t functionId,
-                                                 uint8_t *buffer, size_t size,
-                                                 bool isHost) {
+                                                 uint8_t *buffer, size_t size) {
   if (!buffer || !hostBuffer)
     return;
 
@@ -266,27 +261,20 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
   }
 
   int64_t timeShiftCost = 0;
-  if (runtime->getDeviceType() == DeviceType::NPU) {
-    timeShiftCost = getAscendTimeShiftCost(*runtime);
+  if (auto runtimeCost = runtime->getTimeShiftCost()) {
+    timeShiftCost = *runtimeCost;
   } else if (modeOptions.count("optimizations")) {
     auto optimizations = proton::split(modeOptions.at("optimizations"), ",");
     if (std::find(optimizations.begin(), optimizations.end(), "time_shift") !=
         optimizations.end())
-      timeShiftCost = getTimeShiftCost(*circularLayoutConfig);
+      timeShiftCost = proton::getTimeShiftCost(*circularLayoutConfig);
   }
   auto &scopeIdContexts = functionScopeIdContexts[functionId];
 
   auto parseBuffer = [&](uint8_t *bufferPtr, size_t bufferSize) {
     ByteSpan byteSpan(bufferPtr, bufferSize);
     CircularLayoutParser parser(byteSpan, *circularLayoutConfig);
-    try {
-      parser.parse();
-    } catch (const std::exception &e) {
-      // Degrade parse failures to a warning instead of aborting the session.
-      std::cerr << "Warning: failed to parse instrumented buffer: " << e.what()
-                << std::endl;
-      return;
-    }
+    parser.parse();
     for (auto &blockTrace : parser.getResult()->blockTraces) {
       for (auto &trace : blockTrace.traces) {
         for (auto &event : trace.profileEvents) {
@@ -306,24 +294,17 @@ void InstrumentationProfiler::exitInstrumentedOp(uint64_t streamId,
                     blockTrace.blockId, blockTrace.procId, trace.uid, device,
                     static_cast<uint64_t>(runtime->getDeviceType()),
                     timeShiftCost, blockTrace.initTime, blockTrace.preFinalTime,
-                    blockTrace.postFinalTime));
+                    blockTrace.postFinalTime,
+                    runtime->getCycleCounterFreqMhz()));
           }
         }
       }
     }
   };
 
-  if (isHost) {
-    // The buffer already lives on the host (Ascend instrumentation path).
-    parseBuffer(buffer, size);
-    runtime->freeHostBuffer(buffer);
-  } else {
-    runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
-    runtime->processHostBuffer(hostBuffer, size, buffer, size, priorityStream,
-                               [&](uint8_t *bufferPtr, size_t bufferSize) {
-                                 parseBuffer(bufferPtr, bufferSize);
-                               });
-  }
+  runtime->synchronizeStream(reinterpret_cast<void *>(streamId));
+  runtime->processHostBuffer(hostBuffer, size, buffer, size, priorityStream,
+                             parseBuffer);
 
   dataScopeIdMap.clear();
 }

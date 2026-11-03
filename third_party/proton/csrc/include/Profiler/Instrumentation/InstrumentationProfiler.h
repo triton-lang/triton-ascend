@@ -36,8 +36,7 @@ protected:
   void enterInstrumentedOp(uint64_t streamId, uint64_t functionId,
                            uint8_t *buffer, size_t size) override;
   void exitInstrumentedOp(uint64_t streamId, uint64_t functionId,
-                          uint8_t *buffer, size_t size,
-                          bool isHost = false) override;
+                          uint8_t *buffer, size_t size) override;
 
   // OpInterface
   void startOp(const Scope &scope) override {
@@ -59,6 +58,7 @@ private:
   uint8_t *hostBuffer{nullptr};
   // functionId -> scopeId -> scopeName
   std::map<uint64_t, std::map<size_t, std::string>> functionScopeIdNames;
+  std::map<uint64_t, std::map<size_t, size_t>> functionScopeIdParents;
   // functionId -> scopeId -> contexts
   std::map<uint64_t, std::map<size_t, std::vector<Context>>>
       functionScopeIdContexts;

@@ -3,6 +3,7 @@
 
 #include "Utility/String.h"
 #include "Utility/Traits.h"
+#include <cstdint>
 #include <stdexcept>
 #include <variant>
 #include <vector>
@@ -296,7 +297,8 @@ public:
               const std::string &kernelName, uint64_t blockId,
               uint64_t processorId, uint64_t unitId, uint64_t deviceId,
               uint64_t deviceType, uint64_t timeShiftCost, uint64_t initTime,
-              uint64_t preFinalTime, uint64_t postFinalTime)
+              uint64_t preFinalTime, uint64_t postFinalTime,
+              double cycleCounterFreqMhz = 1000.0)
       : CycleMetric() {
     this->values[StartCycle] = startCycle;
     this->values[EndCycle] = endCycle;
@@ -313,7 +315,10 @@ public:
     this->values[InitTime] = initTime;
     this->values[PreFinalTime] = preFinalTime;
     this->values[PostFinalTime] = postFinalTime;
+    this->cycleCounterFreqMhz = cycleCounterFreqMhz;
   }
+
+  double getCycleCounterFreqMhz() const { return cycleCounterFreqMhz; }
 
   virtual const std::string getName() const { return "CycleMetric"; }
 
@@ -326,6 +331,7 @@ public:
   virtual bool isExclusive(int valueId) const { return EXCLUSIVE[valueId]; }
 
 private:
+  double cycleCounterFreqMhz{1000.0};
   const static inline bool PROPERTY[CycleMetricKind::Count] = {
       false, false, false, false, true,  true,  true, true,
       true,  true,  true,  true,  false, false, false};

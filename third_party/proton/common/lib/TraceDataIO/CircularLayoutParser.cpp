@@ -151,13 +151,13 @@ void CircularLayoutParser::parseBlock() {
 }
 
 PreambleException::PreambleException(const std::string &msg)
-    : ParserException(msg, ExceptionSeverity::WARNING) {}
+    : ParserException(msg, ExceptionSeverity::ERROR) {}
 
 ScopeMisMatchException::ScopeMisMatchException(const std::string &msg)
     : ParserException(msg, ExceptionSeverity::WARNING) {}
 
 ClockOverflowException::ClockOverflowException(const std::string &msg)
-    : ParserException(msg, ExceptionSeverity::WARNING) {}
+    : ParserException(msg, ExceptionSeverity::ERROR) {}
 
 namespace {
 Device decodeDevice(const uint32_t dev) {

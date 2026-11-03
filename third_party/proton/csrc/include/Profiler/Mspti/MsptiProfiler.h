@@ -5,13 +5,12 @@
 
 namespace proton {
 
-class MsptiProfiler : public GPUProfiler<MsptiProfiler> {
+class MsptiProfiler : public GPUProfiler<MsptiProfiler>, public StateInterface {
 public:
   MsptiProfiler();
   virtual ~MsptiProfiler();
 
-  static size_t captureExternId();
-  static void restoreExternId(size_t id);
+  void setState(std::optional<Context> state) override;
 
 protected:
   void startOp(const Scope &scope) override;

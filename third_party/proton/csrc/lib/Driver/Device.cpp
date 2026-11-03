@@ -1,5 +1,7 @@
 #include "Device.h"
+#ifdef PROTON_BUILD_CANN
 #include "Driver/GPU/CannApi.h"
+#endif
 #ifdef PROTON_BUILD_CUDA
 #include "Driver/GPU/CudaApi.h"
 #endif
@@ -22,9 +24,11 @@ Device getDevice(DeviceType type, uint64_t index) {
     return hip::getDevice(index);
   }
 #endif
+#ifdef PROTON_BUILD_CANN
   if (type == DeviceType::NPU) {
     return cann::getDevice(index);
   }
+#endif
   throw std::runtime_error("DeviceType not supported");
 }
 

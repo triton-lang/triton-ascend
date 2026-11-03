@@ -19,6 +19,12 @@ public:
 
   size_t getNumUnits() const { return numUnits; }
 
+  bool operator==(const InstrumentationMetadata &other) const {
+    return metadataPath == other.metadataPath &&
+           scratchMemorySize == other.scratchMemorySize &&
+           numWarps == other.numWarps && numUnits == other.numUnits;
+  }
+
 private:
   void parse();
 

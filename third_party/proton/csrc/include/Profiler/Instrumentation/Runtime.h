@@ -4,9 +4,10 @@
 #include <cstddef>
 #include <cstdlib>
 #include <functional>
-#include <string>
+#include <optional>
 
 #include "Device.h"
+#include "TraceDataIO/Parser.h"
 
 namespace proton {
 class Runtime {
@@ -30,9 +31,15 @@ public:
                     void *stream,
                     std::function<void(uint8_t *, size_t)> callback) = 0;
 
-  // Returns the runtime SoC name when the backend can query it. Backends that
-  // do not expose a SoC name return an empty string.
-  virtual std::string getSocName() const { return {}; }
+  // Preserve the upstream policies unless a runtime explicitly opts in.
+  virtual ParserConfig::ErrorPolicy getParserErrorPolicy() const {
+    return ParserConfig::ErrorPolicy::Strict;
+  }
+  virtual bool allowRepeatedFunctionMetadata() const { return false; }
+  virtual double getCycleCounterFreqMhz() const { return 1000.0; }
+  virtual std::optional<int64_t> getTimeShiftCost() const {
+    return std::nullopt;
+  }
 
   DeviceType getDeviceType() const { return deviceType; }
 

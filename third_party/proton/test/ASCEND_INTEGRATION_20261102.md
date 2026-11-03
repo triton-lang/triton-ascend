@@ -126,3 +126,37 @@ directory. Build/test/reproducer scripts are /home/j00957045/proton-combined-bui
 /home/j00957045/proton-instrumentation-reproduce.sh.
 The standalone host regression entry is
 /home/j00957045/proton-launcher-host-test.sh.
+
+## Upstream behavior boundaries (2026-11-03)
+
+This follow-up keeps the shared implementation but makes Ascend policies explicit:
+
+| Boundary | Default / GPU behavior | Ascend policy |
+| --- | --- | --- |
+| Parser errors | Strict; invalid preamble and clock overflow throw | AscendRuntime opts into best-effort parsing; recoverable errors remain visible, truncated buffers still throw |
+| Duplicate function metadata | Duplicate IDs throw | Only identical names, scopes, parents and parsed metadata may be reused |
+| State propagation | ContextSource only updates thread-local state | MSPTI subscribes through StateInterface and owns its cross-thread map and mutex |
+| Counter frequency | 1000 MHz default retained | AscendRuntime supplies 50 MHz through CycleMetric and KernelMetadata |
+| Time correction | Existing GPU mode options retained | SoC policy is owned by AscendRuntime |
+| Backend build | CUDA/HIP default ON; missing requested headers fail configuration | setup_patch.py explicitly selects CANN/MSPTI and disables CUDA/HIP |
+
+The unused isHost argument and add_kernel_metric binding were removed; the
+four-argument exit_instrumented_op interface is restored. No separate Python
+frontend copy or independent libproton instance was introduced.
+
+Validation used a standalone rebuild of all Proton runtime sources in
+/home/j00957045/proton-boundaries-20261103, with a copy of the previously built
+TA wheel. The system installation, CANN and NPU-IR binaries were not replaced.
+
+- C++ parser/writer/runtime-policy tests: 19 passed.
+- CMake selection and metadata registration tests: 5 passed, 2 skipped because
+  CUDA/HIP were not compiled in this Ascend-only build.
+- MSPTI lifecycle and backend tests: 9 passed; 2 instrumentation cases deselected.
+- Viewer tests: 22 passed.
+- GPU hardware and instrumentation end-to-end execution were not validated in
+  this follow-up. The earlier NPU-IR device-link issue is not fixed by this work.
+
+Run test_backend_build_options.py and test_backend_metadata_policy.py alongside
+the existing Proton tests when upgrading the upstream revision. Build-option
+tests use header placeholders only to exercise CMake selection, not to compile
+or emulate a GPU backend. Logs are in the standalone validation directory.

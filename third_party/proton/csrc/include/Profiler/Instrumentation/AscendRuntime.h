@@ -20,7 +20,12 @@ public:
                     uint8_t *deviceBuffer, size_t deviceBufferSize,
                     void *stream,
                     std::function<void(uint8_t *, size_t)> callback) override;
-  std::string getSocName() const override;
+  ParserConfig::ErrorPolicy getParserErrorPolicy() const override {
+    return ParserConfig::ErrorPolicy::BestEffort;
+  }
+  bool allowRepeatedFunctionMetadata() const override { return true; }
+  double getCycleCounterFreqMhz() const override { return 50.0; }
+  std::optional<int64_t> getTimeShiftCost() const override;
 };
 
 } // namespace proton

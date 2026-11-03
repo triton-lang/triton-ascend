@@ -7,7 +7,6 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -43,11 +42,9 @@ public:
     return contexts;
   }
 
-  void setState(std::optional<Context> newState);
+  void setState(std::optional<Context> state) { ContextSource::state = state; }
 
   static std::optional<Context> getThreadState() { return state; }
-
-  static std::optional<Context> getActiveState();
 
   static void setThreadState(std::optional<Context> newState) {
     state = std::move(newState);
@@ -58,8 +55,14 @@ public:
 protected:
   virtual std::vector<Context> getContextsImpl() = 0;
   static thread_local std::optional<Context> state;
-  static std::mutex activeStatesMutex;
-  static std::map<std::thread::id, Context> activeStates;
+};
+
+/// Optional notifications for profilers whose callbacks need launch-thread
+/// state.
+class StateInterface {
+public:
+  virtual ~StateInterface() = default;
+  virtual void setState(std::optional<Context> state) = 0;
 };
 
 /// A scope is a context with a unique identifier.
@@ -157,8 +160,7 @@ public:
   virtual void enterInstrumentedOp(uint64_t streamId, uint64_t functionId,
                                    uint8_t *buffer, size_t size) = 0;
   virtual void exitInstrumentedOp(uint64_t streamId, uint64_t functionId,
-                                  uint8_t *buffer, size_t size,
-                                  bool isHost = false) = 0;
+                                  uint8_t *buffer, size_t size) = 0;
 };
 
 } // namespace proton

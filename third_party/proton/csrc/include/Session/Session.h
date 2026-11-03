@@ -111,12 +111,10 @@ public:
                            uint8_t *buffer, size_t size);
 
   void exitInstrumentedOp(uint64_t streamId, uint64_t functionId,
-                          uint8_t *buffer, size_t size, bool isHost = false);
+                          uint8_t *buffer, size_t size);
 
   void addMetrics(size_t scopeId,
                   const std::map<std::string, MetricValueType> &metrics);
-
-  void addMetric(size_t scopeId, std::shared_ptr<Metric> metric);
 
   void setState(std::optional<Context> context);
 
@@ -218,6 +216,7 @@ private:
       instrumentationInterfaceCounts;
   // {context source, active count}
   std::vector<std::pair<ContextSource *, size_t>> contextSourceCounts;
+  std::vector<std::pair<StateInterface *, size_t>> stateInterfaceCounts;
 };
 
 } // namespace proton

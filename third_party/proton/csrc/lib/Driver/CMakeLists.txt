@@ -1,7 +1,10 @@
 set(PROTON_DRIVER_SOURCES
   Device.cpp
-  GPU/CannApi.cpp
 )
+
+if(PROTON_BUILD_CANN)
+  list(APPEND PROTON_DRIVER_SOURCES GPU/CannApi.cpp)
+endif()
 
 if(PROTON_BUILD_CUDA)
   list(APPEND PROTON_DRIVER_SOURCES

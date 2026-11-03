@@ -3,30 +3,8 @@ project(Proton LANGUAGES CXX)
 set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
 set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
-# ============ Detect optional backends =============
-set(PROTON_BUILD_CUDA OFF)
-if(DEFINED CUPTI_INCLUDE_DIR
-   AND EXISTS "${CUPTI_INCLUDE_DIR}/cupti.h"
-   AND EXISTS "${CUPTI_INCLUDE_DIR}/cuda.h")
-  set(PROTON_BUILD_CUDA ON)
-endif()
-
-set(PROTON_BUILD_HIP OFF)
-if(DEFINED ROCTRACER_INCLUDE_DIR
-   AND EXISTS "${ROCTRACER_INCLUDE_DIR}/roctracer/roctracer.h"
-   AND EXISTS "${ROCTRACER_INCLUDE_DIR}/hip/hip_runtime_api.h")
-  set(PROTON_BUILD_HIP ON)
-endif()
-
-set(PROTON_BUILD_MSPTI OFF)
-if(DEFINED MSPTI_INCLUDE_DIR AND EXISTS "${MSPTI_INCLUDE_DIR}/mspti.h")
-  set(PROTON_BUILD_MSPTI ON)
-endif()
-
-set(PROTON_BUILD_CANN OFF)
-if(DEFINED CANN_INCLUDE_DIR AND EXISTS "${CANN_INCLUDE_DIR}/acl/acl.h")
-  set(PROTON_BUILD_CANN ON)
-endif()
+# ============ Configure optional backends =============
+include(cmake/ProtonBackends.cmake)
 
 if(NOT JSON_INCLUDE_DIR)
   message(FATAL_ERROR "JSON include directory not defined")

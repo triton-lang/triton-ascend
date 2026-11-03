@@ -50,9 +50,16 @@ void AscendRuntime::synchronizeStream(void *stream) {
   }
 }
 
-std::string AscendRuntime::getSocName() const {
+std::optional<int64_t> AscendRuntime::getTimeShiftCost() const {
   const char *name = aclrtGetSocName();
-  return name ? std::string(name) : std::string();
+  const std::string socName = name ? name : "";
+  if (socName.find("Ascend910_9382") != std::string::npos)
+    return 0;
+  // Preserve the legacy calibration; other SoCs use the raw counter.
+  if (socName.find("Ascend910A") != std::string::npos ||
+      socName.find("Ascend910B") != std::string::npos)
+    return 12;
+  return 0;
 }
 
 void AscendRuntime::processHostBuffer(

@@ -153,6 +153,9 @@ void SessionManager::activateSessionImpl(size_t sessionId) {
   registerInterface<InstrumentationInterface>(sessionId,
                                               instrumentationInterfaceCounts);
   registerInterface<ContextSource>(sessionId, contextSourceCounts);
+  registerInterface<StateInterface>(sessionId, stateInterfaceCounts);
+  for (auto *interface : sessions[sessionId]->getInterfaces<StateInterface>())
+    interface->setState(ContextSource::getThreadState());
 }
 
 void SessionManager::deActivateSessionImpl(size_t sessionId) {
@@ -167,6 +170,7 @@ void SessionManager::deActivateSessionImpl(size_t sessionId) {
   unregisterInterface<InstrumentationInterface>(sessionId,
                                                 instrumentationInterfaceCounts);
   unregisterInterface<ContextSource>(sessionId, contextSourceCounts);
+  unregisterInterface<StateInterface>(sessionId, stateInterfaceCounts);
 }
 
 void SessionManager::removeSession(size_t sessionId) {
@@ -275,14 +279,13 @@ void SessionManager::enterInstrumentedOp(uint64_t streamId, uint64_t functionId,
 }
 
 void SessionManager::exitInstrumentedOp(uint64_t streamId, uint64_t functionId,
-                                        uint8_t *buffer, size_t size,
-                                        bool isHost) {
+                                        uint8_t *buffer, size_t size) {
   std::lock_guard<std::mutex> lock(mutex);
   executeInterface(
       instrumentationInterfaceCounts,
       [&](auto *instrumentationInterface) {
         instrumentationInterface->exitInstrumentedOp(streamId, functionId,
-                                                     buffer, size, isHost);
+                                                     buffer, size);
       },
       /*isReversed=*/true);
 }
@@ -297,15 +300,6 @@ void SessionManager::addMetrics(
   }
 }
 
-void SessionManager::addMetric(size_t scopeId, std::shared_ptr<Metric> metric) {
-  std::lock_guard<std::mutex> lock(mutex);
-  for (auto [sessionId, active] : sessionActive) {
-    if (active) {
-      sessions[sessionId]->data->addMetric(scopeId, metric);
-    }
-  }
-}
-
 void SessionManager::setState(std::optional<Context> context) {
   std::lock_guard<std::mutex> lock(mutex);
   for (auto iter : contextSourceCounts) {
@@ -314,6 +308,8 @@ void SessionManager::setState(std::optional<Context> context) {
       contextSource->setState(context);
     }
   }
+  executeInterface(stateInterfaceCounts,
+                   [&](auto *interface) { interface->setState(context); });
 }
 
 size_t SessionManager::getContextDepth(size_t sessionId) {

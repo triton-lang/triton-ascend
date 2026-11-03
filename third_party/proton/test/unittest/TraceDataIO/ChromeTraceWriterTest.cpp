@@ -101,6 +101,34 @@ TEST_F(ChromeTraceWriterTest, SingleBlock) {
   EXPECT_DOUBLE_EQ(data["traceEvents"][1]["ts"], 0.1);
 }
 
+TEST_F(ChromeTraceWriterTest, CounterFrequencyIsExplicit) {
+  auto metadata = std::make_shared<KernelMetadata>();
+  EXPECT_DOUBLE_EQ(metadata->cycleCounterFreqMhz, 1000.0);
+  auto result = createDefaultResult(1, 1, 1);
+  auto &event = result->blockTraces[0].traces[0].profileEvents[0];
+  event.first->cycle = 100;
+  event.second->cycle = 200;
+  std::vector<KernelTrace> traces = {{result, metadata}};
+  for (double frequency : {1000.0, 50.0}) {
+    metadata->cycleCounterFreqMhz = frequency;
+    auto writer = StreamChromeTraceWriter(traces, chromeTracePath);
+    writer.dump();
+    auto data = readJsonTrace(chromeTracePath);
+    EXPECT_DOUBLE_EQ(data["traceEvents"][0]["dur"], 100.0 / frequency);
+    EXPECT_DOUBLE_EQ(data["traceEvents"][0]["args"]["Frequency (MHz)"],
+                     frequency);
+  }
+}
+
+TEST_F(ChromeTraceWriterTest, InvalidCounterFrequency) {
+  auto metadata = std::make_shared<KernelMetadata>();
+  metadata->cycleCounterFreqMhz = 0;
+  auto result = createDefaultResult(1, 1, 1);
+  std::vector<KernelTrace> traces = {{result, metadata}};
+  auto writer = StreamChromeTraceWriter(traces, chromeTracePath);
+  EXPECT_THROW(writer.dump(), std::invalid_argument);
+}
+
 TEST_F(ChromeTraceWriterTest, MultiBlockMultiWarp) {
   auto metadata = std::make_shared<KernelMetadata>();
   metadata->kernelName = "kernel2";

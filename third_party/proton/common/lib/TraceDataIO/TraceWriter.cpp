@@ -1,5 +1,6 @@
 #include "TraceDataIO/TraceWriter.h"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -165,6 +166,10 @@ void StreamChromeTraceWriter::writeKernel(json &object,
                                           const uint64_t minInitTime) {
   auto result = kernelTrace.first;
   auto metadata = kernelTrace.second;
+  if (!std::isfinite(metadata->cycleCounterFreqMhz) ||
+      metadata->cycleCounterFreqMhz <= 0)
+    throw std::invalid_argument(
+        "Cycle counter frequency must be positive and finite");
 
   json callStack = json::array();
   for (auto const &frame : metadata->callStack) {

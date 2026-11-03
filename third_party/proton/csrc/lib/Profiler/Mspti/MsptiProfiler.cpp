@@ -11,6 +11,7 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -33,13 +34,27 @@ thread_local bool callbackCreatingOp = false;
 std::deque<uint64_t> pendingExternalIds;
 std::mutex pendingExternalIdsMutex;
 std::atomic<size_t> pendingKernelActivities{0};
+std::mutex activeStatesMutex;
+std::map<std::thread::id, Context> activeStates;
+
+std::optional<Context> getActiveState() {
+  std::lock_guard<std::mutex> lock(activeStatesMutex);
+  if (activeStates.empty())
+    return std::nullopt;
+  const auto &state = activeStates.begin()->second;
+  for (const auto &entry : activeStates) {
+    if (entry.second != state)
+      return std::nullopt;
+  }
+  return state;
+}
 
 class ScopedCallbackState {
 public:
   ScopedCallbackState() : previousState(ContextSource::getThreadState()) {
     if (previousState.has_value())
       return;
-    auto activeState = ContextSource::getActiveState();
+    auto activeState = getActiveState();
     if (!activeState.has_value())
       return;
     ContextSource::setThreadState(std::move(activeState));
@@ -295,6 +310,10 @@ void MsptiProfiler::MsptiProfilerPimpl::doStop() {
   setRuntimeCallbacks(subscriber, /*enable=*/false);
   mspti::unsubscribe<true>(subscriber);
   subscriber = nullptr;
+  {
+    std::lock_guard<std::mutex> lock(activeStatesMutex);
+    activeStates.clear();
+  }
   profiler.correlation.corrIdToExternId.clear();
   profiler.correlation.apiExternIds.clear();
   pendingKernelActivities.store(0, std::memory_order_relaxed);
@@ -307,6 +326,15 @@ MsptiProfiler::MsptiProfiler() {
 }
 
 MsptiProfiler::~MsptiProfiler() = default;
+
+void MsptiProfiler::setState(std::optional<Context> state) {
+  std::lock_guard<std::mutex> lock(activeStatesMutex);
+  const auto threadId = std::this_thread::get_id();
+  if (state)
+    activeStates[threadId] = std::move(*state);
+  else
+    activeStates.erase(threadId);
+}
 
 void MsptiProfiler::startOp(const Scope &scope) {
   GPUProfiler<MsptiProfiler>::startOp(scope);

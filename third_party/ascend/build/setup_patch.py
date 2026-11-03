@@ -476,7 +476,12 @@ def _get_ascend_proton_cmake_args():
             if os.path.exists(os.path.join(candidate, "acl", "acl.h")):
                 cann_include_dir = candidate
                 break
-    cmake_args = []
+    cmake_args = [
+        "-DPROTON_BUILD_CUDA=OFF",
+        "-DPROTON_BUILD_HIP=OFF",
+        "-DPROTON_BUILD_CANN=ON",
+        "-DPROTON_BUILD_MSPTI=ON",
+    ]
     if cann_include_dir:
         cmake_args.append(f"-DCANN_INCLUDE_DIR={cann_include_dir}")
     for variable, suffix in (("MSPTI_INCLUDE_DIR", "include"), ("MSPTI_LIB_DIR", "lib64")):

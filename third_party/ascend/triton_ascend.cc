@@ -154,8 +154,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
          const std::string &compileMode, std::uint64_t ubSafetyPercent,
          std::uint64_t reservedUBBytes, std::uint64_t mappingL0ACapacityBytes,
          std::uint64_t mappingL0BCapacityBytes,
-         std::uint64_t mappingL0CCapacityBytes, std::uint64_t l0SafetyPercent,
-         bool compileOn91095) {
+         std::uint64_t mappingL0CCapacityBytes, std::uint64_t l0SafetyPercent) {
         if (ruleMask > std::numeric_limits<std::uint32_t>::max())
           throw py::value_error("rule_mask must fit in uint32_t");
         const auto graphRuleMask =
@@ -213,7 +212,6 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
             static_cast<unsigned>(mappingL0CCapacityBytes);
         options.l0SafetyPercent = static_cast<unsigned>(l0SafetyPercent);
         options.compileMode = compileMode;
-        options.compileOn91095 = compileOn91095;
         pm.addPass(mlir::triton::cfg::createGraphOptimizePass(options));
       },
       py::arg("pm"),
@@ -228,7 +226,7 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
       py::arg("mapping_l0a_capacity_bytes") = 0,
       py::arg("mapping_l0b_capacity_bytes") = 0,
       py::arg("mapping_l0c_capacity_bytes") = 0,
-      py::arg("l0_safety_percent") = 80, py::arg("compile_on_910_95") = false);
+      py::arg("l0_safety_percent") = 80);
 
   m.def("set_buffer_count", [](mlir::ModuleOp &module, const std::string &type,
                                int count) {

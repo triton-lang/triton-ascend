@@ -1667,6 +1667,32 @@ static void readStageResources(ProfileJSONReader &reader,
   if (const auto *scan = resources->getObject("calibrated_prefix_scan")) {
     auto &calibration = profile.calibratedPrefixScan;
     calibration.enabled = true;
+    if (const auto *formulas = scan->getArray("formulas")) {
+      auto parsed = parsePrefixScanFormulas(*formulas);
+      if (!parsed)
+        reader.setError(llvm::toString(parsed.takeError()));
+      else {
+        if (context == "simd") {
+          static const llvm::StringSet<> simdFeatures = {
+              "one",        "E",        "C",       "logE",    "f16",
+              "B",          "chain",    "vecwork", "payload", "tileR",
+              "paddedwork", "doubling", "treework"};
+          for (const auto &formula : *parsed) {
+            if (formula.projection != "legacy")
+              reader.setError(
+                  "SIMD prefixscan formula cannot use SIMT layout projection");
+            for (const auto &domain : formula.domains)
+              if (domain.warps != 0)
+                reader.setError(
+                    "SIMD prefixscan formula cannot restrict warps");
+            for (const auto &[name, coefficient] : formula.terms)
+              if (!simdFeatures.contains(name))
+                reader.setError("invalid SIMD prefixscan feature: " + name);
+          }
+        }
+        calibration.formulas = std::move(*parsed);
+      }
+    }
     calibration.prefixScanDependencyFactor =
         reader.number(*scan, "dependency_factor", prefix + ".prefix_scan");
     // Optional 1D factor for 1D tt.scan (S = N).  Falls back to the
@@ -2299,6 +2325,13 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
       return llvm::createStringError(
           std::errc::invalid_argument,
           "invalid prefixscan profile schema or target");
+    const bool hasFormulas = (scanRoot->getObject("simd") &&
+                              scanRoot->getObject("simd")->get("formulas")) ||
+                             (scanRoot->getObject("simt") &&
+                              scanRoot->getObject("simt")->get("formulas"));
+    if (hasFormulas && scanRoot->getString("unit") != "system_cycle")
+      return llvm::createStringError(std::errc::invalid_argument,
+                                     "unsupported prefixscan unit");
     for (llvm::StringRef mode :
          {llvm::StringRef("simd"), llvm::StringRef("simt")}) {
       auto *model = root->getObject(mode);
@@ -3591,7 +3624,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       }
       const auto &[geometry, count] = *stage.workload.prefixScanCounts.begin();
       const auto &[extent, sequences, stride, results, reverse, combine,
-                   dataType, rank, dimension, elementBits] = geometry;
+                   dataType, rank, dimension, elementBits, fullShape,
+                   exactCombine, simpleBinary] = geometry;
       if (!std::isfinite(count) || std::abs(count - 1.0) > 1.0e-12 || reverse ||
           combine != "add" || results != 1 || stride != sequences ||
           extent < rank2ScanFit.minimumExtent ||

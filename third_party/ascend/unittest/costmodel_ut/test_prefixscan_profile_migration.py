@@ -48,7 +48,9 @@ def scan_costs(report, mode):
             continue
         impls = [i for i in stage['implementations'] if i['implementation']['mode'] == mode]
         assert impls
-        costs.append(impls[0]['resource_system_cycles']['prefix_scan_critical_path_per_iteration'])
+        resources = impls[0]['resource_system_cycles']
+        costs.append(resources['prefix_scan_critical_path_per_iteration'] +
+                     resources.get('scan_completion_per_iteration', 0))
     assert costs
     return sum(costs)
 
@@ -117,6 +119,9 @@ def local_profile(tmp_path):
         if key in profile:
             profile[key] = str((PROFILE.parent / profile[key]).resolve())
     calibration = json.loads((PROFILE.parent / profile['prefixscan_profile']).read_text())
+    # These tests exercise the cumsum coefficients independently of the formula table.
+    for mode in ('simd', 'simt'):
+        calibration[mode].pop('formulas', None)
     asset = tmp_path / 'calibration.json'
     asset.write_text(json.dumps(calibration))
     profile['prefixscan_profile'] = str(asset)
@@ -171,9 +176,8 @@ def test_loop_scan_uses_same_calibration(tmp_path):
     assert scan_costs(report, 'simt') == pytest.approx(195.8)
 
 
-@pytest.mark.parametrize('replacement', [('reverse = false', 'reverse = true'), ('arith.addf', 'arith.mulf'),
-                                         ('f32', 'f16')])
-def test_scan_calibration_ignores_direction_combine_and_dtype(tmp_path, replacement):
+@pytest.mark.parametrize('replacement', [('reverse = false', 'reverse = true'), ('f32', 'f16')])
+def test_add_calibration_ignores_direction_and_dtype(tmp_path, replacement):
     profile, _, _ = local_profile(tmp_path)
     module = scan_module((128, ), 0).replace(*replacement)
     calibrated = evaluate(tmp_path, (128, ), profile=profile, module_text=module)
@@ -201,11 +205,19 @@ def test_multidimensional_scan_uses_operand_width(tmp_path, dtype, bits, axis):
     assert instances and all(entry['element_bit_width'] == bits for entry in instances)
 
 
-def test_mixed_scan_combines_keep_calibrated_cost(tmp_path):
+def test_mixed_scan_combines_only_add_uses_cumsum_fit(tmp_path):
     module = scan_module((32, ), 0, copies=2).replace('arith.addf', 'arith.mulf', 1)
-    report = evaluate(tmp_path, (32, ), module_text=module)
-    assert scan_costs(report, 'simd') == pytest.approx(2 * (26.4 + 227.3 / 2))
-    assert scan_costs(report, 'simt') == pytest.approx(2 * 96.8)
+    profile, _, _ = local_profile(tmp_path)
+    report = evaluate(tmp_path, (32, ), profile=profile, module_text=module)
+    for mode, expected in [('simd', 26.4 + 227.3 / 2), ('simt', 96.8)]:
+        values = [
+            next(impl['resource_system_cycles']
+                 for impl in stage['implementations']
+                 if impl['implementation']['mode'] == mode)
+            for stage in report['stage_model']['logical_stages']
+        ]
+        assert sum(r['scan_completion_per_iteration'] for r in values) == pytest.approx(expected)
+        assert scan_costs(report, mode) > expected
 
 
 def test_multi_result_scan_uses_first_operand_geometry(tmp_path):
@@ -223,5 +235,39 @@ def test_multi_result_scan_uses_first_operand_geometry(tmp_path):
       }
     }"""
     report = evaluate(tmp_path, (32, ), module_text=module)
-    assert scan_costs(report, 'simd') == pytest.approx(26.4 + 227.3 / 2)
-    assert scan_costs(report, 'simt') == pytest.approx(96.8)
+    for mode in ('simd', 'simt'):
+        assert scan_costs(report, mode) > 0
+        values = [
+            impl['resource_system_cycles']
+            for stage in report['stage_model']['logical_stages']
+            for impl in stage['implementations']
+            if impl['implementation']['mode'] == mode
+        ]
+        assert all(r['scan_completion_per_iteration'] == 0 for r in values)
+
+
+@pytest.mark.parametrize('shape,axis,folded,folded_axis', [
+    ((8, 2, 2, 8), 0, (8, 32), 0),
+    ((2, 2, 2, 32), 3, (8, 32), 1),
+    ((1, 2, 16, 2, 4), 2, (2, 16, 8), 1),
+])
+@pytest.mark.parametrize('mode', ['simd', 'simt'])
+def test_high_rank_table_uses_canonical_geometry(tmp_path, shape, axis, folded, folded_axis, mode):
+    # The SIMT head regime has a rank-three calibration domain only.
+    if mode == 'simt' and axis == 0:
+        folded = (8, 1, 32)
+
+    def estimate(sh, ax, folder):
+        folder.mkdir()
+        text = scan_module(sh, ax).replace('f32', 'f16').replace('arith.addf', 'arith.maxnumf')
+        report = evaluate(folder, sh, axis=ax, warps=8, module_text=text)
+        return next(impl['resource_system_cycles']
+                    for stage in report['stage_model']['logical_stages']
+                    for impl in stage['implementations']
+                    if impl['implementation']['mode'] == mode)
+
+    actual = estimate(shape, axis, tmp_path / 'higher_rank')
+    expected = estimate(folded, folded_axis, tmp_path / 'canonical')
+    assert actual.get('scan_formula_instances_per_iteration')
+    assert actual['scan_formula_instances_per_iteration'] == expected['scan_formula_instances_per_iteration']
+    assert actual['scan_completion_per_iteration'] == pytest.approx(expected['scan_completion_per_iteration'])

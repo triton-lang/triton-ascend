@@ -852,6 +852,31 @@ class AscendInterpreterBuilder(InterpreterBuilder):
                     result[neg_mask] = dt_info.min
         return TensorHandle(result, lhs.dtype.scalar)
 
+    def create_srem(self, lhs, rhs):
+        # Ascend compiled kernels define signed remainder by a zero divisor:
+        # the BiShengIR HFusion NormalizeModOp pass rewrites every integer mod
+        # into (y == 0) ? -1 : x % y, so zero-divisor lanes deterministically
+        # return -1 (the all-ones value of the result type), see issue #2518.
+        # numpy's np.fmod returns 0 there. Match the compiled behaviour; the
+        # base create_srem (np.fmod) already matches the non-zero lanes, and
+        # np.where folds the zero lanes to the all-ones value the same way
+        # create_idiv above folds them with boolean-mask indexing.
+        result = super().create_srem(lhs, rhs)
+        d = result.data.dtype
+        if d.kind == 'i':
+            result.data = np.where(rhs.data == 0, d.type(-1), result.data)
+        return result
+
+    def create_urem(self, lhs, rhs):
+        # Same compiler guarantee as create_srem (BiShengIR NormalizeModOp),
+        # but for unsigned types the all-ones bit pattern reads as 2**n - 1
+        # (e.g. 255 for uint8), see issue #2518.
+        result = super().create_urem(lhs, rhs)
+        d = result.data.dtype
+        if d.kind == 'u':
+            result.data = np.where(rhs.data == 0, d.type(np.iinfo(d).max), result.data)
+        return result
+
     def create_histogram(self, data, bins, mask):
         # Override to ensure histogram result is always int32, regardless of
         # input dtype (base impl uses input dtype for weights, causing int64

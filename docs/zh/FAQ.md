@@ -37,6 +37,18 @@ A: 不可以，只能在 Ascend NPU 硬件环境使用 Triton-Ascend
 A: 用例请参考 [07_accuracy_comparison_example.md](../zh/examples/07_accuracy_comparison_example.md)
 调试方法请参考 [解释器模式调试方法](./debug_guide/debugging.md#debug-interpreter-mode)
 
+**Q: Ascend 上整数除法/取余在除数为 0 时是什么语义？**
+
+A: 在 Ascend 上，整数除 0 的取余/除法是确定性、由编译器定义的语义（已基于 CANN 9.2.0 + Ascend 910B 验证；保护逻辑由 BiShengIR HFusion `NormalizeModOp` Pass 插入，该 Pass 将整数 `mod` 重写为 `(y == 0) ? -1 : x % y`）：
+
+| 运算 | 除数为 0 的 lane 上的结果 |
+|---|---|
+| `x % 0`，有符号（i8/i16/i32/i64） | `-1`，即结果类型的全 1 值 |
+| `x % 0`，无符号（如 uint8） | `2**n - 1`（如 `255`），同样是全 1 位模式。910B 上超过 8 位的无符号取余当前编译失败 |
+| `x // 0`，int32（load 张量、kernel 内全 0 张量、字面量 `0` 三种除数形式）与 int64（load 出来的全 0 除数张量） | 饱和：`x > 0 -> MAX`，`x < 0 -> MIN`，`x == 0 -> 0`。i8/i16 的 `// 0` 当前返回 `{-1, 0}`，不在承诺范围内 |
+
+取余语义对已测除数形式成立（load 张量形式覆盖所有观测宽度；kernel 内全 0 张量与字面量 `0` 形式当前仅对 int32/int64 固化）；非零 lane 上 `%` 遵循 C 截断（`np.fmod`）语义。这些值是编译器保障而非硬件偶然行为，与 eager 场景的 `torch.remainder`/`torch.fmod` 以及 CUDA（架构上未定义）有意不同。解释器模式（`TRITON_INTERPRET=1`）在取余承诺上与编译结果一致；但 `x // 0` 时解释器对任意宽度、任意除数形式都做饱和处理，而编译 kernel 当前对 int64 的全 0 张量/字面量除数返回被除数、对 i8/i16 返回 `{-1, 0}`——即上文的排除配置。本契约的验证基线为 Ascend 910B + CANN 9.2.0 默认 SIMD（HFusion）流水线；SIMT 模式与其他 SoC 不在已验证基线内。若需要其他语义，请显式保护，例如 `tl.where(y == 0, fallback, x % y)`。该行为由 `third_party/ascend/unittest/pytest_ut/test_int_div_zero.py` 用例固化，其编译态设备用例在非 910B 架构上自动跳过。
+
 ## 3. 错误代码与异常处理
 
 **Q: 为什么 kernel 编译时报 MLIRCompilationError？如何定位具体失败的 Pass？**

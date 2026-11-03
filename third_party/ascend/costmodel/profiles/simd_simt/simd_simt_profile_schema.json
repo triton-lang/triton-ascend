@@ -2230,9 +2230,6 @@
         },
         "masked_strided_store_copy_completion": {
           "$ref": "#/definitions/masked_strided_copy_completion_map"
-        },
-        "strided_short_completion": {
-          "$ref": "#/definitions/strided_short_completion"
         }
       },
       "additionalProperties": false
@@ -4564,17 +4561,6 @@
         "evidence"
       ],
       "additionalProperties": false
-    },
-    "strided_short_completion": {
-      "type": "object",
-      "properties": {
-        "description": {
-          "type": "string"
-        }
-      },
-      "additionalProperties": {
-        "$ref": "#/definitions/strided_short_completion_fit"
-      }
     }
   },
   "description": "Target-specific hardware resource profile consumed by the online Stage Cost Model. Stage partitions and workloads are derived from transformed TTIR.",

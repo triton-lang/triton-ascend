@@ -573,6 +573,23 @@ CoreType getValueCoreType(Value value) {
   return fromStrCoreType(coreTypeStrs[resultIdx]);
 }
 
+Value getAliasSource(Value value) {
+  if (auto barg = dyn_cast<BlockArgument>(value)) {
+    auto parentOp = barg.getOwner()->getParentOp();
+    if (isa<func::FuncOp>(parentOp)) {
+      return nullptr;
+    }
+    LOG_DEBUG("Warning: " << *parentOp << " carries memref bargs!" << "\n");
+    return nullptr;
+  }
+  return llvm::TypeSwitch<Operation *, Value>(value.getDefiningOp())
+      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
+      .Case([](bufferization::ToTensorOp toTensor) {
+        return toTensor.getBuffer();
+      })
+      .Default([](auto) { return nullptr; });
+}
+
 Block *getFirstLoopBlock(Block *block) {
   while (block) {
     Region *parentRegion = block->getParent();
@@ -678,23 +695,6 @@ Operation *getLoopCarriedDefOp(Value argValue, Block *block) {
 
   Operation *origin = getLoopCarriedOrigin(updateOperand->get());
   return origin ? getAncestorInBlock(origin, block) : nullptr;
-}
-
-Value getAliasSource(Value value) {
-  if (auto barg = dyn_cast<BlockArgument>(value)) {
-    auto parentOp = barg.getOwner()->getParentOp();
-    if (isa<func::FuncOp>(parentOp)) {
-      return nullptr;
-    }
-    LOG_DEBUG("Warning: " << *parentOp << " carries memref bargs!" << "\n");
-    return nullptr;
-  }
-  return llvm::TypeSwitch<Operation *, Value>(value.getDefiningOp())
-      .Case([](ViewLikeOpInterface viewOp) { return viewOp.getViewSource(); })
-      .Case([](bufferization::ToTensorOp toTensor) {
-        return toTensor.getBuffer();
-      })
-      .Default([](auto) { return nullptr; });
 }
 
 } // namespace CVPipeline

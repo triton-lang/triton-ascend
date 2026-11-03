@@ -469,20 +469,19 @@ def _get_ascend_cmake_args():
 
 def _get_install_requirements():
     install_requires = [
-        "attrs==24.2.0",
-        "numpy==1.26.4",
-        "scipy==1.13.1;python_version<'3.13'",
-        "scipy==1.15.1;python_version>='3.13'",
-        "decorator==5.1.1",
-        "psutil==6.0.0",
-        "pytest>=8.3.2,<9.0.0",
-        "pytest-xdist==3.6.1",
+        "attrs",
+        "numpy",
+        "scipy",
+        "decorator",
+        "psutil",
         "pyyaml",
         "pybind11",
         "pandas",
-        "pyelftools>=0.29",
-        "triton==3.6.0",
+        "pyelftools",
     ]
+    argv = " ".join(sys.argv).lower()
+    if "editable_wheel" not in argv and "dist_info" not in argv:
+        install_requires.append("triton==3.6.0")
     return [*install_requires]
 
 

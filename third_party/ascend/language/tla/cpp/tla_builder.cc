@@ -420,6 +420,9 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "or") {
               result = self.create<hivmave::VFOrOp>(resTy, lhs, rhs, mask)
                            .getResult();
+            } else if (kind == "and") {
+              result = self.create<hivmave::VFAndOp>(resTy, lhs, rhs, mask)
+                           .getResult();
             } else if (kind == "div") {
               result = self.create<hivmave::VFDivOp>(resTy, lhs, rhs, mask)
                            .getResult();
@@ -437,6 +440,12 @@ void init_tla_builder(py::module &&m) {
                            .getResult();
             } else if (kind == "mod") {
               result = self.create<hivmave::VFModOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "absdiff") {
+              result = self.create<hivmave::VFAbsDiffOp>(resTy, lhs, rhs, mask)
+                           .getResult();
+            } else if (kind == "expdif") {
+              result = self.create<hivmave::VFExpdifOp>(resTy, lhs, rhs, mask)
                            .getResult();
             } else if (kind == "max") {
               result = self.create<hivmave::VFMaxOp>(resTy, lhs, rhs, mask)
@@ -528,24 +537,80 @@ void init_tla_builder(py::module &&m) {
           py::arg("kind"), py::arg("vec"), py::arg("scalar"), py::arg("mask"))
       .def(
           "create_simd_vfma",
-          [](TLABuilder &self, Value &acc, Value &lhs, Value &rhs,
-             Value &mask) -> Value {
+          [](TLABuilder &self, Value &acc, Value &lhs, Value &rhs, Value &mask,
+             std::string mode) -> Value {
             auto resTy = acc.getType();
             // vmula %acc, %lhs, %rhs, %mask == acc + lhs * rhs
             auto op =
                 self.create<hivmave::VFMulaOp>(resTy, acc, lhs, rhs, mask);
-            return op.getResult();
+            return applySimdMode(self, op.getResult(), mask, mode);
           },
-          py::arg("acc"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"))
+          py::arg("acc"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
+          py::arg("mode") = "zeroing")
+      .def(
+          "create_simd_preg_binary",
+          [](TLABuilder &self, std::string &kind, Value &lhs, Value &rhs,
+             Value &mask) -> Value {
+            auto resTy = lhs.getType();
+            auto &builder = self.getBuilder();
+            auto mwAttr = hivmave::MaskWidthAttr::get(builder.getContext(),
+                                                      hivmave::MaskWidth::B8);
+            if (kind == "and")
+              return self
+                  .create<hivmave::PregAndOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            if (kind == "or")
+              return self
+                  .create<hivmave::PregOrOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            if (kind == "xor")
+              return self
+                  .create<hivmave::PregXorOp>(resTy, mwAttr, lhs, rhs, mask)
+                  .getResult();
+            throw std::invalid_argument("unknown preg binary kind: " + kind);
+          },
+          py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"))
+      .def(
+          "create_simd_preg_unary",
+          [](TLABuilder &self, std::string &kind, Value &src,
+             Value &mask) -> Value {
+            auto resTy = src.getType();
+            auto &builder = self.getBuilder();
+            auto mwAttr = hivmave::MaskWidthAttr::get(builder.getContext(),
+                                                      hivmave::MaskWidth::B8);
+            if (kind == "not")
+              return self.create<hivmave::PregNotOp>(resTy, mwAttr, src, mask)
+                  .getResult();
+            throw std::invalid_argument("unknown preg unary kind: " + kind);
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"))
+      .def(
+          "create_simd_vmull",
+          [](TLABuilder &self, Value &src1, Value &src2,
+             Value &mask) -> py::tuple {
+            auto ty = src1.getType();
+            auto op = self.create<hivmave::VFVMULLOp>(ty, ty, src1, src2, mask);
+            return py::make_tuple(op.getRes1(), op.getRes2());
+          },
+          py::arg("src1"), py::arg("src2"), py::arg("mask"))
       .def(
           "create_simd_unary",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
              std::string mode) -> Value {
             auto resTy = src.getType();
             Value result;
-            if (kind == "neg") {
+            if (kind == "abs") {
+              result =
+                  self.create<hivmave::VFAbsOp>(resTy, src, mask).getResult();
+            } else if (kind == "neg") {
               result =
                   self.create<hivmave::VFNegOp>(resTy, src, mask).getResult();
+            } else if (kind == "not") {
+              result =
+                  self.create<hivmave::VFNotOp>(resTy, src, mask).getResult();
+            } else if (kind == "relu") {
+              result =
+                  self.create<hivmave::VFReluOp>(resTy, src, mask).getResult();
             } else if (kind == "sqrt") {
               result =
                   self.create<hivmave::VFSqrtOp>(resTy, src, mask).getResult();
@@ -555,6 +620,9 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "exp") {
               result =
                   self.create<hivmave::VFExpOp>(resTy, src, mask).getResult();
+            } else if (kind == "ln") {
+              result =
+                  self.create<hivmave::VFLnOp>(resTy, src, mask).getResult();
             } else {
               throw std::invalid_argument("unknown unary kind: " + kind);
             }
@@ -716,7 +784,8 @@ void init_tla_builder(py::module &&m) {
       .def(
           "create_simd_vcvt",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
-             py::object out_elem_tag, std::string &part) -> Value {
+             py::object out_elem_tag, std::string &part, std::string &round,
+             bool sat, std::string mode) -> Value {
             auto &builder = self.getBuilder();
             auto *ctx = builder.getContext();
             auto outElemTy = resolveSimdElementType(ctx, out_elem_tag);
@@ -725,30 +794,89 @@ void init_tla_builder(py::module &&m) {
               throw std::invalid_argument("unknown vcvt part: " + part);
             }
             auto partAttr = hivmave::VCVT_PartTypeAttr::get(ctx, *partEnum);
+            auto roundEnum = hivm::symbolizeRoundMode(round);
+            if (!roundEnum) {
+              throw std::invalid_argument("unknown vcvt round mode: " + round);
+            }
+            auto roundAttr = hivm::RoundModeAttr::get(ctx, *roundEnum);
             auto srcTy = cast<VectorType>(src.getType());
+            int64_t totalBits = srcTy.getNumElements() *
+                                srcTy.getElementType().getIntOrFloatBitWidth();
+            auto outVecTy = VectorType::get(
+                {totalBits / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
+            Value result;
             if (kind == "truncf") {
               // vtruncf narrows keeping the total register bits: f32 (64) ->
               // bf16/f16 (128) -> f8 (256), lane count = total_bits / out_bits.
-              int64_t totalBits =
-                  srcTy.getNumElements() *
-                  srcTy.getElementType().getIntOrFloatBitWidth();
-              auto outVecTy = VectorType::get(
-                  {totalBits / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
-              return self
-                  .create<hivmave::VFTruncFOp>(
-                      outVecTy, src, mask,
-                      hivm::RoundModeAttr::get(ctx, hivm::RoundMode::ROUND),
-                      builder.getBoolAttr(true), partAttr)
-                  .getResult();
+              result = self.create<hivmave::VFTruncFOp>(
+                               outVecTy, src, mask, roundAttr,
+                               builder.getBoolAttr(sat), partAttr)
+                           .getResult();
+            } else if (kind == "extf") {
+              // vextf widens to a full register: 2048 / out_bits lanes.
+              result =
+                  self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
+                      .getResult();
+            } else if (kind == "s2f" || kind == "u2f") {
+              // int -> fp conversion, sign chosen by the source dtype.
+              // ISA attribute rules (VFSIntToFpOp/VFUIntToFpOp::verify):
+              //   i8->f16, i16->f32, u8->f16 : part set, rnd unset
+              //   i16->f16, i32->f32         : part unset, rnd set
+              //   i64->f32, u64->f32         : part set, rnd set
+              unsigned sb = srcTy.getElementType().getIntOrFloatBitWidth();
+              bool outF16 = outElemTy.isF16();
+              if (kind == "s2f") {
+                auto op = self.create<hivmave::VFSIntToFpOp>(
+                    outVecTy, src, mask, roundAttr, partAttr);
+                bool needPart =
+                    (sb == 8 && outF16) || (sb == 16 && !outF16) || sb == 64;
+                bool needRnd = !needPart || sb == 64;
+                if (!needPart)
+                  op.removePartAttr();
+                if (!needRnd)
+                  op.removeRndAttr();
+                result = op.getResult();
+              } else {
+                auto op = self.create<hivmave::VFUIntToFpOp>(
+                    outVecTy, src, mask, roundAttr, partAttr);
+                bool needRnd = sb == 64;
+                if (!needRnd)
+                  op.removeRndAttr();
+                result = op.getResult();
+              }
+            } else if (kind == "f2s" || kind == "f2u") {
+              // fp -> int conversion with rounding and saturation.
+              // ISA attribute rules (VFFpToSIntOp::verify):
+              //   f32->i32, f16->i16 : part unset, sat set
+              //   f16->i32           : part set,   sat unset
+              //   everything else    : part set,   sat set
+              auto satAttr = builder.getBoolAttr(sat);
+              if (kind == "f2s") {
+                auto op = self.create<hivmave::VFFpToSIntOp>(
+                    outVecTy, src, mask, roundAttr, satAttr, partAttr);
+                unsigned sb = srcTy.getElementType().getIntOrFloatBitWidth();
+                bool sameWidth = sb == outElemTy.getIntOrFloatBitWidth();
+                if (sameWidth)
+                  op.removePartAttr();
+                else if (srcTy.getElementType().isF16() &&
+                         outElemTy.isInteger(32))
+                  op.removeSatAttr();
+                result = op.getResult();
+              } else {
+                // vfptoui only supports f16 -> u8 (part/rnd/sat all set).
+                result = self.create<hivmave::VFFpToUIntOp>(outVecTy, src, mask,
+                                                            roundAttr, satAttr,
+                                                            partAttr)
+                             .getResult();
+              }
+            } else {
+              throw std::invalid_argument("unknown vcvt kind: " + kind);
             }
-            // vextf widens to a full register: 2048 / out_bits lanes.
-            auto outVecTy = VectorType::get(
-                {2048 / outElemTy.getIntOrFloatBitWidth()}, outElemTy);
-            return self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
-                .getResult();
+            return applySimdMode(self, result, mask, mode);
           },
           py::arg("kind"), py::arg("src"), py::arg("mask"),
-          py::arg("out_elem_tag"), py::arg("part"))
+          py::arg("out_elem_tag"), py::arg("part"), py::arg("round") = "round",
+          py::arg("sat") = true, py::arg("mode") = "zeroing")
       .def(
           "create_simd_pge",
           [](TLABuilder &self, std::string &pattern, int32_t lanes) -> Value {
@@ -1093,12 +1221,12 @@ void init_tla_builder(py::module &&m) {
           py::arg("src"), py::arg("dst"), py::arg("dma_mode"))
       // C = A x B (+C): A=(M,K)/B=(K,N) in L1, C in L0C (f32/i32).
       // init_condition clears L0C first (clear_accum), real_m/k/n are the
-      // actual tile sizes (arith.constant index); transpose_b sets UnitAttr.
+      // actual tile sizes (arith.constant index); transposes set UnitAttrs.
       .def(
           "create_hivm_mmadl1",
           [](TLABuilder &self, Value a, Value b, Value c, bool init_condition,
-             int64_t real_m, int64_t real_k, int64_t real_n, bool transpose_b,
-             std::optional<int32_t> unitFlagCtrl,
+             int64_t real_m, int64_t real_k, int64_t real_n, bool transposeA,
+             bool transposeB, std::optional<int32_t> unitFlagCtrl,
              std::optional<int64_t> unitFlagGroupId) {
             auto &builder = self.getBuilder();
             auto loc = self.getLastLoc();
@@ -1107,17 +1235,19 @@ void init_tla_builder(py::module &&m) {
             auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
             auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
             auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
-            auto bTrans = transpose_b ? builder.getUnitAttr() : UnitAttr{};
+            auto aTrans = transposeA ? builder.getUnitAttr() : UnitAttr{};
+            auto bTrans = transposeB ? builder.getUnitAttr() : UnitAttr{};
             auto op = self.create<hivm::MmadL1Op>(
                 TypeRange{}, a, b, init, m, k, n, c,
-                /*per_channel_bias=*/Value{}, /*a_transpose=*/UnitAttr{},
+                /*per_channel_bias=*/Value{}, /*a_transpose=*/aTrans,
                 /*b_transpose=*/bTrans, /*enable_HF32=*/UnitAttr{},
                 /*enable_I4=*/UnitAttr{});
             setUnitFlagAttrs(builder, op, unitFlagCtrl, unitFlagGroupId);
           },
           py::arg("a"), py::arg("b"), py::arg("c"), py::arg("init_condition"),
           py::arg("real_m"), py::arg("real_k"), py::arg("real_n"),
-          py::arg("transpose_b"), py::arg("unit_flag_ctrl") = std::nullopt,
+          py::arg("transpose_a") = false, py::arg("transpose_b") = false,
+          py::arg("unit_flag_ctrl") = std::nullopt,
           py::arg("unit_flag_group_id") = std::nullopt)
       .def("create_scope_op",
            [](TLABuilder &self, py::dict &scopeAttrs,
@@ -1139,12 +1269,14 @@ void init_tla_builder(py::module &&m) {
       // pybind11 wraps Block in unique_ptr; reference keeps it alive.
       .def(
           "get_scope_entry_block",
-          [](TLABuilder &self, OpState op) -> Block * {
-            Region &region = op->getRegion(0);
-            if (region.empty())
-              region.emplaceBlock();
-            return &region.front();
-          },
+          [](TLABuilder &self, OpState op) -> Block
+                                               * {
+                                                 Region &region =
+                                                     op->getRegion(0);
+                                                 if (region.empty())
+                                                   region.emplaceBlock();
+                                                 return &region.front();
+                                               },
           py::return_value_policy::reference)
       // Set an attribute on an existing operation. module.get_function is not
       // usable for the ttadapter entry: triton_to_linalg lowers it from

@@ -165,6 +165,11 @@ inline bool isTensorComputeOp(Operation *op) {
       return false;
     }
     if (auto fillOp = dyn_cast<linalg::FillOp>(op)) {
+      auto input = fillOp.getInputs()[0];
+      auto constantOp = input.getDefiningOp<arith::ConstantOp>();
+      if (constantOp) {
+        return false;
+      }
       if (isFillEliminableByInlineBrc(fillOp)) {
         return false;
       }

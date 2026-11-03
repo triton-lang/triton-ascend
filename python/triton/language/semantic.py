@@ -591,6 +591,8 @@ class TritonSemantic(Generic[TensorTy]):
         # scalar
         if dtype is None:
             raise ValueError("dtype must be specified when value is not a tensor")
+        if dtype.name in getattr(self.builder.options, "software_fp8_dtypes", ()):
+            return self.cast(self.to_tensor(value), dtype)
         if value == 0:
             value = self.builder.get_null_value(dtype.to_ir(self.builder))
         else:
@@ -814,7 +816,9 @@ class TritonSemantic(Generic[TensorTy]):
                                  "Source scalar type is " + str(src_sca_ty) + " and destination type is " +
                                  str(dst_sca_ty))
 
-        if (src_sca_ty.is_fp8e4b15() or dst_sca_ty.is_fp8e4b15()):
+        software_fp8 = getattr(self.builder.options, "software_fp8_dtypes", ())
+        if (src_sca_ty.is_fp8e4b15() or dst_sca_ty.is_fp8e4b15() or src_sca_ty.name in software_fp8
+                or dst_sca_ty.name in software_fp8):
             assert self.builder.codegen_fns.get(
                 "convert_custom_types") is not None, "target doesn't provide conversion for this type."
             return self.builder.codegen_fns["convert_custom_types"](input, dst_ty, fp_downcast_rounding, _semantic=self)
@@ -1511,6 +1515,12 @@ class TritonSemantic(Generic[TensorTy]):
                     f"Please use OCP fp8 variants on {arch} for performance")
                 lhs = self.cast(lhs, tl.float16)
                 rhs = self.cast(rhs, tl.float16)
+
+        software_fp8 = getattr(self.builder.options, "software_fp8_dtypes", ())
+        if lhs.dtype.name in software_fp8 or rhs.dtype.name in software_fp8:
+            # Byte storage does not make the numerical operands integers.
+            lhs = self.cast(lhs, tl.float16)
+            rhs = self.cast(rhs, tl.float16)
 
         if input_precision is None:
             input_precision = self.builder.options.default_dot_input_precision

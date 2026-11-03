@@ -121,7 +121,7 @@ static cann_error execute(Invocation &call) {
       !call.plan->warned.exchange(true))
     std::fprintf(
         stderr,
-        "WARNING: Grid %u > physical limit %u, performance may be reduced.\n",
+        "WARNING: Grid %llu > physical limit %u, performance may be reduced.\n",
         call.grid.logicalBlocks, spec.physical_blocks);
   if (spec.flags & TRITON_NPU_FFTS) {
     void *address = nullptr;

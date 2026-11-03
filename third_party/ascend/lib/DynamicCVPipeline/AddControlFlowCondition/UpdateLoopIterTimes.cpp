@@ -320,11 +320,11 @@ int UpdateLoopIterTimesPass::GetMainLoopIdToLoopOpMap(
   return ret;
 }
 
-
 // Returns the number of the main loop's body argument that holds the counter
 // of `ifOp`, or -1 when the counter of the block is unknown.
-static int getCounterArgNumber(scf::ForOp forOp, scf::IfOp ifOp,
-                               const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
+static int
+getCounterArgNumber(scf::ForOp forOp, scf::IfOp ifOp,
+                    const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
   Value counter = cntArgs.lookup(ifOp);
   if (!counter) {
     return -1;
@@ -347,9 +347,10 @@ static int getCounterArgNumber(scf::ForOp forOp, scf::IfOp ifOp,
 //
 // The counters are the loop carried values of the main loop, so the condition
 // has to compare the arguments of the 'before' region.
-static Value buildWhileCondition(scf::ForOp forOp, Block *beforeBlock,
-                                  const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
-                                  OpBuilder &builder, Location loc) {
+static Value
+buildWhileCondition(scf::ForOp forOp, Block *beforeBlock,
+                    const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
+                    OpBuilder &builder, Location loc) {
   Value upperBound = forOp.getUpperBound();
   Value condition;
   for (Operation &op : forOp.getBody()->without_terminator()) {
@@ -369,8 +370,8 @@ static Value buildWhileCondition(scf::ForOp forOp, Block *beforeBlock,
            "different types");
       continue;
     }
-    Value cmp = builder.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::slt, counter, upperBound);
+    Value cmp = builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
+                                              counter, upperBound);
     if (!condition) {
       condition = cmp;
       continue;
@@ -389,9 +390,10 @@ static Value buildWhileCondition(scf::ForOp forOp, Block *beforeBlock,
 //
 // The upstream pattern is internal to its translation unit, so it cannot be
 // reused with a filter; the conversion body is copied here instead.
-static LogicalResult convertMainLoopForToWhile(
-    scf::ForOp forOp, const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
-    RewriterBase &rewriter) {
+static LogicalResult
+convertMainLoopForToWhile(scf::ForOp forOp,
+                          const llvm::DenseMap<scf::IfOp, Value> &cntArgs,
+                          RewriterBase &rewriter) {
   Location loc = forOp.getLoc();
   // Loop-carried values of the while: the induction variable comes first,
   // followed by the for loop's iter args.
@@ -428,9 +430,9 @@ static LogicalResult convertMainLoopForToWhile(
     arith::CmpIPredicate predicate = forOp.getUnsignedCmp()
                                          ? arith::CmpIPredicate::ult
                                          : arith::CmpIPredicate::slt;
-    condition = rewriter.create<arith::CmpIOp>(
-        whileOp.getLoc(), predicate, beforeBlock->getArgument(0),
-        forOp.getUpperBound());
+    condition = rewriter.create<arith::CmpIOp>(whileOp.getLoc(), predicate,
+                                               beforeBlock->getArgument(0),
+                                               forOp.getUpperBound());
   }
   rewriter.create<scf::ConditionOp>(whileOp.getLoc(), condition,
                                     beforeBlock->getArguments());
@@ -481,8 +483,9 @@ static LogicalResult convertMainLoopForToWhile(
 
 // Convert every main loop tagged with `ssbuffer.main_loop` from scf.for into
 // scf.while.
-static LogicalResult convertMainLoopsToWhile(
-    ModuleOp module, const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
+static LogicalResult
+convertMainLoopsToWhile(ModuleOp module,
+                        const llvm::DenseMap<scf::IfOp, Value> &cntArgs) {
   // Collect the tagged main loops up front: the conversion rewrites the loop
   // body, so walking the IR while modifying it is not safe.
   SmallVector<scf::ForOp> mainLoops;

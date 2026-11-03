@@ -71,9 +71,9 @@ module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
     // CHECK:       arith.cmpi slt
     // CHECK:       arith.andi
     // CHECK:       scf.if
-    // The block counter has a single writer: load, add one, store.
-    // CHECK:       %[[CB0N:.+]] = memref.load
-    // CHECK:       %[[CB0N1:.+]] = arith.addi %[[CB0N]]
+    // The block counter has a single writer: the value that the conditions
+    // of the block already loaded is reused, add one and store it.
+    // CHECK:       %[[CB0N1:.+]] = arith.addi %[[CB0]]
     // CHECK:       memref.store %[[CB0N1]]
         scf.yield %arg17, %arg18 : i32, i32
       } {ssbuffer.block_id = 9 : i32, ssbuffer.main_loop = 0 : i64}

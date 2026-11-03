@@ -218,6 +218,79 @@ Value dmaIndexOperand(TLABuilder &self, Value value) {
   return value;
 }
 
+// Preserve static sizes/strides while accepting scalar runtime DMA operands.
+OpFoldResult mixedDmaIndex(TLABuilder &self, const py::object &value) {
+  if (py::isinstance<py::int_>(value) && !py::isinstance<py::bool_>(value))
+    return self.getBuilder().getIndexAttr(py::cast<int64_t>(value));
+  auto operand = py::cast<Value>(value);
+  if (!isa<IntegerType, IndexType>(operand.getType()))
+    throw std::invalid_argument("TLA DMA indices must be scalar integers");
+  return dmaIndexOperand(self, operand);
+}
+
+int64_t staticDmaIndex(OpFoldResult value) {
+  if (auto attr = dyn_cast<Attribute>(value))
+    return cast<IntegerAttr>(attr).getInt();
+  return ShapedType::kDynamic;
+}
+
+Value materializeDmaIndex(TLABuilder &self, OpFoldResult value) {
+  if (auto operand = dyn_cast<Value>(value))
+    return operand;
+  return self.create<arith::ConstantIndexOp>(staticDmaIndex(value));
+}
+
+void createStridedLoad(TLABuilder &self, Value src, Value dst,
+                       const py::object &offset, const py::object &rowStride,
+                       const py::object &rows) {
+  auto srcType = dyn_cast<MemRefType>(src.getType());
+  auto dstType = dyn_cast<MemRefType>(dst.getType());
+  if (!srcType || !dstType || srcType.getRank() != 1 ||
+      dstType.getRank() != 2 || !dstType.hasStaticShape() ||
+      srcType.getElementType() != dstType.getElementType())
+    throw std::invalid_argument(
+        "TLA strided load requires rank-one source and rank-two destination "
+        "with matching element types");
+  auto &builder = self.getBuilder();
+  auto count = mixedDmaIndex(self, rows);
+  auto stride = mixedDmaIndex(self, rowStride);
+  auto relativeOffset = materializeDmaIndex(self, mixedDmaIndex(self, offset));
+  // reinterpret_cast replaces the source descriptor offset rather than adding
+  // to it. Read and add that offset so a source subview keeps its address.
+  auto metadata = self.create<memref::ExtractStridedMetadataOp>(src);
+  auto absoluteOffset =
+      self.create<arith::AddIOp>(metadata.getOffset(), relativeOffset);
+  int64_t width = dstType.getDimSize(1);
+  int64_t capacity = staticDmaIndex(count);
+  bool dynamicCount = ShapedType::isDynamic(capacity);
+  if (dynamicCount)
+    capacity = dstType.getDimSize(0);
+  // Pointer-entry descriptors require static shapes during Triton-to-Linalg
+  // conversion. Keep the capacity static and express the active row count
+  // with a subview, just as the destination does. Only the subview is loaded.
+  auto sourceType = MemRefType::get(
+      {capacity, width}, srcType.getElementType(),
+      StridedLayoutAttr::get(builder.getContext(), ShapedType::kDynamic,
+                             {staticDmaIndex(stride), 1}),
+      srcType.getMemorySpace());
+  SmallVector<OpFoldResult> sizes{count, builder.getIndexAttr(width)};
+  SmallVector<OpFoldResult> capacitySizes{builder.getIndexAttr(capacity),
+                                          builder.getIndexAttr(width)};
+  SmallVector<OpFoldResult> strides{stride, builder.getIndexAttr(1)};
+  Value source = self.create<memref::ReinterpretCastOp>(
+      sourceType, src, OpFoldResult(absoluteOffset.getResult()), capacitySizes,
+      strides);
+  SmallVector<OpFoldResult> zeroOffsets(2, builder.getIndexAttr(0));
+  SmallVector<OpFoldResult> unitSteps(2, builder.getIndexAttr(1));
+  if (dynamicCount)
+    source =
+        self.create<memref::SubViewOp>(source, zeroOffsets, sizes, unitSteps);
+  auto destination =
+      self.create<memref::SubViewOp>(dst, zeroOffsets, sizes, unitSteps);
+  self.create<hivm::LoadOp>(TypeRange{}, source, destination.getResult(),
+                            hivm::PadModeAttr{}, Value{}, Value{}, Value{});
+}
+
 // UnitFlag encoding belongs to native op construction. MMAD and Fixpipe
 // share the backend enum mapping without exposing an attribute factory.
 void setUnitFlagAttrs(OpBuilder &builder, Operation *op,
@@ -979,6 +1052,41 @@ void init_tla_builder(py::module &&m) {
                    "TLA alloc requires a static memref");
              return self.create<memref::AllocOp>(memrefType).getResult();
            })
+      .def("create_tla_scalar_load",
+           [](TLABuilder &self, Value source,
+              std::vector<Value> indices) -> Value {
+             auto type = dyn_cast<MemRefType>(source.getType());
+             if (!type || !type.getElementType().isInteger(32) ||
+                 indices.size() != type.getRank())
+               throw std::invalid_argument(
+                   "TLA scalar load requires an i32 memref and one index per "
+                   "dimension");
+             for (Value index : indices)
+               if (!isa<IntegerType, IndexType>(index.getType()))
+                 throw std::invalid_argument(
+                     "TLA scalar load indices must be scalar integers");
+             return self
+                 .create<memref::LoadOp>(source, toIndexValues(self, indices))
+                 .getResult();
+           })
+      .def("create_tla_byte_view",
+           [](TLABuilder &self, Value source, int64_t byteOffset,
+              Type resultType) -> Value {
+             auto srcType = dyn_cast<MemRefType>(source.getType());
+             auto dstType = dyn_cast<MemRefType>(resultType);
+             if (!srcType || !dstType || srcType.getRank() != 1 ||
+                 !srcType.getElementType().isInteger(8) ||
+                 !srcType.getLayout().isIdentity() ||
+                 !dstType.hasStaticShape() || byteOffset < 0 ||
+                 srcType.getMemorySpace() != dstType.getMemorySpace())
+               throw std::invalid_argument(
+                   "TLA byte view requires an identity-layout i8 source and a "
+                   "static result in the same memory space");
+             auto shift = self.create<arith::ConstantIndexOp>(byteOffset);
+             return self
+                 .create<memref::ViewOp>(dstType, source, shift, ValueRange{})
+                 .getResult();
+           })
       .def("create_tla_bind",
            [](TLABuilder &self, Value addr, Type type) -> Value {
              auto memrefType = dyn_cast<MemRefType>(type);
@@ -1048,6 +1156,9 @@ void init_tla_builder(py::module &&m) {
       .def("create_tla_expand_shape", &createReshapeOp<memref::ExpandShapeOp>,
            py::arg("source"), py::arg("result_type"), py::arg("reassociation"))
       // Each explicit DMA binding materializes one native HIVM operation.
+      .def("create_tla_load_strided", &createStridedLoad, py::arg("src"),
+           py::arg("dst"), py::arg("offset"), py::arg("row_stride"),
+           py::arg("rows"))
       .def(
           "create_tla_load",
           [](TLABuilder &self, Value src, Value dst, const py::dict &attrs,

@@ -28,6 +28,19 @@ def _shape(values):
     return values
 
 
+def _scalar_index(value):
+    """Indices use signed i32/i64 scalars so index_cast preserves their value."""
+    value = tl._unwrap_if_constexpr(value)
+    if isinstance(value, tl.tensor):
+        if value.shape or value.dtype not in (tl.int32, tl.int64):
+            raise TypeError("indices must be scalar integers with signed int32 or int64 dtype")
+    elif type(value) is not int:
+        raise TypeError("indices must be scalar integers")
+    elif not -(1 << 63) <= value < (1 << 63):
+        raise ValueError("constant indices must fit signed int64")
+    return value
+
+
 def _row_major_strides(sizes):
     strides, stride = [], 1
     for size in reversed(sizes):

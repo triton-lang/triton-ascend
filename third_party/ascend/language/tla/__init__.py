@@ -56,6 +56,7 @@ from .dma import (
     FixpipeL0C2L1Params,
     FixpipeL0C2UBParams,
     load_gm_to_ub,
+    load_gm_to_ub_strided,
     store_ub_to_gm,
     load_gm_to_l1,
     copy_ub_to_l1,
@@ -68,7 +69,8 @@ from .dma import (
     copy_l0c_to_l1,
     set_ctrl,
 )
-from .view import view, subview, reshape
+from .view import view, subview, reshape, byte_view
+from .scalar import scalar_load
 from .aux_ops import annotate_buffer_versions
 from . import math
 from .math import compensated_rstd
@@ -118,6 +120,7 @@ __all__ = [
     "FixpipeL0C2L1Params",
     "FixpipeL0C2UBParams",
     "load_gm_to_ub",
+    "load_gm_to_ub_strided",
     "store_ub_to_gm",
     "load_gm_to_l1",
     "copy_ub_to_l1",
@@ -141,6 +144,8 @@ __all__ = [
     "view",
     "subview",
     "reshape",
+    "byte_view",
+    "scalar_load",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",

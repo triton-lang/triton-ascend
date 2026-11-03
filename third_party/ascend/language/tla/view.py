@@ -32,7 +32,7 @@
 
 ``space`` only applies to a pointer entry; a buffer's space is its own.
 """
-from triton.language.core import builtin, tensor, int64, _unwrap_if_constexpr
+from triton.language.core import builtin, tensor, dtype as _dtype, int8, int64, _unwrap_if_constexpr
 from .core import buffer, buffer_type, _shape, _row_major_strides
 
 
@@ -96,6 +96,39 @@ def _entry(src, sizes, strides, offsets, space, semantic):
 def _bind(src, ty, semantic):
     """Pointer memory as a memref via one hivm.hir.pointer_cast."""
     handle = semantic.builder.create_tla_bind(semantic.cast(src, int64).handle, ty.to_ir(semantic.builder))
+    return buffer(handle, ty)
+
+
+@builtin
+def byte_view(src, shape, dtype, byte_offset=0, _semantic=None):
+    """Create a typed, contiguous alias of a byte allocation via ``memref.view``.
+
+    ``src`` must be a zero-offset, contiguous rank-one int8 UB buffer. Shape,
+    element type and byte offset are compile-time values. The selected byte
+    range must fit in the source, and the offset must align to the result
+    element size. No data is copied or converted.
+
+    Overlapping views share storage. The caller must respect their lifetimes
+    and complete outstanding reads before overwriting the same bytes. The
+    native memref alias remains visible to memory and synchronization passes.
+    Individual consumers may impose stricter hardware alignment requirements.
+    """
+    if (not isinstance(src, buffer) or src.space != "ub" or src.dtype != int8 or len(src.shape) != 1
+            or src.strides != (1, ) or src.offset != 0):
+        raise TypeError("byte_view requires a zero-offset contiguous rank-one int8 UB buffer")
+    sizes = _shape(shape)
+    element_ty = _unwrap_if_constexpr(dtype)
+    if (not isinstance(element_ty, _dtype) or not (element_ty.is_int() or element_ty.is_floating())
+            or element_ty.primitive_bitwidth not in (8, 16, 32, 64)):
+        raise TypeError("byte_view requires a byte-addressable scalar integer or floating-point dtype")
+    byte_offset = _unwrap_if_constexpr(byte_offset)
+    element_bytes = element_ty.primitive_bitwidth // 8
+    if type(byte_offset) is not int or byte_offset < 0 or byte_offset % element_bytes:
+        raise ValueError("byte_view byte_offset must be a nonnegative compile-time multiple of the element size")
+    if byte_offset + _numel(sizes) * element_bytes > src.shape[0]:
+        raise ValueError("byte_view exceeds the source allocation")
+    ty = buffer_type(sizes, element_ty, src.space)
+    handle = _semantic.builder.create_tla_byte_view(src.handle, byte_offset, ty.to_ir(_semantic.builder))
     return buffer(handle, ty)
 
 

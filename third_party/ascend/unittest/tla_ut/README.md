@@ -4,7 +4,7 @@ Each case is one script with three stages selected by `TLA_TEST_STAGE`:
 
 | Stage     | Verifies                                            | NPU needed |
 |-----------|-----------------------------------------------------|------------|
-| `ir`      | offline HIVM IR handed to npuir (structure asserts) | no         |
+| `ir`      | offline HIVM IR handed to NPU-IR (structure asserts) | no         |
 | `compile` | `.o` / `.npubin` artifacts in `TRITON_CACHE_DIR`    | yes        |
 | `run`     | device launch + accuracy                            | yes        |
 
@@ -58,3 +58,23 @@ Host-only SIMD contract tests do not need a build or NPU:
 ```bash
 pytest third_party/ascend/unittest/tla_ut -k simd_frontend
 ```
+
+## Sparse-memory interfaces
+
+The [memory interface guide](../../../../docs/en/triton_api_extension/tla/memory.md)
+describes scalar UB reads, byte-backed typed aliases and runtime-strided DMA.
+With the rebuilt TLA frontend and native bindings, run:
+
+```bash
+TLA_TEST_STAGE=run python -m pytest -q -s \
+  third_party/ascend/unittest/tla_ut/vector/scalar_load.py \
+  third_party/ascend/unittest/tla_ut/vector/byte_view.py \
+  third_party/ascend/unittest/tla_ut/dma/strided_load.py \
+  third_party/ascend/unittest/tla_ut/memory_frontend_contract.py
+```
+
+Device cases check exact data and untouched guards, including overlapping
+view lifetimes, SIMD-to-scalar dependencies, dynamic row counts and composed
+source/destination offsets. Host rejection tests are separate from numerical
+validation. Existing `vector/subview.py`, `vector/reshape.py` and
+`dma/load_store.py` provide neighboring-interface regression coverage.

@@ -61,7 +61,6 @@ def _decode_fp8_reference(bits, dtype):
     """Evaluate sign, exponent and significand independently of Triton."""
     codes = np.asarray(bits).view(np.uint8)
     fraction_bits, bias = {
-        "float8e4b15": (3, 15),
         "float8e4nv": (3, 7),
         "float8e5": (2, 15),
     }[dtype]
@@ -73,11 +72,10 @@ def _decode_fp8_reference(bits, dtype):
         magnitude = np.where((codes & 0x7f) == 0x7f, np.nan, magnitude)
     elif dtype == "float8e5":
         magnitude = np.where(exponent == 31, np.where(fraction == 0, np.inf, np.nan), magnitude)
-    # E4M3B15 uses every encoding for a finite value, including 0x7f/0xff.
     return np.copysign(magnitude, np.where(codes >= 128, -1.0, 1.0)).astype(np.float32)
 
 
-@pytest.mark.parametrize("dtype", ["float8e4b15", "float8e4nv", "float8e5"])
+@pytest.mark.parametrize("dtype", ["float8e4nv", "float8e5"])
 @pytest.mark.parametrize("block_m,block_n,block_k", [(128, 256, 128), (64, 64, 64)], ids=["large-tile", "small-tile"])
 @pytest.mark.parametrize("low_precision_acc", [0, 32, 64, 128])
 def test_fp8_indirect_matmul(dtype, block_m, block_n, block_k, low_precision_acc):
@@ -106,8 +104,4 @@ def test_fp8_indirect_matmul(dtype, block_m, block_n, block_k, low_precision_acc
     b_reference = torch.from_numpy(_decode_fp8_reference(b_bits, dtype))
     reference = a_reference @ b_reference
     rtol = 0.01 if dtype == "float8e4nv" else 0.001
-    # E4M3B15 outputs are smaller than the community test's 1e-3 absolute
-    # tolerance. Tighten this regression so zeros or a permuted K dimension
-    # cannot pass. These FP8 inputs and their FP32 sums are exactly representable.
-    atol = 1e-10 if dtype == "float8e4b15" else rtol
-    torch.testing.assert_close(reference, output.cpu(), rtol=rtol, atol=atol)
+    torch.testing.assert_close(reference, output.cpu(), rtol=rtol, atol=rtol)

@@ -238,7 +238,7 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
     namespace = {name: importlib.import_module(name) for name in ("functools", "os", "re")}
     exec(compile(ast.Module(body=[driver_class], type_ignores=[]), str(driver_path), "exec"), namespace)
     npu_utils = object.__new__(namespace["NPUUtils"])
-    npu_utils.get_device_core = lambda: (28, 56)
+    npu_utils.get_device_core = lambda device=None: (28, 56)
     npu_utils.get_arch = lambda: arch
     monkeypatch.setattr(compiler, "NPUUtils", lambda: npu_utils)
     if device_limit is None:

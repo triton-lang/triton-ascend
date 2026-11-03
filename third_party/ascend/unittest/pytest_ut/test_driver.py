@@ -28,21 +28,13 @@ _MOCK_AIVECTOR_NUM = _MOCK_AICORE_NUM * 2
 
 
 def _make_mock_npu_utils():
-    """Create a mock with real _get_npu_device_limit_form_env and get_device_properties
-    bound, while get_device_aicore returns a fixed int.
-
-    get_device_aicore cannot be bound via types.MethodType because it is decorated
-    with @functools.lru_cache(), whose wrapper object is not a descriptor and does
-    not produce a correct bound method. Using return_value avoids this issue."""
+    """Use real limit validation with fixed hardware core counts."""
     try:
         from triton.backends.ascend.driver import NPUUtils
     except ImportError:
         pytest.skip("Ascend backend not available")
     mock = MagicMock()
-    # _get_npu_device_limit_form_env calls self.get_device_aicore(); configure it
-    # to return a fixed int instead of binding the real lru_cached method.
     mock.get_device_core.return_value = _MOCK_AICORE_NUM, _MOCK_AIVECTOR_NUM
-    # Bind real methods (not lru_cached) so the actual parsing/property logic runs.
     mock._get_npu_device_limit_form_env = types.MethodType(NPUUtils._get_npu_device_limit_form_env, mock)
     mock.get_device_properties = types.MethodType(NPUUtils.get_device_properties, mock)
     return mock, NPUUtils
@@ -165,3 +157,50 @@ def test_npu_device_limit_get_aicore_num(monkeypatch):
 
     assert NPUUtils.get_aicore_num(mock_utils) == 8
     assert NPUUtils.get_aivector_core_num(mock_utils) == 16
+
+
+def test_device_core_follows_requested_device(monkeypatch):
+    import torch
+    from triton.backends.ascend.driver import NPUUtils
+
+    current_device = [0]
+    properties = {
+        0: types.SimpleNamespace(cube_core_num=24, vector_core_num=48),
+        1: types.SimpleNamespace(cube_core_num=20, vector_core_num=40),
+    }
+    monkeypatch.setattr(torch.npu, "current_device", lambda: current_device[0])
+    monkeypatch.setattr(torch.npu, "get_device_properties", lambda device: properties[device])
+    utils = object.__new__(NPUUtils)
+    assert utils.get_device_core() == (24, 48)
+    current_device[0] = 1
+    assert utils.get_device_core() == (20, 40)
+    assert utils.get_device_core(0) == (24, 48)
+    monkeypatch.delenv("NPU_DEVICE_LIMIT", raising=False)
+    assert utils.get_device_properties(0)["num_vectorcore"] == 48
+    assert utils.get_device_properties(1)["num_vectorcore"] == 40
+
+
+def test_profiling_properties_reuse_driver(monkeypatch):
+    from contextlib import nullcontext
+    import torch
+
+    utils, NPUUtils = _make_mock_npu_utils()
+    utils._load_mod.return_value.get_device_id.return_value = 0
+    utils.get_arch.return_value = "test_soc"
+    utils.get_vector_clock_rate.return_value = 1650000
+    utils.get_hbm_clock_rate.return_value = 3200000
+    device_context = MagicMock(side_effect=lambda device: nullcontext())
+    monkeypatch.setattr(torch.npu, "device", device_context)
+
+    for limit, expected_aiv in (("8,16", 16), ("16,32", 32)):
+        monkeypatch.setenv("NPU_DEVICE_LIMIT", limit)
+        props = NPUUtils.get_profiling_device_properties(utils, 3)
+        assert props == {
+            "arch": "test_soc",
+            "num_vectorcore": expected_aiv,
+            "clock_rate": 1650000,
+            "memory_clock_rate": 3200000,
+        }
+    utils._load_mod.return_value.get_device_id.assert_called_with(3, True)
+    utils.get_device_core.assert_called_with(0)
+    device_context.assert_called_with(0)

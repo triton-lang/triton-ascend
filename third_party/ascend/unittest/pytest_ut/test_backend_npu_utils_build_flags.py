@@ -67,6 +67,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     monkeypatch.setattr(utils.sysconfig, "get_paths", lambda scheme=None: {"include": "/pyinclude"})
 
     calls = []
+    commands = []
 
     def fake_get_backend_func(name, *args, **kwargs):
         calls.append((name, args, kwargs))
@@ -80,7 +81,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     monkeypatch.setattr(
         utils.subprocess,
         "run",
-        lambda *args, **kwargs: SimpleNamespace(returncode=0, stderr=""),
+        lambda command, **kwargs: commands.append(command) or SimpleNamespace(returncode=0, stderr=""),
     )
 
     src_path = tmp_path / "npu_utils.cpp"
@@ -89,6 +90,7 @@ def _assert_npu_utils_uses_special_flags(utils, monkeypatch, tmp_path):
     so_path = utils._build_npu_ext("npu_utils", str(src_path), kernel_launcher="torch")
 
     assert so_path.endswith(".so")
+    assert "-ldl" in commands[0]
     assert any(name == "get_cc_cmd_npu_utils" for name, _, _ in calls)
     assert not any(name == "get_cc_cmd" for name, _, _ in calls)
 

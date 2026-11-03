@@ -46,7 +46,8 @@ def walk(node):
 
 
 @pytest.mark.parametrize("hook", [None, "triton"])
-def test_mspti_metadata_and_activation(tmp_path, hook):
+@pytest.mark.parametrize("limit_cores", [False, True])
+def test_mspti_metadata_and_activation(tmp_path, monkeypatch, hook, limit_cores):
     n = 1024
     x = torch.arange(n, device="npu", dtype=torch.float32)
     y = torch.ones_like(x)
@@ -57,6 +58,14 @@ def test_mspti_metadata_and_activation(tmp_path, hook):
         torch.npu.synchronize()
 
     launch()
+    utils = triton.runtime.driver.active.utils
+    hardware_aic, hardware_aiv = utils.get_device_core()
+    divisor = math.gcd(hardware_aic, hardware_aiv)
+    if limit_cores:
+        monkeypatch.setenv("NPU_DEVICE_LIMIT", f"{hardware_aic // divisor},{hardware_aiv // divisor}")
+    else:
+        monkeypatch.delenv("NPU_DEVICE_LIMIT", raising=False)
+    expected_aiv = hardware_aiv // divisor if limit_cores else hardware_aiv
     base = tmp_path / "mspti"
     # Also exercises default NPU -> MSPTI backend selection.
     session = proton.start(str(base), hook=hook)
@@ -84,6 +93,11 @@ def test_mspti_metadata_and_activation(tmp_path, hook):
         assert metrics["time (ns)"] > 0
         assert metrics["device_type"] == "NPU"
         assert str(metrics["device_id"]) in profile[1]["NPU"]
+        device_info = profile[1]["NPU"][str(metrics["device_id"])]
+        assert device_info["num_sms"] == expected_aiv
+        assert device_info["arch"] == utils.get_arch()
+        assert device_info["clock_rate"] == utils.get_vector_clock_rate(torch.npu.current_device())
+        assert device_info["memory_clock_rate"] == utils.get_hbm_clock_rate(torch.npu.current_device())
         if hook == "triton":
             assert kernel["frame"]["name"] == "named_add"
             assert metrics["flops32"] == n * count
@@ -91,6 +105,34 @@ def test_mspti_metadata_and_activation(tmp_path, hook):
         else:
             assert kernel["frame"]["name"] == "metadata_add"
             assert "flops32" not in metrics
+
+
+def test_mspti_unavailable_device_clocks(tmp_path, monkeypatch):
+    n = 1024
+    x = torch.arange(n, device="npu", dtype=torch.float32)
+    y = torch.ones_like(x)
+    z = torch.empty_like(x)
+    metadata_add[(4, )](x, y, z, n, BLOCK=256)
+    torch.npu.synchronize()
+    utils = triton.runtime.driver.active.utils
+    native = utils._load_mod()
+    monkeypatch.setattr(utils, "get_vector_clock_rate", lambda device: native.get_vector_clock_rate(999999))
+    monkeypatch.setattr(utils, "get_hbm_clock_rate", lambda device: native.get_hbm_clock_rate(999999))
+    base = tmp_path / "unavailable_clocks"
+    session = proton.start(str(base), backend="mspti", hook="triton")
+    try:
+        metadata_add[(4, )](x, y, z, n, BLOCK=256)
+        torch.npu.synchronize()
+    finally:
+        with pytest.warns(RuntimeWarning, match="clock rate is unavailable"):
+            proton.finalize(session)
+    profile = json.loads(base.with_suffix(".hatchet").read_text())
+    kernels = [node for node in walk(profile[0]) if node.get("metrics", {}).get("count", 0)]
+    assert len(kernels) == 1
+    assert kernels[0]["metrics"]["count"] == 1
+    assert kernels[0]["metrics"]["time (ns)"] > 0
+    info = profile[1]["NPU"][str(kernels[0]["metrics"]["device_id"])]
+    assert info["clock_rate"] == info["memory_clock_rate"] == 0
 
 
 @pytest.mark.parametrize("n", [256, 4096])

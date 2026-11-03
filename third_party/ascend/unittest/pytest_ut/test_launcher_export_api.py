@@ -459,7 +459,7 @@ def test_merged_code_preamble_shared_variables_present(
     for section_name, section in [("triton_launch_kernel", c_abi_launch), ("_launch", cpp_launch)]:
         assert "void* workspace_addr_ptr = nullptr;" in section, f"{section_name}: missing workspace_addr_ptr"
         assert "void* workspace_handle = nullptr;" in section, f"{section_name}: missing workspace_handle"
-        assert "uint32_t blockNum4Workspace = gridX * gridY * gridZ;" in section, f"{section_name}: missing blockNum4Workspace"
+        assert "uint64_t blockNum4Workspace = static_cast<uint64_t>(gridX) * gridY * gridZ;" in section, f"{section_name}: missing blockNum4Workspace"
         assert "uint32_t blockNum = gridX * gridY * gridZ;" in section, f"{section_name}: missing blockNum"
         assert "cann_error ret = CANN_SUCCESS;" in section, f"{section_name}: missing ret"
 

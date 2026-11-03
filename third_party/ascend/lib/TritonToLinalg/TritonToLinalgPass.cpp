@@ -886,7 +886,8 @@ static bool isSIMTOp(Operation *op) {
   // parallel_mode -> mix_simd_simt -> enable_simt). Everything else stays SIMD.
   if (compileOn91095Flag) {
     if (auto scan = dyn_cast<triton::ScanOp>(op)) {
-      return directSimtEnabled && isSimt1DCumsum(scan);
+      // The SIMD 1D helper also requires the SIMT launch contract.
+      return isSimt1DCumsum(scan);
     }
   }
 

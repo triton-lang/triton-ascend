@@ -391,7 +391,8 @@ struct StageWorkload {
   std::map<std::tuple<int64_t, int64_t, int64_t>, double>
       segmentedIndirectStoreCounts;
   std::map<int64_t, double> predicateCounts;
-  std::map<std::tuple<int64_t, int64_t, int64_t, int64_t, bool, std::string>,
+  std::map<std::tuple<int64_t, int64_t, int64_t, int64_t, bool, std::string,
+                      std::string, int64_t, int64_t, int64_t>,
            double>
       prefixScanCounts;
   /// Dynamic row-reduction operations per Stage iteration.

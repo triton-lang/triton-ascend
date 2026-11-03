@@ -1664,6 +1664,133 @@ static void readStageResources(ProfileJSONReader &reader,
                 profile.privateLoadSourceFit);
   readSourceFit(reader, *resources, "private_store_source_fit", prefix,
                 profile.privateStoreSourceFit);
+  if (const auto *scan = resources->getObject("calibrated_prefix_scan")) {
+    auto &calibration = profile.calibratedPrefixScan;
+    calibration.enabled = true;
+    calibration.prefixScanDependencyFactor =
+        reader.number(*scan, "dependency_factor", prefix + ".prefix_scan");
+    // Optional 1D factor for 1D tt.scan (S = N).  Falls back to the
+    // multi-dim factor when the profile omits it.
+    if (const auto value = scan->getNumber("dependency_factor_1d"))
+      calibration.prefixScanDependencyFactor1d = *value;
+    else
+      calibration.prefixScanDependencyFactor1d =
+          calibration.prefixScanDependencyFactor;
+    // Optional small-extent (N <= 64, sklansky_regbuf_16 scalar-register) 1D
+    // factor.  Falls back to the ordinary 1D factor when the profile omits it.
+    if (const auto value = scan->getNumber("dependency_factor_1d_small"))
+      calibration.prefixScanDependencyFactor1dSmall = *value;
+    else
+      calibration.prefixScanDependencyFactor1dSmall =
+          calibration.prefixScanDependencyFactor1d;
+    // Optional rvec-regime 1D factors, in Sklansky element-rounds (the priced
+    // feature is sum(N * log2(N)) for extents above 64).  Falling back to the
+    // multi-dim factor keeps the rvec 1D pool priced as multi-dim scan work
+    // when a profile omits them (conservative: over- rather than under-prices
+    // SIMD 1D scans).
+    if (const auto value = scan->getNumber("dependency_factor_1d_work"))
+      calibration.prefixScanDependencyFactor1dMidWork = *value;
+    else
+      calibration.prefixScanDependencyFactor1dMidWork =
+          calibration.prefixScanDependencyFactor;
+    if (const auto value = scan->getNumber("dependency_factor_1d_tiled_work"))
+      calibration.prefixScanDependencyFactor1dTiledWork = *value;
+    else
+      calibration.prefixScanDependencyFactor1dTiledWork =
+          calibration.prefixScanDependencyFactor;
+    // Optional extra factor for the multi-dim column-parallel steps above the
+    // SIMD hinge (S = 256).  Absent key keeps 0, i.e. a single-slope multi-dim
+    // price.  SIMD only (SIMT uses its warp segment table).
+    if (const auto value = scan->getNumber("dependency_factor_multi_tail"))
+      calibration.prefixScanDependencyFactorMultiTail = *value;
+    // Optional transpose cost for non-leading-axis multi-dim scans:
+    // cycles = fixed + bytes / rate.  Absent keys keep 0, i.e. no transpose.
+    if (const auto value =
+            scan->getNumber("transpose_dim01_bytes_per_system_cycle"))
+      calibration.prefixScanTransposeDim01BytesPerCycle = *value;
+    if (const auto value =
+            scan->getNumber("transpose_dim01_fixed_system_cycles"))
+      calibration.prefixScanTransposeDim01FixedCycles = *value;
+    if (const auto value =
+            scan->getNumber("transpose_ar2ra_bytes_per_system_cycle"))
+      calibration.prefixScanTransposeAr2raBytesPerCycle = *value;
+    if (const auto value =
+            scan->getNumber("transpose_ar2ra_fixed_system_cycles"))
+      calibration.prefixScanTransposeAr2raFixedCycles = *value;
+    // Optional fixed per-scan-execution startups (SIMT thread barrier +
+    // fixed launch shape + UB round-trip).  Default 0 keeps SIMD unchanged.
+    if (const auto value = scan->getNumber("startup_system_cycles"))
+      calibration.prefixScanStartupCycles = *value;
+    if (const auto value = scan->getNumber("startup_system_cycles_1d"))
+      calibration.prefixScanStartupCycles1d = *value;
+    if (const auto value = scan->getNumber("startup_system_cycles_1d_small"))
+      calibration.prefixScanStartupCycles1dSmall = *value;
+    // Optional warp-shape-aware three-segment table for SIMT 1D scans.
+    // Key = warp bucket ("4"/"8"/"16"/"32").  Absent table keeps the legacy
+    // factor pricing.  The cross-warp Sklansky merge is a single code path,
+    // so its cost is one segment priced by the real Sklansky round count.
+    if (const auto *segments = scan->getObject("simt_1d_warp_segments")) {
+      for (const auto &entry : *segments) {
+        const llvm::StringRef bucket = entry.first;
+        unsigned warps = 0;
+        if (bucket.getAsInteger(10, warps) || warps == 0) {
+          reader.setError("invalid warp bucket key '" + bucket + "' in " +
+                          prefix + ".prefix_scan.simt_1d_warp_segments");
+          continue;
+        }
+        const auto *seg = entry.second.getAsObject();
+        if (!seg) {
+          reader.setError("warp bucket '" + bucket + "' in " + prefix +
+                          ".prefix_scan.simt_1d_warp_segments"
+                          " must be an object");
+          continue;
+        }
+        const std::string segPath =
+            prefix + ".prefix_scan.simt_1d_warp_segments." + bucket.str();
+        CalibratedPrefixScanProfile::PrefixScan1dWarpSegment segment;
+        segment.cLocal = reader.number(*seg, "c_local", segPath);
+        segment.cFixed = reader.number(*seg, "c_fixed", segPath);
+        segment.cRound = reader.number(*seg, "c_round", segPath);
+        segment.cGen = reader.number(*seg, "c_gen", segPath);
+        segment.serialRate = reader.number(*seg, "serial_rate", segPath);
+        calibration.prefixScan1dWarpSegments[warps] = segment;
+      }
+    }
+    // Optional warp-shape-aware linear pricing table for SIMT multi-dim
+    // (2D) scans.  Key = warp bucket ("4"/"8"/"16"/"32").  Absent table keeps
+    // the legacy multi-dim factor pricing.
+    if (const auto *segments = scan->getObject("simt_2d_warp_segments")) {
+      for (const auto &entry : *segments) {
+        const llvm::StringRef bucket = entry.first;
+        unsigned warps = 0;
+        if (bucket.getAsInteger(10, warps) || warps == 0) {
+          reader.setError("invalid warp bucket key '" + bucket + "' in " +
+                          prefix + ".prefix_scan.simt_2d_warp_segments");
+          continue;
+        }
+        const auto *seg = entry.second.getAsObject();
+        if (!seg) {
+          reader.setError("warp bucket '" + bucket + "' in " + prefix +
+                          ".prefix_scan.simt_2d_warp_segments"
+                          " must be an object");
+          continue;
+        }
+        const std::string segPath =
+            prefix + ".prefix_scan.simt_2d_warp_segments." + bucket.str();
+        CalibratedPrefixScanProfile::PrefixScan2dWarpSegment segment;
+        segment.a = reader.number(*seg, "a", segPath);
+        segment.b = reader.number(*seg, "b", segPath);
+        segment.c = reader.number(*seg, "c", segPath);
+        segment.d = reader.number(*seg, "d", segPath);
+        segment.r0 = reader.number(*seg, "r0", segPath);
+        // Optional sub-warp (extent < 32) linear regime; absent keys keep the
+        // warp-aligned formula for every extent.
+        segment.aSubwarp = reader.optionalNumber(*seg, "a_subwarp", 0.0);
+        segment.bSubwarp = reader.optionalNumber(*seg, "b_subwarp", 0.0);
+        calibration.prefixScan2dWarpSegments[warps] = segment;
+      }
+    }
+  }
   if (const auto *scan = resources->getObject("prefix_scan")) {
     profile.prefixScanDependencyFactor = reader.optionalNumber(
         *scan, "dependency_factor", profile.prefixScanDependencyFactor);
@@ -2150,10 +2277,41 @@ loadCandidateProfileUncached(llvm::StringRef pathRef,
                                    "failed to parse SIMD/SIMT profile '%s': %s",
                                    path.c_str(),
                                    llvm::toString(parsed.takeError()).c_str());
-  const auto *root = parsed->getAsObject();
+  auto *root = parsed->getAsObject();
   if (!root)
     return llvm::createStringError(std::errc::invalid_argument,
                                    "SIMD/SIMT profile root must be an object");
+  if (auto reference = root->getString("prefixscan_profile")) {
+    const std::string resolved = resolveProfileReference(path, *reference);
+    if (dependencies)
+      dependencies->push_back(resolved);
+    auto scanBuffer = llvm::MemoryBuffer::getFile(resolved);
+    if (!scanBuffer)
+      return llvm::createStringError(scanBuffer.getError(),
+                                     "failed to read prefixscan profile '%s'",
+                                     resolved.c_str());
+    auto scanParsed = llvm::json::parse(scanBuffer.get()->getBuffer());
+    if (!scanParsed)
+      return scanParsed.takeError();
+    auto *scanRoot = scanParsed->getAsObject();
+    if (!scanRoot || scanRoot->getInteger("schema_version") != 1 ||
+        scanRoot->getString("target") != "Ascend950PR")
+      return llvm::createStringError(
+          std::errc::invalid_argument,
+          "invalid prefixscan profile schema or target");
+    for (llvm::StringRef mode :
+         {llvm::StringRef("simd"), llvm::StringRef("simt")}) {
+      auto *model = root->getObject(mode);
+      auto *resources = model ? model->getObject("stage_resources") : nullptr;
+      auto *calibration = scanRoot->getObject(mode);
+      if (!resources || !calibration)
+        return llvm::createStringError(
+            std::errc::invalid_argument,
+            "prefixscan profile requires both mode resources");
+      (*resources)["calibrated_prefix_scan"] =
+          llvm::json::Value(std::move(*calibration));
+    }
+  }
   auto selectionSchemaVersion = root->getInteger("schema_version");
   if (!selectionSchemaVersion ||
       (*selectionSchemaVersion != 18 && *selectionSchemaVersion != 19))
@@ -3432,8 +3590,8 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
         continue;
       }
       const auto &[geometry, count] = *stage.workload.prefixScanCounts.begin();
-      const auto &[extent, sequences, stride, results, reverse, combine] =
-          geometry;
+      const auto &[extent, sequences, stride, results, reverse, combine,
+                   dataType, rank, dimension, elementBits] = geometry;
       if (!std::isfinite(count) || std::abs(count - 1.0) > 1.0e-12 || reverse ||
           combine != "add" || results != 1 || stride != sequences ||
           extent < rank2ScanFit.minimumExtent ||

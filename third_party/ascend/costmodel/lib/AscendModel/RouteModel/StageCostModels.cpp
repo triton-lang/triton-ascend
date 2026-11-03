@@ -1222,6 +1222,76 @@ static void mapCompositeDotPaths(StageWorkload &work,
   }
 }
 
+// v3.1 warp-shape-aware SIMT 1D scan cost.  The ScanOpToLLVM lowering has
+// three structural regimes (single-warp fast path / cross-warp Sklansky merge
+// / general path) keyed off N and the kernel warp count; the segment cost
+// replaces the legacy factor * laneSteps pricing for the whole 1D pool,
+// including its startups.
+static double
+simtPrefixScan1dSegmentCost(const CalibratedPrefixScanProfile &simt,
+                            int64_t numWarps, double n) {
+  const auto &segments = simt.prefixScan1dWarpSegments;
+  auto it = segments.lower_bound(
+      static_cast<unsigned>(std::max<int64_t>(1, numWarps)));
+  if (it == segments.end())
+    it = std::prev(segments.end());
+  const auto &segment = it->second;
+  const double warps = static_cast<double>(it->first);
+  const double threads = 32.0 * warps;
+  if (n <= 32.0)
+    return segment.cLocal;
+  // warpsPerCTA[axis] = ceil(N/32), capped by the kernel warp count.
+  const double chainWarps = std::min(warps, std::ceil(n / 32.0));
+  // Cross-warp Sklansky merge.  Both gates mirror canUseMultiWarpSklansky:
+  // one element per thread (N <= 32*w) and at most warpSize axis warps
+  // (k <= 32, i.e. N <= 1024).  A kernel with more warps than that
+  // (num_warps = 64) drops to the general path already at N = 2048 although
+  // every thread still owns one element, so pricing it as Sklansky would
+  // under-predict it.  ceil(log2 k) is the trip count of the Sklansky
+  // `for (h = 1; h < k; h <<= 1)` loop, so the pricing tracks the real round
+  // count instead of a linear proxy.
+  if (n <= threads && chainWarps <= 32.0) {
+    const double rounds = std::ceil(std::log2(std::max(1.0, chainWarps)));
+    return segment.cFixed + segment.cRound * rounds;
+  }
+  // General path.  The per-element serial slope is charged from N = 0; the
+  // 32*w anchor of the (N - 32*w) form is folded into cGen, so cGen is not
+  // directly comparable with the cross-warp segment constant.
+  return segment.cGen + segment.serialRate * n;
+}
+
+// v3.2 warp-shape-aware SIMT multi-dim (2D) scan cost.  The generic scan
+// lowering (AddPartialReduce) distributes the scan across warps with a serial
+// UB load chain whose cost is additive in the total element count N, plus a
+// per-thread-element hinge that prices register pressure beyond r0.  E is the
+// aggregate scan extent (exact for a single multi-dim scan per Stage) and
+// determines k = warpsPerCTA[axis], the UB chain length.  Extents below one
+// warp (E < 32) take the separate linear regime described inline below.
+static double
+simtPrefixScan2dSegmentCost(const CalibratedPrefixScanProfile &simt,
+                            int64_t numWarps, double extentSum, double n) {
+  const auto &segments = simt.prefixScan2dWarpSegments;
+  auto it = segments.lower_bound(
+      static_cast<unsigned>(std::max<int64_t>(1, numWarps)));
+  if (it == segments.end())
+    it = std::prev(segments.end());
+  const auto &segment = it->second;
+  const double extent = std::max(1.0, extentSum);
+  // Sub-warp extent: the warp owning the axis holds fewer than 32 valid lanes,
+  // so the axis warp never needs a cross-warp chain (k = 1) and the cost
+  // collapses onto a single linear-in-N regime.  Layout-coalesced small scans
+  // (e.g. a 16-element cumsum promoted to an (8,16,16) scan) land here.
+  if (extent < 32.0 && (segment.aSubwarp > 0.0 || segment.bSubwarp > 0.0))
+    return segment.aSubwarp + segment.bSubwarp * n;
+  const double threads = 32.0 * static_cast<double>(it->first);
+  // warpsPerCTA[axis]: warps holding unique data along the scan axis.
+  const double chainWarps =
+      std::min(static_cast<double>(it->first), std::ceil(extent / 32.0));
+  const double chainLoads = n * std::max(1.0, chainWarps) / threads;
+  const double hinge = std::max(0.0, n / threads - segment.r0);
+  return segment.a + segment.b * n + segment.c * chainLoads + segment.d * hinge;
+}
+
 static std::optional<StageResourceCycles>
 mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
             StageMode mode, int64_t superblockFactor, bool wholeSimt,
@@ -1366,6 +1436,62 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
           resources.gridStrideStartup =
               std::max(resources.gridStrideStartup,
                        interpolateEnvelopeCost(startupCurve, extent));
+      }
+    }
+    // Apply the scan formulas independently of direction, combine and result
+    // count. Geometry and element width follow the first scan operand.
+    const auto &calibration = profile.calibratedPrefixScan;
+    if (calibration.enabled && std::get<7>(shape) > 0) {
+      const double n = static_cast<double>(extent) * independentSequences;
+      double completion = 0.0;
+      if (simd && independentSequences == 1) {
+        if (extent <= 64)
+          completion =
+              calibration.prefixScanStartupCycles1dSmall +
+              extent * calibration.prefixScanDependencyFactor1dSmall / 64.0;
+        else
+          completion =
+              calibration.prefixScanStartupCycles1d +
+              extent * std::log2(static_cast<double>(extent)) *
+                  (extent <= 1024
+                       ? calibration.prefixScanDependencyFactor1dMidWork
+                       : calibration.prefixScanDependencyFactor1dTiledWork) /
+                  64.0;
+      } else if (simd) {
+        const int64_t elementBits = std::get<9>(shape);
+        const double elementBytes = elementBits >= 8 ? elementBits / 8 : 0;
+        const double vectorElements =
+            elementBytes > 0.0 ? 256.0 / elementBytes : 64.0;
+        const double steps =
+            extent * std::ceil(independentSequences / vectorElements);
+        completion = calibration.prefixScanStartupCycles +
+                     (steps * calibration.prefixScanDependencyFactor +
+                      std::max(0.0, steps - 256.0) *
+                          calibration.prefixScanDependencyFactorMultiTail) /
+                         64.0;
+        if (std::get<8>(shape) != 0 && elementBytes > 0.0) {
+          const bool rank2 = std::get<7>(shape) == 2;
+          const double rate =
+              rank2 ? calibration.prefixScanTransposeAr2raBytesPerCycle
+                    : calibration.prefixScanTransposeDim01BytesPerCycle;
+          if (rate > 0.0)
+            completion +=
+                (rank2 ? calibration.prefixScanTransposeAr2raFixedCycles
+                       : calibration.prefixScanTransposeDim01FixedCycles) +
+                2.0 * n * elementBytes / rate;
+        }
+      } else if (independentSequences == 1 &&
+                 !calibration.prefixScan1dWarpSegments.empty()) {
+        completion = simtPrefixScan1dSegmentCost(calibration,
+                                                 profile.activeWarpCount, n);
+      } else if (independentSequences > 1 &&
+                 !calibration.prefixScan2dWarpSegments.empty()) {
+        completion = simtPrefixScan2dSegmentCost(
+            calibration, profile.activeWarpCount, extent, n);
+      }
+      if (completion > 0.0) {
+        resources.prefixScanCriticalPath += count * completion;
+        continue;
       }
     }
     if (simd) {
@@ -2669,13 +2795,12 @@ static LogicalStage perAivStage(const LogicalStage &logical, int64_t parts) {
   for (const auto &[elements, count] : work.predicateCounts)
     predicates[extent(elements)] += count;
   work.predicateCounts = std::move(predicates);
-  std::map<std::tuple<int64_t, int64_t, int64_t, int64_t, bool, std::string>,
-           double>
-      scans;
+  decltype(work.prefixScanCounts) scans;
   for (const auto &[shape, count] : work.prefixScanCounts)
     scans[{std::get<0>(shape), extent(std::get<1>(shape)), std::get<2>(shape),
-           std::get<3>(shape), std::get<4>(shape), std::get<5>(shape)}] +=
-        count;
+           std::get<3>(shape), std::get<4>(shape), std::get<5>(shape),
+           std::get<6>(shape), std::get<7>(shape), std::get<8>(shape),
+           std::get<9>(shape)}] += count;
   work.prefixScanCounts = std::move(scans);
   work.reductionOperations /= parts;
   work.shuffleLaneSteps /= parts;
@@ -2970,6 +3095,11 @@ static double estimateStageBase(const LogicalStage &stage,
         stage.scheduleKind == StageScheduleKind::StraightLine &&
         !stage.features.isGridStrideLoopShell &&
         !stage.features.insideGridStrideLoopBody &&
+        !(profile.simt.calibratedPrefixScan.enabled &&
+          llvm::all_of(stage.workload.prefixScanCounts,
+                       [](const auto &entry) {
+                         return std::get<7>(entry.first) > 0;
+                       })) &&
         profile.simt.straightLinePrefixScanElementsPerCycle > 0.0) {
       double semanticElements = 0.0;
       for (const auto &[shape, occurrences] : stage.workload.prefixScanCounts) {
@@ -3441,7 +3571,37 @@ static bool overlappingNodeRanges(const std::vector<Curve> &curves,
 
 } // namespace
 
+bool CalibratedPrefixScanProfile::isValid() const {
+  auto valid = [](std::initializer_list<double> values) {
+    return std::all_of(values.begin(), values.end(), [](double value) {
+      return std::isfinite(value) && value >= 0.0;
+    });
+  };
+  if (!valid({prefixScanDependencyFactor, prefixScanDependencyFactor1d,
+              prefixScanDependencyFactor1dSmall,
+              prefixScanDependencyFactor1dMidWork,
+              prefixScanDependencyFactor1dTiledWork,
+              prefixScanDependencyFactorMultiTail,
+              prefixScanTransposeDim01FixedCycles,
+              prefixScanTransposeDim01BytesPerCycle,
+              prefixScanTransposeAr2raFixedCycles,
+              prefixScanTransposeAr2raBytesPerCycle, prefixScanStartupCycles,
+              prefixScanStartupCycles1d, prefixScanStartupCycles1dSmall}))
+    return false;
+  for (const auto &[warps, s] : prefixScan1dWarpSegments)
+    if (warps == 0 ||
+        !valid({s.cLocal, s.cFixed, s.cRound, s.cGen, s.serialRate}))
+      return false;
+  for (const auto &[warps, s] : prefixScan2dWarpSegments)
+    if (warps == 0 ||
+        !valid({s.a, s.b, s.c, s.d, s.r0, s.aSubwarp, s.bSubwarp}))
+      return false;
+  return true;
+}
+
 bool StageModeProfile::isValid(StageMode mode) const {
+  if (!calibratedPrefixScan.isValid())
+    return false;
   if (!finitePositive({setupCycles, predicateOperationsPerCycle,
                        shuffleLanesPerCycle, dotSetupCycles, dotFlopsPerCycle,
                        issueOperationsPerCycle, prefixScanStepLatencyCycles,

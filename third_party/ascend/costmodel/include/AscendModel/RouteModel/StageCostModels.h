@@ -137,8 +137,45 @@ struct StageOperationRate {
   std::map<int64_t, double> throughputByWarpCount;
 };
 
-/// Completion-inclusive cost of one straight-line prefix-scan helper, selected
-/// by the TTIR combine class.
+/// Prefix scan calibration in SYS_CNT cycles.
+/// Applied independently to each scan geometry and occurrence.
+struct CalibratedPrefixScanProfile {
+  bool enabled = false;
+  double prefixScanDependencyFactor = 1.0;
+  double prefixScanDependencyFactor1d = 1.0;
+  double prefixScanDependencyFactor1dSmall = 1.0;
+  double prefixScanDependencyFactor1dMidWork = 1.0;
+  double prefixScanDependencyFactor1dTiledWork = 1.0;
+  double prefixScanDependencyFactorMultiTail = 0.0;
+  double prefixScanTransposeDim01FixedCycles = 0.0;
+  double prefixScanTransposeDim01BytesPerCycle = 0.0;
+  double prefixScanTransposeAr2raFixedCycles = 0.0;
+  double prefixScanTransposeAr2raBytesPerCycle = 0.0;
+  double prefixScanStartupCycles = 0.0;
+  double prefixScanStartupCycles1d = 0.0;
+  double prefixScanStartupCycles1dSmall = 0.0;
+  struct PrefixScan1dWarpSegment {
+    double cLocal = 0.0;
+    double cFixed = 0.0;
+    double cRound = 0.0;
+    double cGen = 0.0;
+    double serialRate = 0.0;
+  };
+  std::map<unsigned, PrefixScan1dWarpSegment> prefixScan1dWarpSegments;
+  struct PrefixScan2dWarpSegment {
+    double a = 0.0;
+    double b = 0.0;
+    double c = 0.0;
+    double d = 0.0;
+    double r0 = 0.0;
+    double aSubwarp = 0.0;
+    double bSubwarp = 0.0;
+  };
+  std::map<unsigned, PrefixScan2dWarpSegment> prefixScan2dWarpSegments;
+  bool isValid() const;
+};
+
+/// Completion-inclusive cost of one straight-line prefix-scan helper.
 struct StraightLinePrefixScanCost {
   double startupCycles = 0.0;
   double elementsPerCycle = 0.0;
@@ -444,6 +481,7 @@ struct StageModeProfile {
   double gridStrideResidentLoadWarpInstructionsPerCycle = 0.0;
   double gridStrideResidentStoreWarpInstructionsPerCycle = 0.0;
   std::string gridStrideResidentMemoryEvidence;
+  CalibratedPrefixScanProfile calibratedPrefixScan;
   double prefixScanDependencyFactor = 1.0;
   double dotSetupCycles = 0.0;
   double dotFlopsPerCycle = 0.0;

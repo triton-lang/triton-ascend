@@ -93,7 +93,8 @@
           "enum": [
             "isolated_microbenchmark",
             "device_configuration",
-            "architecture_fact"
+            "architecture_fact",
+            "derived_calibration"
           ],
           "description": "Evidence category: measured result, device configuration, or architecture contract."
         },

@@ -574,7 +574,8 @@ TEST(SimdSimtCostModelTest, LoopCarriedRecurrenceAppliesScanDependencyFactor) {
     // Mixed shuffle pool: 320 scan-class steps (tt.scan) + 320 reduce-class
     // steps (tt.reduce).
     stage.workload.shuffleLaneSteps = 640.0;
-    stage.workload.prefixScanCounts[{32, 10, 1, 1, false, "add"}] = 1.0;
+    stage.workload.prefixScanCounts[{32, 10, 1, 1, false, "add", "", 0, 0, 0}] =
+        1.0;
     return stage;
   };
 

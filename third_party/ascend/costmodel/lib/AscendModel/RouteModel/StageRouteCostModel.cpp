@@ -260,8 +260,8 @@ static MinmaxScanFacts minmaxScanFacts(const StageCostTable &table) {
     }
     const auto &[geometry, count] = *stage.workload.prefixScanCounts.begin();
     const auto exactCount = exactNonNegativeWorkCount(count);
-    const auto &[extent, sequences, stride, results, reverse, combine] =
-        geometry;
+    const auto &[extent, sequences, stride, results, reverse, combine, dataType,
+                 rank, dimension, elementBits] = geometry;
     if (!exactCount || *exactCount != 1 || extent <= 1 || sequences <= 1 ||
         stride <= 0 || results != 1 || reverse || combine != "minmax") {
       facts.exact = false;
@@ -1069,6 +1069,10 @@ llvm::json::Object StageWorkload::toJSON() const {
                            {"result_count", std::get<3>(shape)},
                            {"reverse", std::get<4>(shape)},
                            {"combine_class", std::get<5>(shape)},
+                           {"data_type", std::get<6>(shape)},
+                           {"rank", std::get<7>(shape)},
+                           {"axis", std::get<8>(shape)},
+                           {"element_bit_width", std::get<9>(shape)},
                            {"count_per_iteration", count}});
   result["prefix_scan_instances_per_iteration"] = std::move(prefixScans);
   result["reduction_operations_per_iteration"] = reductionOperations;
@@ -3211,7 +3215,8 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       }
       const auto &[shape, count] = *stage.workload.prefixScanCounts.begin();
       const auto exactCount = exactNonNegativeWorkCount(count);
-      const auto &[axis, sequences, stride, results, reverse, combine] = shape;
+      const auto &[axis, sequences, stride, results, reverse, combine, dataType,
+                   rank, dimension, elementBits] = shape;
       if (!exactCount || *exactCount != 1 || reverse || stride != 1 ||
           combine != "add" ||
           axis < costTable.routeCompletions.multiResultPrefixScan

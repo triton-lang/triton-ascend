@@ -2108,6 +2108,9 @@
         },
         "masked_strided_store_copy_completion": {
           "$ref": "#/definitions/masked_strided_copy_completion_map"
+        },
+        "strided_short_completion": {
+          "$ref": "#/definitions/strided_short_completion"
         }
       },
       "additionalProperties": false
@@ -2419,6 +2422,9 @@
         },
         "masked_strided_store_copy_completion": {
           "$ref": "#/definitions/masked_strided_copy_completion_map"
+        },
+        "strided_short_completion": {
+          "$ref": "#/definitions/strided_short_completion"
         }
       },
       "additionalProperties": false
@@ -4338,6 +4344,47 @@
         "atomic_memory"
       ],
       "type": "object"
+    },
+    "strided_short_completion_fit": {
+      "type": "object",
+      "properties": {
+        "intercept_system_cycles": {
+          "type": "number"
+        },
+        "coefficient_system_cycles": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 8
+        },
+        "structural_constants": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2
+        },
+        "evidence": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "evidence"
+      ],
+      "additionalProperties": false
+    },
+    "strided_short_completion": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/strided_short_completion_fit"
+      }
     }
   },
   "description": "Target-specific hardware resource profile consumed by the online Stage Cost Model. Stage partitions and workloads are derived from transformed TTIR.",
@@ -4434,6 +4481,10 @@
       "description": "Canonical target for this calibration; it must equal the target of the referenced shared microbenchmark profile."
     },
     "reduction_profile": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prefixscan_profile": {
       "type": "string",
       "minLength": 1
     }

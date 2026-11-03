@@ -2847,6 +2847,72 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
       }
     }
   }
+  if (plan.candidate == StageKernelRouteKind::AllSIMT &&
+      costTable.simtStraightLinePrefixScanKernelCompletionCycles > 0.0) {
+    std::optional<size_t> scanOwner;
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      if (plan.implementations[index].mode != StageMode::SIMT ||
+          stage.model != "prefix_scan" || stage.features.hasLoop ||
+          stage.features.isGridStrideLoopShell ||
+          stage.features.insideGridStrideLoopBody)
+        continue;
+      const bool calibratedHelper =
+          !stage.workload.prefixScanCounts.empty() &&
+          llvm::all_of(stage.workload.prefixScanCounts, [](const auto &entry) {
+            const auto &shape = entry.first;
+            return std::get<7>(shape) > 0 && std::get<3>(shape) == 1 &&
+                   std::get<2>(shape) == 1 &&
+                   (std::get<5>(shape) == "add" ||
+                    std::get<5>(shape) == "minmax");
+          });
+      if (calibratedHelper)
+        continue;
+      if (scanOwner) {
+        scanOwner.reset();
+        break;
+      }
+      scanOwner = index;
+    }
+    if (scanOwner) {
+      const double completion =
+          static_cast<double>(
+              std::max<int64_t>(1, plan.runtimePhysicalProgramCount)) *
+          costTable.simtStraightLinePrefixScanKernelCompletionCycles;
+      plan.logicalStageCycles[*scanOwner] += completion;
+      plan.totalCycles += completion;
+      plan.diagnostic<double>(
+          "straight_line_simt_scan_kernel_completion_system_cycles") =
+          completion;
+    }
+  }
+  if (plan.candidate == StageKernelRouteKind::AllSIMD &&
+      costTable.simdNonUnitPrefixScanKernelCompletionCycles > 0.0) {
+    std::optional<size_t> scanOwner;
+    for (size_t index = 0; index < costTable.stages.size(); ++index) {
+      const LogicalStageCost &stage = costTable.stages[index];
+      const bool nonUnitScan =
+          llvm::any_of(stage.workload.prefixScanCounts, [](const auto &entry) {
+            return entry.second > 0.0 && std::get<2>(entry.first) > 1 &&
+                   std::get<3>(entry.first) == 1;
+          });
+      if (!nonUnitScan)
+        continue;
+      if (scanOwner) {
+        scanOwner.reset();
+        break;
+      }
+      scanOwner = index;
+    }
+    if (scanOwner) {
+      const double completion =
+          costTable.simdNonUnitPrefixScanKernelCompletionCycles;
+      plan.logicalStageCycles[*scanOwner] += completion;
+      plan.totalCycles += completion;
+      plan.diagnostic<double>(
+          "non_unit_simd_scan_kernel_completion_system_cycles") = completion;
+    }
+  }
   if (plan.candidate == StageKernelRouteKind::AllSIMD &&
       costTable.simdLoadOperationStartupCycles > 0.0) {
     const bool hasIndirectAddressDependency =

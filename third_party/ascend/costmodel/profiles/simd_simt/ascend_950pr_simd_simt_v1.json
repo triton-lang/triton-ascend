@@ -995,9 +995,10 @@
       "prefix_scan": {
         "step_latency_system_cycles": 27.278581,
         "step_latency_measurement": "simt.shuffle.dependent_latency",
-        "description": "Grid-stride and recurrence scans use the decomposed dependency model. A P=1 straight-line scan lowers to a completion-inclusive external helper priced from TTIR semantic elements.",
+        "description": "Grid-stride and recurrence scans use the decomposed dependency model. The calibrated prefix-scan resource profile prices supported single-result unit-stride additive/minmax scans; other straight-line scan helper structures retain the independently measured completion envelope.",
         "straight_line_completion_elements_per_system_cycle": 10,
-        "straight_line_completion_evidence": "Fresh A5 profiler controls for non-additive and multiplicative straight-line scans: cummax rows/extent 8x64, 16x32, 32x16 and cumprod 1x1024, 2x512, 4x256. After subtracting the generic kernel boundary and explicit GM load/store Stages, semantic_elements/10 SYS_CNT plus helper ownership of the pure generic index prologue keeps all six geometries within ten percent without an operator or exact-shape key."
+        "straight_line_kernel_completion_system_cycles": 370.0,
+        "straight_line_completion_evidence": "Fresh A5 profiler controls for multiplicative and unsupported straight-line scan helper structures. The calibrated prefix-scan resource profile owns single-result unit-stride additive/minmax scans; other structures retain the measured helper completion without charging the same startup twice."
       },
       "rowwise_reduction": {
         "description": "Completion-inclusive physical-group surface for a structural TTIR FP32 row reduction with one packed rank-2 input and two reduction operations. Online interpolation is bounded to the measured row/extent rectangle and never uses an operator or kernel name.",

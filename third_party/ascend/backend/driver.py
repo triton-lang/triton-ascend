@@ -1294,7 +1294,7 @@ static void release_npu_tensor_handle(void* handle) {{
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
   {coalesce_grid_div}
-  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  uint64_t blockNum4Workspace = static_cast<uint64_t>(gridX) * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;
@@ -1313,7 +1313,7 @@ static void release_npu_tensor_handle(void* handle) {{
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
 {_program_grid_launch_preamble}
-  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  uint64_t blockNum4Workspace = static_cast<uint64_t>(gridX) * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;
@@ -1327,7 +1327,7 @@ static void release_npu_tensor_handle(void* handle) {{
   void* workspace_addr_ptr = nullptr;
   void* workspace_handle = nullptr;
 {_program_grid_launch_preamble}
-  uint32_t blockNum4Workspace = gridX * gridY * gridZ;
+  uint64_t blockNum4Workspace = static_cast<uint64_t>(gridX) * gridY * gridZ;
   {get_backend_func("pre_launch", True)}
   {f'''
   uint64_t totalWorkSpaceSize = (uint64_t){workspace_size} * blockNum4Workspace;

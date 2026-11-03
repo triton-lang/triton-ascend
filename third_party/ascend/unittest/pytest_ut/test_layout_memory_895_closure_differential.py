@@ -521,7 +521,7 @@ def _launcher_paths(source):
 
 def _coalescing_fragment(path):
     start = path.index("// coalescing: each program covers")
-    end = path.index("uint32_t blockNum4Workspace", start)
+    end = path.index("uint64_t blockNum4Workspace", start)
     return path[start:end]
 
 

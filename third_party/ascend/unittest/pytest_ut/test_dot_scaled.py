@@ -175,11 +175,11 @@ def test_scaled_dot_fast_math(normal_type):
         tl.store(out_ptr, out_tensor.to(a.dtype))
 
     def make_scale_tensor(scale, data_dtype):
-        if data_dtype == torch.bfloat16:
-            scale_i16 = scale.to(torch.int16)
-            return (scale_i16 << 7).view(torch.bfloat16)
-        scale_fp32 = (scale.to(torch.int32) << 23).view(torch.float32)
-        return scale_fp32.to(torch.float16)
+        # E8M0 has no zero or infinity: codes 0 and 255 mean 2^-127 and NaN.
+        bits = scale.to(torch.int32) << 23
+        bits = torch.where(scale.eq(0), torch.full_like(bits, 0x00400000), bits)
+        bits = torch.where(scale.eq(255), torch.full_like(bits, 0x7fc00000), bits)
+        return bits.view(torch.float32).to(data_dtype)
 
     def golden_ref(x, scale_x, y, scale_y, fast_math):
         upscale_x = make_scale_tensor(scale_x.repeat_interleave(x.shape[1] // scale_x.shape[1], dim=1), x.dtype)

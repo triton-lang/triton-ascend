@@ -2009,12 +2009,15 @@ def vselr(src, index, mask=None, mode=MODE.ZEROING, _semantic=None):
 def _group_reduce_native(kind, src, mask, mode, _semantic):
     _require_vector(src, "src")
     tag = _elem_tag(src.dtype)
-    if tag not in ("i8", "i16", "i32", "f16", "f32") or src.type.lanes != _lanes_for(tag):
-        raise ValueError("group reduction requires a full i8/i16/i32/f16/f32 register")
+    if tag not in ("i16", "i32", "f16", "f32") or src.type.lanes != _lanes_for(tag):
+        raise ValueError(
+            "group reduction requires a full i16/i32/f16/f32 register; native i8 is unavailable on Ascend950")
     _check_mode(mode)
     mask = _mask_for(mask, src.type.lanes, _semantic)
     handle = _semantic.builder.create_simd_group_reduce(kind, src.handle, mask.handle, _is_unsigned(src.dtype))
-    return vector(handle, src.type)
+    out_type = vector_type(
+        64, tl.uint32 if _is_unsigned(src.dtype) else tl.int32) if kind == "add" and tag == "i16" else src.type
+    return vector(handle, out_type)
 
 
 @builtin
@@ -2022,8 +2025,10 @@ def vcgadd(src, mask=None, mode=MODE.ZEROING, _semantic=None):
     """Sum active lanes in each 32-byte group with one native group reduction.
 
     Returns a full register: eight group results in lanes 0..7, zeros after.
+    Native 8-bit group reductions are unavailable on Ascend950 and rejected.
     Mask density matches the source. Empty groups sum to zero; integer sums
-    wrap to the input width. Floating sums use the hardware reduction order.
+    widen from i16/u16 to i32/u32 (64 output lanes), while i32/u32 wrap
+    to 32 bits. Floating sums use the hardware reduction order.
     Both modes use the same native result, with no old destination operand.
     """
     return _group_reduce_native("add", src, mask, mode, _semantic)
@@ -2033,7 +2038,7 @@ def vcgadd(src, mask=None, mode=MODE.ZEROING, _semantic=None):
 def vcgmax(src, mask=None, mode=MODE.ZEROING, _semantic=None):
     """Maximum of active lanes per 32-byte group; eight results then zeros.
 
-    Same full-register and mask contract as vcgadd. Empty groups use the
+    Returns the input dtype, including i16/u16. Empty groups use the
     native maximum-reduction identity. Floating special values follow the
     target's native reduction semantics, not a sequential Python max.
     """
@@ -2044,7 +2049,7 @@ def vcgmax(src, mask=None, mode=MODE.ZEROING, _semantic=None):
 def vcgmin(src, mask=None, mode=MODE.ZEROING, _semantic=None):
     """Minimum of active lanes per 32-byte group; eight results then zeros.
 
-    Same full-register and mask contract as vcgadd. Empty groups use the
+    Returns the input dtype, including i16/u16. Empty groups use the
     native minimum-reduction identity. Floating special values follow the
     target's native reduction semantics, not a sequential Python min.
     """

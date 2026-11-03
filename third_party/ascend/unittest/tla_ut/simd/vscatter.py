@@ -31,7 +31,7 @@ from utils.tla_test_utils import compile_offline, compile_native_kernel, lower_o
 
 @tla.jit
 def scatter_kernel(X, I, M, INIT, O, CHECK, OFFSET, DT: tl.constexpr, W: tl.constexpr, VIEW: tl.constexpr,
-                   MASKED: tl.constexpr, READBACK: tl.constexpr):
+                   MASKED: tl.constexpr, READBACK: tl.constexpr, INNER: tl.constexpr):
     N: tl.constexpr = 2048 // W
     IT: tl.constexpr = tl.uint32 if W == 32 else tl.uint16
     MT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
@@ -59,6 +59,9 @@ def scatter_kernel(X, I, M, INIT, O, CHECK, OFFSET, DT: tl.constexpr, W: tl.cons
             idx = (tla.simd.vlds(indices[0]), tla.simd.vlds(indices[128]))
         else:
             idx = tla.simd.vlds(indices[0])
+        if INNER:
+            # Trace a view created inside the VF back to its captured base.
+            target = tla.subview(target, offsets=(8, ), sizes=(952, ))
         tla.simd.vscatter(target[32], idx, data, mask)
         # Alias read after the native store must observe its memory effects.
         if READBACK:
@@ -76,12 +79,12 @@ TYPES = [("int8", "i8", 8), ("uint8", "u8", 8), ("int16", "i16", 16), ("uint16",
 CASES = [(typ, view) for typ in TYPES for view in ("none", "static", "dynamic")]
 
 
-def constants(case, masked, readback=True):
+def constants(case, masked, readback=True, inner=False):
     (name, _, w), view = case
-    return dict(DT=getattr(tl, name), W=w, VIEW=view, MASKED=masked, READBACK=readback)
+    return dict(DT=getattr(tl, name), W=w, VIEW=view, MASKED=masked, READBACK=readback, INNER=inner)
 
 
-def launch(case, pattern, readback=True):
+def launch(case, pattern, readback=True, inner=False):
     (name, _, w), view = case
     n = 2048 // w
     dtype = getattr(torch, name)
@@ -98,10 +101,10 @@ def launch(case, pattern, readback=True):
     check = torch.empty(n, dtype=dtype, device="npu")
     compiled = scatter_kernel[(1, )](data.npu(), poisoned.to(torch.uint32 if w == 32 else torch.uint16).npu(),
                                      mask.to({8: torch.int8, 16: torch.int16, 32: torch.int32}[w]).npu(), init.npu(),
-                                     out, check, 64, **constants(case, pattern != "unmasked", readback))
+                                     out, check, 64, **constants(case, pattern != "unmasked", readback, inner))
     torch.npu.synchronize()
     expected = init.to(torch.float64)
-    expected[32 + (64 if view != "none" else 0) + index[mask]] = data.to(torch.float64)[mask]
+    expected[32 + (64 if view != "none" else 0) + (8 if inner else 0) + index[mask]] = data.to(torch.float64)[mask]
     check_ref = torch.where(mask, data.to(torch.float64), 0) if readback else torch.zeros(n, dtype=torch.float64)
     return out.cpu().to(torch.float64), expected, check.cpu().to(torch.float64), check_ref, compiled
 
@@ -119,33 +122,36 @@ def test_ir(case):
     assert "llvm.inttoptr" in text
     lowered = str(lower_offline(module, ctx))
     assert "func.func private @tla_native_simd" in lowered
-    assert "#hivm.memory_effect<read_write>" in lowered
+    assert lowered.count("#hivm.memory_effect<write>") == 1
+    assert "#hivm.memory_effect<read_write>" not in lowered
     assert "call @tla_native_simd" in lowered
 
 
 @pytest.mark.parametrize("case", CASES)
 @pytest.mark.parametrize("readback", (False, True))
-def test_compile(case, readback):
+@pytest.mark.parametrize("inner", (False, True))
+def test_compile(case, readback, inner):
     (_, sig, w), _ = case
     kernel = compile_native_kernel(
         scatter_kernel,
         dict(X=f"*{sig}", I="*u32" if w == 32 else "*u16", M=f"*i{w}", INIT=f"*{sig}", O=f"*{sig}", CHECK=f"*{sig}",
-             OFFSET="i32"), constants(case, True, readback))
-    assert "#hivm.memory_effect<read_write>" in kernel.asm["ttadapter"]
+             OFFSET="i32"), constants(case, True, readback, inner))
+    assert "#hivm.memory_effect<write>" in kernel.asm["ttadapter"]
 
 
-@pytest.mark.parametrize("case", CASES)
+@pytest.mark.parametrize("case,inner",
+                         [(case, False) for case in CASES] + [(case, True) for case in CASES if case[1] == "dynamic"])
 @pytest.mark.parametrize("pattern", ("unmasked", "all", "none", "tail", "mixed"))
 @pytest.mark.parametrize("readback", (False, True))
-def test_run(case, pattern, readback):
-    actual, expected, check, check_ref, _ = launch(case, pattern, readback)
+def test_run(case, inner, pattern, readback):
+    actual, expected, check, check_ref, _ = launch(case, pattern, readback, inner)
     torch.testing.assert_close(actual, expected, rtol=0, atol=0)
     torch.testing.assert_close(check, check_ref, rtol=0, atol=0)
 
 
 @tla.jit
 def two_scopes_kernel(O):
-    out = tla.alloc_buffer((64,), tl.int32, space="ub")
+    out = tla.alloc_buffer((64, ), tl.int32, space="ub")
     with tla.scope.simd():
         idx = tla.simd.vsplat(0, tl.uint32)
         data = tla.simd.vsplat(7, tl.int32)
@@ -154,12 +160,12 @@ def two_scopes_kernel(O):
         idx = tla.simd.vsplat(1, tl.uint32)
         data = tla.simd.vsplat(9, tl.int32)
         tla.simd.vscatter(out[0], idx, data, tla.simd.pge(1, 64))
-    tla.copy(out, tla.view(O, (64,)))
+    tla.copy(out, tla.view(O, (64, )))
 
 
 def test_ir_multiple_scopes():
     module, ctx = compile_offline(two_scopes_kernel, dict(O="*i32"), {})
     text = str(lower_offline(module, ctx))
     assert text.count("func.func private @tla_native_simd") == 2
-    assert text.count("#hivm.memory_effect<read_write>") == 2
+    assert text.count("#hivm.memory_effect<write>") == 2
     assert module.verify()

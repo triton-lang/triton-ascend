@@ -72,10 +72,16 @@ def launch(typ, pattern, index_kind, mode="ZEROING"):
     lane = torch.arange(n)
     raw = (lane * 7 + 3) % 29 - (0 if name.startswith("uint") else 14)
     data = raw.to(dtype)
+    bit_dtype = {8: torch.int8, 16: torch.int16, 32: torch.int32}[w]
+    if pattern == "bits":
+        # Preserve arbitrary payloads, NaNs, infinities and signed zero.
+        bits = (lane * 2654435761 + 12345).to(bit_dtype)
+        bits[:4] = torch.tensor([0, -(1 << (w - 1)), -1, (1 << (w - 1)) - 1], dtype=bit_dtype)
+        data = bits.view(dtype)
     idx = lane.flip(0) if index_kind == "reverse" else (lane * 13 + 7) % (n // 2)
     mask = {
         "unmasked": lane >= 0, "all": lane >= 0, "none": lane < 0, "tail": lane < n - 5, "mixed": (lane * 7 + 3) % 11
-        < 5
+        < 5, "bits": (lane % 3) != 0
     }[pattern]
     out = torch.empty((2, n), dtype=dtype, device="npu")
     compiled = permutation_kernel[(1, )](data.npu(), idx.to({8: torch.uint8, 16: torch.uint16, 32:
@@ -83,9 +89,10 @@ def launch(typ, pattern, index_kind, mode="ZEROING"):
                                          mask.to({8: torch.int8, 16: torch.int16, 32: torch.int32}[w]).npu(), out,
                                          **constants(typ, pattern != "unmasked", mode))
     torch.npu.synchronize()
-    selected = data.to(torch.float64)[idx]
-    ref = torch.stack((torch.where(mask, selected, 0), torch.where(mask, selected, 7)))
-    return out.cpu().to(torch.float64), ref, compiled
+    selected = data.view(bit_dtype).to(torch.int64)[idx]
+    old_bits = torch.tensor(7, dtype=dtype).view(bit_dtype).to(torch.int64)
+    ref = torch.stack((torch.where(mask, selected, 0), torch.where(mask, selected, old_bits)))
+    return out.cpu().view(bit_dtype).to(torch.int64), ref, compiled
 
 
 @pytest.mark.parametrize("typ", TYPES)
@@ -108,7 +115,7 @@ def test_compile(typ):
 
 
 @pytest.mark.parametrize("typ", TYPES)
-@pytest.mark.parametrize("pattern", ("unmasked", "all", "none", "tail", "mixed"))
+@pytest.mark.parametrize("pattern", ("unmasked", "all", "none", "tail", "mixed", "bits"))
 @pytest.mark.parametrize("index_kind", ("reverse", "repeated"))
 @pytest.mark.parametrize("mode", ("ZEROING", "MERGING"))
 def test_run(typ, pattern, index_kind, mode):

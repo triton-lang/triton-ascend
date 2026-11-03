@@ -36,7 +36,11 @@ def group_kernel(X, M, O, DT: tl.constexpr, W: tl.constexpr, OP: tl.constexpr, M
     MT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
     x = tla.alloc_buffer((N, ), DT, space="ub")
     m = tla.alloc_buffer((N, ), MT, space="ub")
-    out = tla.alloc_buffer((N, ), DT, space="ub")
+    WIDEN: tl.constexpr = OP == "add" and (DT == tl.int16 or DT == tl.uint16)
+    OUT_DT: tl.constexpr = (tl.uint32 if DT == tl.uint16 else tl.int32) if WIDEN else DT
+    OUT_N: tl.constexpr = 64 if WIDEN else N
+    OW: tl.constexpr = 32 if WIDEN else W
+    out = tla.alloc_buffer((OUT_N, ), OUT_DT, space="ub")
     tla.copy(tla.view(X, (N, )), x)
     tla.copy(tla.view(M, (N, )), m)
     with tla.scope.simd():
@@ -50,13 +54,18 @@ def group_kernel(X, M, O, DT: tl.constexpr, W: tl.constexpr, OP: tl.constexpr, M
             result = tla.simd.vcgmax(a, mask, mode=MODE)
         else:
             result = tla.simd.vcgmin(a, mask, mode=MODE)
-        tla.simd.vsts(out[0], result, dist="NORM_B8" if W == 8 else ("NORM_B16" if W == 16 else "NORM_B32"))
-    tla.copy(out, tla.view(O, (N, )))
+        tla.simd.vsts(out[0], result, dist="NORM_B16" if OW == 16 else "NORM_B32")
+    tla.copy(out, tla.view(O, (OUT_N, )))
 
 
-TYPES = [("int8", "i8", 8), ("uint8", "u8", 8), ("int16", "i16", 16), ("uint16", "u16", 16), ("int32", "i32", 32),
-         ("uint32", "u32", 32), ("float16", "fp16", 16), ("float32", "fp32", 32)]
+TYPES = [("int16", "i16", 16), ("uint16", "u16", 16), ("int32", "i32", 32), ("uint32", "u32", 32),
+         ("float16", "fp16", 16), ("float32", "fp32", 32)]
 CASES = [(op, typ) for op in ("add", "max", "min") for typ in TYPES]
+
+
+def output_sig(case):
+    op, (name, sig, _) = case
+    return ("u32" if name == "uint16" else "i32") if op == "add" and name in ("int16", "uint16") else sig
 
 
 def constants(case, masked, mode):
@@ -76,12 +85,23 @@ def launch(case, pattern, mode="ZEROING"):
         else:
             info = torch.iinfo(dtype)
             raw = torch.where(lane % 3 == 0, info.min, info.max)
+    if pattern == "special":
+        groups = torch.tensor([float("inf"), -float("inf"), float("nan"), -0.0, 0.0, 1.0, -1.0, 2.0], dtype=dtype)
+        raw = groups.repeat_interleave(n // 8)
+    elif pattern == "masked_nan":
+        raw = raw.to(torch.float64)
+        raw[lane % 2 == 0] = float("nan")
     data = raw.to(dtype)
     mask = {
         "all": lane >= 0, "none": lane < 0, "tail": lane < n - 3, "mixed": (lane * 7 + 3) % 11 < 5, "unmasked": lane
-        >= 0, "extreme": lane >= 0
+        >= 0, "extreme": lane >= 0, "special": lane >= 0, "masked_nan": lane >= 0
     }[pattern]
-    out = torch.empty(n, dtype=dtype, device="npu")
+    if pattern == "masked_nan":
+        mask = lane % 2 != 0
+    widen = op == "add" and name in ("int16", "uint16")
+    out_dtype = (torch.uint32 if name == "uint16" else torch.int32) if widen else dtype
+    out_n = 64 if widen else n
+    out = torch.empty(out_n, dtype=out_dtype, device="npu")
     compiled = group_kernel[(1, )](data.npu(), mask.to({8: torch.int8, 16: torch.int16, 32: torch.int32}[width]).npu(),
                                    out, **constants(case, pattern != "unmasked", mode))
     torch.npu.synchronize()
@@ -97,29 +117,37 @@ def launch(case, pattern, mode="ZEROING"):
             identity = info.min if op == "max" else info.max
         values = torch.where(active, values, identity)
         reduced = values.max(1).values if op == "max" else values.min(1).values
-    expected = torch.cat((reduced.to(dtype).to(torch.float64), torch.zeros(n - 8, dtype=torch.float64)))
+    expected = torch.cat((reduced.to(out_dtype).to(torch.float64), torch.zeros(out_n - 8, dtype=torch.float64)))
     return out.cpu().to(torch.float64), expected, compiled
 
 
 @pytest.mark.parametrize("case", CASES)
 def test_ir(case):
     op, (name, sig, w) = case
-    module, _ = compile_offline(group_kernel, dict(X=f"*{sig}", M=f"*i{w}", O=f"*{sig}"),
+    module, _ = compile_offline(group_kernel, dict(X=f"*{sig}", M=f"*i{w}", O=f"*{output_sig(case)}"),
                                 constants(case, True, "ZEROING"))
     text = str(module)
     assert f'llvm.hivm.vcg{op}.{"u" if name.startswith("uint") else "s"}.x' in text
     assert "ave.hir.vdintlv" not in text
+    if op == "add" and name in ("int16", "uint16"):
+        assert "vector<128xi16> to vector<64xi32>" in text
 
 
 @pytest.mark.parametrize("case", CASES)
 def test_compile(case):
     _, (_, sig, w) = case
-    compile_native_kernel(group_kernel, dict(X=f"*{sig}", M=f"*i{w}", O=f"*{sig}"), constants(case, True, "ZEROING"))
+    compile_native_kernel(group_kernel, dict(X=f"*{sig}", M=f"*i{w}", O=f"*{output_sig(case)}"),
+                          constants(case, True, "ZEROING"))
 
 
-@pytest.mark.parametrize("case", CASES)
-@pytest.mark.parametrize("pattern", ("unmasked", "all", "none", "tail", "mixed", "extreme"))
+@pytest.mark.parametrize("case,pattern",
+                         [(case, pattern)
+                          for case in CASES
+                          for pattern in (("unmasked", "all", "none", "tail", "mixed", "extreme") +
+                                          (("special", "masked_nan") if case[1][0].startswith("float") else ()))])
 @pytest.mark.parametrize("mode", ("ZEROING", "MERGING"))
 def test_run(case, pattern, mode):
     actual, expected, _ = launch(case, pattern, mode)
-    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0, equal_nan=True)
+    if pattern == "special" and case[0] != "add":
+        assert torch.signbit(actual[3]) == torch.signbit(expected[3])

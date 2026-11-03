@@ -1106,12 +1106,16 @@ def test_native_predicate_interleave_contract(op, lanes):
 def test_native_group_reduce_contract(op, kind, dtype, unsigned):
     sem, src, mask = _Semantic(), _vec(128, dtype), _mask(128)
     result = op(src, mask, mode=simd.MODE.MERGING, _semantic=sem)
-    assert result.type == src.type
+    expected = simd.vector_type(
+        64, tl.uint32 if unsigned else tl.int32) if kind == "add" and dtype != tl.float16 else src.type
+    assert result.type == expected
     assert sem.builder.calls == [("group_reduce", (kind, src.handle, mask.handle, unsigned))]
     for kwargs in (dict(mask=_mask(256)), dict(mode="invalid")):
         with pytest.raises(ValueError):
             op(src, _semantic=_Semantic(), **kwargs)
-    for bad in (_vec(128, tl.bfloat16), _vec(64, tl.int64), _vec(64, tl.float16)):
+    invalid_sources = (_vec(256, tl.int8), _vec(256, tl.uint8), _vec(128, tl.bfloat16),
+                       _vec(64, tl.int64), _vec(64, tl.float16))
+    for bad in invalid_sources:
         with pytest.raises(ValueError):
             op(bad, _semantic=_Semantic())
 

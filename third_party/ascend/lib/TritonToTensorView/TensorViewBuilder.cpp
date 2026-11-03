@@ -11,6 +11,7 @@
 #include "bishengir/Dialect/TensorView/IR/TensorViewDialect.h"
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Utils/StaticValueUtils.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -174,8 +175,11 @@ Value tensorViewLoad(OpBuilder &b, Location loc, Value view, ValueRange index,
   auto viewType = cast<tv::TensorViewType>(view.getType());
   SmallVector<int64_t> sparseDims =
       tv::getEncodingSparseDims(viewType.getEncoding());
+  auto type = cast<RankedTensorType>(resultTy);
+  auto init =
+      b.create<tensor::EmptyOp>(loc, type.getShape(), type.getElementType());
   return b
-      .create<tv::ViewLoadOp>(loc, resultTy, view,
+      .create<tv::ViewLoadOp>(loc, TypeRange{resultTy}, view, init,
                               castIndices(b, loc, index, sparseDims))
       .getResult();
 }
@@ -196,8 +200,11 @@ Value tensorViewPtrLoad(OpBuilder &b, Location loc, Value pointers,
   auto addressType =
       RankedTensorType::get(pointerType.getShape(), b.getI64Type());
   pointers = b.create<triton::PtrToIntOp>(loc, addressType, pointers);
+  auto type = cast<RankedTensorType>(resultTy);
+  auto init =
+      b.create<tensor::EmptyOp>(loc, type.getShape(), type.getElementType());
   return b
-      .create<tv::PtrLoadOp>(loc, resultTy, pointers,
+      .create<tv::PtrLoadOp>(loc, TypeRange{resultTy}, pointers, init,
                              createCoordinateTensors(b, loc, coordinates))
       .getResult();
 }

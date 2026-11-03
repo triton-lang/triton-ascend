@@ -10,6 +10,7 @@ add_triton_library(TritonToTensorView
   MLIRArithDialect
   MLIRIR
   MLIRPass
+  MLIRTensorDialect
   MLIRTransforms
   TritonIR
 )

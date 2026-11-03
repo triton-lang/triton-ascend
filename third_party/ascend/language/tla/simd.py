@@ -20,14 +20,17 @@
 """
 SIMD vector-register primitives for the engram_fused_weight decode chains.
 
-Each op maps 1:1 onto an AVE dialect op (``ave.hir.*``) built through
-``ascend_ir.cc`` bindings:
+Primitives use AVE dialect ops (``ave.hir.*``) and native LLVM intrinsics
+through ``tla_builder.cc`` bindings. Some interfaces compose multiple ops:
 
 ============================  ==========================================
-API                           AVE op
+API                           Implementation
 ============================  ==========================================
 ``vlds``                      ``ave.hir.vload``
 ``vsts``                      ``ave.hir.masked_store``
+``pld`` / ``pst``             i1 load/store with explicit predicate density
+``vunpack``                   native unpack or strided vext; optional mask
+``vgather`` / ``vld``         ``vgather`` (8-bit: two gathers + rearrangement)
 ``vextf``                     ``ave.hir.vextf``
 ``vintlv``                    ``ave.hir.vintlv``
 ``vbitcast``                  ``vector.bitcast``
@@ -95,6 +98,11 @@ __all__ = [
     "CMP",
     "POS",
     "vlds",
+    "vunpack",
+    "pld",
+    "pst",
+    "vgather",
+    "vld",
     "vsts",
     "vsstb",
     "vsub",
@@ -696,6 +704,159 @@ def _make_scalar(scalar, dtype, tag, op, _semantic):
         return _semantic.builder.create_simd_scalar(tag, value)
     raise TypeError(f"{op} scalar must be a constexpr number or a scalar tensor, "
                     f"got {type(value).__name__}")
+
+
+@builtin
+def pld(ptr, offsets=None, *, width=8, dist="NORM", _semantic=None) -> vector:
+    """Load a packed predicate from a contiguous byte UB buffer.
+
+    ``width`` (8/16/32) sets the data-lane density and the returned predicate
+    has 2048/width lanes. Bits are LSB-first within bytes: NORM reads bit i,
+    US reads bit i//2, DS reads bit 2*i. Offsets are in bytes. Reserve 32
+    readable bytes (64 for DS) at the address, aligned to 32 bytes.
+    Dynamic addresses must satisfy the same bounds and alignment constraints.
+    This is an unmasked load with no destination-preserving merging mode.
+    """
+    width = _unwrap_if_constexpr(width)
+    if type(width) is not int or width not in (8, 16, 32):
+        raise ValueError("pld width must be 8, 16 or 32")
+    dist = _unwrap_if_constexpr(dist)
+    ss.check_dist(dist, ("NORM", "US", "DS"), "pld")
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+        raise TypeError("pld requires an int8/uint8 UB buffer of packed bits")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ):
+        raise ValueError("pld requires a contiguous one-dimensional buffer")
+    if offsets is None or len(offsets) != len(ptr.shape):
+        raise ValueError("pld requires one scalar offset per buffer dimension")
+    _check_predicate_address(ptr, offsets, 64 if dist == "DS" else 32, "pld")
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    lanes = 2048 // width
+    handle = _semantic.builder.create_simd_pld(base, indices, lanes, dist, f"pb{width}")
+    return vector(handle, vector_type(lanes, tl.int1))
+
+
+def _check_predicate_address(ptr, offsets, size, name):
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int:
+        if offset < 0 or offset + size > ptr.shape[0]:
+            raise ValueError(f"{name} byte range is outside the buffer")
+        if offset % 32:
+            raise ValueError(f"{name} byte offset must be 32-byte aligned")
+    # A static subview must preserve the base alignment as well. Dynamic
+    # addresses remain the caller's responsibility, as for vlds/vsts.
+    if type(ptr.offset) is int and ptr.offset % 32:
+        raise ValueError(f"{name} buffer base must be 32-byte aligned")
+
+
+@builtin
+def pst(ptr, offsets_or_val, val=None, _semantic=None):
+    """Store a predicate as LSB-first packed bits in a byte UB buffer.
+
+    The predicate's 256/128/64 lanes determine PB8/PB16/PB32 density.
+    There is no store mask or merging mode: every predicate bit is stored.
+    Writes exactly 32/16/8 bytes respectively. Offsets are in bytes and
+    must be 32-byte aligned. Dynamic offsets must satisfy the same bounds
+    and alignment requirements as static offsets.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets, val = ptr.buffer, list(ptr.indices), offsets_or_val
+    else:
+        offsets = offsets_or_val
+    _require_vector(val, "val")
+    if val.dtype != tl.int1 or val.type.lanes not in (256, 128, 64):
+        raise ValueError("pst requires a 256/128/64-lane predicate")
+    if not isinstance(ptr, buffer) or ptr.space != "ub" or ptr.dtype not in (tl.int8, tl.uint8):
+        raise TypeError("pst requires an int8/uint8 UB buffer of packed bits")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ):
+        raise ValueError("pst requires a contiguous one-dimensional buffer")
+    if offsets is None or len(offsets) != 1:
+        raise ValueError("pst requires one byte offset")
+    _check_predicate_address(ptr, offsets, val.type.lanes // 8, "pst")
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    _semantic.builder.create_simd_pst(base, indices, val.handle, f"pb{2048 // val.type.lanes}")
+
+
+@builtin
+def vgather(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Gather a full register from contiguous UB using element indices.
+
+    32-bit data requires 64 uint32 indices; 16-bit data requires 128 uint16
+    indices. 8-bit data requires a pair of 128 uint16 index registers for
+    the first and second 128 result lanes. That form uses two gathers and
+    a deinterleave to remove the hardware's zero-extension bytes.
+
+    ``ptr`` is a 1-D buffer or ``buf[base_offset]``; the base offset and
+    indices are in elements. Supports integer 8/16/32-bit, f16/bf16/f32 and
+    fp8e4nv/fp8e5 data. Active indices must be in bounds. The mask
+    has the full result lane count and suppresses inactive memory accesses.
+    Both modes have zero inactive results and use the same masked gather;
+    no redundant zero-merge select is emitted. Preserve old values with vsel.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    else:
+        offsets = [0]
+    if not isinstance(ptr, buffer) or ptr.space != "ub":
+        raise TypeError("vgather requires a UB buffer")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ) or len(offsets) != 1:
+        raise ValueError("vgather requires a contiguous one-dimensional buffer")
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int and not 0 <= offset < ptr.shape[0]:
+        raise ValueError("vgather base offset is outside the buffer")
+    tag = _elem_tag(ptr.dtype)
+    if tag not in ("i8", "i16", "i32", "f16", "bf16", "f32", "fp8e4nv", "fp8e5"):
+        raise ValueError("vgather supports only 8/16/32-bit elements")
+    bits = _ELEM_SPECS[tag]
+    lanes = _lanes_for(tag)
+    mode = _check_mode(mode)
+    has_mask = mask is not None
+    mask = _mask_for(mask, lanes, _semantic)
+    base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
+    if bits == 8:
+        if isinstance(index, tl.tuple):
+            index = index.values
+        if not isinstance(index, (tuple, list)) or len(index) != 2:
+            raise ValueError("8-bit vgather requires two 128-lane uint16 index registers")
+        for half in index:
+            _require_vector(half, "index")
+            if half.type != vector_type(128, tl.uint16):
+                raise ValueError("8-bit vgather indices must be vector<128xuint16>")
+        # Native pintlv duplicates each half's bits into the physical
+        # predicate positions consumed by byte gather. ALL needs no split.
+        if has_mask:
+            lo_mask, hi_mask = _semantic.builder.create_simd_gather_masks(mask.handle)
+        else:
+            lo_mask = hi_mask = mask.handle
+        a = _semantic.builder.create_simd_vgather(base, indices, index[0].handle, lo_mask, tag, lanes)
+        b = _semantic.builder.create_simd_vgather(base, indices, index[1].handle, hi_mask, tag, lanes)
+        # The low byte of each 16-bit hardware slot holds the gathered bits.
+        av = vector(a, vector_type(lanes, ptr.dtype))
+        bv = vector(b, vector_type(lanes, ptr.dtype))
+        av = vbitcast(av, "u8", _semantic=_semantic)
+        bv = vbitcast(bv, "u8", _semantic=_semantic)
+        packed, _ = vdintlv(av, bv, _semantic=_semantic)
+        handle = _semantic.builder.create_simd_bitcast(packed.handle, tag, lanes)
+    else:
+        _require_vector(index, "index")
+        expected = vector_type(lanes, tl.uint32 if bits == 32 else tl.uint16)
+        if index.type != expected:
+            raise ValueError(f"vgather indices must be {expected}")
+        handle = _semantic.builder.create_simd_vgather(base, indices, index.handle, mask.handle, tag, lanes)
+    return vector(handle, vector_type(lanes, ptr.dtype))
+
+
+@builtin
+def vld(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
+    """Indexed UB load, using :func:`vgather` and its element-index contract.
+
+    This exposes full-register indexed loads without CANN's vector_address
+    object or distribution controls. It does not update address state.
+    8-bit loads use two gathers plus mask rearrangement and deinterleave;
+    16/32-bit loads use one gather.
+    """
+    return vgather(ptr, index, mask=mask, mode=mode, _semantic=_semantic)
 
 
 @builtin
@@ -1634,6 +1795,8 @@ class PART:
     """Sub-register selector for width-changing conversions."""
     EVEN = "part_even"
     ODD = "part_odd"
+    LOWER = "lower"
+    HIGHER = "higher"
 
 
 class PAT:
@@ -1679,6 +1842,63 @@ def pset(elem_width: tl.constexpr, dist: tl.constexpr = PAT.ALL, _semantic=None)
     ty = vector_type(lanes, tl.int1)
     handle = _semantic.builder.create_simd_pge(pattern, lanes)
     return vector(handle, ty)
+
+
+@builtin
+def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", signed=False, mode=MODE.ZEROING,
+            _semantic=None) -> vector:
+    """Widen integer lanes with explicit half or strided selection.
+
+    For 8->16 and 16->32, LOWER/HIGHER select the contiguous first/second
+    source half using a native ``vzunpack``/``vsunpack`` intrinsic.
+    Without a mask this emits one unpack operation, with no result select.
+    EVEN (the compatibility default)/ODD use ``vextui``/``vextsi`` instead.
+    Supports 8->16, 16->32 and 8->32 bit registers. ``part_even`` selects
+    src[0::2], ``part_odd`` selects src[1::2]; ``ppN`` selects src[N::4].
+    The 32->64 template fallback discards the selector, so it is rejected.
+    The mask has the result lane count. Both modes follow :class:`MODE`: inactive
+    lanes are zero; preserve an old destination with an explicit ``vsel``.
+    An explicit mask adds a result select. Strided widening uses an all-true
+    source predicate because conversion tests bits at source positions.
+    LOWER/HIGHER and EVEN/ODD have different semantics, not just costs.
+    """
+    _require_vector(src, "src")
+    target_dtype = _unwrap_if_constexpr(target_dtype)
+    src_tag, out_tag = _elem_tag(src.dtype), _elem_tag(target_dtype)
+    if (src_tag, out_tag) not in (("i8", "i16"), ("i16", "i32"), ("i8", "i32")):
+        raise ValueError("vunpack supports integer 8->16, 16->32 and 8->32 conversions")
+    if src.type.lanes != _lanes_for(src_tag):
+        raise ValueError("vunpack requires a full source register")
+    signed = _unwrap_if_constexpr(signed)
+    if type(signed) is not bool:
+        raise ValueError("vunpack signed must be a compile-time bool")
+    part = _unwrap_if_constexpr(part)
+    native_half = part in (PART.LOWER, PART.HIGHER)
+    if not native_half:
+        part = ss.check_part(part)
+    pp = _unwrap_if_constexpr(pp)
+    if pp not in ("pp0", "pp1", "pp2", "pp3"):
+        raise ValueError("vunpack pp must be pp0/pp1/pp2/pp3")
+    if out_tag == "i32" and src_tag == "i8":
+        if part != PART.EVEN:
+            raise ValueError("8->32 vunpack selects lanes with pp, not part")
+    elif pp != "pp0":
+        raise ValueError("factor-two vunpack selects lanes with part, not pp")
+    lanes = _lanes_for(out_tag)
+    mode = _check_mode(mode)
+    if native_half:
+        if mask is not None:
+            _check_mask(mask, lanes)
+        handle = _semantic.builder.create_simd_vunpack(src.handle, out_tag, int(part == PART.HIGHER), signed)
+        result = vector(handle, vector_type(lanes, target_dtype))
+        if mask is not None:
+            result = vsel(mask, result, vsplat(0, target_dtype, _semantic=_semantic), _semantic=_semantic)
+        return result
+    apply_mask = mask is not None
+    mask = _mask_for(mask, lanes, _semantic)
+    handle = _semantic.builder.create_simd_vcvt("extsi" if signed else "extui", src.handle, mask.handle, out_tag, part,
+                                                "round", False, _MODE_BUILDER_NAMES[mode], pp, apply_mask)
+    return vector(handle, vector_type(lanes, target_dtype))
 
 
 @builtin

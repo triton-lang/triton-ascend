@@ -95,7 +95,7 @@ createCoordinateTensors(OpBuilder &b, Location loc,
   SmallVector<Value> indices;
   for (ArrayRef<int64_t> coordinate : coordinates) {
     auto type = RankedTensorType::get({static_cast<int64_t>(coordinate.size())},
-                                      b.getIndexType());
+                                      b.getI64Type());
     auto value = DenseIntElementsAttr::get(type, coordinate);
     indices.push_back(b.create<arith::ConstantOp>(loc, type, value));
   }

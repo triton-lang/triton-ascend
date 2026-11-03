@@ -58,6 +58,7 @@ from triton.backends.ascend.utils import (
     _get_npucompiler_path,
     _get_triton_adapter_opt_path,
     _get_triton_opt_path,
+    _get_triton_mlir_opt_path,
     _is_ascend_sanitizer_enabled,
     _is_debug_line_info_disabled,
     _is_auto_map_parallel_blocks_enabled,

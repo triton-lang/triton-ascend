@@ -580,6 +580,15 @@ def _get_triton_opt_path() -> str:
     return _get_tool_path("triton-opt")
 
 
+def _get_triton_mlir_opt_path() -> str:
+    """
+    Get the path to triton-mlir-opt tool.
+    This tool is used to convert MLIR to Bytecode format, supporting both
+    MLIR native ops and AscendNPU-IR custom ops.
+    """
+    return _get_tool_path("triton-mlir-opt")
+
+
 def _get_npucompiler_path() -> str:
     ascend_dir = os.path.dirname(os.path.abspath(__file__))
     env = os.environ.copy()

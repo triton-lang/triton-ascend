@@ -23,6 +23,7 @@ import torch
 import torch_npu  # noqa: F401
 import triton
 import triton.language as tl
+from triton.backends.ascend.utils import AscendArchGen, arch_generation
 
 
 @triton.jit
@@ -72,6 +73,11 @@ def _fp32_downcast_rtz(X, Y, BLOCK: tl.constexpr):
     ids=["fp16", "bf16", "fp8e5m2"],
 )
 def test_fp32_downcast_rtz(dtype, cases):
+    if dtype == tl.float8e5:
+        arch = triton.runtime.driver.active.get_current_target().arch
+        if arch_generation(arch) != AscendArchGen.GEN5:
+            pytest.skip("FP32 to FP8 E5M2 RTZ conversion is only supported on A5")
+
     # Fixed IEEE encodings provide an oracle independent of the device cast
     # and PyTorch's default round-to-nearest conversion. Include both signs
     # and compare raw bits so that negative zero is checked too.

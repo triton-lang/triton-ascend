@@ -1516,11 +1516,25 @@
       "dynamic_cv_first_fill_system_cycles": 395.0000000000002,
       "dynamic_cv_per_iteration_delta_system_cycles": -21.66666666666606,
       "schedule_contract": "CANN9.1_9579_stage_predecessor_aic_aiv_schedule_v1",
-      "full_kernel_validation_sha256": "81169cb5f51a5a6649c947ee898920df8b68d6ad17fa333dd39965cb0ed16642",
-      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. Frozen validation covers 12 original and QK32/V64 off/on full-kernel cases with maximum APE 3.63%; no kernel name, Stage count, carried-value name or dot geometry is part of admission."
+      "full_kernel_validation_sha256": "d1c8e9a3eec2bc13ae075d5fb31b5f8df03773739dce8814f0ed1ec4f9ab30e4",
+      "evidence": "Generic Stage predecessor/resource schedule calibrated with independent task-gap and mask-only CV terms 0c4253475a4313542d705a4e19ae0472b38273c76746f2c9f6ed37a23e011339. The 289-cycle recurrent-task completion is launch-inclusive and replaces the generic additive launch envelope. The initiation-interval efficiency uses three independent original-shape processes (CV 0.39%); independent QK32/V64 holdout maximum error is 2.58%. No kernel name, Stage count, carried-value name or dot geometry is part of admission."
     },
     "scalar_prologue_system_cycles": 852.475,
     "scalar_epilogue_system_cycles": 852.475,
+    "launch_system_cycles_by_execution_domain": {
+      "aiv": {
+        "base_system_cycles": 537.9774739135498,
+        "incremental_system_cycles_per_physical_program": 14.307636363636364,
+        "overlap_norm_exponent": 1.6,
+        "evidence": "AIV fit uses six independent 300-ABBA windows and 14400 tasks. Base CV 2.07%, incremental CV 0.57%; direct-copy and AIV-Mixed holdout marginal errors are 0.13% and 0.46%. The p=1.6 overlap composition is validated by direct copy, vector-add, grid-stride gather, masked-copy schedule exclusion, and the strict 96-case non-histogram profiler run."
+      },
+      "aic": {
+        "base_system_cycles": 584.3611462727271,
+        "incremental_system_cycles_per_physical_program": 112.0093621399177,
+        "overlap_norm_exponent": 1.6,
+        "evidence": "AIC fit uses three independent 300-ABBA windows and 3600 tasks. Base CV 2.87%, incremental CV 1.17%; Cube-plus-SIMT holdout marginal error is 4.42%. The p=1.6 overlap composition is independently checked by the P448 all-SIMD grid-dot route."
+      }
+    },
     "boundary_residual_system_cycles_by_physical_program_count": {
       "1": 408.3,
       "2": 703.65,
@@ -1707,6 +1721,6 @@
       "evidence": "data_provider/950pr_simt_non_affine_rank1_memory_20261009.json; paired one-dimensional and channel-row structural families at source program counts 8/16/32/64/128/256. Curve points use the paired-layout center; the P128 point is the robust center of fresh-process medians on cards 0/2/4/5 plus the independent flat-layout measurement. Matching uses the compiler-proven non-affine FP address DAG, rank-one 32-element load/store geometry and source program count, never an operator or kernel name."
     },
     "system_counter_frequency_mhz": 1000,
-    "evidence": "The base curve is the fresh forced-SIMD minimal observable store-only kernel sweep at physical grids 1,2,4,8,16,32,56. The global-load residual is the median direct-copy profiler duration minus its compiler-derived route resource and the base boundary at P=1: 314.207 SYS_CNT for forced SIMD and 485.789 SYS_CNT for selected SIMT. Independent P=4/P=56 direct-copy controls confirm the term is a sub-microsecond completion envelope rather than a per-operation slope. Kernel argument count is reported for diagnosis only: the v105 held-out set disproved an additive argument-count charge because two four-argument kernels with different structural work required opposite corrections. The prologue/epilogue fields are an equal accounting split, not separately measured components."
+    "evidence": "Exact-binary ABBA calibration on Ascend950PR_9579. Independent direct-copy, AIV-Mixed and Cube-plus-SIMT holdouts validate the execution-domain launch formula. The legacy boundary remains only as a completion reference: a single-wave route with nontrivial work after a global load, or a dynamic dot loop, pays max(0, legacy_boundary + route_load_completion - launch); pure direct-memory paths and ordinary multi-wave routes do not. Store-only multi-block growth belongs to scalar/MTE3 completion rather than launch."
   }
 }

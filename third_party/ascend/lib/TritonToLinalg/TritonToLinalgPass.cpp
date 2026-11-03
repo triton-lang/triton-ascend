@@ -1137,7 +1137,6 @@ static void addMemoryConversionLegalities(ConversionTarget &target,
   // earlier pass has already adapted the pointer operand to a memref.
   target.addIllegalOp<
       triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp, triton::AtomicCASOp,
-      triton::ascend::IndirectLoadOp, triton::ascend::IndirectStoreOp,
       triton::ascend::StrideLoadOp, triton::ascend::StrideStoreOp,
       triton::ascend::GatherOutToUbOp, triton::ascend::ScatterUbToOutOp,
       triton::ascend::IndexSelectSimdOp, triton::ascend::IndexPutOp>();

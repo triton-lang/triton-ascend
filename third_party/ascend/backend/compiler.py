@@ -2848,7 +2848,8 @@ def _custom_core_count_options(metadata):
     npu_utils = NPUUtils()
     if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
         return [
-            f"--custom-aic-number={npu_utils.get_aicore_num()}", f"--custom-aiv-number={npu_utils.get_aivector_core_num()}"
+            f"--custom-aic-number={npu_utils.get_aicore_num()}",
+            f"--custom-aiv-number={npu_utils.get_aivector_core_num()}"
         ]
     return []
 

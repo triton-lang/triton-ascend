@@ -90,6 +90,7 @@ def _triton_is_builtin(fn):
             return probe(fn)
     raise AssertionError("triton exposes no is_builtin(); cannot verify @builtin")
 
+
 # --------------------------------------------------------------------------
 # mock builder
 # --------------------------------------------------------------------------
@@ -192,7 +193,6 @@ class _ScalarBuilder:
         self.calls.append(("create_select", (cond, x, y)))
         return _ScalarHandle("select", (cond, x, y))
 
-
     def get_int8(self, value):
         return self._make("get_int8", value)
 
@@ -200,7 +200,7 @@ class _ScalarBuilder:
         return self._make("srem", (lhs, rhs))
 
     def create_assume(self, cond):
-        self.calls.append(("create_assume", (cond,)))
+        self.calls.append(("create_assume", (cond, )))
 
     def create_urem(self, lhs, rhs):
         return self._make("urem", (lhs, rhs))
@@ -847,8 +847,8 @@ def test_truncmod_export_and_builtin():
     with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
         math_src.truncmod(7, 3)
     name = "tla_truncmod_export"
-    spec = importlib.util.spec_from_file_location(
-        name, _TLA_DIR / "__init__.py", submodule_search_locations=[str(_TLA_DIR)])
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
     pkg = importlib.util.module_from_spec(spec)
     sys.modules[name] = pkg
     try:
@@ -872,8 +872,8 @@ def test_truncmod_literals_emit_signed_remainder(a, b):
         assert (rhs.op, rhs.value) == ("get_int32", b)
 
 
-@pytest.mark.parametrize("dtype,op", [(tl.int8, "srem"), (tl.int32, "srem"), (tl.int64, "srem"),
-                                      (tl.uint32, "urem"), (tl.uint64, "urem")])
+@pytest.mark.parametrize("dtype,op", [(tl.int8, "srem"), (tl.int32, "srem"), (tl.int64, "srem"), (tl.uint32, "urem"),
+                                      (tl.uint64, "urem")])
 def test_truncmod_tensor_signedness(dtype, op):
     sem, _ = _scalar_semantic()
     a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
@@ -883,8 +883,7 @@ def test_truncmod_tensor_signedness(dtype, op):
     assert _last(sem) == (op, (a.handle, b.handle))
 
 
-@pytest.mark.parametrize("dtype,op,constant", [(tl.int8, "srem", "get_int8"),
-                                              (tl.uint32, "urem", "get_uint32")])
+@pytest.mark.parametrize("dtype,op,constant", [(tl.int8, "srem", "get_int8"), (tl.uint32, "urem", "get_uint32")])
 def test_truncmod_literal_preserves_tensor_type(dtype, op, constant):
     sem, _ = _scalar_semantic()
     a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
@@ -912,11 +911,16 @@ def test_truncmod_rejects_literal_zero(divisor):
 
 
 def test_truncmod_invalid_operands():
-    values = [True, 1.5, tl.constexpr(True), tl.constexpr(1.0),
-              tl.tensor("block", tl.block_type(tl.int32, [64])),
-              tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
-              tl.tensor(_ScalarHandle("arg", "f32"), tl.float32), _vec(64, tl.int32),
-              tla_core.buffer("buf", tla_core.buffer_type((64,), tl.int32, "ub"))]
+    values = [
+        True, 1.5,
+        tl.constexpr(True),
+        tl.constexpr(1.0),
+        tl.tensor("block", tl.block_type(tl.int32, [64])),
+        tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
+        tl.tensor(_ScalarHandle("arg", "f32"), tl.float32),
+        _vec(64, tl.int32),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.int32, "ub"))
+    ]
     for value in values:
         with pytest.raises(TypeError, match="truncmod a"):
             math_src.truncmod(value, 2, _semantic=_NoBuilder())
@@ -932,8 +936,7 @@ def test_truncmod_invalid_operands():
 def test_where_exported_from_source_package():
     assert "where" in selection.__all__
     name = "tla_source_export"
-    spec = importlib.util.spec_from_file_location(name,
-                                                  _TLA_DIR / "__init__.py",
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
                                                   submodule_search_locations=[str(_TLA_DIR)])
     pkg = importlib.util.module_from_spec(spec)
     sys.modules[name] = pkg
@@ -1057,8 +1060,8 @@ def test_assume_export_and_builtin():
     with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
         aux_src.assume(True)
     name = "tla_assume_export"
-    spec = importlib.util.spec_from_file_location(
-        name, _TLA_DIR / "__init__.py", submodule_search_locations=[str(_TLA_DIR)])
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
     pkg = importlib.util.module_from_spec(spec)
     sys.modules[name] = pkg
     try:
@@ -1070,14 +1073,14 @@ def test_assume_export_and_builtin():
             del sys.modules[mod]
 
 
-@pytest.mark.parametrize("cond,value", [(True, True), (False, False),
-                                        (tl.constexpr(True), True), (tl.constexpr(False), False)])
+@pytest.mark.parametrize("cond,value", [(True, True), (False, False), (tl.constexpr(True), True),
+                                        (tl.constexpr(False), False)])
 def test_assume_constants_emit(cond, value):
     sem, builder = _scalar_semantic()
     assert aux_src.assume(cond, _semantic=sem) is None
     assert builder.calls[0] == ("get_int1", value)
     assert len(builder.calls) == 2
-    name, (handle,) = builder.calls[-1]
+    name, (handle, ) = builder.calls[-1]
     assert name == "create_assume"
     assert (handle.op, handle.value) == ("get_int1", value)
 
@@ -1087,15 +1090,20 @@ def test_assume_runtime_condition_emits_with_debug_disabled():
     builder.options = types.SimpleNamespace(debug=False)
     cond = tl.tensor(_ScalarHandle("arg", "cond"), tl.int1)
     assert aux_src.assume(cond, _semantic=sem) is None
-    assert builder.calls == [("create_assume", (cond.handle,))]
+    assert builder.calls == [("create_assume", (cond.handle, ))]
 
 
 def test_assume_invalid_inputs_never_reach_builder():
-    values = [1, 0, 1.0, None, tl.constexpr(1), tl.constexpr(1.0),
-              tl.tensor("block", tl.block_type(tl.int1, [64])),
-              tl.tensor("integer", tl.int32), tl.tensor("float", tl.float32),
-              _vec(64, tl.int1),
-              tla_core.buffer("buf", tla_core.buffer_type((64,), tl.float32, "ub"))]
+    values = [
+        1, 0, 1.0, None,
+        tl.constexpr(1),
+        tl.constexpr(1.0),
+        tl.tensor("block", tl.block_type(tl.int1, [64])),
+        tl.tensor("integer", tl.int32),
+        tl.tensor("float", tl.float32),
+        _vec(64, tl.int1),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    ]
     for cond in values:
         with pytest.raises(TypeError, match="assume requires"):
             aux_src.assume(cond, _semantic=_NoBuilder())

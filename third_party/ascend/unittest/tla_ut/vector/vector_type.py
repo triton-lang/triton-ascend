@@ -108,12 +108,11 @@ def _scalar_truncmod(out, a, b, DTYPE: tl.constexpr):
 
 def test_truncmod_scalar_ir(output_dir=None):
     for kind, dtype, op in (("i32", tl.int32, "arith.remsi"), ("u32", tl.uint32, "arith.remui")):
-        module, ctx = compile_offline(
-            _scalar_truncmod, {
-                "out": tla.buffer_type((64,), dtype, "ub"),
-                "a": kind,
-                "b": kind,
-            }, {"DTYPE": dtype}, output_dir)
+        module, ctx = compile_offline(_scalar_truncmod, {
+            "out": tla.buffer_type((64, ), dtype, "ub"),
+            "a": kind,
+            "b": kind,
+        }, {"DTYPE": dtype}, output_dir)
         text = str(module)
         assert op in text, text
         assert "tensor<" not in text, text
@@ -123,11 +122,8 @@ def test_truncmod_scalar_ir(output_dir=None):
 def test_scalar_where_ir(output_dir=None):
     # vci materializes an i32 vector, so the UB view must be int32 (f32 here
     # made the vsts dtype mismatch).
-    module, ctx = compile_offline(
-        _scalar_where, {
-            "out": tla.buffer_type((64, ), tl.int32, "ub"),
-            "cond": "i1"
-        }, {}, output_dir)
+    module, ctx = compile_offline(_scalar_where, {"out": tla.buffer_type((64, ), tl.int32, "ub"), "cond": "i1"}, {},
+                                  output_dir)
     text = str(module)
     assert "arith.select" in text, text
     assert "tensor<" not in text

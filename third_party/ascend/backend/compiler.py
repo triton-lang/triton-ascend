@@ -404,7 +404,7 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         # copy next to the surviving to_tensor visible, so the other half of the
         # tile reads back the padding value. The IR is unchanged through
         # bishengir-opt, so the loss happens in code generation.
-        if compile_on_910_95:
+        if compile_on_910_95 and _is_a5_target_arch(metadata["target"].arch):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0

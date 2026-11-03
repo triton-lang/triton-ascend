@@ -99,6 +99,12 @@ class _Recorder:
     def create_simd_unary(self, kind, src, mask, mode):
         return self._record("unary", kind, src, mask, mode)
 
+    def create_simd_vfma(self, acc, lhs, rhs, mask, mode):
+        return self._record("vfma", acc, lhs, rhs, mask, mode)
+
+    def create_simd_vcvt(self, kind, src, mask, out_elem_tag, part, round="round", sat=True, mode="zeroing"):
+        return self._record("vcvt", kind, src, mask, out_elem_tag, part, round, sat, mode)
+
     def create_simd_vdup(self, scalar, elem_tag, lanes, mask, mode):
         return self._record("vdup", scalar, elem_tag, lanes, mask, mode)
 
@@ -607,6 +613,74 @@ def test_mode_zeroing_and_merging_reach_the_builder_distinctly():
             op(*args, mode="MODE_WHATEVER", _semantic=_Semantic())
     with pytest.raises(ValueError, match="invalid mode"):
         simd.vdup(1.0, tl.float32, mode="MODE_WHATEVER", _semantic=_Semantic())
+
+
+def test_merging_composes_vsel_against_the_first_operand():
+    """MODE.MERGING on the accumulate/predicate family selects src0/acc.
+
+    The op itself is always built under ZEROING; MERGING appends a vsel
+    against the op's first vector operand (acc for the accumulate ops),
+    mirroring CANN's V920 software-merge lowering.  The legacy register ops
+    keep forwarding "merging" to the C++ builder (covered above).
+    """
+    mask = _mask(64)
+    a = _vec(64, tl.float32)
+    b = _vec(64, tl.float32)
+    for op, args, merge in (
+        (simd.vand, (a, b), a.handle),
+        (simd.vmuls, (a, 2.0), a.handle),
+        (simd.vmula, (a, b, b), a.handle),
+        (simd.vaxpy, (a, b, 1.5), a.handle),
+        (simd.vln, (a, ), a.handle),
+    ):
+        sem = _Semantic()
+        op(*args, mask=mask, mode=simd.MODE.MERGING, _semantic=sem)
+        calls = sem.builder.calls
+        assert calls[-1][0] == "vsel", (op.__name__, calls)
+        assert calls[-1][1][0] is mask.handle, (op.__name__, calls)
+        assert calls[-1][1][2] is merge, (op.__name__, calls)
+        op_call = next(c for c in calls if c[0] in ("binary", "binary_scalar", "vfma", "unary"))
+        assert op_call[1][-1] == "zeroing", (op.__name__, calls)
+
+        sem = _Semantic()
+        op(*args, mask=mask, mode=simd.MODE.ZEROING, _semantic=sem)
+        assert all(c[0] != "vsel" for c in sem.builder.calls), op.__name__
+
+
+def test_vcvt_masks_follow_the_source_register():
+    """Width-changing vcvt predicates at the source register's granularity.
+
+    Measured on Ascend950PR: f16->f32 takes the f16 register's 128-lane b16
+    mask (gating the source lane each output reads); f32->f16 takes the f32
+    register's 64-lane b32 mask (gating whole lane pairs).  Same-width
+    conversions share the 64-lane rule.
+    """
+    # f16 -> f32 widening: the f16 source register's 128-lane mask
+    sem = _Semantic()
+    simd.vcvt(_vec(128, tl.float16), tl.float32, _semantic=sem)
+    assert sem.builder.calls[0] == ("pge", ("ALL", 128))
+    assert _last(sem)[0] == "vcvt"
+    # f32 -> f16 narrowing: the f32 source register's 64-lane mask
+    sem = _Semantic()
+    simd.vcvt(_vec(64, tl.float32), tl.float16, _semantic=sem)
+    assert sem.builder.calls[0] == ("pge", ("ALL", 64))
+    # same-width conversions keep the shared 64-lane rule
+    sem = _Semantic()
+    simd.vcvt(_vec(64, tl.int32), tl.float32, _semantic=sem)
+    assert sem.builder.calls[0] == ("pge", ("ALL", 64))
+    # the mask must match the source register in either direction
+    with pytest.raises(ValueError, match="mask must be vector<128xint1>"):
+        simd.vcvt(_vec(128, tl.float16), tl.float32, mask=_mask(64), _semantic=_Semantic())
+    with pytest.raises(ValueError, match="mask must be vector<64xint1>"):
+        simd.vcvt(_vec(64, tl.float32), tl.float16, mask=_mask(128), _semantic=_Semantic())
+
+
+def test_vcvt_rejects_merging():
+    """vcvt changes dtype, so no result-typed merge source exists."""
+    with pytest.raises(ValueError, match="does not support MODE.MERGING"):
+        simd.vcvt(_vec(64, tl.float32), tl.float16, mode=simd.MODE.MERGING, _semantic=_Semantic())
+    with pytest.raises(ValueError, match="invalid mode"):
+        simd.vcvt(_vec(64, tl.float32), tl.float16, mode="MODE_WHATEVER", _semantic=_Semantic())
 
 
 def test_precision_tiers():

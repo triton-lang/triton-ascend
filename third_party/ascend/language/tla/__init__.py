@@ -30,10 +30,26 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``, and scalar dtypes.
 
 Scalar types share Triton's dtype protocol, so ``tla.float32`` can be passed
-directly to buffer, vector, and cast APIs.  The ``dtype`` constructor uses
-Triton's canonical names (for example, ``dtype("fp32")``).
+directly to buffer, vector, and cast APIs.  The re-exported names map to the
+following Triton dtypes:
+
+``bfloat16`` -> ``bf16``, ``float16`` -> ``fp16``, ``float32`` -> ``fp32``,
+``int8``/``int16``/``int32``/``int64`` keep their names, and
+``uint8``/``uint16``/``uint32``/``uint64`` keep their names.  The ``dtype``
+constructor uses Triton's canonical names (for example, ``dtype("fp32")``).
+
+.. note::
+    The scalar dtype objects are re-exported unchanged from
+    :mod:`triton.language.core`; they are the same objects as
+    ``triton.language.float32`` and the other public dtype names.
 """
 
+# Re-export Triton's scalar dtype objects unchanged.  Using the original
+# objects keeps ``tla.buffer_type``, ``tla.vector_type``, casts and ``@tla.jit``
+# interoperable with ``triton.language`` without wrappers or conversions.
+# These are dtype objects, not functions; their public spellings are the
+# Triton names above, while ``tla.dtype(...)`` accepts canonical names such as
+# ``"fp32"``.
 from triton.language.core import (
     bfloat16,
     dtype,

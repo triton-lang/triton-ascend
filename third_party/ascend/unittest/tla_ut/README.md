@@ -4,7 +4,7 @@ Each case is one script with three stages selected by `TLA_TEST_STAGE`:
 
 | Stage     | Verifies                                            | NPU needed |
 |-----------|-----------------------------------------------------|------------|
-| `ir`      | offline HIVM IR handed to npuir (structure asserts) | no         |
+| `ir`      | offline HIVM IR handed to NPU-IR (structure asserts) | no         |
 | `compile` | `.o` / `.npubin` artifacts in `TRITON_CACHE_DIR`    | yes        |
 | `run`     | device launch + accuracy                            | yes        |
 

@@ -3,16 +3,9 @@
 #include "Context/Shadow.h"
 #include "Data/TraceData.h"
 #include "Data/TreeData.h"
-#ifdef PROTON_BUILD_CUDA
 #include "Profiler/Cupti/CuptiProfiler.h"
-#endif
 #include "Profiler/Instrumentation/InstrumentationProfiler.h"
-#ifdef PROTON_BUILD_MSPTI
-#include "Profiler/Mspti/MsptiProfiler.h"
-#endif
-#ifdef PROTON_BUILD_HIP
 #include "Profiler/Roctracer/RoctracerProfiler.h"
-#endif
 #include "Utility/String.h"
 
 namespace proton {
@@ -20,24 +13,13 @@ namespace proton {
 namespace {
 
 Profiler *makeProfiler(const std::string &name) {
-#ifdef PROTON_BUILD_CUDA
   if (proton::toLower(name) == "cupti") {
     return &CuptiProfiler::instance();
-  }
-#endif
-#ifdef PROTON_BUILD_HIP
-  if (proton::toLower(name) == "roctracer") {
+  } else if (proton::toLower(name) == "roctracer") {
     return &RoctracerProfiler::instance();
-  }
-#endif
-  if (proton::toLower(name) == "instrumentation") {
+  } else if (proton::toLower(name) == "instrumentation") {
     return &InstrumentationProfiler::instance();
   }
-#ifdef PROTON_BUILD_MSPTI
-  if (proton::toLower(name) == "mspti") {
-    return &MsptiProfiler::instance();
-  }
-#endif
   throw std::runtime_error("Unknown profiler: " + name);
 }
 
@@ -153,9 +135,6 @@ void SessionManager::activateSessionImpl(size_t sessionId) {
   registerInterface<InstrumentationInterface>(sessionId,
                                               instrumentationInterfaceCounts);
   registerInterface<ContextSource>(sessionId, contextSourceCounts);
-  registerInterface<StateInterface>(sessionId, stateInterfaceCounts);
-  for (auto *interface : sessions[sessionId]->getInterfaces<StateInterface>())
-    interface->setState(ContextSource::getThreadState());
 }
 
 void SessionManager::deActivateSessionImpl(size_t sessionId) {
@@ -170,7 +149,6 @@ void SessionManager::deActivateSessionImpl(size_t sessionId) {
   unregisterInterface<InstrumentationInterface>(sessionId,
                                                 instrumentationInterfaceCounts);
   unregisterInterface<ContextSource>(sessionId, contextSourceCounts);
-  unregisterInterface<StateInterface>(sessionId, stateInterfaceCounts);
 }
 
 void SessionManager::removeSession(size_t sessionId) {
@@ -308,8 +286,6 @@ void SessionManager::setState(std::optional<Context> context) {
       contextSource->setState(context);
     }
   }
-  executeInterface(stateInterfaceCounts,
-                   [&](auto *interface) { interface->setState(context); });
 }
 
 size_t SessionManager::getContextDepth(size_t sessionId) {

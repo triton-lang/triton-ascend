@@ -64,6 +64,6 @@ def max_bps(device_type, arch, bus_width, memory_clock_rate):
     """
     if device_type == "CUDA":
         return 2 * bus_width * memory_clock_rate * 1e3 / 8
-    if device_type == "HIP":
+    else:
+        assert device_type == "HIP"
         return amd_bps_by_arch[arch]
-    raise ValueError(f"Peak memory bandwidth is unavailable for device type {device_type}")

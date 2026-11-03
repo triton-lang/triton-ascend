@@ -404,8 +404,6 @@ convertToTimelineTrace(TraceData::Trace *trace,
         getStringValue(kernelEvent.cycleMetric, CycleMetric::KernelName);
     metadata->scopeName = scopeIdToName;
     metadata->callStack = std::move(callStack);
-    metadata->cycleCounterFreqMhz =
-        kernelEvent.cycleMetric->getCycleCounterFreqMhz();
     if (timeShiftCost > 0)
       timeShift(timeShiftCost, parserResult);
     results.emplace_back(parserResult, metadata);

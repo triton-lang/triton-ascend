@@ -1,6 +1,5 @@
 #include "TraceDataIO/TraceWriter.h"
 #include <algorithm>
-#include <cmath>
 #include <iostream>
 #include <limits>
 #include <sstream>
@@ -166,10 +165,6 @@ void StreamChromeTraceWriter::writeKernel(json &object,
                                           const uint64_t minInitTime) {
   auto result = kernelTrace.first;
   auto metadata = kernelTrace.second;
-  if (!std::isfinite(metadata->cycleCounterFreqMhz) ||
-      metadata->cycleCounterFreqMhz <= 0)
-    throw std::invalid_argument(
-        "Cycle counter frequency must be positive and finite");
 
   json callStack = json::array();
   for (auto const &frame : metadata->callStack) {
@@ -215,8 +210,8 @@ void StreamChromeTraceWriter::writeKernel(json &object,
           else
             name = metadata->scopeName.at(scopeId);
 
-          // Unit: MHz; backends override the 1GHz default via KernelMetadata.
-          double freq = metadata->cycleCounterFreqMhz;
+          // Unit: MHz, we assume freq is 1000MHz (1GHz)
+          double freq = 1000.0;
 
           // Global time is in `ns` unit. With 1GHz assumption, we
           // could subtract with blockToMInCycle: (ns - ns) / 1GHz - cycle

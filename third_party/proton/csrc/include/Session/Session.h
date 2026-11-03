@@ -216,7 +216,6 @@ private:
       instrumentationInterfaceCounts;
   // {context source, active count}
   std::vector<std::pair<ContextSource *, size_t>> contextSourceCounts;
-  std::vector<std::pair<StateInterface *, size_t>> stateInterfaceCounts;
 };
 
 } // namespace proton

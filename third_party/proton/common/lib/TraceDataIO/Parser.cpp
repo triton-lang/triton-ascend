@@ -16,8 +16,7 @@ void ParserBase::reportException(const ParserException &e, size_t pos) {
               << std::endl;
   }
 
-  if (e.severity == ExceptionSeverity::WARNING ||
-      config.errorPolicy == ParserConfig::ErrorPolicy::BestEffort)
+  if (e.severity == ExceptionSeverity::WARNING)
     return;
 
   throw e;

@@ -7,7 +7,6 @@
 #include <mutex>
 #include <optional>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace proton {
@@ -44,25 +43,11 @@ public:
 
   void setState(std::optional<Context> state) { ContextSource::state = state; }
 
-  static std::optional<Context> getThreadState() { return state; }
-
-  static void setThreadState(std::optional<Context> newState) {
-    state = std::move(newState);
-  }
-
   virtual size_t getDepth() = 0;
 
 protected:
   virtual std::vector<Context> getContextsImpl() = 0;
   static thread_local std::optional<Context> state;
-};
-
-/// Optional notifications for profilers whose callbacks need launch-thread
-/// state.
-class StateInterface {
-public:
-  virtual ~StateInterface() = default;
-  virtual void setState(std::optional<Context> state) = 0;
 };
 
 /// A scope is a context with a unique identifier.

@@ -30,6 +30,7 @@ except ImportError:
     from wheel.bdist_wheel import bdist_wheel
 
 from .build_npuir import build_npuir
+from .proton_patch import set_proton_patch
 
 _THIS_DIR = Path(__file__).resolve().parent
 _REPO_ROOT = _THIS_DIR.parents[2]
@@ -556,6 +557,7 @@ def patch_module(mod):
             return cmake_args
 
         def run(self):
+            set_proton_patch(mod.check_env_flag("TRITON_BUILD_PROTON", "OFF"), _REPO_ROOT)
             _apply_triton_ascend_patch()
 
             enable_hitest = os.getenv("TRITON_ENABLE_COVERAGE_HITEST", "0").lower() \

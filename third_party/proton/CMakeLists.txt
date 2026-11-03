@@ -3,50 +3,15 @@ project(Proton LANGUAGES CXX)
 set(PROTON_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/csrc")
 set(PROTON_COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
-# ============ Configure optional backends =============
-# Community builds retain both GPU backends. Downstream builds opt out explicitly.
-option(PROTON_BUILD_CUDA "Build the CUPTI and CUDA instrumentation backends" ON)
-option(PROTON_BUILD_HIP "Build the ROCtracer and HIP instrumentation backends" ON)
-option(PROTON_BUILD_MSPTI "Build the MSPTI backend" OFF)
-option(PROTON_BUILD_CANN "Build the CANN device and instrumentation runtime" OFF)
-
-function(proton_require_header directory header backend)
-  if(NOT DEFINED ${directory} OR NOT EXISTS "${${directory}}/${header}")
-    message(FATAL_ERROR "${backend} is enabled but ${header} is missing from ${directory}. Set ${directory} or explicitly disable ${backend}.")
-  endif()
-endfunction()
-
-if(PROTON_BUILD_CUDA)
-  proton_require_header(CUPTI_INCLUDE_DIR cupti.h PROTON_BUILD_CUDA)
-  proton_require_header(CUPTI_INCLUDE_DIR cuda.h PROTON_BUILD_CUDA)
+# ============ Check for includes =============
+if(NOT CUPTI_INCLUDE_DIR)
+  message(FATAL_ERROR "CUPTI include directory not defined")
 endif()
-if(PROTON_BUILD_HIP)
-  proton_require_header(ROCTRACER_INCLUDE_DIR roctracer/roctracer.h PROTON_BUILD_HIP)
-  proton_require_header(ROCTRACER_INCLUDE_DIR hip/hip_runtime_api.h PROTON_BUILD_HIP)
+if(NOT ROCTRACER_INCLUDE_DIR)
+  message(FATAL_ERROR "ROCTRACER include directory not defined")
 endif()
-if(PROTON_BUILD_MSPTI)
-  if(NOT PROTON_BUILD_CANN)
-    message(FATAL_ERROR "PROTON_BUILD_MSPTI requires PROTON_BUILD_CANN")
-  endif()
-  proton_require_header(MSPTI_INCLUDE_DIR mspti.h PROTON_BUILD_MSPTI)
-endif()
-if(PROTON_BUILD_CANN)
-  proton_require_header(CANN_INCLUDE_DIR acl/acl.h PROTON_BUILD_CANN)
-endif()
-message(STATUS "Proton backends: CUDA=${PROTON_BUILD_CUDA}; HIP=${PROTON_BUILD_HIP}; MSPTI=${PROTON_BUILD_MSPTI}; CANN=${PROTON_BUILD_CANN}")
-
 if(NOT JSON_INCLUDE_DIR)
   message(FATAL_ERROR "JSON include directory not defined")
-endif()
-
-if(PROTON_BUILD_CANN)
-  get_filename_component(PROTON_CANN_BASE_DIR "${CANN_INCLUDE_DIR}" DIRECTORY)
-  find_library(CANN_CL_LIBRARY ascendcl
-    HINTS "${PROTON_CANN_BASE_DIR}/lib64"
-          "${PROTON_CANN_BASE_DIR}/lib"
-          "${PROTON_CANN_BASE_DIR}/../lib64"
-          "${PROTON_CANN_BASE_DIR}/../lib"
-    REQUIRED)
 endif()
 
 # ============ Dependencies =============
@@ -62,33 +27,23 @@ function(add_proton_library name)
 
   target_link_libraries(${name} PRIVATE Python3::Module pybind11::headers)
 
+  # Use system to skip warnings caused by legacy clang compilers
+  target_include_directories(${name}
+    SYSTEM PRIVATE
+      "${ROCTRACER_INCLUDE_DIR}"
+  )
+
   target_include_directories(${name}
     PRIVATE
+      "${CUPTI_INCLUDE_DIR}"
       "${JSON_INCLUDE_DIR}"
       "${PROTON_COMMON_DIR}/include"
       "${PROTON_SRC_DIR}/include"
   )
 
-  if(PROTON_BUILD_CUDA)
-    target_include_directories(${name} PRIVATE "${CUPTI_INCLUDE_DIR}")
-    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CUDA)
-  endif()
-  if(PROTON_BUILD_HIP)
-    # Use system to skip warnings caused by legacy clang compilers.
-    target_include_directories(${name} SYSTEM PRIVATE "${ROCTRACER_INCLUDE_DIR}")
-    target_compile_definitions(${name} PRIVATE PROTON_BUILD_HIP __HIP_PLATFORM_AMD__)
-  endif()
-  if(PROTON_BUILD_MSPTI)
-    target_include_directories(${name} PRIVATE "${MSPTI_INCLUDE_DIR}")
-    target_compile_definitions(${name} PRIVATE PROTON_BUILD_MSPTI)
-    if(DEFINED MSPTI_LIB_DIR)
-      target_compile_definitions(${name} PRIVATE MSPTI_LIB_DIR=${MSPTI_LIB_DIR})
-    endif()
-  endif()
-  if(PROTON_BUILD_CANN)
-    target_include_directories(${name} PRIVATE "${CANN_INCLUDE_DIR}")
-    target_compile_definitions(${name} PRIVATE PROTON_BUILD_CANN)
-  endif()
+  # If HIP is AMD-based
+  target_compile_definitions(${name} PRIVATE __HIP_PLATFORM_AMD__)
+
   # Append this library name to the GLOBAL property "PROTON_LIBS"
   set_property(GLOBAL APPEND PROPERTY PROTON_LIBS ${name})
 endfunction()
@@ -123,10 +78,6 @@ endforeach()
 add_library(proton SHARED ${_proton_obj_sources})
 
 target_link_libraries(proton PRIVATE Python3::Module)
-
-if(PROTON_BUILD_CANN)
-  target_link_libraries(proton PRIVATE ${CANN_CL_LIBRARY})
-endif()
 # Apply any macOS linker flags or extra link options
 if(PROTON_PYTHON_LDFLAGS)
   target_link_options(proton PRIVATE ${PROTON_PYTHON_LDFLAGS})

@@ -1436,10 +1436,14 @@ mapWorkload(const LogicalStage &stage, const StageModeProfile &profile,
                        interpolateEnvelopeCost(startupCurve, extent));
       }
     }
-    // Apply the scan formulas independently of direction, combine and result
-    // count. Geometry and element width follow the first scan operand.
+    // The calibrated helper surface prices a single result with unit-stride
+    // additive/minmax combine. Other lowering templates retain their measured
+    // completion model until their result and layout costs are calibrated.
     const auto &calibration = profile.calibratedPrefixScan;
-    if (calibration.enabled && std::get<7>(shape) > 0) {
+    const bool calibratedHelper =
+        resultCount == 1 && axisStride == 1 &&
+        (combineClass == "add" || combineClass == "minmax");
+    if (calibration.enabled && calibratedHelper && std::get<7>(shape) > 0) {
       const double n = static_cast<double>(extent) * independentSequences;
       double completion = 0.0;
       if (simd && independentSequences == 1) {
@@ -3117,7 +3121,12 @@ static double estimateStageBase(const LogicalStage &stage,
         !(profile.simt.calibratedPrefixScan.enabled &&
           llvm::all_of(stage.workload.prefixScanCounts,
                        [](const auto &entry) {
-                         return std::get<7>(entry.first) > 0;
+                         const auto &shape = entry.first;
+                         return std::get<7>(shape) > 0 &&
+                                std::get<3>(shape) == 1 &&
+                                std::get<2>(shape) == 1 &&
+                                (std::get<5>(shape) == "add" ||
+                                 std::get<5>(shape) == "minmax");
                        })) &&
         profile.simt.straightLinePrefixScanElementsPerCycle > 0.0) {
       double semanticElements = 0.0;

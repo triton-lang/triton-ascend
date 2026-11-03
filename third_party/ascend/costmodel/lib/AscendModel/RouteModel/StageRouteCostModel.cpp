@@ -3005,16 +3005,27 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
     std::optional<size_t> scanOwner;
     for (size_t index = 0; index < costTable.stages.size(); ++index) {
       const LogicalStageCost &stage = costTable.stages[index];
-      if (plan.implementations[index].mode == StageMode::SIMT &&
-          stage.model == "prefix_scan" && !stage.features.hasLoop &&
-          !stage.features.isGridStrideLoopShell &&
-          !stage.features.insideGridStrideLoopBody) {
-        if (scanOwner) {
-          scanOwner.reset();
-          break;
-        }
-        scanOwner = index;
+      if (plan.implementations[index].mode != StageMode::SIMT ||
+          stage.model != "prefix_scan" || stage.features.hasLoop ||
+          stage.features.isGridStrideLoopShell ||
+          stage.features.insideGridStrideLoopBody)
+        continue;
+      const bool calibratedHelper =
+          !stage.workload.prefixScanCounts.empty() &&
+          llvm::all_of(stage.workload.prefixScanCounts, [](const auto &entry) {
+            const auto &shape = entry.first;
+            return std::get<7>(shape) > 0 && std::get<3>(shape) == 1 &&
+                   std::get<2>(shape) == 1 &&
+                   (std::get<5>(shape) == "add" ||
+                    std::get<5>(shape) == "minmax");
+          });
+      if (calibratedHelper)
+        continue;
+      if (scanOwner) {
+        scanOwner.reset();
+        break;
       }
+      scanOwner = index;
     }
     if (scanOwner) {
       const double completion =

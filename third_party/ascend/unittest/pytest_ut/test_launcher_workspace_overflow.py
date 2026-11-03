@@ -104,7 +104,7 @@ def test_auto_map_allows_a_logical_grid_above_32bit():
     assert logical == 2**32
     assert physical == 40
     assert physical <= UINT32_MAX
-    assert 262144 * logical == 2**42
+    assert 262144 * logical == 2**50
 
 
 def test_unmapped_grid_above_32bit_is_still_rejected():

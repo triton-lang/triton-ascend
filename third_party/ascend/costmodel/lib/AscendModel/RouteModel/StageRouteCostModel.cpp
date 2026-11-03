@@ -1965,6 +1965,38 @@ static double sumStages(const StageRoutePlan &plan, size_t begin, size_t end) {
                          plan.logicalStageCycles.begin() + end, 0.0);
 }
 
+/// Estimate the bytes touched by one Stage iteration from its affine access
+/// geometry. Logical tensor bytes overcount overlapping rows, for example a
+/// 256-wide tile with a 150-element row stride.
+static double workingSetBytesPerIteration(const StageWorkload &workload) {
+  double bytes = 0.0;
+  for (const StageMemoryAccess &access : workload.memoryAccesses) {
+    const int64_t rows = access.rowCount();
+    const int64_t rowBytes = access.rowBytes();
+    if (rows <= 0 || rowBytes <= 0 || access.elementBits <= 0 ||
+        access.elementBits % 8 != 0 || !std::isfinite(access.count) ||
+        access.count < 0.0)
+      return workload.loadBytes + workload.storeBytes;
+
+    const int64_t elementBytes = access.elementBits / 8;
+    const double activeRatio =
+        access.masked ? std::clamp(access.activeElementRatio, 0.0, 1.0) : 1.0;
+    const int64_t activeElements = static_cast<int64_t>(
+        std::ceil(static_cast<double>(rowBytes / elementBytes) * activeRatio));
+    const int64_t activeRowBytes = activeElements * elementBytes;
+    if (activeRowBytes == 0)
+      continue;
+
+    const int64_t strideBytes = std::abs(access.rowStrideBytes());
+    const int64_t additionalRowBytes = std::min(strideBytes, activeRowBytes);
+    const double accessBytes =
+        static_cast<double>(activeRowBytes) +
+        static_cast<double>(rows - 1) * additionalRowBytes;
+    bytes += access.count * accessBytes;
+  }
+  return bytes > 0.0 ? bytes : workload.loadBytes + workload.storeBytes;
+}
+
 /// Apply a bounded whole-SIMD completion curve after runtime replay.
 static void applyWholeSimdCompletionCurve(StageRoutePlan &plan,
                                           const StageCostTable &costTable) {
@@ -2807,6 +2839,7 @@ static bool applyRuntimeSchedule(StageRoutePlan &plan,
           stage.model == "prefix_scan" && !stage.features.hasLoop &&
           !stage.features.isGridStrideLoopShell &&
           !stage.features.insideGridStrideLoopBody;
+      hasStraightLineScan |= matches;
     }
     if (hasStraightLineScan) {
       for (size_t index = 0; index < costTable.stages.size(); ++index) {

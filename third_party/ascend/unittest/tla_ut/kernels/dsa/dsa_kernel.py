@@ -1,4 +1,4 @@
-"""BF16 sparse MLA attention with a three-slot Cube/Vector pipeline.
+"""BF16 sparse MLA prefill with a three-slot pipeline.
 
 Supported contract: B=1, SQ=KV=8192, TopK=2048, H in {16,32,64,128},
 latent/value dimension 512 plus a separate 64-wide Q/K RoPE, contiguous BSND
@@ -136,7 +136,6 @@ def _sparse_mla(
         packed0 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
         packed1 = tla.alloc((36, GRP * 16), tl.bfloat16, space='ub')
         ids_view0 = tla.view(ids, (BN, ), offsets=(0, ))
-        ids_view1 = tla.view(ids, (BN, ), offsets=(BN, ))
 
         with tla.scope.cube():
             tla.load_gm_to_l1(tla.view(Q + (token * H + head) * 512, (BM, 512)), q_lat)
@@ -155,60 +154,55 @@ def _sparse_mla(
         # the previous job's key reads, so the first gather needs no free wait.
         with tla.scope.vector():
             sub = tla.sub_block_id()
-            for slot in tl.static_range(1):
-                if slot == 0:
-                    id_view = ids_view0
-                else:
-                    id_view = ids_view1
-                tla.load_gm_to_ub(tla.view(IDS + token * TOPK + slot * BN, (BN, )), id_view)
-                gather_start = slot * BN
-                for chunk in tl.range(BN // (4 * GR)):
-                    for stage in tl.static_range(2):
-                        if stage == 0:
-                            keys, ropes, packed = key0, rope0, packed0
-                        else:
-                            keys, ropes, packed = key1, rope1, packed1
-                        position = sub * (BN // 2) + (chunk * 2 + stage) * GR
-                        for pair in tl.static_range(GR // 2):
-                            idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
-                            # Two int32 indices per load; masking clamps both ends.
-                            safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
-                            safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
-                            row = pair * 2
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe0 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row, 0)),
-                            )
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe1 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row + 1, 0)),
-                            )
-                        with tla.scope.simd():
-                            # Only the first 64 BF16 lanes of the RoPE tail are valid.
-                            half = tla.simd.pge(64, 128)
-                            for local_row in tl.range(GR):
-                                for col in tl.static_range(4):
-                                    value = tla.simd.vlds(keys[local_row, col * 128])
-                                    tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
-                                rope = tla.simd.vlds(ropes[local_row, 0])
-                                tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (32, GR * 16)),
-                            tla.view(
-                                kv_lat_flat,
-                                (32, GR * 16),
-                                offsets=(slot * 32, position * 16),
-                            ),
+            tla.load_gm_to_ub(tla.view(IDS + token * TOPK, (BN, )), ids_view0)
+            gather_start = 0
+            for chunk in tl.range(BN // (4 * GR)):
+                for stage in tl.static_range(2):
+                    if stage == 0:
+                        keys, ropes, packed = key0, rope0, packed0
+                    else:
+                        keys, ropes, packed = key1, rope1, packed1
+                    position = sub * (BN // 2) + (chunk * 2 + stage) * GR
+                    for pair in tl.static_range(GR // 2):
+                        idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                        # Wrap addresses safely; softmax masks invalid indices using the original int32 values.
+                        safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
+                        safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
+                        row = pair * 2
+                        tla.load_gm_to_ub(
+                            tla.view(PACKED_KV + safe0 * 576, (1, 576)),
+                            tla.view(keys, (1, 576), offsets=(row, 0)),
                         )
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (4, GR * 16), offsets=(32, 0)),
-                            tla.view(
-                                kv_rope_flat,
-                                (4, GR * 16),
-                                offsets=(slot * 4, position * 16),
-                            ),
+                        tla.load_gm_to_ub(
+                            tla.view(PACKED_KV + safe1 * 576, (1, 576)),
+                            tla.view(keys, (1, 576), offsets=(row + 1, 0)),
                         )
-                tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
+                    with tla.scope.simd():
+                        # Only the first 64 BF16 lanes of the RoPE tail are valid.
+                        half = tla.simd.pge(64, 128)
+                        for local_row in tl.range(GR):
+                            for col in tl.static_range(4):
+                                value = tla.simd.vlds(keys[local_row, col * 128])
+                                tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
+                            rope = tla.simd.vlds(ropes[local_row, 0])
+                            tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
+                    tla.copy_ub_to_l1(
+                        tla.view(packed, (32, GR * 16)),
+                        tla.view(
+                            kv_lat_flat,
+                            (32, GR * 16),
+                            offsets=(0, position * 16),
+                        ),
+                    )
+                    tla.copy_ub_to_l1(
+                        tla.view(packed, (4, GR * 16), offsets=(32, 0)),
+                        tla.view(
+                            kv_rope_flat,
+                            (4, GR * 16),
+                            offsets=(0, position * 16),
+                        ),
+                    )
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
 
         for t in tl.range(TILES):
             lat_cur = tla.view(kv_lat, (32, BN // 16, 16, 16), offsets=((t % 3) * 32, 0, 0, 0))
@@ -259,87 +253,46 @@ def _sparse_mla(
                     )
                     # Rolling two-stage gather: keep one group of row DMAs in flight while
                     # the previous group is packed into nZ and copied to L1.
-                    for g in tl.static_range(2):
-                        if g == 0:
-                            keys = key0
-                        else:
-                            keys = key1
-                        position = sub * (BN // 2) + g * GR
-                        for pair in tl.static_range(GR // 2):
-                            idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
-                            safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
-                            safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
-                            row = pair * 2
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe0 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row, 0)),
-                            )
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe1 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row + 1, 0)),
-                            )
-                    for g in tl.static_range(2):
-                        if g == 0:
+                    # Compile-time stages preserve the rolling two-buffer schedule:
+                    # load 0, load 1, pack 0/load 2, pack 1/load 3, pack 2, pack 3.
+                    for step in tl.static_range(6):
+                        if step % 2 == 0:
                             keys, ropes, packed = key0, rope0, packed0
                         else:
                             keys, ropes, packed = key1, rope1, packed1
-                        position = sub * (BN // 2) + g * GR
-                        with tla.scope.simd():
-                            half = tla.simd.pge(64, 128)
-                            for local_row in tl.range(GR):
-                                for col in tl.static_range(4):
-                                    value = tla.simd.vlds(keys[local_row, col * 128])
-                                    tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
-                                rope = tla.simd.vlds(ropes[local_row, 0])
-                                tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (32, GR * 16)),
-                            tla.view(kv_lat_flat, (32, GR * 16), offsets=(((t + 1) % 3) * 32, position * 16)),
-                        )
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (4, GR * 16), offsets=(32, 0)),
-                            tla.view(kv_rope_flat, (4, GR * 16), offsets=(((t + 1) % 2) * 4, position * 16)),
-                        )
-                        if g == 0:
-                            keys = key0
-                        else:
-                            keys = key1
-                        position = sub * (BN // 2) + (g + 2) * GR
-                        for pair in tl.static_range(GR // 2):
-                            idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
-                            safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
-                            safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
-                            row = pair * 2
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe0 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row, 0)),
+                        if step >= 2:
+                            position = sub * (BN // 2) + (step - 2) * GR
+                            with tla.scope.simd():
+                                half = tla.simd.pge(64, 128)
+                                for local_row in tl.range(GR):
+                                    for col in tl.static_range(4):
+                                        value = tla.simd.vlds(keys[local_row, col * 128])
+                                        tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
+                                    rope = tla.simd.vlds(ropes[local_row, 0])
+                                    tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
+                            tla.copy_ub_to_l1(
+                                tla.view(packed, (32, GR * 16)),
+                                tla.view(kv_lat_flat, (32, GR * 16), offsets=(((t + 1) % 3) * 32, position * 16)),
                             )
-                            tla.load_gm_to_ub(
-                                tla.view(PACKED_KV + safe1 * 576, (1, 576)),
-                                tla.view(keys, (1, 576), offsets=(row + 1, 0)),
+                            tla.copy_ub_to_l1(
+                                tla.view(packed, (4, GR * 16), offsets=(32, 0)),
+                                tla.view(kv_rope_flat, (4, GR * 16), offsets=(((t + 1) % 2) * 4, position * 16)),
                             )
-                    for g in tl.static_range(2):
-                        if g == 0:
-                            keys, ropes, packed = key0, rope0, packed0
-                        else:
-                            keys, ropes, packed = key1, rope1, packed1
-                        position = sub * (BN // 2) + (g + 2) * GR
-                        with tla.scope.simd():
-                            half = tla.simd.pge(64, 128)
-                            for local_row in tl.range(GR):
-                                for col in tl.static_range(4):
-                                    value = tla.simd.vlds(keys[local_row, col * 128])
-                                    tla.simd.vsstb(value, packed[col * 8, local_row * 16], GRP * 16)
-                                rope = tla.simd.vlds(ropes[local_row, 0])
-                                tla.simd.vsstb(rope, packed[32, local_row * 16], GRP * 16, mask=half)
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (32, GR * 16)),
-                            tla.view(kv_lat_flat, (32, GR * 16), offsets=(((t + 1) % 3) * 32, position * 16)),
-                        )
-                        tla.copy_ub_to_l1(
-                            tla.view(packed, (4, GR * 16), offsets=(32, 0)),
-                            tla.view(kv_rope_flat, (4, GR * 16), offsets=(((t + 1) % 2) * 4, position * 16)),
-                        )
+                        if step < 4:
+                            position = sub * (BN // 2) + step * GR
+                            for pair in tl.static_range(GR // 2):
+                                idx2 = tl.load(IDS64 + (token * TOPK + gather_start + position) // 2 + pair)
+                                safe0 = (idx2 & 0xFFFFFFFF).to(tl.int32) & (L - 1)
+                                safe1 = (idx2 >> 32).to(tl.int32) & (L - 1)
+                                row = pair * 2
+                                tla.load_gm_to_ub(
+                                    tla.view(PACKED_KV + safe0 * 576, (1, 576)),
+                                    tla.view(keys, (1, 576), offsets=(row, 0)),
+                                )
+                                tla.load_gm_to_ub(
+                                    tla.view(PACKED_KV + safe1 * 576, (1, 576)),
+                                    tla.view(keys, (1, 576), offsets=(row + 1, 0)),
+                                )
                     tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, FLAG_KV_READY)
                 tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, FLAG_SCORE_TILE)
                 ids_cur = tla.view(ids, (BN, ), offsets=((t % 2) * BN, ))
@@ -497,23 +450,7 @@ def forward(q, kv, qr, kr, indices, config=None, *, core_limit=None):
     denominator = torch.empty_like(maximum)
     options = dict(sanitize_overflow=False, enable_auto_bind_sub_block=False, enable_preload=False)
     indices64 = indices.view(torch.int64)
-    args = (
-        q,
-        qr,
-        indices,
-        indices64,
-        output,
-        maximum,
-        denominator,
-        packed_kv,
-        8192,
-        h,
-        8192,
-        2048,
-        bm,
-        gr,
-        cores,
-    )
+    args = (q, qr, indices, indices64, output, maximum, denominator, packed_kv, 8192, h, 8192, 2048, bm, gr, cores)
     with torch.npu.device(q.device):
         _pack_kv[(1024, )](kv, kr, packed_kv, **options)
         _sparse_mla[(cores, )](*args, **options)

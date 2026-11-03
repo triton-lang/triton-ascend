@@ -46,3 +46,7 @@ if(TRITON_ENABLE_COVERAGE_HITEST)
       endif()
   endforeach()
 endif()
+
+if(TRITON_BUILD_PROTON)
+  add_subdirectory(ProtonToHIVM)
+endif()

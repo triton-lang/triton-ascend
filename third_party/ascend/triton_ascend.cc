@@ -10,6 +10,9 @@
 #include "mlir/Transforms/Passes.h" // createInlinerPass
 
 #include "ascend/include/AutoBlockify/Passes.h"
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+#include "ascend/include/ProtonToHIVM/Passes.h"
+#endif
 #include "ascend/include/Dialect/TritonAscend/IR/TritonAscendDialect.h"
 #include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
 #include "ascend/include/TritonControlFlowOpt/Passes.h"
@@ -60,6 +63,17 @@ namespace py = pybind11;
 using namespace mlir;
 
 void init_triton_ascend_passes_ttir(py::module &&m) {
+#ifdef TRITON_ASCEND_ENABLE_PROTON
+  m.def("add_assign_ascend_proton_scope_ids", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::proton::createAssignAscendProtonScopeIdsPass());
+  });
+  m.def("add_lower_ascend_proton_to_hivm",
+        [](mlir::PassManager &pm, int32_t bufferSize) {
+          pm.addPass(mlir::triton::proton::createLowerAscendProtonToHIVMPass(
+              bufferSize));
+        });
+#endif
+
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;

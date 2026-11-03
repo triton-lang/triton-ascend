@@ -7,3 +7,7 @@ add_proton_library(ProtonDriver
 	GPU/RoctracerApi.cpp
 	GPU/NvtxApi.cpp
 )
+
+if(PROTON_ENABLE_NPU)
+	target_sources(ProtonDriver PRIVATE NPU/AscendApi.cpp)
+endif()

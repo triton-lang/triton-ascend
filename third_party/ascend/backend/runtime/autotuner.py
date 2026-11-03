@@ -2255,9 +2255,7 @@ class AutoTilingTuner(Autotuner):
                 for config, _, _ in diagnostics.results:
                     if config not in pruned_configs:
                         diagnostics.record(config, "pruned", "Removed by early_config_prune or perf_model/top_k.")
-            if (self.enable_ubtuner or len(pruned_configs) > 1
-                    or (knobs.ascend.bench_single_config and knobs.ascend.bench_method.lower() == "npu"
-                        and not self.user_defined_do_bench)):
+            if self.enable_ubtuner or len(pruned_configs) > 1:
 
                 def benchmark():
                     nonlocal did_benchmark
@@ -2615,10 +2613,7 @@ class AutoTilingTuner(Autotuner):
         if len(run_fns) == 0:
             raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc} \nStack trace: {exc_stack}")
 
-        use_profiling = knobs.ascend.bench_method.lower() == "npu"
-        # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
-        use_npu_profiling = use_profiling and not self.user_defined_do_bench
-        if len(run_fns) == 1 and (not use_npu_profiling or not knobs.ascend.bench_single_config):
+        if len(run_fns) == 1:
             # we ignore expensive profiling method when only single config is left
             return {config: self._bench_config(config, fn) for config, fn in run_fns.items()}
 
@@ -2627,12 +2622,15 @@ class AutoTilingTuner(Autotuner):
         if parser_mode in ("cube", "mix") and cv_parse_result is not None:
             run_fns = self._prune_by_time_limit(run_fns)
 
+        use_profiling = knobs.ascend.bench_method.lower() == "npu"
+        # Respect user-provided benchmarkers even when NPU profiling mode is enabled.
+        use_npu_profiling = use_profiling and not self.user_defined_do_bench
         if use_npu_profiling:
             from ..testing import ProfilerResultMismatchError, do_bench_npu
 
-            cv_mode = parser_mode in ("cube", "mix") and cv_parse_result is not None and len(run_fns) > 1
+            cv_mode = parser_mode in ("cube", "mix") and cv_parse_result is not None
             warmup = getattr(self, "cv_warmup", 5) if cv_mode else 5
-            active = getattr(self, "cv_repeat", 30) if cv_mode else 30
+            active = min(getattr(self, "cv_repeat", 30), 30) if cv_mode else 30
             target_kernel_name = self._resolve_target_kernel_name(kernels_call, run_fns.keys())
             try:
                 time_cost = do_bench_npu(
@@ -2643,8 +2641,6 @@ class AutoTilingTuner(Autotuner):
                     target_kernel_name=target_kernel_name,
                     _active_limit=active if cv_mode else None,
                 )
-                if len(run_fns) == 1:
-                    time_cost = [time_cost]
                 assert len(time_cost) == len(run_fns)
                 timings = dict(zip(run_fns.keys(), time_cost))
                 self._record_user_timings(timings)

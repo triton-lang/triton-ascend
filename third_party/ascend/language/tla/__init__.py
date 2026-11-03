@@ -108,6 +108,7 @@ from .dma import (
 )
 
 from .view import view, subview, reshape
+from .scalar import select, maximum, minimum, cast, max_value, cdiv, infinity, clamp
 from .aux_ops import annotate_buffer_versions, assume
 
 from . import math
@@ -201,6 +202,16 @@ __all__ = [
     "view",
     "subview",
     "reshape",
+
+    # scalar expressions
+    "select",
+    "maximum",
+    "minimum",
+    "cast",
+    "max_value",
+    "cdiv",
+    "infinity",
+    "clamp",
 
     # core-mode scopes (scope.simd / scope.cube)
     "scope",

@@ -201,7 +201,8 @@ inline void validateSpec(const TritonNpuLaunchSpecV1 &spec) {
 
 struct LaunchGrid {
   std::array<int32_t, 3> grid;
-  uint32_t logicalBlocks, physicalBlocks;
+  uint64_t logicalBlocks;
+  uint32_t physicalBlocks;
 };
 
 inline LaunchGrid prepareGrid(const TritonNpuLaunchSpecV1 &spec,
@@ -235,13 +236,17 @@ inline LaunchGrid prepareGrid(const TritonNpuLaunchSpecV1 &spec,
   }
   uint64_t blocks = checkedMultiply(
       checkedMultiply(result.grid[0], result.grid[1]), result.grid[2]);
-  if (blocks > std::numeric_limits<uint32_t>::max())
-    throw std::overflow_error("launch grid exceeds uint32 block count");
+  // logicalBlocks keeps the full 64-bit program count: workspace sizing needs
+  // the true total and must not inherit the 32-bit block_dim limit.
   result.logicalBlocks = blocks;
-  result.physicalBlocks =
+  // physicalBlocks is the value handed to CANN as block_dim and stays 32-bit.
+  const uint64_t physical =
       (spec.flags & TRITON_NPU_AUTO_MAP)
-          ? std::min(result.logicalBlocks, spec.physical_blocks)
+          ? std::min(result.logicalBlocks, uint64_t{spec.physical_blocks})
           : result.logicalBlocks;
+  if (physical > std::numeric_limits<uint32_t>::max())
+    throw std::overflow_error("launch grid exceeds uint32 block count");
+  result.physicalBlocks = static_cast<uint32_t>(physical);
   return result;
 }
 

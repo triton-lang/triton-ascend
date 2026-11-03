@@ -478,6 +478,9 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("mode") = "zeroing")
+      // Elementwise vector-vector shift (``ave.hir.vshl`` / ``ave.hir.vshr``).
+      // ``sign`` selects arithmetic vs logical right shift; ``mode`` is
+      // consumed by applySimdMode.
       .def(
           "create_simd_shift",
           [](TLABuilder &self, std::string &kind, Value &lhs, Value &rhs,
@@ -503,6 +506,9 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("sign"), py::arg("mode") = "zeroing")
+      // Elementwise vector-scalar left shift (``ave.hir.vshls``).  The scalar
+      // must already have the vector element type; ``mode`` is consumed by
+      // applySimdMode.
       .def(
           "create_simd_shift_scalar",
           [](TLABuilder &self, std::string &kind, Value &vec, Value &scalar,
@@ -832,6 +838,9 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("scalar"), py::arg("elem_tag"), py::arg("lanes"),
           py::arg("mask"), py::arg("mode") = "zeroing")
+      // Pack b16 -> b8 or b32 -> b16 into one half of the destination.
+      // ``part`` is 0 for part_even and 1 for part_odd; the unwritten half is
+      // left unspecified by a single call.
       .def(
           "create_simd_vpack",
           [](TLABuilder &self, Value &src, int32_t part,

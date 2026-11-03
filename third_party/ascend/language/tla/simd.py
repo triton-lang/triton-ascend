@@ -1010,12 +1010,28 @@ def vshl(src0: vector, src1: vector, mask: vector = None, mode: tl.constexpr = M
     """
     Elementwise vector left shift (``ave.hir.vshl``).
 
-    :param src0: value vector register
-    :param src1: shift-amount vector register, same type as ``src0``
-    :param mask: predicate register; defaults to an all-true mask
-    :param mode: ``MODE.ZEROING`` (default) or ``MODE.MERGING``
+    Each lane computes ``src0 << src1`` under the predicate.
+
+    :param src0: Value vector register.
+    :type src0: tla.vector
+    :param src1: Shift-amount vector register with the same dtype and lane
+        count as ``src0``.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Shifted vector with the same dtype and lane count as ``src0``.
+    :rtype: tla.vector
+
     Supported element types: i8/i16/i32 and u8/u16/u32.  The AVE shift
     lowering has no i64 path and CCE has no i64 vector-shift overload.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
     _require_vector(src0, "src0")
     _require_vector(src1, "src1")
@@ -1035,9 +1051,30 @@ def vshr(src0: vector, src1: vector, mask: vector = None, mode: tl.constexpr = M
     """
     Elementwise vector right shift (``ave.hir.vshr``).
 
-    The AVE ``sign`` operand selects arithmetic (signed) or logical (unsigned)
-    right shift from the frontend dtype.  Supported element types:
-    i8/i16/i32 and u8/u16/u32.
+    Each lane computes ``src0 >> src1`` under the predicate.  The AVE
+    ``sign`` operand selects arithmetic (signed) or logical (unsigned) right
+    shift from the frontend dtype.
+
+    :param src0: Value vector register.
+    :type src0: tla.vector
+    :param src1: Shift-amount vector register with the same dtype and lane
+        count as ``src0``.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Shifted vector with the same dtype and lane count as ``src0``.
+    :rtype: tla.vector
+
+    Supported element types: i8/i16/i32 and u8/u16/u32.  The AVE shift
+    lowering has no i64 path and CCE has no i64 vector-shift overload.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
     _require_vector(src0, "src0")
     _require_vector(src1, "src1")
@@ -1057,12 +1094,29 @@ def vshls(src: vector, scalar, mask: vector = None, mode: tl.constexpr = MODE.ZE
     """
     Elementwise left shift by a scalar amount (``ave.hir.vshls``).
 
-    :param src: value vector register
-    :param scalar: constexpr integer or scalar tensor of the register's dtype
-    :param mask: predicate register; defaults to an all-true mask
-    :param mode: ``MODE.ZEROING`` (default) or ``MODE.MERGING``
-    The scalar is materialized at the vector element type to satisfy the AVE
-    ``AVE_ShiftVecScalarOp`` contract; compile-time values must fit int16.
+    Each lane computes ``src << scalar`` under the predicate.
+
+    :param src: Value vector register.
+    :type src: tla.vector
+    :param scalar: Shift amount as a Python/``tl.constexpr`` integer or a
+        scalar tensor.  The value is materialized at the vector element type.
+    :type scalar: int, tl.constexpr, or scalar tl.tensor
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :param mode: Predication mode, ``MODE.ZEROING`` (default) or
+        ``MODE.MERGING``.
+    :type mode: tla.simd.MODE
+    :return: Shifted vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    Supported element types: i8/i16/i32 and u8/u16/u32.  Compile-time scalar
+    values must fit the CCE int16 shift slot; runtime scalar tensors are not
+    range-checked at compile time.
+
+    .. note::
+        ``MODE.MERGING`` uses a zero merge source; it does not preserve the
+        previous destination lanes.
     """
     _require_vector(src, "src")
     sign = _shift_sign(src, "vshls")
@@ -1082,8 +1136,21 @@ def vlrelu(src: vector, alpha, mask: vector = None, _semantic=None) -> vector:
     """
     Leaky ReLU with a scalar slope (``ave.hir.vlrelus``).
 
-    ``dst = src >= 0 ? src : alpha * src``.  Only f16/f32 are supported; the
-    scalar is materialized at the vector element type.
+    Computes ``dst = src >= 0 ? src : alpha * src`` under the predicate.
+
+    :param src: Value vector register.
+    :type src: tla.vector
+    :param alpha: Slope for negative lanes, as a Python/``tl.constexpr``
+        number or a scalar tensor.  It is materialized at the vector element
+        type.
+    :type alpha: int, float, tl.constexpr, or scalar tl.tensor
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :return: Vector with the same dtype and lane count as ``src``.
+    :rtype: tla.vector
+
+    Only f16/f32 are supported.  Inactive lanes use zeroing predication.
     """
     _require_vector(src, "src")
     tag = _elem_tag(src.dtype)
@@ -1101,8 +1168,20 @@ def vprelu(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> v
     """
     Parametric ReLU with per-lane slopes (``ave.hir.vprelu``).
 
-    ``src1`` holds one slope per lane and must match ``src0`` exactly.  Only
-    f16/f32 are supported.
+    Computes ``dst = src0 >= 0 ? src0 : src1 * src0`` under the predicate.
+
+    :param src0: Value vector register.
+    :type src0: tla.vector
+    :param src1: Per-lane slope vector with the same dtype and lane count as
+        ``src0``.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane;
+        ``None`` selects an all-true mask.
+    :type mask: tla.vector or None
+    :return: Vector with the same dtype and lane count as ``src0``.
+    :rtype: tla.vector
+
+    Only f16/f32 are supported.  Inactive lanes use zeroing predication.
     """
     _require_vector(src0, "src0")
     _require_vector(src1, "src1")
@@ -2328,11 +2407,17 @@ def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vect
     """
     Pack wider lanes to narrower lanes (``ave.hir.vpack``).
 
-    :param src: source vector register
+    The source lanes are narrowed and written into one half of the
+    destination register.
+
+    :param src: Source vector register.
+    :type src: tla.vector
     :param part: ``part_even`` (default, low destination half) or
         ``part_odd`` (high destination half), matching :func:`vextf` /
-        :func:`vtruncf`
-    :return: vector with twice as many lanes and half the element width
+        :func:`vtruncf`.
+    :type part: str or tl.constexpr
+    :return: Vector with twice as many lanes and half the element width.
+    :rtype: tla.vector
 
     The AVE verifier only permits b16 -> b8 and b32 -> b16 narrowing, so the
     supported source types are i16/u16 and i32/u32.  The low/high selector
@@ -2340,6 +2425,10 @@ def vpack(src: vector, part: tl.constexpr = "part_even", _semantic=None) -> vect
     bytes; the other half is unspecified for a single ``part_even`` /
     ``part_odd`` call.  Issue a matching operation into the same destination
     when both halves must be defined.
+
+    .. note::
+        A single call does not guarantee the unwritten destination half is
+        zero or contains the original destination value.
     """
     _require_vector(src, "src")
     part = ss.check_part(_unwrap_if_constexpr(part))

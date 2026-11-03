@@ -44,6 +44,7 @@
 #include "mlir/IR/ValueRange.h"
 
 #include "ascend/include/DynamicCVPipeline/AddControlFlowCondition.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/SSBufferManager.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 
@@ -60,6 +61,11 @@ static constexpr int VALUE_SSBUF_OFFSET = 4;
 static constexpr int UPDATE_CONDITION_INFO_SUCCESS = 0;
 static constexpr int UPDATE_CONDITION_INFO_FAILED = -1;
 static constexpr size_t kVectorCount = 2;
+// Block level counters start right after the area that used to hold the
+// per-dependency-edge counters (3 edges * 8 bytes). Each block owns one slot,
+// a vector block keeps a second copy at slot + VECTOR_SSBUF_OFFSET.
+static constexpr int SSBUF_BLOCK_COUNTER_BASE = 24;
+static constexpr int SSBUF_BLOCK_COUNTER_STRIDE = 8;
 
 #define DBGS() (llvm::dbgs() << '[' << DEBUG_TYPE << "] ")
 #define LDBG(...)                                                              \
@@ -238,25 +244,246 @@ static int buildWhileCounterCondition(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-// Allocate the SSBuffer pointer
+// Find the scope that owns `op`. Returns nullptr when there is none.
+static scope::ScopeOp findOwningScope(Operation *op) {
+  if (!op) {
+    return nullptr;
+  }
+  Operation *parent = op->getParentOp();
+  while (parent) {
+    if (auto scopeOp = dyn_cast<scope::ScopeOp>(parent)) {
+      return scopeOp;
+    }
+    parent = parent->getParentOp();
+  }
+  return nullptr;
+}
+
+// Read the core type of a scope. Returns false when the attribute is missing
+// or holds an unexpected value.
+static bool getScopeCoreType(scope::ScopeOp scopeOp, bool &isAIC, bool &isAIV) {
+  isAIC = false;
+  isAIV = false;
+  if (!scopeOp || !scopeOp->hasAttr("hivm.tcore_type")) {
+    return false;
+  }
+
+  auto attr = scopeOp->getAttr("hivm.tcore_type");
+  auto aiCAttr =
+      hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::CUBE);
+  auto aiVAttr =
+      hivm::TCoreTypeAttr::get(scopeOp->getContext(), hivm::TCoreType::VECTOR);
+  if (attr == aiCAttr) {
+    isAIC = true;
+    return true;
+  }
+  if (attr == aiVAttr) {
+    isAIV = true;
+    return true;
+  }
+  return false;
+}
+
+// Build the block level cross-core edges out of the op level dependency map.
+// One dependency group becomes one edge per producer computation block: the
+// edge depth is the number of producer ops of the group living in that block.
+// A group whose producers spread over several blocks therefore produces one
+// edge per block, every block owning its own counter.
+int UpdateConditionInfoPass::buildCrossCoreBlockEdges(ModuleOp module) {
+  info->crossCoreBlockEdges.clear();
+
+  // The dependency map is a DenseMap, so collect the edges first and sort
+  // them afterwards to get a stable result.
+  SmallVector<CrossCoreBlockEdge> edges;
+  DenseMap<std::pair<scf::IfOp, scf::IfOp>, int> edgeIndex;
+
+  for (auto &entry : info->crossCoreDependentMap) {
+    Operation *consumerOp = entry.first;
+    scf::IfOp consumerIf = findIfOpContainingOp(consumerOp);
+    if (!consumerIf) {
+      LDBG("Cross-core consumer op is not inside any ssbuffer.if block: "
+           << *consumerOp << "\n");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+
+    for (SmallVector<Operation *> &producers : entry.second) {
+      if (producers.empty()) {
+        LDBG("Cross-core producer list is empty, consumer=" << *consumerOp
+                                                        << "\n");
+        return UPDATE_CONDITION_INFO_FAILED;
+      }
+
+      // Group the producers of this dependency group by their block. Every
+      // producer block owns its own counter and produces its own buffers, so
+      // a group whose producers spread over several blocks produces one edge
+      // per block.
+      SmallVector<std::pair<scf::IfOp, int>> producersByBlock;
+      for (Operation *producerOp : producers) {
+        scf::IfOp producerBlock = findIfOpContainingOp(producerOp);
+        if (!producerBlock) {
+          LDBG("Cross-core producer op is not inside any ssbuffer.if block: "
+               << *producerOp << "\n");
+          return UPDATE_CONDITION_INFO_FAILED;
+        }
+        auto blockIt = producersByBlock.end();
+        for (auto it = producersByBlock.begin(); it != producersByBlock.end();
+             ++it) {
+          if (it->first == producerBlock) {
+            blockIt = it;
+            break;
+          }
+        }
+        if (blockIt == producersByBlock.end()) {
+          producersByBlock.push_back({producerBlock, 1});
+        } else {
+          blockIt->second++;
+        }
+      }
+
+      for (const auto &producerEntry : producersByBlock) {
+        scf::IfOp producerIf = producerEntry.first;
+        int bufferNum = producerEntry.second;
+        if (producerIf == consumerIf) {
+          // Producer and consumer share the block: the difference of their
+          // counters is always zero, the edge carries no information.
+          LDBG("Skip the cross-core edge inside a single block: "
+               << producerIf << "\n");
+          continue;
+        }
+
+        auto key = std::make_pair(producerIf, consumerIf);
+        auto it = edgeIndex.find(key);
+        if (it == edgeIndex.end()) {
+          edgeIndex[key] = static_cast<int>(edges.size());
+          edges.push_back({producerIf, consumerIf, bufferNum});
+        } else if (bufferNum < edges[it->second].bufferNum) {
+          // Several groups share the same block pair: keep the strictest depth.
+          edges[it->second].bufferNum = bufferNum;
+        }
+      }
+    }
+  }
+
+  // Sort the edges by block id to get a deterministic slot assignment.
+  auto blockIdOf = [](scf::IfOp ifOp) {
+    int blockId = -1;
+    getIfBlockId(ifOp, blockId);
+    return blockId;
+  };
+  llvm::sort(edges, [&](const CrossCoreBlockEdge &a, const CrossCoreBlockEdge &b) {
+    int aProducer = blockIdOf(a.producer);
+    int bProducer = blockIdOf(b.producer);
+    if (aProducer != bProducer) {
+      return aProducer < bProducer;
+    }
+    return blockIdOf(a.consumer) < blockIdOf(b.consumer);
+  });
+
+  for (const CrossCoreBlockEdge &edge : edges) {
+    info->crossCoreBlockEdges[edge.producer].push_back(edge);
+    info->crossCoreBlockEdges[edge.consumer].push_back(edge);
+  }
+
+  LDBG("Built " << edges.size() << " block level cross-core edges." << "\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Give every computation block taking part in a cross-core dependency a
+// counter slot. The vector blocks come first (sorted by block id), then the
+// cube blocks (sorted by block id).
+int UpdateConditionInfoPass::assignBlockCounterSlots(ModuleOp module) {
+  info->blockCounterSlots.clear();
+  blockCounterOwners.clear();
+
+  struct BlockEntry {
+    int blockId;
+    bool isVector;
+    scf::IfOp ifOp;
+  };
+  SmallVector<BlockEntry> vectorBlocks;
+  SmallVector<BlockEntry> cubeBlocks;
+  bool failed = false;
+
+  // Collect the blocks in module walk order to have a stable base order.
+  module.walk([&](Operation *op) {
+    auto ifOp = dyn_cast<scf::IfOp>(op);
+    if (!ifOp || !ifOp->hasAttr(CVPipeline::kIf)) {
+      return;
+    }
+    if (!info->crossCoreBlockEdges.count(ifOp)) {
+      return;
+    }
+
+    int blockId;
+    if (getIfBlockId(ifOp, blockId) == UPDATE_CONDITION_INFO_FAILED) {
+      failed = true;
+      return;
+    }
+    scope::ScopeOp scopeOp = findOwningScope(ifOp);
+    bool isAIC = false;
+    bool isAIV = false;
+    if (!getScopeCoreType(scopeOp, isAIC, isAIV)) {
+      LDBG("Cross-core block is not in a cube or vector scope: " << ifOp
+                                                                 << "\n");
+      failed = true;
+      return;
+    }
+    if (isAIV) {
+      vectorBlocks.push_back({blockId, true, ifOp});
+    } else {
+      cubeBlocks.push_back({blockId, false, ifOp});
+    }
+  });
+
+  if (failed) {
+    LDBG("assignBlockCounterSlots failed!");
+    return UPDATE_CONDITION_INFO_FAILED;
+  }
+
+  auto byBlockId = [](const BlockEntry &a, const BlockEntry &b) {
+    return a.blockId < b.blockId;
+  };
+  llvm::stable_sort(vectorBlocks, byBlockId);
+  llvm::stable_sort(cubeBlocks, byBlockId);
+
+  int slot = 0;
+  SmallVector<BlockEntry> allBlocks(vectorBlocks);
+  llvm::append_range(allBlocks, cubeBlocks);
+  for (const BlockEntry &entry : allBlocks) {
+    BlockCounterSlot counterSlot;
+    counterSlot.slot = slot++;
+    counterSlot.byteOffset =
+        SSBUF_BLOCK_COUNTER_BASE + counterSlot.slot * SSBUF_BLOCK_COUNTER_STRIDE;
+    counterSlot.isVector = entry.isVector;
+    counterSlot.blockId = entry.blockId;
+    info->blockCounterSlots[entry.ifOp] = counterSlot;
+    blockCounterOwners.push_back(entry.ifOp);
+  }
+
+  LDBG("Assigned " << blockCounterOwners.size()
+                  << " block level counter slots." << "\n");
+  return UPDATE_CONDITION_INFO_SUCCESS;
+}
+
+// Allocate the SSBuffer pointers of the block level counters.
+//   vector block: one counter per vector core, at byteOffset and
+//                 byteOffset + VECTOR_SSBUF_OFFSET
+//   cube block:   a single counter at byteOffset
+// Every counter is reset to 0 before the first scope.
 SmallVector<SmallVector<Value>>
 UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
   OpBuilder builder(module.getContext());
-  auto i64Type = builder.getIntegerType(ADDR_INT_TYPE);
   auto i32Type = builder.getIntegerType(CONST_INT_TYPE);
-  auto memrefType = getSsbufMemrefType(builder);
 
-  // alloc 2 group of ssbuffer pointers:
-  // Core Vector 0: allocate ssbuffer address: 0, 4, 8, ...
-  // Core Vector 1: allocate ssbuffer address: 1024, 1028, 1032, ...
   SmallVector<SmallVector<Value>> ssbufferMemrefs;
-  SmallVector<Value> ssbufferVec0Memrefs;
-  SmallVector<Value> ssbufferVec1Memrefs;
-  int numBuffers = countProducerGroups(info->crossCoreDependentMap);
-  if (numBuffers == 0) {
-    LDBG("crossCoreDependentMap is empty!" << "\n");
+  if (blockCounterOwners.empty()) {
+    LDBG("No block level counter to allocate!" << "\n");
     return ssbufferMemrefs;
   }
+
+  int numSlots = static_cast<int>(blockCounterOwners.size());
+  SmallVector<Value> core0Memrefs(numSlots);
+  SmallVector<Value> core1Memrefs(numSlots);
 
   module->walk([&](Operation *op) {
     if (auto scopeOp = dyn_cast<scope::ScopeOp>(op)) {
@@ -265,51 +492,44 @@ UpdateConditionInfoPass::allocSSBuffer(ModuleOp module) {
       auto zeroConst = builder.create<arith::ConstantOp>(
           scopeOp->getLoc(), i32Type, builder.getIntegerAttr(i32Type, 0));
 
-      for (int i = 0; i < numBuffers; i++) {
+      for (int slot = 0; slot < numSlots; slot++) {
+        auto slotIt = info->blockCounterSlots.find(blockCounterOwners[slot]);
+        if (slotIt == info->blockCounterSlots.end()) {
+          continue;
+        }
+        const BlockCounterSlot &counterSlot = slotIt->second;
+
         auto memref0 =
-            createPointerCastOp(builder, loc, i * VALUE_SSBUF_OFFSET);
-        auto memref1 = createPointerCastOp(
-            builder, loc, VECTOR_SSBUF_OFFSET + i * VALUE_SSBUF_OFFSET);
-
+            createPointerCastOp(builder, loc, counterSlot.byteOffset);
+        core0Memrefs[slot] = memref0.getResult();
         builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref0);
-        builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref1);
 
-        ssbufferVec0Memrefs.push_back(memref0.getResult());
-        ssbufferVec1Memrefs.push_back(memref1.getResult());
+        if (counterSlot.isVector) {
+          // The second vector core keeps its own copy of the counter.
+          auto memref1 = createPointerCastOp(
+              builder, loc, counterSlot.byteOffset + VECTOR_SSBUF_OFFSET);
+          core1Memrefs[slot] = memref1.getResult();
+          builder.create<memref::StoreOp>(scopeOp->getLoc(), zeroConst, memref1);
+        } else {
+          core1Memrefs[slot] = memref0.getResult();
+        }
       }
       return mlir::WalkResult::interrupt();
     }
     return mlir::WalkResult::advance();
   });
 
-  ssbufferMemrefs.push_back(ssbufferVec0Memrefs);
-  ssbufferMemrefs.push_back(ssbufferVec1Memrefs);
+  ssbufferMemrefs.push_back(core0Memrefs);
+  ssbufferMemrefs.push_back(core1Memrefs);
   return ssbufferMemrefs;
 }
 
 // Collect dependency buffer
 void UpdateConditionInfoPass::collectDependencyBuffers(
     ModuleOp module, SmallVector<Operation *> &mainLoopOps,
-    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-        &crossCoreBuffers,
     DenseMap<Operation *,
              DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
         &intraCoreBuffersMap) {
-  // Collect crossCoreBuffers by traversing module in deterministic order
-  int crossCoreIdx = 0;
-  module.walk([&](Operation *op) {
-    // Collect crossCoreBuffers for this op
-    auto it = info->crossCoreDependentMap.find(op);
-    if (it != info->crossCoreDependentMap.end()) {
-      for (SmallVector<Operation *> &producers : it->second) {
-        crossCoreBuffers[crossCoreIdx][op] = producers;
-        crossCoreIdx++;
-      }
-    }
-
-    return WalkResult::advance();
-  });
-
   // Collect intraCoreBuffers for all main_loop for/while ops
   for (Operation *loopOp : mainLoopOps) {
     auto depsIt = info->intraCoreDependentMap.find(loopOp);
@@ -426,15 +646,11 @@ static int buildBufferDependencyMappings(
 
 // getInputOutputValues - Analyze the input/output buffer groups used in a
 // single ifOp This function traverses all operations within ifOp, identifies
-// FixpipeOp, CopyOp and MaterializeInDestinationOp, and extracts cross-core and
-// intra-core buffer group indices from their operands and yield values.
+// FixpipeOp, CopyOp and MaterializeInDestinationOp, and extracts intra-core
+// buffer group indices from their operands and yield values.
 
 // Data structure description
-//   - crossCoreBuffers: {groupIdx -> (consumer -> [producers])}
 //   - intraCoreBuffers: {groupIdx -> (consumer -> [producers])}
-//   - crossCoreInputValues: list of cross-core group indices read by this ifOp
-//   - crossCoreOutputValues: list of cross-core group indices written by this
-//   ifOp
 //   - intraCoreInputValues: list of intra-core group indices read by this ifOp
 //   - intraCoreOutputValues: list of intra-core group indices written by this
 //   ifOp
@@ -444,38 +660,23 @@ static int buildBufferDependencyMappings(
 //   2. Traverse Fixpipe/Copy/MaterializeInDestination ops in ifOp, collect
 //   input/output groups
 //   3. Traverse ifOp.thenYield() operands, collect yield output groups
-//   4. Deduplicate and output four groups of index values
+//   4. Deduplicate and output the two groups of index values
 int UpdateConditionInfoPass::getInputOutputValues(
     scf::IfOp ifOp,
     DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-        crossCoreBuffers,
-    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
         intraCoreBuffers,
-    SmallVector<int> &crossCoreInputValues,
-    SmallVector<int> &crossCoreOutputValues,
     SmallVector<int> &intraCoreInputValues,
     SmallVector<int> &intraCoreOutputValues) {
-  DenseSet<int> crossCoreInputSet;
-  DenseSet<int> crossCoreOutputSet;
   DenseSet<int> intraCoreInputSet;
   DenseSet<int> intraCoreOutputSet;
 
-  // Build output mappings for cross-core and intra-core
+  // Build output mappings for intra-core
   // Same producer/output can be used by multiple consumers/inputs, so we need
   // to track all related groups
-  DenseMap<Operation *, SmallVector<int>> crossCoreOutputToGroups;
   DenseMap<Operation *, SmallVector<int>> intraCoreOutputToGroups;
 
   // Add consumer mappings for input dependency identification
-  DenseMap<Operation *, SmallVector<int>> crossCoreConsumerToGroups;
   DenseMap<Operation *, SmallVector<int>> intraCoreConsumerToGroups;
-
-  // Build cross-core mappings
-  if (buildBufferDependencyMappings(crossCoreBuffers, crossCoreConsumerToGroups,
-                                    crossCoreOutputToGroups) ==
-      UPDATE_CONDITION_INFO_FAILED) {
-    return UPDATE_CONDITION_INFO_FAILED;
-  }
 
   // Build intra-core mappings
   if (buildBufferDependencyMappings(intraCoreBuffers, intraCoreConsumerToGroups,
@@ -490,21 +691,12 @@ int UpdateConditionInfoPass::getInputOutputValues(
       return WalkResult::advance();
 
     // Check if this op is a consumer (for input dependency)
-    if (crossCoreConsumerToGroups.count(op)) {
-      for (int idx : crossCoreConsumerToGroups[op])
-        crossCoreInputSet.insert(idx);
-    }
     if (intraCoreConsumerToGroups.count(op)) {
       for (int idx : intraCoreConsumerToGroups[op])
         intraCoreInputSet.insert(idx);
     }
 
     // Check if this op is a producer (for output dependency)
-    if (crossCoreOutputToGroups.count(op)) {
-      for (int idx : crossCoreOutputToGroups[op]) {
-        crossCoreOutputSet.insert(idx);
-      }
-    }
     if (intraCoreOutputToGroups.count(op)) {
       for (int idx : intraCoreOutputToGroups[op]) {
         intraCoreOutputSet.insert(idx);
@@ -513,10 +705,6 @@ int UpdateConditionInfoPass::getInputOutputValues(
     return WalkResult::advance();
   });
 
-  crossCoreInputValues.assign(crossCoreInputSet.begin(),
-                              crossCoreInputSet.end());
-  crossCoreOutputValues.assign(crossCoreOutputSet.begin(),
-                               crossCoreOutputSet.end());
   intraCoreInputValues.assign(intraCoreInputSet.begin(),
                               intraCoreInputSet.end());
   intraCoreOutputValues.assign(intraCoreOutputSet.begin(),
@@ -526,11 +714,7 @@ int UpdateConditionInfoPass::getInputOutputValues(
   llvm::sort(intraCoreInputValues);
   llvm::sort(intraCoreOutputValues);
 
-  LDBG("==== Cross Core & Intra Core Values ====" << "\n");
-  LLVM_DEBUG(
-      logConditionGroupIndices("crossCoreInputValues: ", crossCoreInputValues));
-  LLVM_DEBUG(logConditionGroupIndices("crossCoreOutputValues: ",
-                                      crossCoreOutputValues));
+  LDBG("==== Intra Core Values ====" << "\n");
   LLVM_DEBUG(
       logConditionGroupIndices("intraCoreInputValues: ", intraCoreInputValues));
   LLVM_DEBUG(logConditionGroupIndices("intraCoreOutputValues: ",
@@ -610,100 +794,139 @@ int UpdateConditionInfoPass::buildOutputGroups(
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
 
-// Select corresponding SSBuffer ptr based on ifblock running on vector/cube
-// core
-Value UpdateConditionInfoPass::getSSBufferMemref(
-    bool isAIC, int groupIdx, int ptrSetIdx,
-    DenseMap<int, Value> &VectorSSBufferPtrs,
+// ---------------------------------------------------------------------------
+// Block level cross-core conditions
+// ---------------------------------------------------------------------------
+
+// Memrefs holding the counter of `targetBlock` as seen by the reading core.
+//   cube reader  : vector target -> {core0 copy, core1 copy};
+//                  cube target   -> {the single copy}.
+//   vector reader: vector target -> {the copy of the running core};
+//                  cube target   -> {the single copy}.
+SmallVector<Value> UpdateConditionInfoPass::getBlockCounterMemrefs(
+    bool isAIC, scf::IfOp targetBlock, DenseMap<int, Value> &vectorSSBufferMemrefs,
     ArrayRef<SmallVector<Value>> ssbufferPtrs) {
-  if (isAIC) {
-    return ssbufferPtrs[ptrSetIdx][groupIdx];
-  } else {
-    return VectorSSBufferPtrs[groupIdx];
+  SmallVector<Value> memrefs;
+
+  auto slotIt = info->blockCounterSlots.find(targetBlock);
+  if (slotIt == info->blockCounterSlots.end()) {
+    LDBG("No counter slot for block " << targetBlock << "\n");
+    return memrefs;
   }
+  const BlockCounterSlot &counterSlot = slotIt->second;
+  int slot = counterSlot.slot;
+
+  if (!counterSlot.isVector) {
+    // A cube block owns a single counter.
+    memrefs.push_back(ssbufferPtrs[0][slot]);
+    return memrefs;
+  }
+
+  if (isAIC) {
+    // The cube reads both copies of a vector block at their fixed addresses.
+    memrefs.push_back(ssbufferPtrs[0][slot]);
+    memrefs.push_back(ssbufferPtrs[1][slot]);
+    return memrefs;
+  }
+
+  // The vector reads the copy of its own core through a dynamic address.
+  auto vectorIt = vectorSSBufferMemrefs.find(slot);
+  if (vectorIt == vectorSSBufferMemrefs.end()) {
+    LDBG("No dynamic address for the vector counter of slot " << slot << "\n");
+    return memrefs;
+  }
+  memrefs.push_back(vectorIt->second);
+  return memrefs;
 }
 
-// Compute pointers for VECTOR core SSBuffer
+// Compute the dynamic addresses of the vector side counters. For every slot
+// the result holds the memref of the counter copy owned by the vector core
+// running the code (slotBase + sub_block_idx * 1024). The copy of the other
+// vector core is only read by the cube core, which addresses it through a
+// fixed address.
 std::optional<DenseMap<int, Value>>
 UpdateConditionInfoPass::computeVectorSSBufferMemrefs(
-    OpBuilder &builder, Location loc, Operation *scopeOp,
-    SmallVector<int> crossCoreInputValues,
-    SmallVector<int> crossCoreOutputValues) {
+    OpBuilder &builder, Location loc, Operation *scopeOp, ArrayRef<int> slots) {
   if (!scopeOp) {
     LDBG("Scope Op is null pointer!");
     return std::nullopt;
   }
 
-  // Collect all unique group indices
-  SmallVector<int> allGroupIndices;
-  DenseSet<int> uniqueIndices;
-  for (int idx : crossCoreInputValues) {
-    if (uniqueIndices.insert(idx).second) {
-      allGroupIndices.push_back(idx);
+  DenseMap<int, Value> &cached = vectorSSBufferMemrefCache[scopeOp];
+
+  SmallVector<int> missingSlots;
+  for (int slot : slots) {
+    if (!cached.count(slot)) {
+      missingSlots.push_back(slot);
     }
   }
-  for (int idx : crossCoreOutputValues) {
-    if (uniqueIndices.insert(idx).second) {
-      allGroupIndices.push_back(idx);
+  if (missingSlots.empty()) {
+    return cached;
+  }
+
+  Value ssbAddrOffset;
+  auto offsetIt = vectorSubBlockOffsetCache.find(scopeOp);
+  if (offsetIt == vectorSubBlockOffsetCache.end()) {
+    builder.setInsertionPointToStart(&scopeOp->getRegion(0).front());
+    Value vec1OffsetValue = builder.create<arith::ConstantIntOp>(
+        loc, VECTOR_SSBUF_OFFSET, ADDR_INT_TYPE);
+    auto subIdOp = builder.create<GetSubBlockIdxOp>(
+        loc, builder.getIntegerType(ADDR_INT_TYPE));
+    ssbAddrOffset =
+        builder.create<arith::MulIOp>(loc, subIdOp, vec1OffsetValue);
+    vectorSubBlockOffsetCache[scopeOp] = ssbAddrOffset;
+  } else {
+    ssbAddrOffset = offsetIt->second;
+    // The offset is already in the block: the new addresses have to be built
+    // after it, otherwise they would use a value that is defined later.
+    builder.setInsertionPointAfter(ssbAddrOffset.getDefiningOp());
+  }
+
+  for (int slot : missingSlots) {
+    if (slot < 0 || slot >= static_cast<int>(blockCounterOwners.size())) {
+      continue;
     }
+    auto slotIt = info->blockCounterSlots.find(blockCounterOwners[slot]);
+    if (slotIt == info->blockCounterSlots.end()) {
+      continue;
+    }
+    int byteOffset = slotIt->second.byteOffset;
+
+    Value baseAddr =
+        builder.create<arith::ConstantIntOp>(loc, byteOffset, ADDR_INT_TYPE);
+    // The copy of the running core: base + sub_block_idx * 1024
+    Value ownAddr = builder.create<arith::AddIOp>(loc, baseAddr, ssbAddrOffset);
+
+    cached[slot] = builder.create<PointerCastOp>(
+        loc, getSsbufMemrefType(builder), ownAddr);
   }
 
-  DenseMap<int, Value> vectorSSBufferMemrefs;
-
-  builder.setInsertionPointToStart(&scopeOp->getRegion(0).front());
-  int vec1Offset = 1024;
-  Value vec1OffsetValue = builder.create<arith::ConstantIntOp>(
-      loc, VECTOR_SSBUF_OFFSET, ADDR_INT_TYPE);
-  auto subIdOp = builder.create<GetSubBlockIdxOp>(
-      loc, builder.getIntegerType(ADDR_INT_TYPE));
-  Value ssbAddrOffset =
-      builder.create<arith::MulIOp>(loc, subIdOp, vec1OffsetValue);
-
-  for (int groupIdx : allGroupIndices) {
-    auto ssbBaseAddr = builder.create<arith::ConstantIntOp>(
-        loc, groupIdx * VALUE_SSBUF_OFFSET, ADDR_INT_TYPE);
-    auto ssbAddr =
-        builder.create<arith::AddIOp>(loc, ssbBaseAddr, ssbAddrOffset);
-    Value memref = builder.create<PointerCastOp>(
-        loc, getSsbufMemrefType(builder), ssbAddr.getResult());
-    vectorSSBufferMemrefs[groupIdx] = memref;
-  }
-
-  return vectorSSBufferMemrefs;
+  return cached;
 }
 
-template <typename FuncTy>
-auto UpdateConditionInfoPass::createSsbufLoads(
-    OpBuilder &builder, Location loc, bool isAIC, int groupIdx,
-    DenseMap<int, Value> &vectorSSBufferMemrefs,
-    llvm::ArrayRef<SmallVector<Value>> ssbufferMemrefs, FuncTy &&pred) {
-  using ResTy = std::invoke_result_t<FuncTy, memref::LoadOp, int>;
-  SmallVector<ResTy, kVectorCount> res;
-  size_t resNum = isAIC ? kVectorCount : 1;
-  for (int ptrSetIdx : llvm::seq(resNum)) {
-    auto loadOp = builder.create<memref::LoadOp>(
-        loc,
-        getSSBufferMemref(isAIC, groupIdx, ptrSetIdx, vectorSSBufferMemrefs,
-                          ssbufferMemrefs),
-        ValueRange{});
-    auto markOp = builder.create<annotation::MarkOp>(loc, loadOp);
-    markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
-    res.push_back(std::invoke(pred, loadOp, ptrSetIdx));
-  }
-  return res;
-}
-
-// Part 2: Add cross-core conditions
-Value UpdateConditionInfoPass::addCrossCoreConditions(
-    OpBuilder &builder, Location loc, SmallVector<int> crossCoreInputValues,
-    SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-        &crossCoreBuffers,
-    bool isAIC, Value zeroConst, DenseMap<int, Value> &VectorSSBufferPtrs,
+// Build the cross-core conditions of `ifOp`.
+//
+// Every cross-core dependency edge P -> C is described by the difference of
+// the two block counters:
+//   consumer side: c_P - c_C > 0    the producer produced more rounds than
+//                                    the consumer consumed
+//   producer side: c_P - c_C < N_e  the producer is less than N_e rounds
+//                                    ahead of the consumer
+// A cube block consuming a vector block additionally waits until both vector
+// cores produced the same number of rounds (c_V0 == c_V1).
+//
+// A vector block only ever looks at the counter copy of its own core: the
+// number of rounds the other core produced does not constrain it.
+Value UpdateConditionInfoPass::addCrossCoreBlockConditions(
+    OpBuilder &builder, Location loc, scf::IfOp ifOp, bool isAIC,
+    Value zeroConst, DenseMap<int, Value> &vectorSSBufferMemrefs,
     SmallVector<SmallVector<Value>> ssbufferPtrs) {
   Value conditions = nullptr;
 
   auto combineCondition = [&](Value newCond) {
+    if (!newCond) {
+      return;
+    }
     if (conditions) {
       conditions = builder.create<arith::AndIOp>(loc, conditions, newCond);
     } else {
@@ -711,158 +934,202 @@ Value UpdateConditionInfoPass::addCrossCoreConditions(
     }
   };
 
-  for (int inputGroupIdx : crossCoreInputValues) {
-    auto conds = createSsbufLoads(
-        builder, loc, isAIC, inputGroupIdx, VectorSSBufferPtrs, ssbufferPtrs,
-        [&](memref::LoadOp loadOp, auto) {
-          return builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::sgt,
-                                               loadOp, zeroConst);
-        });
-    Value cond = conds[0];
-    if (isAIC) {
-      cond = builder.create<arith::AndIOp>(loc, conds[0], conds[1]);
-    }
-    combineCondition(cond);
+  auto edgesIt = info->crossCoreBlockEdges.find(ifOp);
+  if (edgesIt == info->crossCoreBlockEdges.end()) {
+    return nullptr;
   }
 
-  for (int outputGroupIdx : crossCoreOutputValues) {
-    int outputCount = 0;
-    if (crossCoreBuffers.count(outputGroupIdx)) {
-      for (auto &entry : crossCoreBuffers[outputGroupIdx]) {
-        outputCount += entry.second.size();
-      }
-    } else {
-      LDBG("outputGroupIdx " << outputGroupIdx
-                             << " not found in any buffers map!" << "\n");
+  // Every counter is read once, the loaded value is shared by all conditions.
+  DenseMap<Value, Value> loadedCounters;
+  auto loadCounter = [&](Value memref) -> Value {
+    auto it = loadedCounters.find(memref);
+    if (it != loadedCounters.end()) {
+      return it->second;
+    }
+    auto loadOp = builder.create<memref::LoadOp>(loc, memref, ValueRange{});
+    auto markOp = builder.create<annotation::MarkOp>(loc, loadOp);
+    markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
+    loadedCounters[memref] = loadOp.getResult();
+    return loadOp.getResult();
+  };
+
+  for (const CrossCoreBlockEdge &edge : edgesIt->second) {
+    bool currentIsProducer = (edge.producer == ifOp);
+    scf::IfOp producer = edge.producer;
+    scf::IfOp consumer = edge.consumer;
+
+    SmallVector<Value> producerMemrefs = getBlockCounterMemrefs(
+        isAIC, producer, vectorSSBufferMemrefs, ssbufferPtrs);
+    SmallVector<Value> consumerMemrefs = getBlockCounterMemrefs(
+        isAIC, consumer, vectorSSBufferMemrefs, ssbufferPtrs);
+    if (producerMemrefs.empty() || consumerMemrefs.empty()) {
+      LDBG("Missing counter address for a cross-core edge of " << ifOp << "\n");
       return nullptr;
     }
-    Value bufferNum =
-        builder.create<arith::ConstantIntOp>(loc, outputCount, CONST_INT_TYPE);
-    auto conds = createSsbufLoads(
-        builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs, ssbufferPtrs,
-        [&](Value cond, auto) {
-          return builder.create<arith::CmpIOp>(loc, arith::CmpIPredicate::slt,
-                                               cond, bufferNum);
-        });
-    Value cond = conds[0];
+
+    bool producerIsVector = producerMemrefs.size() > 1;
+    bool consumerIsVector = consumerMemrefs.size() > 1;
+
+    // The pairs of counters to compare.
+    SmallVector<std::pair<Value, Value>> pairs;
     if (isAIC) {
-      cond = builder.create<arith::AndIOp>(loc, conds[0], conds[1]);
+      if (currentIsProducer) {
+        // The cube produces: it must not run more than N_e rounds ahead of
+        // any of the vector cores, so both copies of the consumer counter are
+        // compared against the single cube counter.
+        pairs.push_back({producerMemrefs[0], consumerMemrefs[0]});
+        if (consumerIsVector) {
+          pairs.push_back({producerMemrefs[0], consumerMemrefs[1]});
+        }
+      } else {
+        // The cube consumes: it waits for every vector core, so both copies
+        // of the producer counter are compared against the single cube
+        // counter.
+        pairs.push_back({producerMemrefs[0], consumerMemrefs[0]});
+        if (producerIsVector) {
+          pairs.push_back({producerMemrefs[1], consumerMemrefs[0]});
+        }
+      }
+    } else {
+      // The vector only compares the counters of the running core.
+      pairs.push_back({producerMemrefs[0], consumerMemrefs[0]});
     }
-    combineCondition(cond);
+
+    for (const auto &pair : pairs) {
+      Value producerValue = loadCounter(pair.first);
+      Value consumerValue = loadCounter(pair.second);
+      Value diff =
+          builder.create<arith::SubIOp>(loc, producerValue, consumerValue);
+      if (currentIsProducer) {
+        Value bufferNum = builder.create<arith::ConstantIntOp>(
+            loc, edge.bufferNum, CONST_INT_TYPE);
+        combineCondition(builder.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::slt, diff, bufferNum));
+      } else {
+        combineCondition(builder.create<arith::CmpIOp>(
+            loc, arith::CmpIPredicate::sgt, diff, zeroConst));
+      }
+    }
+
+    // A cube block reads the whole slot filled by the two vector cores: it
+    // has to wait until both cores produced the same number of rounds.
+    if (!currentIsProducer && isAIC && producerIsVector) {
+      Value core0Value = loadCounter(producerMemrefs[0]);
+      Value core1Value = loadCounter(producerMemrefs[1]);
+      combineCondition(builder.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, core0Value, core1Value));
+    }
   }
 
   return conditions;
 }
 
-// Part 3: Update control variables in then block
-void UpdateConditionInfoPass::updateCrossCoreControlVars(
-    OpBuilder &builder, Location loc, scf::IfOp ifOp,
-    SmallVector<int> crossCoreInputValues,
-    SmallVector<int> crossCoreOutputValues, bool isAIC, Value oneConst,
-    DenseMap<int, Value> &VectorSSBufferPtrs,
+// Increment the counter owned by `ifOp` at the end of its then block.
+// Every counter has a single writer: the block owning it. A vector block owns
+// one counter per vector core and only bumps the copy of the core it runs on.
+void UpdateConditionInfoPass::updateBlockCounterVars(
+    OpBuilder &builder, Location loc, scf::IfOp ifOp, bool isAIC, Value oneConst,
+    DenseMap<int, Value> &vectorSSBufferMemrefs,
     SmallVector<SmallVector<Value>> ssbufferPtrs) {
+  auto slotIt = info->blockCounterSlots.find(ifOp);
+  if (slotIt == info->blockCounterSlots.end()) {
+    return;
+  }
+  const BlockCounterSlot &counterSlot = slotIt->second;
+
+  Value counterMemref;
+  if (counterSlot.isVector) {
+    // The running vector core bumps the copy of its own core.
+    auto vectorIt = vectorSSBufferMemrefs.find(counterSlot.slot);
+    if (vectorIt == vectorSSBufferMemrefs.end()) {
+      LDBG("No dynamic address for the vector counter of slot "
+           << counterSlot.slot << "\n");
+      return;
+    }
+    counterMemref = vectorIt->second;
+  } else {
+    counterMemref = ssbufferPtrs[0][counterSlot.slot];
+  }
+
   Block *thenBlock = &ifOp.getThenRegion().front();
   auto yieldOp = cast<scf::YieldOp>(thenBlock->getTerminator());
   builder.setInsertionPoint(yieldOp);
 
-  for (int inputGroupIdx : crossCoreInputValues) {
-    createSsbufLoads(builder, loc, isAIC, inputGroupIdx, VectorSSBufferPtrs,
-                     ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
-                       Value newValue = builder.create<arith::SubIOp>(
-                           loc, loadRes, oneConst);
-                       return builder.create<memref::StoreOp>(
-                           loc, newValue,
-                           getSSBufferMemref(isAIC, inputGroupIdx, ptrSetIdx,
-                                             VectorSSBufferPtrs, ssbufferPtrs),
-                           ValueRange{});
-                     });
-  }
-
-  for (int outputGroupIdx : crossCoreOutputValues) {
-    createSsbufLoads(builder, loc, isAIC, outputGroupIdx, VectorSSBufferPtrs,
-                     ssbufferPtrs, [&](Value loadRes, int ptrSetIdx) {
-                       Value newValue = builder.create<arith::AddIOp>(
-                           loc, loadRes, oneConst);
-                       return builder.create<memref::StoreOp>(
-                           loc, newValue,
-                           getSSBufferMemref(isAIC, outputGroupIdx, ptrSetIdx,
-                                             VectorSSBufferPtrs, ssbufferPtrs),
-                           ValueRange{});
-                     });
-  }
+  auto loadOp = builder.create<memref::LoadOp>(loc, counterMemref, ValueRange{});
+  auto markOp = builder.create<annotation::MarkOp>(loc, loadOp);
+  markOp->setAttr(kMemrefExtVolatile, builder.getUnitAttr());
+  Value newValue =
+      builder.create<arith::AddIOp>(loc, loadOp.getResult(), oneConst);
+  builder.create<memref::StoreOp>(loc, newValue, counterMemref, ValueRange{});
 }
 
-// Set the crossCore condition
+// Set the crossCore condition of `ifOp` and bump its own counter.
 int UpdateConditionInfoPass::setCrossCoreCondition(
-    SmallVector<int> crossCoreInputValues,
-    SmallVector<int> crossCoreOutputValues,
-    DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-        &crossCoreBuffers,
     scf::IfOp ifOp, SmallVector<SmallVector<Value>> ssbufferPtrs,
     Value &crossCoreCond) {
   OpBuilder builder(ifOp);
   Location loc = ifOp.getLoc();
+  crossCoreCond = nullptr;
+
+  // Only the blocks taking part in a cross-core dependency own a counter.
+  if (!info->blockCounterSlots.count(ifOp)) {
+    return UPDATE_CONDITION_INFO_SUCCESS;
+  }
 
   // ========== Part 1: Preparation ==========
   // Determine whether the current ifblock is on cube or vector core
-  auto aiCAttr =
-      hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::CUBE);
-  auto aivAttr =
-      hivm::TCoreTypeAttr::get(builder.getContext(), hivm::TCoreType::VECTOR);
+  scope::ScopeOp scopeOp = findOwningScope(ifOp);
   bool isAIC = false;
   bool isAIV = false;
-  mlir::Operation *parentOp = ifOp->getParentOp();
-  mlir::Operation *scopeOp = nullptr;
-  while (parentOp) {
-    if (dyn_cast<scope::ScopeOp>(parentOp)) {
-      scopeOp = parentOp;
-      break;
-    }
-    parentOp = parentOp->getParentOp();
-  }
-  if (scopeOp && scopeOp->hasAttr("hivm.tcore_type")) {
-    auto attr = scopeOp->getAttr("hivm.tcore_type");
-    if (attr == aiCAttr) {
-      isAIC = true;
-    } else if (attr == aivAttr) {
-      isAIV = true;
-    } else {
-      LDBG("scope block has invalid tcore_type attribute" << "\n");
-      return UPDATE_CONDITION_INFO_FAILED;
-    }
-  } else {
+  if (!getScopeCoreType(scopeOp, isAIC, isAIV)) {
     LDBG("ifblock not in a correct scope block" << "\n");
     return UPDATE_CONDITION_INFO_FAILED;
   }
+
+  // The vector side addresses the counters of the vector blocks through the
+  // dynamic address of its own core.
+  DenseMap<int, Value> vectorSSBufferMemrefs;
+  if (!isAIC) {
+    SmallVector<int> neededSlots;
+    auto edgesIt = info->crossCoreBlockEdges.find(ifOp);
+    if (edgesIt != info->crossCoreBlockEdges.end()) {
+      for (const CrossCoreBlockEdge &edge : edgesIt->second) {
+        for (scf::IfOp block : {edge.producer, edge.consumer}) {
+          auto slotIt = info->blockCounterSlots.find(block);
+          if (slotIt == info->blockCounterSlots.end()) {
+            continue;
+          }
+          if (!slotIt->second.isVector) {
+            continue;
+          }
+          if (!llvm::is_contained(neededSlots, slotIt->second.slot)) {
+            neededSlots.push_back(slotIt->second.slot);
+          }
+        }
+      }
+    }
+    auto result = computeVectorSSBufferMemrefs(
+        builder, loc, scopeOp.getOperation(), neededSlots);
+    if (!result) {
+      LDBG("computeVectorSSBufferMemrefs failed!");
+      return UPDATE_CONDITION_INFO_FAILED;
+    }
+    vectorSSBufferMemrefs = std::move(*result);
+  }
+
+  builder.setInsertionPoint(ifOp);
 
   Value zeroConst =
       builder.create<arith::ConstantIntOp>(loc, 0, CONST_INT_TYPE);
   Value oneConst = builder.create<arith::ConstantIntOp>(loc, 1, CONST_INT_TYPE);
 
-  // If ifblock is on vector core, compute the required SSBuffer ptrs for vector
-  // side
-  DenseMap<int, Value> VectorSSBufferPtrs;
-  if (!isAIC) {
-    auto result = computeVectorSSBufferMemrefs(
-        builder, loc, scopeOp, crossCoreInputValues, crossCoreOutputValues);
-    if (!result) {
-      LDBG("computeVectorSSBufferPtrs failed!");
-      return UPDATE_CONDITION_INFO_FAILED;
-    }
-    VectorSSBufferPtrs = std::move(*result);
-  }
-
-  builder.setInsertionPoint(ifOp);
-
   // ========== Part 2: Add cross-core conditions ==========
-  crossCoreCond = addCrossCoreConditions(
-      builder, loc, crossCoreInputValues, crossCoreOutputValues,
-      crossCoreBuffers, isAIC, zeroConst, VectorSSBufferPtrs, ssbufferPtrs);
+  crossCoreCond = addCrossCoreBlockConditions(
+      builder, loc, ifOp, isAIC, zeroConst, vectorSSBufferMemrefs, ssbufferPtrs);
 
-  // ========== Part 3: Update control variables ==========
-  updateCrossCoreControlVars(builder, loc, ifOp, crossCoreInputValues,
-                             crossCoreOutputValues, isAIC, oneConst,
-                             VectorSSBufferPtrs, ssbufferPtrs);
+  // ========== Part 3: Update the own counter ==========
+  updateBlockCounterVars(builder, loc, ifOp, isAIC, oneConst,
+                         vectorSSBufferMemrefs, ssbufferPtrs);
 
   return UPDATE_CONDITION_INFO_SUCCESS;
 }
@@ -1242,6 +1509,38 @@ void UpdateConditionInfoPass::updateDAGAfterIfOpReplacement(scf::IfOp oldIfOp,
   for (auto &entry : info->flowOptIfOpPairs) {
     if (entry.second == oldIfOp) {
       entry.second = newIfOp;
+    }
+  }
+
+  // 3. Update the block level cross-core edges
+  if (info->crossCoreBlockEdges.count(oldIfOp)) {
+    auto edges = info->crossCoreBlockEdges[oldIfOp];
+    info->crossCoreBlockEdges.erase(oldIfOp);
+    info->crossCoreBlockEdges[newIfOp] = edges;
+  }
+
+  for (auto &entry : info->crossCoreBlockEdges) {
+    for (auto &edge : entry.second) {
+      if (edge.producer == oldIfOp) {
+        edge.producer = newIfOp;
+      }
+      if (edge.consumer == oldIfOp) {
+        edge.consumer = newIfOp;
+      }
+    }
+  }
+
+  // 4. Update the block counter slots
+  if (info->blockCounterSlots.count(oldIfOp)) {
+    auto slot = info->blockCounterSlots[oldIfOp];
+    info->blockCounterSlots.erase(oldIfOp);
+    info->blockCounterSlots[newIfOp] = slot;
+  }
+
+  // 5. Update the counter slot owners
+  for (auto &owner : blockCounterOwners) {
+    if (owner == oldIfOp) {
+      owner = newIfOp;
     }
   }
 }
@@ -1824,13 +2123,10 @@ int UpdateConditionInfoPass::updateIfConds(
   }
 
   // Step0: Collect dependency buffers once outside the loop
-  DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>
-      crossCoreBuffers;
   DenseMap<Operation *,
            DenseMap<int, DenseMap<Operation *, SmallVector<Operation *>>>>
       intraCoreBuffersMap;
-  collectDependencyBuffers(module, mainLoopOps, crossCoreBuffers,
-                           intraCoreBuffersMap);
+  collectDependencyBuffers(module, mainLoopOps, intraCoreBuffersMap);
 
   for (Operation *loopOp : mainLoopOps) {
     controlVarToLatestValue.clear();
@@ -1843,8 +2139,8 @@ int UpdateConditionInfoPass::updateIfConds(
     }
 
     // for/while requires at least one of cross/intra deps;
-    if (crossCoreBuffers.empty() && intraCoreBuffers.empty()) {
-      LDBG("crossCoreBuffers and intraCoreBuffers are all empty! loopOp="
+    if (info->crossCoreBlockEdges.empty() && intraCoreBuffers.empty()) {
+      LDBG("crossCoreBlockEdges and intraCoreBuffers are all empty! loopOp="
            << *loopOp << "\n");
       return UPDATE_CONDITION_INFO_FAILED;
     }
@@ -1871,14 +2167,10 @@ int UpdateConditionInfoPass::updateIfConds(
 
     // Update the conditions of ifOp in this loop op.
     for (scf::IfOp ifOp : ifOps) {
-      SmallVector<int> crossCoreInputValues;
-      SmallVector<int> crossCoreOutputValues;
       SmallVector<int> intraCoreInputValues;
       SmallVector<int> intraCoreOutputValues;
 
-      if (getInputOutputValues(ifOp, crossCoreBuffers, intraCoreBuffers,
-                               crossCoreInputValues, crossCoreOutputValues,
-                               intraCoreInputValues,
+      if (getInputOutputValues(ifOp, intraCoreBuffers, intraCoreInputValues,
                                intraCoreOutputValues) != 0) {
         LDBG("getInputOutputValues failed! ifOp=" << ifOp << ", loopOp="
                                                   << *loopOp << "\n");
@@ -1887,9 +2179,7 @@ int UpdateConditionInfoPass::updateIfConds(
 
       // Step3:Set the crossCore condition
       Value crossCoreCond;
-      if (setCrossCoreCondition(crossCoreInputValues, crossCoreOutputValues,
-                                crossCoreBuffers, ifOp, ssbufferPtrs,
-                                crossCoreCond) != 0) {
+      if (setCrossCoreCondition(ifOp, ssbufferPtrs, crossCoreCond) != 0) {
         LDBG("setCrossCoreCondition failed! ifOp=" << ifOp << ", loopOp="
                                                    << *loopOp << "\n");
         return UPDATE_CONDITION_INFO_FAILED;
@@ -1933,11 +2223,28 @@ void UpdateConditionInfoPass::runOnOperation() {
   }
 
   LDBG("Enter UpdateConditionInfo pass." << "\n");
-  // Step1:Init the ssbufferPtrs
+  // Step1:Build the block level cross-core edges out of the op level
+  // crossCoreDependentMap. Every producer of a dependency group must live in
+  // the same ssbuffer.if block.
+  if (buildCrossCoreBlockEdges(module) != UPDATE_CONDITION_INFO_SUCCESS) {
+    LDBG("buildCrossCoreBlockEdges failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step2:Give every block taking part in a cross-core dependency a counter
+  // slot.
+  if (assignBlockCounterSlots(module) != UPDATE_CONDITION_INFO_SUCCESS) {
+    LDBG("assignBlockCounterSlots failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step3:Init the ssbufferPtrs
   SmallVector<SmallVector<Value>> ssbufferPtrs = allocSSBuffer(module);
 
-  // Step2:Update the conditions of ifOp based on the intraCoreDependentMap and
-  // crossCoreDependentMap
+  // Step4:Update the conditions of ifOp based on the intraCoreDependentMap and
+  // the block level cross-core edges
   int updateResult = updateIfConds(module, ssbufferPtrs);
 
   if (updateResult != UPDATE_CONDITION_INFO_SUCCESS) {

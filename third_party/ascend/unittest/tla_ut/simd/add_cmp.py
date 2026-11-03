@@ -108,7 +108,9 @@ def add_cmp(A_ptr, B_ptr, C_ptr, S_ptr, MX_ptr, MN_ptr, M_ptr, C2_ptr, I_ptr, J_
         one = tla.simd.vsplat(1.0, tl.int32)
         zero = tla.simd.vsplat(0.0, tl.int32)
         gt = tla.simd.vcmp(av, bv, op=tla.simd.CMP.GT)
-        tla.simd.vsts(m_ub[0], tla.simd.vsel(gt, one, zero), dist="NORM_B32")
+        # tla.where(mask, x, y) is the vector form of vsel; keep the other
+        # selects below on the explicit tla.simd.vsel spelling.
+        tla.simd.vsts(m_ub[0], tla.where(gt, one, zero), dist="NORM_B32")
 
         # vaddc: int32 sum + two's-complement carry-out.
         sv, cv = tla.simd.vaddc(iv, jv)

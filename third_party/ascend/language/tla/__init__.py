@@ -27,7 +27,8 @@ from the TLA repo's SIMD VF additions.  It does **not** reuse the existing
 Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``copy`` (GM<->buffer), ``view`` (GM view), ``scope`` (core-mode scopes:
 ``tla.scope.simd()`` / ``tla.scope.cube()``),
-``simd`` (vector-register ops), ``annotate_buffer_versions``.
+``simd`` (vector-register ops), ``where`` (eager scalar/SIMD select),
+``annotate_buffer_versions``.
 """
 
 from .core import buffer, buffer_type, vector, vector_type
@@ -68,15 +69,20 @@ from .dma import (
     copy_l0c_to_l1,
     set_ctrl,
 )
+
 from .view import view, subview, reshape
-from .aux_ops import annotate_buffer_versions
+from .aux_ops import annotate_buffer_versions, assume
+
 from . import math
-from .math import compensated_rstd
+from .math import compensated_rstd, truncmod
 from .debug import device_assert, device_print
 
 # SIMD vector-register ops.  ``simd`` is exported as a module so its ``cast``
 # (ave.hir.vextf) does not shadow unrelated top-level names.
 from . import simd
+
+# Scalar / SIMD-register selection (eager, unlike TileLang T.if_then_else).
+from .selection import where
 
 # Cube-core ops (``mmad``/``tla.copy`` L1/L0C routes).
 from . import cube
@@ -148,14 +154,19 @@ __all__ = [
     # math helpers / diagnostics
     "math",
     "compensated_rstd",
+    "truncmod",
     "device_assert",
     "device_print",
 
     # aux ops
     "annotate_buffer_versions",
+    "assume",
 
     # simd ops
     "simd",
+
+    # scalar / SIMD selection
+    "where",
 
     # cube ops
     "cube",

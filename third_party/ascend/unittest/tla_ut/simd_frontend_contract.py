@@ -52,16 +52,44 @@ triton = pytest.importorskip("triton")
 tl = pytest.importorskip("triton.language")
 
 
-def _load_simd():
-    """Import the in-tree ``language/tla/simd.py`` as a throwaway package."""
+def _source_package():
+    """Register the in-tree ``language/tla`` directory as a throwaway package."""
     if "tla_src" not in sys.modules:
         pkg = types.ModuleType("tla_src")
         pkg.__path__ = [str(_TLA_DIR)]
         sys.modules["tla_src"] = pkg
-    return importlib.import_module("tla_src.simd")
+    return importlib.import_module
+
+
+def _load_simd():
+    """Import the in-tree ``language/tla/simd.py`` as a throwaway package."""
+    return _source_package()("tla_src.simd")
+
+
+def _load_selection():
+    """Import the in-tree ``language/tla/selection.py`` (not site-packages)."""
+    return _source_package()("tla_src.selection")
 
 
 simd = _load_simd()
+selection = _load_selection()
+math_src = _source_package()("tla_src.math")
+aux_src = _source_package()("tla_src.aux_ops")
+tla_core = importlib.import_module("tla_src.core")
+
+
+def _triton_is_builtin(fn):
+    """Call triton's own ``is_builtin`` on whichever module actually has it.
+
+    The helper lives in ``triton.language.core`` upstream but must not be
+    hard-coded, since the Ascend build can move/alias it.
+    """
+    for mod_name in ("triton.language.core", "triton.language"):
+        probe = getattr(importlib.import_module(mod_name), "is_builtin", None)
+        if callable(probe):
+            return probe(fn)
+    raise AssertionError("triton exposes no is_builtin(); cannot verify @builtin")
+
 
 # --------------------------------------------------------------------------
 # mock builder
@@ -122,6 +150,75 @@ class _Semantic:
 
     def __init__(self):
         self.builder = _Recorder()
+
+
+class _ScalarHandle:
+
+    def __init__(self, op, value):
+        self.op, self.value = op, value
+
+    def __repr__(self):
+        return f"{self.op}({self.value!r})"
+
+
+class _ScalarBuilder:
+    """Recording builder good enough for the real ``TritonSemantic``."""
+
+    def __init__(self):
+        self.calls = []
+
+    def _make(self, op, value):
+        self.calls.append((op, value))
+        return _ScalarHandle(op, value)
+
+    def get_int1(self, value):
+        return self._make("get_int1", value)
+
+    def get_int32(self, value):
+        return self._make("get_int32", value)
+
+    def get_uint32(self, value):
+        return self._make("get_uint32", value)
+
+    def get_int64(self, value):
+        return self._make("get_int64", value)
+
+    def get_fp32(self, value):
+        return self._make("get_fp32", value)
+
+    def get_null_value(self, _ty):
+        return self._make("get_null_value", None)
+
+    def create_select(self, cond, x, y):
+        self.calls.append(("create_select", (cond, x, y)))
+        return _ScalarHandle("select", (cond, x, y))
+
+    def get_int8(self, value):
+        return self._make("get_int8", value)
+
+    def create_srem(self, lhs, rhs):
+        return self._make("srem", (lhs, rhs))
+
+    def create_assume(self, cond):
+        self.calls.append(("create_assume", (cond, )))
+
+    def create_urem(self, lhs, rhs):
+        return self._make("urem", (lhs, rhs))
+
+
+def _scalar_semantic():
+    from triton.language.semantic import TritonSemantic
+
+    builder = _ScalarBuilder()
+    return TritonSemantic(builder), builder
+
+
+class _NoBuilder:
+    """Invalid inputs must fail before any builder operation is reached."""
+
+    @property
+    def builder(self):
+        raise AssertionError("invalid tla.where input reached the builder")
 
 
 def _vec(lanes, dtype):
@@ -737,6 +834,279 @@ def test_existing_internal_callers_still_work():
     sem = _Semantic()
     simd.vdiv(_vec(64, tl.float32), _vec(64, tl.float32), _semantic=sem)
     assert _last(sem)[0] == "binary"
+
+
+# --------------------------------------------------------------------------
+# tla.truncmod (math.py)
+# --------------------------------------------------------------------------
+
+
+def test_truncmod_export_and_builtin():
+    assert "truncmod" in math_src.__all__
+    assert _triton_is_builtin(math_src.truncmod)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        math_src.truncmod(7, 3)
+    name = "tla_truncmod_export"
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "truncmod" in pkg.__all__
+        assert pkg.truncmod is pkg.math.truncmod
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("a,b", [(7, 3), (-7, 3), (7, -3), (-7, -3)])
+def test_truncmod_literals_emit_signed_remainder(a, b):
+    for args in ((a, b), (tl.constexpr(a), tl.constexpr(b))):
+        sem, _ = _scalar_semantic()
+        result = math_src.truncmod(*args, _semantic=sem)
+        assert isinstance(result, tl.tensor) and result.type == tl.int32
+        name, (lhs, rhs) = _last(sem)
+        assert name == "srem"
+        assert (lhs.op, lhs.value) == ("get_int32", a)
+        assert (rhs.op, rhs.value) == ("get_int32", b)
+
+
+@pytest.mark.parametrize("dtype,op", [(tl.int8, "srem"), (tl.int32, "srem"), (tl.int64, "srem"), (tl.uint32, "urem"),
+                                      (tl.uint64, "urem")])
+def test_truncmod_tensor_signedness(dtype, op):
+    sem, _ = _scalar_semantic()
+    a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
+    b = tl.tensor(_ScalarHandle("arg", "b"), dtype)
+    result = math_src.truncmod(a, b, _semantic=sem)
+    assert result.type == dtype
+    assert _last(sem) == (op, (a.handle, b.handle))
+
+
+@pytest.mark.parametrize("dtype,op,constant", [(tl.int8, "srem", "get_int8"), (tl.uint32, "urem", "get_uint32")])
+def test_truncmod_literal_preserves_tensor_type(dtype, op, constant):
+    sem, _ = _scalar_semantic()
+    a = tl.tensor(_ScalarHandle("arg", "a"), dtype)
+    result = math_src.truncmod(a, 3, _semantic=sem)
+    assert result.type == dtype
+    name, (lhs, rhs) = _last(sem)
+    assert name == op and lhs is a.handle
+    assert (rhs.op, rhs.value) == (constant, 3)
+
+
+def test_truncmod_rejects_mixed_signedness():
+    for lhs_ty, rhs_ty in ((tl.int32, tl.uint32), (tl.uint64, tl.int64)):
+        sem, builder = _scalar_semantic()
+        a = tl.tensor(_ScalarHandle("arg", "a"), lhs_ty)
+        b = tl.tensor(_ScalarHandle("arg", "b"), rhs_ty)
+        with pytest.raises(TypeError, match="different signedness"):
+            math_src.truncmod(a, b, _semantic=sem)
+        assert not builder.calls
+
+
+@pytest.mark.parametrize("divisor", [0, tl.constexpr(0)])
+def test_truncmod_rejects_literal_zero(divisor):
+    with pytest.raises(ValueError, match="divisor must be nonzero"):
+        math_src.truncmod(7, divisor, _semantic=_NoBuilder())
+
+
+def test_truncmod_invalid_operands():
+    values = [
+        True, 1.5,
+        tl.constexpr(True),
+        tl.constexpr(1.0),
+        tl.tensor("block", tl.block_type(tl.int32, [64])),
+        tl.tensor(_ScalarHandle("arg", "i1"), tl.int1),
+        tl.tensor(_ScalarHandle("arg", "f32"), tl.float32),
+        _vec(64, tl.int32),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.int32, "ub"))
+    ]
+    for value in values:
+        with pytest.raises(TypeError, match="truncmod a"):
+            math_src.truncmod(value, 2, _semantic=_NoBuilder())
+        with pytest.raises(TypeError, match="truncmod b"):
+            math_src.truncmod(2, value, _semantic=_NoBuilder())
+
+
+# --------------------------------------------------------------------------
+# tla.where (selection.py)
+# --------------------------------------------------------------------------
+
+
+def test_where_exported_from_source_package():
+    assert "where" in selection.__all__
+    name = "tla_source_export"
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert pkg.where.__name__ == "where"
+        assert "where" in pkg.__all__
+        assert _triton_is_builtin(pkg.where)
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+def test_where_signature():
+    import inspect
+
+    params = inspect.signature(selection.where).parameters
+    assert list(params) == ["condition", "x", "y", "_semantic"]
+    assert params["_semantic"].default is None
+    # ``where`` must stay a triton builtin so @triton.jit injects _semantic.
+    assert _triton_is_builtin(selection.where)
+
+
+def test_where_without_semantic_hits_builtin_guard():
+    # Outside @triton.jit no _semantic is injected; the @builtin wrapper must
+    # reject the call instead of running the body with _semantic=None.
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        selection.where(True, 1, 2)
+
+
+def test_where_scalar_bool_delegates_to_tl_where_with_promotion():
+    sem, builder = _scalar_semantic()
+    result = selection.where(True, 1, 2.5, _semantic=sem)
+    assert result.type == tl.float32
+    name, (cond, x, y) = builder.calls[-1]
+    assert name == "create_select"
+    assert cond.op == "get_int1" and cond.value is True
+    # the two arms were promoted by TritonSemantic before the select, not
+    # returned raw: the int arm materializes as an f32 handle.
+    assert (x.op, x.value) == ("get_fp32", 1)
+    assert (y.op, y.value) == ("get_fp32", 2.5)
+
+
+def test_where_constexpr_bool_scalar_keeps_type_promotion():
+    sem, builder = _scalar_semantic()
+    result = selection.where(tl.constexpr(False), 1, 2.5, _semantic=sem)
+    assert result.type == tl.float32
+    assert any(call[0] == "create_select" for call in builder.calls)
+    _, (_, x, y) = builder.calls[-1]
+    assert x.op == y.op == "get_fp32"
+
+
+def test_where_runtime_scalar_bool_condition_delegates():
+    sem, builder = _scalar_semantic()
+    cond = tl.tensor(_ScalarHandle("arg", "cond"), tl.int1)
+    result = selection.where(cond, 1, 2, _semantic=sem)
+    assert result.type == tl.int32
+    name, (got_cond, x, y) = builder.calls[-1]
+    assert name == "create_select"
+    assert got_cond is cond.handle
+    assert (x.value, y.value) == (1, 2)
+
+
+def test_where_vector_mask_uses_vsel():
+    sem = _Semantic()
+    mask, a, b = _mask(64), _vec(64, tl.float32), _vec(64, tl.float32)
+    result = selection.where(mask, a, b, _semantic=sem)
+    assert result.type == a.type
+    assert result is not a and result is not b
+    name, args = _last(sem)
+    assert name == "vsel"
+    assert args == (mask.handle, a.handle, b.handle)
+
+
+@pytest.mark.parametrize("condition, want", [(True, "x"), (False, "y"), (tl.constexpr(True), "x"),
+                                             (tl.constexpr(False), "y")])
+def test_where_const_bool_folds_vector_arms_without_ir(condition, want):
+    sem = _Semantic()
+    a, b = _vec(64, tl.float32), _vec(64, tl.float32)
+    result = selection.where(condition, a, b, _semantic=sem)
+    assert result is (a if want == "x" else b)
+    assert sem.builder.calls == []
+
+
+def test_where_invalid_inputs_never_reach_the_builder():
+    vec = _vec(64, tl.float32)
+    other = _vec(64, tl.int32)
+    mask = _mask(64)
+    block = tl.tensor("block", tl.block_type(tl.float32, [64]))
+    block_cond = tl.tensor("block_cond", tl.block_type(tl.int1, [64]))
+    int_cond = tl.tensor("int_cond", tl.int32)
+    bool_cond = tl.tensor("bool_cond", tl.int1)
+    buf = tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    sem = _NoBuilder()
+    cases = [
+        (TypeError, "condition must be", lambda: selection.where(1, 1.0, 2.0, _semantic=sem)),
+        (TypeError, "int1 dtype", lambda: selection.where(int_cond, 1.0, 2.0, _semantic=sem)),
+        (TypeError, "block tensor", lambda: selection.where(block_cond, 1.0, 2.0, _semantic=sem)),
+        (TypeError, "block tensor", lambda: selection.where(True, block, 1.0, _semantic=sem)),
+        (TypeError, "scalar value", lambda: selection.where(True, buf, 1.0, _semantic=sem)),
+        (TypeError, "vector condition requires", lambda: selection.where(mask, 1.0, 2.0, _semantic=sem)),
+        (ValueError, "same-typed", lambda: selection.where(mask, vec, other, _semantic=sem)),
+        (TypeError, "mix scalar and tla.vector", lambda: selection.where(True, vec, 1.0, _semantic=sem)),
+        (TypeError, "runtime scalar bool", lambda: selection.where(bool_cond, vec, vec, _semantic=sem)),
+        (ValueError, "mask must be", lambda: selection.where(_mask(32), vec, vec, _semantic=sem)),
+        (ValueError, "mask must be", lambda: selection.where(_mask(64, tl.float32), vec, vec, _semantic=sem)),
+    ]
+    for exc_type, match, call in cases:
+        with pytest.raises(exc_type, match=match):
+            call()
+
+
+# --------------------------------------------------------------------------
+# tla.assume (aux_ops.py)
+# --------------------------------------------------------------------------
+
+
+def test_assume_export_and_builtin():
+    assert "assume" in aux_src.__all__
+    assert _triton_is_builtin(aux_src.assume)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        aux_src.assume(True)
+    name = "tla_assume_export"
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "assume" in pkg.__all__
+        assert pkg.assume is pkg.aux_ops.assume
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("cond,value", [(True, True), (False, False), (tl.constexpr(True), True),
+                                        (tl.constexpr(False), False)])
+def test_assume_constants_emit(cond, value):
+    sem, builder = _scalar_semantic()
+    assert aux_src.assume(cond, _semantic=sem) is None
+    assert builder.calls[0] == ("get_int1", value)
+    assert len(builder.calls) == 2
+    name, (handle, ) = builder.calls[-1]
+    assert name == "create_assume"
+    assert (handle.op, handle.value) == ("get_int1", value)
+
+
+def test_assume_runtime_condition_emits_with_debug_disabled():
+    sem, builder = _scalar_semantic()
+    builder.options = types.SimpleNamespace(debug=False)
+    cond = tl.tensor(_ScalarHandle("arg", "cond"), tl.int1)
+    assert aux_src.assume(cond, _semantic=sem) is None
+    assert builder.calls == [("create_assume", (cond.handle, ))]
+
+
+def test_assume_invalid_inputs_never_reach_builder():
+    values = [
+        1, 0, 1.0, None,
+        tl.constexpr(1),
+        tl.constexpr(1.0),
+        tl.tensor("block", tl.block_type(tl.int1, [64])),
+        tl.tensor("integer", tl.int32),
+        tl.tensor("float", tl.float32),
+        _vec(64, tl.int1),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    ]
+    for cond in values:
+        with pytest.raises(TypeError, match="assume requires"):
+            aux_src.assume(cond, _semantic=_NoBuilder())
 
 
 # --------------------------------------------------------------------------

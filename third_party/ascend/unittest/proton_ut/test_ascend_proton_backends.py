@@ -96,8 +96,9 @@ def test_mspti_metadata_and_activation(tmp_path, monkeypatch, hook, limit_cores)
         device_info = profile[1]["NPU"][str(metrics["device_id"])]
         assert device_info["num_sms"] == expected_aiv
         assert device_info["arch"] == utils.get_arch()
-        assert device_info["clock_rate"] == utils.get_vector_clock_rate(torch.npu.current_device())
-        assert device_info["memory_clock_rate"] == utils.get_hbm_clock_rate(torch.npu.current_device())
+        logical_device = int(metrics["device_id"])
+        assert device_info["clock_rate"] == utils.get_vector_clock_rate(logical_device)
+        assert device_info["memory_clock_rate"] == utils.get_hbm_clock_rate(logical_device)
         if hook == "triton":
             assert kernel["frame"]["name"] == "named_add"
             assert metrics["flops32"] == n * count

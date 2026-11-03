@@ -109,7 +109,7 @@ class NPUUtils(object):
     def load_binary(self, name, kernel, shared, device, mix_mode):
         return self._load_mod().load_kernel_binary(name, kernel, shared, device, mix_mode)
 
-    def _get_npu_device_limit_form_env(self, device=None) -> tuple[int, int]:
+    def _get_npu_device_limit_form_env(self) -> tuple[int, int]:
         """Read and validate the NPU_DEVICE_LIMIT env var, return the capped AICore and AIVector counts.
 
         The env var format is ``cube_core_num,vector_core_num`` (e.g. ``"14,28"``),
@@ -133,7 +133,7 @@ class NPUUtils(object):
                 input and the hardware actual caps.
         """
         npu_device_limit_str = os.getenv("NPU_DEVICE_LIMIT")
-        num_aic, num_aiv = self.get_device_core(device)
+        num_aic, num_aiv = self.get_device_core()
         if npu_device_limit_str is None:
             return num_aic, num_aiv
 
@@ -172,10 +172,10 @@ class NPUUtils(object):
                              f"It should be like '14,28' (cube_core_num,vector_core_num) "
                              f"and it must be a positive number.")
 
-    def get_device_core(self, device=None):
+    @functools.lru_cache()
+    def get_device_core(self):
         import torch
-        if device is None:
-            device = torch.npu.current_device()
+        device = torch.npu.current_device()
         prop = torch.npu.get_device_properties(device)
         cube_core_num, vector_core_num = prop.cube_core_num, prop.vector_core_num
         return cube_core_num, vector_core_num
@@ -190,7 +190,7 @@ class NPUUtils(object):
     def get_device_properties(self, device):
         # temperoarily added "max_shared_mem" properties to avoid triton-compiler complain
         # fetch available memory at runtime
-        num_aic, num_aiv = self._get_npu_device_limit_form_env(device)
+        num_aic, num_aiv = self._get_npu_device_limit_form_env()
         return {"max_shared_mem": 1, "num_aicore": num_aic, "num_vectorcore": num_aiv}
 
     def get_arch(self):
@@ -205,28 +205,12 @@ class NPUUtils(object):
         return self.get_device_properties("npu")["num_vectorcore"]
 
     def get_vector_clock_rate(self, device):
-        """Return the vector-core clock rate in kHz, or warn and return zero."""
+        """Return the vector-core clock in kHz for a logical device ID, or warn and return zero."""
         return self._load_mod().get_vector_clock_rate(device)
 
     def get_hbm_clock_rate(self, device):
-        """Return the HBM clock rate in kHz, or warn and return zero."""
+        """Return the HBM clock in kHz for a logical device ID, or warn and return zero."""
         return self._load_mod().get_hbm_clock_rate(device)
-
-    def get_profiling_device_id(self, device):
-        return self._load_mod().get_device_id(device, False)
-
-    def get_profiling_device_properties(self, device):
-        import torch
-        # MSPTI reports logical IDs; Torch APIs expect visible device indices.
-        user_device = self._load_mod().get_device_id(device, True)
-        with torch.npu.device(user_device):
-            properties = self.get_device_properties(user_device)
-            return {
-                "arch": self.get_arch(),
-                "num_vectorcore": properties["num_vectorcore"],
-                "clock_rate": self.get_vector_clock_rate(user_device),
-                "memory_clock_rate": self.get_hbm_clock_rate(user_device),
-            }
 
 
 class NPULauncher(object):

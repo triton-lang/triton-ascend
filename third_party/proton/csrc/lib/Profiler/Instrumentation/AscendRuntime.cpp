@@ -1,5 +1,4 @@
 #include "Profiler/Instrumentation/AscendRuntime.h"
-#include "Driver/GPU/CannApi.h"
 
 #include <acl/acl.h>
 #include <acl/acl_rt.h>
@@ -24,7 +23,14 @@ void AscendRuntime::freeHostBuffer(uint8_t *buffer) {
   }
 }
 
-uint64_t AscendRuntime::getDevice() { return cann::getDeviceId(); }
+uint64_t AscendRuntime::getDevice() {
+  int32_t deviceId;
+  aclError ret = aclrtGetDevice(&deviceId);
+  if (ret != ACL_ERROR_NONE) {
+    throw std::runtime_error("Failed to get device: " + std::to_string(ret));
+  }
+  return static_cast<uint64_t>(deviceId);
+}
 
 void *AscendRuntime::getPriorityStream() {
   aclrtStream stream;

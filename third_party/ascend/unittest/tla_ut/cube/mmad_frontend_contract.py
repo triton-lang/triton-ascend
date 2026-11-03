@@ -144,3 +144,19 @@ def test_invalid_operand_contracts(a, b, acc, message):
     with pytest.raises((TypeError, ValueError), match=message):
         cube.mmad(a, b, acc, _semantic=sem)
     assert not sem.builder.calls
+
+
+@pytest.mark.parametrize("m", [16, 32, 64])
+@pytest.mark.parametrize("constexpr", [False, True])
+def test_transpose_b_split_reduction_accumulates_into_same_l0c(m, constexpr):
+    """DSA QK: initialize with K=512, then add the K=64 RoPE product."""
+    sem = Semantic()
+    acc = buf(nz(m, 128), "l0c")
+    wrap = tl.constexpr if constexpr else lambda value: value
+    for k, clear in ((512, True), (64, False)):
+        a, b = buf(nz(m, k)), buf(nz(128, k))
+        cube.mmad(a, b, acc, transpose_b=wrap(True), clear_accum=wrap(clear), _semantic=sem)
+        assert sem.builder.calls[-1] == ((a.handle, b.handle, acc.handle),
+                                         dict(init_condition=clear, real_m=m, real_k=k, real_n=128, transpose_a=False,
+                                              transpose_b=True, unit_flag_ctrl=None, unit_flag_group_id=None))
+    assert len(sem.builder.calls) == 2

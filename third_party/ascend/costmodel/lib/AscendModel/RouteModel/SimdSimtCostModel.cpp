@@ -3739,6 +3739,19 @@ static void addRouteResidual(StageRoutePlan &plan, size_t owner,
   setRouteTotal(plan, owner, plan.totalCycles + residual);
 }
 
+struct RouteFixedCost {
+  double launch = 0.0;
+  double overlap = 0.0;
+  double globalLoadCompletion = 0.0;
+  double fixed = 0.0;
+};
+
+static RouteFixedCost routeFixedCost(const CandidateProfile &profile,
+                                     llvm::StringRef route,
+                                     const StageCostModelSummary &stageModel,
+                                     const StageRoutePlan &plan,
+                                     int64_t kernelArgumentCount);
+
 static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     const SimdSimtFeatureSummary &features, const CandidateProfile &profile,
     unsigned numWarps, bool wholeKernelSuperblockMaterializable,
@@ -4176,51 +4189,6 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
   auto routes = solveStageRoutes(*costTable, hardwareProfile.scopeHandoff);
   if (!routes)
     return routes.takeError();
-  auto annotateCompleteKernelCost = [&](StageRoutePlan &plan,
-                                        llvm::StringRef route,
-                                        llvm::StringRef launchDomain) {
-    const double launchCycles = profile.kernelTiming.boundarySystemCycles(
-        route, plan.routeSuperblockFactor, plan.runtimePhysicalProgramCount,
-        launchDomain);
-    const double launchAndBodyCycles =
-        usesCompletionInclusivePhysicalGroupBody(plan)
-            ? plan.totalCycles +
-                  profile.kernelTiming.boundarySystemCycles(
-                      route, plan.routeSuperblockFactor, 1, launchDomain)
-        : launchDistributionOverlapsBody(*routes)
-            ? profile.kernelTiming.completeWithLaunchSystemCycles(
-                  route, plan.routeSuperblockFactor,
-                  plan.runtimePhysicalProgramCount, launchDomain,
-                  plan.totalCycles)
-            : plan.totalCycles + launchCycles;
-    const double effectiveLaunchCycles =
-        std::max(0.0, launchAndBodyCycles - plan.totalCycles);
-    const double globalLoadCompletionCycles =
-        requiresGlobalLoadCompletion(*routes, plan)
-            ? routeGlobalLoadCompletionSystemCycles(
-                  profile.kernelTiming, route, plan.routeSuperblockFactor,
-                  plan.runtimePhysicalProgramCount, launchDomain,
-                  effectiveLaunchCycles, *routes)
-            : 0.0;
-    const double fixedCycles =
-        effectiveLaunchCycles + globalLoadCompletionCycles +
-        profile.kernelTiming.runtimeArgumentSetupSystemCycles(
-            route, kernelArgumentCount);
-    const double completeCycles = plan.totalCycles + fixedCycles;
-    plan.diagnostic<std::string>("kernel_launch_execution_domain") =
-        launchDomain.str();
-    plan.diagnostic<double>("kernel_launch_system_cycles") = launchCycles;
-    plan.diagnostic<double>("kernel_launch_body_overlap_system_cycles") =
-        std::max(0.0, launchCycles - effectiveLaunchCycles);
-    plan.diagnostic<double>("global_load_completion_system_cycles") =
-        globalLoadCompletionCycles;
-    plan.diagnostic<double>("complete_fixed_system_cycles") = fixedCycles;
-    plan.diagnostic<double>("complete_kernel_system_cycles") = completeCycles;
-    return completeCycles;
-  };
-  if (routes->allSimd.legal)
-    annotateCompleteKernelCost(routes->allSimd, kAllSimd,
-                               launchExecutionDomain(*routes, routes->allSimd));
   auto refreshBestAllSimt = [&]() {
     std::optional<StageRoutePlan> best;
     double bestCompleteCycles = std::numeric_limits<double>::infinity();
@@ -4229,7 +4197,9 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       if (!plan.legal)
         continue;
       const double completeCycles =
-          annotateCompleteKernelCost(plan, kAllSimtOnly, kAivLaunchDomain);
+          plan.totalCycles + routeFixedCost(profile, kAllSimtOnly, *routes,
+                                            plan, kernelArgumentCount)
+                                 .fixed;
       if (!best || completeCycles < bestCompleteCycles) {
         best = plan;
         bestCompleteCycles = completeCycles;
@@ -4246,9 +4216,10 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
       if (!plan.legal ||
           plan.implementations.size() != costTable->stages.size())
         continue;
-      const llvm::StringRef launchDomain = launchExecutionDomain(*routes, plan);
       const double completeCycles =
-          annotateCompleteKernelCost(plan, kMixedSimdSimt, launchDomain);
+          plan.totalCycles + routeFixedCost(profile, kMixedSimdSimt, *routes,
+                                            plan, kernelArgumentCount)
+                                 .fixed;
       if (!best || completeCycles < bestCompleteCycles) {
         best = plan;
         bestCompleteCycles = completeCycles;
@@ -4489,21 +4460,17 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     // includes fixed/setup/helper costs and supersedes old route residuals.
     const StageRoutePlan *best = nullptr;
     double bestElapsed = 0;
-    for (const auto &[factor, plan] : routes->allSimtFactorPlans) {
+    for (const auto &entry : routes->allSimtFactorPlans) {
+      const StageRoutePlan &plan = entry.second;
       if (!plan.legal)
         continue;
-      double elapsed =
-          plan.diagnostic<bool>("native_indirect_chain_applied")
-              ? plan.diagnostic<double>(
-                    "native_indirect_chain_elapsed_system_cycles")
-              : plan.totalCycles +
-                    profile.kernelTiming.boundarySystemCycles(
-                        kAllSimtOnly, factor, plan.runtimePhysicalProgramCount,
-                        kAivLaunchDomain) +
-                    profile.kernelTiming.globalLoadBoundarySystemCycles(
-                        kAllSimtOnly) +
-                    profile.kernelTiming.runtimeArgumentSetupSystemCycles(
-                        kAllSimtOnly, kernelArgumentCount);
+      double elapsed = plan.diagnostic<bool>("native_indirect_chain_applied")
+                           ? plan.diagnostic<double>(
+                                 "native_indirect_chain_elapsed_system_cycles")
+                           : plan.totalCycles +
+                                 routeFixedCost(profile, kAllSimtOnly, *routes,
+                                                plan, kernelArgumentCount)
+                                     .fixed;
       if (!best || elapsed < bestElapsed) {
         best = &plan;
         bestElapsed = elapsed;
@@ -4512,6 +4479,30 @@ static llvm::Expected<StageCostModelSummary> evaluateStageModel(
     if (best)
       routes->allSimt = *best;
   }
+  auto recordRouteCost = [&](StageRoutePlan &plan, llvm::StringRef route) {
+    if (!plan.legal)
+      return;
+    const llvm::StringRef domain = launchExecutionDomain(*routes, plan);
+    const RouteFixedCost cost =
+        routeFixedCost(profile, route, *routes, plan, kernelArgumentCount);
+    plan.diagnostic<std::string>("kernel_launch_execution_domain") =
+        domain.str();
+    plan.diagnostic<double>("kernel_launch_system_cycles") = cost.launch;
+    plan.diagnostic<double>("kernel_launch_body_overlap_system_cycles") =
+        cost.overlap;
+    plan.diagnostic<double>("global_load_completion_system_cycles") =
+        cost.globalLoadCompletion;
+    plan.diagnostic<double>("complete_fixed_system_cycles") = cost.fixed;
+    plan.diagnostic<double>("complete_kernel_system_cycles") =
+        plan.totalCycles + cost.fixed;
+  };
+  recordRouteCost(routes->allSimd, kAllSimd);
+  for (auto &[factor, plan] : routes->allSimtFactorPlans)
+    recordRouteCost(plan, kAllSimtOnly);
+  for (StageRoutePlan &plan : routes->mixedFactorPlans)
+    recordRouteCost(plan, kMixedSimdSimt);
+  recordRouteCost(routes->allSimt, kAllSimtOnly);
+  recordRouteCost(routes->mixed, kMixedSimdSimt);
   return std::move(*routes);
 }
 
@@ -4689,12 +4680,15 @@ static std::optional<double> simtNonAffineRank1MemoryAdjustment(
       fit.residualBySourceProgramCount, sourceProgramCount, 0.0);
 }
 
-static double routeFixedSystemCycles(const CandidateProfile &profile,
+static RouteFixedCost routeFixedCost(const CandidateProfile &profile,
                                      llvm::StringRef route,
                                      const StageCostModelSummary &stageModel,
                                      const StageRoutePlan &plan,
                                      int64_t kernelArgumentCount) {
   const llvm::StringRef launchDomain = launchExecutionDomain(stageModel, plan);
+  const double launch = profile.kernelTiming.boundarySystemCycles(
+      route, plan.routeSuperblockFactor, plan.runtimePhysicalProgramCount,
+      launchDomain);
   const double launchAndBodyCycles =
       usesCompletionInclusivePhysicalGroupBody(plan)
           ? plan.totalCycles +
@@ -4705,21 +4699,31 @@ static double routeFixedSystemCycles(const CandidateProfile &profile,
                 route, plan.routeSuperblockFactor,
                 plan.runtimePhysicalProgramCount, launchDomain,
                 plan.totalCycles)
-          : plan.totalCycles + profile.kernelTiming.boundarySystemCycles(
-                                   route, plan.routeSuperblockFactor,
-                                   plan.runtimePhysicalProgramCount,
-                                   launchDomain);
+          : plan.totalCycles + launch;
   const double effectiveLaunchCycles =
       std::max(0.0, launchAndBodyCycles - plan.totalCycles);
-  double cycles = effectiveLaunchCycles;
+  RouteFixedCost cost;
+  cost.launch = launch;
+  cost.overlap = std::max(0.0, launch - effectiveLaunchCycles);
+  cost.fixed = effectiveLaunchCycles;
   if (requiresGlobalLoadCompletion(stageModel, plan))
-    cycles += routeGlobalLoadCompletionSystemCycles(
+    cost.globalLoadCompletion = routeGlobalLoadCompletionSystemCycles(
         profile.kernelTiming, route, plan.routeSuperblockFactor,
         plan.runtimePhysicalProgramCount, launchDomain, effectiveLaunchCycles,
         stageModel);
-  cycles += profile.kernelTiming.runtimeArgumentSetupSystemCycles(
+  cost.fixed += cost.globalLoadCompletion;
+  cost.fixed += profile.kernelTiming.runtimeArgumentSetupSystemCycles(
       route, kernelArgumentCount);
-  return cycles;
+  return cost;
+}
+
+static double routeFixedSystemCycles(const CandidateProfile &profile,
+                                     llvm::StringRef route,
+                                     const StageCostModelSummary &stageModel,
+                                     const StageRoutePlan &plan,
+                                     int64_t kernelArgumentCount) {
+  return routeFixedCost(profile, route, stageModel, plan, kernelArgumentCount)
+      .fixed;
 }
 
 static SimdSimtCandidateScores
@@ -4811,37 +4815,13 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
   prediction.runtimeArgumentSetupSystemCycles =
       profile.kernelTiming.runtimeArgumentSetupSystemCycles(
           prediction.candidate, kernelArgumentCount);
-  prediction.kernelLaunchSystemCycles =
-      profile.kernelTiming.boundarySystemCycles(
-          prediction.candidate, plan->routeSuperblockFactor,
-          plan->runtimePhysicalProgramCount, prediction.launchExecutionDomain);
-  const double launchAndBodyCycles =
-      usesCompletionInclusivePhysicalGroupBody(*plan)
-          ? plan->totalCycles + profile.kernelTiming.boundarySystemCycles(
-                                    prediction.candidate,
-                                    plan->routeSuperblockFactor, 1,
-                                    prediction.launchExecutionDomain)
-      : launchDistributionOverlapsBody(report.stageModel)
-          ? profile.kernelTiming.completeWithLaunchSystemCycles(
-                prediction.candidate, plan->routeSuperblockFactor,
-                plan->runtimePhysicalProgramCount,
-                prediction.launchExecutionDomain, plan->totalCycles)
-          : plan->totalCycles + prediction.kernelLaunchSystemCycles;
-  const double effectiveLaunchCycles =
-      std::max(0.0, launchAndBodyCycles - plan->totalCycles);
-  prediction.kernelLaunchBodyOverlapSystemCycles = std::max(
-      0.0, prediction.kernelLaunchSystemCycles - effectiveLaunchCycles);
-  prediction.globalLoadCompletionSystemCycles =
-      requiresGlobalLoadCompletion(report.stageModel, *plan)
-          ? routeGlobalLoadCompletionSystemCycles(
-                profile.kernelTiming, prediction.candidate,
-                plan->routeSuperblockFactor, plan->runtimePhysicalProgramCount,
-                prediction.launchExecutionDomain, effectiveLaunchCycles,
-                report.stageModel)
-          : 0.0;
-  prediction.fixedSystemCycles =
-      routeFixedSystemCycles(profile, prediction.candidate, report.stageModel,
-                             *plan, kernelArgumentCount);
+  const RouteFixedCost cost =
+      routeFixedCost(profile, prediction.candidate, report.stageModel, *plan,
+                     kernelArgumentCount);
+  prediction.kernelLaunchSystemCycles = cost.launch;
+  prediction.kernelLaunchBodyOverlapSystemCycles = cost.overlap;
+  prediction.globalLoadCompletionSystemCycles = cost.globalLoadCompletion;
+  prediction.fixedSystemCycles = cost.fixed;
   if (report.decision == SimdSimtCandidateKind::AllSIMTOnly) {
     if (auto adjustment = tinyStraightLineSimtMemoryAdjustment(
             report.stageModel, *plan,

@@ -314,6 +314,20 @@ def _serialize_module(mod, opt):
     return mod.str_nodebug()
 
 
+def make_tla_ttir(mod, metadata, opt):
+    from triton.language.extra.tla.compiler import add_ttir_pipeline
+
+    if "hash" not in metadata:
+        metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
+    pm = ir.pass_manager(mod.context)
+    pm.enable_debug()
+    add_ttir_pipeline(pm)
+    pm.run(mod, 'make_tla_ttir')
+    if opt.debug:
+        get_dump_manager(metadata["hash"]).put(str(mod), "kernel.ttir.mlir", binary=False)
+    return mod
+
+
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -339,6 +353,18 @@ def make_ttir(mod, metadata, opt):
         dump_manager.put(str(mod), "kernel.ttir.mlir", binary=False)
 
     return mod
+
+
+def tla_to_ttadapter(mod, metadata, opt):
+    from triton.language.extra.tla.compiler import lower_ttir
+
+    metadata["has_auto_blockify_blacklist_op"] = False
+    lower_ttir(mod, mod.context)
+    _export_program_grid_metadata(mod, metadata)
+    text = _serialize_module(mod, opt)
+    if opt.debug:
+        get_dump_manager(metadata["hash"]).put(text, "kernel.ttadapter.mlir", binary=False)
+    return text
 
 
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
@@ -444,10 +470,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
-        # Infer TLA kernel-mode attributes for backend compiler.
-        if getattr(opt, "enable_tla_mode", False):
-            from triton.language.extra.tla.compiler import _infer_tla_kernel_mode
-            _infer_tla_kernel_mode(mod, mod.context)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
@@ -1597,8 +1619,14 @@ class AscendBackend(BaseBackend):
             # NPUOptions retains compatibility defaults for legacy names so
             # JIT and Inductor can still recognize them as compile options.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts)
+            frontend_kind = normalized_opts.get("_frontend_kind")
+            if frontend_kind not in (None, "triton", "tla"):
+                raise ValueError(f"unsupported Ascend frontend kind: {frontend_kind!r}")
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
+            # Frontend identity comes from the source.
+            # A launch keyword alone cannot select TLA.
+            object.__setattr__(options, "enable_tla_mode", frontend_kind == "tla")
             # Lazy init enable_dynamic_cv_pipeline if not provided.
             # compile_on_910_95 is already resolved from the requested target.
             if options.enable_dynamic_cv_pipeline is None:
@@ -1652,11 +1680,15 @@ class AscendBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
-            stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-            if options.is_pure_simt:
-                stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
-                return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            if options.enable_tla_mode:
+                stages["ttir"] = lambda src, metadata: make_tla_ttir(src, metadata, options)
+                stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
+            else:
+                stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
+                if options.is_pure_simt:
+                    stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
+                    return
+                stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
             if options.compile_on_910_95:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))

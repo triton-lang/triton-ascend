@@ -66,6 +66,8 @@ enum class GraphOptimizationRuleId : GraphOptimizationRuleMask {
   IntermediatePrecisionBoundaryElision = 8192,
   StoreCoveragePlanning = 16384,
   ContiguousBlockAccessFormation = 32768,
+  // Last-axis indirect loads become bounds-checked Gather on A2/A3.
+  GatherOptimization = 65536,
 };
 
 enum class GraphOptimizationRulePhase : uint8_t {
@@ -80,6 +82,7 @@ enum class GraphOptimizationRulePhase : uint8_t {
   StoreCoveragePlanning,
   StoreCoalescing,
   ContiguousBlockAccessFormation,
+  GatherOptimization,
   RowCoalescing,
   Compatibility,
 };
@@ -87,6 +90,8 @@ enum class GraphOptimizationRulePhase : uint8_t {
 constexpr const char *
 getGraphOptimizationRuleName(GraphOptimizationRuleId rule) {
   switch (rule) {
+  case GraphOptimizationRuleId::GatherOptimization:
+    return "GatherOptimization";
   case GraphOptimizationRuleId::LoadStoreTranspose:
     return "LoadStoreTranspose";
   case GraphOptimizationRuleId::TransposePointwiseReorder:
@@ -137,6 +142,8 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
     return GraphOptimizationRulePhase::ProgramMapping;
   case GraphOptimizationRuleId::PersistentTaskStripMining:
     return GraphOptimizationRulePhase::PersistentTaskMapping;
+  case GraphOptimizationRuleId::GatherOptimization:
+    return GraphOptimizationRulePhase::GatherOptimization;
   case GraphOptimizationRuleId::LoadStoreTranspose:
     return GraphOptimizationRulePhase::LoadStoreTranspose;
   case GraphOptimizationRuleId::TransposePointwiseReorder:
@@ -161,7 +168,7 @@ getGraphOptimizationRulePhase(GraphOptimizationRuleId rule) {
   return GraphOptimizationRulePhase::Compatibility;
 }
 
-constexpr std::array<GraphOptimizationRuleId, 15>
+constexpr std::array<GraphOptimizationRuleId, 16>
     kGraphOptimizationRuleRegistry = {
         GraphOptimizationRuleId::LoadStoreTranspose,
         GraphOptimizationRuleId::TransposePointwiseReorder,
@@ -178,6 +185,7 @@ constexpr std::array<GraphOptimizationRuleId, 15>
         GraphOptimizationRuleId::IntermediatePrecisionBoundaryElision,
         GraphOptimizationRuleId::StoreCoveragePlanning,
         GraphOptimizationRuleId::ContiguousBlockAccessFormation,
+        GraphOptimizationRuleId::GatherOptimization,
 };
 
 constexpr bool hasUniqueSingleBitGraphOptimizationRuleIds() {
@@ -215,6 +223,7 @@ constexpr GraphOptimizationRuleMask kLegacyGraphOptimizationRuleMask =
         GraphOptimizationRuleId::StridedLoadStoreRewrite);
 
 constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::GatherOptimization) |
     kLegacyGraphOptimizationRuleMask |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
@@ -230,6 +239,7 @@ constexpr GraphOptimizationRuleMask kKnownGraphOptimizationRuleMask =
         GraphOptimizationRuleId::ContiguousBlockAccessFormation);
 
 constexpr GraphOptimizationRuleMask kDefaultEligibleGraphOptimizationRuleMask =
+    getGraphOptimizationRuleMask(GraphOptimizationRuleId::GatherOptimization) |
     kLegacyGraphOptimizationRuleMask |
     getGraphOptimizationRuleMask(
         GraphOptimizationRuleId::IndependentAxisTensorize) |
@@ -315,6 +325,8 @@ struct GraphOptimizationOptions {
   // compile_mode="simt_only".  Keep the source selector rather than a
   // second derived force flag so every consumer follows one mode contract.
   std::string compileMode = "simd_simt_template";
+  // Backend target for Gather eligibility; unknown targets decline.
+  std::string targetArch;
   IndependentAxisTensorizeRuleOptions independentAxisTensorize;
   PersistentTaskStripMiningRuleOptions persistentTaskStripMining;
   StoreCoalescingRuleOptions storeCoalescing;

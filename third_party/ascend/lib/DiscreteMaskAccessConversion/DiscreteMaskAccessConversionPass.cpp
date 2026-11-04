@@ -475,7 +475,7 @@ static bool isAxisDiscreteMask(Value mask) {
 static bool isAxisDiscreteMaskLoad(triton::LoadOp op) {
   auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
   auto maskType = dyn_cast<RankedTensorType>(op.getMask().getType());
-  
+
   // FIXME: Only 2D pointers and masks are currently supported. The
   // axis-discrete mask optimization needs generalizing to other ranks.
   if (!ptrType || !maskType || ptrType.getRank() != 2)
@@ -597,8 +597,7 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
         ptrType && ptrType.getShape().size() <= 5;
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
-        rankWithinIndirectFastPathLimit &&
-        !isAxisDiscreteMaskLoad(op)) {
+        rankWithinIndirectFastPathLimit && !isAxisDiscreteMaskLoad(op)) {
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();

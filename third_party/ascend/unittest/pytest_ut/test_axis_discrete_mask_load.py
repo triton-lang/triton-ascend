@@ -28,13 +28,15 @@ from triton.backends.ascend.testing import do_bench_npu
 
 @triton.jit
 def _axis_discrete_mask_load_kernel(
-    kv_ptr, idx_ptr, out_ptr,
-    topk,                        # runtime scalar row bound
+    kv_ptr,
+    idx_ptr,
+    out_ptr,
+    topk,  # runtime scalar row bound
     BLOCK_K: tl.constexpr,
     G: tl.constexpr,
 ):
-    g = tl.arange(0, G)               # [G]
-    k_offs = tl.arange(0, BLOCK_K)    # [K]
+    g = tl.arange(0, G)
+    k_offs = tl.arange(0, BLOCK_K)
 
     valid = k_offs < topk
     slot = tl.load(idx_ptr + k_offs, mask=valid, other=0)
@@ -67,12 +69,14 @@ def _reference(kv, idx, topk, block_k):
 def test_axis_discrete_mask_load(G, BLOCK_K, topk):
     torch.manual_seed(0)
     kv = torch.randn(BLOCK_K, G, dtype=torch.float32, device="npu")
-    idx = torch.randint(0, topk, (BLOCK_K,), dtype=torch.int32, device="npu")
+    idx = torch.randint(0, topk, (BLOCK_K, ), dtype=torch.int32, device="npu")
     idx[topk // 2] = -1  # force some rows to be masked out
     out = torch.zeros((BLOCK_K, G), dtype=torch.float32, device="npu")
 
     _axis_discrete_mask_load_kernel[(1, )](
-        kv, idx, out,
+        kv,
+        idx,
+        out,
         topk,
         BLOCK_K=BLOCK_K,
         G=G,
@@ -80,29 +84,3 @@ def test_axis_discrete_mask_load(G, BLOCK_K, topk):
     torch.npu.synchronize()
 
     torch.testing.assert_close(out, _reference(kv, idx, topk, BLOCK_K), rtol=0, atol=0)
-
-
-@pytest.mark.parametrize("G,BLOCK_K,topk", [
-    (128, 64, 32),
-    (256, 64, 32),
-    (512, 128, 64),
-    (1024, 128, 64),
-])
-def test_axis_discrete_mask_load_perf(G, BLOCK_K, topk):
-    """Benchmark the pure device-side latency of the axis-discrete mask load kernel."""
-    torch.manual_seed(0)
-    kv = torch.randn(BLOCK_K, G, dtype=torch.float32, device="npu")
-    idx = torch.randint(0, topk, (BLOCK_K,), dtype=torch.int32, device="npu")
-    idx[topk // 2] = -1  # force some rows to be masked out
-    out = torch.zeros((BLOCK_K, G), dtype=torch.float32, device="npu")
-
-    def fn():
-        _axis_discrete_mask_load_kernel[(1, )](
-            kv, idx, out,
-            topk,
-            BLOCK_K=BLOCK_K,
-            G=G,
-        )
-
-    ms = do_bench_npu(fn)
-    print(f"axis-discrete-mask-load G={G} BLOCK_K={BLOCK_K} topk={topk}: {ms:.3f} ms")

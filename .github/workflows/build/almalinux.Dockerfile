@@ -12,8 +12,6 @@ RUN dnf install --assumeyes llvm-toolset
 RUN dnf install --assumeyes python39-pip python39-devel git
 RUN alternatives --set python3 /usr/bin/python3.9
 
-ENV PIP_INDEX_URL=http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple \
-    PIP_TRUSTED_HOST=cache-service.nginx-pypi-cache.svc.cluster.local
 
 RUN python3 -m pip install --upgrade pip
 RUN python3 -m pip install --upgrade cmake ninja sccache lit nanobind

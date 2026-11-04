@@ -75,6 +75,7 @@ void ComputeBlockOptPass::runOnOperation() {
   pm.addPass(createExpSubfPatternPass());
   pm.addPass(createReorderOpsByBlockIdPass());
   pm.addPass(createMergeSmallBlockPass());
+  pm.addPass(createSplitIfByBlockIdPass());
   pm.addPass(createReorderOpsByBlockIdPass());
 
   pm.addPass(createMergeComputeBlockPass());

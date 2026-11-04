@@ -601,7 +601,8 @@ LogicalResult PtrState::addState(PtrState &lhsState, PtrState &rhsState,
   return success();
 }
 
-triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
+triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc,
+                                          bool preserveZeroStrideAxes) {
   SmallVector<int64_t> tensorSizes;
   SmallVector<OpFoldResult> tensorStrides;
 
@@ -610,7 +611,7 @@ triton::AddPtrOp PtrState::createAddPtrOp(OpBuilder &builder, Location loc) {
 
   for (auto id : permuteIds) {
     auto info = stateInfo[id];
-    if (isZero(info.stride))
+    if (isZero(info.stride) && !preserveZeroStrideAxes)
       continue;
     tensorStrides.emplace_back(info.stride);
     tensorSizes.emplace_back(getIntAttr(info.shape).value());

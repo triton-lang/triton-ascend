@@ -139,6 +139,21 @@ bool isaPermutedMemRefType(MemRefType memRefType) {
   }
 }
 
+// A transpose is a no-op iff every non-singleton dim keeps its relative order.
+static bool isNoOpPermutation(llvm::ArrayRef<int64_t> shape,
+                              llvm::ArrayRef<int64_t> perm) {
+  int64_t lastInDim = -1;
+  for (int64_t out = 0; out < static_cast<int64_t>(perm.size()); ++out) {
+    int64_t inDim = perm[out];
+    if (shape[inDim] <= 1)
+      continue;
+    if (inDim <= lastInDim)
+      return false;
+    lastInDim = inDim;
+  }
+  return true;
+}
+
 Value getTransposedValue(Value source, const Location loc,
                          ConversionPatternRewriter &rewriter,
                          llvm::ArrayRef<int> order) {
@@ -150,6 +165,23 @@ Value getTransposedValue(Value source, const Location loc,
   SmallVector<int64_t> transposedShape(sourceRank);
   for (size_t i = 0; i < sourceRank; i++) {
     transposedShape[i] = originalShape[perm[i]];
+  }
+
+  // Lower a no-op transpose to a reshape (collapse + expand).
+  if (isNoOpPermutation(originalShape, perm)) {
+    SmallVector<ReassociationIndices> reassoc(1);
+    for (int64_t i = 0; i < sourceRank; ++i)
+      reassoc[0].push_back(i);
+
+    RankedTensorType transposedType =
+        RankedTensorType::get(transposedShape, sourceType.getElementType());
+    Value flat = rewriter.create<tensor::CollapseShapeOp>(
+        loc,
+        RankedTensorType::get({sourceType.getNumElements()},
+                              sourceType.getElementType()),
+        source, reassoc);
+    return rewriter.create<tensor::ExpandShapeOp>(loc, transposedType, flat,
+                                                  reassoc);
   }
 
   Value transposeInit = rewriter.create<tensor::EmptyOp>(

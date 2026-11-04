@@ -399,12 +399,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
-        # Restricted to 910_95/950. The merged buffer is written by two disjoint
-        # memref.copy ops, and on 910_9362 the generated code only makes the
-        # copy next to the surviving to_tensor visible, so the other half of the
-        # tile reads back the padding value. The IR is unchanged through
-        # bishengir-opt, so the loss happens in code generation.
-        if compile_on_910_95:
+        # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
+        if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0

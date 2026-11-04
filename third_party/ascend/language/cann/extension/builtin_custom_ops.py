@@ -20,9 +20,12 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import math
+
 import triton.language.core as tl
+from triton.language.core import _unwrap_if_constexpr
 from .custom_op import register_custom_op
-from .core import CORE, PIPE, MODE, ascend_address_space
+from .core import CORE, PIPE, MODE, AddressSpace, DataLayout, ascend_address_space
 from ..utils import _deprecated
 from ._utils import _is_int_like_elem, _assert_int_like_tuple
 
@@ -69,6 +72,14 @@ class _sparse_gather_load_to_L1buffer:
     pipe = PIPE.PIPE_MTE2
     # base and index are both read straight from GM.
     gm_addr_args_indices = (0, 1)
+    # The template lands the tile in zN, whatever shape the destination was
+    # declared with. Saying so lets a consumer's ND -> Fractal convert_layout
+    # fold away; without it the compiler believes the ND declaration and
+    # synthesises a vector-core transpose, which drags the tile back out of L1.
+    data_layout = {'out': DataLayout.Fractal}
+    # Likewise for where it lands: hivm-infer-hivm-mem-scope reads this off
+    # arg_attrs rather than guessing from the pipe, which would say GM.
+    address_space = {'out': AddressSpace.L1}
     # Must be inlined: as a call, the cube caller reads X0-X4 back after it and
     # the template has already overwritten them, which corrupts the L1 address
     # the following L1 -> L0A load uses.
@@ -100,12 +111,17 @@ class _sparse_gather_load_to_L1buffer:
                 f"dim_size * sizeof(dtype) must be 32B aligned, got {dim_size} * {elem_bytes}"
 
         # The template fills block_r * region_size token rows without bounds
-        # checking, so a destination that disagrees corrupts whatever follows it
-        # in L1.
-        if all(isinstance(v, int) for v in (block_r, region_size, dim_size)):
-            expected = [block_r * region_size, dim_size]
-            assert list(out.shape) == expected, \
-                f"out shape should be [block_r * region_size, dim_size] = {expected}, but got {list(out.shape)}"
+        # checking, so a destination that holds fewer elements than that
+        # corrupts whatever follows it in L1. Only the capacity is fixed: the
+        # tile is written in zN, so the destination is equally well declared as
+        # [block_r * region_size, dim_size] or as its 4D fractal.
+        shape = [_unwrap_if_constexpr(d) for d in out.shape]
+        if all(isinstance(v, int) for v in (block_r, region_size, dim_size)) and \
+                all(isinstance(d, int) for d in shape):
+            needed = block_r * region_size * dim_size
+            got = math.prod(shape)
+            assert got >= needed, \
+                f"out holds {got} elements, needs block_r * region_size * dim_size = {needed}"
 
         # stride_token is an element count that reaches the hardware as a 16-bit
         # field; the template falls back to a per-row transfer beyond that.

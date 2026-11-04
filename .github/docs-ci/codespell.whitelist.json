@@ -258,5 +258,6 @@
   "TTGIR",
   "mbarrier",
   "Moudallal",
-  "LLDB"
+  "LLDB",
+  "msDebug"
 ]

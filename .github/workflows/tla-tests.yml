@@ -1,9 +1,9 @@
 name: TLA Tests
 
 # Dedicated pipeline monitoring TLA (triton.language.extra.tla) changes.
-# One job per (chip x python) on the a3 + a5 NPU matrix provided by
-# runner-preparation.yml, testing the two stages as separate steps that
-# share a single wheel build (the whole suite takes ~1 min):
+# TLA only targets the a5 (Ascend 950) environment, so a single job on the
+# a5 NPU runner tests the two stages as separate steps sharing one wheel
+# build (the whole suite takes ~1 min):
 #   - TLA_TEST_STAGE=ir : offline HIVM IR structure asserts.
 #   - TLA_TEST_STAGE=run: device launch + accuracy, implies ir+compile.
 on:
@@ -22,30 +22,17 @@ concurrency:
 permissions: {}
 
 jobs:
-  runner-preparation:
-    uses: ./.github/workflows/runner-preparation.yml
-    permissions:
-      contents: read
-
   tla-tests:
-    name: tla-tests (${{ matrix.config.runs_on[0] }}, py${{ matrix.config.python_version }})
-    needs: runner-preparation
-    if: needs.runner-preparation.outputs.matrix-ASCEND != ''
-    runs-on: ${{ matrix.config.runs_on }}
+    name: tla-tests (a5, py3.12)
+    # a5 (Ascend 950) environment: cann9.1.0 / ubuntu22.04 / py3.12.
+    runs-on: [linux-amd64-a5-2]
     container:
-      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:${{ matrix.config.cann_version }}-${{ matrix.config.chip_type }}-${{ matrix.config.os }}-py${{ matrix.config.python_version }}-latest
+      image: swr.cn-southwest-2.myhuaweicloud.com/base_image/ascend-ci/triton:9.1.0-950-ubuntu22.04-py3.12-latest
     timeout-minutes: 300
     permissions:
       contents: read
-    strategy:
-      matrix:
-        # Each config entry carries its full environment (cann_version,
-        # chip_type, os, python_version) because chips differ: a3 uses
-        # cann8.5.0/py3.10+3.11 while a5 (Ascend 950) uses cann9.1.0/py3.12.
-        config: ${{ fromJson(needs.runner-preparation.outputs.matrix-ASCEND) }}
-      fail-fast: false
     env:
-      PYTHON: "python${{ matrix.config.python_version }}"
+      PYTHON: python3.12
       PIP_INDEX_URL: "http://cache-service.nginx-pypi-cache.svc.cluster.local/pypi/simple"
       PIP_TRUSTED_HOST: "cache-service.nginx-pypi-cache.svc.cluster.local"
       PIP_EXTRA_INDEX_URL: "https://repo.huaweicloud.com/ascend/repos/pypi"
@@ -67,8 +54,8 @@ jobs:
             ~/.triton/json
             ~/.triton/nvidia
             ~/.ccache
-          key: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-tla-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
-          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann${{ matrix.config.cann_version }}-${{ matrix.config.os }}-${{ matrix.config.chip_type }}-py${{ matrix.config.python_version }}-tla-
+          key: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-tla-${{ hashFiles('cmake/llvm-hash.txt', 'cmake/json-version.txt', 'cmake/nvidia-toolchain-version.json', 'third_party/ascend/patch/llvm_patch_*.patch') }}
+          restore-keys: ${{ runner.os }}-${{ runner.arch }}-cann9.1.0-ubuntu22.04-950-py3.12-tla-
 
       - name: Download and install Bisheng compiler
         shell: bash

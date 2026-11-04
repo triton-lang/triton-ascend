@@ -474,6 +474,300 @@ bool InterCoreTransferAndSyncPass::isOuterLayerDependency(
   return false;
 }
 
+class InterCoreTransferAndSyncPass::InsertPointAnalyzer {
+public:
+  explicit InsertPointAnalyzer(InterCoreTransferAndSyncPass &pass)
+      : pass(pass) {}
+
+  TransferSyncInsertPoint
+  analyzeVectorToCubeTransferPoint(DependencyInfo &dep, Value srcValue,
+                                   Value normalizedValue) {
+    TransferSyncInsertPoint insertPoint;
+    std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
+        pass.getBlockStartEnd(dep.producerBlockId, pass.module);
+    std::tie(insertPoint.consStart, insertPoint.consEnd) =
+        pass.getBlockStartEnd(dep.consumerBlockId, pass.module);
+
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      auto consumerPoint =
+          analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
+      if (consumerPoint &&
+          consumerPoint->getBlock() == insertPoint.consStart->getBlock()) {
+        insertPoint.consStart = consumerPoint;
+      }
+    }
+    if (dep.iniProducerBlockId == dep.producerBlockId) {
+      auto producerPoint = getCopyPointBeforeStore(
+          normalizedValue, insertPoint.prodEnd, dep.iniProducerBlockId);
+      if (producerPoint) {
+        insertPoint.prodEnd = producerPoint;
+      }
+      if (Operation *srcDefOp = srcValue.getDefiningOp();
+          srcDefOp && getSubBlockId(srcDefOp)) {
+        if (Operation *subBlockEnd =
+                pass.getSubBlockStartEnd(srcDefOp).second) {
+          insertPoint.prodEnd = subBlockEnd;
+        }
+      }
+    }
+    return insertPoint;
+  }
+
+  TransferSyncInsertPoint
+  analyzeVectorToCubeSyncPoint(DependencyInfo &dep, int transferIndex,
+                               TransferSyncInsertPoint insertPoint) {
+    std::tie(insertPoint.consStart, insertPoint.consEnd) =
+        pass.getBlockStartEnd(dep.consumerBlockId, pass.module);
+
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      auto newConsumerPoint = getConsumerWaitPoint(transferIndex);
+      if (newConsumerPoint &&
+          insertPoint.consStart->getBlock() == newConsumerPoint->getBlock()) {
+        insertPoint.consStart = newConsumerPoint;
+      }
+    }
+    return insertPoint;
+  }
+
+  TransferSyncInsertPoint analyzeCubeToVectorTransferPoint(DependencyInfo &dep,
+                                                           Value srcValue) {
+    TransferSyncInsertPoint insertPoint;
+    std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
+        pass.getBlockStartEnd(dep.producerBlockId, pass.module);
+    std::tie(insertPoint.consStart, insertPoint.consEnd) =
+        pass.getBlockStartEnd(dep.consumerBlockId, pass.module);
+
+    pass.AnalyzeSplittedIf(dep);
+
+    if (srcValue.getDefiningOp() &&
+        !isa<scf::ForOp, scf::WhileOp, scf::IfOp>(srcValue.getDefiningOp())) {
+      auto producerPoint =
+          getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
+      if (producerPoint) {
+        insertPoint.prodEnd = producerPoint;
+      }
+    }
+
+    consumerPoint = nullptr;
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      consumerPoint =
+          analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
+      if (consumerPoint && getSubBlockId(consumerPoint)) {
+        insertPoint.consStart = pass.getSubBlockStartEnd(consumerPoint).first;
+      }
+    }
+
+    if (dep.isSplitedIf) {
+      insertPoint.prodEnd = dep.realValue.getDefiningOp();
+      auto splitConsumerPoint =
+          analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
+      if (splitConsumerPoint) {
+        insertPoint.consStart = splitConsumerPoint;
+      }
+    }
+    return insertPoint;
+  }
+
+  TransferSyncInsertPoint
+  analyzeCubeToVectorSyncPoint(DependencyInfo &dep, int transferIndex,
+                               Operation *receiveToTensorOp) {
+    TransferSyncInsertPoint insertPoint;
+    std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
+        pass.getBlockStartEnd(dep.producerBlockId, pass.module);
+    std::tie(insertPoint.consStart, insertPoint.consEnd) =
+        pass.getBlockStartEnd(dep.consumerBlockId, pass.module);
+
+    if (Operation *subBlockEnd =
+            pass.getSubBlockStartEnd(consumerPoint).second) {
+      insertPoint.consEnd = subBlockEnd;
+    }
+
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      auto newConsumerPoint = getConsumerWaitPoint(transferIndex);
+      if (newConsumerPoint && getSubBlockId(consumerPoint)) {
+        insertPoint.consStart = pass.getSubBlockStartEnd(consumerPoint).first;
+      }
+    }
+    if (dep.isSplitedIf) {
+      auto newConsumerPoint = getConsumerWaitPoint(transferIndex);
+      auto yieldBeforeOp = getOpBeforeYield(newConsumerPoint);
+      if (newConsumerPoint && yieldBeforeOp) {
+        insertPoint.consStart = newConsumerPoint;
+        insertPoint.consEnd = yieldBeforeOp;
+      }
+    }
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      Operation *firstSyncOpAfterConsumer = findConsumerSetPoint(
+          receiveToTensorOp, dep.iniConsumerBlockId, insertPoint.consEnd);
+      if (firstSyncOpAfterConsumer &&
+          insertPoint.consEnd->getBlock() ==
+              firstSyncOpAfterConsumer->getBlock()) {
+        insertPoint.consEnd = firstSyncOpAfterConsumer;
+      }
+    }
+    return insertPoint;
+  }
+
+  std::pair<Operation *, Operation *>
+  getCubeToCubeTransferInsertPoints(DependencyInfo &dep, Value transferValue,
+                                    Operation *prodEnd, Operation *consStart) {
+    if (dep.consumerBlockId == dep.iniConsumerBlockId) {
+      if (Operation *consumerPoint = analyzeConsumerReadInsertPoint(
+              transferValue, dep.iniConsumerBlockId)) {
+        consStart = consumerPoint;
+      }
+    }
+
+    if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(
+            transferValue.getDefiningOp())) {
+      if (Operation *producerPoint = getFixpipePointAfterProducer(
+              transferValue, dep.iniProducerBlockId)) {
+        prodEnd = producerPoint;
+      }
+    }
+    return {prodEnd, consStart};
+  }
+
+  Operation *getNormalizedVectorProducerEnd(Value value, Operation *producerEnd,
+                                            int producerBlockId,
+                                            Operation *defOp) {
+    if (Operation *copyPoint =
+            getCopyPointBeforeStore(value, producerEnd, producerBlockId)) {
+      producerEnd = copyPoint;
+    }
+    if (getSubBlockId(defOp)) {
+      if (Operation *subBlockEnd = pass.getSubBlockStartEnd(defOp).second) {
+        producerEnd = subBlockEnd;
+      }
+    }
+    return producerEnd;
+  }
+
+private:
+  Operation *analyzeConsumerReadInsertPoint(Value srcValue, int iniConsumerId) {
+    llvm::DenseSet<Operation *> consumerOps;
+    for (Operation *user : srcValue.getUsers()) {
+      auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
+      if (userBlockIdOpt && *userBlockIdOpt == iniConsumerId) {
+        consumerOps.insert(user);
+      }
+    }
+
+    Operation *firstFoundOp = nullptr;
+    pass.module->walk<WalkOrder::PreOrder>([&](Operation *op) {
+      if (consumerOps.contains(op)) {
+        firstFoundOp = op;
+        return WalkResult::interrupt();
+      }
+      return WalkResult::advance();
+    });
+    return firstFoundOp;
+  }
+
+  Operation *getConsumerWaitPoint(int transferIndex) {
+    Operation *consumerWaitPoint = nullptr;
+    pass.module.walk<WalkOrder::PreOrder>([&](Operation *op) {
+      if (consumerWaitPoint) {
+        return;
+      }
+      if (!isa<hivm::ConvertLayoutOp>(op) &&
+          !isa<memref::MemorySpaceCastOp>(op) && !isa<memref::LoadOp>(op)) {
+        return;
+      }
+      auto transferIdAttr =
+          op->getAttrOfType<IntegerAttr>(CVPipeline::kTransferId);
+      if (transferIdAttr && transferIdAttr.getInt() == transferIndex) {
+        consumerWaitPoint = op;
+      }
+    });
+    return consumerWaitPoint;
+  }
+
+  Operation *getCopyPointBeforeStore(Value depValue, Operation *vectorEndOp,
+                                     int iniProducerBlockId) {
+    Operation *curr = vectorEndOp;
+    Operation *firstStoreOpAfterProducer = nullptr;
+    while (curr) {
+      auto blockIdOpt = CVPipeline::getOpBlockId(curr);
+      if (blockIdOpt != iniProducerBlockId) {
+        break;
+      }
+      if (curr == depValue.getDefiningOp()) {
+        break;
+      }
+      if (CVPipeline::isStoreLike(curr)) {
+        firstStoreOpAfterProducer = curr->getPrevNode();
+        LOG_DEBUG("firstStoreOpAfterProducer: " << *firstStoreOpAfterProducer
+                                                << "\n");
+      }
+      curr = curr->getPrevNode();
+    }
+    return firstStoreOpAfterProducer;
+  }
+
+  Operation *findConsumerSetPoint(Operation *receiveToTensorOp,
+                                  int consumerBlockId,
+                                  Operation *consEndPoint) {
+    LOG_DEBUG("findConsumerSetPoint for block: " << consumerBlockId << "\n");
+    llvm::DenseSet<Operation *> consumerOps;
+    for (Operation *user : receiveToTensorOp->getResult(0).getUsers()) {
+      if (CVPipeline::getOpBlockId(user) == consumerBlockId) {
+        consumerOps.insert(user);
+      }
+    }
+
+    Operation *curr = consEndPoint;
+    Operation *firstSyncOpAfterConsumer = nullptr;
+    while (curr) {
+      auto blockIdOpt = CVPipeline::getOpBlockId(curr);
+      if (blockIdOpt != consumerBlockId || consumerOps.contains(curr)) {
+        break;
+      }
+      if (isa<hivm::SyncBlockSetOp, hivm::SyncBlockWaitOp, hivm::CopyOp,
+              hivm::FixpipeOp>(curr)) {
+        firstSyncOpAfterConsumer = curr->getPrevNode();
+        LOG_DEBUG("firstSyncOpAfterConsumer: " << *firstSyncOpAfterConsumer
+                                               << "\n");
+      }
+      curr = curr->getPrevNode();
+    }
+    return firstSyncOpAfterConsumer;
+  }
+
+  Operation *getFixpipePointAfterProducer(Value srcValue, int producerBlockId) {
+    Operation *fixpipePoint = srcValue.getDefiningOp();
+    int blockId = CVPipeline::getOpBlockId(fixpipePoint).value_or(-1);
+    if (blockId != producerBlockId) {
+      return nullptr;
+    }
+
+    while (fixpipePoint &&
+           CVPipeline::getOpBlockId(fixpipePoint) == producerBlockId) {
+      if (!isa<hivm::SyncBlockSetOp>(fixpipePoint->getNextNode())) {
+        break;
+      }
+      fixpipePoint = fixpipePoint->getNextNode();
+    }
+    while (Operation *nextOp = fixpipePoint->getNextNode()) {
+      if (CVPipeline::getOpBlockId(nextOp).value_or(-1) != producerBlockId ||
+          !isa<hivm::FixpipeOp>(nextOp)) {
+        break;
+      }
+      Operation *setOp = nextOp->getNextNode();
+      if (!setOp ||
+          CVPipeline::getOpBlockId(setOp).value_or(-1) != producerBlockId ||
+          !isa<hivm::SyncBlockSetOp>(setOp)) {
+        break;
+      }
+      fixpipePoint = setOp;
+    }
+    return fixpipePoint;
+  }
+
+  InterCoreTransferAndSyncPass &pass;
+  Operation *consumerPoint = nullptr;
+};
+
 // Nd2NzNormalizer
 SmallVector<int64_t>
 InterCoreTransferAndSyncPass::computeExpectedShape(mlir::Value depValue,
@@ -522,30 +816,6 @@ bool InterCoreTransferAndSyncPass::isExpectedShape(
 
   LOG_DEBUG("isEqualedShape" << isEqualedShape << "\n");
   return isEqualedShape;
-}
-
-// insert copyop before store to avoid mte3 blocking (store and V->C use the
-// same PIPE)
-mlir::Operation *InterCoreTransferAndSyncPass::getCopyPointBeforeStore(
-    Value depValue, Operation *vectorEndOp, int iniProducerBlockId) {
-  Operation *curr = vectorEndOp;
-  Operation *firstStoreOpAfterProducer = nullptr;
-  while (curr) {
-    auto blockIdOpt = CVPipeline::getOpBlockId(curr);
-    if (blockIdOpt != iniProducerBlockId) {
-      break;
-    }
-    if (curr == depValue.getDefiningOp()) {
-      break;
-    }
-    if (CVPipeline::isStoreLike(curr)) {
-      firstStoreOpAfterProducer = curr->getPrevNode();
-      LOG_DEBUG("firstStoreOpAfterProducer: " << *firstStoreOpAfterProducer
-                                              << "\n");
-    }
-    curr = curr->getPrevNode();
-  }
-  return firstStoreOpAfterProducer;
 }
 
 // padding v->c tensor
@@ -656,15 +926,9 @@ void InterCoreTransferAndSyncPass::Nd2NzNormalize(OpBuilder &builder,
   auto [newProdStart, newProdEnd] =
       getBlockStartEnd(dep.producerBlockId, module);
   if (dep.iniProducerBlockId == dep.producerBlockId) {
-    auto producerPoint =
-        getCopyPointBeforeStore(newValue, newProdEnd, dep.iniProducerBlockId);
-    if (producerPoint) {
-      newProdEnd = producerPoint;
-    }
-    if (subBlockId) {
-      if (Operation *subBlockEnd = getSubBlockStartEnd(origDefOp).second)
-        newProdEnd = subBlockEnd;
-    }
+    InsertPointAnalyzer insertPointAnalyzer(*this);
+    newProdEnd = insertPointAnalyzer.getNormalizedVectorProducerEnd(
+        newValue, newProdEnd, dep.iniProducerBlockId, origDefOp);
   }
   builder.setInsertionPointAfter(newProdEnd);
 
@@ -778,75 +1042,6 @@ InterCoreTransferAndSyncPass::createTransferAllocs(
   markAllocIndex++;
 
   return {prodAllocOp, consAllocOp};
-}
-
-mlir::Operation *InterCoreTransferAndSyncPass::analyzeConsumerReadInsertPoint(
-    Value srcValue, int iniConsumerId) {
-  llvm::DenseSet<mlir::Operation *> consumerOps;
-  for (Operation *user : srcValue.getUsers()) {
-    auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
-    if (userBlockIdOpt && *userBlockIdOpt == iniConsumerId) {
-      consumerOps.insert(user);
-    }
-  }
-
-  mlir::Operation *firstFoundOp = nullptr;
-
-  module->walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
-    if (consumerOps.contains(op)) {
-      firstFoundOp = op;
-      return mlir::WalkResult::interrupt();
-    }
-    return mlir::WalkResult::advance();
-  });
-
-  return firstFoundOp;
-}
-
-mlir::Operation *
-InterCoreTransferAndSyncPass::getConsumerWaitPoint(int transferIndex) {
-  mlir::Operation *consumerWaitPoint = nullptr;
-  module.walk<WalkOrder::PreOrder>([&](mlir::Operation *op) {
-    if (consumerWaitPoint) {
-      return;
-    }
-    if (!isa<hivm::ConvertLayoutOp>(op) &&
-        !isa<memref::MemorySpaceCastOp>(op) && !isa<memref::LoadOp>(op)) {
-      return;
-    }
-    auto transferIdAttr =
-        op->getAttrOfType<IntegerAttr>(CVPipeline::kTransferId);
-    if (transferIdAttr && transferIdAttr.getInt() == transferIndex) {
-      consumerWaitPoint = op;
-    }
-  });
-  return consumerWaitPoint;
-}
-
-mlir::Operation *InterCoreTransferAndSyncPass::getFixpipePointAfterProducer(
-    Value srcValue, int producerBlockId) {
-  mlir::Operation *fixpipePoint = srcValue.getDefiningOp();
-  int blockId = CVPipeline::getOpBlockId(fixpipePoint).value_or(-1);
-  if (blockId != producerBlockId) {
-    return nullptr;
-  }
-
-  while (Operation *nextOp = fixpipePoint->getNextNode()) {
-    if (CVPipeline::getOpBlockId(nextOp).value_or(-1) != producerBlockId ||
-        !isa<hivm::FixpipeOp>(nextOp)) {
-      break;
-    }
-    Operation *setOp = nextOp->getNextNode();
-    if (!setOp ||
-        CVPipeline::getOpBlockId(setOp).value_or(-1) != producerBlockId ||
-        !isa<hivm::SyncBlockSetOp>(setOp)) {
-      break;
-    }
-
-    fixpipePoint = setOp;
-  }
-
-  return fixpipePoint;
 }
 
 Operation *InterCoreTransferAndSyncPass::insertVectorToCubeTransfer(
@@ -1753,34 +1948,12 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
     normalizedVal = it->second;
   }
 
-  // Get start/end operations for V/C blocks
-  TransferSyncInsertPoint insertPoint;
-  std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
-      getBlockStartEnd(dep.producerBlockId, module);
-  std::tie(insertPoint.consStart, insertPoint.consEnd) =
-      getBlockStartEnd(dep.consumerBlockId, module);
+  InsertPointAnalyzer insertPointAnalyzer(*this);
+  TransferSyncInsertPoint insertPoint =
+      insertPointAnalyzer.analyzeVectorToCubeTransferPoint(dep, srcValue,
+                                                           normalizedVal);
 
   Operation *consumedDataOp = nullptr;
-  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-    auto consumerPoint =
-        analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
-    if (consumerPoint &&
-        consumerPoint->getBlock() == insertPoint.consStart->getBlock()) {
-      insertPoint.consStart = consumerPoint;
-    }
-  }
-  if (dep.iniProducerBlockId == dep.producerBlockId) {
-    auto producerPoint = getCopyPointBeforeStore(
-        normalizedVal, insertPoint.prodEnd, dep.iniProducerBlockId);
-    if (producerPoint) {
-      insertPoint.prodEnd = producerPoint;
-    }
-    if (Operation *srcDefOp = srcValue.getDefiningOp();
-        srcDefOp && getSubBlockId(srcDefOp)) {
-      if (Operation *subBlockEnd = getSubBlockStartEnd(srcDefOp).second)
-        insertPoint.prodEnd = subBlockEnd;
-    }
-  }
   LOG_DEBUG("after analyzeConsumerReadInsertPoint\n");
   Operation *transferOp = insertVectorToCubeTransfer(
       builder, srcValue, normalizedVal, insertPoint, loc, transferIndex, dep,
@@ -1789,16 +1962,8 @@ LogicalResult InterCoreTransferAndSyncPass::handleVectorToCube(
     return failure();
   }
   int flagId = dep.flagId;
-  std::tie(insertPoint.consStart, insertPoint.consEnd) =
-      getBlockStartEnd(dep.consumerBlockId, module);
-
-  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-    auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
-    if (newconsumerPoint &&
-        insertPoint.consStart->getBlock() == newconsumerPoint->getBlock()) {
-      insertPoint.consStart = newconsumerPoint;
-    }
-  }
+  insertPoint = insertPointAnalyzer.analyzeVectorToCubeSyncPoint(
+      dep, transferIndex, insertPoint);
 
   insertInterCoreSync(builder, transferOp, dep, insertPoint, flagId, loc,
                       transferIndex, flagIdReuseManager, consumedDataOp);
@@ -1817,75 +1982,21 @@ LogicalResult InterCoreTransferAndSyncPass::handleCubeToVector(
   mlir::Value srcValue = dep.value;
 
   Location loc = srcValue.getLoc();
-  TransferSyncInsertPoint insertPoint;
-  std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
-      getBlockStartEnd(dep.producerBlockId, module); // C Block
-  std::tie(insertPoint.consStart, insertPoint.consEnd) =
-      getBlockStartEnd(dep.consumerBlockId, module); // V Block
-
-  AnalyzeSplittedIf(dep);
-
-  if (srcValue.getDefiningOp() &&
-      !isa<scf::ForOp, scf::WhileOp, scf::IfOp>(srcValue.getDefiningOp())) {
-    auto producerPoint =
-        getFixpipePointAfterProducer(srcValue, dep.iniProducerBlockId);
-    if (producerPoint) {
-      insertPoint.prodEnd = producerPoint;
-    }
-  }
-
-  // uses of srcValue. Only applied when the source op belongs to a
-  // sub-block.
-  Operation *consumerPoint = nullptr;
-  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-    consumerPoint =
-        analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
-    if (consumerPoint && getSubBlockId(consumerPoint)) {
-      insertPoint.consStart = getSubBlockStartEnd(consumerPoint).first;
-    }
-  }
-
-  if (dep.isSplitedIf) {
-    insertPoint.prodEnd = dep.realValue.getDefiningOp();
-    auto consumerPoint =
-        analyzeConsumerReadInsertPoint(srcValue, dep.iniConsumerBlockId);
-    if (consumerPoint) {
-      insertPoint.consStart = consumerPoint;
-    }
-  }
+  InsertPointAnalyzer insertPointAnalyzer(*this);
+  TransferSyncInsertPoint insertPoint =
+      insertPointAnalyzer.analyzeCubeToVectorTransferPoint(dep, srcValue);
 
   Operation *consumedDataOp = nullptr;
   Operation *transferOp = insertCubeToVectorTransfer(
       builder, srcValue, insertPoint, loc, transferIndex, dep, &consumedDataOp);
 
-  std::tie(insertPoint.prodStart, insertPoint.prodEnd) =
-      getBlockStartEnd(dep.producerBlockId, module); // C Block
-  std::tie(insertPoint.consStart, insertPoint.consEnd) =
-      getBlockStartEnd(dep.consumerBlockId, module); // V Block
-
-  if (Operation *subBlockEnd = getSubBlockStartEnd(consumerPoint).second) {
-    insertPoint.consEnd = subBlockEnd;
-  }
   int flagId = dep.flagId;
 
   bool isStoreDirectly =
       isStoreDirectlyInUserChain(consumedDataOp->getResult(0));
 
-  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-    auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
-    if (newconsumerPoint && getSubBlockId(consumerPoint)) {
-      // insert the wait for read at the sub-block start
-      insertPoint.consStart = getSubBlockStartEnd(consumerPoint).first;
-    }
-  }
-  if (dep.isSplitedIf) {
-    auto newconsumerPoint = getConsumerWaitPoint(transferIndex);
-    auto yieldBeforeOp = getOpBeforeYield(newconsumerPoint);
-    if (newconsumerPoint && yieldBeforeOp) {
-      insertPoint.consStart = newconsumerPoint;
-      insertPoint.consEnd = yieldBeforeOp;
-    }
-  }
+  insertPoint = insertPointAnalyzer.analyzeCubeToVectorSyncPoint(
+      dep, transferIndex, consumedDataOp);
   insertInterCoreSync(builder, transferOp, dep, insertPoint, flagId, loc,
                       transferIndex, flagIdReuseManager, consumedDataOp,
                       isStoreDirectly);
@@ -1948,15 +2059,10 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
   auto [consStart, consEnd] =
       getBlockStartEnd(dep.consumerBlockId, module); // C Block
 
-  // Adjust consStart to the first operation that actually reads transferValue
-  // within the consumer block, matching the logic in handleVectorToCube.
-  if (dep.consumerBlockId == dep.iniConsumerBlockId) {
-    auto consumerPoint =
-        analyzeConsumerReadInsertPoint(transferValue, dep.iniConsumerBlockId);
-    if (consumerPoint) {
-      consStart = consumerPoint;
-    }
-  }
+  InsertPointAnalyzer insertPointAnalyzer(*this);
+  std::tie(prodEnd, consStart) =
+      insertPointAnalyzer.getCubeToCubeTransferInsertPoints(dep, transferValue,
+                                                            prodEnd, consStart);
 
   auto transferTensorType = cast<RankedTensorType>(transferValue.getType());
   int64_t M = transferTensorType.getDimSize(0);
@@ -1969,15 +2075,6 @@ InterCoreTransferAndSyncPass::handleCubeToCube(OpBuilder &builder,
   int consBlockId = CVPipeline::getOpBlockId(consStart).value_or(-1);
 
   bool isIntraC2C = (dep.iniProducerBlockId == dep.iniConsumerBlockId);
-
-  if (!isa<scf::ForOp, scf::WhileOp, scf::IfOp>(
-          transferValue.getDefiningOp())) {
-    auto producerPoint =
-        getFixpipePointAfterProducer(transferValue, dep.iniProducerBlockId);
-    if (producerPoint) {
-      prodEnd = producerPoint;
-    }
-  }
 
   // Allocate a single shared L1 buffer for producer and consumer.
   Operation *allocOp =

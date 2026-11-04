@@ -1859,6 +1859,16 @@ void TritonToLinalgPass::runOnOperation() {
     return;
   }
 
+  // Fold one-hot selection before SelectOp lowering materializes slices.
+  {
+    RewritePatternSet patterns(&getContext());
+    TTOpConverters::populatePreConversionCanonicalizationPatterns(patterns);
+    if (failed(applyPatternsGreedily(moduleOp, std::move(patterns)))) {
+      signalPassFailure();
+      return;
+    }
+  }
+
   // CUBE requirements affect normalization itself. SIMT requirements must also
   // account for indirect accesses introduced by that normalization.
   bool hasCubeOps = collectCubeRequirements(moduleOp);

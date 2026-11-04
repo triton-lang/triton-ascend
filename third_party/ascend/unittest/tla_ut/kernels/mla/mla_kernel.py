@@ -190,63 +190,105 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
 
 @tla.jit
 def _mla_merge(PART, MAXIMUM, DENOMINATOR, OUT, LSE, ROWS: tl.constexpr, SPLITS: tl.constexpr, CORES: tl.constexpr):
-    """Online merge: rescale each split numerator and denominator together."""
-    # At most 128 KiB of UB for split numerators. Larger core configurations
-    # retain the scalar split traversal instead of exceeding UB capacity.
-    BATCH: tl.constexpr = SPLITS if SPLITS <= 64 else 1
-    for row in tl.range(tl.program_id(0), ROWS, CORES):
-        with tla.scope.vector():
-            values = tla.alloc((BATCH, 512), tl.float32, space='ub')
-            accumulator = tla.alloc((512, ), tl.float32, space='ub')
-            maximum = tla.alloc((64, ), tl.float32, space='ub')
-            denominator = tla.alloc((64, ), tl.float32, space='ub')
-            output = tla.alloc((512, ), tl.bfloat16, space='ub')
-            logsum = tla.alloc((64, ), tl.float32, space='ub')
-            split_maximum = tla.alloc((BATCH, 8), tl.float32, space='ub')
-            split_denominator = tla.alloc((BATCH, 8), tl.float32, space='ub')
-            with tla.scope.simd():
-                zero = tla.simd.vfull(0.0, tl.float32, 64)
-                tla.simd.vsts(maximum[0], tla.simd.vfull(float('-inf'), tl.float32, 64))
-                tla.simd.vsts(denominator[0], zero)
-                for col in tl.static_range(8):
-                    tla.simd.vsts(accumulator[col * 64], zero)
-            # Batch strided split reads: one DMA per tensor and chunk,
-            # then merge all loaded splits in order inside one SIMD scope.
-            # Eight-float statistics rows preserve 32-byte DMA alignment.
-            for group in tl.range(SPLITS // BATCH):
-                offset = group * BATCH * ROWS + row
-                tla.load_gm_to_ub(tla.view(MAXIMUM + offset, (BATCH, 1), strides=(ROWS, 1)),
-                                  tla.view(split_maximum, (BATCH, 1)))
-                tla.load_gm_to_ub(tla.view(DENOMINATOR + offset, (BATCH, 1), strides=(ROWS, 1)),
-                                  tla.view(split_denominator, (BATCH, 1)))
-                tla.load_gm_to_ub(tla.view(PART + offset * 512, (BATCH, 512), strides=(ROWS * 512, 1)), values)
+    """Rescale splits to one maximum and reduce each output chunk in registers.
+
+    A split stores unnormalized FP32 numerator, maximum and denominator.
+    Weighting each numerator/denominator by exp(split_max - global_max)
+    gives the same online-softmax result without renormalizing it per split.
+    """
+    if SPLITS <= 64:
+        for row in tl.range(tl.program_id(0), ROWS, CORES):
+            with tla.scope.vector():
+                values = tla.alloc((SPLITS, 512), tl.float32, space='ub')
+                split_maximum = tla.alloc((SPLITS, 8), tl.float32, space='ub')
+                split_denominator = tla.alloc((SPLITS, 8), tl.float32, space='ub')
+                weights = tla.alloc((64, ), tl.float32, space='ub')
+                output = tla.alloc((512, ), tl.bfloat16, space='ub')
+                logsum = tla.alloc((64, ), tl.float32, space='ub')
+                tla.load_gm_to_ub(tla.view(MAXIMUM + row, (SPLITS, 1), strides=(ROWS, 1)),
+                                  tla.view(split_maximum, (SPLITS, 1)))
+                tla.load_gm_to_ub(tla.view(DENOMINATOR + row, (SPLITS, 1), strides=(ROWS, 1)),
+                                  tla.view(split_denominator, (SPLITS, 1)))
+                tla.load_gm_to_ub(tla.view(PART + row * 512, (SPLITS, 512), strides=(ROWS * 512, 1)), values)
                 with tla.scope.simd():
-                    for split in tl.range(BATCH):
-                        part_max = tla.simd.vlds(split_maximum[split, 0], dist='BRC_B32')
-                        old_max = tla.simd.vlds(maximum[0])
-                        new_max = tla.simd.vmax(old_max, part_max)
-                        alpha = tla.simd.vexpdif(old_max, new_max)
-                        beta = tla.simd.vexpdif(part_max, new_max)
-                        total = tla.simd.vadd(
-                            tla.simd.vmul(tla.simd.vlds(denominator[0]), alpha),
-                            tla.simd.vmul(beta, tla.simd.vlds(split_denominator[split, 0], dist='BRC_B32')))
-                        tla.simd.vsts(maximum[0], new_max)
-                        tla.simd.vsts(denominator[0], total)
-                        for col in tl.static_range(8):
-                            value = tla.simd.vadd(tla.simd.vmul(tla.simd.vlds(accumulator[col * 64]), alpha),
-                                                  tla.simd.vmul(tla.simd.vlds(values[split, col * 64]), beta))
-                            tla.simd.vsts(accumulator[col * 64], value)
-            with tla.scope.simd():
-                den = tla.simd.vlds(denominator[0])
-                for col in tl.static_range(4):
-                    left = tla.simd.vtruncf(tla.simd.vdiv(tla.simd.vlds(accumulator[col * 128]), den), tl.bfloat16)
-                    right = tla.simd.vtruncf(tla.simd.vdiv(tla.simd.vlds(accumulator[col * 128 + 64]), den),
-                                             tl.bfloat16)
-                    packed, unused = tla.simd.vdintlv(left, right)
-                    tla.simd.vsts(output[col * 128], packed)
-                tla.simd.vsts(logsum[0], tla.simd.vadd(tla.simd.vlds(maximum[0]), tla.simd.vln(den)))
-            tla.store_ub_to_gm(output, tla.view(OUT + row * 512, (512, )))
-            tla.store_ub_to_gm(tla.view(logsum, (1, )), tla.view(LSE + row, (1, )))
+                    maximum = tla.simd.vfull(float('-inf'), tl.float32, 64)
+                    for split in tl.range(SPLITS):
+                        maximum = tla.simd.vmax(maximum, tla.simd.vlds(split_maximum[split, 0], dist='BRC_B32'))
+                    total = tla.simd.vfull(0.0, tl.float32, 64)
+                    for split in tl.range(SPLITS):
+                        weight = tla.simd.vexpdif(tla.simd.vlds(split_maximum[split, 0], dist='BRC_B32'), maximum)
+                        total = tla.simd.vfma(total, tla.simd.vlds(split_denominator[split, 0], dist='BRC_B32'), weight)
+                        tla.simd.vsts(weights[split], weight, dist='ONEPT_B32')
+                    for col in tl.static_range(4):
+                        left = tla.simd.vfull(0.0, tl.float32, 64)
+                        right = tla.simd.vfull(0.0, tl.float32, 64)
+                        for split in tl.range(SPLITS):
+                            weight = tla.simd.vlds(weights[split], dist='BRC_B32')
+                            left = tla.simd.vfma(left, tla.simd.vlds(values[split, col * 128]), weight)
+                            right = tla.simd.vfma(right, tla.simd.vlds(values[split, col * 128 + 64]), weight)
+                        packed, unused = tla.simd.vdintlv(tla.simd.vtruncf(tla.simd.vdiv(left, total), tl.bfloat16),
+                                                          tla.simd.vtruncf(tla.simd.vdiv(right, total), tl.bfloat16))
+                        tla.simd.vsts(output[col * 128], packed)
+                    tla.simd.vsts(logsum[0], tla.simd.vadd(maximum, tla.simd.vln(total)))
+                tla.store_ub_to_gm(output, tla.view(OUT + row * 512, (512, )))
+                tla.store_ub_to_gm(tla.view(logsum, (1, )), tla.view(LSE + row, (1, )))
+    else:
+        # At most 128 KiB of UB for split numerators. Larger core configurations
+        # retain the scalar split traversal instead of exceeding UB capacity.
+        BATCH: tl.constexpr = SPLITS if SPLITS <= 64 else 1
+        for row in tl.range(tl.program_id(0), ROWS, CORES):
+            with tla.scope.vector():
+                values = tla.alloc((BATCH, 512), tl.float32, space='ub')
+                accumulator = tla.alloc((512, ), tl.float32, space='ub')
+                maximum = tla.alloc((64, ), tl.float32, space='ub')
+                denominator = tla.alloc((64, ), tl.float32, space='ub')
+                output = tla.alloc((512, ), tl.bfloat16, space='ub')
+                logsum = tla.alloc((64, ), tl.float32, space='ub')
+                split_maximum = tla.alloc((BATCH, 8), tl.float32, space='ub')
+                split_denominator = tla.alloc((BATCH, 8), tl.float32, space='ub')
+                with tla.scope.simd():
+                    zero = tla.simd.vfull(0.0, tl.float32, 64)
+                    tla.simd.vsts(maximum[0], tla.simd.vfull(float('-inf'), tl.float32, 64))
+                    tla.simd.vsts(denominator[0], zero)
+                    for col in tl.static_range(8):
+                        tla.simd.vsts(accumulator[col * 64], zero)
+                # Batch strided split reads: one DMA per tensor and chunk,
+                # then merge all loaded splits in order inside one SIMD scope.
+                # Eight-float statistics rows preserve 32-byte DMA alignment.
+                for group in tl.range(SPLITS // BATCH):
+                    offset = group * BATCH * ROWS + row
+                    tla.load_gm_to_ub(tla.view(MAXIMUM + offset, (BATCH, 1), strides=(ROWS, 1)),
+                                      tla.view(split_maximum, (BATCH, 1)))
+                    tla.load_gm_to_ub(tla.view(DENOMINATOR + offset, (BATCH, 1), strides=(ROWS, 1)),
+                                      tla.view(split_denominator, (BATCH, 1)))
+                    tla.load_gm_to_ub(tla.view(PART + offset * 512, (BATCH, 512), strides=(ROWS * 512, 1)), values)
+                    with tla.scope.simd():
+                        for split in tl.range(BATCH):
+                            part_max = tla.simd.vlds(split_maximum[split, 0], dist='BRC_B32')
+                            old_max = tla.simd.vlds(maximum[0])
+                            new_max = tla.simd.vmax(old_max, part_max)
+                            alpha = tla.simd.vexpdif(old_max, new_max)
+                            beta = tla.simd.vexpdif(part_max, new_max)
+                            total = tla.simd.vadd(
+                                tla.simd.vmul(tla.simd.vlds(denominator[0]), alpha),
+                                tla.simd.vmul(beta, tla.simd.vlds(split_denominator[split, 0], dist='BRC_B32')))
+                            tla.simd.vsts(maximum[0], new_max)
+                            tla.simd.vsts(denominator[0], total)
+                            for col in tl.static_range(8):
+                                value = tla.simd.vadd(tla.simd.vmul(tla.simd.vlds(accumulator[col * 64]), alpha),
+                                                      tla.simd.vmul(tla.simd.vlds(values[split, col * 64]), beta))
+                                tla.simd.vsts(accumulator[col * 64], value)
+                with tla.scope.simd():
+                    den = tla.simd.vlds(denominator[0])
+                    for col in tl.static_range(4):
+                        left = tla.simd.vtruncf(tla.simd.vdiv(tla.simd.vlds(accumulator[col * 128]), den), tl.bfloat16)
+                        right = tla.simd.vtruncf(tla.simd.vdiv(tla.simd.vlds(accumulator[col * 128 + 64]), den),
+                                                 tl.bfloat16)
+                        packed, unused = tla.simd.vdintlv(left, right)
+                        tla.simd.vsts(output[col * 128], packed)
+                    tla.simd.vsts(logsum[0], tla.simd.vadd(tla.simd.vlds(maximum[0]), tla.simd.vln(den)))
+                tla.store_ub_to_gm(output, tla.view(OUT + row * 512, (512, )))
+                tla.store_ub_to_gm(tla.view(logsum, (1, )), tla.view(LSE + row, (1, )))
 
 
 def forward(q, kv_cache, block_table, *, softmax_scale=0.04, causal=True, core_limit=None, compile_only=False):

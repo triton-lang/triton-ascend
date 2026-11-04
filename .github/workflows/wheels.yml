@@ -7,7 +7,7 @@ on:
   pull_request:
     paths:
       - .github/workflows/wheels.yml
-      - .github/workflows/docker/wheels.Dockerfile
+      - .github/workflows/build/wheels.Dockerfile
       - setup.py
       - pyproject.toml
       - version.txt

@@ -201,13 +201,11 @@ static PyObject *unavailableClockRate(const char *kind, int device,
   return PyLong_FromLong(0);
 }
 
-#ifdef TRITON_CANN_910
 static void *getHalLibrary() {
   // DSMI depends on symbols exported by the HAL library.
   static void *library = dlopen("libascend_hal.so", RTLD_GLOBAL | RTLD_LAZY);
   return library;
 }
-#endif
 
 static PyObject *getVectorClockRate(PyObject *self, PyObject *args) {
   int device;
@@ -217,7 +215,6 @@ static PyObject *getVectorClockRate(PyObject *self, PyObject *args) {
     PyErr_SetString(PyExc_ValueError, "Device ID must be non-negative");
     return nullptr;
   }
-#ifdef TRITON_CANN_910
   using GetDeviceInfo = int (*)(uint32_t, int32_t, int32_t, int64_t *);
   void *library = getHalLibrary();
   auto query =
@@ -237,11 +234,6 @@ static PyObject *getVectorClockRate(PyObject *self, PyObject *args) {
         "halGetDeviceInfo failed or returned an invalid frequency (error " +
             std::to_string(result) + ")");
   return PyLong_FromUnsignedLongLong(static_cast<uint64_t>(mhz) * 1000);
-#else
-  return unavailableClockRate("Vector core", device,
-                              "the legacy CANN rt backend does not support "
-                              "this query; CANN 9.1.0 or later is required");
-#endif
 }
 
 static PyObject *getHbmClockRate(PyObject *self, PyObject *args) {
@@ -252,7 +244,6 @@ static PyObject *getHbmClockRate(PyObject *self, PyObject *args) {
     PyErr_SetString(PyExc_ValueError, "Device ID must be non-negative");
     return nullptr;
   }
-#ifdef TRITON_CANN_910
   (void)getHalLibrary();
   static void *library = dlopen("libdrvdsmi_host.so", RTLD_LOCAL | RTLD_LAZY);
   using GetFrequency = int (*)(int, int, unsigned int *);
@@ -272,11 +263,6 @@ static PyObject *getHbmClockRate(PyObject *self, PyObject *args) {
                                 "an invalid frequency (error " +
                                     std::to_string(result) + ")");
   return PyLong_FromUnsignedLongLong(static_cast<uint64_t>(mhz) * 1000);
-#else
-  return unavailableClockRate("HBM", device,
-                              "the legacy CANN rt backend does not support "
-                              "this query; CANN 9.1.0 or later is required");
-#endif
 }
 
 static std::tuple<void *, void *> registerKernel(const char *name,

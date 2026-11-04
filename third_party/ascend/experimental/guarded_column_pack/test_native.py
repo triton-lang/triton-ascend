@@ -1,40 +1,71 @@
-from pathlib import Path
-import json,random,time,statistics
+"""CPU-only checks: python -m unittest test_native -v (build guard first)."""
+import random
+import unittest
+from unittest.mock import patch
 import torch
 import native_guard
-from access_guard import StorageView,conv_certificate_check
+import dispatch
 
-torch.set_num_threads(1)
-rng=random.Random(42)
-def call_args(t,D,N,W,BD,sx=None,sy=None):
- return tuple(t[k] for k in ['x','cache','weight','bias','y'])+(D,N,W,BD,(D+BD-1)//BD,N,sx or D,sy or D)
-def metadata(t):
- return {k:StorageView(v.untyped_storage().data_ptr(),v.untyped_storage().nbytes(),v.data_ptr(),v.element_size(),str(v.device),str(v.dtype)) for k,v in t.items()}
-count=0
-for i in range(1000):
- D=rng.choice([1,3,17,127,257]);N=rng.choice([1,3,5]);W=rng.choice([2,4,8,16,32,64]);BD=rng.choice([8,32,128,256]);dt=rng.choice([torch.float16,torch.float32])
- t={k:torch.empty(n,dtype=dt) for k,n in dict(x=N*D,cache=N*D*W,weight=D*W,bias=D,y=N*D).items()}
- variant=i%5
- if variant==1:t['cache']=t['cache'][1:]
- if variant==2:t['weight']=t['cache']
- if variant==3:t['y']=t['x']
- if variant==4:
-  storage=torch.empty(sum(v.numel() for v in t.values()),dtype=dt);offset=0
-  for k,v in list(t.items()):t[k]=storage[offset:offset+v.numel()];offset+=v.numel()
- args=call_args(t,D,N,W,BD)
- expected=conv_certificate_check(metadata(t),D=D,N=N,W=W,BD=BD,grid=(args[-4],N),stride_x_n=D,stride_y_n=D).fast
- assert native_guard.check_cpu_test(*args)==expected,(i,variant,expected)
- assert native_guard.check(*args) is False # production path rejects CPU
- count+=1
-# B16/D2048 f32 metadata microbenchmark: no kernel launches or tensor contents.
-D,N,W,BD=2048,16,4,1024
-t={k:torch.empty(n,dtype=torch.float32) for k,n in dict(x=N*D,cache=N*D*W,weight=D*W,bias=D,y=N*D).items()}
-args=call_args(t,D,N,W,BD)
-for _ in range(100):assert native_guard.check_cpu_test(*args)
-rounds=[]
-for _ in range(5):
- begin=time.perf_counter_ns()
- for i in range(10000):native_guard.check_cpu_test(*args)
- rounds.append((time.perf_counter_ns()-begin)/10000/1000)
-result=dict(real_tensor_cases_passed=count,production_CPU_rejections=count,host_cpu_metadata_guard_us=rounds,median_host_cpu_metadata_guard_us=statistics.median(rounds),device_launches=0,scope='Native metadata guard on real CPU tensors; not an NPU end-to-end launch benchmark')
-Path(__file__).with_name('native_result.json').write_text(json.dumps(result,indent=2)+'\n');print(result)
+
+class GuardTests(unittest.TestCase):
+    def test_storage_and_width_policy(self):
+        rng = random.Random(42)
+        for i in range(1000):
+            D, N = rng.choice([1, 3, 17, 127, 257]), rng.choice([1, 3, 5])
+            W, BD = rng.choice([2, 4, 8, 16, 32, 64]), rng.choice([8, 32, 128, 256])
+            dtype = rng.choice([torch.float16, torch.float32])
+            tensors = [torch.empty(n, dtype=dtype) for n in (N*D, N*D*W, D*W, D, N*D)]
+            kind = i % 5
+            if kind == 1:
+                tensors[1] = tensors[1][1:]  # offset makes the envelope too short
+            if kind == 2:
+                tensors[2] = tensors[1]  # weight aliases writable cache
+            if kind == 3:
+                tensors[4] = tensors[0]  # output aliases input
+            if kind == 4:
+                storage = torch.empty(sum(t.numel() for t in tensors), dtype=dtype)
+                tensors = list(storage.split([t.numel() for t in tensors]))
+            args = (*tensors, D, N, W, BD, (D+BD-1)//BD, N, D, D)
+            allowed = W <= 16 or (W == 32 and dtype == torch.float32 and BD <= 128)
+            self.assertEqual(native_guard.check_cpu_test(*args), kind in (0, 4) and allowed)
+            self.assertFalse(native_guard.check(*args))  # CPU cannot authorize NPU launch
+
+    def test_invalid_launch(self):
+        tensors = [torch.empty(n) for n in (16, 64, 32, 8, 16)]
+        scalars = [8, 2, 4, 8, 1, 2, 8, 8]
+        for index, value in [(0, 0), (1, 0), (2, 3), (2, 64), (3, 3),
+                             (4, 2), (5, 3), (6, 7), (7, 7), (0, 2**40)]:
+            changed = scalars.copy()
+            changed[index] = value
+            self.assertFalse(native_guard.check_cpu_test(*tensors, *changed))
+
+    def test_dispatch_binds_checked_arguments(self):
+        objects = [object() for _ in range(5)]
+        calls = []
+
+        class Kernel:
+            def __init__(self, name):
+                self.name = name
+            def __getitem__(self, grid):
+                return lambda *args, **kwargs: calls.append((self.name, grid, args, kwargs))
+
+        for allowed in (True, False):
+            with patch.object(dispatch.native_guard, "check", return_value=allowed) as check:
+                dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects,
+                                        D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
+                x, cache, y, weight, bias = objects
+                check.assert_called_once_with(x, cache, weight, bias, y, 17, 3, 4, 8, 3, 3, 20, 24)
+                name, grid, args, meta = calls[-1]
+                self.assertEqual(name, "fast" if allowed else "original")
+                self.assertEqual(grid, (3, 3))
+                self.assertEqual(args, (*objects, 20, 1, 24, 1))
+                self.assertEqual((meta["W"], meta["BD"], meta["CHUNK_OFFSET"]), (4, 8, 0))
+        with patch.object(dispatch, "native_guard", None):
+            dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects,
+                                    D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
+        self.assertEqual(calls[-1][0], "original")
+        with patch.object(dispatch, "native_guard", None):
+            dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects[:3], None, None,
+                                    D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
+        self.assertFalse(calls[-1][3]["HAS_WEIGHT"])
+        self.assertFalse(calls[-1][3]["HAS_BIAS"])

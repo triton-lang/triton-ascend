@@ -15,7 +15,7 @@ static PyObject *checkImpl(PyObject *args, c10::DeviceType expectedDevice) {
   if (!PyArg_ParseTuple(args,"OOOOOLLLLLLLL",&objects[0],&objects[1],&objects[2],
        &objects[3],&objects[4],&D,&N,&W,&BD,&g0,&g1,&sx,&sy)) return nullptr;
   if (D<=0 || N<=0 || BD<=0 || (BD&(BD-1)) ||
-      (W<2 || W>64 || (W&(W-1))) || sx<D || sy<D ||
+      (W<2 || W>32 || (W&(W-1))) || sx<D || sy<D ||
       U128(g0)!=((U128(D)+BD-1)/BD) || g1!=N ||
       U128(g0)*g1>65535 || (U128(g0)*BD-1)*W>INT32_MAX ||
       U128(N)*D*W>INT64_MAX) Py_RETURN_FALSE;
@@ -32,6 +32,8 @@ static PyObject *checkImpl(PyObject *args, c10::DeviceType expectedDevice) {
       if (!i) { index=t.device().index();dtype=t.scalar_type(); }
       if (t.device().index()!=index || t.scalar_type()!=dtype ||
           (dtype!=at::kHalf && dtype!=at::kFloat)) Py_RETURN_FALSE;
+      // Wide FP16 and large W32 tiles failed compilation/resource checks.
+      if (W==32 && (dtype!=at::kFloat || BD>128)) Py_RETURN_FALSE;
       const auto storage=t.storage();
       const uintptr_t base=reinterpret_cast<uintptr_t>(storage.data_ptr().get());
       const uintptr_t ptr=reinterpret_cast<uintptr_t>(t.data_ptr());

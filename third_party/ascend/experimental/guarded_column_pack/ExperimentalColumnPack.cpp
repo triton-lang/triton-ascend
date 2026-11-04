@@ -98,7 +98,10 @@ std::optional<Group> group(Operation *first, const EntryArgPointerAliasAnalysis 
   Address a=address(ptr(first)); int64_t w=rowStride(a.rows);
   bool store=isa<triton::StoreOp>(first);
   // Bounded resource cost. Preserve missing leading field with an explicit mask.
-  if (w<2 || w>64 || a.field>(store?0:1)) return std::nullopt;
+  if (w<2 || w>32 || a.field>(store?0:1)) return std::nullopt;
+  if (w==32 && (t.getDimSize(0)>128 ||
+      !cast<triton::PointerType>(t.getElementType()).getPointeeType().isF32()))
+    return std::nullopt;
   if (auto l=dyn_cast<triton::LoadOp>(first); l && l.getIsVolatile()) return std::nullopt;
   Group g{{first},a.rows,w,store};
   int64_t next=a.field+1;

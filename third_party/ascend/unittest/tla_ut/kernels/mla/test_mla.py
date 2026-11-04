@@ -163,9 +163,9 @@ def offline_ir(kernel, heads, folder, cores=29, causal=True):
     from triton.language.extra.tla.compiler import ast_to_ttir, lower_ttir
 
     cfg = kernel.launch_config(heads, cores, 2 * cores)
+    split_entry = kernel.split_kernel(cfg['block_m'])
     entries = [
-        (kernel._mla_split, dict(Q='*bf16', KV='*bf16', TABLE='*i32', PART='*fp32', MAXIMUM='*fp32',
-                                 DENOMINATOR='*fp32'),
+        (split_entry, dict(Q='*bf16', KV='*bf16', TABLE='*i32', PART='*fp32', MAXIMUM='*fp32', DENOMINATOR='*fp32'),
          dict(H=heads, BM=cfg['block_m'], SPLITS=cfg['splits'], CORES=cfg['cube_grid'], SCALE=SCALE, CAUSAL=causal)),
         (kernel._mla_merge, dict(PART='*fp32', MAXIMUM='*fp32', DENOMINATOR='*fp32', OUT='*bf16',
                                  LSE='*fp32'), dict(ROWS=4 * heads, SPLITS=cfg['splits'], CORES=cfg['vector_grid'])),
@@ -189,10 +189,10 @@ def offline_ir(kernel, heads, folder, cores=29, causal=True):
         assert module.verify()
         assert '!tt.ptr' not in text and 'tensor<' not in text
         assert 'hacc.mode = "tla"' in text
-        required = ('hivm.hir.nd2nz', 'hivm.hir.mmadL1', 'hivm.hir.fixpipe') if function == kernel._mla_split else ()
+        required = ('hivm.hir.nd2nz', 'hivm.hir.mmadL1', 'hivm.hir.fixpipe') if function == split_entry else ()
         for op in required:
             assert op in text, op
-        if function == kernel._mla_split:
+        if function == split_entry:
             assert 'hivm.func_core_type<MIX>' in text and 'dual_dst_mode = <ROW_SPLIT>' in text
             copies = [line for line in text.splitlines() if 'hivm.hir.copy ins(' in line]
             assert copies and all('address_space<ub>' in line and 'address_space<cbuf>' in line for line in copies)

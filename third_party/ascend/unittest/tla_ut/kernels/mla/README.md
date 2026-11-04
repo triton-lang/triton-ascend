@@ -18,7 +18,7 @@ RoPE 变换由上游完成。
 
 ## 实现
 
-`mla_kernel.py` 包含两个 kernel 和 `forward` 入口：
+`mla_kernel.py` 包含两阶段计算和 `forward` 入口，每次仍只 launch 两个 kernel：
 
 1. Split-KV：运行时查询 Cube/Vector 核数，根据行块数划分逻辑页，再把工作项循环分配到 Cube。
    不固定物理核数，支持少核时一个核处理多个工作项。当前要求 Ascend950 的 1:2 Cube/Vector 配置。
@@ -29,9 +29,16 @@ RoPE 变换由上游完成。
    H96/48/24 使用 M=96，以减少重复读取 KV；H12 使用 M=48，覆盖全部有效行。
 5. SQ=4 的 causal mask 只影响最后一页，因此前 1023 页省去逐行位置计算和比较。
    最后一页仍严格执行完整 mask，测试中有专门的 causal 边界输入。
-6. 第二个纯 AIV kernel 批量读取各 split 的分子和统计量，再按原顺序在 FP32 中重缩放、合并，
-   最后才转 BF16。分子批量 buffer 限制在 128 KiB 内；超过 64 个 split 时退回逐 split 读取，
-   该限制来自 UB 容量，不是物理核数假设。
+6. M96 使用延迟一页的 PV 调度：Cube 做 PV(t-1)、预取 K(t+1)、QK(t+1)，
+   Vector 做 softmax(t) 后合并 PV(t-1)。两份 P 和 alpha 保留延迟输入，score/PV 仍复用 UB。
+   flag 4/5 分别保护 score 已读、PV 已读，最后单独 drain；一页 split 有明确的收尾分支。
+   M48 的短循环更快，H12 保留原顺序；选择只依赖公开的 tile 形状。
+7. 数据就绪的跨核等待放在消费者流水线：Vector V、Cube MTE1、Cube F；工作项结束仍用 S 握手。
+8. 第二个纯 AIV kernel 批量读取各 split 的 FP32 原始分子、最大值和分母，先求公共最大值，
+   每个 split 的缩放权重只计算一次，再按 128 列分组在寄存器累加。最后才转 BF16，并保留 FP32 LSE。
+   超过 64 个 split 时保留逐 split 的有界 UB 回退。当前包的 nested TLA JIT helper 会丢失 TLA
+   builder，因此两种 split 调度保留独立入口；没有修改编译器。
+
 
 每次执行都分配新的 workspace/output，并执行两个 kernel；不缓存输入、KV 数据、softmax 或输出。
 `core_limit` 只用于诊断核数映射，默认不限制运行时查询的核数。
@@ -77,35 +84,42 @@ AI Core/Vector 任务时间由 profiler 单独采集，
 
 ## 本次验证结果
 
-2026-11-04，Ascend950，运行时报告 28 Cube / 56 Vector，物理卡 3。
-TA 为 2026-11-03 日构建 `0ee9f1a3`，配套 NPU-IR `b6af414f2289`。
-AscendC 为官方 ops-transformer `74dc469b5744bea3b5bd06d249fb59747195bddd` 的 Flash MLA，
-源码未修改，单独构建并加载；未替换 TA、NPU-IR 或全局 CANN。
+2026-11-04，Ascend950，runtime 28 Cube / 56 Vector。TA 1103 `0ee9f1a3`，
+NPU-IR `b6af414f2289`，均未修改。AscendC 为官方 ops-transformer
+`74dc469b5744bea3b5bd06d249fb59747195bddd` 的 Flash MLA，源码未改。
+只在允许的卡上运行，未使用物理 4/5/6；主配对实验用物理 2，独立计数器用物理 1。
 
-IR 与两阶段 binary 均通过。最终计算实现通过 40 组全量 output/LSE 精度检查；
-整理后的 PR 文件另通过 8 组 normal/causal_boundary 检查。
-单 Cube 上 H96/H12 的 normal/causal_boundary 共 4 组也通过；
-1–192 Cube 核的 768 组调度覆盖检查通过，1/29/192 核离线编译通过。
-实际机器仍只有 28 Cube，其他核数的离线检查不等同于对应硬件上的执行验证。
+最终文件直接通过 40 组全量 output/LSE 精度（TLA 与两种官方 AscendC 调用路径均检查），
+以及 4 组单 Cube、3 组强制 65/1023/1024 splits 和 2 组 noncausal 诊断。
+强制 split 仅改变诊断调度，用同样的目标输入在实际 28 核硬件验证归约回退和单页收尾。
+四规格 1/29/192 核离线编译以及 H24 的 1024 核单页配置通过；
+离线配置不代表在相应核数的硬件上测过。pytest IR 4 passed、12 skipped，standalone IR 通过。
 
-下表为同一进程、相同输入、轮换调用顺序的完整调用时间中位数，每项保留 120 个样本。
-包括同步、workspace 分配、核数查询及两个 TLA kernel；不混用 device task 时间。
-`prepared` 复用官方长度/形状 metadata；`regenerate` 每次重新生成 metadata。
-比值大于 1 才表示 TLA 更快。
+以下是最终逐字节源码在同一进程、相同普通随机输入下的完整调用中位数，
+每项 3×40 样本、逐样本轮换调用顺序。原 PR 指 `8f5bea4e4`，不是历史不同轮次结果。
+包含分配、runtime 核数查询、launch、全部设备工作和同步；prepared 为主要 AscendC 基线。
 
-| H | TLA final (us) | TLA previous (us) | AscendC prepared (us) | AscendC regenerate (us) | prepared / TLA |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 96 | 620.145 | 624.462 | 386.470 | 465.007 | 0.623x |
-| 48 | 351.482 | 359.184 | 250.440 | 326.125 | 0.713x |
-| 24 | 270.886 | 263.756 | 239.314 | 346.880 | 0.883x |
-| 12 | 148.057 | 232.754 | 130.071 | 192.238 | 0.879x |
+| H | 原 PR (us) | 本次 (us) | 降低 | AscendC prepared (us) | AscendC regenerate (us) | prepared / 本次 |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 96 | 614.402 | 569.940 | 7.2% | 382.158 | 455.233 | 0.671x |
+| 48 | 352.774 | 339.980 | 3.6% | 240.701 | 319.013 | 0.708x |
+| 24 | 209.494 | 191.918 | 8.4% | 180.495 | 239.750 | 0.940x |
+| 12 | 151.762 | 139.659 | 8.0% | 187.637 | 250.060 | 1.344x |
 
-当前四组均未超过 AscendC prepared 基线。相对前版，H12 完整调用时间降低约 36.4%；
-H24 完整调用时间增加约 2.7%，该回退保留在结果中。
-独立 profiler 显示 H24 merge 从 20.230 us 降至 9.004 us；
-H96 split 仍约 546 us，是主要优化对象。不同采集轮次的 task 时间与完整调用时间不能相减推导 host 开销。
+H96/H48/H24 仍未超过 prepared。H12 本轮快于 prepared，但官方 H12 基线从重启前
+约 130 us 变为本轮约 188 us，原因尚未确定，不能把跨轮次变化归因于本次 TLA 优化。
+重新核对的官方源码、输入/输出形状和核数一致；独立 profiler 中官方 H12 的 MTE2
+活跃时间约 116 us、比率约 0.919，说明当前执行以搬运为主，但不是历史差异的因果证明。
 
-计时使用整理前的同一计算版本；最终 `_mla_split`、`_mla_merge`、`launch_config` 的 AST 与之完全一致。
-整理仅移除 debug 用的全局 binary 记录，并让 `compile_only` 直接返回编译对象；
-上表不是整理后文件重新采集的逐字节相同源码计时。
-原始样本、源码 hash、占用快照和分析随任务报告提供。
+H48 加入延迟 PV 后相对只改等待位置的中间版，wall 338.868→339.980 us，约增加 0.3%；
+独立 AI-task 总和 288.072→281.694 us。保留这一差异，不用 task 时间替代完整调用。
+最终仍比原 PR 的完整调用快约 3.6%。
+
+Level2 H96 split 中位数：原 PR 545.431 us，本次 517.415 us，官方 324.066 us。
+三者 MAC 活跃时间都约 310 us，而活跃比例约 0.569/0.601/0.959；主要剩余方向是
+跨页流水重叠和缓冲区周转。计数器可以重叠，不能相加，也不是 MFU。
+现有 llvm-objdump 仍不能解码 A5 指令；报告使用 LLVM/HIVM 与 msprof 证据，不作指令级 stall 结论。
+此前报告中“UB 预算 216 KiB，无法独立分配 score”有误：最终 HIVM 声明为 248 KiB，
+独立 score 候选已编译执行通过，但未比复用 UB 更快，故未采用。
+
+完整原始样本、占用快照、源码 hash、计数器及未采用的候选随本次任务报告提供。

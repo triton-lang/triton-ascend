@@ -116,7 +116,7 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
                     with tla.scope.vector():
                         tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 1)
                         sub = tla.sub_block_id()
-                        # Only the last physical tile needs a causal mask:
+                        # Only the last logical page needs a causal mask:
                         # every earlier logical page is visible to all four queries.
                         if CAUSAL and page == 1023:
                             with tla.scope.simd():
@@ -188,6 +188,196 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
         with tla.scope.cube():
             tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 7)
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 8)
+
+
+@tla.jit
+def _mla_split_pipelined(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl.constexpr,
+                         SPLITS: tl.constexpr, CORES: tl.constexpr, SCALE: tl.constexpr, CAUSAL: tl.constexpr):
+    """Pipeline softmax(t) with PV(t-1), then fold PV while computing QK(t+1).
+
+    Score and PV still share UB. Credits 4/5 protect the alternating owners:
+    score-consumed -> PV write -> PV-consumed -> next-score write.
+    Two L1 probability slots and two alpha slots preserve the delayed PV input.
+    """
+    BN: tl.constexpr = 128
+    VM: tl.constexpr = BM // 2
+    ROWS: tl.constexpr = 4 * H
+    core = tl.program_id(0)
+    for job in tl.range(core, (ROWS // BM) * SPLITS, CORES):
+        row_start = (job // SPLITS) * BM
+        split = job % SPLITS
+        first_page = split * 1024 // SPLITS
+        end_page = (split + 1) * 1024 // SPLITS
+
+        q = tla.alloc((36, BM // 16, 16, 16), tl.bfloat16, space='l1')
+        kv = tla.alloc((72, 8, 16, 16), tl.bfloat16, space='l1')
+        p = tla.alloc((16, BM // 16, 16, 16), tl.bfloat16, space='l1')
+        pflat = tla.reshape(p, (16, BM * 16))
+        qk = tla.alloc((8, BM // 16, 16, 16), tl.float32, space='l0c')
+        pv = tla.alloc((32, BM // 16, 16, 16), tl.float32, space='l0c')
+        exchange = tla.alloc((VM * 512, ), tl.float32, space='ub')
+        score = tla.reshape(tla.view(exchange, (VM * BN, )), (VM, BN))
+        product = tla.reshape(exchange, (VM, 512))
+        accumulator = tla.alloc((VM, 512), tl.float32, space='ub')
+        probability = tla.alloc((8, (VM + 1) * 16), tl.bfloat16, space='ub')
+        maximum = tla.alloc((64, ), tl.float32, space='ub')
+        denominator = tla.alloc((64, ), tl.float32, space='ub')
+        correction = tla.alloc((2, 64), tl.float32, space='ub')
+
+        # Prologue: every split has at least one page, including single-page
+        # splits on larger core configurations. Publish its initial score.
+        with tla.scope.cube():
+            tla.load_gm_to_l1(tla.view(Q + row_start * 576, (BM, 576)), q)
+            page_id = tl.load(TABLE + first_page).to(tl.int64)
+            first_kv = tla.view(kv, (36, 8, 16, 16), offsets=((first_page % 2) * 36, 0, 0, 0))
+            tla.load_gm_to_l1(tla.view(KV + page_id * BN * 576, (BN, 576)), first_kv)
+            tla.cube.mmad(q, first_kv, qk, transpose_b=True, clear_accum=True)
+            tla.copy_l0c_to_ub(
+                qk, score,
+                tla.FixpipeL0C2UBParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
+                                        dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 1)
+        with tla.scope.vector():
+            with tla.scope.simd():
+                zero = tla.simd.vfull(0.0, tl.float32, 64)
+                tla.simd.vsts(maximum[0], tla.simd.vfull(float('-inf'), tl.float32, 64))
+                tla.simd.vsts(denominator[0], zero)
+                for row in tl.range(VM):
+                    for col in tl.static_range(8):
+                        tla.simd.vsts(accumulator[row, col * 64], zero)
+
+        for page in tl.range(first_page, end_page):
+            current_slot = page % 2
+            previous_slot = (page + 1) % 2
+            with tla.scope.cube():
+                if page > first_page:
+                    tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 2)
+                    tla.cube.mmad(tla.view(p, (8, BM // 16, 16, 16), offsets=(previous_slot * 8, 0, 0, 0)),
+                                  tla.view(kv, (32, 8, 16, 16), offsets=(previous_slot * 36, 0, 0, 0)), pv,
+                                  clear_accum=True)
+                # PV has consumed the old KV slot. Load the next page into it;
+                # the compiler inserts the same-core read/write dependencies.
+                if page + 1 < end_page:
+                    next_id = tl.load(TABLE + page + 1).to(tl.int64)
+                    tla.load_gm_to_l1(tla.view(KV + next_id * BN * 576, (BN, 576)),
+                                      tla.view(kv, (36, 8, 16, 16), offsets=(previous_slot * 36, 0, 0, 0)))
+                if page > first_page:
+                    tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 4)
+                    tla.copy_l0c_to_ub(
+                        pv, product,
+                        tla.FixpipeL0C2UBParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
+                                                dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
+                    tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 3)
+                if page + 1 < end_page:
+                    tla.cube.mmad(q, tla.view(kv, (36, 8, 16, 16), offsets=(previous_slot * 36, 0, 0, 0)), qk,
+                                  transpose_b=True, clear_accum=True)
+                    if page > first_page:
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 5)
+                    else:
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 4)
+                    tla.copy_l0c_to_ub(
+                        qk, score,
+                        tla.FixpipeL0C2UBParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
+                                                dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
+                    tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 1)
+            with tla.scope.vector():
+                tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 1)
+                sub = tla.sub_block_id()
+                # Only the last logical page needs a causal mask:
+                # every earlier logical page is visible to all four queries.
+                if CAUSAL and page == 1023:
+                    with tla.scope.simd():
+                        negative = tla.simd.vfull(float('-inf'), tl.float32, 64)
+                        positions0 = tla.simd.vci(page * BN)
+                        positions1 = tla.simd.vci(page * BN + 64)
+                        for row in tl.range(VM):
+                            logical_row = (row_start + sub * VM + row).to(tl.int32)
+                            bound = 131072 - 4 + logical_row // H + 1
+                            x0 = tla.simd.vlds(score[row, 0])
+                            x1 = tla.simd.vlds(score[row, 64])
+                            x0 = tla.simd.vsel(tla.simd.vcmps(positions0, bound, op=tla.simd.CMP.LT), x0, negative)
+                            x1 = tla.simd.vsel(tla.simd.vcmps(positions1, bound, op=tla.simd.CMP.LT), x1, negative)
+                            tla.simd.vsts(score[row, 0], x0)
+                            tla.simd.vsts(score[row, 64], x1)
+                with tla.scope.simd():
+                    for row in tl.range(VM):
+                        x0 = tla.simd.vmuls(tla.simd.vlds(score[row, 0]), SCALE)
+                        x1 = tla.simd.vmuls(tla.simd.vlds(score[row, 64]), SCALE)
+                        old_max = tla.simd.vlds(maximum[row], dist='BRC_B32')
+                        new_max = tla.simd.vmax(tla.simd.vreduce_max(tla.simd.vmax(x0, x1)), old_max)
+                        alpha = tla.simd.vexpdif(old_max, new_max)
+                        p0 = tla.simd.vexpdif(x0, new_max)
+                        p1 = tla.simd.vexpdif(x1, new_max)
+                        total = tla.simd.vbroadcast(tla.simd.vreduce_sum(tla.simd.vadd(p0, p1)))
+                        total = tla.simd.vadd(total,
+                                              tla.simd.vmul(tla.simd.vlds(denominator[row], dist='BRC_B32'), alpha))
+                        tla.simd.vsts(maximum[row], new_max, dist='ONEPT_B32')
+                        tla.simd.vsts(denominator[row], total, dist='ONEPT_B32')
+                        tla.simd.vsts(correction[current_slot, row], alpha, dist='ONEPT_B32')
+                        packed, unused = tla.simd.vdintlv(tla.simd.vtruncf(p0, tl.bfloat16),
+                                                          tla.simd.vtruncf(p1, tl.bfloat16))
+                        tla.simd.vsstb(packed, probability[0, row * 16], (VM + 1) * 16)
+                tla.copy_ub_to_l1(tla.view(probability, (8, VM * 16)),
+                                  tla.view(pflat, (8, VM * 16), offsets=(current_slot * 8, sub * VM * 16)))
+                tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 2)
+                # P and alpha for this page are ready before the previous PV
+                # is folded. The old alpha lives in the other slot.
+                tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 4)
+                if page > first_page:
+                    tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 3)
+                    with tla.scope.simd():
+                        for row in tl.range(VM):
+                            alpha = tla.simd.vlds(correction[previous_slot, row], dist='BRC_B32')
+                            for col in tl.static_range(8):
+                                value = tla.simd.vfma(tla.simd.vlds(product[row, col * 64]),
+                                                      tla.simd.vlds(accumulator[row, col * 64]), alpha)
+                                tla.simd.vsts(accumulator[row, col * 64], value)
+                    tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 5)
+
+        # Drain the final PV. For a one-page split no PV-free credit exists;
+        # its score-free credit directly permits the last exchange write.
+        last_slot = (end_page - 1) % 2
+        with tla.scope.cube():
+            tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 2)
+            tla.cube.mmad(tla.view(p, (8, BM // 16, 16, 16), offsets=(last_slot * 8, 0, 0, 0)),
+                          tla.view(kv, (32, 8, 16, 16), offsets=(last_slot * 36, 0, 0, 0)), pv, clear_accum=True)
+            if end_page - first_page > 1:
+                tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 5)
+            else:
+                tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 4)
+            tla.copy_l0c_to_ub(
+                pv, product,
+                tla.FixpipeL0C2UBParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
+                                        dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 3)
+        with tla.scope.vector():
+            tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 3)
+            with tla.scope.simd():
+                for row in tl.range(VM):
+                    alpha = tla.simd.vlds(correction[last_slot, row], dist='BRC_B32')
+                    for col in tl.static_range(8):
+                        value = tla.simd.vfma(tla.simd.vlds(product[row, col * 64]),
+                                              tla.simd.vlds(accumulator[row, col * 64]), alpha)
+                        tla.simd.vsts(accumulator[row, col * 64], value)
+            sub = tla.sub_block_id()
+            offset = split * ROWS + row_start + sub * VM
+            tla.store_ub_to_gm(accumulator, tla.view(PART + offset * 512, (VM, 512)))
+            tla.store_ub_to_gm(tla.view(maximum, (VM, )), tla.view(MAXIMUM + offset, (VM, )))
+            tla.store_ub_to_gm(tla.view(denominator, (VM, )), tla.view(DENOMINATOR + offset, (VM, )))
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 7)
+            tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 8)
+        with tla.scope.cube():
+            tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 7)
+            tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 8)
+
+
+def split_kernel(block_m):
+    """The 96-row tile hides PV behind softmax; 48 rows favor the shorter loop.
+
+    Separate JIT entries keep both schedules explicit. The 1103 frontend does
+    not preserve the TLA builder when compiling a nested TLA JIT helper.
+    """
+    return _mla_split_pipelined if block_m == 96 else _mla_split
 
 
 @tla.jit
@@ -330,13 +520,14 @@ def forward(q, kv_cache, block_table, *, softmax_scale=0.04, causal=True, core_l
     options = dict(sanitize_overflow=False, enable_auto_bind_sub_block=False, enable_preload=False)
     args = (q, kv_cache, block_table, part, maximum, denominator, h, config['block_m'], splits, config['cube_grid'],
             softmax_scale, causal)
+    split_entry = split_kernel(config['block_m'])
     merge_args = (part, maximum, denominator, output, lse, rows, splits, config['vector_grid'])
     with torch.npu.device(q.device):
         if compile_only:
-            first = _mla_split.warmup(*args, grid=(config['cube_grid'], ), **options)
+            first = split_entry.warmup(*args, grid=(config['cube_grid'], ), **options)
             second = _mla_merge.warmup(*merge_args, grid=(config['vector_grid'], ), **options)
             return first, second
         else:
-            _mla_split[(config['cube_grid'], )](*args, **options)
+            split_entry[(config['cube_grid'], )](*args, **options)
             _mla_merge[(config['vector_grid'], )](*merge_args, **options)
     return output, lse

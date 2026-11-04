@@ -26,10 +26,12 @@ RoPE 变换由上游完成。
 3. QK 通过 fixpipe ROW_SPLIT 分给两个 AIV。FP32 online softmax 后，BF16 P 用 `vsstb`
    转为 NZ，再通过 `copy_ub_to_l1` 交给 Cube；P 不经过 GM。
 4. PV 保持完整 512 列。QK/PV 交换 buffer 的生命周期不重叠，复用 UB 并通过 block flag 保护。
-   H96/48/24 使用 M=96，以减少重复读取 KV；H12 使用 M=16。
+   H96/48/24 使用 M=96，以减少重复读取 KV；H12 使用 M=48，覆盖全部有效行。
 5. SQ=4 的 causal mask 只影响最后一页，因此前 1023 页省去逐行位置计算和比较。
    最后一页仍严格执行完整 mask，测试中有专门的 causal 边界输入。
-6. 第二个纯 AIV kernel 在 FP32 中重缩放、合并各 split 的分子和分母，最后才转 BF16。
+6. 第二个纯 AIV kernel 批量读取各 split 的分子和统计量，再按原顺序在 FP32 中重缩放、合并，
+   最后才转 BF16。分子批量 buffer 限制在 128 KiB 内；超过 64 个 split 时退回逐 split 读取，
+   该限制来自 UB 容量，不是物理核数假设。
 
 每次执行都分配新的 workspace/output，并执行两个 kernel；不缓存输入、KV 数据、softmax 或输出。
 `core_limit` 只用于诊断核数映射，默认不限制运行时查询的核数。
@@ -72,3 +74,38 @@ AI Core/Vector 任务时间由 profiler 单独采集，
 
 性能测试请串行运行，不使用 pytest-xdist。`PERF_COUNTERS=True` 额外导出 Level2 PipeUtilization，
 计数器采集与性能计时分开。环境、源码 hash、精度、原始 trace 和结果保存在每次独立结果目录中。
+
+## 本次验证结果
+
+2026-11-04，Ascend950，运行时报告 28 Cube / 56 Vector，物理卡 3。
+TA 为 2026-11-03 日构建 `0ee9f1a3`，配套 NPU-IR `b6af414f2289`。
+AscendC 为官方 ops-transformer `74dc469b5744bea3b5bd06d249fb59747195bddd` 的 Flash MLA，
+源码未修改，单独构建并加载；未替换 TA、NPU-IR 或全局 CANN。
+
+IR 与两阶段 binary 均通过。最终计算实现通过 40 组全量 output/LSE 精度检查；
+整理后的 PR 文件另通过 8 组 normal/causal_boundary 检查。
+单 Cube 上 H96/H12 的 normal/causal_boundary 共 4 组也通过；
+1–192 Cube 核的 768 组调度覆盖检查通过，1/29/192 核离线编译通过。
+实际机器仍只有 28 Cube，其他核数的离线检查不等同于对应硬件上的执行验证。
+
+下表为同一进程、相同输入、轮换调用顺序的完整调用时间中位数，每项保留 120 个样本。
+包括同步、workspace 分配、核数查询及两个 TLA kernel；不混用 device task 时间。
+`prepared` 复用官方长度/形状 metadata；`regenerate` 每次重新生成 metadata。
+比值大于 1 才表示 TLA 更快。
+
+| H | TLA final (us) | TLA previous (us) | AscendC prepared (us) | AscendC regenerate (us) | prepared / TLA |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 96 | 620.145 | 624.462 | 386.470 | 465.007 | 0.623x |
+| 48 | 351.482 | 359.184 | 250.440 | 326.125 | 0.713x |
+| 24 | 270.886 | 263.756 | 239.314 | 346.880 | 0.883x |
+| 12 | 148.057 | 232.754 | 130.071 | 192.238 | 0.879x |
+
+当前四组均未超过 AscendC prepared 基线。相对前版，H12 完整调用时间降低约 36.4%；
+H24 完整调用时间增加约 2.7%，该回退保留在结果中。
+独立 profiler 显示 H24 merge 从 20.230 us 降至 9.004 us；
+H96 split 仍约 546 us，是主要优化对象。不同采集轮次的 task 时间与完整调用时间不能相减推导 host 开销。
+
+计时使用整理前的同一计算版本；最终 `_mla_split`、`_mla_merge`、`launch_config` 的 AST 与之完全一致。
+整理仅移除 debug 用的全局 binary 记录，并让 `compile_only` 直接返回编译对象；
+上表不是整理后文件重新采集的逐字节相同源码计时。
+原始样本、源码 hash、占用快照和分析随任务报告提供。

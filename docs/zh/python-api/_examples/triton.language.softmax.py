@@ -40,3 +40,4 @@ def test_softmax_2d():
 
 if __name__ == '__main__':
     test_softmax_2d()
+    print("test softmax 2d passed")

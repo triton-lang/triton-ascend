@@ -57,8 +57,6 @@ from .custom_op import (
 
 from . import builtin_custom_ops
 
-from .math_ops import (atan2, isfinited, finitef)
-
 from .aux_ops import (
     parallel,
     compile_hint,
@@ -132,11 +130,6 @@ __all__ = [
     "custom_semantic",
     "register_custom_op",
     "SyncEventSlot",
-
-    # math ops
-    "atan2",
-    "isfinited",
-    "finitef",
 
     # aux ops
     "sync_block_set",

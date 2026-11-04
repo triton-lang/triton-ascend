@@ -334,6 +334,10 @@ struct StageModeProfile {
   double independentLoadGroupBytesPerCycle = 0.0;
   int64_t independentLoadGroupMinimumOperations = 0;
   int64_t independentLoadGroupMaximumOperations = 0;
+  /// Completion residuals for backend-expanded operation compositions inside
+  /// an independent SIMD loop, beyond the standalone operation rates.
+  double independentLoopExpDivPairCyclesPerElement = 0.0;
+  double independentLoopPredicateSelectCyclesPerElement = 0.0;
   int64_t computedAddressScalarizedLoadMinimumElements = 0;
   int64_t computedAddressScalarizedLoadMaximumElements = 0;
   double computedAddressScalarizedLoadCyclesPerElement = 0.0;
@@ -358,6 +362,9 @@ struct StageModeProfile {
       maskedStridedLoadCopyCompletionByStrideBytes;
   std::map<int64_t, MaskedStridedCopyCompletionCost>
       maskedStridedStoreCopyCompletionByStrideBytes;
+  /// One-time MTE3 establishment for a masked strided-store loop. Per-row
+  /// service remains in maskedStridedStoreCopyCompletionByStrideBytes.
+  double maskedStridedStoreKernelStartupCycles = 0.0;
   /// Generic SIMD completion floor for statically padded rectangular tiles.
   bool irregularTileCompletionEnabled = false;
   int64_t irregularTilePhysicalThresholdElements = 0;
@@ -414,6 +421,7 @@ struct StageModeProfile {
   /// Source-level row-reduction envelope.
   double reductionOperationSetupCycles = 0.0;
   double reductionLaneStepsPerCycle = 0.0;
+  double largeRowTwoReductionCompletionCycles = 0.0;
   int64_t scalarizedMultiResultReductionMinimumExtent = 0;
   int64_t scalarizedMultiResultReductionReferenceResults = 0;
   double scalarizedMultiResultReductionSetupCycles = 0.0;
@@ -458,6 +466,8 @@ struct StageModeProfile {
   /// Completion-inclusive throughput of the backend external helper used by a
   /// straight-line SIMT scan.
   double straightLinePrefixScanElementsPerCycle = 0.0;
+  double straightLinePrefixScanKernelCompletionCycles = 0.0;
+  double nonUnitPrefixScanKernelCompletionCycles = 0.0;
   std::string straightLinePrefixScanCompletionEvidence;
   /// SIMD helper completion curves keyed by structural combine class.
   std::map<std::string, StraightLinePrefixScanCost>

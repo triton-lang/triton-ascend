@@ -3,7 +3,7 @@
   "profile_version": "ascend-950pr-prefixscan-pr2474-v1",
   "target": "Ascend950PR",
   "source_commit": "1164ad184f38786181d928df7bb83cf35e098983",
-  "scope": "Static-shape tt.scan workloads, priced from the first operand geometry and element width without direction, combine or result-count restrictions.",
+  "scope": "Static-shape single-result, unit-stride additive/minmax tt.scan workloads, priced from the first operand geometry and element width. Other scan lowering templates retain their earlier completion model.",
   "simd": {
     "dependency_factor": 573.6,
     "dependency_factor_multi_tail": 1347.7,

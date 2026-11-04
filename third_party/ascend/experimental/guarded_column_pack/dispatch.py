@@ -1,6 +1,6 @@
 """Isolated experiment for kernel_full.py; not installed in the TA launcher.
 
-ExperimentalColumnPack.cpp requires ascend.experimental_checked_full_rows, a
+The column rule uses ascend.experimental_checked_full_rows to select a
 harness assertion, NOT a compiler-derived proof. Only pass variants compiled
 from this exact fixture. Automatic certificate extraction remains unimplemented.
 Build the host guard with `MAX_JOBS=1 python setup.py build_ext --inplace`.

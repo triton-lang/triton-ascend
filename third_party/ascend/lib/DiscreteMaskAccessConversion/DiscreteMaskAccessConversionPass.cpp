@@ -466,9 +466,9 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
 }
 
 static bool isAxisDiscreteMask(Value mask) {
-  if (auto andOp = mask.getDefiningOp<arith::AndIOp>())
-    return isAxisDiscreteMask(andOp.getLhs()) &&
-           isAxisDiscreteMask(andOp.getRhs());
+  // if (auto andOp = mask.getDefiningOp<arith::AndIOp>())
+  //   return isAxisDiscreteMask(andOp.getLhs()) &&
+  //          isAxisDiscreteMask(andOp.getRhs());
   return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
 }
 

@@ -90,6 +90,8 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
             # Flag 4 grants Cube permission to overwrite the PV destination UB.
             tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 4)
 
+        # Cross-core waits target the actual consumer: F overwrites score,
+        # MTE1 reads P, and V reads score/PV. Job-completion waits remain on S.
         # Each tile is one complete page. A scalar table lookup precedes ND2NZ;
         # no contiguous-page assumption, full-cache packing or GM P workspace.
         for page_pair in tl.range(first_page, end_page, 2):
@@ -105,14 +107,14 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
                             next_id = tl.load(TABLE + page + 1).to(tl.int64)
                             tla.load_gm_to_l1(tla.view(KV + next_id * BN * 576, (BN, 576)), following)
                         tla.cube.mmad(q, current, qk, transpose_b=True, clear_accum=True)
-                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 4)
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 4)
                         tla.copy_l0c_to_ub(
                             qk, score,
                             tla.FixpipeL0C2UBParams(dma_mode=tla.FixpipeDMAMode.NZ2ND,
                                                     dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
                         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 1)
                     with tla.scope.vector():
-                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 1)
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 1)
                         sub = tla.sub_block_id()
                         # Only the last physical tile needs a causal mask:
                         # every earlier logical page is visible to all four queries.
@@ -154,7 +156,7 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
                                           tla.view(pflat, (8, VM * 16), offsets=(0, sub * VM * 16)))
                         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE3, 2)
                     with tla.scope.cube():
-                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 2)
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.MTE1, 2)
                         tla.cube.mmad(p, tla.view(current, (32, 8, 16, 16)), pv, clear_accum=True)
                         tla.copy_l0c_to_ub(
                             pv, product,
@@ -162,7 +164,7 @@ def _mla_split(Q, KV, TABLE, PART, MAXIMUM, DENOMINATOR, H: tl.constexpr, BM: tl
                                                     dual_dst_mode=tla.FixpipeDualDstMode.ROW_SPLIT, sub_block_idx=None))
                         tla.sync.block_set_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.F, 3)
                     with tla.scope.vector():
-                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.S, 3)
+                        tla.sync.block_wait_flag(tla.sync.MODE.BLOCK, tla.sync.PIPE.V, 3)
                         with tla.scope.simd():
                             for row in tl.range(VM):
                                 alpha = tla.simd.vlds(correction[row], dist='BRC_B32')

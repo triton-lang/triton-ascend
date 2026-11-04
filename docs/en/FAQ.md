@@ -39,6 +39,18 @@ A: No. Triton-Ascend can be used only in the Ascend NPU hardware environment.
 A: For details, see [07_accuracy_comparison_example.md](../en/examples/07_accuracy_comparison_example.md).
 For details about the debugging method, see [Debugging in Interpreter Mode](./debug_guide/debugging.md#debug-interpreter-mode).
 
+**Q: What are the integer division / remainder semantics on Ascend when the divisor is zero?**
+
+A: On Ascend, integer remainder/division by a zero divisor is deterministic and compiler-defined (verified with CANN 9.2.0 on Ascend 910B; the guard is inserted by the BiShengIR HFusion `NormalizeModOp` pass, which rewrites integer `mod` into `(y == 0) ? -1 : x % y`):
+
+| Operation | Result on zero-divisor lanes |
+|---|---|
+| `x % 0`, signed (i8/i16/i32/i64) | `-1` — the all-ones value of the result type |
+| `x % 0`, unsigned (e.g. uint8) | `2**n - 1` (e.g. `255`) — the same all-ones bit pattern. Unsigned remainder on widths above 8 bits currently fails to compile on Ascend 910B |
+| `x // 0`, int32 (loaded, splat-zero or literal-zero divisor) and int64 (loaded zero divisor) | Saturates: `x > 0 -> MAX`, `x < 0 -> MIN`, `x == 0 -> 0`. `// 0` on i8/i16 currently returns `{-1, 0}` and is excluded from this promise |
+
+The remainder guarantee holds for the tested divisor forms (the loaded tensor form for every observed width; the in-kernel splat zero and literal `0` forms pinned for int32/int64). On non-zero lanes `%` follows C-truncation (`np.fmod`) remainder semantics. These values are compiler-defined guarantees, not hardware accidents; they deliberately differ from eager `torch.remainder`/`torch.fmod` and from CUDA, where the result is architecturally undefined. Interpreter mode (`TRITON_INTERPRET=1`) matches the compiled values for the remainder promise; for `x // 0` the interpreter saturates for every width and divisor form, while the compiled kernels currently return the dividend for int64 splat/literal zero divisors and `{-1, 0}` for i8/i16 — exactly the configurations excluded above. This contract is verified on Ascend 910B with CANN 9.2.0 using the default SIMD (HFusion) pipeline; SIMT mode and other SoCs are outside the verified baseline. If your kernel needs other semantics, guard explicitly, for example `tl.where(y == 0, fallback, x % y)`. The behaviour is pinned by `third_party/ascend/unittest/pytest_ut/test_int_div_zero.py`, whose compiled-device cases skip on non-910B archs.
+
 ## 3. Error Code and Exception Handling
 
 **Q: Why is the error message "MLIRCompilationError" displayed during kernel compilation? How can I locate the failed pass?**

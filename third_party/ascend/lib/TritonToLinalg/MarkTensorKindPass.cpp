@@ -172,6 +172,23 @@ void MarkTensorKindPass::runOnOperation() {
       &getContext());
 
   (void)applyPatternsGreedily(getOperation(), std::move(patterns));
+
+  // Profiling metadata is a positional list of the kernel's user pointers.
+  // Keep a slot even when no memory operation assigned a kind; otherwise an
+  // unused argument shifts the kinds of all following tensors. Hidden ABI
+  // arguments (workspace, sync locks, etc.) are introduced after this pass.
+  auto noneKind = IntegerAttr::get(
+      IntegerType::get(&getContext(), INT_BIT_WIDTH), TensorKind::NONE);
+  getOperation().walk([&](triton::FuncOp func) {
+    if (!func.isPublic() || func.isDeclaration())
+      return;
+    for (unsigned i = 0; i < func.getNumArguments(); ++i) {
+      if (isa<triton::PointerType>(func.getArgumentTypes()[i]) &&
+          !func.getArgAttr(i, "tt.tensor_kind")) {
+        func.setArgAttr(i, "tt.tensor_kind", noneKind);
+      }
+    }
+  });
 }
 
 std::unique_ptr<OperationPass<ModuleOp>> triton::createMarkTensorKindPass() {

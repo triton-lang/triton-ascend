@@ -465,14 +465,28 @@ static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
   return {contMask, discMask};
 }
 
-static bool isAxisDiscreteMask(Value mask) {
-  // if (auto andOp = mask.getDefiningOp<arith::AndIOp>())
-  //   return isAxisDiscreteMask(andOp.getLhs()) &&
-  //          isAxisDiscreteMask(andOp.getRhs());
+static bool isAxisDiscreteMask(Value mask, PatternRewriter &rewriter) {
+  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
+    auto isContinuousMask = [&](Value operand) {
+      MaskState mstate;
+      bool isContinuous =
+          succeeded(mstate.parse(operand, andOp.getLoc(), rewriter));
+      // Analysis can insert temporary ops even when parsing fails.
+      if (!isContinuous)
+        mstate.eraseInsertedOps(andOp, rewriter);
+      return isContinuous;
+    };
+    bool lhsIsContinuous = isContinuousMask(andOp.getLhs());
+    bool rhsIsContinuous = isContinuousMask(andOp.getRhs());
+    if (lhsIsContinuous == rhsIsContinuous)
+      return false;
+    return true;
+  }
   return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
 }
 
-static bool isAxisDiscreteMaskLoad(triton::LoadOp op) {
+static bool isAxisDiscreteMaskLoad(triton::LoadOp op,
+                                   PatternRewriter &rewriter) {
   auto ptrType = dyn_cast<RankedTensorType>(op.getPtr().getType());
   auto maskType = dyn_cast<RankedTensorType>(op.getMask().getType());
 
@@ -485,7 +499,7 @@ static bool isAxisDiscreteMaskLoad(triton::LoadOp op) {
     return false;
   if (maskType.getShape() != shape)
     return false;
-  return isAxisDiscreteMask(op.getMask());
+  return isAxisDiscreteMask(op.getMask(), rewriter);
 }
 
 struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
@@ -597,7 +611,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
         ptrType && ptrType.getShape().size() <= 5;
     if (compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
-        rankWithinIndirectFastPathLimit && !isAxisDiscreteMaskLoad(op)) {
+        rankWithinIndirectFastPathLimit &&
+        !isAxisDiscreteMaskLoad(op, rewriter)) {
       op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
       return failure();

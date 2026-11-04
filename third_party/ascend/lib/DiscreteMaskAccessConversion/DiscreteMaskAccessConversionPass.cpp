@@ -480,7 +480,7 @@ static bool isAxisDiscreteMask(Value mask, PatternRewriter &rewriter) {
     bool rhsIsContinuous = isContinuousMask(andOp.getRhs());
     if (lhsIsContinuous == rhsIsContinuous)
       return false;
-    return true;
+    mask = lhsIsContinuous ? andOp.getRhs() : andOp.getLhs();
   }
   return isa_and_nonnull<triton::BroadcastOp>(mask.getDefiningOp());
 }

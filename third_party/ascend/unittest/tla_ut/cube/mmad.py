@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
@@ -147,6 +148,76 @@ def test_run(case):
               (actual - expected).abs().max().item())
 
 
+@tla.jit
+def split_qk(Q, K, QR, KR, OUT, M: tl.constexpr):
+    with tla.scope.cube():
+        q = tla.alloc((32, M // 16, 16, 16), tl.bfloat16, space="l1")
+        k = tla.alloc((32, 8, 16, 16), tl.bfloat16, space="l1")
+        qr = tla.alloc((4, M // 16, 16, 16), tl.bfloat16, space="l1")
+        kr = tla.alloc((4, 8, 16, 16), tl.bfloat16, space="l1")
+        acc = tla.alloc((8, M // 16, 16, 16), tl.float32, space="l0c")
+        tla.load_gm_to_l1(tla.view(Q, (M, 512)), q)
+        tla.load_gm_to_l1(tla.view(K, (128, 512)), k)
+        tla.load_gm_to_l1(tla.view(QR, (M, 64)), qr)
+        tla.load_gm_to_l1(tla.view(KR, (128, 64)), kr)
+        tla.cube.mmad(q, k, acc, transpose_b=True, clear_accum=True)
+        tla.cube.mmad(qr, kr, acc, transpose_b=True, clear_accum=False)
+        tla.store_l0c_to_gm(acc, tla.view(OUT, (M, 128)), tla.FixpipeL0C2GMParams(dma_mode=tla.FixpipeDMAMode.NZ2ND))
+
+
+@pytest.mark.parametrize("m", (16, 32, 64))
+class TestTransposeAccumulate:
+    """Different K=512/64 products share L0C; H128 also uses M=64 tiles."""
+
+    def test_ir(self, m, output_dir=None):
+        module, ctx = compile_offline(split_qk, dict(Q="*bf16", K="*bf16", QR="*bf16", KR="*bf16", OUT="*fp32"),
+                                      dict(M=m), output_dir=output_dir)
+        text = str(lower_offline(module, ctx, output_dir=output_dir))
+        ops = re.findall(r"hivm\.hir\.mmadL1[^\n]*", text)
+        assert len(ops) == 2
+        values = {name: int(value) for name, value in re.findall(r"(%[\w]+) = arith\.constant (\d+) : index", text)}
+        flags = dict(re.findall(r"(%[\w]+) = arith\.constant (true|false)", text))
+        outputs = []
+        for op, reduction, clear in zip(ops, (512, 64), ("true", "false")):
+            assert "b_transpose" in op and "a_transpose" not in op
+            operands = re.search(r"ins\((.*?) :", op).group(1).split(", ")
+            assert flags[operands[2]] == clear
+            outputs.append(re.search(r"outs\((%[\w]+) :", op).group(1))
+            assert tuple(values[value] for value in operands[-3:]) == (m, reduction, 128)
+        assert outputs[0] == outputs[1]
+        assert text.count("hivm.hir.nd2nz ") == 4
+        assert text.count("hivm.hir.fixpipe ") == 1
+        assert text.count("memref.alloc()") == 5
+        assert "memref.transpose" not in text and "hivm.hir.vtranspose" not in text
+        assert "!tt.ptr" not in text and "tensor<" not in text
+
+    @staticmethod
+    def _launch(m, seed=7, compile_only=False):
+        generator = torch.Generator().manual_seed(seed)
+        inputs = [
+            torch.randn(shape, generator=generator).to(torch.bfloat16)
+            for shape in ((m, 512), (128, 512), (m, 64), (128, 64))
+        ]
+        device_inputs = [x.npu() for x in inputs]
+        out = torch.full((m, 128), float("nan"), dtype=torch.float32, device="npu")
+        if compile_only:
+            return split_qk.warmup(*device_inputs, out, M=m, grid=(1, )), None, None
+        kernel = split_qk[(1, )](*device_inputs, out, M=m)
+        torch.npu.synchronize()
+        q, k, qr, kr = [x.float() for x in inputs]
+        return kernel, out.cpu(), q @ k.T + qr @ kr.T
+
+    def test_compile(self, m):
+        kernel, _, _ = self._launch(m, compile_only=True)
+        check_kernel_binary(kernel)
+
+    def test_run(self, m):
+        for seed in (7, 19):
+            _, actual, expected = self._launch(m, seed)
+            assert torch.isfinite(actual).all()
+            torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+
+
 def main():
     do_ir, do_compile, do_run = get_stages()
     for case in CONFIGS:
@@ -156,6 +227,15 @@ def main():
             test_compile(case)
         if do_run:
             test_run(case)
+
+    split = TestTransposeAccumulate()
+    for m in (16, 32, 64):
+        if do_ir:
+            split.test_ir(m)
+        if do_compile:
+            split.test_compile(m)
+        if do_run:
+            split.test_run(m)
 
 
 if __name__ == "__main__":

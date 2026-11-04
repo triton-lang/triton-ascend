@@ -20,14 +20,57 @@
 
 import pytest
 import torch
-import torch_npu  # noqa: F401
+import torch_npu
 import triton
 import triton.language as tl
 from triton.backends.ascend.testing import do_bench_npu
 
+params = [
+    (16, 16),
+    (16, 32),
+    (16, 64),
+    (16, 128),
+    (16, 256),
+    (16, 512),
+    (16, 1024),
+
+    (16, 16),
+    (32, 16),
+    (64, 16),
+    (128, 16),
+    (256, 16),
+    (512, 16),
+    (1024, 16),
+]
 
 @triton.jit
 def _axis_discrete_mask_load_kernel(
+    kv_ptr,
+    idx_ptr,
+    out_ptr,
+    topk,  # runtime scalar row bound
+    BLOCK_K: tl.constexpr,
+    G: tl.constexpr,
+):
+    g = tl.arange(0, G)
+    k_offs = tl.arange(0, BLOCK_K)
+
+    valid = k_offs < topk
+    slot = tl.load(idx_ptr + k_offs, mask=valid, other=0)
+    valid = valid & (slot >= 0)
+
+    # Axis-discrete 2D load: ptr structured, mask constant along g.
+    kv0 = tl.load(
+        kv_ptr + k_offs[:, None] * G + g[None, :],
+        mask=valid[:, None],
+        other=0.0,
+    )
+
+    tl.store(out_ptr + k_offs[:, None] * G + g[None, :], kv0)
+
+
+@triton.jit
+def _axis_discrete_mask_load_kernel_ptr_broadcast(
     kv_ptr,
     idx_ptr,
     out_ptr,
@@ -47,40 +90,93 @@ def _axis_discrete_mask_load_kernel(
         kv_ptr + g[None, :],
         mask=valid[:, None],
         other=0.0,
-    ).to(tl.float32)
+    )
 
     tl.store(out_ptr + k_offs[:, None] * G + g[None, :], kv0)
 
 
-def _reference(kv, idx, topk, block_k):
-    # Reference (on NPU): load row 0 of kv, masked by (k < topk) & (idx[k] >= 0).
-    valid_ref = (torch.arange(block_k, device="npu") < topk) & (idx >= 0)
-    out_ref = torch.zeros((block_k, kv.shape[1]), dtype=torch.float32, device="npu")
-    out_ref[valid_ref, :] = kv[0]
-    return out_ref
-
-
-@pytest.mark.parametrize("G,BLOCK_K,topk", [
-    (128, 64, 32),
-    (64, 128, 64),
-    (256, 64, 16),
-    (32, 128, 128),
+@pytest.mark.parametrize("G,BLOCK_K", [
+    (128, 64),
+    (64, 128),
+    (256, 64),
+    (32, 128),
 ])
-def test_axis_discrete_mask_load(G, BLOCK_K, topk):
+def test_axis_discrete_mask_load(G, BLOCK_K):
     torch.manual_seed(0)
-    kv = torch.randn(BLOCK_K, G, dtype=torch.float32, device="npu")
-    idx = torch.randint(0, topk, (BLOCK_K, ), dtype=torch.int32, device="npu")
-    idx[topk // 2] = -1  # force some rows to be masked out
-    out = torch.zeros((BLOCK_K, G), dtype=torch.float32, device="npu")
+    kv = torch.randn(BLOCK_K, G, dtype=torch.float16, device="npu")
+    idx = torch.randint(0, BLOCK_K, (BLOCK_K, ), dtype=torch.int32, device="npu")
+    idx[idx % 2 == 1] = -1  # force rows with odd idx values to be masked out
+    out = torch.zeros((BLOCK_K, G), dtype=torch.float16, device="npu")
+
+    def _reference():
+        # Rows with idx >= 0 are kept as-is; other rows are zero-filled.
+        mask = (idx >= 0).to(kv.dtype).unsqueeze(1)  # (BLOCK_K, 1)
+        return kv * mask
 
     _axis_discrete_mask_load_kernel[(1, )](
         kv,
         idx,
         out,
-        topk,
+        BLOCK_K,
         BLOCK_K=BLOCK_K,
         G=G,
     )
     torch.npu.synchronize()
 
-    torch.testing.assert_close(out, _reference(kv, idx, topk, BLOCK_K), rtol=0, atol=0)
+    torch.testing.assert_close(out, _reference(), rtol=0, atol=0)
+
+
+@triton.jit
+def _axis_continuous_mask_load_kernel(
+    kv_ptr,
+    idx_ptr,
+    out_ptr,
+    topk,  # runtime scalar row bound
+    BLOCK_K: tl.constexpr,
+    G: tl.constexpr,
+):
+    g = tl.arange(0, G)
+    k_offs = tl.arange(0, BLOCK_K)
+
+    valid = g < topk
+    slot = tl.load(idx_ptr + g, mask=valid, other=0)
+    valid = valid & (slot >= 0)
+
+    # Axis-continuous 2D load: ptr structured along g, mask constant along g.
+    kv0 = tl.load(
+        kv_ptr + k_offs[:, None] * G + g[None, :],
+        mask=valid[None, :],
+        other=0.0,
+    )
+    tl.store(out_ptr + k_offs[:, None] * G + g[None, :], kv0)
+
+
+@pytest.mark.parametrize("G,BLOCK_K", [
+    (128, 64),
+    (64, 128),
+    (256, 64),
+    (32, 128),
+])
+def test_axis_continuous_mask_load(G, BLOCK_K):
+    torch.manual_seed(0)
+    kv = torch.randn(BLOCK_K, G, dtype=torch.float16, device="npu")
+    idx = torch.randint(0, G, (G, ), dtype=torch.int32, device="npu")
+    idx[idx % 2 == 1] = -1  # force rows with odd idx values to be masked out
+    out = torch.zeros((BLOCK_K, G), dtype=torch.float16, device="npu")
+
+    def _reference():
+        # Columns with idx >= 0 are kept as-is; other columns are zero-filled.
+        mask = (idx >= 0).to(kv.dtype).unsqueeze(0)  # (1, G)
+        return kv * mask
+
+    _axis_continuous_mask_load_kernel[(1, )](
+        kv,
+        idx,
+        out,
+        G,
+        BLOCK_K=BLOCK_K,
+        G=G,
+    )
+    torch.npu.synchronize()
+
+    torch.testing.assert_close(out, _reference(), rtol=0, atol=0)

@@ -374,6 +374,11 @@ bool isControlFlowEscape(Operation *operation) {
 }
 
 bool hasUnsupportedEffect(Operation *operation) {
+  // Compiler-generated integer checks can be lifted with the program lanes;
+  // the tensorizer masks inactive tail lanes before checking them.
+  if (isa<triton::AssertOp>(operation) &&
+      operation->hasAttr("tt.auto_overflow_assert"))
+    return false;
   if (isa<triton::StoreOp, triton::LoadOp>(operation))
     return false;
   if (isa<CallOpInterface>(operation))

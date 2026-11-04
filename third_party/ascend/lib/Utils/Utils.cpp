@@ -897,14 +897,13 @@ void traverseBackwardUpdateOperandChainIf(
                                        builder, handledOperation);
 }
 
-static void traverseForwardUpdateUserChainIfImpl(
+void traverseForwardUpdateUserChainIf(
     Operation *op, std::function<bool(Operation *)> conditionFn,
     std::function<bool(Operation *)> stopFn,
     std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
-    llvm::SmallPtrSet<Operation *, 16> &stopOps,
-    DenseSet<Operation *> &handledOperations) {
+    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
 
-  if (!op || !handledOperations.insert(op).second) {
+  if (!op) {
     return;
   }
 
@@ -919,21 +918,10 @@ static void traverseForwardUpdateUserChainIfImpl(
 
   for (auto res : op->getResults()) {
     for (auto userOp : res.getUsers()) {
-      traverseForwardUpdateUserChainIfImpl(userOp, conditionFn, stopFn,
-                                           actionFn, builder, stopOps,
-                                           handledOperations);
+      traverseForwardUpdateUserChainIf(userOp, conditionFn, stopFn, actionFn,
+                                       builder, stopOps);
     }
   }
-}
-
-void traverseForwardUpdateUserChainIf(
-    Operation *op, std::function<bool(Operation *)> conditionFn,
-    std::function<bool(Operation *)> stopFn,
-    std::function<void(OpBuilder &, Operation *)> actionFn, OpBuilder &builder,
-    llvm::SmallPtrSet<Operation *, 16> &stopOps) {
-  DenseSet<Operation *> handledOperations;
-  traverseForwardUpdateUserChainIfImpl(op, conditionFn, stopFn, actionFn,
-                                       builder, stopOps, handledOperations);
 }
 
 // Note: rootOp will also be processed.

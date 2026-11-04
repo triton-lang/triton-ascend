@@ -55,7 +55,6 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "triton/Dialect/Triton/IR/Dialect.h"
-#include "triton/Tools/Sys/GetEnv.hpp"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -1315,23 +1314,50 @@ public:
   }
 };
 
+/// A call boundary hides pointer provenance: the memory conversion cannot
+/// materialize a memref for a call result, nor follow a call-carried pointer
+/// base. Ascend has no device-side calling convention, so pointer-bearing
+/// callees have to be inlined before the memory stage instead of after it.
+static bool carriesPointerType(TypeRange types) {
+  return llvm::any_of(types, [](Type type) {
+    if (isa<triton::PointerType>(type))
+      return true;
+    auto shaped = dyn_cast<ShapedType>(type);
+    return shaped && isa<triton::PointerType>(shaped.getElementType());
+  });
+}
+
 /// Inline private callees into their callers so the downstream ttadapter sees a
-/// single kernel function.
-static void inlinePrivateCallees(ModuleOp moduleOp) {
+/// single kernel function. When `pointerCarryingOnly` is set only calls that
+/// pass or return pointers are inlined; the remaining scalar-only calls stay
+/// until after the memory stage, where their ABI is already settled.
+static void inlineCallees(ModuleOp moduleOp, bool pointerCarryingOnly) {
   // Inlining a callee clones its body into the caller, which can bring in
   // further calls (nested noinline helpers). Iterate to a fixed point so no
-  // func.call to a tt.func callee survives.
+  // call to a tt.func callee survives. Scalar-only `tt.call` ops stay legal
+  // through the memory stage (operands and results are pointer-free), so both
+  // the already converted `func.call` and the remaining `tt.call` flavors have
+  // to be handled here.
   DenseSet<triton::FuncOp> inlinedCallees;
   bool changed = true;
   while (changed) {
     changed = false;
-    SmallVector<func::CallOp> callOps;
-    moduleOp.walk([&](func::CallOp call) { callOps.push_back(call); });
+    SmallVector<Operation *> callOps;
+    moduleOp.walk([&](Operation *op) {
+      if (isa<func::CallOp, triton::CallOp>(op))
+        callOps.push_back(op);
+    });
 
-    for (func::CallOp call : callOps) {
+    for (Operation *call : callOps) {
+      StringRef calleeName;
+      if (auto funcCall = dyn_cast<func::CallOp>(call))
+        calleeName = funcCall.getCallee();
+      else
+        calleeName = cast<triton::CallOp>(call).getCallee();
+
       triton::FuncOp callee = nullptr;
       for (auto func : moduleOp.getOps<triton::FuncOp>()) {
-        if (func.getName() == call.getCallee()) {
+        if (func.getName() == calleeName) {
           callee = func;
           break;
         }
@@ -1342,22 +1368,44 @@ static void inlinePrivateCallees(ModuleOp moduleOp) {
           !isa<triton::ReturnOp>(callee.getBody().front().getTerminator()))
         continue;
 
+      if (pointerCarryingOnly && !carriesPointerType(call->getOperandTypes()) &&
+          !carriesPointerType(call->getResultTypes()))
+        continue;
+
       if (auto noinlineAttr = callee->getAttrOfType<BoolAttr>("noinline");
           noinlineAttr && noinlineAttr.getValue())
-        call.emitWarning(
+        call->emitWarning(
             "Ascend has no device-side calling convention, so the "
             "noinline attribute is not honored; inlining the callee");
 
       Block &entry = callee.getBody().front();
       auto retOp = cast<triton::ReturnOp>(entry.getTerminator());
-      if (retOp.getNumOperands() != call.getNumResults())
+      if (retOp.getNumOperands() != call->getNumResults() ||
+          entry.getNumArguments() < call->getNumOperands())
         continue;
+
+      SmallVector<Value> operands(call->getOperands().begin(),
+                                  call->getOperands().end());
+      // A scalar-only `tt.call` is never rewritten by TritonCallOpPattern, so
+      // it still passes only the original arguments while the callee signature
+      // already carries the program-info arguments appended by
+      // prepareMemoryConversion. Borrow them from the enclosing function,
+      // mirroring the call conversion.
+      size_t programInfoArgs = entry.getNumArguments() - operands.size();
+      if (programInfoArgs != 0) {
+        auto caller = call->getParentOfType<triton::FuncOp>();
+        if (!caller || caller.getBody().empty())
+          continue;
+        auto callerArgs = caller.getBody().front().getArguments();
+        if (callerArgs.size() < programInfoArgs)
+          continue;
+        operands.append(callerArgs.end() - programInfoArgs, callerArgs.end());
+      }
 
       inlinedCallees.insert(callee);
       OpBuilder builder(call);
       IRMapping map;
-      for (auto [arg, operand] :
-           llvm::zip(entry.getArguments(), call.getOperands()))
+      for (auto [arg, operand] : llvm::zip(entry.getArguments(), operands))
         map.map(arg, operand);
       // Deep-clone the callee body (regions included), except the terminator.
       for (Operation &op : entry.without_terminator())
@@ -1366,8 +1414,8 @@ static void inlinePrivateCallees(ModuleOp moduleOp) {
       SmallVector<Value> results;
       for (Value operand : retOp.getOperands())
         results.push_back(map.lookupOrDefault(operand));
-      call.replaceAllUsesWith(results);
-      call.erase();
+      call->replaceAllUsesWith(results);
+      call->erase();
       changed = true;
     }
   }
@@ -1376,13 +1424,25 @@ static void inlinePrivateCallees(ModuleOp moduleOp) {
   // longer referenced by any remaining call). Other private functions must
   // stay: single-function test modules declare their kernel as private.
   DenseSet<StringRef> referenced;
-  moduleOp.walk(
-      [&](func::CallOp call) { referenced.insert(call.getCallee()); });
+  moduleOp.walk([&](Operation *op) {
+    if (auto funcCall = dyn_cast<func::CallOp>(op))
+      referenced.insert(funcCall.getCallee());
+    else if (auto tritonCall = dyn_cast<triton::CallOp>(op))
+      referenced.insert(tritonCall.getCallee());
+  });
   for (triton::FuncOp func : inlinedCallees) {
     if (func.getSymVisibility() != "public" &&
         !referenced.contains(func.getName()))
       func.erase();
   }
+}
+
+static void inlinePointerCarryingCallees(ModuleOp moduleOp) {
+  inlineCallees(moduleOp, /*pointerCarryingOnly=*/true);
+}
+
+static void inlinePrivateCallees(ModuleOp moduleOp) {
+  inlineCallees(moduleOp, /*pointerCarryingOnly=*/false);
 }
 
 /// Route the specific `splat(base) -> addptr(scan) -> addptr(constant) ->
@@ -1592,7 +1652,8 @@ void TritonToLinalgPass::populateTritonToLinalgCanonicalizationPatterns(
   patterns.add<TTOpConverters::ReduceSingleCanonicalizer>(
       patterns.getContext());
   if (this->enableSelectAnalysis) {
-    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext());
+    patterns.add<TTOpConverters::SelectCanonicalizer>(patterns.getContext(),
+                                                      this->compileOn91095);
   }
 }
 
@@ -1853,28 +1914,17 @@ void TritonToLinalgPass::runOnOperation() {
 
   auto moduleOp = getOperation();
 
-  // Remember whether the input carries concrete source locations before
-  // conversion creates helper operations with synthetic NameLocs. If Triton
-  // intentionally omitted file/line/column information
-  // (TRITON_DISABLE_LINE_INFO), there is no source location to recover at the
-  // end of this pass.
-  bool inputHasSourceLocation = false;
-  if (!triton::tools::getBoolEnv("TRITON_DISABLE_LINE_INFO")) {
-    moduleOp.walk([&](Operation *op) {
-      if (op->getLoc()->findInstanceOf<FileLineColLoc>()) {
-        inputHasSourceLocation = true;
-        return WalkResult::interrupt();
-      }
-      return WalkResult::advance();
-    });
-  }
-
   // Validate the CFO handoff before any rewrite can erase malformed metadata.
   if (failed(validatePointerDescriptorHandoffMetadata(moduleOp))) {
     moduleOp->emitError("invalid pointer descriptor handoff metadata");
     signalPassFailure();
     return;
   }
+
+  // Calls that carry pointers cannot survive the memory stage: their
+  // provenance is opaque there. Inline them first, before any rewrite starts
+  // depending on the call ABI.
+  inlinePointerCarryingCallees(moduleOp);
 
   // CUBE requirements affect normalization itself. SIMT requirements must also
   // account for indirect accesses introduced by that normalization.
@@ -1915,9 +1965,6 @@ void TritonToLinalgPass::runOnOperation() {
     signalPassFailure();
     return;
   }
-  // Without input source locations, there is nothing useful to recover.
-  if (inputHasSourceLocation)
-    repairUnknownLocations(moduleOp);
 }
 
 // Initialize the existing target flags before any target-dependent analysis.
@@ -2162,6 +2209,7 @@ LogicalResult TritonToLinalgPass::finalizeLoweredModule(ModuleOp moduleOp,
 
   optimizeInterleavedStores(moduleOp);
   addRuntimeWorkspaceArguments(moduleOp);
+  repairUnknownLocations(moduleOp);
   return success();
 }
 

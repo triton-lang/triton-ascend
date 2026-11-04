@@ -293,7 +293,6 @@ def _graph_optimize_kwargs(opt):
     kwargs = {
         "ub_capacity_bytes": graph_ub_budget_bytes_for_arch(opt.target_arch),
         "compile_mode": opt.compile_mode,
-        "compile_on_910_95": opt.compile_on_910_95,
         # Zero capacities (unknown target) leave the cube L0 checks disabled.
         "mapping_l0a_capacity_bytes": l0a_kb * 1024,
         "mapping_l0b_capacity_bytes": l0b_kb * 1024,
@@ -1230,7 +1229,7 @@ class NPUOptions:
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
     enable_graph_optimize: bool = True
-    supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
+    supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4nv")
     deprecated_fp8_dtypes: Tuple[str] = ()
     deprecated_fp8_dot_operand_dtypes: Tuple[str] = ()
     vf_merge_level: int = 1

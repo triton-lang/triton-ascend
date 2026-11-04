@@ -52,13 +52,12 @@ lowering -- not the name -- decides: ``vexp`` is f16/f32 only, scalar
 ``vdup``/``vdups`` are 8/16/32-bit only (the 64-bit scalar wrapper drops the
 predicate), ``vdupv`` additionally has a real 64-lane i64/u64 form, and
 ``vmaxs`` has no bf16/f8 scalar slot.  ``mode`` accepts both
-``MODE.ZEROING`` and ``MODE.MERGING``, and the normalized mode is forwarded to
-the TLA C++ builder, which consumes it for real (``tla_builder.cc``
-``applySimdMode``): ``ZEROING`` returns the bare masked AVE op, while
-``MERGING`` materializes a same-typed ``+0`` SSA vector
-(``arith.constant`` zero + ``ave.hir.scalar_broadcast``) and selects it for the
-inactive lanes with ``ave.hir.vsel``.  The merge source therefore defaults to
-``+0``, so both modes read inactive lanes as zero; ``MODE.MERGING`` does **not**
+``MODE.ZEROING`` and ``MODE.MERGING``. Elementwise value ops produce zero in
+inactive output lanes with either mode. AVE wrappers may implement MERGING
+with an explicit ``vsel(mask, result, zero_vector)``; native paths that already
+produce zero need no extra select. Group reductions instead apply their mask
+to input contributions and use the native empty-group identity in both modes.
+``MODE.MERGING`` does **not**
 map onto CANN's native dst-preserving predicate and does not keep the old
 destination / ``src0`` lanes.  Use an explicit
 ``vsel(mask, op(...), old_value)`` when inactive lanes must keep their previous
@@ -231,19 +230,16 @@ _DTYPE_ALIASES = {
 class MODE(str, enum.Enum):
     """Predicate mode for the SIMD register ops.
 
-    Both modes are forwarded unchanged to the TLA C++ builder, which lowers
-    them explicitly (``tla_builder.cc`` ``applySimdMode``):
+    Elementwise value ops zero inactive output lanes in either mode. AVE
+    wrappers may append ``vsel(mask, result, zero_vector)`` for MERGING;
+    native paths can provide the same result without an extra select.
+    Group reductions mask input contributions instead of output lanes and
+    retain their native empty-group identity in either mode.
 
-    * ``ZEROING`` -> the bare masked AVE op, inactive lanes read as zero;
-    * ``MERGING`` -> the same masked AVE op followed by
-      ``vsel(mask, result, zero_vector)``, where ``zero_vector`` is the
-      same-typed merge source initialized to ``+0``.
-
-    AVE regbase value ops have no mutable destination, so ``MERGING`` is **not**
-    CANN's native dst-preserving predicate: the merge source defaults to a
-    ``+0`` SSA vector and the old destination / ``src0`` lanes are not
-    preserved.  Compose ``vsel(mask, op(...), old_value)`` explicitly when
-    inactive lanes must keep their previous value.
+    Value ops have no mutable destination: MERGING does not preserve an old
+    destination or ``src0``. Compose ``vsel(output_mask, result, old_value)``
+    when that behavior is needed. For group reductions, the output mask must
+    describe the result lanes, separately from the input contribution mask.
     """
 
     ZEROING = "MODE_ZEROING"
@@ -255,9 +251,8 @@ class MODE(str, enum.Enum):
 
 _MODE_ZEROING_ALIASES = ("MODE_ZEROING", "ZEROING")
 _MODE_MERGING_ALIASES = ("MODE_MERGING", "MERGING")
-# Builder-side spelling consumed by tla_builder.cc::applySimdMode.  The mode is
-# an actual lowering choice (bare op vs op + zero-init + vsel), never an
-# unconsumed attribute and never rewritten back to zeroing on the way down.
+# Builder-side spelling for AVE wrappers using tla_builder.cc::applySimdMode.
+# Native wrappers validate MODE at the API boundary and may share one lowering.
 _MODE_BUILDER_NAMES = {MODE.ZEROING: "zeroing", MODE.MERGING: "merging"}
 
 
@@ -667,12 +662,25 @@ def _resolve_element_dtype(dtype_):
     return _elem_tag(dtype_obj), dtype_obj
 
 
+def _integer_scalar(value, dtype, tag, op, _semantic):
+    """Build an exact, range-checked integer constant, including uint64 bits."""
+    dtype = _unwrap_if_constexpr(dtype)
+    bits = _ELEM_SPECS[tag]
+    unsigned = _is_unsigned(dtype)
+    lo, hi = (0, 1 << bits) if unsigned else (-(1 << (bits - 1)), 1 << (bits - 1))
+    if not lo <= value < hi:
+        raise ValueError(f"{op} scalar {value} does not fit {dtype} ([{lo}, {hi}))")
+    # The binding takes int64_t; preserve high uint64 values as two's complement.
+    if bits == 64 and unsigned and value >= (1 << 63):
+        value -= 1 << 64
+    return _semantic.builder.create_simd_scalar_int(tag, value)
+
+
 def _make_scalar(scalar, dtype, tag, op, _semantic):
     """Materialize a scalar operand whose type is exactly ``dtype``.
 
     Integers go through ``create_simd_scalar_int`` so that i64 values are not
-    rounded through a Python double; ``create_simd_scalar`` (float path) is
-    left untouched for vsplat/vfull compatibility.
+    rounded through a Python double.
     """
     value = _unwrap_if_constexpr(scalar)
     if isinstance(value, tensor):
@@ -688,21 +696,7 @@ def _make_scalar(scalar, dtype, tag, op, _semantic):
         raise TypeError(f"{op} scalar must be a number, got bool")
     if isinstance(value, int):
         if tag.startswith("i"):
-            bits = _ELEM_SPECS[tag]
-            if _is_unsigned(dtype):
-                in_range = 0 <= value < (1 << bits)
-                bounds = f"[0, 2**{bits})"
-            else:
-                in_range = -(1 << (bits - 1)) <= value < (1 << (bits - 1))
-                bounds = f"[-2**{bits - 1}, 2**{bits - 1})"
-            if not in_range:
-                raise ValueError(f"{op} scalar {value} does not fit {dtype} ({bounds})")
-            # The exact binding takes an int64_t.  Unsigned 64-bit values in
-            # [2**63, 2**64) are passed as the equivalent two's-complement
-            # Python int so IntegerAttr gets the exact bits (no float path).
-            if bits == 64 and _is_unsigned(dtype) and value >= (1 << 63):
-                value -= 1 << 64
-            return _semantic.builder.create_simd_scalar_int(tag, value)
+            return _integer_scalar(value, dtype, tag, op, _semantic)
         if dtype.is_floating():
             return _semantic.builder.create_simd_scalar(tag, float(value))
         raise TypeError(f"{op} scalar must be numeric, got {type(value).__name__}")
@@ -1067,6 +1061,7 @@ def vadd(src0: vector, src1: vector, mask: vector = None, mode: tl.constexpr = M
 
 def _scalar_handle(src, scalar, _semantic):
     """Build or validate the scalar operand of a vector-scalar op."""
+    scalar = _unwrap_if_constexpr(scalar)
     if isinstance(scalar, vector):
         if scalar.shape[0] != 1:
             raise ValueError(f"scalar register must have one lane, got {scalar.shape[0]}")
@@ -1081,19 +1076,12 @@ def _scalar_handle(src, scalar, _semantic):
             raise TypeError(f"scalar dtype {scalar.dtype} does not match src dtype "
                             f"{src.dtype}")
         return scalar.handle
-    scalar = _unwrap_if_constexpr(scalar)
     dtype = str(src.dtype)
     if dtype.startswith(("int", "uint")):
         if not isinstance(scalar, int) or isinstance(scalar, bool):
             raise TypeError(f"scalar must be an integer for {dtype}, "
                             f"got {type(scalar).__name__}")
-        bits = _ELEM_SPECS[_elem_tag(src.dtype)]
-        if dtype.startswith("uint"):
-            lo, hi = 0, (1 << bits) - 1
-        else:
-            lo, hi = -(1 << (bits - 1)), (1 << (bits - 1)) - 1
-        if not lo <= scalar <= hi:
-            raise ValueError(f"scalar {scalar} does not fit in {dtype}")
+        return _integer_scalar(scalar, src.dtype, _elem_tag(src.dtype), "vector-scalar", _semantic)
     elif not isinstance(scalar, (int, float)) or isinstance(scalar, bool):
         raise TypeError(f"scalar must be numeric, got {type(scalar).__name__}")
     return _semantic.builder.create_simd_scalar(_elem_tag(src.dtype), float(scalar))
@@ -2555,7 +2543,10 @@ def vfull(value, dtype, lanes, _semantic=None) -> vector:
     lanes = _unwrap_if_constexpr(lanes)
     tag = _elem_tag(dtype)
     ty = vector_type(lanes, dtype)
-    scalar = _semantic.builder.create_simd_scalar(tag, float(value))
+    if isinstance(value, int) and not isinstance(value, bool) and tag.startswith("i"):
+        scalar = _integer_scalar(value, dtype, tag, "vfull", _semantic)
+    else:
+        scalar = _semantic.builder.create_simd_scalar(tag, float(value))
     handle = _semantic.builder.create_simd_vsplat(scalar, tag, lanes)
     return vector(handle, ty)
 

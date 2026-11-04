@@ -26,10 +26,12 @@
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVMAVE/IR/HIVMAVE.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "mlir/Analysis/AliasAnalysis.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/Block.h"
@@ -39,6 +41,7 @@
 #include "mlir/IR/Region.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/Types.h"
+#include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/RegionUtils.h"
@@ -129,6 +132,308 @@ Value nativeSimdCall(TLABuilder &self, Type result, StringRef name,
   return self
       .create<LLVM::CallIntrinsicOp>(result, builder.getStringAttr(name), args)
       .getResult(0);
+}
+
+// memref.view needs a one-dimensional identity-layout byte source. Rebase a
+// strided descriptor without losing its offset or the buffer's alias identity.
+Value predicateByteView(TLABuilder &self, Value ptr, Value byteOffset) {
+  auto &b = self.getBuilder();
+  auto ty = cast<MemRefType>(ptr.getType());
+  if (!ty.getLayout().isIdentity()) {
+    auto metadata = self.create<memref::ExtractStridedMetadataOp>(ptr);
+    Value offset = metadata.getOffset();
+    byteOffset = self.create<arith::AddIOp>(offset, byteOffset);
+    Value extent =
+        self.create<arith::AddIOp>(offset, metadata.getSizes().front());
+    auto baseTy =
+        MemRefType::get({ShapedType::kDynamic}, b.getI8Type(),
+                        MemRefLayoutAttrInterface{}, ty.getMemorySpace());
+    // reinterpret_cast replaces the descriptor offset; view below applies it
+    // exactly once, in bytes. Keep ptr as the source for memory-effect
+    // analysis.
+    ptr = self.create<memref::ReinterpretCastOp>(
+        baseTy, ptr, b.getIndexAttr(0), ArrayRef<OpFoldResult>{extent},
+        ArrayRef<OpFoldResult>{b.getIndexAttr(1)});
+  }
+  auto bitsTy = MemRefType::get(
+      {256}, b.getI1Type(), MemRefLayoutAttrInterface{}, ty.getMemorySpace());
+  return self.create<memref::ViewOp>(bitsTy, ptr, byteOffset, ValueRange{});
+}
+
+bool isNativeScatter(LLVM::CallIntrinsicOp call) {
+  return call.getIntrin().starts_with("llvm.hivm.vscatter.");
+}
+
+bool containsNativeScatter(Operation *op) {
+  bool found = false;
+  op->walk([&](LLVM::CallIntrinsicOp call) { found |= isNativeScatter(call); });
+  return found;
+}
+
+// A pre-scatter load does not need the dependency. Loads in the same loop as
+// a scatter do: on the next iteration they may observe the previous write even
+// when they lexically precede this iteration's scatter.
+bool needsNativeScatterReloadDependency(Operation *op) {
+  for (Block *block = op->getBlock(); block;) {
+    for (Operation &candidate : *block) {
+      if (&candidate == op)
+        break;
+      if (containsNativeScatter(&candidate))
+        return true;
+    }
+    Operation *parent = block->getParentOp();
+    if (!parent || isa<func::FuncOp>(parent))
+      break;
+    if (isa<scf::ForOp, scf::WhileOp, scf::ParallelOp>(parent) &&
+        containsNativeScatter(parent))
+      return true;
+    op = parent;
+    block = parent->getBlock();
+  }
+  return false;
+}
+
+// Rebuild captured views inside the VF so aliases share a single root argument.
+// npuir marks every VF pointer argument noalias. Capturing a base and its view
+// separately would therefore promise disjoint storage to the LLVM optimizer.
+void collectNativeSimdCapture(Value value, llvm::SetVector<Value> &inputs,
+                              llvm::SetVector<Operation *> &rebuild) {
+  Operation *def = value.getDefiningOp();
+  bool rebuildView =
+      def && isa<MemRefType>(value.getType()) &&
+      (isa<ViewLikeOpInterface, memref::CastOp>(def) ||
+       (isa<scf::IfOp, arith::SelectOp>(def) && isMemoryEffectFree(def)));
+  if (!def || (!def->hasTrait<OpTrait::ConstantLike>() && !rebuildView)) {
+    inputs.insert(value);
+    return;
+  }
+  if (rebuild.contains(def))
+    return;
+  for (Value operand : def->getOperands())
+    collectNativeSimdCapture(operand, inputs, rebuild);
+  for (Region &region : def->getRegions()) {
+    llvm::SetVector<Value> captures;
+    getUsedValuesDefinedAbove(region, captures);
+    for (Value capture : captures)
+      collectNativeSimdCapture(capture, inputs, rebuild);
+  }
+  rebuild.insert(def);
+}
+
+void annotateNativeSimdWrites(func::FuncOp fn) {
+  // AVE loads/stores already expose their effects. Mark only native store
+  // destinations; marking all inputs writable would serialize unrelated DMA.
+  llvm::SmallDenseSet<unsigned> writtenArgs;
+  bool unknownAddress = false;
+  fn.walk([&](LLVM::CallIntrinsicOp call) {
+    if (!isNativeScatter(call))
+      return;
+    SmallVector<Value> pending{call.getArgs()[1]};
+    llvm::SmallDenseSet<Value> visited;
+    bool sawMemref = false;
+    while (!pending.empty()) {
+      Value value = pending.pop_back_val();
+      if (!visited.insert(value).second)
+        continue;
+      bool isMemref = isa<MemRefType>(value.getType());
+      sawMemref |= isMemref;
+      if (auto arg = dyn_cast<BlockArgument>(value)) {
+        if (isMemref) {
+          if (arg.getOwner() == &fn.front())
+            writtenArgs.insert(arg.getArgNumber());
+          else
+            unknownAddress = true;
+        }
+        continue;
+      }
+      Operation *def = value.getDefiningOp();
+      if (!def) {
+        unknownAddress = true;
+        continue;
+      }
+      if (isa<memref::AllocOp, memref::AllocaOp>(def))
+        continue;
+      if (isMemref) {
+        if (auto view = dyn_cast<ViewLikeOpInterface>(def))
+          pending.push_back(view.getViewSource());
+        else if (auto cast = dyn_cast<memref::CastOp>(def))
+          pending.push_back(cast.getSource());
+        else
+          unknownAddress = true;
+      } else {
+        llvm::append_range(pending, def->getOperands());
+      }
+    }
+    unknownAddress |= !sawMemref;
+  });
+  for (auto [i, ty] : llvm::enumerate(fn.getArgumentTypes())) {
+    if (!isa<MemRefType>(ty) || (!unknownAddress && !writtenArgs.contains(i)))
+      continue;
+    fn.setArgAttr(i, hivm::MemoryEffectAttr::name,
+                  hivm::MemoryEffectAttr::get(
+                      fn.getContext(), unknownAddress
+                                           ? hivm::MemoryEffect::READ_WRITE
+                                           : hivm::MemoryEffect::WRITE));
+  }
+}
+
+Value nativeSimdViewRoot(Value value) {
+  while (Operation *def = value.getDefiningOp()) {
+    if (auto view = dyn_cast<ViewLikeOpInterface>(def))
+      value = view.getViewSource();
+    else if (auto cast = dyn_cast<memref::CastOp>(def))
+      value = cast.getSource();
+    else
+      break;
+  }
+  return value;
+}
+
+// CANN 9.2's LLVM optimizer can reuse a pre-scatter vector load even across
+// VST_VLD when its address is constant. Give potentially aliasing reads a fresh
+// address dependency, while retaining the original AVE memref operand for
+// GraphSyncSolver. Launder returns the same pointer; the difference is zero.
+// Apply inside loops too: a read can alias a scatter in the previous iteration.
+void preserveNativeScatterReloads(func::FuncOp fn) {
+  SmallVector<Value> destinations;
+  fn.walk([&](LLVM::CallIntrinsicOp call) {
+    if (!isNativeScatter(call))
+      return;
+    SmallVector<Value> pending{call.getArgs()[1]};
+    llvm::SmallDenseSet<Value> visited;
+    while (!pending.empty()) {
+      Value value = pending.pop_back_val();
+      if (!visited.insert(value).second)
+        continue;
+      if (isa<MemRefType>(value.getType())) {
+        destinations.push_back(value);
+        continue;
+      }
+      if (auto *def = value.getDefiningOp())
+        llvm::append_range(pending, def->getOperands());
+    }
+  });
+  AliasAnalysis aliases(fn);
+  fn.walk([&](Operation *op) {
+    Value base;
+    MutableOperandRange indices = [&]() -> MutableOperandRange {
+      if (auto load = dyn_cast<hivmave::VFLoadOp>(op)) {
+        base = load.getBase();
+        return load.getIndicesMutable();
+      }
+      if (auto gather = dyn_cast<hivmave::VFGatherOp>(op)) {
+        base = gather.getBase();
+        return gather.getIndicesMutable();
+      }
+      return MutableOperandRange(op, 0, 0);
+    }();
+    if (!base || indices.empty() || !needsNativeScatterReloadDependency(op) ||
+        (!destinations.empty() && llvm::all_of(destinations, [&](Value dest) {
+          // The outliner already proved distinct captured roots disjoint.
+          // Preserve that fact after they become function block arguments.
+          auto lhs = dyn_cast<BlockArgument>(nativeSimdViewRoot(base));
+          auto rhs = dyn_cast<BlockArgument>(nativeSimdViewRoot(dest));
+          if (lhs && rhs && lhs != rhs && lhs.getOwner() == &fn.front() &&
+              rhs.getOwner() == &fn.front())
+            return true;
+          return aliases.alias(base, dest).isNo();
+        })))
+      return;
+    OpBuilder b(op);
+    auto loc = op->getLoc();
+    Value address = b.create<memref::ExtractAlignedPointerAsIndexOp>(loc, base);
+    Value integer = b.create<arith::IndexCastOp>(loc, b.getI64Type(), address);
+    auto ptrTy = LLVM::LLVMPointerType::get(b.getContext(), 6);
+    Value ptr = b.create<LLVM::IntToPtrOp>(loc, ptrTy, integer);
+    auto freshOp = b.create<LLVM::CallIntrinsicOp>(
+        loc, ptrTy, b.getStringAttr("llvm.launder.invariant.group"),
+        ValueRange{ptr});
+    Value fresh = freshOp.getResult(0);
+    Value freshInteger = b.create<LLVM::PtrToIntOp>(loc, b.getI64Type(), fresh);
+    Value zero = b.create<arith::SubIOp>(loc, freshInteger, integer);
+    zero = b.create<arith::IndexCastOp>(loc, b.getIndexType(), zero);
+    SmallVector<Value> offsets;
+    offsets.reserve(indices.size());
+    for (OpOperand &operand : indices)
+      offsets.push_back(operand.get());
+    offsets.back() = b.create<arith::AddIOp>(loc, offsets.back(), zero);
+    indices.assign(offsets);
+  });
+}
+
+void outlineNativeSimdScope(scope::ScopeOp scopeOp, SymbolTable &symbols) {
+  llvm::SetVector<Value> captures, inputs;
+  llvm::SetVector<Operation *> rebuild;
+  getUsedValuesDefinedAbove(scopeOp.getRegion(), captures);
+  for (Value value : captures)
+    collectNativeSimdCapture(value, inputs, rebuild);
+
+  // An opaque memref producer (e.g. a loop-carried alias) cannot safely become
+  // an independent noalias argument. Diagnose rather than emit wrong code.
+  AliasAnalysis aliases(scopeOp->getParentOfType<ModuleOp>());
+  for (auto [i, lhs] : llvm::enumerate(inputs)) {
+    if (!isa<MemRefType>(lhs.getType()))
+      continue;
+    for (Value rhs : llvm::drop_begin(inputs, i + 1))
+      if (isa<MemRefType>(rhs.getType()) && !aliases.alias(lhs, rhs).isNo())
+        throw std::invalid_argument(
+            "native SIMD memory captures may alias but cannot be rebased; "
+            "create the views or buffer selection inside scope.simd");
+  }
+
+  OpBuilder b(scopeOp);
+  auto module = scopeOp->getParentOfType<ModuleOp>();
+  b.setInsertionPointToEnd(module.getBody());
+  auto fn =
+      b.create<func::FuncOp>(scopeOp.getLoc(), "tla_native_simd",
+                             b.getFunctionType(TypeRange(inputs.getArrayRef()),
+                                               scopeOp.getResultTypes()));
+  for (auto attr : scopeOp->getAttrs())
+    fn->setAttr(attr.getName(), attr.getValue());
+  fn.setPrivate();
+  symbols.insert(fn);
+  auto *entry = fn.addEntryBlock();
+  IRMapping mapping;
+  for (auto [value, argument] : llvm::zip(inputs, entry->getArguments()))
+    mapping.map(value, argument);
+  b.setInsertionPointToStart(entry);
+  for (Operation *op : rebuild)
+    b.clone(*op, mapping);
+  for (Operation &op : scopeOp.getRegion().front()) {
+    if (isa<scope::ReturnOp>(op)) {
+      SmallVector<Value> results;
+      for (Value value : op.getOperands())
+        results.push_back(mapping.lookupOrDefault(value));
+      b.create<func::ReturnOp>(op.getLoc(), results);
+    } else {
+      b.clone(op, mapping);
+    }
+  }
+  annotateNativeSimdWrites(fn);
+  preserveNativeScatterReloads(fn);
+  b.setInsertionPoint(scopeOp);
+  auto call =
+      b.create<func::CallOp>(scopeOp.getLoc(), fn, inputs.getArrayRef());
+  call->setAttr(hivm::VectorFunctionAttr::name, b.getUnitAttr());
+  scopeOp->replaceAllUsesWith(call.getResults());
+  scopeOp.erase();
+}
+
+void prepareNativeSimdMemory(ModuleOp module) {
+  SmallVector<scope::ScopeOp> scopes;
+  module.walk([&](scope::ScopeOp scopeOp) {
+    if (!scopeOp->hasAttr(hivm::VectorFunctionAttr::name))
+      return;
+    bool hasScatter = false;
+    scopeOp.walk([&](LLVM::CallIntrinsicOp call) {
+      hasScatter |= isNativeScatter(call);
+    });
+    if (hasScatter)
+      scopes.push_back(scopeOp);
+  });
+  SymbolTable symbols(module);
+  for (auto scopeOp : scopes)
+    outlineNativeSimdScope(scopeOp, symbols);
 }
 
 // Core type of the enclosing TLA core-mode scope, defaulting to the AIV
@@ -332,123 +637,7 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
 } // namespace
 
 void init_tla_builder(py::module &&m) {
-  m.def("prepare_native_simd_memory", [](ModuleOp module) {
-    SmallVector<scope::ScopeOp> scopes;
-    module.walk([&](scope::ScopeOp scopeOp) {
-      if (!scopeOp->hasAttr(hivm::VectorFunctionAttr::name))
-        return;
-      bool hasScatter = false;
-      scopeOp.walk([&](LLVM::CallIntrinsicOp call) {
-        hasScatter |= call.getIntrin().starts_with("llvm.hivm.vscatter.");
-      });
-      if (hasScatter)
-        scopes.push_back(scopeOp);
-    });
-    // Only native-memory VFs need early outlining. Keep constants inside the
-    // VF, matching npuir's outline-scope convention, and name its memref
-    // effects so the graph sync solver retains DMA dependencies.
-    SymbolTable symbols(module);
-    for (auto scopeOp : scopes) {
-      llvm::SetVector<Value> captured;
-      getUsedValuesDefinedAbove(scopeOp.getRegion(), captured);
-      SmallVector<Value> inputs;
-      llvm::SetVector<Operation *> constants;
-      for (Value value : captured) {
-        auto *def = value.getDefiningOp();
-        if (def && def->hasTrait<OpTrait::ConstantLike>())
-          constants.insert(def);
-        else
-          inputs.push_back(value);
-      }
-      OpBuilder b(scopeOp);
-      b.setInsertionPointToEnd(module.getBody());
-      auto fn = b.create<func::FuncOp>(
-          scopeOp.getLoc(), "tla_native_simd",
-          b.getFunctionType(TypeRange(inputs), scopeOp.getResultTypes()));
-      for (auto attr : scopeOp->getAttrs())
-        fn->setAttr(attr.getName(), attr.getValue());
-      fn.setPrivate();
-      symbols.insert(fn);
-      auto *entry = fn.addEntryBlock();
-      IRMapping mapping;
-      for (auto [value, argument] : llvm::zip(inputs, entry->getArguments()))
-        mapping.map(value, argument);
-      b.setInsertionPointToStart(entry);
-      for (auto *constant : constants)
-        b.clone(*constant, mapping);
-      for (Operation &op : scopeOp.getRegion().front()) {
-        if (isa<scope::ReturnOp>(op)) {
-          SmallVector<Value> results;
-          for (Value value : op.getOperands())
-            results.push_back(mapping.lookupOrDefault(value));
-          b.create<func::ReturnOp>(op.getLoc(), results);
-        } else {
-          b.clone(op, mapping);
-        }
-      }
-      // npuir already tracks AVE loads/stores. Add only the native store's
-      // destination, traced through address arithmetic and view descriptors.
-      // Over-marking source buffers as writable serializes unrelated DMA.
-      llvm::SmallDenseSet<unsigned> writtenArgs;
-      bool unknownAddress = false;
-      fn.walk([&](LLVM::CallIntrinsicOp call) {
-        if (!call.getIntrin().starts_with("llvm.hivm.vscatter."))
-          return;
-        SmallVector<Value> pending{call.getArgs()[1]};
-        llvm::SmallDenseSet<Value> visited;
-        bool sawMemref = false;
-        while (!pending.empty()) {
-          Value value = pending.pop_back_val();
-          if (!visited.insert(value).second)
-            continue;
-          bool isMemref = isa<MemRefType>(value.getType());
-          sawMemref |= isMemref;
-          if (auto arg = dyn_cast<BlockArgument>(value)) {
-            if (isMemref) {
-              if (arg.getOwner() == entry)
-                writtenArgs.insert(arg.getArgNumber());
-              else
-                unknownAddress = true;
-            }
-            continue;
-          }
-          Operation *def = value.getDefiningOp();
-          if (!def) {
-            unknownAddress = true;
-            continue;
-          }
-          if (isa<memref::AllocOp, memref::AllocaOp>(def))
-            continue; // local VF allocation has no caller argument
-          if (isMemref) {
-            if (auto view = dyn_cast<ViewLikeOpInterface>(def))
-              pending.push_back(view.getViewSource());
-            else if (auto cast = dyn_cast<memref::CastOp>(def))
-              pending.push_back(cast.getSource());
-            else
-              unknownAddress = true; // e.g. control-flow-selected buffers
-          } else {
-            for (Value operand : def->getOperands())
-              pending.push_back(operand);
-          }
-        }
-        unknownAddress |= !sawMemref;
-      });
-      for (auto [i, ty] : llvm::enumerate(fn.getArgumentTypes())) {
-        if (!isa<MemRefType>(ty) || (!unknownAddress && !writtenArgs.contains(i)))
-          continue;
-        fn.setArgAttr(i, hivm::MemoryEffectAttr::name,
-                      hivm::MemoryEffectAttr::get(
-                          module.getContext(),
-                          unknownAddress ? hivm::MemoryEffect::READ_WRITE
-                                         : hivm::MemoryEffect::WRITE));
-      }
-      b.setInsertionPoint(scopeOp);
-      auto call = b.create<func::CallOp>(scopeOp.getLoc(), fn, inputs);
-      call->setAttr(hivm::VectorFunctionAttr::name, b.getUnitAttr());
-      scopeOp->replaceAllUsesWith(call.getResults());
-      scopeOp.erase();
-    }
-  });
+  m.def("prepare_native_simd_memory", &prepareNativeSimdMemory);
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())
       .def(py::init<MLIRContext *, std::string, std::string>(),
@@ -668,14 +857,17 @@ void init_tla_builder(py::module &&m) {
                 viewOffset = self.create<arith::ConstantIndexOp>(layout.second);
               offset = self.create<arith::AddIOp>(offset, viewOffset);
             }
-            Value scale = self.create<arith::ConstantIndexOp>(bits / 8);
-            offset = self.create<arith::MulIOp>(offset, scale);
-            address = self.create<arith::AddIOp>(address, offset);
             Value integer =
                 self.create<arith::IndexCastOp>(b.getI64Type(), address);
             b.getContext()->getOrLoadDialect<LLVM::LLVMDialect>();
-            Value rawPtr = self.create<LLVM::IntToPtrOp>(
-                LLVM::LLVMPointerType::get(b.getContext(), 6), integer);
+            auto ptrTy = LLVM::LLVMPointerType::get(b.getContext(), 6);
+            Value basePtr = self.create<LLVM::IntToPtrOp>(ptrTy, integer);
+            Value elementOffset =
+                self.create<arith::IndexCastOp>(b.getI64Type(), offset);
+            // Keep offset arithmetic in pointer form. ptrtoint + add +
+            // inttoptr obscures the relationship with AVE's GEP-based loads.
+            Value rawPtr = self.create<LLVM::GEPOp>(
+                ptrTy, elem, basePtr, ValueRange{elementOffset});
             // Scatter's typed intrinsics retain 128xi16 indices for byte
             // and halfword data; gather's 64xi32 ABI does not apply here.
             std::string suffix =
@@ -778,13 +970,8 @@ void init_tla_builder(py::module &&m) {
             if (indices.size() != 1)
               throw std::invalid_argument(
                   "predicate store needs one byte offset");
-            auto memTy = cast<MemRefType>(ptr.getType());
-            auto bitsTy = MemRefType::get({256}, builder.getI1Type(),
-                                          MemRefLayoutAttrInterface{},
-                                          memTy.getMemorySpace());
             auto indicesIdx = toIndexValues(self, indices);
-            ptr = self.create<memref::ViewOp>(bitsTy, ptr, indicesIdx.front(),
-                                              ValueRange{});
+            ptr = predicateByteView(self, ptr, indicesIdx.front());
             Value zero = self.create<arith::ConstantIndexOp>(0);
             Value mask = self.create<hivmave::VFPgeOp>(
                 val.getType(), hivmave::PgePattern::ALL);
@@ -814,12 +1001,7 @@ void init_tla_builder(py::module &&m) {
                   "predicate load needs one byte offset");
             auto vecTy = VectorType::get({lanes}, builder.getI1Type());
             auto indicesIdx = toIndexValues(self, indices);
-            auto memTy = cast<MemRefType>(ptr.getType());
-            auto bitsTy = MemRefType::get({256}, builder.getI1Type(),
-                                          MemRefLayoutAttrInterface{},
-                                          memTy.getMemorySpace());
-            ptr = self.create<memref::ViewOp>(bitsTy, ptr, indicesIdx.front(),
-                                              ValueRange{});
+            ptr = predicateByteView(self, ptr, indicesIdx.front());
             Value zero = self.create<arith::ConstantIndexOp>(0);
             auto op = self.create<hivmave::VFLoadOp>(
                 vecTy, hivmave::LoadDistAttr::get(ctx, *distEnum), ptr,

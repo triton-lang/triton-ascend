@@ -727,6 +727,22 @@ def test_u64_scalar_uses_exact_twos_complement():
             simd.vmaxs(_vec(64, tl.uint64), bad, _semantic=_Semantic())
 
 
+@pytest.mark.parametrize("dtype,value", [(tl.int64, 2**53 + 1), (tl.int64, -(2**53 + 1)), (tl.uint64, 2**63 + 1),
+                                         (tl.uint64, 2**64 - 1)])
+@pytest.mark.parametrize("op", ("vadds", "vmuls", "vsplat", "vfull"))
+def test_integer_scalar_precision_across_apis(dtype, value, op):
+    sem = _Semantic()
+    if op == "vsplat":
+        simd.vsplat(tl.constexpr(value), tl.constexpr(dtype), _semantic=sem)
+    elif op == "vfull":
+        simd.vfull(tl.constexpr(value), tl.constexpr(dtype), 64, _semantic=sem)
+    else:
+        getattr(simd, op)(_vec(64, dtype), tl.constexpr(value), _semantic=sem)
+    expected = value if value < 2**63 else value - 2**64
+    assert ("scalar_int", ("i64", expected)) in sem.builder.calls
+    assert not any(name == "scalar" for name, _ in sem.builder.calls)
+
+
 def test_exact_i64_scalar_has_no_double_roundtrip():
     big = 2**62 + 12345
     sem = _Semantic()

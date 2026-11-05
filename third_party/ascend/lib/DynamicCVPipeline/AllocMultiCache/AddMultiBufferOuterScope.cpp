@@ -966,14 +966,18 @@ static Value createPollingCondition(scf::ForOp forOp, OpBuilder &builder,
   setSsbufferTags(divOp.getOperation(), builder, blockId, tid);
 
   Type counterType = divOp.getResult().getType();
-  int bitWidth = counterType.getIntOrFloatBitWidth();
-  auto c2Val = builder.create<arith::ConstantIntOp>(loc, 2, bitWidth);
+  // SCF loop counters may be index-typed as well as fixed-width integers.
+  // Preserve that type so polling arithmetic does not query an index bitwidth
+  // or mix an index counter with an integer constant.
+  auto c2Val = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(counterType, 2));
   setSsbufferTags(c2Val.getOperation(), builder, blockId, tid);
   auto remOp =
       builder.create<arith::RemSIOp>(loc, divOp.getResult(), c2Val.getResult());
   setSsbufferTags(remOp.getOperation(), builder, blockId, tid);
 
-  auto c0Val = builder.create<arith::ConstantIntOp>(loc, 0, bitWidth);
+  auto c0Val = builder.create<arith::ConstantOp>(
+      loc, builder.getIntegerAttr(counterType, 0));
   auto cmpOp = builder.create<arith::CmpIOp>(
       loc, arith::CmpIPredicate::eq, remOp.getResult(), c0Val.getResult());
   setSsbufferTags(cmpOp.getOperation(), builder, blockId, tid);

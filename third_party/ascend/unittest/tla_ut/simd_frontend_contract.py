@@ -133,7 +133,7 @@ class _Recorder:
     def create_simd_vpack(self, src, part, out_elem_tag, out_lanes):
         return self._record("vpack", src, part, out_elem_tag, out_lanes)
 
-    def create_simd_unary(self, kind, src, mask, mode):
+    def create_simd_unary(self, kind, src, mask, mode="zeroing"):
         return self._record("unary", kind, src, mask, mode)
 
     def create_simd_vfma(self, acc, lhs, rhs, mask, mode):
@@ -200,6 +200,15 @@ class _ScalarBuilder:
 
     def get_fp32(self, value):
         return self._make("get_fp32", value)
+
+    def get_float_ty(self):
+        return self._make("get_float_ty", None)
+
+    def get_fp64(self, value):
+        return self._make("get_fp64", value)
+
+    def create_sqrt(self, value):
+        return self._make("create_sqrt", value)
 
     def get_null_value(self, _ty):
         return self._make("get_null_value", None)
@@ -1086,6 +1095,81 @@ def test_truncmod_invalid_operands():
             math_src.truncmod(value, 2, _semantic=_NoBuilder())
         with pytest.raises(TypeError, match="truncmod b"):
             math_src.truncmod(2, value, _semantic=_NoBuilder())
+
+
+# --------------------------------------------------------------------------
+# tla.sqrt (math.py)
+# --------------------------------------------------------------------------
+
+
+def test_sqrt_export_and_builtin():
+    assert "sqrt" in math_src.__all__
+    assert _triton_is_builtin(math_src.sqrt)
+    with pytest.raises(ValueError, match="Did you forget to add @triton.jit"):
+        math_src.sqrt(4.0)
+    name = "tla_sqrt_export"
+    spec = importlib.util.spec_from_file_location(name, _TLA_DIR / "__init__.py",
+                                                  submodule_search_locations=[str(_TLA_DIR)])
+    pkg = importlib.util.module_from_spec(spec)
+    sys.modules[name] = pkg
+    try:
+        spec.loader.exec_module(pkg)
+        assert "sqrt" in pkg.__all__
+        assert pkg.sqrt is pkg.math.sqrt
+    finally:
+        for mod in [m for m in sys.modules if m == name or m.startswith(name + ".")]:
+            del sys.modules[mod]
+
+
+@pytest.mark.parametrize("value", [4.0, tl.constexpr(4.0), -1.0, 0.0, float("inf"), float("nan")])
+def test_sqrt_scalar_emits_expression(value):
+    sem, builder = _scalar_semantic()
+    result = math_src.sqrt(value, _semantic=sem)
+    assert isinstance(result, tl.tensor) and result.type == tl.float32
+    assert builder.calls[-1][0] == "create_sqrt"
+
+
+def test_sqrt_runtime_scalar_and_large_literal():
+    sem, builder = _scalar_semantic()
+    value = tl.tensor(_ScalarHandle("arg", "x"), tl.float32)
+    result = math_src.sqrt(value, _semantic=sem)
+    assert result.type == value.type
+    assert builder.calls[-1] == ("create_sqrt", value.handle)
+    sem, builder = _scalar_semantic()
+    with pytest.raises(TypeError, match="float32 scalars"):
+        math_src.sqrt(1e300, _semantic=sem)
+    assert not any(call[0] == "create_sqrt" for call in builder.calls)
+
+
+@pytest.mark.parametrize("dtype,lanes", [(tl.float16, 128), (tl.float32, 64)])
+def test_sqrt_vector_preserves_type(dtype, lanes):
+    sem = _Semantic()
+    value = _vec(lanes, dtype)
+    result = math_src.sqrt(value, _semantic=sem)
+    assert isinstance(result, simd.vector) and result.type == value.type
+    assert sem.builder.calls[0] == ("pge", ("ALL", lanes))
+    name, args = _last(sem)
+    assert name == "unary" and args[0] == "sqrt"
+    assert args[1] is value.handle and args[2].ty == "pge"
+    assert args[3] == "zeroing"
+
+
+def test_sqrt_rejects_invalid_inputs_before_builder():
+    values = [
+        1, True, 1 + 2j,
+        tl.constexpr(1),
+        tl.constexpr(True),
+        tl.tensor("block", tl.block_type(tl.float32, [64])),
+        tla_core.buffer("buf", tla_core.buffer_type((64, ), tl.float32, "ub"))
+    ]
+    values += [
+        tl.tensor(_ScalarHandle("arg", "x"), dtype)
+        for dtype in (tl.float16, tl.bfloat16, tl.float64, tl.int32, tl.int1)
+    ]
+    values += [_vec(64, dtype) for dtype in (tl.int32, tl.uint32, tl.bfloat16, tl.float64, tl.int1)]
+    for value in values:
+        with pytest.raises(TypeError, match="sqrt"):
+            math_src.sqrt(value, _semantic=_NoBuilder())
 
 
 # --------------------------------------------------------------------------

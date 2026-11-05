@@ -770,6 +770,36 @@ UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
   return success();
 }
 
+static LogicalResult rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
+                                               PatternRewriter &rewriter) {
+  auto loc = op.getLoc();
+  auto ptr = op.getPtr();
+  auto mask = op.getMask();
+  auto other = op.getOther();
+  auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
+  if (!other) {
+    FailureOr<Value> constant = specializeTypelessValueToConstant(
+        TypelessValue::Zero, ptr.getType(), loc, rewriter);
+    if (failed(constant))
+      llvm_unreachable("Unsupported type for constant creation");
+    other = *constant;
+  }
+
+  triton::LoadOp load;
+  if (contMask && discMask) {
+    // Bound memory accesses and initialize inactive lanes before selection.
+    load = rewriter.create<triton::LoadOp>(
+        loc, ptr, contMask, other, op.getCache(), op.getEvict(),
+        op.getIsVolatile());
+    mask = discMask;
+  } else {
+    load = rewriter.create<triton::LoadOp>(
+        loc, ptr, op.getCache(), op.getEvict(), op.getIsVolatile());
+  }
+  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, load.getResult(), other);
+  return success();
+}
+
 template <typename MemAccOpTy>
 UnstructuredMemAccessConverter<MemAccOpTy>::UnstructuredMemAccessConverter(
     MLIRContext *context, bool forceScalarizeMode,
@@ -788,6 +818,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto ptrType = resolvePtrTensorType(ptr);
   auto mixCompileDiscreteMask =
       op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
+  auto simdDiscreteMask = op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName);
   bool runtimeLoopMask = op->hasAttr(ConverterUtils::runtimeLoopMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
@@ -860,6 +891,11 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
+
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (simdDiscreteMask && ptrOffsetInfo.isStructured())
+      return rewriteSimdDiscreteMaskLoad(op, rewriter);
+  }
 
   if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       (!ptrOffsetInfo.isScalarLike() ||
@@ -940,6 +976,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
                                            resultShape, rewriter))) {
     return success();
+  }
+
+  // Keep the original mask/other for SIMT; only rewrite after that path fails.
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (simdDiscreteMask)
+      return rewriteSimdDiscreteMaskLoad(op, rewriter);
   }
 
   LLVM_DEBUG({

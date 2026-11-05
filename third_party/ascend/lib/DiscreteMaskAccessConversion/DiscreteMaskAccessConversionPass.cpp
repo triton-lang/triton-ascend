@@ -388,83 +388,6 @@ LogicalResult isDiscreteMask(Operation *op, Value mask,
   return success();
 }
 
-// Recursively collect all leaf operands of a nested arith::AndIOp tree.
-// This function also normalizes masks by distributing broadcast over andi
-//   broadcast(andi(a, b)) = andi(broadcast(a), broadcast(b))
-// so that inner AND operands nested inside a broadcast are still reachable.
-static void collectAndLeaves(Value mask, SmallVectorImpl<Value> &leaves,
-                             Location loc, PatternRewriter &rewriter) {
-  if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
-    collectAndLeaves(andOp.getLhs(), leaves, loc, rewriter);
-    collectAndLeaves(andOp.getRhs(), leaves, loc, rewriter);
-  } else if (auto broadcastOp = mask.getDefiningOp<triton::BroadcastOp>()) {
-    // Distribute broadcast over andi so we can inspect each factor separately.
-    if (auto innerAnd = broadcastOp.getSrc().getDefiningOp<arith::AndIOp>()) {
-      Type dstType = mask.getType();
-      Value broadcastA =
-          rewriter.create<triton::BroadcastOp>(loc, dstType, innerAnd.getLhs())
-              .getResult();
-      Value broadcastB =
-          rewriter.create<triton::BroadcastOp>(loc, dstType, innerAnd.getRhs())
-              .getResult();
-      collectAndLeaves(broadcastA, leaves, loc, rewriter);
-      collectAndLeaves(broadcastB, leaves, loc, rewriter);
-    } else {
-      leaves.push_back(mask);
-    }
-  } else {
-    leaves.push_back(mask);
-  }
-}
-
-struct MaskDecomposition {
-  // AND of all leaves that MaskState::parse() can analyze as a rectangle mask.
-  // nullptr when no such leaves exist.
-  Value contMask;
-  // AND of all leaves that MaskState::parse() cannot analyze
-  // (discrete/runtime). nullptr when no such leaves exist.
-  Value discMask;
-};
-
-// Decompose an AND-tree mask into its continuous and discrete leaf components
-// so that we can use contMask to bound GM accesses while discMask still drives
-// the per-element selection.
-static MaskDecomposition decomposeAndMask(Operation *op, Value mask,
-                                          const Location &loc,
-                                          PatternRewriter &rewriter) {
-  SmallVector<Value> leaves;
-  collectAndLeaves(mask, leaves, loc, rewriter);
-
-  SmallVector<Value> contLeaves;
-  SmallVector<Value> discLeaves;
-
-  for (Value leaf : leaves) {
-    MaskState st;
-    if (st.parse(leaf, loc, rewriter).succeeded()) {
-      if (st.isMask())
-        contLeaves.push_back(leaf);
-      else
-        discLeaves.push_back(leaf);
-    } else {
-      discLeaves.push_back(leaf);
-    }
-  }
-
-  Value contMask = nullptr;
-  for (Value v : contLeaves)
-    contMask =
-        contMask ? rewriter.create<arith::AndIOp>(loc, contMask, v).getResult()
-                 : v;
-
-  Value discMask = nullptr;
-  for (Value v : discLeaves)
-    discMask =
-        discMask ? rewriter.create<arith::AndIOp>(loc, discMask, v).getResult()
-                 : v;
-
-  return {contMask, discMask};
-}
-
 static bool isAxisDiscreteMask(Value mask, PatternRewriter &rewriter) {
   if (auto andOp = mask.getDefiningOp<arith::AndIOp>()) {
     auto isContinuousMask = [&](Value operand) {
@@ -595,11 +518,10 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
-    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName))
+    if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName) ||
+        op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName))
       return failure();
 
-    auto loc = op.getLoc();
-    auto other = op.getOther();
     auto mask = op.getMask();
     auto ptr = op.getPtr();
 
@@ -609,54 +531,18 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    if (compileOn91095Flag &&
+    bool useSimtTemplate =
+        compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
         rankWithinIndirectFastPathLimit &&
-        !isAxisDiscreteMaskLoad(op, rewriter)) {
-      op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+        !isAxisDiscreteMaskLoad(op, rewriter);
+    // Defer SIMD mask rewriting until pointer-based routing in unstructure.
+    rewriter.modifyOpInPlace(op, [&] {
+      op->setAttr(useSimtTemplate
+                      ? ConverterUtils::mixCompileDiscreteMaskAttrName
+                      : ConverterUtils::simdDiscreteMaskAttrName,
                   rewriter.getUnitAttr());
-      return failure();
-    }
-
-    // SIMD path: when mask = contMask & discMask, load only the safe range
-    // defined by contMask and use discMask for the per-element select,
-    // avoiding OOB reads.
-    auto [contMask, discMask] = decomposeAndMask(op, mask, loc, rewriter);
-    if (contMask && discMask) {
-      if (!other) {
-        FailureOr<Value> constant = specializeTypelessValueToConstant(
-            TypelessValue::Zero, ptr.getType(), loc, rewriter);
-        if (failed(constant)) {
-          llvm_unreachable("Unsupported type for constant creation");
-        }
-        other = *constant;
-      }
-      auto safeLoad = rewriter.create<triton::LoadOp>(
-          loc, ptr, contMask, op.getCache(), op.getEvict(), op.getIsVolatile());
-      // Use combined mask to select the result, avoid the uninitialized memory
-      // access.
-      auto combinedMask =
-          rewriter.create<arith::AndIOp>(loc, contMask, discMask);
-      auto discreteMaskOp = rewriter.create<arith::SelectOp>(
-          loc, combinedMask, safeLoad.getResult(), other);
-      rewriter.replaceOp(op, discreteMaskOp);
-      return success();
-    }
-
-    // Fallback: original full load + select (contMask absent, pure discrete).
-    if (!other) {
-      FailureOr<Value> constant = specializeTypelessValueToConstant(
-          TypelessValue::Zero, ptr.getType(), loc, rewriter);
-      if (failed(constant))
-        llvm_unreachable("Unsupported type for constant creation");
-      other = *constant;
-    }
-
-    auto newLoadOp = rewriter.create<triton::LoadOp>(
-        loc, ptr, op.getCache(), op.getEvict(), op.getIsVolatile());
-    auto discreteMaskOp =
-        rewriter.create<arith::SelectOp>(loc, mask, newLoadOp, other);
-    rewriter.replaceOp(op, discreteMaskOp);
+    });
     return success();
   }
 };

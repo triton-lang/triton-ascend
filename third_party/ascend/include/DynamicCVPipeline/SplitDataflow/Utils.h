@@ -36,6 +36,7 @@ int getOpLoopDepth(mlir::Operation *op);
 void setOpLoopDepth(mlir::Operation *op);
 bool isScalarDependency(mlir::Value depValue);
 bool is1DTensorDependency(mlir::Value depValue);
+bool isOutlineReuseBlacklistKernel(ModuleOp module);
 
 } // namespace triton
 } // namespace mlir

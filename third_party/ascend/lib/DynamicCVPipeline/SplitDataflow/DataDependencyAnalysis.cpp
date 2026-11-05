@@ -388,7 +388,7 @@ bool DataDependencyAnalysisPass::collectDepInfo(
   depInfo.producerBlockId = commonLevelIds.first;
   depInfo.consumerBlockId = commonLevelIds.second;
 
-  analyzeDepLoopInfo(info, depInfo);
+  analyzeDepLoopInfo(module, depInfo);
 
   if (isAllTranspoesd) {
     depInfo.isAllTranspoesd = true;
@@ -969,7 +969,7 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
   depInfo.predOp = predOp;
   depInfo.nextOp = nextOp;
 
-  analyzeDepLoopInfo(info, depInfo);
+  analyzeDepLoopInfo(module, depInfo);
 
   memoryDependencies.push_back(depInfo);
 }
@@ -1258,7 +1258,7 @@ void DataDependencyAnalysisPass::runOnOperation() {
   sortDependencies(info.getC2VDependencies(), module);
   sortDependencies(info.getC2CDependencies(), module);
   sortDependencies(info.getIntraC2CDependencies(), module);
-  analyzeSyncReuse(info);
+  analyzeSyncReuse(info, module);
 
   info.setValid(true);
 

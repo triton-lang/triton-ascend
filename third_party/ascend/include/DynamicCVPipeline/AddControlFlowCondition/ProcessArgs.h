@@ -91,6 +91,9 @@ public:
       scf::WhileOp whileOp, scf::WhileOp newWhileOp,
       SmallVector<SharedArgInfo> &sharedArgsInfo,
       const llvm::DenseMap<int, Operation *> &sharedArgToCompOp,
+      const llvm::DenseMap<int, Value> &sharedArgToCompValue,
+      const llvm::DenseMap<int, llvm::DenseMap<int, SmallVector<Value>>>
+          &sharedArgToConsumerValues,
       const llvm::DenseMap<int, llvm::DenseSet<Operation *>>
           &sharedArgToChainOps,
       ControlFlowConditionInfo *info);

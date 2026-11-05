@@ -17,10 +17,16 @@ The default `all` auto-degrades to `ir` when no NPU is available.
   `vdup`, `vdups`, `vdupv`), grouped cases (`add_cmp`, `elementwise`,
   `hardware_spec`), the runtime-N long-vector case (`simd_tail`), and the
   tilelang-derived `vecadd`.
-- `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...).
+- `vector/` — TLA vector kernel cases (`cast_back`, `expand`, `rope`, ...),
+  including `subview.py` for compact/pitched aliases and offset-preserving reshape,
+  and `view_frontend_contract.py` for host-only bounds/layout contracts.
 - `sync/` — `sync_pipe` (intra-core pipes) and `sync_block` (cross-core block flags, INTER/SUBBLOCK/BLOCK).
 - `dma/` — explicit load/store/copy/fixpipe/nd2nz cases.
-- `cube/` — matmul / mixed-core cases.
+- `cube/` — matmul / mixed-core cases, including `mmad.py` for transposed
+  operands and actual extents, and `mmad_frontend_contract.py` for host contracts.
+- `dtype/` — host-only contract tests for the scalar dtypes exported by `tla`.
+- `kernels/` — composite kernel accuracy and performance tests, with shared utilities.
+  Includes [DSA](kernels/dsa/README.md); IR/compile stages skip runtime tests.
 - `utils/` — shared helpers.
 - `simd_frontend_contract.py` — host-only SIMD frontend contract tests.
 

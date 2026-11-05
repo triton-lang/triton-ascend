@@ -886,8 +886,10 @@ void init_tla_builder(py::module &&m) {
                                outVecTy, src, mask, roundAttr,
                                builder.getBoolAttr(sat), partAttr)
                            .getResult();
-            } else if (kind == "extf") {
+            } else if (kind == "extf" || kind == "vextf") {
               // vextf widens to a full register: 2048 / out_bits lanes.
+              // "vextf" is the legacy kind spelling kept for the existing
+              // vextf() frontend helper.
               result =
                   self.create<hivmave::VFExtFOp>(outVecTy, src, mask, partAttr)
                       .getResult();

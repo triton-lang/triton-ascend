@@ -749,7 +749,6 @@ def test_mode_zeroing_and_merging_reach_the_builder_distinctly():
         (simd.vdiv, (_vec(64, tl.float32), _vec(64, tl.float32))),
         (simd.vmax, (_vec(64, tl.float32), _vec(64, tl.float32))),
         (simd.vmin, (_vec(64, tl.float32), _vec(64, tl.float32))),
-        (simd.vmaxs, (_vec(64, tl.float32), 1.0)),
         (simd.vexp, (_vec(64, tl.float32), )),
     )
     for op, args in cases:
@@ -798,19 +797,55 @@ def test_mode_zeroing_and_merging_reach_the_builder_distinctly():
         simd.vdup(1.0, tl.float32, mode="MODE_WHATEVER", _semantic=_Semantic())
 
 
+@pytest.mark.parametrize("dtype", [tl.int64, tl.uint64])
+def test_vmaxs_i64_zeroing_masked_selects_zero(dtype):
+    src = _vec(64, dtype)
+    mask = _mask(64)
+    sem = _Semantic()
+    simd.vmaxs(src, 7, mask=mask, mode=simd.MODE.ZEROING, _semantic=sem)
+    op_call = next(args for name, args in sem.builder.calls if name == "binary_scalar")
+    assert op_call[3] is mask.handle and op_call[4] == "zeroing"
+    select = next(args for name, args in sem.builder.calls if name == "vsel")
+    assert select[0] is mask.handle and select[2] is not src.handle
+
+    sem = _Semantic()
+    simd.vmaxs(src, 7, mode=simd.MODE.ZEROING, _semantic=sem)
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+    with pytest.raises(ValueError, match="invalid mode"):
+        simd.vmaxs(src, 7, mode="MODE_WHATEVER", _semantic=_Semantic())
+
+
+@pytest.mark.parametrize("dtype,scalar", [
+    (tl.float16, 1.0),
+    (tl.float32, 1.0),
+    (tl.int8, 7),
+    (tl.int16, 7),
+    (tl.int32, 7),
+    (tl.uint8, 7),
+    (tl.uint16, 7),
+    (tl.uint32, 7),
+])
+def test_vmaxs_non64_zeroing_masked_has_no_extra_select(dtype, scalar):
+    sem = _Semantic()
+    simd.vmaxs(_vec(64, dtype), scalar, mask=_mask(64), mode=simd.MODE.ZEROING, _semantic=sem)
+    assert all(name != "vsel" for name, _ in sem.builder.calls)
+
+
 def test_merging_composes_vsel_against_the_first_operand():
-    """MODE.MERGING on the accumulate/predicate family selects src0/acc.
+    """MODE.MERGING on the accumulate/vector-scalar family selects src0/acc.
 
     The op itself is always built under ZEROING; MERGING appends a vsel
     against the op's first vector operand (acc for the accumulate ops),
-    mirroring CANN's V920 software-merge lowering.  The legacy register ops
-    keep forwarding "merging" to the C++ builder (covered above).
+    mirroring CANN's V920 software-merge lowering.  The remaining register
+    ops keep forwarding "merging" to the C++ builder (covered above).
     """
     mask = _mask(64)
     a = _vec(64, tl.float32)
     b = _vec(64, tl.float32)
     for op, args, merge in (
         (simd.vand, (a, b), a.handle),
+        (simd.vmaxs, (a, 2.0), a.handle),
         (simd.vmuls, (a, 2.0), a.handle),
         (simd.vmula, (a, b, b), a.handle),
         (simd.vaxpy, (a, b, 1.5), a.handle),

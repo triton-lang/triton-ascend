@@ -6,7 +6,7 @@ f32 kernel rows (64 lanes each):
   1 vmaxs(x, 0.0, prefix)            first ACTIVE lanes, MODE_ZEROING
   2 vmaxs(x, 0.0, arb)               per-lane threshold from ``T`` (signed i32 index)
   3 vmaxs(x, 0.0, none)              all-false predicate
-  4 vmaxs(x, 0.0, prefix, MERGING)   merge source is ``+0``
+  4 vmaxs(x, 0.0, prefix, MERGING)   inactive lanes retain ``x``
   5 vmaxs(x, 0.0, arb, MERGING)
 
 Scalar-bound kernel (one register per row, three scalars per dtype):
@@ -109,6 +109,7 @@ def test_ir(output_dir=None):
     btext = str(module)
     assert btext.count("ave.hir.vmaxs") == 3, "signed i64 uses vmaxs"
     assert btext.count("ave.hir.vumaxs") == 6, "u64 and u32 must select vumaxs"
+    assert btext.count("ave.hir.vsel") == 4, "masked i64/u64 ZEROING selects zero"
     assert "9007199254740993 : i64" in btext, "2**53+1 must stay an exact i64 constant"
     assert "-9223372036854775808 : i64" in btext, "u64 2**63 travels as two's-complement bits"
     assert "-1 : i64" in btext, "u64 2**64-1 travels as two's-complement bits"
@@ -148,8 +149,8 @@ def _launch():
         _apply(v, masks["prefix"]),
         _apply(v, masks["arb"]),
         _apply(v, masks["none"]),
-        _apply(v, masks["prefix"]),
-        _apply(v, masks["arb"]),
+        torch.where(masks["prefix"], v, x),
+        torch.where(masks["arb"], v, x),
     ])
 
     iv = torch.tensor([(i * 7919) % (2**62) * ((-1)**i) for i in range(n)], dtype=torch.int64)
@@ -192,7 +193,7 @@ def _bitwise_zero(t):
 
 
 def _inactive_zero(got, masks):
-    for row, name in ((1, "prefix"), (2, "arb"), (3, "none"), (4, "prefix"), (5, "arb")):
+    for row, name in ((1, "prefix"), (2, "arb"), (3, "none")):
         keep = masks[name]
         inactive = got[row][~keep] if keep.any() else got[row]
         assert _bitwise_zero(inactive), f"row {row} ({name}) has a non-zero inactive lane"

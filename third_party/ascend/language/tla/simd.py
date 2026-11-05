@@ -232,7 +232,7 @@ class MODE(str, enum.Enum):
     AVE regbase value ops are pure SSA with no mutable destination, so
     ``MERGING`` cannot be CANN's native dst-preserving predicate
     ``OP_m(dst, src0, src1, mask)``.  The accumulate/predicate family
-    (``vand``/``vmuls``/``vmula``/``vmadd``/``vaxpy``/``vln``) instead merges
+    (``vand``/``vmaxs``/``vmuls``/``vmula``/``vmadd``/``vaxpy``/``vln``) instead merges
     with the op's own first vector operand: for the accumulate ops that
     operand is ``acc``, which matches CANN's dst-preserving semantics exactly
     (CANN itself lowers merging to a vsel against the destination on its V920
@@ -1410,12 +1410,10 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     :param scalar: constexpr number or scalar tensor, element type of ``src0``
     :param mask: predicate vector; defaults to an all-true mask
     :param mode: ``MODE.ZEROING`` emits the bare masked AVE op;
-        ``MODE.MERGING`` emits the same op plus an ``ave.hir.vsel`` that
-        merges a same-typed ``+0`` SSA vector into the inactive lanes.
-        MERGING is not CANN's native dst-preserving predicate and does not keep
-        the old dst/``src0`` lanes (see :class:`MODE`)
-    Inactive lanes are ``+0`` for both modes: ZEROING relies on the masked AVE
-    op, MERGING explicitly selects a ``+0`` merge source in the C++ builder.
+        ``MODE.MERGING`` appends ``vsel(mask, result, src0)`` so inactive
+        lanes retain their original ``src0`` values. ZEROING leaves inactive
+        lanes zero; because the 64-bit fallback ignores its mask, i64/u64 with
+        an explicit mask additionally select zero.
     Supported element types: f16/f32/i8/i16/i32/i64 (u8/u16/u32/u64); the AVE
     vector-scalar contract has no bf16/f8 scalar slot.
     """
@@ -1425,12 +1423,18 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     unsigned = _is_unsigned(src0.dtype)
     _require_elem_support("vmaxs", tag, unsigned)
     lanes = src0.shape[0]
+    explicit_mask = mask is not None
     mask = _resolve_mask(mask, lanes, _semantic)
     scalar_handle = _make_scalar(scalar, src0.dtype, tag, "vmaxs", _semantic)
     kind = "umaxs" if unsigned else "maxs"
     handle = _semantic.builder.create_simd_binary_scalar(kind, src0.handle, scalar_handle, mask.handle,
-                                                         _MODE_BUILDER_NAMES[mode])
-    return vector(handle, src0.type)
+                                                         _MODE_BUILDER_NAMES[MODE.ZEROING])
+    result = vector(handle, src0.type)
+    if mode is MODE.ZEROING and tag == "i64" and explicit_mask:
+        # The 64-bit integer fallback ignores its mask, so restore ZEROING here.
+        zero = vfull(0, src0.dtype, lanes, _semantic=_semantic)
+        return vsel(mask, result, zero, _semantic=_semantic)
+    return _merge_inactive(result, mask, src0, mode, _semantic)
 
 
 @builtin

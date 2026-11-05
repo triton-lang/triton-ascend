@@ -40,11 +40,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/SourceMgr.h"
 
-namespace ir {
-static pybind11::class_<TritonOpBuilder> *builderClassPtr = nullptr;
-pybind11::class_<TritonOpBuilder> *getBuilderClass() { return builderClassPtr; }
-} // namespace ir
-
 namespace {
 
 namespace py = pybind11;
@@ -804,10 +799,9 @@ void init_triton_ir(py::module &&m) {
 
   py::class_<OpBuilder::InsertPoint>(m, "InsertPoint", py::module_local());
 
-  static py::class_<TritonOpBuilder> builderClass(
-      m, "builder", py::module_local(), py::dynamic_attr());
-  ir::builderClassPtr = &builderClass;
-  builderClass.def(py::init<MLIRContext *>())
+  py::class_<TritonOpBuilder>(m, "builder", py::module_local(),
+                              py::dynamic_attr())
+      .def(py::init<MLIRContext *>())
       .def("get_op_builder", &TritonOpBuilder::getBuilder, ret::reference)
       // getters
       .def("create_module",

@@ -34,12 +34,6 @@ from .core import (
     make_tensor_descriptor,
     tensor_descriptor,
     tensor_descriptor_type,
-    tensor_view_type,
-    tensor_view,
-    make_partition_view,
-    make_strided_view,
-    make_gather_scatter_view,
-    scatter,
     add,
     advance,
     arange,
@@ -142,12 +136,6 @@ from .random import (
 from . import target_info
 
 __all__ = [
-    "tensor_view_type",
-    "tensor_view",
-    "make_partition_view",
-    "make_strided_view",
-    "make_gather_scatter_view",
-    "scatter",
     "PropagateNan",
     "TRITON_MAX_TENSOR_NUMEL",
     "load_tensor_descriptor",

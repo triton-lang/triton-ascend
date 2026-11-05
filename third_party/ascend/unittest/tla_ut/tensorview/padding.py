@@ -26,22 +26,22 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def tensor_view_padding_kernel(src, indices, dst, rows, cols, column_block, VIEW: tl.constexpr, PADDING: tl.constexpr):
     if VIEW == "partition":
         view = tla.make_partition_view(src, shape=[rows, cols], strides=[cols, 1], tile=[2, 8], padding_value=PADDING)
-        value = tl.load(view, index=(0, column_block))
+        value = tla.load(view, index=(0, column_block))
     elif VIEW == "strided":
         view = tla.make_strided_view(src, shape=[rows, cols], strides=[cols, 1], tile=[2, 8], traversal_strides=[2, 5],
                                      padding_value=PADDING)
-        value = tl.load(view, index=(0, column_block))
+        value = tla.load(view, index=(0, column_block))
     else:
         row_indices = tl.load(indices + tl.arange(0, 2))
         view = tla.make_gather_scatter_view(src, shape=[rows, cols], strides=[cols, 1], tile=[2, 8], sparse_dim=[0],
                                             padding_value=PADDING)
-        value = tl.load(view, index=(row_indices, column_block))
+        value = tla.load(view, index=(row_indices, column_block))
     output = tla.make_partition_view(dst, shape=[2, 8], strides=[8, 1], tile=[2, 8])
-    tl.store(output, value, index=(0, 0))
+    tla.store(output, value, index=(0, 0))
 
 
 @pytest.mark.parametrize("view", ["partition", "strided", "gather"])

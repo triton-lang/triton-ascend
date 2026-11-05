@@ -23,13 +23,14 @@ import torch_npu  # noqa: F401
 
 import triton
 import triton.language as tl
+import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def ptr_gather_kernel(src, dst):
     offsets = tl.arange(0, 8)
     pointers = src + offsets[None, :] + 8 * offsets[:, None]
-    value = tl.gather(
+    value = tla.gather(
         pointers,
         [0, 2, 4, 6],
         [1, 3, 5, 7],
@@ -38,13 +39,13 @@ def ptr_gather_kernel(src, dst):
     tl.store(dst + output_offsets, value)
 
 
-@triton.jit
+@tla.jit
 def ptr_scatter_kernel(src, dst):
     offsets = tl.arange(0, 8)
     pointers = dst + offsets[None, :] + 8 * offsets[:, None]
     input_offsets = tl.arange(0, 4)
     value = tl.load(src + input_offsets)
-    tl.scatter(
+    tla.scatter(
         pointers,
         value,
         [0, 2, 4, 6],

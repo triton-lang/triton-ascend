@@ -30,7 +30,8 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 ``simd`` (vector-register ops), ``annotate_buffer_versions``.
 """
 
-from triton.language.core import make_partition_view, make_strided_view, make_gather_scatter_view
+from .tensorview import (tensor_view, tensor_view_type, make_partition_view, make_strided_view,
+                         make_gather_scatter_view, load, store, gather, scatter)
 
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
@@ -90,7 +91,9 @@ from .sync import sub_block_id
 
 def jit(fn=None, **kwargs):
     """``@tla.jit``: like ``triton.jit``, but lowered via the TLA frontend."""
+    jit_decorator = jit
     from .jit import TLAJITFunction
+    globals()["jit"] = jit_decorator
 
     def decorator(f):
         return TLAJITFunction(f, **kwargs)
@@ -99,6 +102,12 @@ def jit(fn=None, **kwargs):
 
 
 __all__ = [
+    "tensor_view",
+    "tensor_view_type",
+    "load",
+    "store",
+    "gather",
+    "scatter",
     "make_partition_view",
     "make_strided_view",
     "make_gather_scatter_view",

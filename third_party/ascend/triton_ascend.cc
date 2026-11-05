@@ -22,10 +22,7 @@
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
 #include "ascend/include/TritonToStructured/Passes.h"
-#include "ascend/include/TritonToTensorView/Passes.h"
-#include "ascend/include/TritonToTensorView/TensorViewBuilder.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
-#include "bishengir/Dialect/TensorView/IR/TensorViewDialect.h"
 
 #include "ascend/include/DynamicCVPipeline/AnalyzeDataFlow.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
@@ -62,125 +59,7 @@
 namespace py = pybind11;
 using namespace mlir;
 
-static tv::PaddingValue parseTensorViewPaddingValue(const std::string &value) {
-  if (value == "zero")
-    return tv::PaddingValue::ZERO;
-  if (value == "nan")
-    return tv::PaddingValue::NAN_VALUE;
-  if (value == "inf")
-    return tv::PaddingValue::POS_INF;
-  if (value == "-inf")
-    return tv::PaddingValue::NEG_INF;
-  throw py::value_error("unknown TensorView padding value: " + value);
-}
-
-static void initTensorViewBuilder() {
-  auto *builder = ir::getBuilderClass();
-  builder
-      ->def(
-          "create_tensor_view",
-          [](TritonOpBuilder &self, Value base, std::vector<Value> shape,
-             std::vector<Value> strides) -> Value {
-            FailureOr<Value> view = tv::createTensorViewBase(
-                self.getBuilder(), self.getLastLoc(), base, shape, strides);
-            if (failed(view))
-              throw py::value_error(
-                  "TensorView base pointers must not contain pointer offsets");
-            return *view;
-          })
-      .def("create_partition_view",
-           [](TritonOpBuilder &self, Value view, std::vector<int64_t> tile,
-              std::string paddingValue) -> Value {
-             return tv::createPartitionView(
-                 self.getBuilder(), self.getLastLoc(), view, tile,
-                 parseTensorViewPaddingValue(paddingValue));
-           })
-      .def("create_strided_view",
-           [](TritonOpBuilder &self, Value view, std::vector<int64_t> tile,
-              std::vector<int64_t> traversalStrides,
-              std::string paddingValue) -> Value {
-             return tv::createStridedView(
-                 self.getBuilder(), self.getLastLoc(), view, tile,
-                 traversalStrides, parseTensorViewPaddingValue(paddingValue));
-           })
-      .def("create_gather_scatter_view",
-           [](TritonOpBuilder &self, Value view, std::vector<int64_t> tile,
-              std::vector<int64_t> sparseDims,
-              std::string paddingValue) -> Value {
-             return tv::createGatherScatterView(
-                 self.getBuilder(), self.getLastLoc(), view, tile, sparseDims,
-                 parseTensorViewPaddingValue(paddingValue));
-           })
-      .def("tensor_view_load",
-           [](TritonOpBuilder &self, Value view, std::vector<Value> index,
-              Type resultTy) -> Value {
-             return tv::tensorViewLoad(self.getBuilder(), self.getLastLoc(),
-                                       view, index, resultTy);
-           })
-      .def("tensor_view_store",
-           [](TritonOpBuilder &self, Value view, Value value,
-              std::vector<Value> index) -> void {
-             tv::tensorViewStore(self.getBuilder(), self.getLastLoc(), view,
-                                 index, value);
-           })
-      .def("tensor_view_ptr_load",
-           [](TritonOpBuilder &self, Value pointers,
-              const std::vector<std::vector<int64_t>> &coordinates,
-              Type resultTy) -> Value {
-             llvm::SmallVector<llvm::ArrayRef<int64_t>> coordinateRefs;
-             for (const auto &coordinate : coordinates)
-               coordinateRefs.push_back(coordinate);
-             return tv::tensorViewPtrLoad(self.getBuilder(), self.getLastLoc(),
-                                          pointers, coordinateRefs, resultTy);
-           })
-      .def("tensor_view_ptr_store",
-           [](TritonOpBuilder &self, Value pointers, Value value,
-              const std::vector<std::vector<int64_t>> &coordinates) -> void {
-             llvm::SmallVector<llvm::ArrayRef<int64_t>> coordinateRefs;
-             for (const auto &coordinate : coordinates)
-               coordinateRefs.push_back(coordinate);
-             tv::tensorViewPtrStore(self.getBuilder(), self.getLastLoc(),
-                                    pointers, value, coordinateRefs);
-           })
-      .def("get_tensor_view_strides",
-           [](TritonOpBuilder &, Value view) {
-             return cast<tv::TensorViewType>(view.getType()).getStrides().vec();
-           })
-      .def("get_tensor_view_ty",
-           [](TritonOpBuilder &self, Type elementType, int64_t rank,
-              std::string viewKind, std::vector<int64_t> tile,
-              std::vector<int64_t> traversalStrides,
-              std::vector<int64_t> sparseDims, std::string paddingValue,
-              std::vector<int64_t> strides) -> Type {
-             llvm::SmallVector<int64_t> dynShape(rank, ShapedType::kDynamic);
-             if (strides.empty())
-               strides.assign(rank, ShapedType::kDynamic);
-             Attribute encoding;
-             tv::PaddingValue padding =
-                 parseTensorViewPaddingValue(paddingValue);
-             if (viewKind == "partition") {
-               encoding = tv::PartitionViewAttr::get(
-                   self.getBuilder().getContext(), tile, padding);
-             } else if (viewKind == "strided") {
-               encoding =
-                   tv::StridedViewAttr::get(self.getBuilder().getContext(),
-                                            tile, traversalStrides, padding);
-             } else if (viewKind == "gather_scatter") {
-               encoding = tv::GatherScatterViewAttr::get(
-                   self.getBuilder().getContext(), tile, sparseDims, padding);
-             } else if (!viewKind.empty()) {
-               throw py::value_error("unknown TensorView encoding: " +
-                                     viewKind);
-             }
-             return tv::TensorViewType::get(dynShape, elementType, strides,
-                                            encoding);
-           });
-}
-
 void init_triton_ascend_passes_ttir(py::module &&m) {
-  m.def("add_triton_to_tensor_view", [](mlir::PassManager &pm) {
-    pm.addPass(mlir::triton::createTritonToTensorViewPass());
-  });
   m.def("add_auto_blockify", [](mlir::PassManager &pm, int autoBlockifySize) {
     AutoBlockifyOptions opts;
     opts.autoBlockifySize = autoBlockifySize;
@@ -614,13 +493,11 @@ void init_triton_ascend(py::module &&m) {
   // load dialects
   m.def("load_dialects", [](mlir::MLIRContext &context) {
     mlir::DialectRegistry registry;
-    registry.insert<mlir::triton::ascend::TritonAscendDialect,
-                    mlir::tv::TensorViewDialect>();
+    registry.insert<mlir::triton::ascend::TritonAscendDialect>();
     context.appendDialectRegistry(registry);
     context.loadAllAvailableDialects();
   });
 
-  initTensorViewBuilder();
   init_triton_ascend_passes_ttir(passes.def_submodule("ttir"));
 
 #if TRITON_ASCEND_HAS_INPROC_COSTMODEL

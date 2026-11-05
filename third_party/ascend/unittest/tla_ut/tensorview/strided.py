@@ -25,7 +25,7 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def strided_view_load_store_kernel(src, dst, n_elements, BLOCK_SIZE: tl.constexpr, TRAVERSAL_STRIDE: tl.constexpr):
     block = tl.program_id(0)
     src_tiles = tla.make_strided_view(
@@ -43,11 +43,11 @@ def strided_view_load_store_kernel(src, dst, n_elements, BLOCK_SIZE: tl.constexp
         traversal_strides=[TRAVERSAL_STRIDE],
     )
 
-    value = tl.load(src_tiles, index=(block, ))
-    tl.store(dst_tiles, value, index=(block, ))
+    value = tla.load(src_tiles, index=(block, ))
+    tla.store(dst_tiles, value, index=(block, ))
 
 
-@triton.jit
+@tla.jit
 def strided_view_padding_kernel(src, dst, src_elements, dst_elements, BLOCK_SIZE: tl.constexpr,
                                 TRAVERSAL_STRIDE: tl.constexpr):
     block = tl.program_id(0)
@@ -67,8 +67,8 @@ def strided_view_padding_kernel(src, dst, src_elements, dst_elements, BLOCK_SIZE
         traversal_strides=[TRAVERSAL_STRIDE],
     )
 
-    value = tl.load(src_tiles, index=(block, ))
-    tl.store(dst_tiles, value, index=(block, ))
+    value = tla.load(src_tiles, index=(block, ))
+    tla.store(dst_tiles, value, index=(block, ))
 
 
 def test_tensor_view_strided_load_store():

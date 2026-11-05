@@ -1447,85 +1447,6 @@ class tensor_descriptor_base(base_value):
         return _semantic.descriptor_scatter(self, value, x_offsets, y_offset)
 
 
-class tensor_view_type(base_type):
-    """Type of an N-dimensional logical TensorView."""
-
-    def __init__(self, element_ty: dtype, rank: int, view_kind=None, tile=(), traversal_strides=(), sparse_dims=(),
-                 padding_value="zero", strides=()):
-        self.element_ty = element_ty
-        self.rank = rank
-        self.view_kind = view_kind
-        self.tile = tuple(tile)
-        self.traversal_strides = tuple(traversal_strides)
-        self.sparse_dims = tuple(sparse_dims)
-        self.padding_value = padding_value
-        self.strides = tuple(strides)
-
-    def _unflatten_ir(self, handles: List[ir.value], cursor: int) -> Tuple[tensor_view, int]:
-        return tensor_view(handles[cursor], self.element_ty, self.rank, self.view_kind, self.tile,
-                           self.traversal_strides, self.sparse_dims, self.padding_value, self.strides), cursor + 1
-
-    def _flatten_ir_types(self, builder: ir.builder, out: List[ir.type]) -> None:
-        out.append(
-            builder.get_tensor_view_ty(self.element_ty.to_ir(builder), self.rank, self.view_kind or "", self.tile,
-                                       self.traversal_strides, self.sparse_dims, self.padding_value, self.strides))
-
-    def __str__(self) -> str:
-        suffix = (""
-                  if self.view_kind is None else f", {self.view_kind}, tile={self.tile}, padding={self.padding_value}")
-        return f"tensor_view<{self.element_ty}>[{self.rank}{suffix}]"
-
-    def __eq__(self, other) -> bool:
-        if type(other) is not type(self):
-            return False
-        return (self.element_ty == other.element_ty and self.rank == other.rank and self.view_kind == other.view_kind
-                and self.tile == other.tile and self.traversal_strides == other.traversal_strides
-                and self.sparse_dims == other.sparse_dims and self.padding_value == other.padding_value
-                and self.strides == other.strides)
-
-    def __ne__(self, other) -> bool:
-        return not self.__eq__(other)
-
-    def mangle(self) -> str:
-        encoding = "B" if self.view_kind is None else self.view_kind.upper()
-        tile = "x".join(str(value) for value in self.tile)
-        traversal = "x".join(str(value) for value in self.traversal_strides)
-        sparse = "x".join(str(value) for value in self.sparse_dims)
-        padding = self.padding_value.upper().replace("-", "N")
-        strides = "x".join(str(value).replace("-", "N") for value in self.strides)
-        return f"TV{self.element_ty.mangle()}R{self.rank}K{encoding}T{tile}V{traversal}S{sparse}P{padding}D{strides}"
-
-
-class tensor_view(base_value):
-    """A logical tensor accessed by tiled `tl.load` and `tl.store` operations."""
-
-    def __init__(self, handle, element_ty: dtype, rank: int, view_kind=None, tile=(), traversal_strides=(),
-                 sparse_dims=(), padding_value="zero", strides=()):
-        """Internal constructor."""
-        super().__init__()
-        self.handle = handle
-        self.type = tensor_view_type(element_ty, rank, view_kind, tile, traversal_strides, sparse_dims, padding_value,
-                                     strides)
-
-    def _flatten_ir(self, handles: List[ir.value]) -> None:
-        handles.append(self.handle)
-
-    @property
-    def dtype(self):
-        return self.type.element_ty
-
-    @property
-    def rank(self):
-        return self.type.rank
-
-    @property
-    def tile(self):
-        return self.type.tile
-
-    def __str__(self) -> str:
-        return str(self.type)
-
-
 class tensor_descriptor_type(tensor_descriptor_base_type):
 
     def __init__(self, block_type: block_type, shape_type: tuple_type, strides_type: tuple_type):
@@ -2188,7 +2109,7 @@ def dot_scaled(lhs, lhs_scale, lhs_format, rhs, rhs_scale, rhs_format, acc=None,
 
 @builtin
 def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", cache_modifier="", eviction_policy="",
-         volatile=False, index=None, _semantic=None):
+         volatile=False, _semantic=None):
     """
     Return a tensor of data whose values are loaded from memory at location defined by `pointer`:
 
@@ -2232,12 +2153,6 @@ def load(pointer, mask=None, other=None, boundary_check=(), padding_option="", c
     :param volatile: changes volatile option in NVIDIA PTX
     :type volatile: bool, optional
     """
-    if isinstance(pointer, tensor_view):
-        if mask is not None or other is not None or boundary_check or padding_option:
-            raise ValueError("TensorView bounds and padding are defined by its encoding")
-        if index is None:
-            raise ValueError("`index` is required when loading a TensorView")
-        return _semantic.tensor_view_load(pointer, index)
     # `mask` and `other` can be constexpr
     mask = _unwrap_if_constexpr(mask)
     other = _unwrap_if_constexpr(other)
@@ -2269,8 +2184,7 @@ def store_tensor_descriptor(desc: tensor_descriptor_base, offsets: Sequence[cons
 
 @_tensor_member_fn
 @builtin
-def store(pointer, value, mask=None, boundary_check=(), cache_modifier="", eviction_policy="", index=None,
-          _semantic=None):
+def store(pointer, value, mask=None, boundary_check=(), cache_modifier="", eviction_policy="", _semantic=None):
     """
     Store a tensor of data into memory locations defined by `pointer`.
 
@@ -2311,12 +2225,6 @@ def store(pointer, value, mask=None, boundary_check=(), cache_modifier="", evict
     """
     # `value` can be constexpr
     value = _semantic.to_tensor(value)
-    if isinstance(pointer, tensor_view):
-        if mask is not None or boundary_check:
-            raise ValueError("TensorView bounds are defined by its encoding")
-        if index is None:
-            raise ValueError("`index` is required when storing to a TensorView")
-        return _semantic.tensor_view_store(pointer, value, index)
     mask = _unwrap_if_constexpr(mask)
     if mask is not None:
         mask = _semantic.to_tensor(mask)
@@ -2881,7 +2789,7 @@ def histogram(input, num_bins, mask=None, _semantic=None, _generator=None):
 
 @_tensor_member_fn
 @builtin
-def gather(src, index, axis=None, *coordinates, _semantic=None):
+def gather(src, index, axis, _semantic=None):
     """Gather from a tensor along a given dimension.
 
     :param src: the source tensor
@@ -2892,25 +2800,10 @@ def gather(src, index, axis=None, *coordinates, _semantic=None):
     :type axis: int
 
     """
-    if src.type.is_block() and src.dtype.is_ptr():
-        pointer_coordinates = (index, )
-        if axis is not None:
-            pointer_coordinates += (axis, )
-        return _semantic.tensor_view_ptr_load(src, pointer_coordinates + coordinates)
-    if coordinates:
-        raise ValueError("Additional coordinates require a tensor of pointers")
-    if axis is None:
-        raise ValueError("`axis` is required when gathering from a value tensor")
     src = _unwrap_if_constexpr(src)
     index = _unwrap_if_constexpr(index)
     axis = _unwrap_if_constexpr(axis)
     return _semantic.gather(src, index, axis)
-
-
-@builtin
-def scatter(pointers, value, index, *coordinates, _semantic=None):
-    """Store values at zipped coordinates in an N-D tensor of pointers."""
-    return _semantic.tensor_view_ptr_store(pointers, value, (index, ) + coordinates)
 
 
 @builtin
@@ -3595,32 +3488,3 @@ def builtin_min(*args, propagate_nan=_NOTHING, _semantic=None):
     if min_val.type.is_block():
         warn("builtin min on non-scalar tensor values is deprecated, use tl.minimum instead", DeprecationWarning)
     return min_val
-
-
-@builtin
-def make_partition_view(base: tensor, shape, strides, tile, padding_value="zero", _semantic=None) -> "tensor_view":
-    """Create a tiled partition view over a scalar base pointer.
-
-    ``padding_value`` must be one of ``"zero"``, ``"nan"``, ``"inf"``, or ``"-inf"``.
-    """
-    return _semantic.make_partition_view(base, shape, strides, tile, padding_value)
-
-
-@builtin
-def make_strided_view(base: tensor, shape, strides, tile, traversal_strides, padding_value="zero",
-                      _semantic=None) -> "tensor_view":
-    """Create a tiled pointer view whose origins advance by ``traversal_strides``.
-
-    ``padding_value`` must be one of ``"zero"``, ``"nan"``, ``"inf"``, or ``"-inf"``.
-    """
-    return _semantic.make_strided_view(base, shape, strides, tile, traversal_strides, padding_value)
-
-
-@builtin
-def make_gather_scatter_view(base: tensor, shape, strides, tile, sparse_dim, padding_value="zero",
-                             _semantic=None) -> "tensor_view":
-    """Create a pointer view with tensor-valued indices in selected dimensions.
-
-    ``padding_value`` must be one of ``"zero"``, ``"nan"``, ``"inf"``, or ``"-inf"``.
-    """
-    return _semantic.make_gather_scatter_view(base, shape, strides, tile, sparse_dim, padding_value)

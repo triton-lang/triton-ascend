@@ -32,12 +32,13 @@ class TLASTSource(ASTSource):
     """ASTSource that emits TLA TTIR instead of the community frontend."""
 
     def make_ir(self, target, options, codegen_fns, module_map, context):
-        from triton.language.extra.tla.compiler import ast_to_ttir
+        from triton.language.extra.tla.compiler import ast_to_ttir, prepare_ttir
 
         # Enable the backend TLA lowering and --enable-tla-mode compile flag.
         object.__setattr__(options, "enable_tla_mode", True)
         constexprs = {self.fn.arg_names[i[0]]: value for i, value in self.constants.items()}
-        return ast_to_ttir(self.fn, self.signature, constexprs, context=context, options=options)
+        module = ast_to_ttir(self.fn, self.signature, constexprs, context=context, options=options)
+        return prepare_ttir(module, context)
 
 
 class TLAJITFunction(JITFunction):

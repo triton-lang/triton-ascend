@@ -9,11 +9,6 @@ set(ASCENDNPU_IR_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/AscendNPU-IR" CACHE PATH
     "Path to AscendNPU-IR source root")
 set(ASCENDNPU_IR_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/AscendNPU-IR")
 
-if(LLVM_VERSION_MAJOR GREATER_EQUAL 22)
-  set(LLVM_MAJOR_VERSION_22_COMPATIBLE ON)
-  add_compile_definitions(__LLVM_MAJOR_VERSION_22_COMPATIBLE__)
-endif()
-
 set(BISHENGIR_ENABLE_A5_UNPUBLISHED_FEATURES ON)
 set(BISHENGIR_BUILD_STANDALONE_IR_ONLY ON)
 
@@ -137,8 +132,8 @@ add_triton_plugin(TritonAscend
   LINK_LIBS
   TritonToGraph
   TritonToLinalg
-  TritonToTensorView
   BiShengIRScopeDialect
+  BiShengIRTensorViewDialect
   BiShengIRHIVMDialect
   MLIRAVEDialect
 )

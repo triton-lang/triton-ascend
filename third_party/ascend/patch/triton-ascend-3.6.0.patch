@@ -242,7 +242,7 @@ diff --git a/bin/RegisterTritonDialects.h b/bin/RegisterTritonDialects.h
 index 48049f026..78eabc5f9 100644
 --- a/bin/RegisterTritonDialects.h
 +++ b/bin/RegisterTritonDialects.h
-@@ -1,6 +1,38 @@
+@@ -1,6 +1,36 @@
  #pragma once
 +#include "ascend/include/AutoBlockify/Passes.h"
 +#include "ascend/include/DiscreteMaskAccessConversion/Passes.h"
@@ -265,7 +265,6 @@ index 48049f026..78eabc5f9 100644
 +#include "ascend/include/TritonToLLVM/Passes.h"
 +#include "ascend/include/TritonToLinalg/Passes.h"
 +#include "ascend/include/TritonToStructured/Passes.h"
-+#include "ascend/include/TritonToTensorView/Passes.h"
 +#include "ascend/include/TritonToUnstructure/Passes.h"
 +
 +#include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -273,7 +272,6 @@ index 48049f026..78eabc5f9 100644
 +#include "bishengir/Dialect/HFusion/IR/HFusion.h"
 +#include "bishengir/Dialect/HIVM/IR/HIVM.h"
 +#include "bishengir/Dialect/Scope/IR/Scope.h"
-+#include "bishengir/Dialect/TensorView/IR/TensorViewDialect.h"
 +
  #include "amd/include/Dialect/TritonAMDGPU/IR/Dialect.h"
  #include "amd/include/TritonAMDGPUTransforms/Passes.h"
@@ -281,7 +279,7 @@ index 48049f026..78eabc5f9 100644
  #include "nvidia/include/Dialect/NVGPU/IR/Dialect.h"
  #include "nvidia/include/Dialect/NVWS/IR/Dialect.h"
  #include "proton/Dialect/include/Conversion/ProtonGPUToLLVM/Passes.h"
-@@ -85,6 +117,20 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -85,6 +115,19 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::registerConvertTritonGPUToLLVMPass();
    mlir::triton::registerConvertNVGPUToLLVMPass();
    mlir::triton::registerAllocateSharedMemoryNvPass();
@@ -289,7 +287,6 @@ index 48049f026..78eabc5f9 100644
 +  mlir::triton::registerTritonControlFlowOptPasses();
 +  mlir::triton::registerDiscreteMaskAccessConversion();
 +  mlir::triton::registerTritonToStructuredPasses();
-+  mlir::triton::registerTritonToTensorViewPasses();
 +  mlir::triton::registerTritonToAnnotationPasses();
 +  mlir::triton::registerTritonToUnstructurePasses();
 +  mlir::triton::registerTritonToHIVMPasses();
@@ -302,7 +299,7 @@ index 48049f026..78eabc5f9 100644
    mlir::registerLLVMDIScope();
    mlir::LLVM::registerInlinerInterface(registry);
    mlir::NVVM::registerInlinerInterface(registry);
-@@ -136,16 +182,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
+@@ -136,16 +179,39 @@ inline void registerTritonDialects(mlir::DialectRegistry &registry) {
    mlir::triton::proton::gpu::registerScheduleBufferStorePass();
    mlir::triton::proton::gpu::registerAddSchedBarriersPass();
  
@@ -342,7 +339,7 @@ index 48049f026..78eabc5f9 100644
 +      mlir::annotation::AnnotationDialect, mlir::hfusion::HFusionDialect,
 +      mlir::tensor::TensorDialect, mlir::linalg::LinalgDialect,
 +      mlir::memref::MemRefDialect, mlir::bufferization::BufferizationDialect,
-+      mlir::func::FuncDialect, mlir::tv::TensorViewDialect>();
++      mlir::func::FuncDialect>();
  }
 diff --git a/bin/triton-opt.cpp b/bin/triton-opt.cpp
 index 2d2570771..91ed8b79a 100644

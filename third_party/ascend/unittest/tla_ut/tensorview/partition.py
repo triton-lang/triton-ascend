@@ -25,12 +25,12 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def load_partition_tile(view, row, column):
-    return tl.load(view, index=(row, column))
+    return tla.load(view, index=(row, column))
 
 
-@triton.jit
+@tla.jit
 def partition_view_load_store_kernel(src, dst, rows, cols, BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr):
     row_block = tl.program_id(0)
     col_block = tl.program_id(1)
@@ -48,10 +48,10 @@ def partition_view_load_store_kernel(src, dst, rows, cols, BLOCK_M: tl.constexpr
     )
 
     value = load_partition_tile(src_tiles, row_block, col_block)
-    tl.store(dst_tiles, value, index=(row_block, col_block))
+    tla.store(dst_tiles, value, index=(row_block, col_block))
 
 
-@triton.jit
+@tla.jit
 def partition_view_padding_kernel(src, dst, src_elements, dst_elements, BLOCK_SIZE: tl.constexpr):
     block = tl.program_id(0)
     src_tiles = tla.make_partition_view(
@@ -68,8 +68,8 @@ def partition_view_padding_kernel(src, dst, src_elements, dst_elements, BLOCK_SI
         tile=[BLOCK_SIZE],
     )
 
-    value = tl.load(src_tiles, index=(block, ))
-    tl.store(dst_tiles, value, index=(block, ))
+    value = tla.load(src_tiles, index=(block, ))
+    tla.store(dst_tiles, value, index=(block, ))
 
 
 def test_tensor_view_partition_load_store():
@@ -100,13 +100,13 @@ def test_tensor_view_partition_padding():
     torch.testing.assert_close(actual, expected)
 
 
-@triton.jit
+@tla.jit
 def partition_view_physical_stride_kernel(src, dst, size, src_stride, BLOCK_SIZE: tl.constexpr):
     block = tl.program_id(0)
     source = tla.make_partition_view(src, shape=[size], strides=[src_stride], tile=[BLOCK_SIZE])
     output = tla.make_partition_view(dst, shape=[size], strides=[3], tile=[BLOCK_SIZE])
-    value = tl.load(source, index=(block, ))
-    tl.store(output, value, index=(block, ))
+    value = tla.load(source, index=(block, ))
+    tla.store(output, value, index=(block, ))
 
 
 def test_tensor_view_partition_physical_stride():

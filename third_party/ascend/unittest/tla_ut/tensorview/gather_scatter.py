@@ -25,7 +25,7 @@ import triton.language as tl
 import triton.language.extra.tla as tla
 
 
-@triton.jit
+@tla.jit
 def gather_view_load_kernel(src, indices, dst, n_elements, BLOCK_SIZE: tl.constexpr):
     block = tl.program_id(0)
     offsets = block * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -44,11 +44,11 @@ def gather_view_load_kernel(src, indices, dst, n_elements, BLOCK_SIZE: tl.conste
         tile=[BLOCK_SIZE],
     )
 
-    value = tl.load(src_gather, index=(data_indices, ))
-    tl.store(dst_tiles, value, index=(block, ))
+    value = tla.load(src_gather, index=(data_indices, ))
+    tla.store(dst_tiles, value, index=(block, ))
 
 
-@triton.jit
+@tla.jit
 def scatter_view_store_kernel(src, indices, dst, n_elements, BLOCK_SIZE: tl.constexpr):
     block = tl.program_id(0)
     offsets = block * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
@@ -67,11 +67,11 @@ def scatter_view_store_kernel(src, indices, dst, n_elements, BLOCK_SIZE: tl.cons
         sparse_dim=[0],
     )
 
-    value = tl.load(src_tiles, index=(block, ))
-    tl.store(dst_scatter, value, index=(data_indices, ))
+    value = tla.load(src_tiles, index=(block, ))
+    tla.store(dst_scatter, value, index=(data_indices, ))
 
 
-@triton.jit
+@tla.jit
 def gather_view_padding_kernel(src, indices, dst, src_elements, BLOCK_SIZE: tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     data_indices = tl.load(indices + offsets)
@@ -90,11 +90,11 @@ def gather_view_padding_kernel(src, indices, dst, src_elements, BLOCK_SIZE: tl.c
         tile=[BLOCK_SIZE],
     )
 
-    value = tl.load(src_gather, index=(data_indices, ))
-    tl.store(dst_tiles, value, index=(0, ))
+    value = tla.load(src_gather, index=(data_indices, ))
+    tla.store(dst_tiles, value, index=(0, ))
 
 
-@triton.jit
+@tla.jit
 def scatter_view_bounds_kernel(src, indices, dst, dst_elements, BLOCK_SIZE: tl.constexpr):
     offsets = tl.arange(0, BLOCK_SIZE)
     data_indices = tl.load(indices + offsets)
@@ -112,8 +112,8 @@ def scatter_view_bounds_kernel(src, indices, dst, dst_elements, BLOCK_SIZE: tl.c
         sparse_dim=[0],
     )
 
-    value = tl.load(src_tiles, index=(0, ))
-    tl.store(dst_scatter, value, index=(data_indices, ))
+    value = tla.load(src_tiles, index=(0, ))
+    tla.store(dst_scatter, value, index=(data_indices, ))
 
 
 def test_tensor_view_gather_load():
@@ -168,7 +168,7 @@ def test_tensor_view_scatter_bounds():
     torch.testing.assert_close(actual, expected)
 
 
-@triton.jit
+@tla.jit
 def cartesian_view_kernel(src, rows, cols, tile_output, scatter_output):
     offsets = tl.arange(0, 4)
     row_indices = tl.load(rows + offsets)
@@ -177,9 +177,9 @@ def cartesian_view_kernel(src, rows, cols, tile_output, scatter_output):
                                           padding_value="inf")
     output = tla.make_partition_view(tile_output, shape=[4, 4], strides=[4, 1], tile=[4, 4])
     scatter = tla.make_gather_scatter_view(scatter_output, shape=[5, 7], strides=[7, 1], tile=[4, 4], sparse_dim=[0, 1])
-    value = tl.load(source, index=(row_indices, col_indices))
-    tl.store(output, value, index=(0, 0))
-    tl.store(scatter, value, index=(row_indices, col_indices))
+    value = tla.load(source, index=(row_indices, col_indices))
+    tla.store(output, value, index=(0, 0))
+    tla.store(scatter, value, index=(row_indices, col_indices))
 
 
 def test_tensor_view_cartesian_gather_scatter():

@@ -111,7 +111,29 @@ jobs:
           # because the base image's cmake is too old (npuir needs >= 3.28).
           # The base image's Python lives at /usr/local/python3.12.14 (on
           # PATH ahead of /usr/bin), not the manylinux-standard /opt/python.
-          yum install -y clang lld ccache
+          #
+          # EPEL's metalink is unreliable from these runners: the egress
+          # proxy serves stale repodata and the overseas mirrors 404 on the
+          # hashed metadata files. Pin EPEL to the Huawei Cloud mirror
+          # (ccache comes from EPEL; clang/lld come from AppStream).
+          cat > /etc/yum.repos.d/epel-hwcloud.repo <<'EOF'
+          [epel-hwcloud]
+          name=EPEL 9 (Huawei Cloud mirror)
+          baseurl=https://mirrors.huaweicloud.com/repository/epel/9/Everything/$basearch/
+          enabled=1
+          gpgcheck=1
+          gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-EPEL-9
+          EOF
+          for attempt in 1 2 3; do
+            if yum install -y --disablerepo=epel clang lld ccache; then
+              break
+            fi
+            yum clean all || true
+            sleep 15
+          done
+          # Fail loudly if the retries never succeeded (sh -e does not catch
+          # a failed command inside an if/for).
+          rpm -q clang lld ccache
           python3 -m pip install cmake ninja
           cmake --version | head -1
           ninja --version

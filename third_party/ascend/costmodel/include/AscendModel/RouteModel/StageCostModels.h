@@ -8,7 +8,7 @@
 #ifndef ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 #define ASCENDMODEL_ROUTEMODEL_STAGECOSTMODELS_H
 
-#include "AscendModel/RouteModel/PrefixScanFormulaModel.h"
+#include "AscendModel/RouteModel/PrefixScan/PrefixScanFormulaModel.h"
 #include "AscendModel/RouteModel/Reduction/ReductionProfile.h"
 #include "AscendModel/RouteModel/StageRouteCostModel.h"
 

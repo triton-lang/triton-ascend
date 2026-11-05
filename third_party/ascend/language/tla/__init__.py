@@ -31,7 +31,7 @@ Exports: ``alloc_buffer``/``alloc`` (on-chip buffer + versions),
 """
 
 from .tensorview import (tensor_view, tensor_view_type, make_partition_view, make_strided_view,
-                         make_gather_scatter_view, load, store, gather, scatter)
+                         make_gather_scatter_view, load, store)
 
 from .core import buffer, buffer_type, vector, vector_type
 from .scope import scope
@@ -106,8 +106,6 @@ __all__ = [
     "tensor_view_type",
     "load",
     "store",
-    "gather",
-    "scatter",
     "make_partition_view",
     "make_strided_view",
     "make_gather_scatter_view",

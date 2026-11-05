@@ -36,14 +36,11 @@
 #include "mlir/IR/Block.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
-#include "mlir/IR/IRMapping.h"
 #include "mlir/IR/Region.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Support/LLVM.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
-#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/StringMap.h"
-#include "llvm/ADT/StringSwitch.h"
 
 #include <optional>
 #include <utility>
@@ -296,112 +293,6 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
       .getResult();
 }
 
-Type getTensorViewAddressType(Type type, OpBuilder &builder) {
-  if (auto tensor = dyn_cast<RankedTensorType>(type)) {
-    if (isa<triton::PointerType>(tensor.getElementType()))
-      return tensor.clone(builder.getI64Type());
-  } else if (isa<triton::PointerType>(type)) {
-    return builder.getI64Type();
-  }
-  return type;
-}
-
-FailureOr<Value>
-convertTensorViewPointer(Value pointer, OpBuilder &builder,
-                         llvm::DenseMap<Value, Value> &addresses) {
-  if (auto it = addresses.find(pointer); it != addresses.end())
-    return it->second;
-  Type type = getTensorViewAddressType(pointer.getType(), builder);
-  if (type == pointer.getType())
-    return pointer;
-  Location loc = pointer.getLoc();
-  if (isa<triton::PointerType>(pointer.getType())) {
-    Value address = builder.create<triton::PtrToIntOp>(loc, type, pointer);
-    addresses[pointer] = address;
-    return address;
-  }
-  Operation *producer = pointer.getDefiningOp();
-  if (!producer)
-    return emitError(loc, "pointer tensors must be inlined before TensorView "
-                          "legalization"),
-           failure();
-  if (auto add = dyn_cast<triton::AddPtrOp>(producer)) {
-    auto base = convertTensorViewPointer(add.getPtr(), builder, addresses);
-    if (failed(base))
-      return failure();
-    Value offset = add.getOffset();
-    auto offsetType = cast<RankedTensorType>(offset.getType());
-    Type wideType = offsetType.clone(builder.getI64Type());
-    if (offsetType.getElementType().isIndex())
-      offset = builder.create<arith::IndexCastOp>(loc, wideType, offset);
-    else if (offsetType.getElementType().getIntOrFloatBitWidth() < 64)
-      offset = builder.create<arith::ExtSIOp>(loc, wideType, offset);
-    Type elementType =
-        cast<triton::PointerType>(
-            cast<RankedTensorType>(pointer.getType()).getElementType())
-            .getPointeeType();
-    if (!elementType.isIntOrFloat())
-      return producer->emitError("unsupported pointer element type"), failure();
-    int64_t bytes = (elementType.getIntOrFloatBitWidth() + 7) / 8;
-    Value scale = builder.create<arith::ConstantOp>(
-        loc, DenseIntElementsAttr::get(cast<RankedTensorType>(wideType),
-                                       llvm::APInt(64, bytes)));
-    Value scaled = builder.create<arith::MulIOp>(loc, offset, scale);
-    Value result = builder.create<arith::AddIOp>(loc, *base, scaled);
-    addresses[pointer] = result;
-    return result;
-  }
-  if (auto cast = dyn_cast<triton::IntToPtrOp>(producer)) {
-    if (cast.getSrc().getType() != type)
-      return cast.emitOpError("TensorView addresses must be i64"), failure();
-    addresses[pointer] = cast.getSrc();
-    return cast.getSrc();
-  }
-  if (auto cast = dyn_cast<triton::BitcastOp>(producer)) {
-    auto address = convertTensorViewPointer(cast.getSrc(), builder, addresses);
-    if (failed(address))
-      return failure();
-    addresses[pointer] = *address;
-    return *address;
-  }
-  bool shapeOp = llvm::StringSwitch<bool>(producer->getName().getStringRef())
-                     .Cases("tt.splat", "tt.broadcast", "tt.expand_dims", true)
-                     .Cases("tt.trans", "tt.reshape", "tt.cat", true)
-                     .Cases("tt.join", "tt.split", "tt.gather", true)
-                     .Case("arith.select", true)
-                     .Default(false);
-  if (!shapeOp)
-    return producer->emitError("unsupported TensorView pointer producer"),
-           failure();
-  IRMapping mapping;
-  for (Value operand : producer->getOperands()) {
-    auto address = convertTensorViewPointer(operand, builder, addresses);
-    if (failed(address))
-      return failure();
-    mapping.map(operand, *address);
-  }
-  Operation *copy = builder.clone(*producer, mapping);
-  for (auto [oldResult, newResult] :
-       llvm::zip(producer->getResults(), copy->getResults())) {
-    newResult.setType(getTensorViewAddressType(oldResult.getType(), builder));
-    addresses[oldResult] = newResult;
-  }
-  return addresses.lookup(pointer);
-}
-
-SmallVector<Value>
-tensorViewCoordinates(TLABuilder &self,
-                      const std::vector<std::vector<int64_t>> &coordinates) {
-  SmallVector<Value> result;
-  for (const auto &coordinate : coordinates) {
-    auto type = RankedTensorType::get({static_cast<int64_t>(coordinate.size())},
-                                      self.getBuilder().getI64Type());
-    result.push_back(self.create<arith::ConstantOp>(
-        type, DenseIntElementsAttr::get(type, coordinate)));
-  }
-  return result;
-}
-
 SmallVector<Value> tensorViewIndices(TLABuilder &self, Value view,
                                      const std::vector<Value> &indices) {
   auto type = cast<tv::TensorViewType>(view.getType());
@@ -509,44 +400,6 @@ void init_tla_builder(py::module &&m) {
               const std::vector<Value> &indices) {
              self.create<tv::ViewStoreOp>(view, value,
                                           tensorViewIndices(self, view, indices));
-           })
-      .def("create_tla_ptr_load",
-           [](TLABuilder &self, Value pointers,
-              const std::vector<std::vector<int64_t>> &coordinates,
-              Type resultType) -> Value {
-             auto type = cast<RankedTensorType>(resultType);
-             Value addresses = self.create<triton::PtrToIntOp>(
-                 cast<RankedTensorType>(pointers.getType()).clone(self.getBuilder().getI64Type()), pointers);
-             Value init = self.create<tensor::EmptyOp>(type.getShape(), type.getElementType());
-             return self.create<tv::PtrLoadOp>(TypeRange{resultType}, addresses, init,
-                                                tensorViewCoordinates(self, coordinates)).getResult();
-           })
-      .def("create_tla_ptr_store",
-           [](TLABuilder &self, Value pointers, Value value,
-              const std::vector<std::vector<int64_t>> &coordinates) {
-             Value addresses = self.create<triton::PtrToIntOp>(
-                 cast<RankedTensorType>(pointers.getType()).clone(self.getBuilder().getI64Type()), pointers);
-             self.create<tv::PtrStoreOp>(addresses, value, tensorViewCoordinates(self, coordinates));
-           })
-      .def("lower_tla_tensor_view_pointers",
-           [](TLABuilder &, ModuleOp module) {
-             SmallVector<triton::PtrToIntOp> conversions;
-             module.walk([&](triton::PtrToIntOp op) {
-               if (isa<RankedTensorType>(op.getSrc().getType()) &&
-                   llvm::any_of(op->getUsers(), [](Operation *user) {
-                     return isa<tv::PtrLoadOp, tv::PtrStoreOp>(user);
-                   }))
-                 conversions.push_back(op);
-             });
-             for (auto op : conversions) {
-               OpBuilder builder(op);
-               llvm::DenseMap<Value, Value> addresses;
-               auto address = convertTensorViewPointer(op.getSrc(), builder, addresses);
-               if (failed(address))
-                 throw py::value_error("unsupported TensorView pointer producer");
-               op.getResult().replaceAllUsesWith(*address);
-               op.erase();
-             }
            })
       // Intra-core pipeline synchronization.
       .def(

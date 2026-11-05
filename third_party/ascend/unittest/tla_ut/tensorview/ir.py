@@ -38,21 +38,3 @@ def test_view_ir(kind):
     assert "!tt.ptr" not in text and "tt.call" not in text
     assert "strides=[?]" in text
     assert "hivm.func_core_type<AIV>" in text
-
-
-@tla.jit
-def pointer_copy(src, dst):
-    offsets = tl.arange(0, 8)
-    pointers = src + offsets[None, :] + 8 * offsets[:, None]
-    values = tla.gather(pointers, [0, 2, 4, 6], [1, 3, 5, 7])
-    output = dst + offsets[None, :] + 8 * offsets[:, None]
-    tla.scatter(output, values, [0, 2, 4, 6], [1, 3, 5, 7])
-
-
-def test_pointer_ir():
-    module, ctx = compile_offline(pointer_copy, {"src": "*fp32", "dst": "*fp32"}, {})
-    assert "tv.ptr_load" in str(module) and "tv.ptr_store" in str(module)
-    text = str(lower_offline(module, ctx))
-    assert "tv.ptr_load" in text and "tv.ptr_store" in text
-    assert "!tt.ptr" not in text and "tt.ptr_to_int" not in text
-    assert "tensor<8x8xi64>" in text and "arith.muli" in text

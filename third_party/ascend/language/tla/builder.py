@@ -56,8 +56,6 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_encoded_view',
         'create_tla_view_load',
         'create_tla_view_store',
-        'create_tla_ptr_load',
-        'create_tla_ptr_store',
         'create_tla_buffer_type',
         'create_tla_vector_type',
         'create_tla_alloc',

@@ -46,9 +46,8 @@ def _stamp_tla_mode(module):
 
 
 def prepare_ttir(module, context):
-    """Inline TLA helpers and normalize pointer tensors before adapter lowering."""
+    """Inline TLA helpers before adapter lowering."""
     from triton._C.libtriton import ir, passes
-    from triton._C.libtriton import ascend as ascend_binding
 
     _stamp_tla_mode(module)
     # Inline JIT helpers before conversion. The MLIR inliner handles both
@@ -67,8 +66,6 @@ def prepare_ttir(module, context):
     if calls:
         raise ValueError("unresolved tt.call after inlining; noinline JIT helpers cannot "
                          "cross the ttadapter boundary")
-    ascend_ir = ascend_binding.ir
-    ascend_ir.tla_builder(context).lower_tla_tensor_view_pointers(module)
     return module
 
 
@@ -76,9 +73,9 @@ def lower_ttir(module, context, compile_on_910_95=True, compile_mode="simd_simt_
                named_ops=True):
     """Lower TLA TTIR to the native compiler's ttadapter boundary.
 
-    Inline helpers and normalize TensorView pointer tensors first, then reuse
-    triton_to_linalg for the kernel ABI and remaining Triton operations.
-    Native tv operations stay intact for backend bufferization and HIVM lowering.
+    Inline helpers, then reuse triton_to_linalg for the kernel ABI and remaining
+    Triton operations. Native tv operations stay intact for backend bufferization
+    and HIVM lowering.
     """
     from triton._C.libtriton import ir
     from triton._C.libtriton import ascend as ascend_binding
@@ -121,8 +118,7 @@ def infer_func_core_type(module):
     core_types = set()
     if "#hivm.tcore_type<CUBE>" in text:
         core_types.add("AIC")
-    if "#hivm.tcore_type<VECTOR>" in text or any(
-            name in text for name in ("tv.view_load", "tv.view_store", "tv.ptr_load", "tv.ptr_store")):
+    if "#hivm.tcore_type<VECTOR>" in text or any(name in text for name in ("tv.view_load", "tv.view_store")):
         core_types.add("AIV")
     if "AIC" in core_types and "AIV" in core_types:
         return "MIX"

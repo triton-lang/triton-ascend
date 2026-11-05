@@ -856,11 +856,49 @@ static LogicalResult rewriteForOp(scf::ForOp forOp, OpBuilder &builder,
 // scf.while rewrite
 //===----------------------------------------------------------------------===//
 
+static LogicalResult rewriteWhileBody(scf::WhileOp whileOp, OpBuilder &builder,
+                                      RewriteEnv &env) {
+  SmallVector<Value> newInits;
+  for (Value init : whileOp.getInits())
+    newInits.push_back(env.remap(init));
+
+  bool bodyOk = true;
+  auto rewriteRegion = [&](Block *oldBlock, OpBuilder &bodyBuilder,
+                           ValueRange newArguments) {
+    RewriteEnv regionEnv = env;
+    regionEnv.valueMapping.map(oldBlock->getArguments(), newArguments);
+    if (failed(rewriteBodyOps(oldBlock, bodyBuilder, regionEnv))) {
+      bodyOk = false;
+      return;
+    }
+    bodyBuilder.clone(*oldBlock->getTerminator(), regionEnv.valueMapping);
+  };
+  // Keep the independent before/input and after/result signatures unchanged.
+  auto newWhileOp = builder.create<scf::WhileOp>(
+      whileOp.getLoc(), whileOp.getResultTypes(), newInits,
+      [&](OpBuilder &bodyBuilder, Location, ValueRange arguments) {
+        rewriteRegion(whileOp.getBeforeBody(), bodyBuilder, arguments);
+      },
+      [&](OpBuilder &bodyBuilder, Location, ValueRange arguments) {
+        rewriteRegion(whileOp.getAfterBody(), bodyBuilder, arguments);
+      });
+  if (!bodyOk) {
+    newWhileOp.erase();
+    return failure();
+  }
+  newWhileOp->setAttrs(whileOp->getAttrs());
+  builder.setInsertionPointAfter(newWhileOp);
+  env.valueMapping.map(whileOp.getResults(), newWhileOp.getResults());
+  return success();
+}
+
 static LogicalResult rewriteWhileOp(scf::WhileOp whileOp, OpBuilder &builder,
                                     RewriteEnv &env) {
   const ControlFlowOpAnalysis *analysis = env.plan.lookup(whileOp);
   if (!analysis || !analysis->needsRewrite())
     return failure();
+  if (!analysis->rewritesOwnSignature())
+    return rewriteWhileBody(whileOp, builder, env);
   scf::ConditionOp conditionOp = whileOp.getConditionOp();
   scf::YieldOp yieldOp = whileOp.getYieldOp();
   SmallVector<LoopPointerInfo, 4> pointerInfos;

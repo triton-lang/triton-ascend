@@ -109,6 +109,7 @@ __all__ = [
     "vadd",
     "vadds",
     "vaddc",
+    "vsubc",
     "vshl",
     "vshls",
     "vshr",
@@ -1257,6 +1258,48 @@ def vaddc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tu
     total = _masked_binary("add", src0, src1, mask, MODE.ZEROING, _semantic)
     carry = vcmp(total, src0, mask=mask, op=CMP.ULT, _semantic=_semantic)
     return total, carry
+
+
+@builtin
+def vsubc(src0: vector, src1: vector, mask: vector = None, _semantic=None) -> tuple[vector, vector]:
+    """
+    Vector subtract with borrow-out (``vsubc``) for i32/u32 registers.
+
+    Returns ``(diff, borrow)`` where ``diff = src0 - src1`` (modulo 2**32) and
+    ``borrow`` is an i1 mask holding the two's-complement borrow-out of each
+    lane, derived as ``src0 <u src1``.  The AVE dialect has no dedicated
+    ``vsubc`` op, so this is composed from a masked ``ave.hir.vsub`` and an
+    unsigned ``ave.hir.vcmp``; the result is always zeroing.
+
+    Both operands must be full 64-lane ``int32`` or ``uint32`` registers with
+    the same dtype.  Inactive lanes produce a zero difference and a false
+    borrow.
+
+    :param src0: Minuend vector register.
+    :type src0: tla.vector
+    :param src1: Subtrahend vector register with the same dtype.
+    :type src1: tla.vector
+    :param mask: Optional predicate with one ``i1`` lane per data lane.
+        ``None`` means an all-true mask.
+    :type mask: tla.vector or None
+    :return: ``(diff, borrow)`` vector pair; ``borrow`` is an i1 mask.
+    :rtype: tuple[tla.vector, tla.vector]
+    """
+    _require_vector(src0, "src0")
+    _require_vector(src1, "src1")
+    dtype = str(src0.dtype)
+    if dtype not in ("int32", "uint32"):
+        raise ValueError(f"vsubc only supports int32/uint32, got {dtype}")
+    if src1.dtype != src0.dtype:
+        raise TypeError(f"vsubc operands must have the same dtype, "
+                        f"got {src0.dtype} and {src1.dtype}")
+    lanes = src0.type.lanes
+    if lanes != 64:
+        raise ValueError(f"vsubc requires a full 64-lane register, got {lanes}")
+    mask = _mask_for(mask, lanes, _semantic)
+    diff = _masked_binary("sub", src0, src1, mask, MODE.ZEROING, _semantic)
+    borrow = vcmp(src0, src1, mask=mask, op=CMP.ULT, _semantic=_semantic)
+    return diff, borrow
 
 
 @builtin

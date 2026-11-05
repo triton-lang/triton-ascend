@@ -4298,13 +4298,13 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
   prediction.reason = "generic_stage_resource_formula";
   prediction.calibrationName = "generic_stage_resource_formula_v1";
   prediction.candidate = stringifySimdSimtCandidate(report.decision).str();
-  prediction.formula = "(kernel_boundary_residual_system_cycles("
+  prediction.formula = "max(kernel_boundary_residual_system_cycles("
                        "candidate, superblock_factor, "
                        "runtime_physical_program_count) + "
                        "has_global_load * "
                        "global_load_boundary_residual_system_cycles(route) + "
                        "runtime_argument_setup_system_cycles(route, "
-                       "kernel_argument_count) + "
+                       "kernel_argument_count), "
                        "route_resource_system_cycles) / "
                        "system_counter_frequency_mhz";
   prediction.evidence = profile.kernelTiming.evidence;
@@ -4359,8 +4359,14 @@ populateSelectedRouteElapsedPrediction(SimdSimtCostReport &report,
   prediction.systemCounterFrequencyMHz =
       profile.kernelTiming.systemCounterFrequencyMHz;
   prediction.baseSelectionScore = baseScore;
+  // The kernel boundary residual does not add to the resource work. The
+  // measured duration of a kernel saturates at the boundary residual and grows
+  // linearly from there, so the total is the larger of the two: the prologue
+  // and epilogue overlap with the vector work instead of extending it. Charging
+  // both in full over-predicts every kernel whose work is comparable to the
+  // residual, which is the whole small and medium block range.
   prediction.predictedSystemCounterCycles =
-      prediction.fixedSystemCycles + prediction.baseSelectionScore;
+      std::max(prediction.fixedSystemCycles, prediction.baseSelectionScore);
   prediction.predictedMicroseconds = prediction.predictedSystemCounterCycles /
                                      prediction.systemCounterFrequencyMHz;
   if (plan->diagnostic<bool>("native_indirect_chain_applied")) {

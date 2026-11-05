@@ -887,8 +887,9 @@ def _select_backend_resource_aware_factor(report, factor_resources, selected_fac
                 elapsed["backend_private_stack_load_system_cycles"] = (private_load_charges[chosen]["system_cycles"])
             fixed = float(elapsed.get("fixed_system_cycles", 0.0))
             frequency = float(elapsed.get("system_counter_frequency_mhz", 1000.0))
-            elapsed["predicted_system_counter_cycles"] = fixed + chosen_score
-            elapsed["predicted_microseconds"] = (fixed + chosen_score) / max(1.0, frequency)
+            predicted_cycles = max(fixed, chosen_score)
+            elapsed["predicted_system_counter_cycles"] = predicted_cycles
+            elapsed["predicted_microseconds"] = predicted_cycles / max(1.0, frequency)
     updated_report = json.dumps(report_data, sort_keys=True, separators=(",", ":"))
     return chosen, feedback, updated_report
 

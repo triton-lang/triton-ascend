@@ -1,10 +1,8 @@
 """CPU-only checks: python -m unittest test_native -v (build guard first)."""
 import random
 import unittest
-from unittest.mock import patch
 import torch
 import native_guard
-import dispatch
 
 
 class GuardTests(unittest.TestCase):
@@ -38,34 +36,3 @@ class GuardTests(unittest.TestCase):
             changed = scalars.copy()
             changed[index] = value
             self.assertFalse(native_guard.check_cpu_test(*tensors, *changed))
-
-    def test_dispatch_binds_checked_arguments(self):
-        objects = [object() for _ in range(5)]
-        calls = []
-
-        class Kernel:
-            def __init__(self, name):
-                self.name = name
-            def __getitem__(self, grid):
-                return lambda *args, **kwargs: calls.append((self.name, grid, args, kwargs))
-
-        for allowed in (True, False):
-            with patch.object(dispatch.native_guard, "check", return_value=allowed) as check:
-                dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects,
-                                        D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
-                x, cache, y, weight, bias = objects
-                check.assert_called_once_with(x, cache, weight, bias, y, 17, 3, 4, 8, 3, 3, 20, 24)
-                name, grid, args, meta = calls[-1]
-                self.assertEqual(name, "fast" if allowed else "original")
-                self.assertEqual(grid, (3, 3))
-                self.assertEqual(args, (*objects, 20, 1, 24, 1))
-                self.assertEqual((meta["W"], meta["BD"], meta["CHUNK_OFFSET"]), (4, 8, 0))
-        with patch.object(dispatch, "native_guard", None):
-            dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects,
-                                    D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
-        self.assertEqual(calls[-1][0], "original")
-        with patch.object(dispatch, "native_guard", None):
-            dispatch.launch_checked(Kernel("fast"), Kernel("original"), *objects[:3], None, None,
-                                    D=17, N=3, W=4, BD=8, stride_x_n=20, stride_y_n=24)
-        self.assertFalse(calls[-1][3]["HAS_WEIGHT"])
-        self.assertFalse(calls[-1][3]["HAS_BIAS"])

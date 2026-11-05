@@ -1,35 +1,47 @@
-"""Isolated experiment for kernel_full.py; not installed in the TA launcher.
+"""Signature-independent experimental dispatch; not a production TA launcher.
 
-The column rule uses ascend.experimental_checked_full_rows to select a
-harness assertion, NOT a compiler-derived proof. Only pass variants compiled
-from this exact fixture. Automatic certificate extraction remains unimplemented.
-Build the host guard with `MAX_JOBS=1 python setup.py build_ext --inplace`.
+A trusted producer must bind a guard to the exact two variants. The guard must
+cover memory safety AND transformation preconditions. This module does not
+infer that proof, and never treats argument names as proof.
 """
-try:
-    import native_guard
-except ImportError:
-    native_guard = None
+import inspect
+from types import MappingProxyType
 
 
-def launch_checked(fast, original, x, cache, y, weight, bias, *,
-                   D, N, W, BD, stride_x_n, stride_y_n, num_warps=4):
-    """Check each invocation; forward the checked inputs directly to the kernel.
+class CheckedKernel:
+    """Bundle same-signature variants with their trusted launch guard.
 
-    Unit channel strides, zero chunk offset and SIMD scheduling are fixed parts
-    of this fixture's contract. Unknown storage/aliases use the original variant.
-    Compile/resource errors propagate; they are not silently hidden as fallback.
+    guard(values, grid, options) receives values in formal parameter order,
+    including constexprs and defaults. No guard means original-only execution.
+    Guard producers must regenerate the guard when the kernel signature changes.
     """
-    grid = ((D + BD - 1) // BD, N)
-    try:
-        valid = native_guard is not None and native_guard.check(
-            x, cache, weight, bias, y, D, N, W, BD,
-            grid[0], grid[1], stride_x_n, stride_y_n)
-    except (TypeError, OverflowError):
-        valid = False
-    kernel = fast if valid else original
-    return kernel[grid](
-        x, cache, y, weight, bias, stride_x_n, 1, stride_y_n, 1,
-        D=D, W=W, BD=BD, HAS_WEIGHT=weight is not None, HAS_BIAS=bias is not None,
-        CHUNK_OFFSET=0, N_CHUNK=0, compile_mode="simd_simt_template",
-        num_warps=num_warps, superblock_factor=1, num_stages=2,
-        multibuffer=False, debug=False)
+
+    def __init__(self, original, fast, guard=None):
+        self.original, self.fast, self.guard = original, fast, guard
+        self.signature = inspect.signature(original.fn)
+        if self.signature != inspect.signature(fast.fn):
+            raise ValueError("Checked variants must have identical signatures")
+        if any(p.kind in (p.VAR_POSITIONAL, p.VAR_KEYWORD)
+               for p in self.signature.parameters.values()):
+            raise ValueError("Variadic kernel signatures are unsupported")
+
+    def __getitem__(self, grid):
+        def launch(*args, **kwargs):
+            parameters = self.signature.parameters
+            inputs = {k: v for k, v in kwargs.items() if k in parameters}
+            options = {k: v for k, v in kwargs.items() if k not in parameters}
+            bound = self.signature.bind(*args, **inputs)
+            bound.apply_defaults()
+            # Resolve once: the guard and the selected launch see the same grid.
+            resolved = grid({**bound.arguments, **options}) if callable(grid) else grid
+            resolved = tuple(resolved)
+            values = tuple(bound.arguments[name] for name in parameters)
+            valid = False
+            if self.guard is not None:
+                try:
+                    valid = self.guard(values, resolved, MappingProxyType(options)) is True
+                except (TypeError, ValueError, OverflowError):
+                    pass  # Unrepresentable checks cannot authorize widening.
+            kernel = self.fast if valid else self.original
+            return kernel[resolved](*args, **kwargs)
+        return launch

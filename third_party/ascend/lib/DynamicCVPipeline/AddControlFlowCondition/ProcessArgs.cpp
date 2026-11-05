@@ -257,8 +257,9 @@ cloneChainForBlock(SharedArgInfo &info, Operation *compOp,
       opMapper.map(oldVal, newVal);
     }
 
-    if (llvm::all_of(op->getResults(),
-                     [&](Value result) { return resultMapper.contains(result); }))
+    if (llvm::all_of(op->getResults(), [&](Value result) {
+          return resultMapper.contains(result);
+        }))
       continue;
 
     Operation *cloned = cloneBuilder.clone(*op, opMapper);
@@ -282,13 +283,11 @@ cloneChainForBlock(SharedArgInfo &info, Operation *compOp,
 
 // Replaces iter_arg uses in non-owner block with the cloned iter_arg.
 // argRemapping maps migrated iter_arg Value -> new extra iter_arg Value.
-static LogicalResult replaceIterArgsInBlock(SharedArgInfo &info,
-                                            Block *newBlock,
-                                            IRMapping &argRemapping,
-                                            const IRMapping &resultMapper,
-                                            ArrayRef<Value> consumerValues,
-                                            Operation *loopOp,
-                                            OpBuilder &cloneBuilder) {
+static LogicalResult
+replaceIterArgsInBlock(SharedArgInfo &info, Block *newBlock,
+                       IRMapping &argRemapping, const IRMapping &resultMapper,
+                       ArrayRef<Value> consumerValues, Operation *loopOp,
+                       OpBuilder &cloneBuilder) {
   for (auto arg : newBlock->getArguments()) {
     if (!argRemapping.contains(arg)) {
       continue;
@@ -383,12 +382,10 @@ static LogicalResult processSharedArgsIteration(
 
     // D072 consumer conditions must precede consumer operations. Keep the
     // original insertion point for other shared args to preserve IR order.
-    Operation *insertAfter =
-        consumerValues.empty() ? lastOpInBlock : nullptr;
-    Operation *insertBefore =
-        consumerValues.empty() ? nullptr : firstOpInBlock;
+    Operation *insertAfter = consumerValues.empty() ? lastOpInBlock : nullptr;
+    Operation *insertBefore = consumerValues.empty() ? nullptr : firstOpInBlock;
     OpBuilder cloneBuilder(newBlock, insertBefore ? insertBefore->getIterator()
-                                                   : newBlock->end());
+                                                  : newBlock->end());
     if (insertAfter)
       cloneBuilder.setInsertionPointAfter(insertAfter);
 
@@ -457,11 +454,9 @@ static LogicalResult prepareSharedArgsData(
   LDBG("[INFO]: Found " << sharedArgsInfo.size()
                         << " shared iter_args to process");
 
-  if (failed(buildCompInfoForSharedArgs(loopOp, body, sharedArgsInfo,
-                                        sharedArgToCompOp,
-                                        sharedArgToCompValue,
-                                        sharedArgToConsumerValues,
-                                        sharedArgToChainOps))) {
+  if (failed(buildCompInfoForSharedArgs(
+          loopOp, body, sharedArgsInfo, sharedArgToCompOp, sharedArgToCompValue,
+          sharedArgToConsumerValues, sharedArgToChainOps))) {
     return failure();
   }
 
@@ -622,11 +617,10 @@ ProcessArgsPass::processSharedIterArgsInLoop(Operation *op,
   }
 
   if (auto forOp = dyn_cast<scf::ForOp>(op)) {
-    return processSharedArgsInForOp(forOp, cast<scf::ForOp>(newOp),
-                                    sharedArgsInfo, sharedArgToCompOp,
-                                    sharedArgToCompValue,
-                                    sharedArgToConsumerValues,
-                                    sharedArgToChainOps, info);
+    return processSharedArgsInForOp(
+        forOp, cast<scf::ForOp>(newOp), sharedArgsInfo, sharedArgToCompOp,
+        sharedArgToCompValue, sharedArgToConsumerValues, sharedArgToChainOps,
+        info);
   }
   return processSharedArgsInWhileOp(
       cast<scf::WhileOp>(op), cast<scf::WhileOp>(newOp), sharedArgsInfo,

@@ -17,7 +17,7 @@ on:
         required: true
 
 concurrency:
-  group: dcv-pipeline-${{ github.event_name == 'workflow_dispatch' && github.run_id || 'queue' }}--${{ github.event.pull_request.number || github.ref }}
+  group: dcv-pipeline-${{ github.event_name == 'workflow_dispatch' && github.run_id || format('pr-{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) }}
   cancel-in-progress: true
 
 permissions: {}

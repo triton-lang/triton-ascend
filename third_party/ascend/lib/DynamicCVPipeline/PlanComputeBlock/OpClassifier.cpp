@@ -226,9 +226,8 @@ void OpClassifierPass::matchLoadPattern(Operation *def) {
     return;
   }
 
-  // TODO(cv-pipeline): PackMemrefPass should consume the implicit-transpose
-  // annotation when it packs the unit (packing and stamping it as VECTOR); this
-  // re-check only covers the raw `to_tensor` fallback.
+  // PackMemref pins annotated load scopes to VECTOR. Unpacked load units
+  // still need this check on the raw to_tensor result.
   // special case: implicit transpose -> remains vector
   if (utils::getAnnotateOpWithAttr(toTensorOp.getResult(),
                                    hivm::kMayImplicitTransposeWithLastAxis)) {
@@ -273,6 +272,12 @@ void OpClassifierPass::matchLoadPattern(Operation *def) {
 //   When transpose's input comes from compute ops (e.g., arith.truncf),
 //   transpose itself remains CUBE, but its upstream chain stays VECTOR to avoid
 //   unnecessary CUBE expansion.
+//   A packed load scope (`scope::ScopeOp` tagged `ssbuffer.load`) feeding
+//   transpose is coloured directly via markCube: its alloc/copy/to_tensor body
+//   lives inside the region with no external SSA operands, so no BFS seeding is
+//   needed (unlike a raw to_tensor, whose separate memref alloc
+//   matchLoadPattern also seeds). PackMemref pre-classifies implicit-transpose
+//   units, which markCube's pre-classified guard then leaves as VECTOR.
 // Purpose: transpose is a common preprocessing op for matmul; executing on CUBE
 // leverages matrix transfer capabilities.
 // ============================================================================
@@ -298,9 +303,21 @@ void OpClassifierPass::matchTransposePattern(Operation *def) {
   auto operands = transposeOp->getOperands();
   for (const auto &op : operands) {
     auto defOp = op.getDefiningOp();
-    if (!shouldMarkCubeSeed(defOp) ||
-        utils::getAnnotateOpWithAttr(op,
+    // Implicit-transpose values stay VECTOR regardless of who produces them,
+    // so the annotation is checked before any CUBE marking (incl. load scopes).
+    if (utils::getAnnotateOpWithAttr(op,
                                      hivm::kMayImplicitTransposeWithLastAxis)) {
+      continue;
+    }
+    // A packed load scope is an atomic load unit: its alloc/copy/to_tensor
+    // body lives inside the region with no external SSA operands, so markCube
+    // alone colours it. A raw to_tensor still needs matchLoadPattern to also
+    // seed its separate memref alloc, so it is left to the gate below.
+    if (CVPipeline::isLoadScope(defOp)) {
+      markCube(defOp);
+      continue;
+    }
+    if (!shouldMarkCubeSeed(defOp)) {
       continue;
     }
     if (llvm::isa<bufferization::ToTensorOp>(defOp)) {
@@ -1204,6 +1221,13 @@ Value getViewSource(Value val) {
 // Any tensor-producing compute op means the loop does real vector work and must
 // not be swallowed into the cube pipe.
 bool isDisqualifyingLoaderOp(Operation *op) {
+  // Whole-loop CUBE colouring must respect a packed load's fixed core type.
+  // An unclassified load can still be coloured by the loop's consumers.
+  if (CVPipeline::isLoadScope(op) && op->hasAttr(CVPipeline::kCoreType) &&
+      CVPipeline::getOpCoreType(op) != CVPipeline::CoreType::CUBE_ONLY) {
+    return true;
+  }
+
   if (isa<linalg::MatmulOp, linalg::ReduceOp, linalg::BroadcastOp,
           linalg::GenericOp, linalg::MapOp>(op)) {
     return true;

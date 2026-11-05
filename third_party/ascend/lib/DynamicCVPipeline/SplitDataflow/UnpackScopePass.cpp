@@ -116,6 +116,7 @@ public:
         stampUnitAttrs(op, attrs);
       }
     }
+    LOG_DEBUG("After UnpackScopeOp : " << module << "\n");
   }
 
   [[nodiscard]] llvm::StringRef getArgument() const final {

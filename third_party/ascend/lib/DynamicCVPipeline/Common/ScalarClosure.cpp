@@ -25,7 +25,6 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/IRMapping.h"
@@ -56,11 +55,12 @@ void ScalarClosure::collectOuterDependency(Operation *op) {
 };
 
 void ScalarClosure::collectScalarClosure(Value val) {
-  if (!val || isa<TensorType>(val.getType())) {
+  if (!val || isa<TensorType, BaseMemRefType>(val.getType()) ||
+      !isScalarLike(val)) {
     return;
   }
   Operation *defOp = val.getDefiningOp();
-  if (!defOp || llvm::isa<memref::AllocOp, memref::AllocaOp>(defOp)) {
+  if (!defOp) {
     return;
   }
 
@@ -71,9 +71,12 @@ void ScalarClosure::collectScalarClosure(Value val) {
     return;
   }
 
-  // hard to determine - if scf ops have scalar/memref result, should we clone
-  // the op as well? Perhaps walk into the subregions and clone the
-  // corresponding ops would be better. But for now let's just clone them
+  // A scalar result does not make its whole defining op a scalar operation.
+  // Keep multi-result producers outside the closure and capture their values.
+  if (defOp->getNumResults() != 1) {
+    return;
+  }
+
   collectOuterDependency(defOp);
   scalarOps.insert(defOp);
 }

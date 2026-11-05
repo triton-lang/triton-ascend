@@ -34,9 +34,8 @@
 
 namespace mlir::CVPipeline {
 
-/// Collects the scalar / view ops that a set of ops depends on, stopping at the
-/// first tensor dependency. Used to clone minimal index computation into a
-/// split block, and to decide which view ops travel with a packed scope.
+/// Collects single-result scalar producers that a set of ops depends on.
+/// Non-scalar values and multi-result producers form closure boundaries.
 class ScalarClosure {
 public:
   ScalarClosure(Block *block, ArrayRef<Operation *> ops, bool includeParent);
@@ -44,10 +43,9 @@ public:
   /// Collects the closure of `ops` into `scalarOps`.
   void collect();
 
-  /// Returns the collected scalar ops in insertion order. Collecting does not
-  /// define an order: callers that need dominance order must call
-  /// `sortByDomOrder` (`IROrder.h`) on their own copy, which keeps the ordering
-  /// requirement visible at the call site.
+  /// Returns the collected scalar ops in dependency order: producers precede
+  /// their users. Independent ops need not follow IR order; callers that need
+  /// that order must call `sortByDomOrder` (`IROrder.h`) on their own copy.
   llvm::ArrayRef<Operation *> getScalars() const;
 
   /// Comparator for dominance order: true when `a` strictly precedes `b`.

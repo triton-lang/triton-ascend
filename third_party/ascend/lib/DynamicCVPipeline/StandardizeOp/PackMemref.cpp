@@ -47,9 +47,12 @@
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
 #include "ascend/include/DynamicCVPipeline/StandardizeOp/Passes.h"
 
+#include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
 #include "bishengir/Dialect/HIVM/IR/HIVMImpl.h"
+#include "bishengir/Dialect/HIVM/Utils/Utils.h"
 #include "bishengir/Dialect/Scope/IR/Scope.h"
+#include "bishengir/Dialect/Utils/Util.h"
 
 using namespace mlir;
 using namespace CVPipeline;
@@ -101,9 +104,9 @@ public:
   void runOnOperation() override;
 
   void getDependentDialects(mlir::DialectRegistry &registry) const override {
-    registry
-        .insert<scope::ScopeDialect, hivm::HIVMDialect,
-                bufferization::BufferizationDialect, memref::MemRefDialect>();
+    registry.insert<annotation::AnnotationDialect, scope::ScopeDialect,
+                    hivm::HIVMDialect, bufferization::BufferizationDialect,
+                    memref::MemRefDialect>();
   }
 
   [[nodiscard]] llvm::StringRef getArgument() const final {
@@ -117,6 +120,9 @@ public:
 static void packCustomOpUnit(hivm::CustomOp customOp);
 // Pack `memref.alloc -> <ops on it> -> bufferization.to_tensor` load units.
 static PackUnitStatus packLoadUnit(memref::AllocOp allocOp);
+// Collect the unit's same-block view and scalar dependencies in IR order.
+static SmallVector<Operation *>
+collectUnitDependencies(ArrayRef<Operation *> unitOps);
 // Materializes the unit plus its closure into the op list of a new scope.
 static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
                                               ArrayRef<Operation *> scalars);
@@ -185,11 +191,10 @@ static void packCustomOpUnit(hivm::CustomOp customOp) {
   SmallVector<Operation *> packList(unitOps);
   if (sameBlock) {
     sortByDomOrder(unitOps);
-    ScalarClosure closure(block, unitOps, false);
-    closure.collect();
-    SmallVector<Operation *> scalars(closure.getScalars());
-    sortByDomOrder(scalars);
-    packList = buildPackList(unitOps, scalars);
+    SmallVector<Operation *> dependencies = collectUnitDependencies(unitOps);
+
+    // Build the scope contents from the unit and its moved/cloned dependencies.
+    packList = buildPackList(unitOps, dependencies);
   } else {
     LDBG("custom op unit spans blocks; packing it without a closure");
   }
@@ -382,14 +387,72 @@ static bool unitReadsGlobalMemory(ArrayRef<Operation *> unitOps) {
   return false;
 }
 
+/// Collects memref view definitions read by the unit, including dependencies
+/// of nested operations. Views in other blocks and non-view producers stay
+/// outside; their values are captured by the packed scope.
+static SmallVector<Operation *>
+collectMemDefView(ArrayRef<Operation *> unitOps) {
+  if (unitOps.empty()) {
+    return {};
+  }
+  Block *block = unitOps.front()->getBlock();
+  llvm::DenseSet<Operation *> visited(unitOps.begin(), unitOps.end());
+  SmallVector<Value> worklist;
+  for (Operation *op : unitOps) {
+    op->walk([&](Operation *nested) {
+      for (Value operand : nested->getOperands()) {
+        if (isa<BaseMemRefType>(operand.getType())) {
+          worklist.push_back(operand);
+        }
+      }
+    });
+  }
+
+  SmallVector<Operation *> views;
+  while (!worklist.empty()) {
+    Value value = worklist.pop_back_val();
+    auto view = value.getDefiningOp<ViewLikeOpInterface>();
+    if (!view || view->getBlock() != block ||
+        !visited.insert(view.getOperation()).second) {
+      continue;
+    }
+    views.push_back(view.getOperation());
+    worklist.push_back(view.getViewSource());
+  }
+  return views;
+}
+
+/// Collects view and scalar dependencies without changing unit membership.
+/// All unit ops must belong to the same block.
+static SmallVector<Operation *>
+collectUnitDependencies(ArrayRef<Operation *> unitOps) {
+  if (unitOps.empty()) {
+    return {};
+  }
+  SmallVector<Operation *> dependencies = collectMemDefView(unitOps);
+
+  // Scan both the unit and its views for scalar dependencies, including
+  // address calculations. Keep views separate from unitOps so buildPackList
+  // can clone those that still have external users.
+  SmallVector<Operation *> roots(unitOps);
+  roots.append(dependencies);
+  ScalarClosure closure(unitOps.front()->getBlock(), roots, false);
+  closure.collect();
+  dependencies.append(closure.getScalars().begin(), closure.getScalars().end());
+
+  // Merge view and scalar dependencies in producer-before-consumer order.
+  sortByDomOrder(dependencies);
+  return dependencies;
+}
+
 /// Builds the dominance-ordered op list that moves into the scope: the unit ops
-/// plus the closure scalars. A scalar that still has a consumer outside the
+/// plus the view/scalar dependencies. An op with a consumer outside the
 /// unit is cloned, the internal consumers are rewired to the clone, and the
 /// original keeps dominating the external uses. A closure op that must stay
 /// where it is (`staysOutside` below) is skipped instead.
 /// Preconditions: every op of `unitOps` and `scalars` is a direct child of the
 /// same block (the closure is collected with `includeParent = false`), and
-/// `scalars` is sorted in dominance order by the caller.
+/// `scalars` contains view/scalar dependencies in dominance order.
 static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
                                               ArrayRef<Operation *> scalars) {
   llvm::DenseSet<Operation *> inUnit(unitOps.begin(), unitOps.end());
@@ -447,8 +510,7 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
   //   outside / pinned        | reads across the scope boundary -> copy
   //
   // Walking `scalars` backwards visits every consumer before its producers
-  // (dominance order), so one pass reaches the fixpoint; an unsorted container
-  // would need the fixpoint loop back.
+  // (dependency order), so one pass reaches the fixpoint.
   llvm::DenseSet<Operation *> copiedOps;
   for (Operation *scalarOp : llvm::reverse(scalars)) {
     bool escape = llvm::any_of(scalarOp->getResults(), [&](Value result) {
@@ -510,8 +572,8 @@ static SmallVector<Operation *> buildPackList(ArrayRef<Operation *> unitOps,
 /// Packs `allocOp -> <ops operating on it> -> bufferization.to_tensor` (the
 /// to_tensor possibly reached through a subview / reinterpret_cast) into one
 /// `scope::ScopeOp` tagged with `ssbuffer.load`. When the unit is driven by an
-/// ExtractedLoadOrStore loop the scope is stamped VECTOR right away
-/// (ExtractedLoadOrStore never runs on CUBE). Any deviation leaves the
+/// ExtractedLoadOrStore loop or carries an implicit-transpose annotation, the
+/// scope is stamped VECTOR right away. Any deviation leaves the
 /// allocation untouched and merely traces the reason.
 static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
   Value base = allocOp.getMemref();
@@ -540,7 +602,6 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
       unitOps.push_back(use.top);
     }
   }
-  sortByDomOrder(unitOps);
 
   if (!unitReadsGlobalMemory(unitOps)) {
     LDBG("skip " << base
@@ -548,18 +609,29 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
     return PackUnitStatus::Skipped;
   }
 
-  // Honour ScalarClosure for subviews / reinterpret_cast / scalars.
-  ScalarClosure closure(block, unitOps, false);
-  closure.collect();
+  // OpClassifier skips the packed body, so preserve the implicit-transpose
+  // restriction as an authoritative core type before hiding its annotations.
+  bool hasImplicitTranspose =
+      utils::getAnnotateOpWithAttr(base,
+                                   hivm::kMayImplicitTransposeWithLastAxis)
+          .has_value() ||
+      utils::getAnnotateOpWithAttr((*boundary).getResult(),
+                                   hivm::kMayImplicitTransposeWithLastAxis)
+          .has_value();
 
-  // Collection yields an unordered set: the escape analysis walks it backwards
-  // and relies on dominance order, so sort explicitly here.
-  SmallVector<Operation *> scalars(closure.getScalars());
-  sortByDomOrder(scalars);
+  // Include result annotations in the unit so buildPackList sorts them with
+  // the load. The explicit insertion point keeps late annotations from
+  // delaying the scope past an existing tensor user.
+  for (Operation *user : (*boundary).getResult().getUsers()) {
+    if (isa<annotation::MarkOp>(user) && user->getBlock() == block) {
+      unitOps.push_back(user);
+    }
+  }
 
-  SmallVector<Operation *> packList = buildPackList(unitOps, scalars);
+  SmallVector<Operation *> dependencies = collectUnitDependencies(unitOps);
+  SmallVector<Operation *> packList = buildPackList(unitOps, dependencies);
 
-  auto scopeOp = packScopeOp(packList);
+  auto scopeOp = packScopeOp(packList, *boundary);
   if (!scopeOp) {
     LDBG("skip load unit: scope packing failed; offending alloc: " << allocOp);
     return PackUnitStatus::Skipped;
@@ -567,8 +639,8 @@ static PackUnitStatus packLoadUnit(memref::AllocOp allocOp) {
 
   scopeOp->setAttr(CVPipeline::kScopeLoadAttr,
                    UnitAttr::get(scopeOp->getContext()));
-  // An ExtractedLoadOrStore loop always runs on VECTOR.
-  if (isExtractedLoadStore) {
+  // Extracted loads and implicit-transpose loads must stay on VECTOR.
+  if (isExtractedLoadStore || hasImplicitTranspose) {
     scopeOp->setAttr(kCoreType,
                      StringAttr::get(scopeOp->getContext(),
                                      coreTypeToString(CoreType::VECTOR_ONLY)));

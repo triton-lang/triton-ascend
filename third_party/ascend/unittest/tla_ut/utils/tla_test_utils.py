@@ -175,5 +175,23 @@ def check_kernel_binary(kernel):
     print("COMPILE PASS:", kernel.name, "->", ", ".join(str(path) for path in paths))
 
 
+def compile_native_kernel(fn, signature, constexprs):
+    """Compile an exact TLA specialization without allocating or launching tensors.
+
+    Uses TLA_TEST_ARCH or the current Ascend target and checks its own binary,
+    never a stale artifact found elsewhere in the cache.
+    """
+    import triton
+    from triton.language.extra.tla.jit import TLASTSource
+    from triton.runtime.driver import driver
+    from triton.backends.compiler import GPUTarget
+
+    arch = os.environ.get("TLA_TEST_ARCH")
+    target = GPUTarget("npu", arch, 0) if arch else driver.active.get_current_target()
+    kernel = triton.compile(TLASTSource(fn, signature, constexprs), target=target)
+    check_kernel_binary(kernel)
+    return kernel
+
+
 def matrix(cases):
     return pytest.mark.parametrize("case", cases, ids=[case["name"] for case in cases])

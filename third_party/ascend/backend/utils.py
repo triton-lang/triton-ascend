@@ -779,6 +779,8 @@ def _npu_ext_build_options(obj_name, kernel_launcher, asc_path, has_runtime_head
         "-lruntime",
         "-lascendcl",
     ]
+    if obj_name == "npu_utils":
+        cc_cmd.append("-ldl")
     if kernel_launcher == "torch":
         if obj_name == "npu_utils":
             cc_cmd += get_backend_func("get_cc_cmd_npu_utils")

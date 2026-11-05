@@ -69,7 +69,8 @@ extern "C" void triton_launch_kernel(const char *name, void *function,
         name,   function,
         stream, {gridX, gridY, gridZ},
         shapes, ranks,
-        kinds,  num_tensors};
+        kinds,  num_tensors,
+        nullptr};
     char error[512];
     int ret = adapter.launch(adapter.plan, &request, args, sizes, num_args,
                              error, sizeof(error));

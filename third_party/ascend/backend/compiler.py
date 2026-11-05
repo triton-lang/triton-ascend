@@ -346,6 +346,8 @@ def make_ttir(mod, metadata, opt):
     passes.ttir.add_loop_unroll(pm)
     if opt.enable_graph_optimize:
         ascend.passes.ttir.add_graph_optimize(pm, **_graph_optimize_kwargs(opt))
+    if AscendBackend.instrumentation:
+        AscendBackend.instrumentation.patch("ttir", pm, mod.context)
     pm.run(mod, 'make_ttir')
     if opt.debug:
         dump_manager = get_dump_manager(metadata["hash"])
@@ -440,6 +442,9 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             ascend.passes.ttir.set_enable_buffer_insert_optimization(mod)
             ascend.passes.ttir.add_dynamic_cv_pipeline(pm, compile_on_910_95)
 
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.patch("ttir_to_linalg", pm, mod.context)
+
         if _enable_msdebug():
             ascend.passes.ttir.add_normalize_debug_line_locations(pm)
 
@@ -476,6 +481,12 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         _export_program_grid_metadata(mod, metadata)
 
         linalg_text = _serialize_module(mod, opt)
+        if AscendBackend.instrumentation:
+            for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units",
+                        "profile_sections_per_block", "profile_sample_every_n"):
+                match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
+                if match:
+                    metadata[key] = int(match.group(1))
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)
@@ -1246,6 +1257,9 @@ class NPUOptions:
     launch_cooperative_grid: bool = False
     backend_name: str = 'cann'
     instrumentation_mode: str = ""
+    # Proton profile scratch bytes per block; 0 (default) keeps the
+    # driver-side profile scratch path inert.
+    profile_scratch_size: int = 0
     enable_graph_optimize: bool = True
     supported_fp8_dtypes: Tuple[str] = ("fp8e5", "fp8e4b15", "fp8e4nv", "fp8e4b8", "fp8e5b16")
     deprecated_fp8_dtypes: Tuple[str] = ()
@@ -1568,6 +1582,8 @@ def get_simt_stack_limit():
 
 
 class AscendBackend(BaseBackend):
+    # Set by proton's InstrumentationHook; mirrors CUDABackend.instrumentation.
+    instrumentation = None
 
     @staticmethod
     def get_jit_reuse_handler():
@@ -1661,6 +1677,8 @@ class AscendBackend(BaseBackend):
             "hash": metadata.hash,
             "debug": metadata.debug,
             "tensor_kinds": metadata.tensor_kinds,
+            "profile_scratch_size": getattr(metadata, "profile_scratch_size", 0),
+            "num_warps": getattr(metadata, "num_warps", 0),
         }
 
     def get_codegen_implementation(self, options):
@@ -1677,6 +1695,8 @@ class AscendBackend(BaseBackend):
         buffer_ir.load_dialects(ctx)
         ascend_ir.load_dialects(ctx)
         ascend.load_dialects(ctx)
+        if AscendBackend.instrumentation:
+            AscendBackend.instrumentation.load_dialects(ctx)
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":

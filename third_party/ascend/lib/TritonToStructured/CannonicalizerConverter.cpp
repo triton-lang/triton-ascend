@@ -73,6 +73,42 @@ using namespace mlir;
 using namespace triton;
 constexpr int INT_TYPE_BIT_WIDTH = 32;
 
+static void copyMissingAttrs(Operation *source, Operation *target) {
+  for (NamedAttribute attr : source->getAttrs()) {
+    if (!target->hasAttr(attr.getName()))
+      target->setAttr(attr.getName(), attr.getValue());
+  }
+}
+
+static bool matchBroadcastAddUniform(Value value, Value &broadcastSource,
+                                     Value &uniformSource) {
+  auto add = value.getDefiningOp<arith::AddIOp>();
+  if (!add)
+    return false;
+
+  for (auto [lhs, rhs] :
+       {std::pair<Value, Value>{add.getLhs(), add.getRhs()},
+        std::pair<Value, Value>{add.getRhs(), add.getLhs()}}) {
+    auto broadcast = lhs.getDefiningOp<triton::BroadcastOp>();
+    auto splat = rhs.getDefiningOp<triton::SplatOp>();
+    if (!broadcast || !splat || !isa<IntegerType>(splat.getSrc().getType()))
+      continue;
+    if (broadcast.getType() != value.getType() ||
+        splat.getType() != value.getType())
+      continue;
+    auto sourceType = dyn_cast<RankedTensorType>(broadcast.getSrc().getType());
+    auto resultType = dyn_cast<RankedTensorType>(value.getType());
+    if (!sourceType || !resultType ||
+        sourceType.getRank() != resultType.getRank() ||
+        sourceType.getEncoding() != resultType.getEncoding())
+      continue;
+    broadcastSource = broadcast.getSrc();
+    uniformSource = splat.getSrc();
+    return true;
+  }
+  return false;
+}
+
 // Match and rewrite pattern for optimizing cmp.ne (select(cond, 1, 0), 0) ->
 // cond This pattern transforms:
 //   %select = arith.select %cond, %true_val, %false_val
@@ -194,24 +230,109 @@ SplatCmpConverter::matchAndRewrite(arith::CmpIOp cmpOp,
 LogicalResult
 AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp,
                                       PatternRewriter &rewriter) const {
-  // Match ptr produced by splat
   auto ptr = addPtrOp.getPtr();
+  auto offset = addPtrOp.getOffset();
+  auto resultType = dyn_cast<RankedTensorType>(addPtrOp.getResult().getType());
+  if (!resultType)
+    return failure();
+
+  // 规范化正交的指针广播：
+  //   %small = tt.addptr %small_splat, %offset_a
+  //   %ptr_b = tt.broadcast %small
+  //   %offset_b = tt.broadcast %offset_b_small
+  //   %res = tt.addptr %ptr_b, %offset_b
+  // 转换为标量基础指针加完整偏移。否则指针广播会在 PtrAnalysis 中保留
+  // 非单例零 stride。
+  auto ptrBroadcast = ptr.getDefiningOp<triton::BroadcastOp>();
+  auto offsetBroadcast = offset.getDefiningOp<triton::BroadcastOp>();
+  if (ptrBroadcast && offsetBroadcast) {
+    auto smallAddPtr = ptrBroadcast.getSrc().getDefiningOp<triton::AddPtrOp>();
+    auto smallPtrSplat =
+        smallAddPtr ? smallAddPtr.getPtr().getDefiningOp<triton::SplatOp>()
+                    : nullptr;
+    if (smallAddPtr && smallPtrSplat &&
+        isa<triton::PointerType>(smallPtrSplat.getSrc().getType())) {
+      auto firstOffsetType =
+          dyn_cast<RankedTensorType>(smallAddPtr.getOffset().getType());
+      auto secondOffsetType =
+          dyn_cast<RankedTensorType>(offsetBroadcast.getSrc().getType());
+      if (!firstOffsetType || !secondOffsetType)
+        return failure();
+      Type offsetElementType = firstOffsetType.getElementType();
+      if (!offsetElementType.isInteger() ||
+          secondOffsetType.getElementType() != offsetElementType)
+        return failure();
+
+      Location loc = addPtrOp.getLoc();
+      auto ptrElementType =
+          cast<triton::PointerType>(smallPtrSplat.getSrc().getType());
+      auto fullPtrType =
+          RankedTensorType::get(resultType.getShape(), ptrElementType);
+      Value fullPtr = rewriter.create<triton::SplatOp>(loc, fullPtrType,
+                                                       smallPtrSplat.getSrc());
+      Value firstOffset = rewriter.create<triton::BroadcastOp>(
+          loc, resultType.clone(offsetElementType), smallAddPtr.getOffset());
+      Value secondOffset = rewriter.create<triton::BroadcastOp>(
+          loc, resultType.clone(offsetElementType), offsetBroadcast.getSrc());
+      Value fullOffset =
+          rewriter.create<arith::AddIOp>(loc, firstOffset, secondOffset);
+      Value fullAddPtr = rewriter.create<triton::AddPtrOp>(loc, resultType,
+                                                           fullPtr, fullOffset);
+      rewriter.replaceOp(addPtrOp, fullAddPtr);
+      return success();
+    }
+  }
+
+  // 循环重写后还会出现“广播指针 + 标量 splat 增量”的形态。标量增量在
+  // 广播源形状上等价，先在源形状更新指针，再广播结果，避免完整形状的
+  // 广播指针携带零 stride。
+  if (ptrBroadcast) {
+    auto offsetSplat = offset.getDefiningOp<triton::SplatOp>();
+    auto ptrSrcType =
+        dyn_cast<RankedTensorType>(ptrBroadcast.getSrc().getType());
+    if (offsetSplat && ptrSrcType &&
+        isa<IntegerType>(offsetSplat.getSrc().getType())) {
+      auto ptrElementType =
+          dyn_cast<triton::PointerType>(ptrSrcType.getElementType());
+      if (ptrElementType) {
+        Location loc = addPtrOp.getLoc();
+        auto smallPtrType = RankedTensorType::get(
+            ptrSrcType.getShape(), ptrElementType, ptrSrcType.getEncoding());
+        auto smallOffsetType = RankedTensorType::get(
+            ptrSrcType.getShape(), offsetSplat.getSrc().getType(),
+            ptrSrcType.getEncoding());
+        Value smallOffset = rewriter.create<triton::SplatOp>(
+            loc, smallOffsetType, offsetSplat.getSrc());
+        Value smallAddPtr = rewriter.create<triton::AddPtrOp>(
+            loc, smallPtrType, ptrBroadcast.getSrc(), smallOffset);
+        Value fullAddPtr =
+            rewriter.create<triton::BroadcastOp>(loc, resultType, smallAddPtr);
+        rewriter.replaceOp(addPtrOp, fullAddPtr);
+        return success();
+      }
+    }
+  }
+
+  // Match ptr produced by splat
   auto ptrSplatOp = ptr.getDefiningOp<triton::SplatOp>();
   if (!ptrSplatOp)
     return failure();
 
-  // Match offset produced by broadcast
-  auto offset = addPtrOp.getOffset();
-  auto offsetBroadcastOp = offset.getDefiningOp<triton::BroadcastOp>();
-  if (!offsetBroadcastOp)
+  // 偏移既可能直接来自广播，也可能是广播偏移与标量 splat 相加。CFO 会把
+  // 广播指针重建为完整形状的 addptr，此时把标量增量下沉到广播源形状，
+  // 可以避免广播指针携带零 stride。
+  Value offsetSrc;
+  Value uniformSrc;
+  if (auto offsetBroadcastOp = offset.getDefiningOp<triton::BroadcastOp>()) {
+    offsetSrc = offsetBroadcastOp.getSrc();
+  } else if (!matchBroadcastAddUniform(offset, offsetSrc, uniformSrc)) {
     return failure();
+  }
 
   // Extract sources
   auto ptrSrc = ptrSplatOp.getSrc();
-  auto offsetSrc = offsetBroadcastOp.getSrc();
 
   // Types must be ranked to reason about shapes
-  auto resultType = dyn_cast<RankedTensorType>(addPtrOp.getResult().getType());
   auto offsetSrcType = dyn_cast<RankedTensorType>(offsetSrc.getType());
   if (!resultType || !offsetSrcType)
     return failure();
@@ -231,6 +352,15 @@ AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp,
   // Create splat of ptrSrc to the smaller shape
   auto smallPtrSplat =
       rewriter.create<triton::SplatOp>(loc, smallPtrTensorType, ptrSrc);
+
+  if (uniformSrc) {
+    auto smallUniformType = RankedTensorType::get(
+        offsetSrcType.getShape(), offsetSrcType.getElementType(),
+        offsetSrcType.getEncoding());
+    Value smallUniform =
+        rewriter.create<triton::SplatOp>(loc, smallUniformType, uniformSrc);
+    offsetSrc = rewriter.create<arith::AddIOp>(loc, offsetSrc, smallUniform);
+  }
 
   // Create addptr on the smaller shape
   auto smallAdd = rewriter.create<triton::AddPtrOp>(
@@ -272,8 +402,12 @@ AddPtrSplatConverter::matchAndRewrite(triton::AddPtrOp addPtrOp,
 LogicalResult
 LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
                                         PatternRewriter &rewriter) const {
-  // Match when ptr is defined by BroadcastOp
+  // bool 到 int8 的 bitcast 在这里是透明的，把 load 移到广播前之后需要在
+  // 缩小的指针上重新创建。
   Value ptr = loadOp.getPtr();
+  auto ptrBitcast = ptr.getDefiningOp<triton::BitcastOp>();
+  if (ptrBitcast)
+    ptr = ptrBitcast.getSrc();
   auto ptrBroadcast = ptr.getDefiningOp<triton::BroadcastOp>();
   if (!ptrBroadcast)
     return failure();
@@ -299,6 +433,13 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
 
   Location loc = loadOp.getLoc();
   Value smallPtr = ptrBroadcast.getSrc();
+  if (ptrBitcast)
+    smallPtr = rewriter.create<triton::BitcastOp>(
+        loc,
+        RankedTensorType::get(
+            ptrSrcType.getShape(),
+            cast<RankedTensorType>(ptrBitcast.getType()).getElementType()),
+        smallPtr);
 
   // Preserve other operands of load (like 'other', cache, evict, isVolatile)
   Value other = loadOp.getOther();
@@ -341,6 +482,7 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
 
     auto newLoad = rewriter.create<triton::LoadOp>(
         loc, smallPtr, maskSrc, newOther, cache, evict, isVolatile);
+    copyMissingAttrs(loadOp.getOperation(), newLoad.getOperation());
     auto broadcasted = rewriter.create<triton::BroadcastOp>(
         loc, resultType, newLoad.getResult());
     rewriter.replaceOp(loadOp, broadcasted.getResult());
@@ -350,6 +492,7 @@ LoadBroadcastConverter::matchAndRewrite(triton::LoadOp loadOp,
   auto newLoad = rewriter.create<triton::LoadOp>(
       loc, smallPtr, /*mask=*/nullptr, /*other=*/nullptr, cache, evict,
       isVolatile);
+  copyMissingAttrs(loadOp.getOperation(), newLoad.getOperation());
   auto broadcasted = rewriter.create<triton::BroadcastOp>(loc, resultType,
                                                           newLoad.getResult());
   Value result = broadcasted.getResult();
@@ -533,12 +676,7 @@ LogicalResult ZeroStrideMakeTensorPtrConverter::matchAndRewrite(
 
 LogicalResult PromotePointerIterArgsPattern::matchAndRewrite(
     scf::ForOp forOp, PatternRewriter &rewriter) const {
-  // 1. Check if the loop meets transformation conditions
-  if (failed(matchLoop(forOp))) {
-    return failure();
-  }
-
-  // 2. Collect pointer iteration arguments to be processed
+  // 收集待处理的指针迭代参数
   if (!failed(matchAndRewriteForAddPtr(forOp, rewriter))) {
     return success();
   }
@@ -680,6 +818,10 @@ PromotePointerIterArgsPattern::collectPointerIterArgs(scf::ForOp forOp) const {
       if (info.has_value()) {
         info->oldIndex = static_cast<unsigned>(idx),
         info->basePointer = forOp.getInitArgs()[idx],
+        info->pointerSource = info->basePointer;
+        if (auto broadcast =
+                info->basePointer.getDefiningOp<triton::BroadcastOp>())
+          info->pointerSource = broadcast.getSrc();
         result.push_back(info.value());
       }
     }
@@ -711,6 +853,12 @@ bool PromotePointerIterArgsPattern::isPointerIterArg(Value iterArg) const {
   return ptrType && isa<triton::PointerType>(ptrType.getElementType());
 }
 
+static bool isPointerFromIterArg(Value ptr, Value iterArg) {
+  while (auto bitcast = ptr.getDefiningOp<triton::BitcastOp>())
+    ptr = bitcast.getSrc();
+  return ptr == iterArg;
+}
+
 std::optional<PromotePointerIterArgsPattern::PointerArgInfo>
 PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg,
                                                      Block &loopBody) const {
@@ -725,7 +873,7 @@ PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg,
     TypeSwitch<Operation *>(&op)
         .Case<triton::LoadOp, triton::StoreOp>([&](auto memoryOp) {
           // Check if this memory operation uses the pointer we're analyzing
-          if (memoryOp.getPtr() == iterArg)
+          if (isPointerFromIterArg(memoryOp.getPtr(), iterArg))
             ++memCount;
         })
         .Case<triton::AddPtrOp>([&](auto addPtrOp) {
@@ -761,6 +909,7 @@ PromotePointerIterArgsPattern::analyzePointerIterArg(Value iterArg,
     return PointerArgInfo{
         .oldIndex = 0,
         .basePointer = nullptr, // Will be set in collectPointerIterArgs
+        .pointerSource = nullptr,
         .offsetValue = offset,
         .newIterArg = nullptr, // Will be set in createNewIterArgs
         .addPtrValue = addPtrValue};
@@ -823,6 +972,7 @@ PromotePointerIterArgsPattern::analyzePointerIterArgForAdvancePtr(
     return PointerArgInfo{
         .oldIndex = 0,
         .basePointer = nullptr, // Will be set in collectPointerIterArgs
+        .pointerSource = nullptr,
         .offsetValue = nullptr,
         .newIterArg = nullptr, // Will be set in createNewIterArgs
         .addPtrValue = advancePtrValue,
@@ -1056,8 +1206,11 @@ Value PromotePointerIterArgsPattern::rebuildPointer(
   }
   if (!info)
     return nullptr;
-  // Create splat operation to broadcast integer offset to tensor shape
-  auto baseType = info->basePointer.getType();
+  // 先在广播源形状上构建指针更新，避免循环携带的指针包含广播，从而在后续
+  // 指针 lowering 中产生非单例零 stride。
+  Value pointerSource =
+      info->pointerSource ? info->pointerSource : info->basePointer;
+  auto baseType = pointerSource.getType();
   Value splatOffset = nullptr;
   if (auto rankedType = dyn_cast<RankedTensorType>(baseType)) {
     // Get the shape of the original tensor
@@ -1070,9 +1223,12 @@ Value PromotePointerIterArgsPattern::rebuildPointer(
     return nullptr;
   }
   // Create addptr operation: base pointer + splatted offset
-  return rewriter.create<triton::AddPtrOp>(forOp.getLoc(),
-                                           info->basePointer.getType(),
-                                           info->basePointer, splatOffset);
+  Value rebuilt = rewriter.create<triton::AddPtrOp>(
+      forOp.getLoc(), pointerSource.getType(), pointerSource, splatOffset);
+  if (pointerSource.getType() != info->basePointer.getType())
+    rebuilt = rewriter.create<triton::BroadcastOp>(
+        forOp.getLoc(), info->basePointer.getType(), rebuilt);
+  return rebuilt;
 }
 
 Value PromotePointerIterArgsPattern::rebuildPointerForAdvancePtr(
@@ -1289,10 +1445,15 @@ Value PromotePointerIterArgsPattern::createIntegerAdd(
   }
   if (!info)
     return nullptr;
+  Location loc = info->offsetValue.getLoc();
+  // 标量的 splat 仍然是循环内均匀的增量，整数循环状态只需携带该标量。
+  Value offset = info->offsetValue;
+  if (auto splatOp = offset.getDefiningOp<triton::SplatOp>())
+    offset = splatOp.getSrc();
+
   // Try to extract constant offset value
   Attribute offsetAttr;
-  if (matchPattern(info->offsetValue, m_Constant(&offsetAttr))) {
-    Location loc = info->offsetValue.getLoc();
+  if (matchPattern(offset, m_Constant(&offsetAttr))) {
     // Case 1: Integer attribute (scalar constant)
     if (auto intAttr = dyn_cast<IntegerAttr>(offsetAttr)) {
       Value constOffset = rewriter.create<arith::ConstantIntOp>(
@@ -1324,9 +1485,12 @@ Value PromotePointerIterArgsPattern::createIntegerAdd(
     }
   }
 
-  // Return nullptr if offset is not a constant (pattern only handles constant
-  // offsets)
-  return nullptr;
+  // 非 splat 的张量偏移会使循环携带的整数状态变成张量，无法折叠为标量递推。
+  if (isa<RankedTensorType>(offset.getType()))
+    return nullptr;
+  if (!offset.getType().isInteger(INT_TYPE_BIT_WIDTH))
+    return nullptr;
+  return rewriter.create<arith::AddIOp>(loc, info->newIterArg, offset);
 }
 
 LogicalResult PromotePointerIterArgsPattern::replaceResults(
@@ -1401,8 +1565,10 @@ Value PromotePointerIterArgsPattern::reconstructPointer(
   if (!info)
     return nullptr;
 
-  // Create splat operation to broadcast integer result to tensor shape
-  auto baseType = info->basePointer.getType();
+  // 在广播源形状上重建指针，然后恢复循环结果原本的指针类型。
+  Value pointerSource =
+      info->pointerSource ? info->pointerSource : info->basePointer;
+  auto baseType = pointerSource.getType();
   Value splatOffset = nullptr;
   if (auto rankedType = dyn_cast<RankedTensorType>(baseType)) {
     // Get the shape of the original tensor
@@ -1417,9 +1583,12 @@ Value PromotePointerIterArgsPattern::reconstructPointer(
 
   // Create a tensor with the same shape, where all elements are the integer
   // result
-  return rewriter.create<triton::AddPtrOp>(forOp.getLoc(),
-                                           info->basePointer.getType(),
-                                           info->basePointer, splatOffset);
+  Value rebuilt = rewriter.create<triton::AddPtrOp>(
+      forOp.getLoc(), pointerSource.getType(), pointerSource, splatOffset);
+  if (pointerSource.getType() != info->basePointer.getType())
+    rebuilt = rewriter.create<triton::BroadcastOp>(
+        forOp.getLoc(), info->basePointer.getType(), rebuilt);
+  return rebuilt;
 }
 
 void SimplifyTensorIterArgsPattern::ShapeChainInfo::dump() const {

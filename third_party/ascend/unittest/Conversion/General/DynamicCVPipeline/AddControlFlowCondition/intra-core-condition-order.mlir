@@ -10,7 +10,7 @@
 //   sgt IF1#0, slt DEP1, then-yield subi IF1#0 then addi DEP1.
 
 // CHECK-LABEL: func.func @intra_core_condition_order
-// CHECK: iter_args(%[[CNT0:.*]] = %{{[^,]+}}, %[[CNT1:.*]] = %{{[^,]+}}, %[[CNT2:.*]] = %{{[^,]+}}, %[[DEP0:.*]] = %{{[^,]+}}, %[[DEP1:.*]] = %{{[^,)]+}})
+// CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT0:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT1:[^ ,]+]] = %{{[^ ,]+}}, %[[CNT2:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP0:[^ ,]+]] = %{{[^ ,]+}}, %[[DEP1:[^ ,]+]] = %{{[^ ,]+}})
 // CHECK: arith.cmpi slt, %[[DEP0]], %{{.*}}
 // CHECK: %[[IF1:[0-9]+]]:2 = scf.if
 // CHECK: arith.addi %[[DEP0]], %{{.*}}

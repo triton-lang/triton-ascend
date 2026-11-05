@@ -48,6 +48,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/SymbolTable.h"
 #include "mlir/IR/TypeRange.h"
 #include "mlir/IR/TypeUtilities.h"
@@ -1844,6 +1845,475 @@ TritonToLinalgPass::processPtrBroadcastOperations(ModuleOp moduleOp) {
   return success();
 }
 
+namespace TensorPointerDemotion {
+using namespace mlir;
+using namespace triton;
+
+namespace {
+
+bool containsPointerType(Type type) {
+  if (isa<triton::PointerType>(type))
+    return true;
+  if (auto shapedType = dyn_cast<ShapedType>(type))
+    return containsPointerType(shapedType.getElementType());
+  return false;
+}
+
+std::optional<triton::PointerType>
+getScalarPointerElement(RankedTensorType tensorType) {
+  auto pointerType = dyn_cast<triton::PointerType>(tensorType.getElementType());
+  if (!pointerType || isa<ShapedType>(pointerType.getPointeeType()))
+    return std::nullopt;
+  return pointerType;
+}
+
+std::optional<int64_t> getElementByteSize(Type elementType) {
+  if (auto intType = dyn_cast<IntegerType>(elementType))
+    return (intType.getWidth() + 7) / 8;
+  if (auto floatType = dyn_cast<FloatType>(elementType))
+    return (floatType.getWidth() + 7) / 8;
+  return std::nullopt;
+}
+
+Value createI64SplatConstant(IRRewriter &rewriter, Location loc,
+                             ArrayRef<int64_t> shape, int64_t value) {
+  auto type = RankedTensorType::get(shape, rewriter.getI64Type());
+  auto attr = DenseElementsAttr::get(
+      type, ArrayRef<Attribute>{rewriter.getI64IntegerAttr(value)});
+  return rewriter.create<arith::ConstantOp>(loc, type, attr);
+}
+
+bool isIntDerived(Value value) {
+  auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+  if (tensorType && tensorType.getElementType().isInteger(64))
+    return true;
+
+  auto *def = value.getDefiningOp();
+  if (!def)
+    return false;
+
+  if (isa<triton::IntToPtrOp>(def))
+    return true;
+
+  if (auto ifOp = dyn_cast<scf::IfOp>(def)) {
+    unsigned index = cast<OpResult>(value).getResultNumber();
+    return isIntDerived(cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator())
+                            .getOperand(index)) &&
+           isIntDerived(cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator())
+                            .getOperand(index));
+  }
+  if (auto forOp = dyn_cast<scf::ForOp>(def)) {
+    unsigned index = cast<OpResult>(value).getResultNumber();
+    return isIntDerived(
+        cast<scf::YieldOp>(forOp.getBody()->getTerminator()).getOperand(index));
+  }
+  if (auto whileOp = dyn_cast<scf::WhileOp>(def)) {
+    unsigned index = cast<OpResult>(value).getResultNumber();
+    return isIntDerived(
+        cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator())
+            .getOperand(index));
+  }
+
+  if (isa<triton::SplatOp, triton::BroadcastOp>(def) &&
+      isa<triton::PointerType>(def->getOperand(0).getType()))
+    return false;
+
+  if (tensorType && isa<triton::PointerType>(tensorType.getElementType())) {
+    if (def->getNumRegions() != 0 || def->getNumOperands() == 0)
+      return false;
+    bool hasPointerOperand =
+        llvm::any_of(def->getOperands(), [](Value operand) {
+          return containsPointerType(operand.getType());
+        });
+    if (!hasPointerOperand)
+      return true;
+    return llvm::any_of(def->getOperands(), [](Value operand) {
+      return containsPointerType(operand.getType()) && isIntDerived(operand);
+    });
+  }
+  return false;
+}
+
+FailureOr<Value> materializeTensorAddress(Value value, Location loc,
+                                          IRRewriter &rewriter) {
+  if (auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+      tensorType && tensorType.getElementType().isInteger(64))
+    return value;
+
+  if (auto op = value.getDefiningOp<triton::IntToPtrOp>())
+    return op.getSrc();
+
+  if (auto pointerType = dyn_cast<triton::PointerType>(value.getType())) {
+    if (isa<ShapedType>(pointerType.getPointeeType()))
+      return failure();
+    return rewriter
+        .create<triton::PtrToIntOp>(loc, rewriter.getI64Type(), value)
+        .getResult();
+  }
+
+  auto tensorType = dyn_cast<RankedTensorType>(value.getType());
+  if (!tensorType)
+    return failure();
+  auto addrType =
+      RankedTensorType::get(tensorType.getShape(), rewriter.getI64Type());
+
+  if (auto op = value.getDefiningOp<triton::SplatOp>()) {
+    FailureOr<Value> addr =
+        materializeTensorAddress(op.getSrc(), loc, rewriter);
+    if (failed(addr))
+      return failure();
+    return rewriter.create<triton::SplatOp>(loc, addrType, *addr).getResult();
+  }
+
+  if (auto op = value.getDefiningOp<triton::BroadcastOp>()) {
+    FailureOr<Value> addr =
+        materializeTensorAddress(op.getSrc(), loc, rewriter);
+    if (failed(addr))
+      return failure();
+    return rewriter.create<triton::BroadcastOp>(loc, addrType, *addr)
+        .getResult();
+  }
+
+  if (auto op = value.getDefiningOp<triton::AddPtrOp>()) {
+    auto pointerType = getScalarPointerElement(tensorType);
+    if (!pointerType)
+      return failure();
+    auto byteSize = getElementByteSize(pointerType->getPointeeType());
+    if (!byteSize)
+      return failure();
+
+    FailureOr<Value> base =
+        materializeTensorAddress(op.getPtr(), loc, rewriter);
+    if (failed(base))
+      return failure();
+
+    Value offset = op.getOffset();
+    auto offsetType = dyn_cast<RankedTensorType>(offset.getType());
+    if (!offsetType)
+      return failure();
+    Value offset64 = offset;
+    if (!offsetType.getElementType().isInteger(64)) {
+      auto offset64Type =
+          RankedTensorType::get(offsetType.getShape(), rewriter.getI64Type());
+      offset64 = rewriter.create<arith::ExtSIOp>(loc, offset64Type, offset);
+    }
+    Value byteSizeSplat =
+        createI64SplatConstant(rewriter, loc, offsetType.getShape(), *byteSize);
+    Value scaled = rewriter.create<arith::MulIOp>(loc, offset64, byteSizeSplat);
+    return rewriter.create<arith::AddIOp>(loc, *base, scaled).getResult();
+  }
+
+  if (auto *def = value.getDefiningOp()) {
+    if (!getScalarPointerElement(tensorType) || def->getNumRegions() != 0)
+      return failure();
+    if (isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+            triton::AtomicCASOp, triton::MakeTensorPtrOp, triton::AdvanceOp,
+            triton::FuncOp, triton::ReturnOp, triton::CallOp, scf::IfOp,
+            scf::ForOp, scf::WhileOp>(def))
+      return failure();
+
+    SmallVector<Value> newOperands;
+    newOperands.reserve(def->getNumOperands());
+    for (Value operand : def->getOperands()) {
+      if (!containsPointerType(operand.getType())) {
+        newOperands.push_back(operand);
+        continue;
+      }
+      FailureOr<Value> addr = materializeTensorAddress(operand, loc, rewriter);
+      if (failed(addr))
+        return failure();
+      newOperands.push_back(*addr);
+    }
+
+    SmallVector<Type> newResultTypes;
+    newResultTypes.reserve(def->getNumResults());
+    for (Type resultType : def->getResultTypes()) {
+      auto ranked = dyn_cast<RankedTensorType>(resultType);
+      if (!ranked || !getScalarPointerElement(ranked))
+        return failure();
+      newResultTypes.push_back(
+          RankedTensorType::get(ranked.getShape(), rewriter.getI64Type()));
+    }
+
+    OperationState state(loc, def->getName());
+    state.addOperands(newOperands);
+    state.addTypes(newResultTypes);
+    state.addAttributes(def->getAttrs());
+    Operation *rebuilt = rewriter.create(state);
+    return rebuilt->getResult(cast<OpResult>(value).getResultNumber());
+  }
+  return failure();
+}
+
+LogicalResult demoteIfOp(scf::IfOp ifOp, IRRewriter &rewriter) {
+  SmallVector<unsigned> demoted;
+  for (auto [index, resultType] : llvm::enumerate(ifOp.getResultTypes())) {
+    auto tensorType = dyn_cast<RankedTensorType>(resultType);
+    if (!tensorType || !getScalarPointerElement(tensorType))
+      continue;
+    auto thenYield = cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator());
+    auto elseYield = cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator());
+    if (!isIntDerived(thenYield.getOperand(index)) ||
+        !isIntDerived(elseYield.getOperand(index)))
+      return failure();
+    demoted.push_back(index);
+  }
+  if (demoted.empty())
+    return failure();
+
+  for (unsigned index : demoted) {
+    auto tensorType = cast<RankedTensorType>(ifOp.getResultTypes()[index]);
+    auto addrType =
+        RankedTensorType::get(tensorType.getShape(), rewriter.getI64Type());
+    for (scf::YieldOp yield :
+         {cast<scf::YieldOp>(ifOp.thenBlock()->getTerminator()),
+          cast<scf::YieldOp>(ifOp.elseBlock()->getTerminator())}) {
+      rewriter.setInsertionPoint(yield);
+      FailureOr<Value> addr = materializeTensorAddress(
+          yield.getOperand(index), yield.getLoc(), rewriter);
+      if (failed(addr))
+        return failure();
+      SmallVector<Value> operands = llvm::to_vector(yield.getOperands());
+      operands[index] = *addr;
+      yield->setOperands(operands);
+    }
+    ifOp.getResult(index).setType(addrType);
+  }
+  return success();
+}
+
+LogicalResult demoteForOp(scf::ForOp forOp, IRRewriter &rewriter) {
+  SmallVector<unsigned> demoted;
+  auto yield = cast<scf::YieldOp>(forOp.getBody()->getTerminator());
+  for (auto [index, resultType] : llvm::enumerate(forOp.getResultTypes())) {
+    auto tensorType = dyn_cast<RankedTensorType>(resultType);
+    if (!tensorType || !getScalarPointerElement(tensorType))
+      continue;
+    if (!isIntDerived(yield.getOperand(index)))
+      return failure();
+    demoted.push_back(index);
+  }
+  if (demoted.empty())
+    return failure();
+
+  for (unsigned index : demoted) {
+    auto tensorType = cast<RankedTensorType>(forOp.getResultTypes()[index]);
+    auto addrType =
+        RankedTensorType::get(tensorType.getShape(), rewriter.getI64Type());
+
+    rewriter.setInsertionPoint(forOp);
+    FailureOr<Value> initAddr = materializeTensorAddress(
+        forOp.getInitArgs()[index], forOp.getLoc(), rewriter);
+    if (failed(initAddr))
+      return failure();
+    forOp->setOperand(forOp.getNumControlOperands() + index, *initAddr);
+
+    rewriter.setInsertionPoint(yield);
+    FailureOr<Value> yieldAddr = materializeTensorAddress(
+        yield.getOperand(index), yield.getLoc(), rewriter);
+    if (failed(yieldAddr))
+      return failure();
+    SmallVector<Value> operands = llvm::to_vector(yield.getOperands());
+    operands[index] = *yieldAddr;
+    yield->setOperands(operands);
+
+    forOp.getRegionIterArg(index).setType(addrType);
+    forOp.getResult(index).setType(addrType);
+  }
+  return success();
+}
+
+LogicalResult demoteWhileOp(scf::WhileOp whileOp, IRRewriter &rewriter) {
+  auto condition =
+      cast<scf::ConditionOp>(whileOp.getBefore().front().getTerminator());
+  auto yield = cast<scf::YieldOp>(whileOp.getAfter().front().getTerminator());
+  SmallVector<unsigned> demoted;
+  for (auto [index, resultType] : llvm::enumerate(whileOp.getResultTypes())) {
+    auto tensorType = dyn_cast<RankedTensorType>(resultType);
+    if (!tensorType || !getScalarPointerElement(tensorType))
+      continue;
+    if (!isIntDerived(yield.getOperand(index)))
+      return failure();
+    demoted.push_back(index);
+  }
+  if (demoted.empty())
+    return failure();
+
+  for (unsigned index : demoted) {
+    auto tensorType = cast<RankedTensorType>(whileOp.getResultTypes()[index]);
+    auto addrType =
+        RankedTensorType::get(tensorType.getShape(), rewriter.getI64Type());
+
+    rewriter.setInsertionPoint(whileOp);
+    FailureOr<Value> initAddr = materializeTensorAddress(
+        whileOp.getOperand(index), whileOp.getLoc(), rewriter);
+    if (failed(initAddr))
+      return failure();
+    whileOp->setOperand(index, *initAddr);
+
+    rewriter.setInsertionPoint(condition);
+    FailureOr<Value> condArg = materializeTensorAddress(
+        condition.getArgs()[index], condition.getLoc(), rewriter);
+    if (failed(condArg))
+      return failure();
+    SmallVector<Value> condOperands = llvm::to_vector(condition.getArgs());
+    condOperands[index] = *condArg;
+    condition->setOperands(1, condOperands.size(), condOperands);
+
+    rewriter.setInsertionPoint(yield);
+    FailureOr<Value> yieldAddr = materializeTensorAddress(
+        yield.getOperand(index), yield.getLoc(), rewriter);
+    if (failed(yieldAddr))
+      return failure();
+    SmallVector<Value> operands = llvm::to_vector(yield.getOperands());
+    operands[index] = *yieldAddr;
+    yield->setOperands(operands);
+
+    whileOp.getBefore().front().getArgument(index).setType(addrType);
+    whileOp.getAfter().front().getArgument(index).setType(addrType);
+    whileOp.getResult(index).setType(addrType);
+  }
+  return success();
+}
+
+LogicalResult diagnoseAddressTensorBases(ModuleOp moduleOp) {
+  LogicalResult result = success();
+  moduleOp.walk([&](Operation *op) {
+    if (!isa<triton::LoadOp, triton::StoreOp, triton::AtomicRMWOp,
+             triton::AtomicCASOp>(op))
+      return;
+    Value base = op->getOperand(0);
+    auto baseType = dyn_cast<RankedTensorType>(base.getType());
+    if (!baseType || !baseType.getElementType().isInteger(64))
+      return;
+    op->emitError()
+        << "tensor-of-address memory access is not supported yet: the base of "
+        << op->getName()
+        << " was demoted from a pointer tensor (per-element pointer "
+           "materialization is planned)";
+    result = failure();
+  });
+  return result;
+}
+
+} // namespace
+
+LogicalResult run(ModuleOp moduleOp) {
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    auto result = moduleOp.walk([&](Operation *op) {
+      IRRewriter rewriter(op->getContext());
+
+      if (auto intToPtr = dyn_cast<triton::IntToPtrOp>(op)) {
+        auto resultType = dyn_cast<RankedTensorType>(intToPtr.getType());
+        if (!resultType || !getScalarPointerElement(resultType))
+          return WalkResult::advance();
+        rewriter.replaceOp(intToPtr, intToPtr.getSrc());
+        changed = true;
+        return WalkResult::advance();
+      }
+
+      if (auto ptrToInt = dyn_cast<triton::PtrToIntOp>(op)) {
+        if (!isa<RankedTensorType>(ptrToInt.getType()))
+          return WalkResult::advance();
+        rewriter.setInsertionPoint(ptrToInt);
+        FailureOr<Value> addr = materializeTensorAddress(
+            ptrToInt.getSrc(), ptrToInt.getLoc(), rewriter);
+        if (failed(addr))
+          return WalkResult::advance();
+        rewriter.replaceOp(ptrToInt, *addr);
+        changed = true;
+        return WalkResult::advance();
+      }
+
+      if (auto addPtr = dyn_cast<triton::AddPtrOp>(op)) {
+        auto resultType = dyn_cast<RankedTensorType>(addPtr.getType());
+        if (!resultType || !getScalarPointerElement(resultType))
+          return WalkResult::advance();
+        if (!isIntDerived(addPtr.getResult()))
+          return WalkResult::advance();
+        rewriter.setInsertionPoint(addPtr);
+        FailureOr<Value> addr = materializeTensorAddress(
+            addPtr.getResult(), addPtr.getLoc(), rewriter);
+        if (failed(addr))
+          return WalkResult::advance();
+        rewriter.replaceOp(addPtr, *addr);
+        changed = true;
+        return WalkResult::advance();
+      }
+
+      if (auto ifOp = dyn_cast<scf::IfOp>(op)) {
+        if (succeeded(demoteIfOp(ifOp, rewriter)))
+          changed = true;
+        return WalkResult::advance();
+      }
+      if (auto forOp = dyn_cast<scf::ForOp>(op)) {
+        if (succeeded(demoteForOp(forOp, rewriter)))
+          changed = true;
+        return WalkResult::advance();
+      }
+      if (auto whileOp = dyn_cast<scf::WhileOp>(op)) {
+        if (succeeded(demoteWhileOp(whileOp, rewriter)))
+          changed = true;
+        return WalkResult::advance();
+      }
+
+      if (op->getNumResults() > 0 &&
+          !isa<scf::IfOp, scf::ForOp, scf::WhileOp>(op)) {
+        auto resultType =
+            dyn_cast<RankedTensorType>(op->getResult(0).getType());
+        if (resultType &&
+            isa<triton::PointerType>(resultType.getElementType()) &&
+            isIntDerived(op->getResult(0))) {
+          rewriter.setInsertionPoint(op);
+          FailureOr<Value> addr = materializeTensorAddress(
+              op->getResult(0), op->getLoc(), rewriter);
+          if (succeeded(addr)) {
+            if (op->getNumResults() == 1) {
+              rewriter.replaceOp(op, *addr);
+            } else if (Operation *rebuilt = addr->getDefiningOp()) {
+              rewriter.replaceOp(op, rebuilt->getResults());
+            }
+            changed = true;
+          }
+        }
+      }
+      return WalkResult::advance();
+    });
+    if (result.wasInterrupted())
+      return failure();
+  }
+
+  bool erased = true;
+  while (erased) {
+    erased = false;
+    moduleOp.walk([&](Operation *op) {
+      if (op->getNumRegions() != 0 || !op->use_empty() ||
+          op->getNumResults() == 0 || !isMemoryEffectFree(op))
+        return;
+      bool allPointerResults =
+          llvm::all_of(op->getResultTypes(), [](Type type) {
+            auto ranked = dyn_cast<RankedTensorType>(type);
+            return ranked && isa<triton::PointerType>(ranked.getElementType());
+          });
+      if (!allPointerResults)
+        return;
+      op->erase();
+      erased = true;
+    });
+  }
+
+  return diagnoseAddressTensorBases(moduleOp);
+}
+
+} // namespace TensorPointerDemotion
+
+LogicalResult
+TritonToLinalgPass::processTensorPointerDemotion(ModuleOp moduleOp) {
+  return TensorPointerDemotion::run(moduleOp);
+}
+
 LogicalResult TritonToLinalgPass::processStridedLoadStoreRewriteOperations(
     ModuleOp moduleOp) {
   // The strided-axis rewrites below only apply in 950 SIMT mode. On other
@@ -2048,6 +2518,13 @@ LogicalResult TritonToLinalgPass::prepareMemoryConversion(ModuleOp moduleOp) {
 
   // Normalize pointer broadcasts before the pointer-only type conversion.
   if (failed(processPtrBroadcastOperations(moduleOp))) {
+    return failure();
+  }
+
+  // Demote int-derived pointer tensors to i64 address tensors, after pointer
+  // broadcasts are normalized and before the memory stage's legality rules
+  // would reject the pointer-tensor value forms.
+  if (failed(processTensorPointerDemotion(moduleOp))) {
     return failure();
   }
 

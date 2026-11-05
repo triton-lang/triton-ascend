@@ -1432,6 +1432,7 @@ def vmaxs(src0, scalar, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     result = vector(handle, src0.type)
     if mode is MODE.ZEROING and tag == "i64" and explicit_mask:
         # The 64-bit integer fallback ignores its mask, so restore ZEROING here.
+        # TODO: remove this workaround once AVE i64 mask support is correct.
         zero = vfull(0, src0.dtype, lanes, _semantic=_semantic)
         return vsel(mask, result, zero, _semantic=_semantic)
     return _merge_inactive(result, mask, src0, mode, _semantic)

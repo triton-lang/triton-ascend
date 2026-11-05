@@ -3078,6 +3078,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
   Value rhsScale = adaptor.getBScale();
   RankedTensorType dstType = cast<RankedTensorType>(op.getType());
 
+  // E8M0 stores an unsigned exponent with bias 127, one scale per 32 values.
+  constexpr int64_t scaleBlockSize = 32;
+  constexpr uint8_t e8m0One = 127;
+  constexpr unsigned bf16FractionBits = 7;
+  constexpr unsigned bf16ExponentBits = 8;
+  // Code 0 is 2^-127: a BF16 subnormal with half of its significand set.
+  constexpr uint16_t bf16MinimumScaleBits = 1u << (bf16FractionBits - 1);
+  // Quiet NaN: all exponent bits set, plus the most significant fraction bit.
+  constexpr uint16_t bf16QuietNaNBits =
+      (((1u << bf16ExponentBits) - 1) << bf16FractionBits) |
+      bf16MinimumScaleBits;
+
   auto lhsElemType = op.getAElemType();
   auto rhsElemType = op.getBElemType();
 
@@ -3087,17 +3099,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
                      rhsElemType == triton::ScaleDotElemType::E5M2);
   bool isFP4Input = (lhsElemType == triton::ScaleDotElemType::E2M1) &&
                     (rhsElemType == triton::ScaleDotElemType::E2M1);
-  if ((isFP8Input || isFP4Input) && !lhsScale) {
+  if (!lhsScale) {
     auto lhsTy = cast<RankedTensorType>(lhs.getType());
     int64_t k = lhsTy.getShape().back();
     if (lhsElemType == triton::ScaleDotElemType::E2M1 && op.getLhsKPack())
       k *= 2;
-    auto defaultScaleTy = RankedTensorType::get(
-        {dstType.getDimSize(dstType.getRank() - 2), (k + 31) / 32},
-        rewriter.getI8Type());
+    auto defaultScaleTy =
+        RankedTensorType::get({dstType.getDimSize(dstType.getRank() - 2),
+                               (k + scaleBlockSize - 1) / scaleBlockSize},
+                              rewriter.getI8Type());
     // The native MX path uses E8M0, whose encoding of one is 127.
-    Value defaultScaleVal =
-        rewriter.create<arith::ConstantOp>(loc, rewriter.getI8IntegerAttr(127));
+    Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
+        loc, rewriter.getI8IntegerAttr(e8m0One));
     Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
         loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
     lhsScale = rewriter
@@ -3111,11 +3124,13 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       int64_t k = rhsTy.getDimSize(rhsTy.getRank() - 2);
       if (rhsElemType == triton::ScaleDotElemType::E2M1 && op.getRhsKPack())
         k *= 2;
-      auto defaultScaleTy = RankedTensorType::get(
-          {dstType.getShape().back(), (k + 31) / 32}, rewriter.getI8Type());
+      auto defaultScaleTy =
+          RankedTensorType::get({dstType.getShape().back(),
+                                 (k + scaleBlockSize - 1) / scaleBlockSize},
+                                rewriter.getI8Type());
       // E8M0 encodes a scale factor of one with exponent bias 127.
       Value defaultScaleVal = rewriter.create<arith::ConstantOp>(
-          loc, rewriter.getI8IntegerAttr(127));
+          loc, rewriter.getI8IntegerAttr(e8m0One));
       Value defaultScaleEmpty = rewriter.create<tensor::EmptyOp>(
           loc, defaultScaleTy.getShape(), defaultScaleTy.getElementType());
       rhsScale = rewriter
@@ -3173,10 +3188,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
 
   Value lhsScaleOut;
   Value rhsScaleOut;
-  Value c127 = rewriter.create<arith::ConstantOp>(
-      op.getLoc(), rewriter.getI16Type(), rewriter.getI16IntegerAttr(127));
-  Value c7 = rewriter.create<arith::ConstantOp>(
-      op.getLoc(), rewriter.getI16Type(), rewriter.getI16IntegerAttr(7));
+  Value exponentShift = rewriter.create<arith::ConstantOp>(
+      op.getLoc(), rewriter.getI16Type(),
+      rewriter.getI16IntegerAttr(bf16FractionBits));
   Type i16Ty = rewriter.getI16Type();
   Type bf16Ty = rewriter.getBF16Type();
   Type fp16Ty = rewriter.getF16Type();
@@ -3209,8 +3223,9 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
           .getResult();
     }
 
+    // x != x detects NaN without requiring the backend's unordered predicate.
     return rewriter
-        .create<arith::CmpFOp>(loc, arith::CmpFPredicate::UNO, scaleTensor,
+        .create<arith::CmpFOp>(loc, arith::CmpFPredicate::UNE, scaleTensor,
                                scaleTensor)
         .getResult();
   };
@@ -3223,6 +3238,23 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         .getResult();
   };
 
+  auto convertFloatScale = [&](Value scale, Type elementType) -> Value {
+    auto type = cast<RankedTensorType>(scale.getType());
+    if (type.getElementType() == elementType)
+      return scale;
+    auto targetType = type.clone(elementType);
+    if (type.getElementTypeBitWidth() < elementType.getIntOrFloatBitWidth())
+      return rewriter.create<arith::ExtFOp>(loc, targetType, scale);
+    // BF16 and FP16 have equal widths but different exponent ranges.
+    if (!type.getElementType().isF32())
+      scale = rewriter.create<arith::ExtFOp>(loc, type.clone(fp32Ty), scale);
+    auto result = rewriter.create<arith::TruncFOp>(loc, targetType, scale);
+    result->setAttr("round_mode",
+                    hfusion::RoundModeAttr::get(rewriter.getContext(),
+                                                hfusion::RoundMode::RINT));
+    return result;
+  };
+
   if (lhsScaleTy.getElementType().isIntOrIndex()) {
     RankedTensorType lhsScaleI16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), i16Ty);
@@ -3230,14 +3262,31 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     lhsScaleI16 =
         rewriter.create<arith::ExtUIOp>(op.getLoc(), lhsScaleI16Ty, lhsScale);
 
-    Value lhsShift7Empty = rewriter.create<tensor::EmptyOp>(
+    Value lhsExponentShiftEmpty = rewriter.create<tensor::EmptyOp>(
         op.getLoc(), lhsScaleI16Ty.getShape(), i16Ty);
-    Value lhsShift7 = rewriter
-                          .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
-                                                  ValueRange{lhsShift7Empty})
-                          .getResult(0);
-    Value lhsScaleI16Shifted =
-        rewriter.create<arith::ShLIOp>(op.getLoc(), lhsScaleI16, lhsShift7);
+    Value lhsExponentShift =
+        rewriter
+            .create<linalg::FillOp>(op.getLoc(), ValueRange{exponentShift},
+                                    ValueRange{lhsExponentShiftEmpty})
+            .getResult(0);
+    Value lhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
+        op.getLoc(), lhsScaleI16, lhsExponentShift);
+
+    // Shift handles normal E8M0 codes; 0 and 255 need explicit BF16 encodings.
+    Value lhsZero = rewriter.create<arith::ConstantOp>(
+        loc, lhsScaleI16Ty, rewriter.getZeroAttr(lhsScaleI16Ty));
+    Value lhsIsZero = rewriter.create<arith::CmpIOp>(
+        loc, arith::CmpIPredicate::eq, lhsScaleI16, lhsZero);
+    Value lhsMinimum = rewriter.create<arith::ConstantOp>(
+        loc, lhsScaleI16Ty,
+        DenseElementsAttr::get(lhsScaleI16Ty, APInt(16, bf16MinimumScaleBits)));
+    lhsScaleI16Shifted = rewriter.create<arith::SelectOp>(
+        loc, lhsIsZero, lhsMinimum, lhsScaleI16Shifted);
+    Value lhsNaN = rewriter.create<arith::ConstantOp>(
+        loc, lhsScaleI16Ty,
+        DenseElementsAttr::get(lhsScaleI16Ty, APInt(16, bf16QuietNaNBits)));
+    lhsScaleI16Shifted = rewriter.create<arith::SelectOp>(
+        loc, createNaNMask(lhsScale, lhsScaleTy), lhsNaN, lhsScaleI16Shifted);
 
     RankedTensorType lhsScaleBF16Ty =
         RankedTensorType::get(lhsScaleTy.getShape(), bf16Ty);
@@ -3256,15 +3305,10 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       lhsScaleOut = lhsScaleBF16;
     }
   } else {
-    lhsScaleOut =
-        rewriter
-            .create<arith::ExtFOp>(
-                op.getLoc(),
-                RankedTensorType::get(lhsScaleTy.getShape(), fp32Ty), lhsScale)
-            .getResult();
+    lhsScaleOut = convertFloatScale(lhsScale, lhsTy.getElementType());
   }
 
-  if (rhsScale && rhsScaleTy.getElementType().isIntOrIndex()) {
+  if (rhsScale) {
     if (rhsScaleTy.getRank() != 2) {
       return op.emitError("rhsScale must be 2D for transpose");
     }
@@ -3277,37 +3321,62 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     Value transposedRhsScale = rewriter.create<triton::TransOp>(
         op.getLoc(), transposedRhsScaleTy, rhsScale,
         DenseI32ArrayAttr::get(rewriter.getContext(), ArrayRef<int32_t>{1, 0}));
-    RankedTensorType rhsScaleI16Ty =
-        RankedTensorType::get(transposedShape, i16Ty);
-    Value rhsScaleI16;
-    rhsScaleI16 = rewriter.create<arith::ExtUIOp>(op.getLoc(), rhsScaleI16Ty,
-                                                  transposedRhsScale);
+    if (rhsScaleTy.getElementType().isIntOrIndex()) {
+      RankedTensorType rhsScaleI16Ty =
+          RankedTensorType::get(transposedShape, i16Ty);
+      Value rhsScaleI16;
+      rhsScaleI16 = rewriter.create<arith::ExtUIOp>(op.getLoc(), rhsScaleI16Ty,
+                                                    transposedRhsScale);
 
-    Value rhsShift7Empty = rewriter.create<tensor::EmptyOp>(
-        op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
-    Value rhsShift7 = rewriter
-                          .create<linalg::FillOp>(op.getLoc(), ValueRange{c7},
-                                                  ValueRange{rhsShift7Empty})
-                          .getResult(0);
-    Value rhsScaleI16Shifted =
-        rewriter.create<arith::ShLIOp>(op.getLoc(), rhsScaleI16, rhsShift7);
+      Value rhsExponentShiftEmpty = rewriter.create<tensor::EmptyOp>(
+          op.getLoc(), rhsScaleI16Ty.getShape(), i16Ty);
+      Value rhsExponentShift =
+          rewriter
+              .create<linalg::FillOp>(op.getLoc(), ValueRange{exponentShift},
+                                      ValueRange{rhsExponentShiftEmpty})
+              .getResult(0);
+      Value rhsScaleI16Shifted = rewriter.create<arith::ShLIOp>(
+          op.getLoc(), rhsScaleI16, rhsExponentShift);
 
-    RankedTensorType rhsScaleBF16Ty =
-        RankedTensorType::get(transposedShape, bf16Ty);
-    Value rhsScaleBF16 = rewriter.create<arith::BitcastOp>(
-        op.getLoc(), rhsScaleBF16Ty, rhsScaleI16Shifted);
+      // Shift handles normal E8M0 codes; 0 and 255 need explicit BF16
+      // encodings.
+      Value rhsZero = rewriter.create<arith::ConstantOp>(
+          loc, rhsScaleI16Ty, rewriter.getZeroAttr(rhsScaleI16Ty));
+      Value rhsIsZero = rewriter.create<arith::CmpIOp>(
+          loc, arith::CmpIPredicate::eq, rhsScaleI16, rhsZero);
+      Value rhsMinimum = rewriter.create<arith::ConstantOp>(
+          loc, rhsScaleI16Ty,
+          DenseElementsAttr::get(rhsScaleI16Ty,
+                                 APInt(16, bf16MinimumScaleBits)));
+      rhsScaleI16Shifted = rewriter.create<arith::SelectOp>(
+          loc, rhsIsZero, rhsMinimum, rhsScaleI16Shifted);
+      Value rhsNaN = rewriter.create<arith::ConstantOp>(
+          loc, rhsScaleI16Ty,
+          DenseElementsAttr::get(rhsScaleI16Ty, APInt(16, bf16QuietNaNBits)));
+      rhsScaleI16Shifted = rewriter.create<arith::SelectOp>(
+          loc, createNaNMask(transposedRhsScale, transposedRhsScaleTy), rhsNaN,
+          rhsScaleI16Shifted);
 
-    if (rhsTy.getElementType() == fp16Ty) {
-      RankedTensorType rhsScaleFp32Ty =
-          RankedTensorType::get(transposedShape, fp32Ty);
-      Value rhsScaleFp32 = rewriter.create<arith::ExtFOp>(
-          op.getLoc(), rhsScaleFp32Ty, rhsScaleBF16);
-      RankedTensorType rhsScaleFp16Ty =
-          RankedTensorType::get(transposedShape, fp16Ty);
-      rhsScaleOut = rewriter.create<arith::TruncFOp>(
-          op.getLoc(), rhsScaleFp16Ty, rhsScaleFp32);
+      RankedTensorType rhsScaleBF16Ty =
+          RankedTensorType::get(transposedShape, bf16Ty);
+      Value rhsScaleBF16 = rewriter.create<arith::BitcastOp>(
+          op.getLoc(), rhsScaleBF16Ty, rhsScaleI16Shifted);
+
+      if (rhsTy.getElementType() == fp16Ty) {
+        RankedTensorType rhsScaleFp32Ty =
+            RankedTensorType::get(transposedShape, fp32Ty);
+        Value rhsScaleFp32 = rewriter.create<arith::ExtFOp>(
+            op.getLoc(), rhsScaleFp32Ty, rhsScaleBF16);
+        RankedTensorType rhsScaleFp16Ty =
+            RankedTensorType::get(transposedShape, fp16Ty);
+        rhsScaleOut = rewriter.create<arith::TruncFOp>(
+            op.getLoc(), rhsScaleFp16Ty, rhsScaleFp32);
+      } else {
+        rhsScaleOut = rhsScaleBF16;
+      }
     } else {
-      rhsScaleOut = rhsScaleBF16;
+      rhsScaleOut =
+          convertFloatScale(transposedRhsScale, rhsTy.getElementType());
     }
     int64_t rhsD0 = rhsScaleTy.getShape()[1];
     int64_t rhsD1 = rhsScaleTy.getShape()[0];
@@ -3431,10 +3500,11 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
               broadcasted, reassociation)
           .getResult();
 
-  Value scaledLhsFinal =
-      rewriter.create<arith::MulFOp>(op.getLoc(), lhs, scaledLhs).getResult();
+  Value scaledLhsFinal = lhs;
+  if (op.getAScale())
+    scaledLhsFinal = rewriter.create<arith::MulFOp>(loc, lhs, scaledLhs);
 
-  if (!fastMath) {
+  if (!fastMath && op.getAScale()) {
     Value lhsScaleNaNMask = createNaNMask(lhsScale, lhsScaleTy);
     Value lhsExpandedMask =
         rewriter

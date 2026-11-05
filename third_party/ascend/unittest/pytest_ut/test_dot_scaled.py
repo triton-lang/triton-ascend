@@ -175,11 +175,10 @@ def test_scaled_dot_fast_math(normal_type):
         tl.store(out_ptr, out_tensor.to(a.dtype))
 
     def make_scale_tensor(scale, data_dtype):
-        if data_dtype == torch.bfloat16:
-            scale_i16 = scale.to(torch.int16)
-            return (scale_i16 << 7).view(torch.bfloat16)
-        scale_fp32 = (scale.to(torch.int32) << 23).view(torch.float32)
-        return scale_fp32.to(torch.float16)
+        # E8M0 codes 0..254 represent 2**(code - 127); code 255 represents NaN.
+        decoded = torch.exp2(scale.cpu().to(torch.float32) - 127)
+        decoded = torch.where(scale.cpu().eq(255), float("nan"), decoded)
+        return decoded.to(device=scale.device, dtype=data_dtype)
 
     def golden_ref(x, scale_x, y, scale_y, fast_math):
         upscale_x = make_scale_tensor(scale_x.repeat_interleave(x.shape[1] // scale_x.shape[1], dim=1), x.dtype)

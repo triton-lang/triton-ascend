@@ -80,11 +80,6 @@ void AddBlockIdForControlOpsPass::runOnOperation() {
                                   << "\n");
     }
   });
-  module->walk<WalkOrder::PreOrder>([](Operation *op) {
-    if (isa<scf::ForOp, scf::WhileOp>(op)) {
-      setOpLoopDepth(op);
-    }
-  });
 
   LOG_DEBUG("\n--- exit AddBlockIdForControlOpsPass --->\n");
 }

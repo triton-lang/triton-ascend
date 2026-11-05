@@ -475,17 +475,18 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
-        for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units", "profile_sections_per_block",
-                    "profile_sample_every_n"):
-            match = re.search(rf"\b{key}\s*=\s*(\d+)", str(mod))
-            if match:
-                metadata[key] = int(match.group(1))
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
         _export_program_grid_metadata(mod, metadata)
 
         linalg_text = _serialize_module(mod, opt)
+        if AscendBackend.instrumentation:
+            for key in ("profile_scratch_size", "profile_scratch_align", "profile_num_units",
+                        "profile_sections_per_block", "profile_sample_every_n"):
+                match = re.search(rf"\b{key}\s*=\s*(\d+)", linalg_text)
+                if match:
+                    metadata[key] = int(match.group(1))
         if opt.debug:
             dump_manager = get_dump_manager(metadata["hash"])
             dump_manager.put(linalg_text, "kernel.ttadapter.mlir", binary=False)

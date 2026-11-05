@@ -447,6 +447,9 @@ void init_tla_builder(py::module &&m) {
             } else if (kind == "expdif") {
               result = self.create<hivmave::VFExpdifOp>(resTy, lhs, rhs, mask)
                            .getResult();
+            } else if (kind == "prelu") {
+              result = self.create<hivmave::VFPReluOp>(resTy, lhs, rhs, mask)
+                           .getResult();
             } else if (kind == "max") {
               result = self.create<hivmave::VFMaxOp>(resTy, lhs, rhs, mask)
                            .getResult();
@@ -475,6 +478,57 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
           py::arg("mode") = "zeroing")
+      // Elementwise vector-vector shift (``ave.hir.vshl`` / ``ave.hir.vshr``).
+      // ``sign`` selects arithmetic vs logical right shift; ``mode`` is
+      // consumed by applySimdMode.
+      .def(
+          "create_simd_shift",
+          [](TLABuilder &self, std::string &kind, Value &lhs, Value &rhs,
+             Value &mask, bool sign, std::string mode) -> Value {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto signVal = builder.create<arith::ConstantOp>(
+                loc, builder.getBoolAttr(sign));
+            auto resTy = lhs.getType();
+            Value result;
+            if (kind == "shl") {
+              result = self.create<hivmave::VFShlOp>(resTy, lhs, rhs, mask,
+                                                     signVal)
+                           .getResult();
+            } else if (kind == "shr") {
+              result = self.create<hivmave::VFShrOp>(resTy, lhs, rhs, mask,
+                                                     signVal)
+                           .getResult();
+            } else {
+              throw std::invalid_argument("unknown shift kind: " + kind);
+            }
+            return applySimdMode(self, result, mask, mode);
+          },
+          py::arg("kind"), py::arg("lhs"), py::arg("rhs"), py::arg("mask"),
+          py::arg("sign"), py::arg("mode") = "zeroing")
+      // Elementwise vector-scalar left shift (``ave.hir.vshls``).  The scalar
+      // must already have the vector element type; ``mode`` is consumed by
+      // applySimdMode.
+      .def(
+          "create_simd_shift_scalar",
+          [](TLABuilder &self, std::string &kind, Value &vec, Value &scalar,
+             Value &mask, bool sign, std::string mode) -> Value {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto signVal = builder.create<arith::ConstantOp>(
+                loc, builder.getBoolAttr(sign));
+            auto resTy = vec.getType();
+            if (kind != "shls") {
+              throw std::invalid_argument("unknown scalar shift kind: " + kind);
+            }
+            auto result = self
+                              .create<hivmave::VFShlsOp>(resTy, vec, scalar,
+                                                         mask, signVal)
+                              .getResult();
+            return applySimdMode(self, result, mask, mode);
+          },
+          py::arg("kind"), py::arg("vec"), py::arg("scalar"),
+          py::arg("mask"), py::arg("sign"), py::arg("mode") = "zeroing")
       // Elementwise vector-scalar (``ave.hir.vmaxs`` / ``ave.hir.vsmaxs`` /
       // ``ave.hir.vumaxs``): the scalar operand must have exactly the vector's
       // element type (AVE_VecScalarOp::TypesMatchWith), so the Python frontend
@@ -502,6 +556,9 @@ void init_tla_builder(py::module &&m) {
                            .getResult();
             } else if (kind == "umins") {
               result = self.create<hivmave::VMinsUIOp>(resTy, vec, scalar, mask)
+                           .getResult();
+            } else if (kind == "lrelus") {
+              result = self.create<hivmave::VFLRelusOp>(resTy, vec, scalar, mask)
                            .getResult();
             } else {
               throw std::invalid_argument("unknown vector-scalar kind: " +
@@ -781,6 +838,23 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("scalar"), py::arg("elem_tag"), py::arg("lanes"),
           py::arg("mask"), py::arg("mode") = "zeroing")
+      // Pack b16 -> b8 or b32 -> b16 into one half of the destination.
+      // ``part`` is 0 for part_even and 1 for part_odd; the unwritten half is
+      // left unspecified by a single call.
+      .def(
+          "create_simd_vpack",
+          [](TLABuilder &self, Value &src, int32_t part,
+             py::object out_elem_tag, int32_t out_lanes) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto outElemTy = resolveSimdElementType(ctx, out_elem_tag);
+            auto outTy = VectorType::get({out_lanes}, outElemTy);
+            auto op = self.create<hivmave::VFVpackOp>(
+                outTy, src, builder.getI32IntegerAttr(part));
+            return op.getResult();
+          },
+          py::arg("src"), py::arg("part"), py::arg("out_elem_tag"),
+          py::arg("out_lanes"))
       .def(
           "create_simd_vcvt",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,

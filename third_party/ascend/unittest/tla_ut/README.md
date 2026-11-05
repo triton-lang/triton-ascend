@@ -24,6 +24,9 @@ The default `all` auto-degrades to `ir` when no NPU is available.
 - `dma/` — explicit load/store/copy/fixpipe/nd2nz cases.
 - `cube/` — matmul / mixed-core cases, including `mmad.py` for transposed
   operands and actual extents, and `mmad_frontend_contract.py` for host contracts.
+- `dtype/` — host-only contract tests for the scalar dtypes exported by `tla`.
+- `kernels/` — composite kernel accuracy and performance tests, with shared utilities.
+  Includes [DSA](kernels/dsa/README.md); IR/compile stages skip runtime tests.
 - `utils/` — shared helpers.
 - `simd_frontend_contract.py` — host-only SIMD frontend contract tests.
 

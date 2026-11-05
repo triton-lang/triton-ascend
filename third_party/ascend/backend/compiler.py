@@ -314,6 +314,20 @@ def _serialize_module(mod, opt):
     return mod.str_nodebug()
 
 
+def make_tla_ttir(mod, metadata, opt):
+    from triton.language.extra.tla.compiler import add_ttir_pipeline
+
+    if "hash" not in metadata:
+        metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
+    pm = ir.pass_manager(mod.context)
+    pm.enable_debug()
+    add_ttir_pipeline(pm)
+    pm.run(mod, 'make_tla_ttir')
+    if opt.debug:
+        get_dump_manager(metadata["hash"]).put(str(mod), "kernel.ttir.mlir", binary=False)
+    return mod
+
+
 def make_ttir(mod, metadata, opt):
     if "hash" not in metadata:
         metadata["hash"] = hashlib.sha256(f"{mod}-{metadata}".encode()).hexdigest()
@@ -339,6 +353,18 @@ def make_ttir(mod, metadata, opt):
         dump_manager.put(str(mod), "kernel.ttir.mlir", binary=False)
 
     return mod
+
+
+def tla_to_ttadapter(mod, metadata, opt):
+    from triton.language.extra.tla.compiler import lower_ttir
+
+    metadata["has_auto_blockify_blacklist_op"] = False
+    lower_ttir(mod, mod.context)
+    _export_program_grid_metadata(mod, metadata)
+    text = _serialize_module(mod, opt)
+    if opt.debug:
+        get_dump_manager(metadata["hash"]).put(text, "kernel.ttadapter.mlir", binary=False)
+    return text
 
 
 def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
@@ -399,12 +425,8 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
         ascend.passes.ttir.add_triton_to_structure(pm, False, False, compile_on_910_95)
         ascend.passes.ttir.add_triton_to_linalg(pm, False, named_ops, False, enable_select_analysis, compile_on_910_95,
                                                 compile_mode)
-        # Restricted to 910_95/950. The merged buffer is written by two disjoint
-        # memref.copy ops, and on 910_9362 the generated code only makes the
-        # copy next to the surviving to_tensor visible, so the other half of the
-        # tile reads back the padding value. The IR is unchanged through
-        # bishengir-opt, so the loss happens in code generation.
-        if compile_on_910_95:
+        # MergeConcatLoadBuffer is A5-only; A6 must not be enabled by its register-based flag.
+        if _is_a5_target_arch(getattr(metadata.get("target"), "arch", None)):
             ascend.passes.ttir.add_merge_concat_load_buffer(pm)
         if metadata["enable_dynamic_cv_pipeline"]:
             metadata["set_workspace_multibuffer"] = 0
@@ -448,10 +470,6 @@ def ttir_to_linalg(mod, metadata, opt, *, named_ops=True):
             print(f"[DEBUG] cmd list: {shlex.join(cmd)}")
 
         pm.run(mod, 'ttir_to_linalg')
-        # Infer TLA kernel-mode attributes for backend compiler.
-        if getattr(opt, "enable_tla_mode", False):
-            from triton.language.extra.tla.compiler import _infer_tla_kernel_mode
-            _infer_tla_kernel_mode(mod, mod.context)
         _adjust_metadata_by_module_result(mod, metadata, opt, enable_mixed_cv=enable_mixed_cv,
                                           disable_auto_inject_block_sync=disable_auto_inject_block_sync,
                                           set_workspace_multibuffer=set_workspace_multibuffer)
@@ -748,13 +766,13 @@ def linalg_to_bin_enable_npu_compile_910_95(linalg: str, metadata, opt):
 
         _compile_option_list += [f"--enable-optimized-metaop={is_cann_version_at_least(9, 2, 0)}"]
 
-        npu_utils = NPUUtils()
-        if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
+        has_limit, aic, aiv = NPUUtils().get_device_limit()
+        if _is_a5_target_arch(metadata["target"].arch) or has_limit:
             _compile_option_list += [
-                f"--custom-aic-number={npu_utils.get_aicore_num()}",
+                f"--custom-aic-number={aic}",
             ]
             _compile_option_list += [
-                f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                f"--custom-aiv-number={aiv}",
             ]
 
         if force_disable_ffts(opt.target_arch):
@@ -1503,11 +1521,11 @@ def ttir_to_npubin(mod, metadata, opt):
             if opt.disable_fma:
                 _compile_option_list += [f"--disable-fma"]
             if opt.compile_on_910_95:
-                npu_utils = NPUUtils()
-                if _is_a5_target_arch(metadata["target"].arch) or npu_utils.has_device_limit():
+                has_limit, aic, aiv = NPUUtils().get_device_limit()
+                if _is_a5_target_arch(metadata["target"].arch) or has_limit:
                     _compile_option_list += [
-                        f"--custom-aic-number={npu_utils.get_aicore_num()}",
-                        f"--custom-aiv-number={npu_utils.get_aivector_core_num()}",
+                        f"--custom-aic-number={aic}",
+                        f"--custom-aiv-number={aiv}",
                     ]
 
             bisheng_options = metadata["bisheng_options"]
@@ -1601,8 +1619,14 @@ class AscendBackend(BaseBackend):
             # NPUOptions retains compatibility defaults for legacy names so
             # JIT and Inductor can still recognize them as compile options.
             normalized_opts = opts if internal_options else _remove_deprecated_npu_options(opts)
+            frontend_kind = normalized_opts.get("_frontend_kind")
+            if frontend_kind not in (None, "triton", "tla"):
+                raise ValueError(f"unsupported Ascend frontend kind: {frontend_kind!r}")
             args = {k: normalized_opts[k] for k in option_names if k in normalized_opts}
             options = NPUOptions(arch=self.target.arch, **args)
+            # Frontend identity comes from the source.
+            # A launch keyword alone cannot select TLA.
+            object.__setattr__(options, "enable_tla_mode", frontend_kind == "tla")
             # Lazy init enable_dynamic_cv_pipeline if not provided.
             # compile_on_910_95 is already resolved from the requested target.
             if options.enable_dynamic_cv_pipeline is None:
@@ -1656,11 +1680,15 @@ class AscendBackend(BaseBackend):
 
     def add_stages(self, stages, options, language):
         if self.target.backend == "npu":
-            stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
-            if options.is_pure_simt:
-                stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
-                return
-            stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
+            if options.enable_tla_mode:
+                stages["ttir"] = lambda src, metadata: make_tla_ttir(src, metadata, options)
+                stages["ttadapter"] = lambda src, metadata: tla_to_ttadapter(src, metadata, options)
+            else:
+                stages["ttir"] = lambda src, metadata: make_ttir(src, metadata, options)
+                if options.is_pure_simt:
+                    stages["npubin"] = (lambda src, metadata: ttir_to_npubin(src, metadata, options))
+                    return
+                stages["ttadapter"] = lambda src, metadata: ttir_to_linalg(src, metadata, options)
             if options.compile_on_910_95:
                 stages["npubin"] = (
                     lambda src, metadata: linalg_to_bin_enable_npu_compile_910_95(src, metadata, options))

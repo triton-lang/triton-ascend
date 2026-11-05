@@ -174,8 +174,11 @@ struct ArgLayout {
 inline void validateSpec(const TritonNpuLaunchSpecV1 &spec) {
   if (spec.version != 1 || spec.struct_size != sizeof(spec))
     throw std::invalid_argument("unsupported launcher spec ABI");
-  if (spec.flags & ~uint64_t(2047))
+  if (spec.flags & ~uint64_t(4095))
     throw std::invalid_argument("unknown launcher flags");
+  if ((spec.flags & TRITON_NPU_IAT64) &&
+      (!(spec.flags & TRITON_NPU_IAT) || (spec.flags & TRITON_NPU_PTSM)))
+    throw std::invalid_argument("IAT64 requires standalone IAT");
   if (!spec.coalesce_factor || spec.coalesce_axis < -1 ||
       spec.coalesce_axis > 2)
     throw std::invalid_argument("invalid launcher coalescing configuration");
@@ -211,8 +214,10 @@ inline LaunchGrid prepareGrid(const TritonNpuLaunchSpecV1 &spec,
   for (auto dim : result.grid)
     if (dim <= 0)
       return result;
-  if (spec.flags & TRITON_NPU_IAT)
-    result.grid[1] = (int64_t(input[1]) + 15) / 16;
+  if (spec.flags & TRITON_NPU_IAT) {
+    const uint32_t factor = (spec.flags & TRITON_NPU_IAT64) ? 64 : 16;
+    result.grid[1] = (int64_t(input[1]) + factor - 1) / factor;
+  }
   if (spec.flags & TRITON_NPU_PTSM) {
     const uint32_t factor = (spec.flags & TRITON_NPU_IAT) ? 4 : 64;
     const uint64_t otherPrograms =

@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from triton.language.extra.tla.compiler import ast_to_ttir, lower_ttir
+from triton.language.extra.tla.compiler import add_ttir_pipeline, ast_to_ttir, lower_ttir
 from triton._C.libtriton import ir, buffer_ir, passes
 from triton._C.libtriton.ascend import ir as ascend_ir
 
@@ -122,6 +122,12 @@ def lower_offline(module, ctx, output_dir=None):
     # Entry name must be read before lowering: the pass manager rewrites the
     # module in place (tt.func -> func.func at the ttadapter boundary).
     name = _entry_func_name(module)
+    pm = ir.pass_manager(ctx)
+    pm.enable_debug()
+    add_ttir_pipeline(pm)
+    pm.run(module, "module")
+    if not module.verify():
+        raise RuntimeError("TLA TTIR pipeline produced invalid IR")
     lowered = lower_ttir(module, ctx)
     dump = _dump_dir(name, output_dir)
     if dump:

@@ -24,6 +24,7 @@
 #include "ascend/include/TritonToHIVM/Passes.h"
 #include "ascend/include/TritonToLLVM/Passes.h"
 #include "ascend/include/TritonToLinalg/Passes.h"
+#include "ascend/include/TritonToLinalg/TLAToLinalgPass.h"
 #include "ascend/include/TritonToStructured/Passes.h"
 #include "ascend/include/TritonToUnstructure/Passes.h"
 
@@ -104,6 +105,10 @@ void init_triton_ascend_passes_ttir(py::module &&m) {
               globalKernel, namedOps, enableNd2nzOnVector, enableSelectAnalysis,
               compileOn91095, compileMode));
         });
+
+  m.def("add_tla_to_linalg", [](mlir::PassManager &pm) {
+    pm.addPass(mlir::triton::createTLAToLinalgPass());
+  });
 
   m.def("add_merge_concat_load_buffer", [](mlir::PassManager &pm) {
     pm.addPass(mlir::triton::cfg::createMergeConcatLoadBufferPass());

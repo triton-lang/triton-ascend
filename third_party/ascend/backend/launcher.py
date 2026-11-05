@@ -42,8 +42,8 @@ _LAUNCHER_CFLAGS = ("-O2", )
 # Keep these values in sync with launcher_abi.h. These are data tags, not C++
 # spellings: a signature is decoded once when a native plan is constructed.
 CONSTEXPR, POINTER, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F16, BF16 = range(14)
-FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW = (
-    1 << i for i in range(11))
+FFTS, PURE_SIMT, TASKQUEUE, AUTO_MAP, GRID_WARNING, COALESCE_CEIL, DYNAMIC_SHARED, DEVICE_PRINT, IAT, PTSM, DOT_ROW, IAT64 = (
+    1 << i for i in range(12))
 
 _KINDS = {
     "constexpr": CONSTEXPR,
@@ -152,6 +152,7 @@ def _program_grid_config(metadata):
     # requires the originalGridX/Y hidden arguments of dynamic mappings.
     modes = {
         ((1, 16, False, False), ): (IAT, 1, -1),
+        ((1, 64, False, False), ): (IAT | IAT64, 1, -1),
         ((1, 16, False, False), (0, 4, True, True)): (IAT | PTSM, 1, -1),
         ((0, 64, True, True), ): (PTSM, 1, -1),
         **{((0, factor, False, False), ): (DOT_ROW | COALESCE_CEIL, factor, 0)

@@ -52,6 +52,7 @@ _TRANSFORM_KEYS = frozenset((
 ))
 _SUPPORTED_SEQUENCES = frozenset((
     ((1, 16, False, False), ),
+    ((1, 64, False, False), ),
     ((1, 16, False, False), (0, 4, True, True)),
     ((0, 64, True, True), ),
     ((0, 2, False, False), ),

@@ -23,6 +23,7 @@
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/DataDependencyAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/Common/MemoryEffectsTracker.h"
 #include "ascend/include/DynamicCVPipeline/Common/Utils.h"
+#include "ascend/include/DynamicCVPipeline/SplitDataflow/SyncAnalysis.h"
 #include "ascend/include/DynamicCVPipeline/SplitDataflow/Utils.h"
 
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
@@ -386,6 +387,9 @@ bool DataDependencyAnalysisPass::collectDepInfo(
 
   depInfo.producerBlockId = commonLevelIds.first;
   depInfo.consumerBlockId = commonLevelIds.second;
+
+  analyzeDepLoopInfo(info, depInfo);
+
   if (isAllTranspoesd) {
     depInfo.isAllTranspoesd = true;
   }
@@ -948,7 +952,8 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
     llvm::StringRef predCoreType, int producerBlockId, int consumerBlockId,
     int predBlockId, int currBlockId,
     llvm::SmallVector<DependencyInfo> &memoryDependencies,
-    mlir::Operation *predOp, mlir::Operation *nextOp) {
+    mlir::Operation *predOp, mlir::Operation *nextOp,
+    DataDependencyInfo &info) {
   DependencyInfo depInfo;
 
   if (predCoreType == ssbufferCoreTypeCubeAttr) {
@@ -963,6 +968,8 @@ void DataDependencyAnalysisPass::collectMemDepInfo(
 
   depInfo.predOp = predOp;
   depInfo.nextOp = nextOp;
+
+  analyzeDepLoopInfo(info, depInfo);
 
   memoryDependencies.push_back(depInfo);
 }
@@ -1018,7 +1025,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
           }
           collectMemDepInfo(realPredCoreType, producerBlockId, consumerBlockId,
                             realPredBlockId, currBlockId, memoryDependencies,
-                            realPredOp, op);
+                            realPredOp, op, info);
 
           LOG_DEBUG("\n=op with region mem dep analysis= "
                     << "\nrealpredcoretype" << realPredCoreType
@@ -1049,7 +1056,7 @@ void DataDependencyAnalysisPass::analyzeMemoryEffect(DataDependencyInfo &info) {
 
       collectMemDepInfo(predCoreType, producerBlockId, consumerBlockId,
                         predBlockId, currBlockId, memoryDependencies, predOp,
-                        op);
+                        op, info);
 
       LOG_DEBUG("\n=mem dep analysis= " << "\npredcoretype" << predCoreType
                                         << "\nproducer Block: " << predBlockId
@@ -1160,6 +1167,55 @@ void DataDependencyAnalysisPass::deduplicateDependencies(
   dependencies.erase(newEnd, dependencies.end());
 }
 
+void DataDependencyAnalysisPass::sortDependencies(
+    llvm::SmallVector<DependencyInfo> &dependencies, mlir::ModuleOp module) {
+  if (dependencies.size() <= 1) {
+    return;
+  }
+
+  // Step 1: Walk the entire module and assign a monotonically increasing order
+  //         to each operation, representing its position in the IR.
+  llvm::DenseMap<mlir::Operation *, unsigned> opOrder;
+  unsigned order = 0;
+  module.walk<WalkOrder::PreOrder>(
+      [&](mlir::Operation *op) { opOrder[op] = order++; });
+
+  // Step 2: Helper lambda — get the earliest user op of dep.value within the
+  //         consumer compute block.
+  auto getFirstConsumerOp =
+      [&](const DependencyInfo &dep) -> mlir::Operation * {
+    mlir::Operation *firstConsumer = nullptr;
+    unsigned firstOrder = std::numeric_limits<unsigned>::max();
+    for (auto *user : dep.value.getUsers()) {
+      auto userBlockIdOpt = CVPipeline::getOpBlockId(user);
+      if (userBlockIdOpt && *userBlockIdOpt == dep.consumerBlockId) {
+        auto it = opOrder.find(user);
+        if (it != opOrder.end() && it->second < firstOrder) {
+          firstOrder = it->second;
+          firstConsumer = user;
+        }
+      }
+    }
+    return firstConsumer;
+  };
+
+  // Step 3: Sort
+  std::sort(dependencies.begin(), dependencies.end(),
+            [&](const DependencyInfo &a, const DependencyInfo &b) {
+              // the dependency whose consumer op appears earlier comes first.
+              auto *aConsOp = getFirstConsumerOp(a);
+              auto *bConsOp = getFirstConsumerOp(b);
+              if (aConsOp && bConsOp) {
+                unsigned aConsOpOrder = opOrder.lookup(aConsOp);
+                unsigned bConsOpOrder = opOrder.lookup(bConsOp);
+                if (aConsOpOrder != bConsOpOrder) {
+                  return aConsOpOrder < bConsOpOrder;
+                }
+              }
+              return false;
+            });
+}
+
 void DataDependencyAnalysisPass::runOnOperation() {
   LOG_DEBUG("\n--- enter DataDependencyAnalysisPass --->\n");
   module = getOperation();
@@ -1198,6 +1254,11 @@ void DataDependencyAnalysisPass::runOnOperation() {
   deduplicateDependencies(info.getC2VDependencies());
   deduplicateDependencies(info.getC2CDependencies());
   deduplicateDependencies(info.getMemoryDependencies());
+  sortDependencies(info.getV2CDependencies(), module);
+  sortDependencies(info.getC2VDependencies(), module);
+  sortDependencies(info.getC2CDependencies(), module);
+  sortDependencies(info.getIntraC2CDependencies(), module);
+  analyzeSyncReuse(info);
 
   info.setValid(true);
 

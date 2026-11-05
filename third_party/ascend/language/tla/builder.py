@@ -87,6 +87,8 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_binary',
         'create_simd_vec_scalar',
         'create_simd_binary_scalar',
+        'create_simd_shift',
+        'create_simd_shift_scalar',
         'create_simd_unary',
         'create_simd_vfma',
         'create_simd_vreduce',
@@ -99,10 +101,14 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_vsplat',
         'create_simd_vdup',
         'create_simd_vcvt',
+        'create_simd_vpack',
         'create_simd_pge',
         'create_simd_vsel',
         'create_simd_vintlv',
         'create_simd_vdintlv',
         'create_simd_bitcast',
+        'create_simd_preg_binary',
+        'create_simd_preg_unary',
+        'create_simd_vmull',
     ]
     attach_builder_methods(main_builder, ascend_builder, ascend_methods)

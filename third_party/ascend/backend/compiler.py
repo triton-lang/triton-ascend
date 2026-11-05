@@ -624,7 +624,12 @@ def get_common_bishengir_compile_options(metadata):
     if _is_a5_target_arch(bishengir_target):
         bishengir_target = "Ascend950"
     bishengir_target_opt = f"--target={bishengir_target}"
-    return [bishengir_target_opt]
+    options = [bishengir_target_opt]
+    # NPU-IR owns the transformation and scopes it to its SIMT pipeline,
+    # including outlined SIMT modules in mixed-mode compilation.
+    if metadata.get("enable_interleaved_access_packing", False):
+        options.append("--enable-interleaved-access-packing=true")
+    return options
 
 
 @functools.lru_cache()
@@ -1217,6 +1222,8 @@ def _normalize_compile_mode(compile_mode, arch: str) -> str:
 
 @dataclass(frozen=True)
 class NPUOptions:
+    # Experimental; cross-pointer motion requires proven row alignment.
+    enable_interleaved_access_packing: bool = False
     debug: bool = False
     sanitize_overflow: bool = True
     # Backend-only construction input.  AscendBackend.parse_options injects

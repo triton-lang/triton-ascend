@@ -230,7 +230,8 @@ def compiler_module():
                          ["Ascend950PR_9579", "Ascend950DT_9579", "Ascend910_9581", "Ascend910B4", "Ascend910_9363"])
 @pytest.mark.parametrize("device_limit", [None, "14,28"])
 @pytest.mark.parametrize("pure_simt", [False, True])
-def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, pure_simt):
+@pytest.mark.parametrize("interleaved", [False, True])
+def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, pure_simt, interleaved):
     compiler = compiler_module
     driver_path = Path(__file__).resolve().parents[2] / "backend" / "driver.py"
     driver_class = next(node for node in ast.parse(driver_path.read_text()).body
@@ -251,7 +252,7 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
     assert npu_utils.get_device_core() == (28, 56)
     assert (npu_utils.get_aicore_num(), npu_utils.get_aivector_core_num()) == expected_cores
 
-    options = _parse_options(compiler, arch)
+    options = _parse_options(compiler, arch, {"enable_interleaved_access_packing": interleaved})
     metadata = dict(options.__dict__, target=SimpleNamespace(arch=arch), hash="device-info-test", mix_mode="aiv",
                     bitcodes=None, auto_blockify_enabled=False)
     monkeypatch.setattr(compiler, "_parse_linalg_metadata", lambda source, meta: (source, meta))
@@ -287,6 +288,9 @@ def test_npuir_device_options(compiler_module, monkeypatch, arch, device_limit, 
         aic, aiv = (28, 56) if device_limit is None else (14, 28)
         expected += [f"--custom-aic-number={aic}", f"--custom-aiv-number={aiv}"]
     assert len(commands) == 1
+    # A2/A3's linalg compiler has no NPU-IR SIMT pipeline and must not receive
+    # this new switch. The pure-SIMT and A5 paths share NPU-IR option plumbing.
+    assert ("--enable-interleaved-access-packing=true" in commands[0]) == (interleaved and (pure_simt or is_a5))
     assert [
         arg for arg in commands[0] if arg.startswith(("--target=", "--custom-aic-number=", "--custom-aiv-number="))
     ] == expected

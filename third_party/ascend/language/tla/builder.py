@@ -54,6 +54,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_tla_buffer_type',
         'create_tla_vector_type',
         'create_tla_alloc',
+        'create_tla_fill',
         'create_tla_bind',
         'create_tla_subview',
         'create_tla_reinterpret_cast',

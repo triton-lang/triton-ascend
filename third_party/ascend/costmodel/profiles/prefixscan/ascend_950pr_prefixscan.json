@@ -23,32 +23,14 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "long",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "long",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "long",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "long",
@@ -65,32 +47,14 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "short",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "short",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "short",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "short",
@@ -109,32 +73,14 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 0,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 0,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32"
+            ],
             "rank": 2,
             "axis": 0,
             "branch": "chain",
@@ -154,7 +100,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 2,
             "axis": 0,
@@ -162,23 +111,10 @@
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -196,7 +132,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 2,
             "axis": 0,
@@ -204,23 +143,10 @@
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 3,
             "axis": 0,
@@ -238,96 +164,30 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32",
+              "i32"
+            ],
             "rank": 2,
             "axis": 1,
             "branch": "chain",
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "chain",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f16",
+              "f32",
+              "i32"
+            ],
             "rank": 2,
             "axis": 1,
             "branch": "tree",
@@ -346,7 +206,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 1,
@@ -354,23 +217,10 @@
             "warps": 0
           },
           {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 1,
-            "branch": "direct",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 1,
-            "branch": "transpose",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 1,
@@ -390,7 +240,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 3,
             "axis": 1,
@@ -398,23 +251,10 @@
             "warps": 0
           },
           {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "direct",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "transpose",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 3,
             "axis": 1,
@@ -435,15 +275,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "long",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 1,
             "axis": 0,
@@ -461,15 +296,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "short",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 1,
             "axis": 0,
@@ -507,7 +337,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 2,
             "axis": 0,
@@ -515,23 +348,10 @@
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "branch": "tree",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 3,
             "axis": 0,
@@ -550,15 +370,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "transpose",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 3,
             "axis": 1,
@@ -567,15 +382,10 @@
           },
           {
             "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "product_multi",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "product_multi",
@@ -595,96 +405,30 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
             "rank": 2,
             "axis": 0,
             "branch": "scalar_or_generic",
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "branch": "scalar_or_generic",
@@ -703,48 +447,15 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u32",
+              "u64"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "scalar_or_generic",
@@ -771,15 +482,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u64",
             "rank": 1,
             "axis": 0,
@@ -864,47 +570,24 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "branch": "scalar_or_generic",
             "warps": 0
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u64",
             "rank": 3,
             "axis": 2,
@@ -925,15 +608,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i64",
             "rank": 3,
             "axis": 2,
@@ -951,15 +629,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u32",
             "rank": 2,
             "axis": 1,
@@ -980,15 +653,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "branch": "scalar_or_generic",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u32",
             "rank": 3,
             "axis": 2,
@@ -1007,15 +675,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "long",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f16",
+              "f32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "long",
@@ -1097,15 +760,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "short",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f16",
+              "f32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "short",
@@ -1153,7 +811,11 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f16",
+            "data_type": [
+              "f16",
+              "f32",
+              "integer32"
+            ],
             "rank": 2,
             "axis": 1,
             "branch": "product_multi",
@@ -1161,39 +823,11 @@
           },
           {
             "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "branch": "product_multi",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "product_multi",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "branch": "product_multi",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 2,
-            "axis": 1,
-            "branch": "product_multi",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f16",
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 2,
             "branch": "product_multi",
@@ -1319,15 +953,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 1,
             "axis": 0,
@@ -1354,7 +983,10 @@
             "warps": 64
           },
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 1,
             "axis": 0,
@@ -1367,23 +999,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "warp_local",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -1397,23 +1016,11 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
             "data_type": "f32",
             "rank": 1,
             "axis": 0,
@@ -1434,15 +1041,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 1,
             "axis": 0,
@@ -1463,15 +1065,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u32",
             "rank": 1,
             "axis": 0,
@@ -1497,15 +1094,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "cross_warp",
-            "warps": 0
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 64
+            "warps": [
+              0,
+              64
+            ]
           }
         ],
         "terms": {
@@ -1521,48 +1113,15 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
@@ -1580,100 +1139,22 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
+            "warps": [
+              16,
+              2
+            ]
           }
         ],
         "terms": {
@@ -1689,15 +1170,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 1,
             "axis": 0,
@@ -1717,15 +1193,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 1,
             "axis": 0,
@@ -1743,15 +1214,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 1,
             "axis": 0,
@@ -1770,36 +1236,18 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -1813,15 +1261,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 1,
             "axis": 0,
@@ -1840,36 +1283,18 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u32",
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -1884,15 +1309,10 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u32",
             "rank": 1,
             "axis": 0,
@@ -1916,15 +1336,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -1963,15 +1378,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -2005,100 +1415,22 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
+            "warps": [
+              32,
+              64
+            ]
           }
         ],
         "terms": {
@@ -2113,7 +1445,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i64",
             "rank": 1,
             "axis": 0,
@@ -2121,39 +1456,24 @@
             "warps": 32
           },
           {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
             "warps": 1
           },
           {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i64",
             "rank": 1,
             "axis": 0,
@@ -2166,23 +1486,7 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
             "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
           }
         ],
         "terms": {
@@ -2198,32 +1502,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 64
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "cross_warp",
@@ -2241,96 +1527,42 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 64,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 64,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 0,
@@ -2349,68 +1581,21 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
+            "warps": [
+              16,
+              2
+            ]
           }
         ],
         "terms": {
@@ -2426,32 +1611,14 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "warp_local",
-            "warps": 0
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "warp_local",
@@ -2468,64 +1635,28 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 2,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 2,
@@ -2545,47 +1676,24 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
             "warps": 4
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i64",
             "rank": 1,
             "axis": 0,
@@ -2605,7 +1713,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u64",
             "rank": 1,
             "axis": 0,
@@ -2613,23 +1724,10 @@
             "warps": 32
           },
           {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "cross_warp",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "u64",
             "rank": 1,
             "axis": 0,
@@ -2655,15 +1753,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
+            "warps": [
+              16,
+              64
+            ]
           }
         ],
         "terms": {
@@ -2727,35 +1820,17 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
+            "warps": [
+              1,
+              2
+            ]
           }
         ],
         "terms": {
@@ -2770,100 +1845,22 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
+            "warps": [
+              2,
+              8
+            ]
           },
           {
             "operation": "cumprod",
@@ -2871,15 +1868,10 @@
             "rank": 3,
             "axis": 1,
             "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
+            "warps": [
+              2,
+              8
+            ]
           }
         ],
         "terms": {
@@ -2894,7 +1886,11 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
             "data_type": "f32",
             "rank": 3,
             "axis": 1,
@@ -2902,48 +1898,14 @@
             "warps": 4
           },
           {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
@@ -3010,35 +1972,17 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
+            "warps": [
+              16,
+              32
+            ]
           }
         ],
         "terms": {
@@ -3055,15 +1999,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 64
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
@@ -3141,15 +2080,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 1
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 2
+            "warps": [
+              1,
+              2
+            ]
           }
         ],
         "terms": {
@@ -3169,15 +2103,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 4
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -3214,15 +2143,10 @@
             "rank": 3,
             "axis": 1,
             "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
+            "warps": [
+              2,
+              8
+            ]
           }
         ],
         "terms": {
@@ -3262,15 +2186,10 @@
             "rank": 1,
             "axis": 0,
             "branch": "multi_element",
-            "warps": 16
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 1,
-            "axis": 0,
-            "branch": "multi_element",
-            "warps": 32
+            "warps": [
+              16,
+              32
+            ]
           }
         ],
         "terms": {
@@ -3285,32 +2204,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 64,
@@ -3329,15 +2230,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 1,
@@ -3353,23 +2249,11 @@
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -3410,80 +2294,29 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
             "warps": 32
           },
           {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
@@ -3503,35 +2336,17 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 1
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
+            "warps": [
+              1,
+              32
+            ]
           }
         ],
         "terms": {
@@ -3546,68 +2361,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
             "warps": 16
           },
           {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "i32",
             "rank": 3,
             "axis": 1,
             "branch": "multi",
             "warps": 32
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 32
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
           }
         ],
         "terms": {
@@ -3622,24 +2399,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
@@ -3652,14 +2419,6 @@
             "axis": 1,
             "branch": "multi",
             "warps": 64
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 2
           }
         ],
         "terms": {
@@ -3674,68 +2433,21 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 4
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 8
+            "warps": [
+              4,
+              8
+            ]
           }
         ],
         "terms": {
@@ -3750,32 +2462,14 @@
         "projection": "legacy",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 1,
-            "branch": "multi",
-            "warps": 16
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 1,
             "branch": "multi",
@@ -4155,21 +2849,16 @@
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
-            "warps": 2,
+            "warps": [
+              2,
+              4
+            ],
             "branch": "layout_cross_warp"
           },
           {
             "operation": "cumprod",
             "data_type": "f16",
             "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f16",
-            "rank": 3,
             "axis": 0,
             "warps": 4,
             "branch": "layout_cross_warp"
@@ -4284,15 +2973,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -4311,15 +2995,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -4339,32 +3018,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 16,
@@ -4384,7 +3045,11 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cumprod",
+            "operation": [
+              "cummax",
+              "cummin",
+              "cumprod"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -4392,34 +3057,13 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 2,
             "axis": 1,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
             "warps": 8,
             "branch": "layout_warp_local"
           }
@@ -4489,7 +3133,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 2,
@@ -4497,23 +3144,10 @@
           },
           {
             "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 2,
@@ -4533,15 +3167,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 0,
@@ -4613,96 +3242,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 4,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 4,
@@ -4804,55 +3367,25 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 64,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 2,
             "axis": 1,
@@ -4860,56 +3393,15 @@
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 64,
@@ -4949,7 +3441,10 @@
         "domains": [
           {
             "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 1,
@@ -4957,23 +3452,10 @@
           },
           {
             "operation": "cumprod",
-            "data_type": "integer32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 1,
@@ -5117,7 +3599,10 @@
             "data_type": "f32",
             "rank": 2,
             "axis": 1,
-            "warps": 1,
+            "warps": [
+              1,
+              32
+            ],
             "branch": "layout_warp_local"
           },
           {
@@ -5125,23 +3610,10 @@
             "data_type": "f32",
             "rank": 3,
             "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
+            "warps": [
+              1,
+              32
+            ],
             "branch": "layout_warp_local"
           }
         ],
@@ -5241,15 +3713,10 @@
           },
           {
             "operation": "cumprod",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer32",
+            "data_type": [
+              "f32",
+              "integer32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 64,
@@ -5450,7 +3917,10 @@
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 2,
             "axis": 1,
@@ -5458,120 +3928,43 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 32,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 8,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 0,
@@ -5680,7 +4073,10 @@
             "data_type": "integer64",
             "rank": 2,
             "axis": 1,
-            "warps": 2,
+            "warps": [
+              2,
+              4
+            ],
             "branch": "layout_cross_warp"
           },
           {
@@ -5688,23 +4084,10 @@
             "data_type": "integer64",
             "rank": 3,
             "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cumprod",
-            "data_type": "integer64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
+            "warps": [
+              2,
+              4
+            ],
             "branch": "layout_cross_warp"
           },
           {
@@ -5848,15 +4231,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -5933,96 +4311,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 32,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 32,
@@ -6042,15 +4354,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -6102,15 +4409,10 @@
             "branch": "layout_multi_block"
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -6138,15 +4440,10 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -6165,15 +4462,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -6223,195 +4515,39 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 0,
-            "warps": 2,
+            "warps": [
+              16,
+              2
+            ],
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
+            "warps": [
+              16,
+              2
+            ],
             "branch": "layout_cross_warp"
           }
         ],
@@ -6427,48 +4563,15 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 0,
@@ -6485,16 +4588,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 0,
@@ -6503,22 +4604,6 @@
           {
             "operation": "cummax",
             "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
             "rank": 3,
             "axis": 2,
             "warps": 0,
@@ -6534,96 +4619,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 1,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 1,
@@ -6641,96 +4660,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 2,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 2,
@@ -6749,96 +4702,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 4,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 4,
@@ -6857,7 +4744,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 2,
             "axis": 1,
@@ -6865,56 +4755,15 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 8,
@@ -6932,48 +4781,15 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 2,
@@ -6989,96 +4805,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 32,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 32,
@@ -7097,99 +4847,21 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
+            "warps": [
+              16,
+              4
+            ],
             "branch": "layout_cross_warp"
           }
         ],
@@ -7204,55 +4876,25 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 8,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f32",
             "rank": 2,
             "axis": 1,
@@ -7260,56 +4902,15 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 1,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 16,
@@ -7328,48 +4929,15 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 64,
@@ -7387,32 +4955,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 32,
@@ -7430,24 +4980,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 32,
@@ -7457,14 +4997,6 @@
             "operation": "cummin",
             "data_type": "u64",
             "rank": 2,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
             "axis": 0,
             "warps": 32,
             "branch": "layout_cross_warp"
@@ -7514,32 +5046,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 0,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 0,
@@ -7558,128 +5072,56 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 2,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 2,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 1,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 1,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 1,
@@ -7698,96 +5140,42 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 4,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 4,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 16,
@@ -7807,64 +5195,28 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 2,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 2,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 2,
@@ -7884,32 +5236,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 8,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 8,
@@ -7929,32 +5263,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 32,
@@ -7973,32 +5289,14 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 64,
@@ -8112,15 +5410,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 16,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -8142,15 +5435,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 32,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -8172,15 +5460,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 64,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -8201,15 +5484,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 32,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -8231,7 +5509,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 2,
             "axis": 1,
@@ -8239,23 +5520,10 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "warps": 64,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,
@@ -8277,48 +5545,15 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 1,
-            "branch": "layout_multi_block"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 1,
@@ -8338,64 +5573,28 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 4,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 4,
@@ -8416,64 +5615,28 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 1,
             "warps": 4,
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 2,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 1,
-            "warps": 4,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 2,
             "warps": 4,
@@ -8552,96 +5715,30 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "f32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 8,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i32",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u32",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "f32",
+              "i32",
+              "u32"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 8,
@@ -8689,64 +5786,28 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
-            "data_type": "i64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 2,
             "axis": 0,
             "warps": 8,
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummax",
-            "data_type": "u64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "i64",
-            "rank": 3,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
-            "rank": 2,
-            "axis": 0,
-            "warps": 8,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "u64",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
+            "data_type": [
+              "i64",
+              "u64"
+            ],
             "rank": 3,
             "axis": 0,
             "warps": 8,
@@ -8803,15 +5864,10 @@
             "branch": "layout_cross_warp"
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 0,
-            "warps": 4,
-            "branch": "layout_cross_warp"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 0,
@@ -8832,7 +5888,10 @@
         "projection": "row_major",
         "domains": [
           {
-            "operation": "cummax",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 2,
             "axis": 1,
@@ -8840,23 +5899,10 @@
             "branch": "layout_warp_local"
           },
           {
-            "operation": "cummax",
-            "data_type": "f16",
-            "rank": 3,
-            "axis": 2,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
-            "data_type": "f16",
-            "rank": 2,
-            "axis": 1,
-            "warps": 16,
-            "branch": "layout_warp_local"
-          },
-          {
-            "operation": "cummin",
+            "operation": [
+              "cummax",
+              "cummin"
+            ],
             "data_type": "f16",
             "rank": 3,
             "axis": 2,

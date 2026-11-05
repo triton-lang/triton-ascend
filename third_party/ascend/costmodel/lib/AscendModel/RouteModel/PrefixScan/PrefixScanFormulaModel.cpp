@@ -102,7 +102,33 @@ mlir::ascend::parsePrefixScanFormulas(const llvm::json::Array &array) {
         return invalid();
       formula.terms[term.first.str()] = *value;
     }
+    // Expand compact alternatives once at load time; matching stays scalar.
+    llvm::json::Array expanded;
     for (const auto &value : *domains) {
+      const auto *domain = value.getAsObject();
+      if (!domain)
+        return invalid();
+      llvm::json::Array alternatives;
+      alternatives.push_back(llvm::json::Object(*domain));
+      for (const char *field : {"operation", "data_type", "warps"}) {
+        const auto *values = domain->getArray(field);
+        if (!values)
+          continue;
+        if (values->empty())
+          return invalid();
+        llvm::json::Array next;
+        for (const auto &alternative : alternatives)
+          for (const auto &item : *values) {
+            llvm::json::Object copy(*alternative.getAsObject());
+            copy[field] = item;
+            next.push_back(std::move(copy));
+          }
+        alternatives = std::move(next);
+      }
+      for (auto &alternative : alternatives)
+        expanded.push_back(std::move(alternative));
+    }
+    for (const auto &value : expanded) {
       auto *domain = value.getAsObject();
       if (!domain)
         return invalid();

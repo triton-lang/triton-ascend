@@ -18,6 +18,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 """TLA memory and vector-register values, independent of Triton tensors."""
+from enum import Enum
+
 from triton.language import core as tl
 
 
@@ -41,6 +43,38 @@ SPACES = ("gm", "ub", "l1", "l0a", "l0b", "l0c", "bt", "fb")
 _HIVM_SCOPE = {
     "gm": "gm", "ub": "ub", "l1": "cbuf", "l0a": "ca", "l0b": "cb", "l0c": "cc", "bt": "biasbuf", "fb": "fixbuf"
 }
+
+
+class AddressSpace(str, Enum):
+    """Address spaces understood by the TLA frontend.
+
+    The enumeration is the public spelling; the string value is what the
+    frontend, buffer types and the builder use internally, so legacy
+    ``space="ub"`` calls keep working unchanged.  Being a ``str`` subclass
+    also makes ``AddressSpace.UB == "ub"`` true.
+
+    ``GM`` and the non-local spaces (``L0A``/``L0B``/``BT``/``FB``) are valid
+    buffer address spaces, but :func:`tla.alloc` only materializes ``UB``,
+    ``L1`` and ``L0C``.
+    """
+
+    GM = "gm"
+    UB = "ub"
+    L1 = "l1"
+    L0A = "l0a"
+    L0B = "l0b"
+    L0C = "l0c"
+    BT = "bt"
+    FB = "fb"
+
+    def __str__(self):
+        return self.value
+
+
+def address_space_name(value):
+    """Normalize an :class:`AddressSpace` or legacy string to its canonical name."""
+    value = tl._unwrap_if_constexpr(value)
+    return value.value if isinstance(value, AddressSpace) else value
 
 
 def space_of(value):
@@ -73,7 +107,7 @@ class buffer_type(tl.base_type):
     def __init__(self, shape, dtype, space="gm", strides=None, offset=0):
         self.shape = _shape(shape)
         self.element_ty = tl._unwrap_if_constexpr(dtype)
-        self.space = tl._unwrap_if_constexpr(space)
+        self.space = address_space_name(space)
         if self.space not in SPACES:
             raise ValueError(f"unsupported buffer space: {self.space}")
         if strides is None:

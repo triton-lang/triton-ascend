@@ -618,72 +618,63 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     return success();
   }
 
-  // Tail/Middle masks may have a dynamic start outside the tensor. Keep the
-  // same bounds check for both target-specific slice implementations.
-  Value dynamicOffset;
-  int dynamicDim = -1;
+  // For Tail or Middle positions, we need to compute inverted dimensions
+  // to handle the masking logic
+  SmallVector<OpFoldResult> invertOffsets;
+  SmallVector<OpFoldResult> invertFalseDims;
+  SmallVector<OpFoldResult> invertTrueDims;
+  OpFoldResult falseDimOp;
+  OpFoldResult trueDimOp;
+  int valDim = -1;
   for (int i = 0; i < mstate.getRank(); ++i) {
-    if (!getConstantIntValue(mstate.offsets[i]).has_value()) {
-      assert(dynamicDim == -1 &&
-             "The offset in only one dimension can be dynamic.");
-      dynamicDim = i;
-      dynamicOffset = cast<Value>(mstate.offsets[i]);
-    }
-  }
-
-  Value sliceSource = trueTensor;
-  SmallVector<OpFoldResult> sliceOffsets(mstate.offsets);
-  SmallVector<OpFoldResult> sliceDims(mstate.dims);
-  SmallVector<Operation *> sliceOps;
-  if (!useDirectSelectSlices) {
-    // A2/A3 require the prefix reconstruction to keep all slice starts at zero.
-    // Direct dynamic starts can trigger NPU IR alignment padding and UB
-    // overflow. 950 supports unaligned UB copies and can use the original mask
-    // offsets.
-    SmallVector<OpFoldResult> invertOffsets;
-    SmallVector<OpFoldResult> invertFalseDims;
-    SmallVector<OpFoldResult> invertTrueDims;
-    for (int i = 0; i < mstate.getRank(); ++i) {
-      const auto &offset = mstate.offsets[i];
-      const auto &dim = mstate.dims[i];
-      invertOffsets.push_back(rewriter.getIndexAttr(0));
-      if (isConstantIntValue(offset, 0)) {
-        invertFalseDims.push_back(dim);
-        invertTrueDims.push_back(dim);
-      } else {
-        invertFalseDims.push_back(offset);
-        invertTrueDims.push_back(addOpFoldResult(offset, dim, loc, rewriter,
-                                                 rewriter.getIndexType()));
+    const auto &offVal = mstate.offsets[i];
+    const auto &dimVal = mstate.dims[i];
+    auto constOffVal = getConstantIntValue(offVal);
+    invertOffsets.push_back(rewriter.getIndexAttr(0));
+    if (constOffVal.has_value() && constOffVal.value() == 0) {
+      invertFalseDims.push_back(dimVal);
+      invertTrueDims.push_back(dimVal);
+    } else {
+      assert(valDim == -1 &&
+             "The offset in only one dimension can be not zero.");
+      if (!constOffVal.has_value()) {
+        valDim = i;
+        falseDimOp = offVal;
       }
-    }
 
-    auto falseExtractSliceOp = mstate.getExtractSlice(
-        falseTensor, loc, rewriter, invertOffsets, invertFalseDims);
-    auto trueInsertSliceOp =
-        mstate.getInsertSlice(falseExtractSliceOp, trueTensor, loc, rewriter,
-                              invertOffsets, invertFalseDims);
-    sliceOps.push_back(falseExtractSliceOp.getOperation());
-    sliceOps.push_back(trueInsertSliceOp.getOperation());
-    sliceSource = trueInsertSliceOp;
-    sliceOffsets = std::move(invertOffsets);
-    sliceDims = std::move(invertTrueDims);
+      invertFalseDims.push_back(offVal);
+      trueDimOp = addOpFoldResult(offVal, dimVal, loc, rewriter,
+                                  rewriter.getIndexType());
+      invertTrueDims.push_back(trueDimOp);
+    }
   }
 
-  auto extractSliceOp = mstate.getExtractSlice(sliceSource, loc, rewriter,
-                                               sliceOffsets, sliceDims);
-  auto insertSliceOp = mstate.getInsertSlice(extractSliceOp, falseTensor, loc,
-                                             rewriter, sliceOffsets, sliceDims);
-  sliceOps.push_back(extractSliceOp.getOperation());
-  sliceOps.push_back(insertSliceOp.getOperation());
-  if (dynamicDim != -1) {
-    rewriter.setInsertionPointAfter(insertSliceOp);
+  // Slice out the invert first masked part of false tensor
+  auto falseExtractSliceOp = mstate.getExtractSlice(
+      falseTensor, loc, rewriter, invertOffsets, invertFalseDims);
+  // Insert out the sliced false tensor into true tensor
+  auto trueInsertSliceOp =
+      mstate.getInsertSlice(falseExtractSliceOp, trueTensor, loc, rewriter,
+                            invertOffsets, invertFalseDims);
+  // Slice out the invert first masked and masked part of inserted true tensor
+  auto extractSliceOp = mstate.getExtractSlice(trueInsertSliceOp, loc, rewriter,
+                                               invertOffsets, invertTrueDims);
+  // Insert out the sliced true tensor into false tensor
+  auto insertSliceOp =
+      mstate.getInsertSlice(extractSliceOp, falseTensor, loc, rewriter,
+                            invertOffsets, invertTrueDims);
+  if (valDim != -1) {
+    rewriter.setInsertionPointAfter(trueInsertSliceOp);
+    assert(isa<Value>(falseDimOp) &&
+           "Expected to be a runtime Value for dynamic dimension check.");
     Value zeroIndex = rewriter.create<arith::ConstantIndexOp>(loc, 0);
     Value isNegative = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::slt, dynamicOffset, zeroIndex);
+        loc, arith::CmpIPredicate::slt, cast<Value>(falseDimOp), zeroIndex);
+
     Value sizeIndex =
-        rewriter.create<arith::ConstantIndexOp>(loc, tensorShape[dynamicDim]);
+        rewriter.create<arith::ConstantIndexOp>(loc, tensorShape[valDim]);
     Value isOutOfRange = rewriter.create<arith::CmpIOp>(
-        loc, arith::CmpIPredicate::sge, dynamicOffset, sizeIndex);
+        loc, arith::CmpIPredicate::sge, cast<Value>(falseDimOp), sizeIndex);
     auto orOp = rewriter.create<arith::OrIOp>(loc, isNegative, isOutOfRange);
     auto ifOp = rewriter.create<scf::IfOp>(loc, TypeRange{type},
                                            orOp.getResult(), true, true);
@@ -693,20 +684,27 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     rewriter.create<scf::YieldOp>(loc, ValueRange{falseTensor});
 
     Block *elseBlock = &ifOp.getElseRegion().front();
-    for (Operation *sliceOp : sliceOps)
-      sliceOp->moveBefore(elseBlock, elseBlock->end());
+    rewriter.setInsertionPointToStart(elseBlock);
+    falseExtractSliceOp->moveBefore(elseBlock, elseBlock->begin());
+    trueInsertSliceOp->moveAfter(falseExtractSliceOp);
+    extractSliceOp->moveAfter(trueInsertSliceOp);
+    insertSliceOp->moveAfter(extractSliceOp);
+
     rewriter.setInsertionPointAfter(insertSliceOp);
     rewriter.create<scf::YieldOp>(loc, ValueRange{insertSliceOp.getResult()});
     rewriter.replaceOp(op, ifOp);
-  } else {
+  } else { // static offsets
     rewriter.replaceOp(op, insertSliceOp);
   }
   LLVM_DEBUG({
-    llvm::dbgs() << "  -> Created "
-                 << (useDirectSelectSlices ? "direct" : "prefix")
-                 << " select slices:\n";
-    for (Operation *sliceOp : sliceOps)
-      llvm::dbgs() << "     " << *sliceOp << "\n";
+    llvm::dbgs() << "  -> [invert] Created false tensor extractSlice: "
+                 << *falseExtractSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created true tensor insertSlice: "
+                 << *trueInsertSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created ExtractSlice: "
+                 << *extractSliceOp.getOperation() << "\n"
+                 << "  -> [invert] Created InsertSlice: "
+                 << *insertSliceOp.getOperation() << "\n";
   });
   return success();
 }

@@ -102,38 +102,70 @@ hivm::TCoreType enclosingCoreType(OpBuilder &builder) {
   return hivm::TCoreType::VECTOR;
 }
 
-// Resolve a frontend pipe name ("PIPE_MTE2") to its HIVM attribute.
-hivm::PipeAttr getSyncPipe(OpBuilder &builder, const std::string &pipe) {
+// Pipes available to each core for explicit synchronization.
+bool isSyncPipeSupported(hivm::PIPE pipe, hivm::TCoreType core) {
+  switch (core) {
+  case hivm::TCoreType::VECTOR:
+    return pipe == hivm::PIPE::PIPE_S || pipe == hivm::PIPE::PIPE_V ||
+           pipe == hivm::PIPE::PIPE_MTE2 || pipe == hivm::PIPE::PIPE_MTE3;
+  case hivm::TCoreType::CUBE:
+    return pipe == hivm::PIPE::PIPE_S || pipe == hivm::PIPE::PIPE_M ||
+           pipe == hivm::PIPE::PIPE_MTE1 || pipe == hivm::PIPE::PIPE_MTE2 ||
+           pipe == hivm::PIPE::PIPE_MTE3 || pipe == hivm::PIPE::PIPE_FIX;
+  default:
+    return false;
+  }
+}
+
+// Resolve a frontend pipe name ("PIPE_MTE2") to its HIVM attribute and check
+// that the enclosing core can use it. PIPE_ALL is only valid for barrier.
+hivm::PipeAttr getSyncPipe(OpBuilder &builder, const std::string &pipe,
+                           bool allowAll = false) {
   auto pipeEnum = hivm::symbolizePIPE(pipe);
   if (!pipeEnum)
     throw std::invalid_argument("unknown sync pipe: " + pipe);
+  auto core = enclosingCoreType(builder);
+  if (!(allowAll && *pipeEnum == hivm::PIPE::PIPE_ALL) &&
+      !isSyncPipeSupported(*pipeEnum, core))
+    throw std::invalid_argument(
+        "sync pipe " + pipe + " is not supported by the enclosing " +
+        (core == hivm::TCoreType::CUBE ? "cube" : "vector") + " core");
   return hivm::PipeAttr::get(builder.getContext(), *pipeEnum);
 }
 
-// Validate a frontend constant against its hardware range [0, upper].
-int64_t checkSyncRange(int64_t value, int64_t upper, const char *what) {
-  if (value < 0 || value > upper)
+// Hardware ID limits and the frontend value that selects MODE.INTRA.
+constexpr int64_t kMaxEventId = 7;
+constexpr int64_t kMaxBlockFlagId = 15;
+constexpr int64_t kMaxCubeIntraBlockId = 31;
+constexpr int64_t kMaxVectorIntraBlockId = 15;
+constexpr int64_t kMaxBufferId = 31;
+constexpr int kSyncModeIntra = 3;
+
+// Validate a frontend constant against its hardware range [0, max_id].
+int64_t checkSyncRange(int64_t value, int64_t max_id, const char *what) {
+  if (value < 0 || value > max_id)
     throw std::invalid_argument(std::string(what) + " must be in [0, " +
-                                std::to_string(upper) + "]");
+                                std::to_string(max_id) + "]");
   return value;
 }
 
 // Preserve a static ID or a runtime i64 scalar ID.
-OpFoldResult getSyncId(TLABuilder &self, const py::object &id, int64_t upper,
-                       const char *name) {
-  if (py::isinstance<py::int_>(id) && !py::isinstance<py::bool_>(id))
+OpFoldResult getSyncId(TLABuilder &self, const py::object &id_value,
+                       int64_t max_id, const char *what) {
+  if (py::isinstance<py::int_>(id_value) &&
+      !py::isinstance<py::bool_>(id_value))
     return self.getBuilder().getI64IntegerAttr(
-        checkSyncRange(id.cast<int64_t>(), upper, name));
-  auto value = id.cast<Value>();
+        checkSyncRange(id_value.cast<int64_t>(), max_id, what));
+  auto value = id_value.cast<Value>();
   if (!value.getType().isInteger(64))
-    throw std::invalid_argument(std::string(name) + " must be an i64 scalar");
+    throw std::invalid_argument(std::string(what) + " must be an i64 scalar");
   return value;
 }
 
 template <typename Op>
 void createEventSync(TLABuilder &self, const std::string &pipe,
-                     const std::string &waitPipe, const py::object &eventId) {
-  auto id = getSyncId(self, eventId, 7, "event_id");
+                     const std::string &waitPipe, const py::object &event_id) {
+  auto id = getSyncId(self, event_id, kMaxEventId, "event_id");
   hivm::EventAttr staticId;
   Value dynamicId;
   if (auto attr = dyn_cast<Attribute>(id))
@@ -149,21 +181,150 @@ void createEventSync(TLABuilder &self, const std::string &pipe,
 
 // Cross-core set/wait are block-level synchronization: emit them with the
 // block instruction mode requested by the frontend and the core type of the
-// enclosing TLA scope.
-void createBlockSync(TLABuilder &self, const std::string &pipe, int64_t flag,
-                     hivm::SyncBlockInstrMode instrMode, bool isSet) {
+// enclosing TLA scope. INTRA uses direct A5 intra-block counters, which keep
+// their physical IDs instead of the automatic partner offset.
+void createBlockSync(TLABuilder &self, const std::string &pipe,
+                     const py::object &flag_id, int sync_mode, bool is_set) {
   auto &builder = self.getBuilder();
   auto *ctx = builder.getContext();
-  auto coreAttr = hivm::TCoreTypeAttr::get(ctx, enclosingCoreType(builder));
+  auto core = enclosingCoreType(builder);
+  auto coreAttr = hivm::TCoreTypeAttr::get(ctx, core);
   auto pipeAttr = getSyncPipe(builder, pipe);
-  auto flagAttr = builder.getI64IntegerAttr(checkSyncRange(flag, 15, "flag"));
-  auto modeAttr = hivm::SyncBlockInstrModeAttr::get(ctx, instrMode);
-  if (isSet)
-    self.create<hivm::SyncBlockSetOp>(coreAttr, pipeAttr, pipeAttr, flagAttr,
-                                      Value{}, modeAttr);
+  checkSyncRange(sync_mode, kSyncModeIntra, "sync mode");
+  if (sync_mode == kSyncModeIntra) {
+    const int64_t max_flag_id = core == hivm::TCoreType::CUBE
+                                    ? kMaxCubeIntraBlockId
+                                    : kMaxVectorIntraBlockId;
+    auto flag_id_attr = getSyncId(self, flag_id, max_flag_id, "flagid");
+    if (is_set)
+      self.create<hivm::SyncIntraBlockSetOp>(coreAttr, pipeAttr, flag_id_attr);
+    else
+      self.create<hivm::SyncIntraBlockWaitOp>(coreAttr, pipeAttr, flag_id_attr);
+    return;
+  }
+  auto flag_id_attr = getSyncId(self, flag_id, kMaxBlockFlagId, "flagid");
+  auto mode_attr = hivm::SyncBlockInstrModeAttr::get(
+      ctx, static_cast<hivm::SyncBlockInstrMode>(sync_mode));
+  if (is_set)
+    self.create<hivm::SyncBlockSetOp>(coreAttr, pipeAttr, pipeAttr,
+                                      flag_id_attr, Value{}, mode_attr);
   else
-    self.create<hivm::SyncBlockWaitOp>(coreAttr, pipeAttr, pipeAttr, flagAttr,
-                                       modeAttr);
+    self.create<hivm::SyncBlockWaitOp>(coreAttr, pipeAttr, pipeAttr,
+                                       flag_id_attr, mode_attr);
+}
+
+// Expand the TLA global barrier before handing IR to the affinity backend.
+// Delay until all scopes are known: ALL in a pure AIV kernel is different
+// from ALL in a mixed kernel, and a top-level mixed barrier needs both scopes.
+void lowerTlaSyncAll(ModuleOp module) {
+  auto *ctx = module.getContext();
+  auto moduleCore =
+      module->getAttrOfType<hivm::TModuleCoreTypeAttr>("hivm.module_core_type");
+  bool mixed = moduleCore &&
+               moduleCore.getModuleCoreType() == hivm::TModuleCoreType::MIX;
+  SmallVector<hivm::SyncBlockOp> barriers;
+  module.walk([&](hivm::SyncBlockOp op) { barriers.push_back(op); });
+  for (auto op : barriers) {
+    auto mode = op.getSyncBlockModeAttr().getSyncMode();
+    if (mode != hivm::SyncBlockMode::ALL &&
+        mode != hivm::SyncBlockMode::ALL_VECTOR)
+      throw std::invalid_argument("unexpected TLA global barrier mode");
+    OpBuilder builder(op);
+    auto loc = op.getLoc();
+    auto pipe = [&](hivm::PIPE value) {
+      return hivm::PipeAttr::get(ctx, value);
+    };
+    auto cube = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::CUBE);
+    auto vector = hivm::TCoreTypeAttr::get(ctx, hivm::TCoreType::VECTOR);
+    auto inter = hivm::SyncBlockInstrModeAttr::get(
+        ctx, hivm::SyncBlockInstrMode::INTER_BLOCK_SYNCHRONIZATION);
+    auto intra = hivm::SyncBlockInstrModeAttr::get(
+        ctx, hivm::SyncBlockInstrMode::INTRA_BLOCK_SYNCHRONIZATION);
+    auto set = [&](hivm::TCoreTypeAttr target, hivm::PipeAttr src,
+                   hivm::PipeAttr dst, int64_t id,
+                   hivm::SyncBlockInstrModeAttr instrMode) {
+      builder.create<hivm::SyncBlockSetOp>(loc, target, src, dst,
+                                           builder.getI64IntegerAttr(id),
+                                           Value{}, instrMode);
+    };
+    auto wait = [&](hivm::TCoreTypeAttr target, hivm::PipeAttr src,
+                    hivm::PipeAttr dst, int64_t id,
+                    hivm::SyncBlockInstrModeAttr instrMode) {
+      builder.create<hivm::SyncBlockWaitOp>(
+          loc, target, src, dst, builder.getI64IntegerAttr(id), instrMode);
+    };
+    auto emit = [&](bool isCube) {
+      auto core = isCube ? cube : vector;
+      auto src = pipe(isCube ? hivm::PIPE::PIPE_FIX : hivm::PIPE::PIPE_MTE3);
+      auto dst = pipe(hivm::PIPE::PIPE_S);
+      builder.create<hivm::PipeBarrierOp>(loc, pipe(hivm::PIPE::PIPE_ALL));
+      if (mode == hivm::SyncBlockMode::ALL_VECTOR || !mixed) {
+        // Match HIVMDecomposeOp's default flags: ALL_VECTOR=14,
+        // ALL on a pure Cube=13 or Vector=12 kernel.
+        int64_t id = mode == hivm::SyncBlockMode::ALL_VECTOR ? 14
+                     : isCube                                ? 13
+                                                             : 12;
+        set(core, src, dst, id, inter);
+        wait(core, src, dst, id, inter);
+      } else if (isCube) {
+        wait(cube, pipe(hivm::PIPE::PIPE_MTE3), dst, 10, intra);
+        set(cube, src, dst, 13, inter);
+        wait(cube, src, dst, 13, inter);
+        set(cube, src, dst, 11, intra);
+      } else {
+        set(vector, src, dst, 10, intra);
+        wait(vector, pipe(hivm::PIPE::PIPE_FIX), dst, 11, intra);
+      }
+    };
+    std::optional<bool> enclosingCube;
+    for (Operation *parent = op->getParentOp(); parent;
+         parent = parent->getParentOp()) {
+      if (parent->hasAttr("hivm.vector_function"))
+        throw std::invalid_argument(
+            "sync_all must be outside SIMD/SIMT scopes");
+      if (!enclosingCube) {
+        if (auto core =
+                parent->getAttrOfType<hivm::TCoreTypeAttr>("hivm.tcore_type"))
+          enclosingCube = core.getTcoretype() == hivm::TCoreType::CUBE;
+      }
+    }
+    if (mode == hivm::SyncBlockMode::ALL_VECTOR &&
+        enclosingCube.value_or(moduleCore && moduleCore.getModuleCoreType() ==
+                                                 hivm::TModuleCoreType::AIC))
+      throw std::invalid_argument("sync_all(False) requires a vector core");
+    if (mixed && !enclosingCube) {
+      auto emitScope = [&](bool isCube) {
+        OpBuilder::InsertionGuard guard(builder);
+        auto scope = builder.create<scope::ScopeOp>(loc, TypeRange{});
+        scope->setAttr("hivm.tcore_type", isCube ? cube : vector);
+        if (scope.getRegion().empty())
+          scope.getRegion().emplaceBlock();
+        builder.setInsertionPointToStart(&scope.getRegion().front());
+        emit(isCube);
+        builder.create<scope::ReturnOp>(loc);
+      };
+      if (mode == hivm::SyncBlockMode::ALL)
+        emitScope(true);
+      emitScope(false);
+    } else {
+      bool isCube =
+          enclosingCube.value_or(moduleCore && moduleCore.getModuleCoreType() ==
+                                                   hivm::TModuleCoreType::AIC);
+      emit(isCube);
+    }
+    op.erase();
+  }
+}
+
+template <typename Op>
+void createBufferSync(TLABuilder &self, const py::object &buf_id,
+                      const std::string &pipe, bool nonblocking) {
+  auto &builder = self.getBuilder();
+  // PR4478 buffer-sync ops identify the core by their pipe and no longer
+  // carry a TCoreTypeAttr. Keep the frontend pipe/core check for diagnostics.
+  self.create<Op>(getSyncPipe(builder, pipe),
+                  getSyncId(self, buf_id, kMaxBufferId, "bufid"),
+                  builder.getBoolAttr(nonblocking));
 }
 
 // vload/masked_store indices must be index-typed.
@@ -291,6 +452,7 @@ Value applySimdMode(TLABuilder &self, Value result, Value mask,
 } // namespace
 
 void init_tla_builder(py::module &&m) {
+  m.def("lower_tla_sync_all", &lowerTlaSyncAll, py::arg("module"));
   py::class_<TLABuilder, AscendNPUIROpBuilder>(
       m, "tla_builder", py::module_local(), py::dynamic_attr())
       .def(py::init<MLIRContext *, std::string, std::string>(),
@@ -310,58 +472,67 @@ void init_tla_builder(py::module &&m) {
           "create_tla_barrier",
           [](TLABuilder &self, const std::string &pipe) {
             self.create<hivm::PipeBarrierOp>(
-                getSyncPipe(self.getBuilder(), pipe));
+                getSyncPipe(self.getBuilder(), pipe, /*allowAll=*/true));
           },
           py::arg("pipe"))
       .def(
           "create_tla_set_flag",
           [](TLABuilder &self, const std::string &pipe,
-             const std::string &waitPipe, const py::object &eventId) {
-            createEventSync<hivm::SetFlagOp>(self, pipe, waitPipe, eventId);
+             const std::string &waitPipe, const py::object &event_id) {
+            createEventSync<hivm::SetFlagOp>(self, pipe, waitPipe, event_id);
           },
           py::arg("pipe"), py::arg("wait_pipe"), py::arg("event_id"))
       .def(
           "create_tla_wait_flag",
           [](TLABuilder &self, const std::string &pipe,
-             const std::string &waitPipe, const py::object &eventId) {
-            createEventSync<hivm::WaitFlagOp>(self, pipe, waitPipe, eventId);
+             const std::string &waitPipe, const py::object &event_id) {
+            createEventSync<hivm::WaitFlagOp>(self, pipe, waitPipe, event_id);
           },
           py::arg("pipe"), py::arg("wait_pipe"), py::arg("event_id"))
       // Hardware global barrier: AIV-only (false) or all AIC/AIV (true).
       .def(
           "create_tla_sync_all",
-          [](TLABuilder &self, bool allCores) {
+          [](TLABuilder &self, bool all_cores) {
             auto *ctx = self.getBuilder().getContext();
             auto pipeAll = hivm::PipeAttr::get(ctx, hivm::PIPE::PIPE_ALL);
             auto syncMode = hivm::SyncBlockModeAttr::get(
-                ctx, allCores ? hivm::SyncBlockMode::ALL
-                              : hivm::SyncBlockMode::ALL_VECTOR);
+                ctx, all_cores ? hivm::SyncBlockMode::ALL
+                               : hivm::SyncBlockMode::ALL_VECTOR);
             self.create<hivm::SyncBlockOp>(
                 syncMode, IntegerAttr{}, Value{},
-                allCores ? pipeAll : hivm::PipeAttr{}, pipeAll);
+                all_cores ? pipeAll : hivm::PipeAttr{}, pipeAll);
           },
           py::arg("all_cores"))
-      // FFTS cross-core modes 0..2.
+      // Logical block modes 0..2 and mode 3 for one physical A5 counter.
       .def(
           "create_tla_block_set_flag",
-          [](TLABuilder &self, int mode, const std::string &pipe,
-             int64_t flag) {
-            createBlockSync(self, pipe, flag,
-                            static_cast<hivm::SyncBlockInstrMode>(
-                                checkSyncRange(mode, 2, "sync mode")),
-                            /*isSet=*/true);
+          [](TLABuilder &self, int sync_mode, const std::string &pipe,
+             const py::object &flag_id) {
+            createBlockSync(self, pipe, flag_id, sync_mode, /*is_set=*/true);
           },
-          py::arg("mode"), py::arg("pipe"), py::arg("flag"))
+          py::arg("mode"), py::arg("pipe"), py::arg("flag_id"))
       .def(
           "create_tla_block_wait_flag",
-          [](TLABuilder &self, int mode, const std::string &pipe,
-             int64_t flag) {
-            createBlockSync(self, pipe, flag,
-                            static_cast<hivm::SyncBlockInstrMode>(
-                                checkSyncRange(mode, 2, "sync mode")),
-                            /*isSet=*/false);
+          [](TLABuilder &self, int sync_mode, const std::string &pipe,
+             const py::object &flag_id) {
+            createBlockSync(self, pipe, flag_id, sync_mode, /*is_set=*/false);
           },
-          py::arg("mode"), py::arg("pipe"), py::arg("flag"))
+          py::arg("mode"), py::arg("pipe"), py::arg("flag_id"))
+      // A5 buffer synchronization tokens.
+      .def(
+          "create_tla_mutex_lock",
+          [](TLABuilder &self, const py::object &buf_id,
+             const std::string &pipe, bool nonblocking) {
+            createBufferSync<hivm::GetBufOp>(self, buf_id, pipe, nonblocking);
+          },
+          py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
+      .def(
+          "create_tla_mutex_unlock",
+          [](TLABuilder &self, const py::object &buf_id,
+             const std::string &pipe, bool nonblocking) {
+            createBufferSync<hivm::RlsBufOp>(self, buf_id, pipe, nonblocking);
+          },
+          py::arg("buf_id"), py::arg("pipe"), py::arg("nonblocking") = false)
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
           "create_simd_vlds",

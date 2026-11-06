@@ -18,9 +18,17 @@ from typing import Any, Mapping, Sequence
 PROGRAM_GRID_TRANSFORMS_ATTR = "hacc.program_grid_transforms"
 PROGRAM_GRID_TRANSFORMS_VERSION = 2
 
-GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0xFBFF
+GRAPH_OPTIMIZATION_KNOWN_RULE_MASK = 0x3FBFF
 INDEPENDENT_AXIS_TENSORIZE_RULE_BIT = 1 << 9
 PERSISTENT_TASK_STRIP_MINING_RULE_BIT = 1 << 11
+QUERY_ROW_BATCHING_RULE_BIT = 1 << 17
+# Rule bits for the #2686 pair: SelectedBlockScanRule (the scan rewrite) and
+# QueryRowBatchingRule (the row lift).  Both are known and accepted, but fixed
+# default-off (RFC #2686), so they stay out of DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK
+# below and have to be requested through rule_mask.  There is no separate switch
+# between them: the scan rewrite always calls the row lift's materialize entry and
+# lets it decide; bit 17 only schedules the row lift as a standalone rule.
+SELECTED_BLOCK_SCAN_RULE_BIT = 1 << 16
 DEFAULT_GRAPH_OPTIMIZATION_RULE_MASK = (511 | INDEPENDENT_AXIS_TENSORIZE_RULE_BIT
                                         | PERSISTENT_TASK_STRIP_MINING_RULE_BIT)
 

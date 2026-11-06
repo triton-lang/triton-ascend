@@ -98,3 +98,29 @@ bool triton::isOutlineReuseBlacklistKernel(ModuleOp module) {
   }
   return isBlacklistKernel;
 }
+
+// Helper: ssbuffer.core_type
+llvm::StringRef triton::getSsbufferCoreType(Operation *op) {
+  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
+    return attr.getValue();
+  }
+  return "";
+}
+
+// Helper: Get CoreType from op and index
+llvm::StringRef triton::getCoreTypeWithIndex(Operation *op, int index) {
+  llvm::StringRef typeStr = getSsbufferCoreType(op);
+  if (typeStr.contains(", ")) {
+    llvm::SmallVector<llvm::StringRef> types;
+    typeStr.split(types, ", ", -1, false);
+    if (index < types.size()) {
+      return types[index].trim();
+    }
+    // LOG_DEBUG("Warning: Core type string has multiple types but value is not
+    // "
+    //           "an OpResult or index out of range.\n");
+    return "";
+  }
+
+  return typeStr;
+}

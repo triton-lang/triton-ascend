@@ -100,3 +100,58 @@ def test_select_dynamic_offset(dtype, rows, mode):
         MODE=mode,
     )
     torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)
+
+
+@triton.jit
+def _select_constant_tail_kernel(true_ptr, bounds_ptr, out_ptr, ROWS: tl.constexpr, COLS: tl.constexpr,
+                                 STEPS: tl.constexpr, AXIS: tl.constexpr, FALSE_VALUE: tl.constexpr):
+    pid = tl.program_id(0)
+    rows = tl.arange(0, ROWS)
+    cols = tl.arange(0, COLS)
+    offsets = rows[:, None] * COLS + cols[None, :]
+    for step in range(STEPS):
+        start = tl.load(bounds_ptr + pid * STEPS + step)
+        value = tl.load(true_ptr + step * ROWS * COLS + offsets) + step
+        if AXIS == 0:
+            mask = rows[:, None] >= start
+        else:
+            mask = cols[None, :] >= start
+        selected = tl.where(mask, value, FALSE_VALUE)
+        tl.store(out_ptr + (pid * STEPS + step) * ROWS * COLS + offsets, selected)
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.int32])
+@pytest.mark.parametrize("axis", [0, 1])
+@pytest.mark.parametrize("false_value", [0, -7])
+@pytest.mark.parametrize("multibuffer", [False, True])
+def test_select_constant_tail(dtype, axis, false_value, multibuffer):
+    # Match KDA's outer-axis tail and shared loop-invariant constant, including
+    # starts around the sub-block split and outside the tensor. Also cover the
+    # last axis so the destination choice is independent of the mask axis.
+    rows, cols, steps = 32, 128, 3
+    extent = (rows, cols)[axis]
+    cases = torch.tensor([-3, -1, 0, 1, 7, 8, 9, 15, 16, 17, extent - 1, extent, extent + 3], dtype=torch.int32)
+    bounds = torch.stack([cases.roll(step, 0) for step in range(steps)], dim=1)
+    generator = torch.Generator().manual_seed(13)
+    true_value = torch.randint(-100, 100, (steps, rows, cols), generator=generator).to(dtype)
+    expected = torch.empty((len(cases), steps, rows, cols), dtype=dtype)
+    offsets = torch.arange(extent)
+    for case in range(len(cases)):
+        for step in range(steps):
+            mask = offsets >= bounds[case, step]
+            mask = mask[:, None] if axis == 0 else mask[None, :]
+            expected[case, step] = torch.where(mask, true_value[step] + step, false_value)
+
+    output = torch.empty(expected.shape, dtype=dtype, device="npu")
+    _select_constant_tail_kernel[(len(cases), )](
+        true_value.npu(),
+        bounds.npu(),
+        output,
+        ROWS=rows,
+        COLS=cols,
+        STEPS=steps,
+        AXIS=axis,
+        FALSE_VALUE=false_value,
+        multibuffer=multibuffer,
+    )
+    torch.testing.assert_close(output.cpu(), expected, rtol=0, atol=0)

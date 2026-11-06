@@ -1064,8 +1064,8 @@ static void collectAndLeaves(Value mask, SmallVectorImpl<Value> &leaves,
 // so that we can use contMask to bound GM accesses while discMask still drives
 // the per-element selection.
 MaskDecomposition decomposeAndMask(Operation *op, Value mask,
-                                  const Location &loc,
-                                  PatternRewriter &rewriter) {
+                                   const Location &loc,
+                                   PatternRewriter &rewriter) {
   SmallVector<Value> leaves;
   collectAndLeaves(mask, leaves, loc, rewriter);
 

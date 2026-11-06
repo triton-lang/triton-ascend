@@ -771,7 +771,7 @@ UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
 }
 
 static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
-                                                PatternRewriter &rewriter) {
+                                                  PatternRewriter &rewriter) {
   auto loc = op.getLoc();
   auto ptr = op.getPtr();
   auto mask = op.getMask();
@@ -788,15 +788,16 @@ static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
   triton::LoadOp load;
   if (contMask && discMask) {
     // Bound memory accesses and initialize inactive lanes before selection.
-    load = rewriter.create<triton::LoadOp>(
-        loc, ptr, contMask, other, op.getCache(), op.getEvict(),
-        op.getIsVolatile());
+    load = rewriter.create<triton::LoadOp>(loc, ptr, contMask, other,
+                                           op.getCache(), op.getEvict(),
+                                           op.getIsVolatile());
     mask = discMask;
   } else {
-    load = rewriter.create<triton::LoadOp>(
-        loc, ptr, op.getCache(), op.getEvict(), op.getIsVolatile());
+    load = rewriter.create<triton::LoadOp>(loc, ptr, op.getCache(),
+                                           op.getEvict(), op.getIsVolatile());
   }
-  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, load.getResult(), other);
+  rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, load.getResult(),
+                                               other);
   return load;
 }
 
@@ -895,7 +896,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
 
   bool maskRewritten = false;
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (simdDiscreteMask || (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
+    if (simdDiscreteMask ||
+        (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
       op = rewriteSimdDiscreteMaskLoad(op, rewriter);
       rewriter.setInsertionPoint(op);
       maskRewritten = true;
@@ -950,7 +952,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto resultShape = ptrType.getShape();
   auto resultElementType = getResultElementType(ptrType);
   int64_t sizeInByte = getTypeSizeInByte(resultElementType);
-  
+
   int64_t continuousSize = sizeInByte;
   for (int i = ptrOffsetInfo.getRank() - 1; i >= 0; i--) {
     if (!ptrOffsetInfo.isStructured(i))
@@ -982,7 +984,8 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   bool templateIndirectFastPathEnabled =
       compileOn91095Flag &&
       triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
-      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() && continuousSize < 64) || // cont mask
+      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() &&
+        continuousSize < 64) || // cont mask
        (axisDiscreteMask && discreteSize > continuousSize) ||
        mixCompileDiscreteMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;

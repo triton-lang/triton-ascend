@@ -220,8 +220,8 @@ struct MaskDecomposition {
 };
 
 MaskDecomposition decomposeAndMask(Operation *op, Value mask,
-                                  const Location &loc,
-                                  PatternRewriter &rewriter);
+                                   const Location &loc,
+                                   PatternRewriter &rewriter);
 
 std::optional<MaskState> runMaskAnalysis(Operation *op, OpBuilder &builder);
 

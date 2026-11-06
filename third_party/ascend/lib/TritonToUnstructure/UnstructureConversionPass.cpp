@@ -770,8 +770,8 @@ UnstructuredMemAccessConverter<triton::LoadOp>::splatAndLoadScenario<
   return success();
 }
 
-static LogicalResult rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
-                                               PatternRewriter &rewriter) {
+static triton::LoadOp rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
+                                                PatternRewriter &rewriter) {
   auto loc = op.getLoc();
   auto ptr = op.getPtr();
   auto mask = op.getMask();
@@ -797,7 +797,7 @@ static LogicalResult rewriteSimdDiscreteMaskLoad(triton::LoadOp op,
         loc, ptr, op.getCache(), op.getEvict(), op.getIsVolatile());
   }
   rewriter.replaceOpWithNewOp<arith::SelectOp>(op, mask, load.getResult(), other);
-  return success();
+  return load;
 }
 
 template <typename MemAccOpTy>
@@ -819,6 +819,7 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto mixCompileDiscreteMask =
       op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName);
   auto simdDiscreteMask = op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName);
+  auto axisDiscreteMask = op->hasAttr(ConverterUtils::axisDiscreteMaskAttrName);
   bool runtimeLoopMask = op->hasAttr(ConverterUtils::runtimeLoopMaskAttrName);
 
   if (!ptrType || op->hasAttr(ConverterUtils::discreteAttrName))
@@ -893,14 +894,22 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (simdDiscreteMask && ptrOffsetInfo.isStructured())
-      return rewriteSimdDiscreteMaskLoad(op, rewriter);
+    if (simdDiscreteMask || (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
+      rewriteSimdDiscreteMaskLoad(op, rewriter);
+    }
   }
 
   if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
-    return failure();
+    return success();
+
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (ptrOffsetInfo.isScalarLike() &&
+        succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
+      return success();
+    }
+  }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
@@ -911,13 +920,6 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     os << "\n";
     os << ptrOffsetInfo.isScalarLike() << "\n";
   });
-
-  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (ptrOffsetInfo.isScalarLike() &&
-        succeeded(splatAndLoadScenario(op, ptrOffsetInfo, rewriter))) {
-      return success();
-    }
-  }
 
   std::optional<MaskState> mstate = runMaskAnalysis(op, rewriter);
 
@@ -970,18 +972,12 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
       compileOn91095Flag &&
       triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
       ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       mixCompileDiscreteMask);
+       mixCompileDiscreteMask || axisDiscreteMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (templateIndirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
                                            resultShape, rewriter))) {
     return success();
-  }
-
-  // Keep the original mask/other for SIMT; only rewrite after that path fails.
-  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
-    if (simdDiscreteMask)
-      return rewriteSimdDiscreteMaskLoad(op, rewriter);
   }
 
   LLVM_DEBUG({

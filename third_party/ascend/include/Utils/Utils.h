@@ -49,6 +49,7 @@ namespace ConverterUtils {
 
 const std::string GeneratedByMakeTensorPtrTAG = "GeneratedByMakeTensorPtr";
 const std::string discreteMaskAttrName = "DiscreteMask";
+const std::string axisDiscreteMaskAttrName = "AxisDiscreteMask";
 const std::string mixCompileDiscreteMaskAttrName = "MixCompileDiscreteMask";
 const std::string simdDiscreteMaskAttrName = "SimdDiscreteMask";
 const std::string explicitRouteToSIMDAttrName = "ExplicitRouteToSIMD";

@@ -531,18 +531,31 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
     auto ptrType = dyn_cast<RankedTensorType>(ptr.getType());
     bool rankWithinIndirectFastPathLimit =
         ptrType && ptrType.getShape().size() <= 5;
-    bool useSimtTemplate =
+    bool isAxisDiscreteMask = isAxisDiscreteMaskLoad(op, rewriter);
+    bool canUseSimtTemplate =
         compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
-        rankWithinIndirectFastPathLimit &&
-        !isAxisDiscreteMaskLoad(op, rewriter);
+        rankWithinIndirectFastPathLimit;
+    
     // Defer SIMD mask rewriting until pointer-based routing in unstructure.
-    rewriter.modifyOpInPlace(op, [&] {
-      op->setAttr(useSimtTemplate
-                      ? ConverterUtils::mixCompileDiscreteMaskAttrName
-                      : ConverterUtils::simdDiscreteMaskAttrName,
-                  rewriter.getUnitAttr());
-    });
+    if (canUseSimtTemplate) {
+      if (isAxisDiscreteMask) {
+        rewriter.modifyOpInPlace(op, [&] {
+          op->setAttr(ConverterUtils::axisDiscreteMaskAttrName,
+                      rewriter.getUnitAttr());
+        });
+      } else {
+        rewriter.modifyOpInPlace(op, [&] {
+          op->setAttr(ConverterUtils::mixCompileDiscreteMaskAttrName,
+                      rewriter.getUnitAttr());
+        });
+      }
+    } else {
+      rewriter.modifyOpInPlace(op, [&] {
+        op->setAttr(ConverterUtils::simdDiscreteMaskAttrName,
+                    rewriter.getUnitAttr());
+      });
+    }
     return success();
   }
 };

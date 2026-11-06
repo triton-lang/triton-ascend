@@ -59,9 +59,17 @@ namespace triton {
 namespace cfg {
 namespace {
 
-constexpr std::array<GraphOptimizationRulePhase, 11> kRulePhases = {
+constexpr std::array<GraphOptimizationRulePhase, 12> kRulePhases = {
     GraphOptimizationRulePhase::DiagonalMaskRemoval,
     GraphOptimizationRulePhase::ConvertModuloToMask,
+    // Rule A (selected-block scan) phase: it rewrites the sparse loop before
+    // the memory-access rules below.  Rule B (query row batching) sits in
+    // the ProgramMapping phase per RFC #2686, alongside IAT, and is
+    // scheduled with that phase's loop.
+    // Rule A's phase: it rewrites the sparse loop before the memory-access
+    // rules below look at it.  Rule B (query row batching) runs in the
+    // ProgramMapping phase, alongside IAT, as specified by RFC #2686.
+    GraphOptimizationRulePhase::SelectedBlockScan,
     GraphOptimizationRulePhase::ProgramMapping,
     GraphOptimizationRulePhase::PersistentTaskMapping,
     GraphOptimizationRulePhase::LoadStoreTranspose,
@@ -100,9 +108,19 @@ bool isRuleEnabled(GraphOptimizationRuleMask ruleMask,
   return (ruleMask & getGraphOptimizationRuleMask(ruleId)) != 0;
 }
 
-constexpr bool requiresProgramMappingCleanup(GraphOptimizationRuleId ruleId) {
+constexpr bool requiresPostRewriteCleanup(GraphOptimizationRuleId ruleId) {
+  // Rule A/B build 64-wide values on demand while lifting rows, but the
+  // rewrite can leave unused full-width broadcasts behind (the
+  // 8x16x128xf32 alpha broadcast, for example).  If they are left alone,
+  // downstream materialisation turns them into whole UB buffers and hits
+  // the capacity limit, so both rules rerun the structural cleanup after
+  // apply.
+  // Rules A/B leave unused full-width broadcasts (e.g. 8x16x128xf32 alpha)
+  // behind; without cleanup they are materialized into UB and blow the budget.
   return ruleId == GraphOptimizationRuleId::IndependentAxisTensorize ||
-         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining;
+         ruleId == GraphOptimizationRuleId::PersistentTaskStripMining ||
+         ruleId == GraphOptimizationRuleId::SelectedBlockScan ||
+         ruleId == GraphOptimizationRuleId::QueryRowBatching;
 }
 
 constexpr bool isPlanHigherPriority(unsigned lhsBenefit, unsigned lhsOrder,
@@ -134,6 +152,7 @@ public:
     this->mappingL0BCapacityBytes = options.mappingL0BCapacityBytes;
     this->mappingL0CCapacityBytes = options.mappingL0CCapacityBytes;
     this->l0SafetyPercent = options.l0SafetyPercent;
+    this->coreNum = options.coreNum;
     this->compileMode = options.compileMode;
   }
 
@@ -172,6 +191,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   const uint64_t cliMappingL0BCapacityBytes = this->mappingL0BCapacityBytes;
   const uint64_t cliMappingL0CCapacityBytes = this->mappingL0CCapacityBytes;
   const uint64_t cliL0SafetyPercent = this->l0SafetyPercent;
+  const uint64_t cliCoreNum = this->coreNum;
 
   if (cliRuleMask > std::numeric_limits<GraphOptimizationRuleMask>::max() ||
       !isValidGraphOptimizationRuleMask(
@@ -233,6 +253,12 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
     return failure();
   }
 
+  if (cliCoreNum > std::numeric_limits<unsigned>::max()) {
+    getOperation().emitError()
+        << "graph-optimize core-num is out of range: " << cliCoreNum;
+    return failure();
+  }
+
   const auto compileMode = triton::ascend::parseCompileMode(this->compileMode);
   if (!compileMode) {
     getOperation().emitError()
@@ -257,6 +283,7 @@ GraphOptimizePass::getStableOptions(GraphOptimizationOptions &options) {
   options.mappingL0CCapacityBytes =
       static_cast<unsigned>(cliMappingL0CCapacityBytes);
   options.l0SafetyPercent = static_cast<unsigned>(cliL0SafetyPercent);
+  options.coreNum = static_cast<unsigned>(cliCoreNum);
   options.compileMode = this->compileMode;
   options.independentAxisTensorize.enabledForCompileMode =
       *compileMode != triton::ascend::CompileMode::SimtOnly;
@@ -309,11 +336,19 @@ void GraphOptimizePass::runOnOperation() {
   }
 
   for (triton::FuncOp function : module.getOps<triton::FuncOp>()) {
-    const ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
+    ResourceSnapshot resources = ResourceSnapshot::fromExplicit(
         options.mappingUBCapacityBytes, options.ubSafetyPercent,
         options.reservedUBBytes, options.mappingL0ACapacityBytes,
         options.mappingL0BCapacityBytes, options.mappingL0CCapacityBytes,
         options.l0SafetyPercent);
+    // The physical core count comes only from the pass option (the backend
+    // injects it per kernel execution mode).  The snapshot stores it so the
+    // row-count policy reads it from there and the rules need no separate
+    // query interface.
+    // The physical core count comes from the pass option (the backend injects
+    // it per kernel execution mode); the snapshot carries it so the row-count
+    // policy reads one resource interface instead of a rule-private query.
+    resources.coreNum = options.coreNum;
     GraphOptimizationContext context(function, resources);
     unsigned rewriteCount = 0;
 
@@ -392,7 +427,7 @@ void GraphOptimizePass::runOnOperation() {
           signalPassFailure();
           return;
         }
-        if (requiresProgramMappingCleanup(appliedRuleId) &&
+        if (requiresPostRewriteCleanup(appliedRuleId) &&
             failed(runStructuralCleanup())) {
           selectedPlan.reset();
           plans.clear();
@@ -582,6 +617,21 @@ void populateBuiltinGraphOptimizationRules(
                     GraphOptimizationRuleId::ContiguousBlockAccessFormation)) {
     rules.push_back(createContiguousBlockAccessFormationRule(
         options.contiguousBlockAccessFormation));
+  }
+  // SelectedBlockScanRule is registered when rule bit 65536 is set; that bit
+  // is fixed default-off and must be requested explicitly.  There is no
+  // extra gate to wire up between the two rules: it always goes through
+  // the materialize entry in QueryRowBatching.h and lets the row lift
+  // decide, while 131072 only decides whether QueryRowBatchingRule joins
+  // the scheduler as a standalone rule.
+  // SelectedBlockScanRule is registered when bit 65536 is set (the bit is fixed
+  // default-off, so the caller has to request it).  Nothing has to be stitched
+  // together here: it always goes through the QueryRowBatching.h materialize
+  // entry and the row lift decides; bit 131072 only controls whether
+  // QueryRowBatchingRule is scheduled as a standalone rule.
+  if (isRuleEnabled(options.enabledRuleMask,
+                    GraphOptimizationRuleId::SelectedBlockScan)) {
+    rules.push_back(createSelectedBlockScanRule());
   }
   const auto compileMode =
       triton::ascend::parseCompileMode(options.compileMode);

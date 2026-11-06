@@ -39,13 +39,28 @@
         },
         "source": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "Provenance of the rate. Must name the probe artifact, the raw result and the calibration step that produced this number, so the value can be recomputed. A rate whose probe artifact was not retained must say so explicitly and use confidence \"none\"."
         },
         "confidence": {
           "$ref": "#/definitions/confidence"
         }
       },
       "additionalProperties": false
+    },
+    "atomic_rate_with_provenance": {
+      "description": "An atomic rate that names an operation and a dtype must record where the number came from.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/atomic_rate"
+        },
+        {
+          "required": [
+            "source",
+            "confidence"
+          ]
+        }
+      ]
     },
     "camodel_effective": {
       "type": "object",
@@ -2620,13 +2635,18 @@
             "default": {
               "$ref": "#/definitions/atomic_rate"
             },
-            "operations": {
-              "type": "object",
-              "description": "Operation-and-dtype overrides keyed as kind.dtype, for example fadd.f32.",
-              "additionalProperties": {
-                "$ref": "#/definitions/atomic_rate"
-              }
+        "operations": {
+          "type": "object",
+          "description": "Operation-and-dtype overrides keyed as kind.dtype, for example fadd.f32. The operation name is the TTIR one. A key that names an operation and a dtype must record its provenance, and its source must say which target template operation was measured.",
+          "patternProperties": {
+            "^[a-z0-9_]+\\.[a-z0-9_]+(\\.[a-z0-9_]+)?$": {
+              "$ref": "#/definitions/atomic_rate_with_provenance"
             }
+          },
+          "additionalProperties": {
+            "$ref": "#/definitions/atomic_rate"
+          }
+        }
           },
           "additionalProperties": false
         },

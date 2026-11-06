@@ -1099,6 +1099,9 @@ TEST(SimdSimtCostModelTest,
   stage.workload.atomicWorkloads.push_back(atomic);
 
   HardwareProfile profile = hardwareProfile();
+  // The slot is spelled with the TTIR operation name.  A profile that uses
+  // the TTIR spelling must keep working, so this test pins that the existing
+  // key is still honoured.
   profile.simd.atomicRates["fadd.f32"] = {8.0, 2.0, 5.0, 3.0};
   auto table = evaluateOneStage(stage, profile);
   if (!table)
@@ -1107,6 +1110,52 @@ TEST(SimdSimtCostModelTest,
   EXPECT_DOUBLE_EQ(simd.resources.load, 32.0);
   EXPECT_DOUBLE_EQ(simd.resources.store, 0.0);
   EXPECT_DOUBLE_EQ(simd.resources.atomic, 30.0);
+}
+
+TEST(SimdSimtCostModelTest, AtomicRateSlotPrefersKindDtypeAddressClass) {
+  // A per-operation, per-dtype slot must win over the address class slot and
+  // over the default, so that a rate calibrated for one operation cannot leak
+  // into the others.
+  LogicalStage stage = logicalStage("atomic", StageCostModelKind::AtomicMemory,
+                                    StageScheduleKind::PartiallyDependent);
+  stage.features.hasAtomicMemory = true;
+  mlir::ascend::AtomicWorkload atomic;
+  atomic.kind = "fadd";
+  atomic.dataType = "f32";
+  atomic.memorySemantic = "acq_rel";
+  atomic.memoryScope = "gpu";
+  atomic.logicalElements = 64.0;
+  atomic.logicalOperationInstances = 1.0;
+  atomic.addressDependsOnLoadedIndex = true;
+  atomic.contentionUnknown = true;
+  stage.workload.atomicWorkloads.push_back(atomic);
+
+  auto atomicCycles = [&](HardwareProfile profile) -> double {
+    auto table = evaluateOneStage(stage, std::move(profile));
+    if (!table) {
+      ADD_FAILURE() << llvm::toString(table.takeError());
+      return 0.0;
+    }
+    return table->stages.front().implementations.front().resources.atomic;
+  };
+
+  HardwareProfile profile = hardwareProfile();
+  profile.simd.atomicRates["default"] = {8.0, 0.0, 0.0, 1.0};
+  profile.simd.atomicRates["loaded_index"] = {16.0, 0.0, 0.0, 1.0};
+  profile.simd.atomicRates["fadd.f32.loaded_index"] = {32.0, 0.0, 0.0, 1.0};
+  // 64 elements at 32 elements per cycle
+  EXPECT_DOUBLE_EQ(atomicCycles(profile), 2.0);
+
+  // Without the operation specific slot the address class slot applies.
+  HardwareProfile addressClassOnly = hardwareProfile();
+  addressClassOnly.simd.atomicRates["default"] = {8.0, 0.0, 0.0, 1.0};
+  addressClassOnly.simd.atomicRates["loaded_index"] = {16.0, 0.0, 0.0, 1.0};
+  EXPECT_DOUBLE_EQ(atomicCycles(std::move(addressClassOnly)), 4.0);
+
+  // With neither, the default applies.
+  HardwareProfile defaultOnly = hardwareProfile();
+  defaultOnly.simd.atomicRates["default"] = {8.0, 0.0, 0.0, 1.0};
+  EXPECT_DOUBLE_EQ(atomicCycles(std::move(defaultOnly)), 8.0);
 }
 
 TEST(SimdSimtCostModelTest,

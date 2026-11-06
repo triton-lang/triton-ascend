@@ -54,6 +54,49 @@ but subtraction does not identify the independent non-negative parameter
 assumed by the current Stage formula. Such data is evidence for a formula gap,
 not permission to fit a convenient constant.
 
+### Operation-rate calibration rules
+
+These rules apply to every rate that the Stage formulas multiply a workload
+count by, in particular `stage_resources.atomic_memory`.
+
+1. **Measure the shape the model predicts.** A rate describes the operation as
+   the model sees it: the TTIR operation, its element type, its address class
+   and its mask. Measure it through the same compiler path the model selects
+   for that operation. A rate measured on a different path, on a different
+   instruction sequence, or on a private library call is a rate for something
+   else, even when the arithmetic looks identical.
+2. **Name the operation the way the model sees it, and record which template
+   operation the slot prices.** The Stage model keys atomic rates by the TTIR
+   operation name, so `fadd` and `add` are different slots. The target
+   template names its operations once and separates the element type by the
+   template parameter, so `add`/`fadd`, `max`/`umax`, `min`/`umin` and
+   `exch`/`xchg` may lower to the same template operation. The slot name
+   therefore stays the TTIR spelling, and the `source` of the slot says which
+   template operation was measured.
+3. **Separate the mechanisms, not the spellings.** When one operation lowers to
+   more than one hardware mechanism, each mechanism needs its own rate, and
+   the profile must say which mechanism it prices. The float add/min/max
+   atomics are the current example: they have no native instruction on this
+   target and are expanded into a load, a floating-point operation and a
+   compare-and-swap retry loop, while the integer ones are a single
+   instruction. A rate that does not distinguish them cannot be reconciled
+   with a measured instruction count.
+4. **Hold out part of the fit.** Fit on part of the sweep and report the error
+   on the rest. A polynomial that needs more terms only to keep its training
+   error low has overfitted the sweep rather than described the mechanism.
+5. **State the domain.** A rate is valid for the address pattern, the element
+   width, the footprint and the contention it was measured with. When the
+   runtime footprint or the collision distribution can change the cost, the
+   profile must say so, because a single rate cannot describe both regimes.
+6. **Record the artifact.** `source` must name the probe, the raw result and
+   the calibration step, so that the value can be recomputed. A rate whose
+   probe artifact was not retained must say that explicitly and carry
+   `confidence` `none`, which is what the uncalibrated atomic rates now do.
+7. **Do not fill an uncalibrated slot with a plausible constant.** Leave the
+   slot absent, or carry it with `confidence` `none` and a description of the
+   gap. A constant that looks plausible is harder to remove later than a
+   missing value.
+
 ### Reduction expression strings
 
 First- and middle-axis segment `condition` and `expression` values are strings.

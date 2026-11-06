@@ -9,15 +9,18 @@
 #include "AscendModel/Transforms/Passes.h"
 #include "AscendModel/Transforms/SimtSelection.h"
 #include "ascend/include/Utils/SuperBlockFactor.h"
-
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/IR/Operation.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/Interfaces/FunctionInterfaces.h"
 #include "mlir/Parser/Parser.h"
 #include "mlir/Pass/Pass.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
@@ -174,6 +177,162 @@ static LogicalResult appendJSONLine(llvm::StringRef path,
   return success();
 }
 
+/// Collapse Triton's float min/max bit trick back into one float atomic.
+///
+/// The Triton frontend lowers a float ``atomic_max`` into two integer atomics
+/// on the bit pattern: ``max`` on the non-negative lanes and ``umin`` on the
+/// negative ones, with masks derived from the sign bit.  A float
+/// ``atomic_min`` becomes ``min`` plus ``umax`` symmetrically.  Both updates
+/// address the same location under complementary masks, so the target executes
+/// them as one atomic of the float element type.
+///
+/// The lowering already fuses the pair later on.  The route model runs before
+/// that, so without this it prices the pair as two atomics and charges twice
+/// for one operation.  Fusing here keeps the analysis on the shape that will
+/// actually execute.
+///
+/// The transformation is conservative: it only fires when the two atomics use
+/// the same pointer and value bitcasts, carry complementary sign-bit masks and
+/// are the two halves of one float operation.
+static bool fuseFloatAtomicMinMaxPairs(ModuleOp module) {
+  // The sign-bit constants are splat tensors (`dense<31>`, `dense<true>`), not
+  // scalar attributes, so both forms have to be read.
+  auto splatInteger = [](Value value, int64_t &result) {
+    auto constant = value.getDefiningOp<arith::ConstantOp>();
+    if (!constant)
+      return false;
+    Attribute attr = constant->getAttr("value");
+    if (!attr)
+      return false;
+    if (auto integer = dyn_cast<IntegerAttr>(attr)) {
+      result = integer.getInt();
+      return true;
+    }
+    if (auto dense = dyn_cast<DenseIntElementsAttr>(attr)) {
+      if (!dense.isSplat())
+        return false;
+      result = (*dense.begin()).getSExtValue();
+      return true;
+    }
+    return false;
+  };
+
+  // The masks are derived from the sign bit of the bitcast value:
+  //   %sign = arith.cmpi ne, (arith.shrui %value, signBit), 0
+  // and the operation whose kind is max/min carries !%sign while the unsigned
+  // counterpart carries %sign.
+  auto signBitOf = [&splatInteger](Value mask, Value value) -> Value {
+    auto xorOp = mask.getDefiningOp<arith::XOrIOp>();
+    Value candidate = xorOp ? xorOp.getLhs() : mask;
+    auto cmp = candidate.getDefiningOp<arith::CmpIOp>();
+    if (!cmp || cmp.getPredicate() != arith::CmpIPredicate::ne)
+      return Value();
+    auto shift = cmp.getLhs().getDefiningOp<arith::ShRUIOp>();
+    if (!shift || shift.getLhs() != value)
+      return Value();
+    int64_t amount = 0;
+    if (!splatInteger(shift.getRhs(), amount))
+      return Value();
+    auto shaped = dyn_cast<ShapedType>(value.getType());
+    if (!shaped || !shaped.getElementType().isInteger())
+      return Value();
+    if (amount != shaped.getElementType().getIntOrFloatBitWidth() - 1)
+      return Value();
+    return candidate;
+  };
+  auto isComplementOf = [&splatInteger](Value mask, Value signBit) {
+    // The two halves of the trick use %sign and !%sign.
+    if (mask == signBit)
+      return true;
+    auto xorOp = mask.getDefiningOp<arith::XOrIOp>();
+    if (!xorOp)
+      return false;
+    Value other = xorOp.getLhs() == signBit   ? xorOp.getRhs()
+                  : xorOp.getRhs() == signBit ? xorOp.getLhs()
+                                              : Value();
+    if (!other)
+      return false;
+    int64_t constant = 0;
+    return splatInteger(other, constant) && constant == 1;
+  };
+
+  IRRewriter rewriter(module.getContext());
+  bool changed = false;
+  SmallVector<triton::AtomicRMWOp> atomics;
+  module.walk([&](triton::AtomicRMWOp op) {
+    const triton::RMWOp kind = op.getAtomicRmwOp();
+    if (kind != triton::RMWOp::MAX && kind != triton::RMWOp::MIN)
+      return;
+    if (!op.getMask())
+      return;
+    auto ptrBitcast = op.getPtr().getDefiningOp<triton::BitcastOp>();
+    auto valBitcast = op.getVal().getDefiningOp<triton::BitcastOp>();
+    if (!ptrBitcast || !valBitcast)
+      return;
+    if (!isa<FloatType>(getElementTypeOrSelf(valBitcast.getSrc().getType())))
+      return;
+    atomics.push_back(op);
+  });
+
+  // The partner is erased with its owner, so keep track and skip it.
+  llvm::SmallPtrSet<Operation *, 8> erased;
+  for (triton::AtomicRMWOp op : atomics) {
+    if (erased.count(op) != 0)
+      continue;
+    auto ptrBitcast = op.getPtr().getDefiningOp<triton::BitcastOp>();
+    auto valBitcast = op.getVal().getDefiningOp<triton::BitcastOp>();
+    if (!ptrBitcast || !valBitcast)
+      continue;
+    Value signBit = signBitOf(op.getMask(), op.getVal());
+    if (!signBit)
+      continue;
+    const triton::RMWOp wanted = op.getAtomicRmwOp() == triton::RMWOp::MAX
+                                     ? triton::RMWOp::UMIN
+                                     : triton::RMWOp::UMAX;
+    triton::AtomicRMWOp partner;
+    for (Operation &other : op->getBlock()->getOperations()) {
+      auto candidate = dyn_cast<triton::AtomicRMWOp>(&other);
+      if (!candidate || candidate == op)
+        continue;
+      if (candidate.getAtomicRmwOp() != wanted)
+        continue;
+      if (candidate.getPtr() != op.getPtr() ||
+          candidate.getVal() != op.getVal())
+        continue;
+      if (!candidate.getMask() || !isComplementOf(candidate.getMask(), signBit))
+        continue;
+      partner = candidate;
+      break;
+    }
+    if (!partner)
+      continue;
+
+    rewriter.setInsertionPoint(op);
+    Value fusedMask = rewriter.create<arith::OrIOp>(op.getLoc(), op.getMask(),
+                                                    partner.getMask());
+    Type fusedType = valBitcast.getSrc().getType();
+    auto fused = rewriter.create<triton::AtomicRMWOp>(
+        op.getLoc(), fusedType, op.getAtomicRmwOp(), ptrBitcast.getSrc(),
+        valBitcast.getSrc(), fusedMask, op.getSem(), op.getScope());
+    // The old value keeps its bit pattern, so a used result is re-cast back.
+    auto carryResult = [&](triton::AtomicRMWOp from) {
+      if (from.getResult().use_empty())
+        return;
+      auto cast = rewriter.create<triton::BitcastOp>(
+          from.getLoc(), from.getResult().getType(), fused.getResult());
+      from.getResult().replaceAllUsesWith(cast.getResult());
+    };
+    carryResult(op);
+    carryResult(partner);
+    erased.insert(partner.getOperation());
+    erased.insert(op.getOperation());
+    rewriter.eraseOp(partner);
+    rewriter.eraseOp(op);
+    changed = true;
+  }
+  return changed;
+}
+
 struct SelectSimdSimtCostModelPass
     : public impl::SelectSimdSimtCostModelPassBase<
           SelectSimdSimtCostModelPass> {
@@ -181,6 +340,9 @@ struct SelectSimdSimtCostModelPass
 
   void runOnOperation() override {
     ModuleOp module = getOperation();
+    // Price the float min/max atomic as the single atomic the target runs,
+    // not as the two integer atomics the frontend emits.
+    fuseFloatAtomicMinMaxPairs(module);
     clearPreviousSelection(module);
     const bool autoMode = mode.getValue() == "auto";
 

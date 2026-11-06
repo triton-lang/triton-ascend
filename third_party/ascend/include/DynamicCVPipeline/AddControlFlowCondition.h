@@ -37,6 +37,16 @@ namespace triton {
 constexpr int CROSS_CORE_BUFFER_COUNT_THRESHOLD = 1;
 constexpr int INTRA_CORE_BUFFER_COUNT_THRESHOLD = 2;
 
+// Preload condition.
+//
+// A computation block at depth PRELOAD_DEPTH_MIN or PRELOAD_DEPTH_MAX of the
+// block dependency DAG waits until the block two positions earlier in the
+// chain has produced interCoreBufferCount + 1 more rounds than this block has
+// consumed. Near the end of the main loop the backlog can no longer grow, so
+// the condition falls back to "the loop is about to end".
+constexpr int PRELOAD_DEPTH_MIN = 3;
+constexpr int PRELOAD_DEPTH_MAX = 4;
+
 // Relationship between a tensor iter_arg and ssbuffer.if in the main_loop
 struct TensorIterArgIfOpRelation {
   Value iterArg;
@@ -70,6 +80,31 @@ struct TensorIterArgIfOpVars {
 // Kind of dependency edge between two ifOps in ifBlockDAG.
 enum class IfBlockDepKind : uint8_t { CrossCore = 0, IntraCore = 1 };
 
+// Slot of the SSBuffer counter owned by one ssbuffer.if computation block.
+// A vector block keeps one copy per vector core (byteOffset for core0 and
+// byteOffset + 1024 for core1); a cube block keeps a single copy.
+struct BlockCounterSlot {
+  int slot = -1;         // slot index, 0 based
+  int byteOffset = 0;    // byte offset of the counter in the ssbuf area
+  bool isVector = false; // true when the block runs on the vector side
+  int blockId = -1;      // block id of the owning ssbuffer.if
+};
+
+// Cross-core dependency edge between two ssbuffer.if computation blocks.
+struct CrossCoreBlockEdge {
+  scf::IfOp producer;
+  scf::IfOp consumer;
+  int bufferNum = 1; // buffer depth of this edge
+};
+
+// One preload target: the block carrying the preload condition and the block
+// two positions earlier in the dependency chain, used as the reference of the
+// round difference.
+struct PreloadTarget {
+  scf::IfOp reference; // the block two chain positions earlier
+  int depth = 0;       // depth of the target in the block dependency DAG
+};
+
 // Per scf.while block-arg map: whileOp -> block_id -> (new_arg_idx ->
 // old_arg_idx).
 using WhileBlockArgMap =
@@ -102,7 +137,24 @@ struct ControlFlowConditionInfo {
   llvm::DenseMap<scf::IfOp,
                  llvm::SmallVector<std::pair<scf::IfOp, IfBlockDepKind>>>
       ifBlockDAG;
+  // Preload targets: the block carrying the preload condition and the block
+  // two positions earlier in the chain used as its reference.
+  llvm::DenseMap<scf::IfOp, PreloadTarget> preloadIfOpPairs;
+
+  // FlowOpt targets: the block carrying the flowOpt condition and the start
+  // node of the chain it belongs to.
   llvm::DenseMap<scf::IfOp, scf::IfOp> flowOptIfOpPairs;
+
+  // SSBuffer counter slot owned by a computation block. Only blocks taking
+  // part in a cross-core dependency get a slot.
+  llvm::DenseMap<scf::IfOp, BlockCounterSlot> blockCounterSlots;
+  // Cross-core edges at computation-block granularity. Keyed by the if op;
+  // the value holds every edge the block takes part in, in both directions.
+  llvm::DenseMap<scf::IfOp, llvm::SmallVector<CrossCoreBlockEdge>>
+      crossCoreBlockEdges;
+
+  // Number of inter-core buffers of the module (ssbuffer.inter_core_buf_count).
+  int interCoreBufferCount = 2;
 
   // Buffer counts for flowOpt condition
   int intraCoreBufferCount = 0;

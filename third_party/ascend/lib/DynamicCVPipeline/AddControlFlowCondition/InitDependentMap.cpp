@@ -21,6 +21,7 @@
  */
 
 #include "third_party/ascend/include/DynamicCVPipeline/AddControlFlowCondition/InitDependentMap.h"
+#include "ascend/include/DynamicCVPipeline/AddControlFlowCondition/Utils.h"
 #include "ascend/include/DynamicCVPipeline/Common/BufferCountManager.h"
 #include "bishengir/Dialect/Annotation/IR/Annotation.h"
 #include "bishengir/Dialect/HIVM/IR/HIVM.h"
@@ -429,33 +430,14 @@ static void printDependentMaps(ControlFlowConditionInfo *info) {
   }
 }
 
-// Find the IfOp that contains a given operation
-static scf::IfOp findIfOpContainingOp(Operation *op) {
-  if (!op) {
-    return nullptr;
-  }
-
-  constexpr int maxDepth = 100;
-  int depth = 0;
-
-  Operation *current = op;
-  while (current && depth < maxDepth) {
-    if (auto ifOp = dyn_cast<scf::IfOp>(current)) {
-      if (ifOp->hasAttr(CVPipeline::kIf)) {
-        LDBG("Found ssbuffer.if at depth " << depth);
-        return ifOp;
-      }
-    }
-    current = current->getParentOp();
-    depth++;
-  }
-
-  if (depth >= maxDepth) {
-    LDBG("Warning: Max depth " << maxDepth
-                               << " exceeded in findIfOpContainingOp");
-  }
-
-  return nullptr;
+// Read the number of inter-core buffers of the module. It bounds how many
+// rounds the producer of a cross-core edge may run ahead of its consumer.
+static void computeInterCoreBufferCount(ControlFlowConditionInfo *info,
+                                         ModuleOp module) {
+  BufferCountManager bufferCountMgr(module);
+  info->interCoreBufferCount = bufferCountMgr.getBufferCountByType(
+      BufferCountManager::DepType::InterCore);
+  LDBG("Inter-core buffer count: " << info->interCoreBufferCount);
 }
 
 // Compute producer buffer counts (max map size) from cross/intra-core maps;
@@ -687,7 +669,95 @@ static int collectFlowOptIfOpPairs(ModuleOp module,
   return 0;
 }
 
-// Print DAG and flowOpt pairs for verification
+// DFS helper function to find the preload targets.
+//
+// A preload target is a node at depth PRELOAD_DEPTH_MIN or PRELOAD_DEPTH_MAX
+// of the block dependency DAG. Its reference is the block two positions
+// earlier in the chain it belongs to: the DFS therefore records the path that
+// reaches every node, the depth alone does not identify an ancestor.
+static int collectPreloadTargets(ModuleOp module,
+                                 ControlFlowConditionInfo *info) {
+  // Step 1: Collect every node appearing in the DAG (key or value) and compute
+  // in-degree (every edge, cross or intra, contributes 1).
+  llvm::DenseSet<scf::IfOp> allNodes;
+  llvm::DenseMap<scf::IfOp, int> inDegree;
+  for (auto &entry : info->ifBlockDAG) {
+    allNodes.insert(entry.first);
+    for (auto &edge : entry.second) {
+      allNodes.insert(edge.first);
+      inDegree[edge.first]++;
+    }
+  }
+
+  // Step 2: Identify start nodes (in-degree 0). startNodes is filled in module
+  // order.
+  llvm::SmallVector<scf::IfOp> startNodes;
+  module.walk([&](scf::IfOp ifOp) {
+    if (allNodes.contains(ifOp) && inDegree.lookup(ifOp) == 0)
+      startNodes.push_back(ifOp);
+  });
+
+  LDBG("Number of start nodes (depth=1): " << startNodes.size());
+
+  // Step 3: For each start node, run a per-source DFS to compute each
+  // reachable node's depth (max over all paths from this start) and to record
+  // the path reaching it.
+  for (scf::IfOp start : startNodes) {
+    llvm::DenseMap<scf::IfOp, int> depth;
+    llvm::DenseMap<scf::IfOp, llvm::SmallVector<scf::IfOp>> path;
+    llvm::SmallVector<std::pair<scf::IfOp, int>> worklist;
+    worklist.push_back({start, 1});
+    depth[start] = 1;
+    path[start] = {start};
+
+    while (!worklist.empty()) {
+      auto [node, nodeDepth] = worklist.pop_back_val();
+      auto it = info->ifBlockDAG.find(node);
+      if (it == info->ifBlockDAG.end())
+        continue;
+      for (auto &edge : it->second) {
+        scf::IfOp neighbor = edge.first;
+        int step = (edge.second == IfBlockDepKind::CrossCore) ? 1 : 0;
+        int candidate = nodeDepth + step;
+        auto inserted = depth.try_emplace(neighbor, candidate);
+        if (inserted.second) {
+          path[neighbor] = path[node];
+          path[neighbor].push_back(neighbor);
+          worklist.push_back({neighbor, candidate});
+        } else if (candidate > inserted.first->second) {
+          inserted.first->second = candidate;
+          path[neighbor] = path[node];
+          path[neighbor].push_back(neighbor);
+          worklist.push_back({neighbor, candidate});
+        }
+      }
+    }
+
+    // Step 4: The nodes at depth 3 and 4 are preload targets. The reference of
+    // a target is the block two positions earlier in its chain.
+    for (auto &entry : depth) {
+      if (entry.second < PRELOAD_DEPTH_MIN ||
+          entry.second > PRELOAD_DEPTH_MAX)
+        continue;
+      auto pathIt = path.find(entry.first);
+      if (pathIt == path.end())
+        continue;
+      const llvm::SmallVector<scf::IfOp> &chain = pathIt->second;
+      int chainPos = static_cast<int>(chain.size()) - 1;
+      if (chainPos < 2) {
+        // The chain is too short to hold a reference two positions back.
+        continue;
+      }
+      info->preloadIfOpPairs[entry.first] = {chain[chainPos - 2], entry.second};
+    }
+  }
+
+  LDBG("preloadIfOpPairs size: " << info->preloadIfOpPairs.size());
+
+  return 0;
+}
+
+// Print DAG and preload pairs for verification
 static void printDAGInfo(ControlFlowConditionInfo *info) {
   LDBG("ifBlockDAG contents:");
   for (auto &entry : info->ifBlockDAG) {
@@ -701,11 +771,10 @@ static void printDAGInfo(ControlFlowConditionInfo *info) {
     }
   }
 
-  LDBG("flowOptIfOpPairs contents:");
-  for (auto &entry : info->flowOptIfOpPairs) {
-    scf::IfOp target = entry.first;
-    scf::IfOp source = entry.second;
-    LDBG("  Target IfOp (third node) -> Source IfOp (start node)");
+  LDBG("preloadIfOpPairs contents:");
+  for (auto &entry : info->preloadIfOpPairs) {
+    LDBG("  Target IfOp (depth " << entry.second.depth
+                                << ") -> Reference IfOp");
   }
 }
 
@@ -735,7 +804,10 @@ void InitDependentMapPass::runOnOperation() {
   // Print all dependent maps for verification
   LLVM_DEBUG(printDependentMaps(info));
 
-  // Step 4: Compute producer buffer count for flowOpt condition
+  // Step 4: Read the number of inter-core buffers of the module
+  computeInterCoreBufferCount(info, module);
+
+  // Step 4: Compute the producer buffer counts used by the flowOpt condition
   computeProducerBufferCount(info, module);
 
   // Step 4: Build if block DAG from crossCoreDependentMap (always)
@@ -752,20 +824,28 @@ void InitDependentMapPass::runOnOperation() {
     return;
   }
 
-  // Step 6: Collect flowOpt if block pairs from DAG (only when buffer counts
-  // exceed threshold)
+  // Step 6: Collect the preload targets from the DAG. The preload condition
+  // only relies on the cross-core block counters, it is therefore always
+  // collected.
+  if (collectPreloadTargets(module, info) != 0) {
+    LDBG("collectPreloadTargets failed!");
+    CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
+    return;
+  }
+
+  // Step 7: Collect the flowOpt pairs. The flowOpt condition lets a block
+  // start early, it is only generated when the module has enough buffers.
   if (info->crossCoreBufferCount > CROSS_CORE_BUFFER_COUNT_THRESHOLD &&
       info->intraCoreBufferCount > INTRA_CORE_BUFFER_COUNT_THRESHOLD) {
     LDBG("Buffer counts meet requirements, collecting flowOpt pairs.");
-
     if (collectFlowOptIfOpPairs(module, info) != 0) {
       LDBG("collectFlowOptIfOpPairs failed!");
       CVPipeline::setFallbackAttr(module, CVPipeline::ERRCODE_FAILED);
       return;
     }
-
-    LLVM_DEBUG(printDAGInfo(info));
   }
+
+  LLVM_DEBUG(printDAGInfo(info));
 
   LDBG("Exit InitDependentMap pass.");
 }

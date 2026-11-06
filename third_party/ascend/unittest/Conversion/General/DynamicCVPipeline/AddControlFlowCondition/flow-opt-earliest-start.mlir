@@ -1,12 +1,34 @@
 // RUN: triton-opt --add-control-flow-condition %s | FileCheck %s
 
-// Both starts reach block 4. Starts are walked earliest-first, and the later
-// write wins, so the sge uses block 1's counter (second iter arg). The slt
-// stays on block 4's own counter.
+// The block at depth 3 is a preload target. Its reference is the block two
+// positions earlier in the chain. Both starts reach block 4 and the later
+// write wins, so the reference is block 1.
+// The preload condition is
+//   (c_reference - c_target >= buffer_num + 1)
+//   OR (total_rounds - c_target <= buffer_num)
+// The flowOpt condition of the block is kept, the preload condition is added
+// on top of it: the conditions only grow.
 // CHECK-LABEL: func.func @flow_opt_earliest_start
-// CHECK: iter_args(%[[CNT_A:.*]] = %{{[^,]+}}, %[[CNT_B:.*]] = %{{[^,]+}}, %[[CNT_MIDA:.*]] = %{{[^,]+}}, %[[CNT_MIDB:.*]] = %{{[^,]+}}, %[[CNT_TGT:.*]] = %{{[^,]+}}, %[[DEP:.*]] = %{{[^,)]+}})
-// CHECK: arith.cmpi sge, %[[CNT_B]], %{{.*}}
-// CHECK: arith.cmpi slt, %[[CNT_TGT]], %{{.*}}
+// CHECK: scf.while (%{{[^ ]+}} = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT_B:[^ ,]+]] = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}}, %[[CNT_TGT:[^ ,]+]] = %{{[^ ,]+}}, %{{[^ ]+}} = %{{[^ ,]+}})
+// The flowOpt condition.
+// CHECK: arith.cmpi sge, %[[CNT_B]], %{{[^,]+}} : i32
+// CHECK: arith.muli %{{[^,]+}}, %c2_i32{{.*}} : i32
+// CHECK: arith.addi %{{[^,]+}}, %{{[^,]+}} : i32
+// CHECK: arith.cmpi sge, %[[CNT_B]], %{{[^,]+}} : i32
+// CHECK: arith.ori
+// The preload condition, added on top of the flowOpt condition.
+// CHECK: %[[REF:.+]] = memref.load
+// CHECK: %[[PD:.+]] = arith.subi %[[REF]], %{{[^,]+}}
+// CHECK: arith.cmpi sge, %[[PD]], %c3_i32{{.*}} : i32
+// CHECK: arith.subi %{{[^,]+}}, %{{[^,]+}} : i32
+// CHECK: arith.subi %{{[^,]+}}, %c2_i32{{.*}} : i32
+// CHECK: arith.cmpi sge, %{{[^,]+}}, %{{[^,]+}} : i32
+// CHECK: arith.ori
+// CHECK: arith.cmpi slt, %[[CNT_TGT]], %{{[^,]+}} : i32
+// CHECK: arith.andi
+// CHECK: arith.andi
+// CHECK: arith.andi
+// CHECK: scf.if
 
 module attributes {hacc.target = #hacc.target<"Ascend950PR_9579">} {
   func.func @flow_opt_earliest_start(%arg0: memref<?xi8>, %arg1: memref<?xi8>, %arg2: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg3: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 0 : i32}, %arg4: memref<?xf16> {tt.divisibility = 16 : i32, tt.tensor_kind = 1 : i32}, %arg5: i32 {tt.divisibility = 16 : i32}, %arg6: i32 {tt.divisibility = 16 : i32}, %arg7: i32 {tt.divisibility = 16 : i32}, %arg8: i32, %arg9: i32, %arg10: i32, %arg11: i32, %arg12: i32, %arg13: i32) attributes {SyncBlockLockArgIdx = 0 : i64, WorkspaceArgIdx = 1 : i64, global_kernel = "local", mix_mode = "mix", parallel_mode = "simd", ssbuffer.inter_core_buf_count = 2 : i32, ssbuffer.intra_buf_count = 3 : i32} {

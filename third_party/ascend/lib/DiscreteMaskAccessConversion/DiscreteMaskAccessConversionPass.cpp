@@ -519,7 +519,8 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
     if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName) ||
-        op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName))
+        op->hasAttr(ConverterUtils::simdDiscreteMaskAttrName) ||
+        op->hasAttr(ConverterUtils::axisDiscreteMaskAttrName))
       return failure();
 
     auto mask = op.getMask();
@@ -536,7 +537,7 @@ struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
         compileOn91095Flag &&
         triton::ascend::isSimtTemplateMode(compileModeFlag) &&
         rankWithinIndirectFastPathLimit;
-    
+
     // Defer SIMD mask rewriting until pointer-based routing in unstructure.
     if (canUseSimtTemplate) {
       if (isAxisDiscreteMask) {

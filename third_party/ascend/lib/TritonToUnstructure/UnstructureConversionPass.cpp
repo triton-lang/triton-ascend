@@ -893,16 +893,19 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   if (checkUnstructureAnnotated(op, rewriter))
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
 
+  bool maskRewritten = false;
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     if (simdDiscreteMask || (axisDiscreteMask && ptrOffsetInfo.isStructured())) {
-      rewriteSimdDiscreteMaskLoad(op, rewriter);
+      op = rewriteSimdDiscreteMaskLoad(op, rewriter);
+      rewriter.setInsertionPoint(op);
+      maskRewritten = true;
     }
   }
 
   if (ptrOffsetInfo.isStructured() && !mixCompileDiscreteMask &&
       (!ptrOffsetInfo.isScalarLike() ||
        llvm::all_of(ptrType.getShape(), [](int64_t dim) { return dim == 1; })))
-    return success();
+    return success(maskRewritten);
 
   if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
     if (ptrOffsetInfo.isScalarLike() &&
@@ -947,21 +950,29 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   auto resultShape = ptrType.getShape();
   auto resultElementType = getResultElementType(ptrType);
   int64_t sizeInByte = getTypeSizeInByte(resultElementType);
-
+  
+  int64_t continuousSize = sizeInByte;
   for (int i = ptrOffsetInfo.getRank() - 1; i >= 0; i--) {
     if (!ptrOffsetInfo.isStructured(i))
       break;
-    sizeInByte *= resultShape[i];
+    continuousSize *= resultShape[i];
+  }
+
+  int64_t discreteSize = sizeInByte;
+  for (int i = 0; i < ptrOffsetInfo.getRank(); ++i) {
+    if (!ptrOffsetInfo.isStructured(i))
+      discreteSize *= resultShape[i];
   }
 
   // Force scalarize if memory is not aligned
-  if (sizeInByte % 32 != 0) {
+  if (continuousSize % 32 != 0) {
     ptrOffsetInfo.setUnstructured(ptrOffsetInfo.getRank());
   }
 
   LLVM_DEBUG({
     auto &os = llvm::dbgs();
     os << "UnStructured Flag check:\n";
+    os << "discrete axis size before scalarization: " << discreteSize << "\n";
     os << "ptrOffsetInfo.isStructured: " << ptrOffsetInfo.isStructured()
        << "\n";
     os << "compileOn91095Flag: " << compileOn91095Flag << "\n";
@@ -971,8 +982,9 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
   bool templateIndirectFastPathEnabled =
       compileOn91095Flag &&
       triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
-      ((!ptrOffsetInfo.isStructured() && sizeInByte < 64) ||
-       mixCompileDiscreteMask || axisDiscreteMask);
+      ((!axisDiscreteMask && !ptrOffsetInfo.isStructured() && continuousSize < 64) || // cont mask
+       (axisDiscreteMask && discreteSize > continuousSize) ||
+       mixCompileDiscreteMask);
   bool rankWithinIndirectLoadStoreFastPathLimit = resultShape.size() <= 5;
   if (templateIndirectFastPathEnabled &&
       succeeded(tryRewriteIndirectFastPath(op, loc, srcPtr, ptrOffset,
@@ -980,13 +992,24 @@ LogicalResult UnstructuredMemAccessConverter<MemAccOpTy>::matchAndRewrite(
     return success();
   }
 
+  // A rejected SIMT load still needs its continuous mask to bound fallback
+  // accesses. Continue lowering the replacement load in this rewrite.
+  if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp>) {
+    if (axisDiscreteMask && !maskRewritten) {
+      op = rewriteSimdDiscreteMaskLoad(op, rewriter);
+      rewriter.setInsertionPoint(op);
+      mstate = runMaskAnalysis(op, rewriter);
+      isLoadLike = !op->use_empty();
+    }
+  }
+
   LLVM_DEBUG({
     if (triton::ascend::isSimtTemplateMode(unstructureCompileMode) &&
-        sizeInByte >= 64) {
+        continuousSize >= 64) {
       auto &os = llvm::dbgs();
       os << "Skip template-SIMT indirect fast path because continuous shape "
             "product is "
-         << sizeInByte << " (>=64)\n";
+         << continuousSize << " (>=64)\n";
     }
     if constexpr (std::is_same_v<MemAccOpTy, triton::LoadOp> ||
                   std::is_same_v<MemAccOpTy, triton::StoreOp>) {

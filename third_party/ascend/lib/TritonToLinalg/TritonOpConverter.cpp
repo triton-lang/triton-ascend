@@ -54,6 +54,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "mlir/Dialect/Utils/ReshapeOpsUtils.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 #include "mlir/IR/ValueRange.h"
 #include "mlir/Interfaces/CallInterfaces.h"
@@ -631,11 +632,26 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
     }
   }
 
+  // A constant destination needs a writable copy of the whole tensor. For a
+  // tail mask, copying the complementary false prefix into a single-use true
+  // value instead lets bufferization reuse the computed value's buffer.
+  bool overwriteFalsePrefix = maskPos == MaskPosition::Tail &&
+                              matchPattern(falseTensor, m_Constant()) &&
+                              trueTensor.hasOneUse();
   Value sliceSource = trueTensor;
+  Value sliceDest = falseTensor;
   SmallVector<OpFoldResult> sliceOffsets(mstate.offsets);
   SmallVector<OpFoldResult> sliceDims(mstate.dims);
   SmallVector<Operation *> sliceOps;
-  if (!useDirectSelectSlices) {
+  if (overwriteFalsePrefix) {
+    sliceSource = falseTensor;
+    sliceDest = trueTensor;
+    for (int i = 0; i < mstate.getRank(); ++i) {
+      if (!isConstantIntValue(mstate.offsets[i], 0))
+        sliceDims[i] = mstate.offsets[i];
+      sliceOffsets[i] = rewriter.getIndexAttr(0);
+    }
+  } else if (!useDirectSelectSlices) {
     // A2/A3 require the prefix reconstruction to keep all slice starts at zero.
     // Direct dynamic starts can trigger NPU IR alignment padding and UB
     // overflow. 950 supports unaligned UB copies and can use the original mask
@@ -671,7 +687,7 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
 
   auto extractSliceOp = mstate.getExtractSlice(sliceSource, loc, rewriter,
                                                sliceOffsets, sliceDims);
-  auto insertSliceOp = mstate.getInsertSlice(extractSliceOp, falseTensor, loc,
+  auto insertSliceOp = mstate.getInsertSlice(extractSliceOp, sliceDest, loc,
                                              rewriter, sliceOffsets, sliceDims);
   sliceOps.push_back(extractSliceOp.getOperation());
   sliceOps.push_back(insertSliceOp.getOperation());
@@ -703,7 +719,9 @@ SelectCanonicalizer::matchAndRewrite(arith::SelectOp op,
   }
   LLVM_DEBUG({
     llvm::dbgs() << "  -> Created "
-                 << (useDirectSelectSlices ? "direct" : "prefix")
+                 << (overwriteFalsePrefix    ? "false-prefix"
+                     : useDirectSelectSlices ? "direct"
+                                             : "prefix")
                  << " select slices:\n";
     for (Operation *sliceOp : sliceOps)
       llvm::dbgs() << "     " << *sliceOp << "\n";

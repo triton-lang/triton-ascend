@@ -1,11 +1,13 @@
 add_triton_library(DiscreteMaskAccessConversion
   DiscreteMaskAccessConversionPass.cpp
+  StoreOwnershipAnalysis.cpp
 
   DEPENDS
   DiscreteMaskAccessConversionPassIncGen
 
   LINK_LIBS
   BiShengIRHIVMDialect
+  MLIRAnalysis
   MLIRIR
   MLIRPass
   MLIRSCFDialect
@@ -14,5 +16,6 @@ add_triton_library(DiscreteMaskAccessConversion
   TritonIR
   TritonToLinalg
   TritonMemoryAccessAnalysis
+  TritonToStructured
   TritonToLinalg
 )

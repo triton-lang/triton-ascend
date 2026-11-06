@@ -68,6 +68,11 @@ struct ResourceSnapshot {
   uint64_t l0cCapacityBytes = 0;
   unsigned l0SafetyPercent = 80;
 
+  // Physical AI-core blocks the launcher schedules (AIV for pure-SIMT kernels,
+  // AIC otherwise).  The row-count policy keeps one full wave after R-way
+  // coalescing; zero means unknown and disables the check.
+  uint64_t coreNum = 0;
+
   bool isKnown() const;
   // True only when every cube buffer capacity is populated; the candidate
   // L0 checks are enforced only when this holds.

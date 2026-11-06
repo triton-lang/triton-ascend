@@ -14,6 +14,20 @@ on:
         required: false
         default: "obs://ascend-artifcat-packages/pypi/packages/ascend/repos/pypi/nightly/triton-ascend/"
         type: string
+      update_latest:
+        description: "Also refresh the latest/ subfolder with this upload's wheels"
+        required: false
+        default: false
+        type: boolean
+      new_version:
+        description: >-
+          Rewrite wheel versions before uploading. Default "auto" keeps the
+          build date but drops the time ("3.6.0+dev20261027220530" becomes
+          "3.6.0+dev20261027"); an explicit version (e.g. "3.2.2.dev2") is
+          applied to every wheel; set to "" to upload the wheels unmodified.
+        required: false
+        default: "auto"
+        type: string
       upload_npuir:
         description: >-
           Also extract the npuir (bishengir) payload bundled inside the wheels
@@ -93,12 +107,155 @@ jobs:
           echo "Downloaded ${#wheels[@]} wheel(s):"
           ls -l "${wheels[@]}"
 
+      - name: Rewrite wheel versions
+        if: github.event.inputs.new_version != ''
+        shell: bash
+        env:
+          NEW_VERSION: ${{ github.event.inputs.new_version }}
+        run: |
+          set -eu
+          # Rewrite each wheel's version — filename, METADATA/PKG-INFO,
+          # .dist-info directory name, regenerated RECORD — following the
+          # unpack/patch/repack approach, but with python3 stdlib only (no
+          # `wheel` package required on the runner) and per-wheel version
+          # detection instead of a hardcoded OLD_VERSION.
+          #   NEW_VERSION=auto   (default) keep the build date, drop the time:
+          #                      3.6.0+dev20261027220530 -> 3.6.0+dev20261027
+          #                      (wheels already date-only are left untouched)
+          #   NEW_VERSION=<ver>  set exactly that version on every wheel
+          #   NEW_VERSION=       upload the wheels unmodified (step skipped)
+          if [ "$NEW_VERSION" != "auto" ]; then
+            if ! printf '%s' "$NEW_VERSION" | grep -qE '^[0-9][0-9A-Za-z.+]*$'; then
+              echo "Invalid new_version '$NEW_VERSION': use 'auto', or a PEP 440 version without '-' or spaces (e.g. 3.2.2.dev2)."
+              exit 1
+            fi
+          fi
+          command -v python3 >/dev/null || { echo "python3 is required on the runner for version rewriting."; exit 1; }
+
+          cat > rewrite_wheels.py <<'PYEOF'
+          import base64, hashlib, os, re, sys, zipfile
+
+          arg = sys.argv[1]
+          WHEELHOUSE = "wheelhouse"
+
+          # A 14-digit YYYYMMDDHHMMSS stamp (not part of a longer digit run)
+          # collapses to its 8-digit date; anything else is left as-is.
+          TIME_RE = re.compile(r"(?<!\d)(\d{8})\d{6}(?!\d)")
+
+          def resolve(old_version):
+              if arg == "auto":
+                  return TIME_RE.sub(r"\1", old_version)
+              return arg
+
+          plan = []
+          for fname in sorted(os.listdir(WHEELHOUSE)):
+              if not fname.endswith(".whl"):
+                  continue
+              parts = fname[:-4].split("-")
+              if len(parts) < 5:
+                  sys.exit(f"{fname}: not a valid wheel filename (expected name-version-python-abi-platform.whl)")
+              old_version = parts[1]
+              new_version = resolve(old_version)
+              if new_version == old_version:
+                  print(f"skip (version unchanged): {fname}")
+                  continue
+              parts[1] = new_version
+              plan.append((fname, "-".join(parts) + ".whl", new_version))
+
+          targets = [p[1] for p in plan]
+          dupes = sorted({t for t in targets if targets.count(t) > 1})
+          if dupes:
+              sys.exit(f"version rewrite would collide on: {dupes} — pick distinct versions or upload separately")
+          for t in targets:
+              if os.path.exists(os.path.join(WHEELHOUSE, t)):
+                  sys.exit(f"target filename already exists in wheelhouse: {t}")
+
+          def rewrite(src, dst, new_version):
+              with zipfile.ZipFile(src) as zin:
+                  names = zin.namelist()
+                  dist_dirs = sorted({n.split("/")[0] for n in names
+                                      if re.match(r"^[^/]+\.dist-info/", n)})
+                  if len(dist_dirs) != 1:
+                      sys.exit(f"{src}: expected exactly one .dist-info directory, found {dist_dirs}")
+                  old_dir = dist_dirs[0]
+                  m = re.match(r"^(.*)-([^-]+)\.dist-info$", old_dir)
+                  if not m:
+                      sys.exit(f"{src}: cannot parse dist-info directory name {old_dir}")
+                  dist_name, old_version = m.groups()
+                  new_dir = f"{dist_name}-{new_version}.dist-info"
+                  old_data = f"{dist_name}-{old_version}.data/"
+                  new_data = f"{dist_name}-{new_version}.data/"
+                  records = []
+
+                  def put(zout, path, data, src_info):
+                      # Carry over the original entry's timestamp, mode bits
+                      # and compression method so executables (e.g.
+                      # triton-opt, *.so) keep +x through the repack.
+                      zi = zipfile.ZipInfo(path, date_time=src_info.date_time)
+                      zi.compress_type = src_info.compress_type
+                      zi.external_attr = src_info.external_attr
+                      zout.writestr(zi, data)
+                      digest = base64.urlsafe_b64encode(
+                          hashlib.sha256(data).digest()).rstrip(b"=").decode()
+                      records.append(f"{path},sha256={digest},{len(data)}")
+
+                  with zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+                      record_info = None
+                      for info in zin.infolist():
+                          name = info.filename
+                          if name.endswith("/"):
+                              continue
+                          if name == old_dir + "/RECORD":
+                              record_info = info  # reuse its stamp/attrs
+                              continue  # RECORD is regenerated below
+                          data = zin.read(name)
+                          if name.startswith(old_dir + "/"):
+                              out = new_dir + name[len(old_dir):]
+                          elif name.startswith(old_data):
+                              out = new_data + name[len(old_data):]
+                          else:
+                              out = name
+                          base = out.rsplit("/", 1)[-1]
+                          if base in ("METADATA", "PKG-INFO") and out.startswith(new_dir + "/"):
+                              text = data.decode("utf-8")
+                              text, n = re.subn(r"(?m)^Version:.*$",
+                                                "Version: " + new_version, text, count=1)
+                              if n != 1:
+                                  sys.exit(f"{src}: no 'Version:' line found in {out}")
+                              data = text.encode("utf-8")
+                          put(zout, out, data, info)
+                      if record_info is None:
+                          sys.exit(f"{src}: no RECORD entry found under {old_dir}")
+                      record_body = "\n".join(records) + f"\n{new_dir}/RECORD,,\n"
+                      put(zout, new_dir + "/RECORD", record_body.encode("utf-8"),
+                          record_info)
+
+          for old, new, new_version in plan:
+              src = os.path.join(WHEELHOUSE, old)
+              tmp = os.path.join(WHEELHOUSE, "." + new + ".tmp")
+              rewrite(src, tmp, new_version)
+              os.replace(tmp, os.path.join(WHEELHOUSE, new))
+              os.remove(src)
+              print(f"rewrote: {old} -> {new}")
+
+          if not plan:
+              print("Nothing to rewrite (all wheels already at the target version).")
+          print(f"done: {len(plan)} wheel(s) rewritten")
+          PYEOF
+
+          python3 rewrite_wheels.py "$NEW_VERSION"
+          echo "wheelhouse after rewrite:"
+          ls -l wheelhouse/
+
       - name: Setup obsutil and upload to OBS
         shell: bash
         env:
           AK: ${{ secrets.NIGHTLY_OBS_AK }}
           SK: ${{ secrets.NIGHTLY_OBS_SK }}
           OBS_DIR: ${{ github.event.inputs.obs_dir }}
+          # format() renders the boolean input as 'true'/'false' ('' if the
+          # workflow is ever triggered without inputs — treated as false).
+          UPDATE_LATEST: ${{ format('{0}', inputs.update_latest) }}
         run: |
           set -eu
           if [ -z "${AK}" ] || [ -z "${SK}" ]; then
@@ -114,13 +271,18 @@ jobs:
           obsutil/obsutil config -i="${AK}" -k="${SK}" -e=https://obs.cn-north-4.myhuaweicloud.com
           # obsutil cp takes exactly one source and one destination, so a
           # multi-file glob must be uploaded one wheel at a time.
-          # -f: overwrite without prompting; -u: skip unchanged objects.
+          # -f: overwrite without prompting. No -u here on purpose: with the
+          # new_version rewrite, a wheel can share a filename with an
+          # existing object while its content changed, and -u could silently
+          # skip the upload.
           for f in wheelhouse/*.whl; do
-            obsutil/obsutil cp -f -u "$f" "${OBS_DIR}"
+            obsutil/obsutil cp -f "$f" "${OBS_DIR}"
           done
 
           # Regenerate index.html from every .whl currently in the directory
           # (non-recursive, short format), keeping only the basenames.
+          # (The latest/ subfolder shows up in this listing as a "directory"
+          # entry, which the .whl grep below filters out.)
           obsutil/obsutil ls "${OBS_DIR}" -d -s -limit=0 \
             | grep -oE '[^/]+\.whl$' \
             | sort -u > files.txt
@@ -129,6 +291,48 @@ jobs:
           done < files.txt > index.html
           obsutil/obsutil cp index.html "${OBS_DIR}"
 
+          # ---- latest/ mirror (opt-in via update_latest) ----
+          # When enabled, latest/ ends up holding exactly the files of this
+          # upload, plus its own index.html, so it works as a standalone
+          # find-links page (flat link list, not a PEP 503 package dir — use
+          # -f, not -i):
+          #   pip install triton-ascend -f <public-url>/latest/
+          # Upload first, then prune: latest/ is never empty mid-update, and a
+          # concurrent reader sees either the old or the new file for any
+          # given name.
+          if [ "${UPDATE_LATEST}" != "true" ]; then
+            echo "update_latest='${UPDATE_LATEST}' — skipping latest/ mirror."
+          else
+            LATEST_DIR="${OBS_DIR%/}/latest/"
+            for f in wheelhouse/*.whl; do
+              # -f without -u: rewritten wheels can share names with existing
+              # objects while their content changed.
+              obsutil/obsutil cp -f "$f" "${LATEST_DIR}"
+            done
+
+            # Prune objects in latest/ that are not part of this upload.
+            for f in wheelhouse/*.whl; do basename "$f"; done | sort -u > latest_new.txt
+            if [ ! -s latest_new.txt ]; then
+              echo "No wheels to mirror — leaving latest/ untouched."
+              exit 1
+            fi
+            obsutil/obsutil ls "${LATEST_DIR}" -d -s -limit=0 2>/dev/null \
+              | grep -oE '[^/]+\.whl$' \
+              | sort -u > latest_cur.txt || true
+            comm -23 latest_cur.txt latest_new.txt | while IFS= read -r f; do
+              echo "latest/: removing stale $f"
+              obsutil/obsutil rm "${LATEST_DIR}${f}" -f
+            done
+
+            # Regenerate latest/index.html from this upload only.
+            while IFS= read -r f; do
+              printf "<a href='%s'>%s</a><br />\n" "$f" "$f"
+            done < latest_new.txt > latest_index.html
+            obsutil/obsutil cp -f latest_index.html "${LATEST_DIR}index.html"
+            echo "latest/ now contains $(wc -l < latest_new.txt) wheel(s):"
+            cat latest_new.txt
+          fi
+
   Upload-Npuir:
     name: Extract and upload npuir payload
     # Opt-in via the upload_npuir boolean input. format() renders the input as
@@ -136,7 +340,7 @@ jobs:
     # inputs — treated as false). Runs independently of Upload-Wheels: both
     # jobs download the same wheel_urls, but keeping them self-contained avoids
     # passing multi-hundred-MB wheels through artifacts.
-    if: format('{0}', github.event.inputs.upload_npuir) == 'true'
+    if: format('{0}', inputs.upload_npuir) == 'true'
     runs-on: linux-amd64-cpu-8
     timeout-minutes: 60
 
@@ -310,7 +514,7 @@ jobs:
         env:
           AK: ${{ secrets.OBS_AK }}
           SK: ${{ secrets.OBS_SK }}
-          OVERWRITE: ${{ format('{0}', github.event.inputs.npuir_overwrite) }}
+          OVERWRITE: ${{ format('{0}', inputs.npuir_overwrite) }}
         run: |
           set -eu
           if [ -z "${AK}" ] || [ -z "${SK}" ]; then

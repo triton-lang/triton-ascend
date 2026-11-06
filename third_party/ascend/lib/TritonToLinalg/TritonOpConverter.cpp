@@ -3165,12 +3165,33 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     return op.emitError("lhsScale is required for non-FP8 input");
   }
 
-  // Scaling in half precision can overflow before the FP32 accumulation.
-  for (Value *value : {&lhs, &rhs, &c}) {
+  // Match upstream DecomposeScaledBlocked: use FP16 if either input format
+  // is FP16, otherwise BF16. Convert both operands before expanding scales.
+  Type computeType = rewriter.getBF16Type();
+  if (lhsElemType == triton::ScaleDotElemType::FP16 ||
+      rhsElemType == triton::ScaleDotElemType::FP16)
+    computeType = rewriter.getF16Type();
+  for (Value *value : {&lhs, &rhs}) {
     auto type = cast<RankedTensorType>(value->getType());
-    if (!type.getElementType().isF32())
-      *value = rewriter.create<arith::ExtFOp>(
-          loc, type.clone(rewriter.getF32Type()), *value);
+    Type elementType = type.getElementType();
+    if (elementType == computeType)
+      continue;
+    auto targetType = type.clone(computeType);
+    if (elementType.getIntOrFloatBitWidth() <
+        computeType.getIntOrFloatBitWidth()) {
+      *value = rewriter.create<arith::ExtFOp>(loc, targetType, *value);
+    } else {
+      // BF16 and FP16 have equal widths; convert through FP32 numerically.
+      if (!elementType.isF32())
+        *value = rewriter.create<arith::ExtFOp>(
+            loc, type.clone(rewriter.getF32Type()), *value);
+      auto converted =
+          rewriter.create<arith::TruncFOp>(loc, targetType, *value);
+      converted->setAttr("round_mode",
+                         hfusion::RoundModeAttr::get(rewriter.getContext(),
+                                                     hfusion::RoundMode::RINT));
+      *value = converted;
+    }
   }
 
   RankedTensorType lhsTy = cast<RankedTensorType>(lhs.getType());
@@ -3187,6 +3208,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
       op.getLoc(), rewriter.getI16Type(), rewriter.getI16IntegerAttr(7));
   Type i16Ty = rewriter.getI16Type();
   Type bf16Ty = rewriter.getBF16Type();
+  Type fp16Ty = rewriter.getF16Type();
   Type fp32Ty = rewriter.getF32Type();
   bool fastMath = op.getFastMath();
 
@@ -3250,9 +3272,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
         RankedTensorType::get(lhsScaleTy.getShape(), bf16Ty);
     Value lhsScaleBF16 = rewriter.create<arith::BitcastOp>(
         op.getLoc(), lhsScaleBF16Ty, lhsScaleI16Shifted);
-    lhsScaleOut = rewriter.create<arith::ExtFOp>(
-        loc, RankedTensorType::get(lhsScaleTy.getShape(), fp32Ty),
-        lhsScaleBF16);
+    if (lhsTy.getElementType() == fp16Ty) {
+      RankedTensorType lhsScaleFp32Ty =
+          RankedTensorType::get(lhsScaleTy.getShape(), fp32Ty);
+      Value lhsScaleFp32 = rewriter.create<arith::ExtFOp>(
+          op.getLoc(), lhsScaleFp32Ty, lhsScaleBF16);
+      RankedTensorType lhsScaleFp16Ty =
+          RankedTensorType::get(lhsScaleTy.getShape(), fp16Ty);
+      lhsScaleOut = rewriter.create<arith::TruncFOp>(
+          op.getLoc(), lhsScaleFp16Ty, lhsScaleFp32);
+    } else {
+      lhsScaleOut = lhsScaleBF16;
+    }
   } else {
     lhsScaleOut =
         rewriter
@@ -3295,8 +3326,18 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     Value rhsScaleBF16 = rewriter.create<arith::BitcastOp>(
         op.getLoc(), rhsScaleBF16Ty, rhsScaleI16Shifted);
 
-    rhsScaleOut = rewriter.create<arith::ExtFOp>(
-        loc, RankedTensorType::get(transposedShape, fp32Ty), rhsScaleBF16);
+    if (rhsTy.getElementType() == fp16Ty) {
+      RankedTensorType rhsScaleFp32Ty =
+          RankedTensorType::get(transposedShape, fp32Ty);
+      Value rhsScaleFp32 = rewriter.create<arith::ExtFOp>(
+          op.getLoc(), rhsScaleFp32Ty, rhsScaleBF16);
+      RankedTensorType rhsScaleFp16Ty =
+          RankedTensorType::get(transposedShape, fp16Ty);
+      rhsScaleOut = rewriter.create<arith::TruncFOp>(
+          op.getLoc(), rhsScaleFp16Ty, rhsScaleFp32);
+    } else {
+      rhsScaleOut = rhsScaleBF16;
+    }
     int64_t rhsD0 = rhsScaleTy.getShape()[1];
     int64_t rhsD1 = rhsScaleTy.getShape()[0];
     SmallVector<int64_t> rhsExpandedShape1 = {rhsD0, rhsD1, 1};
@@ -3459,16 +3500,7 @@ DotScaledConverter::matchAndRewrite(triton::DotScaledOp op, OpAdaptor adaptor,
     return op.emitError("DotScaledOp only support 2D or 3D tensor");
   }
 
-  matmulOp->setAttr("input_precision", rewriter.getStringAttr("ieee"));
-  Value result = matmulOp->getResult(0);
-  if (!dstType.getElementType().isF32()) {
-    auto trunc = rewriter.create<arith::TruncFOp>(loc, dstType, result);
-    trunc->setAttr("round_mode",
-                   hfusion::RoundModeAttr::get(rewriter.getContext(),
-                                               hfusion::RoundMode::RINT));
-    result = trunc;
-  }
-  rewriter.replaceOp(op, result);
+  rewriter.replaceOp(op, matmulOp->getResults());
   return success();
 }
 

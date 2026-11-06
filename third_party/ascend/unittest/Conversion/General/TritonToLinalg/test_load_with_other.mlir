@@ -1,4 +1,4 @@
-// RUN: triton-opt --discrete-mask-access-conversion "--triton-to-linalg=global-kernel=false named-ops=True" --split-input-file %s | FileCheck %s
+// RUN: triton-opt --discrete-mask-access-conversion --triton-to-unstructure "--triton-to-linalg=global-kernel=false named-ops=True" --split-input-file %s | FileCheck %s
 
 // Case 1: other = uitofp(mask) -> select(mask, loaded, zeros)
 // CHECK-LABEL: func.func @load_other_mask
@@ -136,7 +136,7 @@ module attributes {hacc.target = #hacc.target<"Ascend910B4">} {
 // -----
 
 // Case 4: discrete mask (offs % 2 == 0) + other = prior tensor.
-// discrete-mask-access-conversion already rewrites to full load + arith.select.
+// Unstructure rewrites the marked load to full load + arith.select.
 // CHECK-LABEL: func.func @load_other_tensor_discrete_mask
 // CHECK: memref.copy
 // CHECK: %[[OTHER:.*]] = bufferization.to_tensor

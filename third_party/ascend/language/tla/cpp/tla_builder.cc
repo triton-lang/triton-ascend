@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 // TLA-specific Ascend IR builder bindings.
 #include "Utils/AscendNPUIROpBuilder.h"
+#include "triton/Dialect/Triton/IR/Dialect.h"
 
 #include "pybind11/pybind11.h"
 #include <pybind11/stl.h>
@@ -1341,10 +1342,14 @@ void init_tla_builder(py::module &&m) {
                throw std::invalid_argument(
                    "TLA buffer shape and strides must have the same rank");
              auto *ctx = self.getBuilder().getContext();
+             // Match converted Triton pointer arguments. GM is inferred from
+             // the argument/view chain; local buffers retain explicit spaces.
              return MemRefType::get(
                  shape, elementType,
                  tlaBufferLayout(ctx, shape, strides, offset),
-                 hivm::AddressSpaceAttr::get(ctx, *memorySpace));
+                 *memorySpace == hivm::AddressSpace::GM
+                     ? Attribute{}
+                     : hivm::AddressSpaceAttr::get(ctx, *memorySpace));
            })
       .def("create_tla_alloc",
            [](TLABuilder &self, Type type) -> Value {
@@ -1364,6 +1369,52 @@ void init_tla_builder(py::module &&m) {
                    "TLA bind requires an i64 address operand");
              return self.create<hivm::PointerCastOp>(memrefType, addr)
                  .getResult();
+           })
+      .def("create_tla_pointer_view",
+           [](TLABuilder &self, Value source, Value linear,
+              Type resultType) -> Value {
+             auto type = dyn_cast<MemRefType>(resultType);
+             auto ptrType = dyn_cast<triton::PointerType>(source.getType());
+             SmallVector<int64_t> strides;
+             int64_t offset;
+             if (!type || !ptrType || !type.hasStaticShape() ||
+                 type.getRank() == 0 || type.getMemorySpace() ||
+                 type.getElementType() != ptrType.getPointeeType() ||
+                 failed(type.getStridesAndOffset(strides, offset)) ||
+                 !ShapedType::isDynamic(offset))
+               throw std::invalid_argument("invalid TLA GM view type");
+             if (!linear.getType().isInteger(64))
+               throw std::invalid_argument(
+                   "TLA GM view requires an i64 element offset");
+             // Put the full signed displacement in the scalar base. Block
+             // offsets are i32 and their standard lowering clamps negatives.
+             Value base =
+                 self.create<triton::AddPtrOp>(source.getType(), source, linear);
+             SmallVector<Value> shapeValues, strideValues, offsets;
+             SmallVector<int32_t> order;
+             auto &builder = self.getBuilder();
+             for (int64_t i = 0; i < type.getRank(); ++i) {
+               if (type.getDimSize(i) <= 0 || strides[i] <= 0)
+                 throw std::invalid_argument(
+                     "TLA GM view requires positive sizes and strides");
+               shapeValues.push_back(
+                   self.create<arith::ConstantIntOp>(type.getDimSize(i), 64));
+               strideValues.push_back(
+                   self.create<arith::ConstantIntOp>(strides[i], 64));
+               offsets.push_back(self.create<arith::ConstantIntOp>(0, 32));
+               order.push_back(type.getRank() - 1 - i);
+             }
+             auto blockType =
+                 RankedTensorType::get(type.getShape(), type.getElementType());
+             auto blockPtrType = triton::PointerType::get(
+                 blockType, ptrType.getAddressSpace());
+             Value block = self.create<triton::MakeTensorPtrOp>(
+                 blockPtrType, base, shapeValues, strideValues, offsets,
+                 builder.getDenseI32ArrayAttr(order));
+             auto bridge = self.create<UnrealizedConversionCastOp>(
+                 TypeRange{resultType}, ValueRange{block});
+             bridge->setAttr("tla.gm_view", builder.getUnitAttr());
+             return bridge.getResult(0);
            })
       .def("create_tla_subview",
            [](TLABuilder &self, Value source, const std::vector<Value> &offsets,

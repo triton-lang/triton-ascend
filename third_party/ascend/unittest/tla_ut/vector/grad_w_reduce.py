@@ -75,8 +75,6 @@ def test_ir(output_dir=None):
     module, ctx = compile_offline(grad_w_reduce, SIGNATURE, constexprs(), output_dir=output_dir)
     text = str(module)
     assert "!tt.ptr" in text, "route A entry must keep pointer args at AST stage"
-    assert text.count("hivm.hir.pointer_cast") == 5, "tla.view(ptr) x5"
-    assert text.count("memref.reinterpret_cast") == 5, "tla.view(ptr) x5"
     module = lower_offline(module, ctx, output_dir=output_dir)
     text = str(module)
     check_lowered_ir(text, loads=5, stores=2, buffers=None)

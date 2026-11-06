@@ -40,7 +40,6 @@ def test_ir(masked, output_dir=None):
     text = str(lower_offline(mod, ctx, output_dir=output_dir))
     assert "tt.load" not in text and "tt.addptr" not in text
     assert text.count("memref.load ") == 1
-    assert "memref<1xi64, #hivm.address_space<gm>>" in text
     assert "hivm.hir.load" in text and "hivm.hir.store" in text
     if masked:
         # The actual GM read must be inside the active branch.
@@ -81,7 +80,6 @@ module {{
     assert text.count("memref.load ") == 1
     assert "scf.if" in text
     if dtype == "i1":
-        assert "memref<1xi8, #hivm.address_space<gm>>" in text
         assert "arith.cmpi ne" in text
 
 

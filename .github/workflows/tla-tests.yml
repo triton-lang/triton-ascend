@@ -142,7 +142,6 @@ jobs:
       # TODO: fix the failing cases and remove continue-on-error.
       - name: Run TLA ir-stage tests
         shell: bash
-        continue-on-error: true
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"
@@ -154,7 +153,6 @@ jobs:
 
       - name: Run TLA run-stage tests on NPU
         shell: bash
-        continue-on-error: true
         run: |
           source /usr/local/Ascend/cann/set_env.sh
           export PATH="/usr/local/bisheng/tools/bishengir/bin:$PATH"

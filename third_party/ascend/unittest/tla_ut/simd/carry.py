@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
-from utils.tla_test_utils import compile_offline, get_stages, lower_offline
+from utils.tla_test_utils import (compile_offline, get_stages, lower_offline, check_compile_artifacts)
 
 MASK32 = 0xFFFFFFFF
 
@@ -109,6 +109,22 @@ def _run(fn, x, y, carry, mask):
     return d.cpu(), b.cpu()
 
 
+def _launch():
+    _, fn, _, _ = CASES[0]
+    x = torch.arange(64, dtype=torch.int32)
+    y = torch.arange(64, dtype=torch.int32) + 1
+    carry = torch.zeros(64, dtype=torch.int32)
+    mask = torch.ones(64, dtype=torch.int32)
+    return _run(fn, x, y, carry, mask)
+
+
+def test_compile():
+    _launch()
+    artifacts = check_compile_artifacts()
+    assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
+    print("COMPILE PASS: carry generated artifacts", len(artifacts), "->", artifacts[0])
+
+
 def test_run():
     torch.manual_seed(11)
     edge = torch.tensor([0, 1, -1, -2, 0x7FFFFFFF, -0x80000000, 0x7FFFFFFE, -0x7FFFFFFF], dtype=torch.int32)
@@ -132,8 +148,10 @@ def test_run():
 
 
 if __name__ == "__main__":
-    do_ir, _, do_run = get_stages()
+    do_ir, do_compile, do_run = get_stages()
     if do_ir:
         test_ir()
+    if do_compile:
+        test_compile()
     if do_run:
         test_run()

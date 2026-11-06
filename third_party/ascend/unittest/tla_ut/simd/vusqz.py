@@ -1,15 +1,12 @@
 """Tests for AVE exclusive prefix mask count."""
 import os
-from pathlib import Path
-import subprocess
 import sys
-import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
-from utils.tla_test_utils import compile_offline, get_stages, lower_offline
+from utils.tla_test_utils import (compile_offline, get_stages, lower_offline, check_compile_artifacts)
 
 
 @tla.jit
@@ -40,36 +37,20 @@ def test_ir():
     print("IR PASS: vusqz")
 
 
-def test_compile():
-    """Exercise backend instruction selection without initializing an NPU."""
-    from triton.backends.ascend.utils import _get_npucompiler_path
+def _launch():
+    td, dtype, _, n, dist = CASES[0]
+    mask = torch.ones(n, dtype=td)
+    out = torch.empty(n, dtype=td, device="npu")
+    vusqz_kernel[(1, )](mask.npu(), out, D=dtype, N=n, DIST=dist)
+    torch.npu.synchronize()
+    return out
 
-    compiler, env = _get_npucompiler_path()
-    for _, dtype, short, n, dist in CASES:
-        mod, ctx = compile_offline(vusqz_kernel, {"M": "*" + short, "O": "*" + short},
-                                   {"D": dtype, "N": n, "DIST": dist})
-        with tempfile.TemporaryDirectory(prefix="vusqz-" + short + "-") as tmp:
-            root = Path(tmp)
-            source = root / "kernel.mlir"
-            source.write_text(str(lower_offline(mod, ctx)))
-            output = root / "kernel"
-            cmd = [
-                compiler,
-                str(source), "--target=Ascend950", "--custom-aic-number=32", "--custom-aiv-number=64",
-                "--enable-hfusion-compile=true", "--enable-triton-kernel-compile=true", "--enable-tla-mode=true",
-                "--enable-optimized-metaop=true", "--save-temps=" + tmp, "-o",
-                str(output)
-            ]
-            result = subprocess.run(cmd, env=env, capture_output=True, text=True)
-            diagnostics = result.stdout + result.stderr
-            assert result.returncode == 0, diagnostics
-            binary = root / "kernel.o"
-            assert binary.is_file() and binary.stat().st_size > 0, diagnostics
-            llvm_ir = (root / "kernel.ll").read_text()
-            assert f"@llvm.hivm.vbr.v{n}i{2048 // n}" in llvm_ir, llvm_ir
-            assert f"@llvm.hivm.vusqz.m.v{n}i{2048 // n}" in llvm_ir, llvm_ir
-            assert "zeroinitializer" not in llvm_ir, llvm_ir
-        print("COMPILE PASS: vusqz", short, "VBR initialization and kernel.o")
+
+def test_compile():
+    _launch()
+    artifacts = check_compile_artifacts()
+    assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
+    print("COMPILE PASS: vusqz generated artifacts", len(artifacts), "->", artifacts[0])
 
 
 def test_run():

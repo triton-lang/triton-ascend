@@ -66,7 +66,7 @@ from triton.language.core import (
     uint64,
 )
 
-from .core import buffer, buffer_type, vector, vector_type
+from .core import AddressSpace, buffer, buffer_type, vector, vector_type
 from .scope import scope
 from .alloc import alloc_buffer, alloc
 from .copy import copy
@@ -151,6 +151,7 @@ __all__ = [
     "uint16",
     "uint32",
     "uint64",
+    "AddressSpace",
     "PadMode",
     "EvictionPolicy",
     "AtomicKind",

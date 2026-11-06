@@ -1,5 +1,6 @@
 import re
 
+import numpy as np
 import pytest
 import torch
 import torch_npu  # noqa: F401
@@ -263,3 +264,100 @@ def test_inttoptr_dyn_offset_reset():
     # dynamic offset 2 => skip block_table[0:2]
     expected = block_table_cpu[2:2 + block].to(torch.int64)
     torch.testing.assert_close(out.cpu(), expected.cpu())
+
+
+# ---------------------------------------------------------------------------
+# Community int_to_ptr cases.
+#
+# These tests extract the `*int32` path of the community
+# `python/test/unit/language/test_core.py::test_where` case. That path builds
+# an elementwise `tt.int_to_ptr -> tt.where(select) -> tt.ptr_to_int` chain
+# over tensor-of-pointer values, which used to fail the memory conversion
+# stage with "failed to legalize operation 'tt.int_to_ptr'". The plan_a
+# workaround demotes such int-derived pointer tensors to i64 address tensors
+# before memory conversion, so the same kernels now lower to plain i64
+# selects/adds.
+# ---------------------------------------------------------------------------
+SIZE = 1000
+BLOCK = 1024
+
+
+def _rand_bool(size, seed):
+    return torch.from_numpy(np.random.RandomState(seed).randint(0, 2, size=size).astype(np.bool_)).npu()
+
+
+def _rand_i64(size, seed):
+    return torch.from_numpy(np.random.RandomState(seed).randint(0, 4096, size=size).astype(np.int64)).npu()
+
+
+@triton.jit
+def _where_int32_kernel(cond_ptr, a_ptr, b_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr,
+                        TEST_POINTERS: tl.constexpr, TEST_SCALAR_POINTERS: tl.constexpr):
+    offsets = tl.program_id(axis=0) * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+    mask = offsets < n_elements
+    decide = tl.load(cond_ptr + offsets, mask=mask)
+    if TEST_SCALAR_POINTERS:
+        ptr = tl.where(tl.load(cond_ptr), a_ptr, b_ptr)
+        output = tl.load(ptr + offsets, mask=mask)
+    else:
+        if TEST_POINTERS:
+            a = tl.load(a_ptr + offsets, mask=mask).to(tl.pi32_t)
+            b = tl.load(b_ptr + offsets, mask=mask).to(tl.pi32_t)
+        else:
+            a = tl.load(a_ptr + offsets, mask=mask)
+            b = tl.load(b_ptr + offsets, mask=mask)
+        output = tl.where(decide, a, b)
+    tl.store(output_ptr + offsets, output, mask=mask)
+
+
+@pytest.mark.parametrize("dtype", [torch.int64])
+def test_where_int32_pointer_tensors(dtype):
+    """Community test_where[1-*int32], TEST_POINTERS launch."""
+    cond = _rand_bool(SIZE, 17)
+    x = _rand_i64(SIZE, 18)
+    y = _rand_i64(SIZE, 19)
+    z = torch.where(cond, x, y)
+
+    z_tri = torch.empty(SIZE, dtype=dtype).npu()
+    grid = (triton.cdiv(SIZE, BLOCK), )
+    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK,
+                              TEST_POINTERS=True, TEST_SCALAR_POINTERS=False)
+    assert (z.cpu().numpy() == z_tri.cpu().numpy()).all()
+
+
+@pytest.mark.parametrize("dtype", [torch.int64])
+def test_where_int32_scalar_pointer(dtype):
+    """Community test_where[1-*int32], TEST_SCALAR_POINTERS launch."""
+    cond = _rand_bool(SIZE, 17)
+    x = _rand_i64(SIZE, 18)
+    y = _rand_i64(SIZE, 19)
+    z = torch.where(cond[0], x, y)
+
+    z_tri = torch.empty(SIZE, dtype=dtype).npu()
+    grid = (triton.cdiv(SIZE, BLOCK), )
+    _where_int32_kernel[grid](cond, x, y, z_tri, SIZE, BLOCK_SIZE=BLOCK,
+                              TEST_POINTERS=True, TEST_SCALAR_POINTERS=True)
+    assert (z.cpu().numpy() == z_tri.cpu().numpy()).all()
+
+
+@triton.jit
+def _int_to_ptr_addptr_kernel(addr_ptr, out_ptr, BLOCK_SIZE: tl.constexpr):
+    offs = tl.arange(0, BLOCK_SIZE)
+    addrs = tl.load(addr_ptr + offs)
+    ptrs = addrs.to(tl.pi32_t)
+    shifted = ptrs + 1
+    tl.store(out_ptr + offs, shifted.to(tl.int64))
+
+
+def test_int_to_ptr_addptr_roundtrip():
+    """int_to_ptr -> addptr -> ptr_to_int folds to i64 address arithmetic."""
+    data = torch.arange(BLOCK, dtype=torch.int32).npu()
+    base = data.data_ptr()
+    addrs = torch.from_numpy(base + np.arange(BLOCK, dtype=np.int64) * 4).npu()
+
+    out = torch.empty(BLOCK, dtype=torch.int64).npu()
+    _int_to_ptr_addptr_kernel[(1, )](addrs, out, BLOCK_SIZE=BLOCK)
+
+    expected = base + np.arange(BLOCK, dtype=np.int64) * 4 + 4
+    assert (out.cpu().numpy() == expected).all()
+

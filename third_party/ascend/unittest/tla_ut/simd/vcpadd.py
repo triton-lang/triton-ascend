@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
-from utils.tla_test_utils import compile_offline, get_stages, lower_offline
+from utils.tla_test_utils import (compile_offline, get_stages, lower_offline, check_compile_artifacts)
 
 
 @tla.jit
@@ -41,6 +41,24 @@ def test_ir():
     print("IR PASS: vcpadd")
 
 
+def _launch():
+    _, td, md, dt, mt, _, _, n, dist = CASES[0]
+    base = torch.arange(n, dtype=td)
+    mask = torch.ones(n, dtype=torch.bool)
+    out = torch.empty(n, dtype=td, device="npu")
+    vcpadd_kernel[(1, )](base.npu(), mask.to(md).npu(), out, D=dt, I=mt, N=n, DIST=dist,
+                         MODE=tla.simd.MODE.ZEROING)
+    torch.npu.synchronize()
+    return out
+
+
+def test_compile():
+    _launch()
+    artifacts = check_compile_artifacts()
+    assert artifacts, "no .o/.npubin artifact in TRITON_CACHE_DIR"
+    print("COMPILE PASS: vcpadd generated artifacts", len(artifacts), "->", artifacts[0])
+
+
 def test_run():
     for name, td, md, dt, mt, _, _, n, dist in CASES:
         base = torch.arange(n, dtype=td)
@@ -61,8 +79,10 @@ def test_run():
 
 
 if __name__ == "__main__":
-    do_ir, _, do_run = get_stages()
+    do_ir, do_compile, do_run = get_stages()
     if do_ir:
         test_ir()
+    if do_compile:
+        test_compile()
     if do_run:
         test_run()

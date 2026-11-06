@@ -553,12 +553,72 @@ struct DiscreteMaskStoreConversion : OpRewritePattern<triton::StoreOp> {
   }
 };
 
+static bool offsetIsPerLaneData(Value offset,
+                                llvm::SmallPtrSetImpl<Value> &visited) {
+  SmallVector<Value, 16> worklist;
+  if (offset)
+    worklist.push_back(offset);
+  while (!worklist.empty()) {
+    Value v = worklist.pop_back_val();
+    if (!visited.insert(v).second)
+      continue;
+    if (!isa<RankedTensorType>(v.getType()))
+      continue;
+    if (v.getDefiningOp<triton::LoadOp>())
+      return true;
+    if (v.getDefiningOp<triton::SplatOp>())
+      continue;
+    Operation *def = v.getDefiningOp();
+    if (!def)
+      continue;
+    for (Value operand : def->getOperands())
+      if (isa<RankedTensorType>(operand.getType()))
+        worklist.push_back(operand);
+  }
+  return false;
+}
+
+static bool hasDataDependentPointerAxis(Value ptr) {
+  llvm::SmallPtrSet<Value, 32> visitedPtrs;
+  SmallVector<Value, 8> worklist{ptr};
+  while (!worklist.empty()) {
+    Value v = worklist.pop_back_val();
+    if (!visitedPtrs.insert(v).second)
+      continue;
+    Operation *def = v.getDefiningOp();
+    if (!def)
+      continue;
+    if (isa<triton::LoadOp>(def))
+      return true;
+    if (auto addptr = dyn_cast<triton::AddPtrOp>(def)) {
+      llvm::SmallPtrSet<Value, 32> visited;
+      if (offsetIsPerLaneData(addptr.getOffset(), visited))
+        return true;
+      worklist.push_back(addptr.getPtr());
+      continue;
+    }
+    for (Value operand : def->getOperands()) {
+      Type ty = operand.getType();
+      bool isPtr = isa<triton::PointerType>(ty);
+      if (auto rt = dyn_cast<RankedTensorType>(ty))
+        isPtr = isa<triton::PointerType>(rt.getElementType());
+      if (isPtr)
+        worklist.push_back(operand);
+    }
+  }
+  return false;
+}
+
+static constexpr const char *kGatherGuardDeferAttr = "tt.gather_guard_defer";
+
 struct DiscreteMaskLoadConversion : OpRewritePattern<triton::LoadOp> {
   using OpRewritePattern<triton::LoadOp>::OpRewritePattern;
 
   LogicalResult matchAndRewrite(triton::LoadOp op,
                                 PatternRewriter &rewriter) const final {
     if (op->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName))
+      return failure();
+    if (op->hasAttr(kGatherGuardDeferAttr))
       return failure();
 
     auto loc = op.getLoc();
@@ -768,6 +828,18 @@ void DiscreteMaskAccessConversionPass::runOnOperation() {
     signalPassFailure();
     return;
   }
+
+  moduleOp.walk([&](triton::LoadOp load) {
+    if (load->hasAttr(ConverterUtils::mixCompileDiscreteMaskAttrName))
+      return;
+    if (load->hasAttr(kGatherGuardDeferAttr))
+      return;
+    if (!load.getMask())
+      return;
+    if (!hasDataDependentPointerAxis(load.getPtr()))
+      return;
+    load->setAttr(kGatherGuardDeferAttr, UnitAttr::get(&getContext()));
+  });
 
   RewritePatternSet patterns(&getContext());
   patterns.add<DiscreteMaskLoadConversion, DiscreteMaskStoreConversion,

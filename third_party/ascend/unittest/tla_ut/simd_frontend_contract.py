@@ -1381,14 +1381,14 @@ def test_predicate_memory_dispatch(width, dist, access):
     name, args = _last(sem)
     assert pred.type == simd.vector_type(2048 // width, tl.int1)
     assert name == "pld" and args[0] is buf.handle and args[1][0].ty == 32
-    assert args[2:] == (2048 // width, dist, f"pb{width}")
+    assert args[2:] == (2048 // width, dist)
     if access:
         simd.pst(buf[32], pred, _semantic=sem)
     else:
         simd.pst(buf, [32], pred, _semantic=sem)
     name, args = _last(sem)
     assert name == "pst" and args[0] is buf.handle and args[1][0].ty == 32
-    assert args[2:] == (pred.handle, f"pb{width}")
+    assert args[2:] == (pred.handle, )
 
 
 @pytest.mark.parametrize("buf", [

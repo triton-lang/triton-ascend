@@ -90,32 +90,6 @@ Type resolveSimdElementType(MLIRContext *ctx, const py::object &elem) {
                               "\"; expected i8 / bf16 / f32 / fp8e4nv");
 }
 
-// memref.view needs a one-dimensional identity-layout byte source. Rebase a
-// strided descriptor without losing its offset or the buffer's alias identity.
-Value predicateByteView(TLABuilder &self, Value ptr, Value byteOffset) {
-  auto &b = self.getBuilder();
-  auto ty = cast<MemRefType>(ptr.getType());
-  if (!ty.getLayout().isIdentity()) {
-    auto metadata = self.create<memref::ExtractStridedMetadataOp>(ptr);
-    Value offset = metadata.getOffset();
-    byteOffset = self.create<arith::AddIOp>(offset, byteOffset);
-    Value extent =
-        self.create<arith::AddIOp>(offset, metadata.getSizes().front());
-    auto baseTy =
-        MemRefType::get({ShapedType::kDynamic}, b.getI8Type(),
-                        MemRefLayoutAttrInterface{}, ty.getMemorySpace());
-    // reinterpret_cast replaces the descriptor offset; view below applies it
-    // exactly once, in bytes. Keep ptr as the source for memory-effect
-    // analysis.
-    ptr = self.create<memref::ReinterpretCastOp>(
-        baseTy, ptr, b.getIndexAttr(0), ArrayRef<OpFoldResult>{extent},
-        ArrayRef<OpFoldResult>{b.getIndexAttr(1)});
-  }
-  auto bitsTy = MemRefType::get(
-      {256}, b.getI1Type(), MemRefLayoutAttrInterface{}, ty.getMemorySpace());
-  return self.create<memref::ViewOp>(bitsTy, ptr, byteOffset, ValueRange{});
-}
-
 // Core type of the enclosing TLA core-mode scope, defaulting to the AIV
 // (vector) core that plain TLA kernels run on.
 hivm::TCoreType enclosingCoreType(OpBuilder &builder) {
@@ -460,58 +434,37 @@ void init_tla_builder(py::module &&m) {
           py::arg("src"), py::arg("index_hi") = py::none())
       .def(
           "create_simd_pst",
-          [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val,
-             const std::string &pb) {
-            auto &builder = self.getBuilder();
-            auto *ctx = builder.getContext();
-            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
-            if (!pbEnum || (pb != "pb8" && pb != "pb16" && pb != "pb32"))
-              throw std::invalid_argument("invalid predicate store density");
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val) {
             if (indices.size() != 1)
               throw std::invalid_argument(
                   "predicate store needs one byte offset");
             auto indicesIdx = toIndexValues(self, indices);
-            ptr = predicateByteView(self, ptr, indicesIdx.front());
-            Value zero = self.create<arith::ConstantIndexOp>(0);
-            Value mask = self.create<hivmave::VFPgeOp>(
-                val.getType(), hivmave::PgePattern::ALL);
-            auto op = self.create<hivmave::VFMaskedStoreOp>(
-                hivmave::StoreDistAttr::get(ctx, hivmave::StoreDist::NORM_B8),
-                ptr, ValueRange{zero}, mask, val);
-            op->setAttr("functionType",
-                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
+            if (failed(hivmave::createPredicateStore(
+                    self.getBuilder(), self.getLastLoc(), ptr,
+                    indicesIdx.front(), val)))
+              throw std::invalid_argument("invalid AVE predicate store");
           },
-          py::arg("ptr"), py::arg("indices"), py::arg("val"), py::arg("pb"))
+          py::arg("ptr"), py::arg("indices"), py::arg("val"))
       .def(
           "create_simd_pld",
           [](TLABuilder &self, Value ptr, std::vector<Value> indices,
-             int32_t lanes, const std::string &dist,
-             const std::string &pb) -> Value {
-            auto &builder = self.getBuilder();
-            auto *ctx = builder.getContext();
+             int32_t lanes, const std::string &dist) -> Value {
             auto distEnum = hivmave::symbolizeLoadDist(dist);
-            auto pbEnum = hivmave::symbolizeFunctionDistType(pb);
-            if (!distEnum || !pbEnum ||
-                (dist != "NORM" && dist != "US" && dist != "DS") ||
-                (pb != "pb8" && pb != "pb16" && pb != "pb32"))
+            if (!distEnum)
               throw std::invalid_argument(
                   "invalid predicate load distribution");
             if (indices.size() != 1)
               throw std::invalid_argument(
                   "predicate load needs one byte offset");
-            auto vecTy = VectorType::get({lanes}, builder.getI1Type());
             auto indicesIdx = toIndexValues(self, indices);
-            ptr = predicateByteView(self, ptr, indicesIdx.front());
-            Value zero = self.create<arith::ConstantIndexOp>(0);
-            auto op = self.create<hivmave::VFLoadOp>(
-                vecTy, hivmave::LoadDistAttr::get(ctx, *distEnum), ptr,
-                ValueRange{zero});
-            op->setAttr("functionType",
-                        hivmave::FunctionDistTypeAttr::get(ctx, *pbEnum));
-            return op.getResult(0);
+            auto result = hivmave::createPredicateLoad(
+                self.getBuilder(), self.getLastLoc(), ptr, indicesIdx.front(),
+                lanes, *distEnum);
+            if (failed(result))
+              throw std::invalid_argument("invalid AVE predicate load");
+            return *result;
           },
-          py::arg("ptr"), py::arg("indices"), py::arg("lanes"), py::arg("dist"),
-          py::arg("pb"))
+          py::arg("ptr"), py::arg("indices"), py::arg("lanes"), py::arg("dist"))
       .def(
           "create_simd_vlds",
           [](TLABuilder &self, Value &ptr, std::vector<Value> &indices,

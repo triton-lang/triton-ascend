@@ -31,7 +31,6 @@ from utils.tla_test_utils import compile_offline, lower_offline, compile_native_
 
 @tla.jit
 def predicate_kernel(X, Y, O, W: tl.constexpr, OP: tl.constexpr, PART: tl.constexpr):
-    N: tl.constexpr = 2048 // W
     OW: tl.constexpr = (W // 2 if OP == "ppack" else (W * 2 if OP == "punpack" else W))
     ON: tl.constexpr = 2048 // OW
     DT: tl.constexpr = tl.int8 if OW == 8 else (tl.int16 if OW == 16 else tl.int32)
@@ -170,4 +169,51 @@ def test_run_generated_pack(width, count):
     src = torch.arange(n) < count
     zero = torch.zeros(n, dtype=torch.bool)
     expected = torch.stack((torch.cat((src, zero)), torch.cat((zero, src)))).to(out.dtype)
+    torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+
+
+@tla.jit
+def predicate_roundtrip_kernel(X, Y, O, COUNT, W: tl.constexpr, PART: tl.constexpr):
+    N: tl.constexpr = 2048 // W
+    DT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
+    x = tla.alloc_buffer((N, ), DT, space="ub")
+    y = tla.alloc_buffer((N, ), DT, space="ub")
+    out = tla.alloc_buffer((4, N), DT, space="ub")
+    tla.copy(tla.view(X, (N, )), x)
+    tla.copy(tla.view(Y, (N, )), y)
+    with tla.scope.simd():
+        a = tla.simd.vcmps(tla.simd.vlds(x[0]), COUNT, op=tla.simd.CMP.LT)
+        b = tla.simd.vcmps(tla.simd.vlds(y[0]), 0, op=tla.simd.CMP.NE)
+        lo, hi = tla.simd.pintlv(a, b)
+        ra, rb = tla.simd.pdintlv(lo, hi)
+        if W != 8:
+            ra = tla.simd.punpack(tla.simd.ppack(ra, part=PART), part=PART)
+            rb = tla.simd.punpack(tla.simd.ppack(rb, part=PART), part=PART)
+        zero = tla.simd.vsplat(0, DT)
+        one = tla.simd.vsplat(1, DT)
+        # Consume the shared producers as well as both reconstructed results.
+        tla.simd.vsts(out[0, 0], tla.simd.vsel(a, one, zero), dist="NORM_B8" if W == 8 else
+                      ("NORM_B16" if W == 16 else "NORM_B32"))
+        tla.simd.vsts(out[1, 0], tla.simd.vsel(b, one, zero), dist="NORM_B8" if W == 8 else
+                      ("NORM_B16" if W == 16 else "NORM_B32"))
+        tla.simd.vsts(out[2, 0], tla.simd.vsel(ra, one, zero), dist="NORM_B8" if W == 8 else
+                      ("NORM_B16" if W == 16 else "NORM_B32"))
+        tla.simd.vsts(out[3, 0], tla.simd.vsel(rb, one, zero), dist="NORM_B8" if W == 8 else
+                      ("NORM_B16" if W == 16 else "NORM_B32"))
+    tla.copy(out, tla.view(O, (4, N)))
+
+
+@pytest.mark.parametrize("width,part", [(8, "lower")] + [(w, p) for w in (16, 32) for p in ("lower", "higher")])
+@pytest.mark.parametrize("count", (-1, 1, 31, 63))
+@pytest.mark.skipif(not get_stages()[2], reason="runtime stage disabled")
+def test_run_roundtrip(width, part, count):
+    n = 2048 // width
+    dtype = {8: torch.int8, 16: torch.int16, 32: torch.int32}[width]
+    lane = torch.arange(n)
+    x = (lane % 64).to(dtype)
+    y = ((lane * 7 + 3) % 11 < 5).to(dtype)
+    out = torch.empty((4, n), dtype=dtype, device="npu")
+    predicate_roundtrip_kernel[(1, )](x.npu(), y.npu(), out, count, W=width, PART=part)
+    torch.npu.synchronize()
+    expected = torch.stack((x < count, y != 0, x < count, y != 0)).to(dtype)
     torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)

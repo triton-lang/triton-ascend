@@ -26,7 +26,7 @@ import pytest
 import torch
 import triton.language as tl
 import triton.language.extra.tla as tla
-from utils.tla_test_utils import compile_offline, compile_native_kernel, lower_offline
+from utils.tla_test_utils import compile_offline, compile_native_kernel, lower_offline, get_stages
 
 
 @tla.jit
@@ -168,3 +168,57 @@ def test_ir_multiple_scopes():
     text = str(lower_offline(module, ctx))
     assert text.count("ave.hir.vscatter") == 2
     assert module.verify()
+
+
+@tla.jit
+def indexed_boundary_kernel(X, I, M, DATA, O, CHECK, W: tl.constexpr):
+    N: tl.constexpr = 2048 // W
+    DT: tl.constexpr = tl.int8 if W == 8 else tl.int16
+    x = tla.alloc_buffer((65536, ), DT, space="ub")
+    indices = tla.alloc_buffer((N, ), tl.uint16, space="ub")
+    masks = tla.alloc_buffer((N, ), DT, space="ub")
+    data = tla.alloc_buffer((N, ), DT, space="ub")
+    check = tla.alloc_buffer((2, N), DT, space="ub")
+    tla.copy(tla.view(X, (65536, )), x)
+    tla.copy(tla.view(I, (N, )), indices)
+    tla.copy(tla.view(M, (N, )), masks)
+    tla.copy(tla.view(DATA, (N, )), data)
+    with tla.scope.simd():
+        if W == 8:
+            idx = (tla.simd.vlds(indices[0]), tla.simd.vlds(indices[128]))
+        else:
+            idx = tla.simd.vlds(indices[0])
+        mask = tla.simd.vcmps(tla.simd.vlds(masks[0]), 0, op=tla.simd.CMP.NE)
+        before = tla.simd.vgather(x[0], idx, mask)
+        tla.simd.membar("VLD_VST")
+        tla.simd.vscatter(x[0], idx, tla.simd.vlds(data[0]), mask)
+        tla.simd.membar("VST_VLD")
+        after = tla.simd.vld(x[0], idx, mask)
+        tla.simd.vsts(check[0, 0], before, dist="NORM_B8" if W == 8 else "NORM_B16")
+        tla.simd.vsts(check[1, 0], after, dist="NORM_B8" if W == 8 else "NORM_B16")
+    tla.copy(x, tla.view(O, (65536, )))
+    tla.copy(check, tla.view(CHECK, (2, N)))
+
+
+@pytest.mark.parametrize("width", (8, 16))
+@pytest.mark.parametrize("active", ("all", "lower_edge", "upper_edge"))
+@pytest.mark.skipif(not get_stages()[2], reason="runtime stage disabled")
+def test_run_unsigned_index_boundary(width, active):
+    n = 2048 // width
+    dtype = torch.int8 if width == 8 else torch.int16
+    lane = torch.arange(n)
+    # Exercise unsigned i16 offsets on both sides of 32768, up to 65535.
+    index = torch.cat((32768 - n // 2 + torch.arange(n // 2), 65536 - n // 2 + torch.arange(n // 2)))
+    mask = lane >= 0 if active == "all" else lane == (n // 2 - 1 if active == "lower_edge" else n // 2)
+    raw = ((torch.arange(65536) * 37 + 9) % 101).to(dtype)
+    data = (-(lane % 97) - 1).to(dtype)
+    out = torch.empty_like(raw, device="npu")
+    check = torch.empty((2, n), dtype=dtype, device="npu")
+    indexed_boundary_kernel[(1, )](raw.npu(), index.to(torch.uint16).npu(), mask.to(dtype).npu(), data.npu(), out,
+                                   check, W=width)
+    torch.npu.synchronize()
+    expected = raw.clone()
+    expected[index[mask]] = data[mask]
+    expected_check = torch.stack((torch.where(mask, raw[index], 0), torch.where(mask, data, 0)))
+    torch.testing.assert_close(out.cpu(), expected, rtol=0, atol=0)
+    torch.testing.assert_close(check.cpu(), expected_check, rtol=0, atol=0)

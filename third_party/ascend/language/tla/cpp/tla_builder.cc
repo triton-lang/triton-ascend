@@ -434,18 +434,30 @@ void init_tla_builder(py::module &&m) {
       .def(
           "create_simd_vgather",
           [](TLABuilder &self, Value ptr, std::vector<Value> indices,
-             Value index, Value mask, py::object elem, int32_t lanes) -> Value {
+             Value index, Value mask, py::object elem, int32_t lanes,
+             std::optional<Value> indexHi) -> Value {
             auto &builder = self.getBuilder();
             auto vecTy = VectorType::get(
                 {lanes}, resolveSimdElementType(builder.getContext(), elem));
             auto indicesIdx = toIndexValues(self, indices);
             return self
                 .create<hivmave::VFGatherOp>(vecTy, ptr, ValueRange(indicesIdx),
-                                             index, mask)
+                                             index, mask, indexHi.value_or(Value{}))
                 .getResult();
           },
           py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
-          py::arg("elem"), py::arg("lanes"))
+          py::arg("elem"), py::arg("lanes"), py::arg("index_hi") = py::none())
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, Value src, std::optional<Value> indexHi) {
+            auto offsets = toIndexValues(self, indices);
+            self.create<hivmave::VFScatterOp>(
+                ptr, ValueRange(offsets), index, mask, src,
+                indexHi.value_or(Value{}));
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("src"), py::arg("index_hi") = py::none())
       .def(
           "create_simd_pst",
           [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val,
@@ -1003,6 +1015,12 @@ void init_tla_builder(py::module &&m) {
             auto elemTy = resolveSimdElementType(ctx, elem);
             auto outTy = VectorType::get(
                 {2048 / elemTy.getIntOrFloatBitWidth()}, elemTy);
+            if (part == "lower" || part == "higher")
+              return self.create<hivmave::VFVunpackOp>(
+                  outTy, src, builder.getI32IntegerAttr(part == "higher"),
+                  hivm::TypeFnAttr::get(ctx, isSigned ? hivm::TypeFn::cast_signed
+                                                     : hivm::TypeFn::cast_unsigned))
+                  .getResult();
             auto partEnum = hivmave::symbolizeVCVT_PartType(part);
             auto ppEnum = hivmave::symbolizeVCVT_PPType(pp);
             if (!partEnum || !ppEnum)

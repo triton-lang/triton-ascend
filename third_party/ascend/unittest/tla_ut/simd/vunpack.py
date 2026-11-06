@@ -62,13 +62,15 @@ def unpack_kernel(X, M, O, SB: tl.constexpr, DB: tl.constexpr, SIGNED: tl.conste
 CASES = [(sb, db, signed, selector)
          for sb, db in ((8, 16), (16, 32), (8, 32))
          for signed in (False, True)
-         for selector in range(db // sb)]
+         for selector in (list(range(db // sb)) + (["lower", "higher"] if db // sb == 2 else []))]
 
 
 def constants(case):
     sb, db, signed, selector = case
-    return dict(SB=sb, DB=db, SIGNED=signed, PART="part_odd" if selector == 1 and db // sb == 2 else "part_even",
-                PP=f"pp{selector}" if db // sb == 4 else "pp0")
+    return dict(
+        SB=sb, DB=db, SIGNED=signed, PART=selector if isinstance(selector, str) else
+        ("part_odd" if selector == 1 and db // sb == 2 else "part_even"),
+        PP=f"pp{selector}" if db // sb == 4 else "pp0")
 
 
 @pytest.mark.parametrize("case", CASES)
@@ -78,9 +80,13 @@ def test_ir(case, masked):
     module, _ = compile_offline(unpack_kernel, dict(X=f"*i{sb}", M=f"*i{db}", O=f"*i{db}"),
                                 dict(**constants(case), MASKED=masked))
     text = str(module)
-    assert text.count("ave.hir.vextsi" if signed else "ave.hir.vextui") == 2
+    assert text.count("ave.hir.vunpack" if isinstance(selector, str) else (
+        "ave.hir.vextsi" if signed else "ave.hir.vextui")) == 2
     assert text.count("ave.hir.vsel") == (3 if masked else 0)
-    assert (f"pp{selector}" if db // sb == 4 else constants(case)["PART"]) in text
+    if isinstance(selector, str):
+        assert ("cast_signed" if signed else "cast_unsigned") in text or not signed
+    else:
+        assert (f"pp{selector}" if db // sb == 4 else constants(case)["PART"]) in text
     assert "llvm." not in text
     assert f"vector<{2048 // db}xi{db}>" in text
 
@@ -99,7 +105,11 @@ def launch(case, pattern, masked=True):
     widened = x.to(torch.int64)
     if not signed:
         widened &= (1 << sb) - 1
-    expected = widened[selector::db // sb]
+    if isinstance(selector, str):
+        start = 0 if selector == "lower" else d
+        expected = widened[start:start + d]
+    else:
+        expected = widened[selector::db // sb]
     if not masked:
         mask = torch.ones_like(mask)
     ref = torch.stack((torch.where(mask, expected, 0), torch.where(mask, expected, 0), torch.where(mask, expected,

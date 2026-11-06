@@ -33,7 +33,7 @@ from utils.tla_test_utils import compile_offline, get_stages, check_kernel_binar
 def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constexpr, MASKED: tl.constexpr = True):
     N: tl.constexpr = 2048 // W
     IT: tl.constexpr = tl.uint32 if W == 32 else tl.uint16
-    MT: tl.constexpr = tl.int16 if W == 16 else tl.int32
+    MT: tl.constexpr = tl.int8 if W == 8 else (tl.int16 if W == 16 else tl.int32)
     x = tla.alloc_buffer((1024, ), DT, space="ub")
     indices = tla.alloc_buffer((N, ), IT, space="ub")
     m = tla.alloc_buffer((N, ), MT, space="ub")
@@ -45,20 +45,24 @@ def indexed_load(X, I, M, O, DT: tl.constexpr, W: tl.constexpr, BASE: tl.constex
         mask = tla.simd.vcmps(tla.simd.vlds(m[0]), 0, op=tla.simd.CMP.NE)
         if not MASKED:
             mask = None
-        idx = tla.simd.vlds(indices[0])
+        if W == 8:
+            idx = (tla.simd.vlds(indices[0]), tla.simd.vlds(indices[128]))
+        else:
+            idx = tla.simd.vlds(indices[0])
         a = tla.simd.vgather(x[BASE], idx, mask)
         b = tla.simd.vld(x[BASE], idx, mask, mode=tla.simd.MODE.MERGING)
         if MASKED:
             c = tla.simd.vsel(mask, a, tla.simd.vsplat(7, DT))
         else:
             c = a
-        tla.simd.vsts(o[0, 0], a, dist="NORM_B16" if W == 16 else "NORM_B32")
-        tla.simd.vsts(o[1, 0], b, dist="NORM_B16" if W == 16 else "NORM_B32")
-        tla.simd.vsts(o[2, 0], c, dist="NORM_B16" if W == 16 else "NORM_B32")
+        tla.simd.vsts(o[0, 0], a, dist="NORM_B8" if W == 8 else ("NORM_B16" if W == 16 else "NORM_B32"))
+        tla.simd.vsts(o[1, 0], b, dist="NORM_B8" if W == 8 else ("NORM_B16" if W == 16 else "NORM_B32"))
+        tla.simd.vsts(o[2, 0], c, dist="NORM_B8" if W == 8 else ("NORM_B16" if W == 16 else "NORM_B32"))
     tla.copy(o, tla.view(O, (3, N)))
 
 
-TYPES = [("int16", "i16", 16), ("uint16", "u16", 16), ("int32", "i32", 32), ("uint32", "u32", 32),
+TYPES = [("int8", "i8", 8), ("uint8", "u8", 8), ("float8e4nv", "fp8e4nv", 8), ("float8e5", "fp8e5", 8),
+         ("int16", "i16", 16), ("uint16", "u16", 16), ("int32", "i32", 32), ("uint32", "u32", 32),
          ("float16", "fp16", 16), ("bfloat16", "bf16", 16), ("float32", "fp32", 32)]
 CASES = [(typ, base) for typ in TYPES for base in (0, 64)]
 
@@ -84,7 +88,7 @@ def test_ir(case, masked):
 def launch(case, pattern, masked=True):
     (name, _, w), base = case
     n = 2048 // w
-    dtype = getattr(torch, name)
+    dtype = getattr(torch, {"float8e4nv": "float8_e4m3fn", "float8e5": "float8_e5m2"}.get(name, name))
     raw = (torch.arange(1024, dtype=torch.int64) * 37 + 9) % 109 - 53
     if name.startswith("uint"):
         raw += 53
@@ -93,16 +97,20 @@ def launch(case, pattern, masked=True):
     masks = {"all": lane >= 0, "none": lane < 0, "tail": lane < n - 5, "mixed": (lane * 7 + 3) % 11 < 5}
     mask = masks[pattern] if masked else torch.ones(n, dtype=torch.bool)
     index = (lane * 17 + 13) % 800
-    expected = raw[base + index].to(dtype).to(torch.float64)
+    bit_dtype = {8: torch.int8, 16: torch.int16, 32: torch.int32}[w]
+    if w == 8:
+        data = (torch.arange(1024) * 37 + 13).to(torch.int8).view(dtype)
+    expected = data.view(bit_dtype).to(torch.int64)[base + index]
+    old_bits = torch.tensor(7, dtype=dtype).view(bit_dtype).to(torch.int64)
     poisoned = torch.where(mask, index, 0xFFFF)
     out = torch.empty((3, n), dtype=dtype, device="npu")
     compiled = indexed_load[(1, )](data.to("npu"), poisoned.to(torch.uint32 if w == 32 else torch.uint16).to("npu"),
-                                   mask.to({16: torch.int16, 32: torch.int32}[w]).to("npu"), out, **constants(case),
-                                   MASKED=masked)
+                                   mask.to({8: torch.int8, 16: torch.int16, 32: torch.int32}[w]).to("npu"), out,
+                                   **constants(case), MASKED=masked)
     torch.npu.synchronize()
     expected = torch.stack((torch.where(mask, expected, 0), torch.where(mask, expected,
-                                                                        0), torch.where(mask, expected, 7))).to(dtype)
-    return out.cpu().to(torch.float64), expected.to(torch.float64), compiled
+                                                                        0), torch.where(mask, expected, old_bits)))
+    return out.cpu().view(bit_dtype).to(torch.int64), expected.to(torch.int64), compiled
 
 
 @pytest.mark.parametrize("case", CASES)

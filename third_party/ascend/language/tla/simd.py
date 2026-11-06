@@ -108,6 +108,7 @@ __all__ = [
     "pld",
     "pst",
     "vgather",
+    "vscatter",
     "vld",
     "vunpack",
     "vsts",
@@ -869,13 +870,32 @@ def pst(ptr, offsets_or_val, val=None, _semantic=None):
     _semantic.builder.create_simd_pst(base, indices, val.handle, f"pb{2048 // val.type.lanes}")
 
 
+def _indexed_memory_indices(index, bits, op):
+    if bits == 8:
+        if isinstance(index, tl.tuple):
+            index = index.values
+        if not isinstance(index, (tuple, list)) or len(index) != 2:
+            raise ValueError(f"8-bit {op} requires two 128-lane uint16 index registers")
+        for half in index:
+            _require_vector(half, "index")
+            if half.type != vector_type(128, tl.uint16):
+                raise ValueError(f"8-bit {op} indices must be vector<128xuint16>")
+        return index[0], index[1]
+    _require_vector(index, "index")
+    expected = vector_type(2048 // bits, tl.uint32 if bits == 32 else tl.uint16)
+    if index.type != expected:
+        raise ValueError(f"{op} indices must be {expected}")
+    return index, None
+
+
 @builtin
 def vgather(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     """Gather a full register from contiguous UB using element indices.
 
-    Supports signed/unsigned 16/32-bit integers and f16/bf16/f32 data.
+    Supports integer 8/16/32-bit, f16/bf16/f32 and fp8e4nv/fp8e5 data.
     32-bit data requires 64 uint32 indices; 16-bit data requires 128 uint16
-    indices. 8-bit data is not supported by this interface yet.
+    indices. Byte data takes two 128-lane uint16 vectors for consecutive
+    result halves. AVE handles the physical memory and register layout.
 
     ``ptr`` is a 1-D buffer or ``buf[base_offset]``; the base offset and
     indices are in elements. Active indices must be in bounds. The mask
@@ -895,18 +915,16 @@ def vgather(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
     if type(offset) is int and not 0 <= offset < ptr.shape[0]:
         raise ValueError("vgather base offset is outside the buffer")
     tag = _elem_tag(ptr.dtype)
-    if tag not in ("i16", "i32", "f16", "bf16", "f32"):
-        raise ValueError("vgather supports only 16/32-bit elements")
+    if tag not in ("i8", "i16", "i32", "f16", "bf16", "f32", "fp8e4nv", "fp8e5"):
+        raise ValueError("vgather supports only 8/16/32-bit elements")
     bits = _ELEM_SPECS[tag]
     lanes = _lanes_for(tag)
     _check_mode(mode)
     mask = _mask_for(mask, lanes, _semantic)
     base, indices = _resolve_base_and_indices(ptr, offsets, _semantic)
-    _require_vector(index, "index")
-    expected = vector_type(lanes, tl.uint32 if bits == 32 else tl.uint16)
-    if index.type != expected:
-        raise ValueError(f"vgather indices must be {expected}")
-    handle = _semantic.builder.create_simd_vgather(base, indices, index.handle, mask.handle, tag, lanes)
+    index, index_hi = _indexed_memory_indices(index, bits, "vgather")
+    handle = _semantic.builder.create_simd_vgather(base, indices, index.handle, mask.handle, tag, lanes,
+                                                   index_hi.handle if index_hi is not None else None)
     return vector(handle, vector_type(lanes, ptr.dtype))
 
 
@@ -916,7 +934,7 @@ def vld(ptr, index, mask=None, mode=MODE.ZEROING, _semantic=None) -> vector:
 
     This exposes full-register indexed loads without CANN's vector_address
     object or distribution controls. It does not update address state.
-    Only 16/32-bit data is supported, using one AVE gather.
+    The same AVE interface supports 8/16/32-bit data.
     """
     return vgather(ptr, index, mask=mask, mode=mode, _semantic=_semantic)
 
@@ -2129,9 +2147,10 @@ def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", sign
 
     Supports 8->16, 16->32 and 8->32 bit registers. For factor-two widening,
     EVEN/ODD selects src[0::2]/src[1::2]. For 8->32, ppN selects src[N::4]
-    and part must remain EVEN. Contiguous LOWER/HIGHER halves and 32->64
-    widening are not supported. ``signed`` chooses sign or zero extension
-    independently of the source and result integer dtype signedness.
+    and part must remain EVEN. For factor-two widening, LOWER/HIGHER selects
+    a contiguous half. 32->64 widening is not supported. ``signed`` chooses
+    sign or zero extension independently of the source and result integer
+    dtype signedness.
 
     The mask describes output lanes. Both modes produce zero inactive
     results; preserve an old destination with an explicit vsel. Extension
@@ -2148,7 +2167,9 @@ def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", sign
     signed = _unwrap_if_constexpr(signed)
     if type(signed) is not bool:
         raise ValueError("vunpack signed must be a compile-time bool")
-    part = ss.check_part(_unwrap_if_constexpr(part))
+    part = _unwrap_if_constexpr(part)
+    if part not in (PART.LOWER, PART.HIGHER):
+        part = ss.check_part(part)
     pp = _unwrap_if_constexpr(pp)
     if pp not in ("pp0", "pp1", "pp2", "pp3"):
         raise ValueError("vunpack pp must be pp0/pp1/pp2/pp3")
@@ -2167,6 +2188,48 @@ def vunpack(src: vector, target_dtype, mask=None, part=PART.EVEN, pp="pp0", sign
     if mask is not None:
         result = vsel(mask, result, vsplat(0, target_dtype, _semantic=_semantic), _semantic=_semantic)
     return result
+
+
+@builtin
+def vscatter(ptr, index, src, mask=None, _semantic=None):
+    """Scatter a full data register to contiguous UB using element indices.
+
+    Supports integers 8/16/32-bit and f16/bf16/f32. 16/32-bit data uses one
+    uint16/uint32 index register. Packed 8-bit data uses two uint16 index
+    registers for consecutive logical halves; AVE handles their layout.
+    The mask has the source lane count; inactive locations are not written.
+    Active addresses must be in bounds and distinct across both index halves.
+    No atomicity or deterministic duplicate-index overwrite is provided.
+    A scalar buffer base offset is in elements, including subview offsets.
+    Before an aliasing vector load in the same SIMD scope, issue
+    membar("VST_VLD"), as for vsts; DMA dependencies are inferred separately.
+    The current LLVM dependency still marks the destination readonly. This
+    API does not fix that optimizer contract: a hardware barrier alone cannot
+    guarantee load-after-scatter correctness until the toolchain is repaired.
+    """
+    if isinstance(ptr, buffer_access):
+        ptr, offsets = ptr.buffer, list(ptr.indices)
+    else:
+        offsets = [0]
+    _require_vector(src, "src")
+    if not isinstance(ptr, buffer) or ptr.space != "ub":
+        raise TypeError("vscatter requires a UB buffer")
+    if len(ptr.shape) != 1 or ptr.strides != (1, ) or len(offsets) != 1:
+        raise ValueError("vscatter requires contiguous one-dimensional memory")
+    offset = _unwrap_if_constexpr(offsets[0])
+    if type(offset) is int and not 0 <= offset < ptr.shape[0]:
+        raise ValueError("vscatter base offset is outside the buffer")
+    tag = _elem_tag(src.dtype)
+    if ptr.dtype != src.dtype or tag not in ("i8", "i16", "i32", "f16", "bf16", "f32"):
+        raise ValueError("vscatter requires matching 8/16/32-bit integer or f16/bf16/f32 data")
+    bits, lanes = _ELEM_SPECS[tag], _lanes_for(tag)
+    if src.type.lanes != lanes:
+        raise ValueError("vscatter requires a full data register")
+    mask = _mask_for(mask, lanes, _semantic)
+    base, offsets = _resolve_base_and_indices(ptr, offsets, _semantic)
+    index, index_hi = _indexed_memory_indices(index, bits, "vscatter")
+    _semantic.builder.create_simd_vscatter(base, offsets, index.handle, mask.handle, src.handle,
+                                           index_hi.handle if index_hi is not None else None)
 
 
 @builtin

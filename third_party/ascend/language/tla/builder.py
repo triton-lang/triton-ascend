@@ -85,6 +85,7 @@ def setup_unified_builder(main_builder, ascend_builder):
         'create_simd_pld',
         'create_simd_pst',
         'create_simd_vgather',
+        'create_simd_vscatter',
         'create_simd_vunpack',
         'create_simd_vsts',
         'create_simd_vsstb',

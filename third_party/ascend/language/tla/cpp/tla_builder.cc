@@ -705,6 +705,81 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("vector"), py::arg("mask"), py::arg("kind"))
       .def(
+          "create_simd_ave_vcpadd",
+          [](TLABuilder &self, Value src, Value mask) -> Value {
+            auto resTy = src.getType();
+            return self.create<hivmave::VcpaddOp>(resTy, src, mask).getResult();
+          },
+          py::arg("src"), py::arg("mask"))
+      .def(
+          "create_simd_ave_vsqz",
+          [](TLABuilder &self, Value src, Value mask, bool stored) -> Value {
+            auto *ctx = self.getBuilder().getContext();
+            auto resTy = src.getType();
+            auto mode = stored ? hivmave::SqueezeStoreMode::STORED
+                               : hivmave::SqueezeStoreMode::NO_STORED;
+            return self
+                .create<hivmave::VsqzOp>(
+                    resTy, src, mask,
+                    hivmave::SqueezeStoreModeAttr::get(ctx, mode))
+                .getResult();
+          },
+          py::arg("src"), py::arg("mask"), py::arg("stored"))
+      .def(
+          "create_simd_ave_carry",
+          [](TLABuilder &self, const std::string &kind, Value src0, Value src1,
+             py::object carry_in, Value mask,
+             bool is_unsigned) -> std::pair<Value, Value> {
+            auto srcTy = dyn_cast<VectorType>(src0.getType());
+            auto maskTy = dyn_cast<VectorType>(mask.getType());
+            if (!srcTy || srcTy.getRank() != 1 ||
+                !srcTy.getElementType().isInteger(32) ||
+                srcTy.getNumElements() != 64 ||
+                src0.getType() != src1.getType())
+              throw std::invalid_argument(
+                  "AVE carry requires matching 64-lane i32/u32 registers");
+            if (!maskTy || maskTy.getRank() != 1 ||
+                !maskTy.getElementType().isInteger(1) ||
+                maskTy.getNumElements() != 64)
+              throw std::invalid_argument(
+                  "AVE carry mask must be vector<64xi1>");
+            if (kind != "vaddcs" && kind != "vsubcs")
+              throw std::invalid_argument("unknown AVE carry kind: " + kind);
+            if (carry_in.is_none())
+              throw std::invalid_argument(
+                  "carry operand is required for vaddcs/vsubcs");
+            auto *ctx = self.getBuilder().getContext();
+            auto castAttr = hivm::TypeFnAttr::get(
+                ctx, is_unsigned ? hivm::TypeFn::cast_unsigned
+                                 : hivm::TypeFn::cast_signed);
+            auto carryValue = py::cast<Value>(carry_in);
+            if (carryValue.getType() != maskTy)
+              throw std::invalid_argument(
+                  "AVE carry-in must match the carry mask type");
+            if (kind == "vaddcs") {
+              auto op = self.create<hivmave::VaddcsOp>(
+                  TypeRange{srcTy, maskTy}, src0, src1, carryValue, mask,
+                  castAttr);
+              return {op.getRes(), op.getCarry()};
+            }
+            auto op = self.create<hivmave::VsubcsOp>(
+                TypeRange{srcTy, maskTy}, src0, src1, carryValue, mask,
+                castAttr);
+            return {op.getRes(), op.getCarry()};
+          },
+          py::arg("kind"), py::arg("src0"), py::arg("src1"),
+          py::arg("carry"), py::arg("mask"), py::arg("unsigned"))
+      .def(
+          "create_simd_ave_vusqz",
+          [](TLABuilder &self, Value mask, py::object elem_tag,
+             int32_t lanes) -> Value {
+            auto *ctx = self.getBuilder().getContext();
+            auto resTy =
+                VectorType::get({lanes}, resolveSimdElementType(ctx, elem_tag));
+            return self.create<hivmave::VusqzOp>(resTy, mask).getResult();
+          },
+          py::arg("mask"), py::arg("elem_tag"), py::arg("lanes"))
+      .def(
           "create_simd_vci",
           [](TLABuilder &self, Value &index, py::object elem_tag, int32_t lanes,
              bool increase) -> Value {

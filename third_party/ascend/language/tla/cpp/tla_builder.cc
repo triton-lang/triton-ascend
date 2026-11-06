@@ -1323,6 +1323,55 @@ void init_tla_builder(py::module &&m) {
           py::arg("transpose_a") = false, py::arg("transpose_b") = false,
           py::arg("unit_flag_ctrl") = std::nullopt,
           py::arg("unit_flag_group_id") = std::nullopt)
+      // C = MX(A, ScaleA) x MX(B, ScaleB) (+bias): A/B and the E8M0 scales are
+      // in L1, C is an L0C accumulator. lhs_format/rhs_format are the native
+      // HIVMMatmulDataformat codes (1=E5M2, 2=E4M3, 3=E2M1) and are only set
+      // for packed integer operands; FP8 element types encode the format.
+      .def(
+          "create_hivm_mmadmx",
+          [](TLABuilder &self, Value a, Value b, Value scaleA, Value scaleB,
+             Value c, bool init_condition, int64_t real_m, int64_t real_k,
+             int64_t real_n, std::optional<int32_t> lhsFormat,
+             std::optional<int32_t> rhsFormat, bool transposeA,
+             bool transposeB, std::optional<Value> perChannelBias) {
+            auto &builder = self.getBuilder();
+            auto loc = self.getLastLoc();
+            auto init = builder.create<arith::ConstantOp>(
+                loc, builder.getI1Type(), builder.getBoolAttr(init_condition));
+            auto m = builder.create<arith::ConstantIndexOp>(loc, real_m);
+            auto k = builder.create<arith::ConstantIndexOp>(loc, real_k);
+            auto n = builder.create<arith::ConstantIndexOp>(loc, real_n);
+            auto aTrans = transposeA ? builder.getUnitAttr() : UnitAttr{};
+            auto bTrans = transposeB ? builder.getUnitAttr() : UnitAttr{};
+            auto lhsAttr = lhsFormat
+                               ? builder.getI32IntegerAttr(*lhsFormat)
+                               : IntegerAttr{};
+            auto rhsAttr = rhsFormat
+                               ? builder.getI32IntegerAttr(*rhsFormat)
+                               : IntegerAttr{};
+            self.create<hivm::MmadMxL1Op>(
+                TypeRange{}, a, b, scaleA, scaleB, init, m, k, n, c,
+                /*lhsFormat=*/lhsAttr, /*rhsFormat=*/rhsAttr,
+                /*a_transpose=*/aTrans, /*b_transpose=*/bTrans,
+                /*per_channel_bias=*/perChannelBias.value_or(Value{}));
+          },
+          py::arg("a"), py::arg("b"), py::arg("scale_a"), py::arg("scale_b"),
+          py::arg("c"), py::arg("init_condition"), py::arg("real_m"),
+          py::arg("real_k"), py::arg("real_n"),
+          py::arg("lhs_format") = std::nullopt,
+          py::arg("rhs_format") = std::nullopt,
+          py::arg("transpose_a") = false, py::arg("transpose_b") = false,
+          py::arg("per_channel_bias") = std::nullopt)
+      // GM -> L1 MX scale load (hivm.hir.load_scale). The source is a 2-D ND
+      // E8M0 tensor and the destination the 4-D zZ/nN fractal buffer.
+      .def(
+          "create_hivm_load_mx_scale",
+          [](TLABuilder &self, Value src, Value dst, bool isTransposed) {
+            checkDmaBuffers(src, dst);
+            self.create<hivm::LoadMXScaleOp>(TypeRange{}, src, dst,
+                                             isTransposed);
+          },
+          py::arg("src"), py::arg("dst"), py::arg("is_transposed") = false)
       .def("create_scope_op",
            [](TLABuilder &self, py::dict &scopeAttrs,
               std::vector<Type> resultTypes) -> OpState {

@@ -60,31 +60,6 @@ static constexpr int ND_SHAPE_LENGTH = 2;
 static constexpr int SHAPE_1D_LENGTH = 1;
 static constexpr int constantIntType = 32;
 
-// Helper: ssbuffer.core_type
-llvm::StringRef getSsbufferCoreType(Operation *op) {
-  if (auto attr = op->getAttrOfType<mlir::StringAttr>(CVPipeline::kCoreType)) {
-    return attr.getValue();
-  }
-  return "";
-}
-
-// Helper: Get CoreType from op and index
-llvm::StringRef getCoreTypeWithIndex(Operation *op, int index) {
-  llvm::StringRef typeStr = getSsbufferCoreType(op);
-  if (typeStr.contains(", ")) {
-    llvm::SmallVector<llvm::StringRef> types;
-    typeStr.split(types, ", ", -1, false);
-    if (index < types.size()) {
-      return types[index].trim();
-    }
-    LOG_DEBUG("Warning: Core type string has multiple types but value is not "
-              "an OpResult or index out of range.\n");
-    return "";
-  }
-
-  return typeStr;
-}
-
 void DataDependencyAnalysisPass::updateCoreTypeAtIndex(
     Operation *op, int index, llvm::StringRef newCoreType) {
   auto coreTypeAttr =
@@ -1211,6 +1186,16 @@ void DataDependencyAnalysisPass::sortDependencies(
                 if (aConsOpOrder != bConsOpOrder) {
                   return aConsOpOrder < bConsOpOrder;
                 }
+
+                auto *aProdOp = a.value.getDefiningOp();
+                auto *bProdOp = b.value.getDefiningOp();
+                if (aProdOp && bProdOp) {
+                  unsigned aProdOpOrder = opOrder.lookup(aProdOp);
+                  unsigned bProdOpOrder = opOrder.lookup(bProdOp);
+                  if (aProdOpOrder != bProdOpOrder) {
+                    return aProdOpOrder < bProdOpOrder;
+                  }
+                }
               }
               return false;
             });
@@ -1258,6 +1243,8 @@ void DataDependencyAnalysisPass::runOnOperation() {
   sortDependencies(info.getC2VDependencies(), module);
   sortDependencies(info.getC2CDependencies(), module);
   sortDependencies(info.getIntraC2CDependencies(), module);
+
+  analyzeRedundantEdges(info, module);
   analyzeSyncReuse(info, module);
 
   info.setValid(true);

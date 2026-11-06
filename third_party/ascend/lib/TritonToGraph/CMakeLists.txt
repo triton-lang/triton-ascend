@@ -16,6 +16,7 @@ add_triton_library(TritonToGraph
   ProgramGridTransform.cpp
   MergeConcatLoadBuffer.cpp
   Passes.cpp
+  RowLifting.cpp
   LegacyMemoryAccess/ChunkCoalescing.cpp
   LegacyMemoryAccess/RowCoalescing.cpp
   LegacyMemoryAccess/StridedAxisCoalescing.cpp

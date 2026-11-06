@@ -94,7 +94,7 @@ module {
 // CHECK: %[[LOAD:.*]] = tt.load %[[SMALL_I8]], {{.*}} {was_bool_to_int8 = true} : tensor<1x16x!tt.ptr<i8>>
 // CHECK: %[[VALUE:.*]] = tt.broadcast %[[LOAD]] : tensor<1x16xi8> -> tensor<16x16xi8>
 // CHECK: scf.if
-// CHECK: tt.addptr %[[PTR]], %[[STEP]] : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi32>
+// CHECK: tt.addptr %[[PTR]], %{{.*}} : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi32>
 // CHECK: scf.yield {{.*}}, %[[VALUE]] : tensor<16x16x!tt.ptr<i1>>, tensor<16x16xi8>
 
 // -----

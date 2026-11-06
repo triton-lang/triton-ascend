@@ -364,6 +364,108 @@ void init_tla_builder(py::module &&m) {
           py::arg("mode"), py::arg("pipe"), py::arg("flag"))
       // SIMD vector-register ops (AVE dialect, ave.hir.*).
       .def(
+          "create_simd_pred_pack",
+          [](TLABuilder &self, Value src, bool unpack, int32_t part) -> Value {
+            if (unpack)
+              return self.create<hivmave::PregUnpackOp>(src, part).getRes();
+            return self.create<hivmave::PregPackOp>(src, part).getRes();
+          },
+          py::arg("src"), py::arg("unpack"), py::arg("part"))
+      .def(
+          "create_simd_pred_interleave",
+          [](TLABuilder &self, Value a, Value b,
+             bool inverse) -> std::pair<Value, Value> {
+            if (inverse) {
+              auto op = self.create<hivmave::PregDeinterleaveOp>(a, b);
+              return {op.getRes0(), op.getRes1()};
+            }
+            auto op = self.create<hivmave::PregInterleaveOp>(a, b);
+            return {op.getRes0(), op.getRes1()};
+          },
+          py::arg("a"), py::arg("b"), py::arg("inverse"))
+      .def(
+          "create_simd_vselr",
+          [](TLABuilder &self, Value src, Value index, Value mask) -> Value {
+            return self.create<hivmave::VFRegisterGatherOp>(src, index, mask)
+                .getRes();
+          },
+          py::arg("src"), py::arg("index"), py::arg("mask"))
+      .def(
+          "create_simd_group_reduce",
+          [](TLABuilder &self, const std::string &kind, Value src, Value mask,
+             bool isUnsigned) -> Value {
+            auto combiningKind = hivmave::symbolizeCombiningKind(kind);
+            if (!combiningKind)
+              throw std::invalid_argument("unknown group reduction kind");
+            return self
+                .create<hivmave::GroupReductionOp>(
+                    *combiningKind, src, mask,
+                    isUnsigned ? hivm::TypeFn::cast_unsigned
+                               : hivm::TypeFn::cast_signed)
+                .getRes();
+          },
+          py::arg("kind"), py::arg("src"), py::arg("mask"), py::arg("unsigned"))
+      .def(
+          "create_simd_vgather",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, py::object elem, int32_t lanes,
+             std::optional<Value> indexHi) -> Value {
+            auto &builder = self.getBuilder();
+            auto vecTy = VectorType::get(
+                {lanes}, resolveSimdElementType(builder.getContext(), elem));
+            auto indicesIdx = toIndexValues(self, indices);
+            return self
+                .create<hivmave::VFGatherOp>(vecTy, ptr, ValueRange(indicesIdx),
+                                             index, mask, indexHi.value_or(Value{}))
+                .getResult();
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("elem"), py::arg("lanes"), py::arg("index_hi") = py::none())
+      .def(
+          "create_simd_vscatter",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             Value index, Value mask, Value src, std::optional<Value> indexHi) {
+            auto offsets = toIndexValues(self, indices);
+            self.create<hivmave::VFScatterOp>(
+                ptr, ValueRange(offsets), index, mask, src,
+                indexHi.value_or(Value{}));
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("index"), py::arg("mask"),
+          py::arg("src"), py::arg("index_hi") = py::none())
+      .def(
+          "create_simd_pst",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices, Value val) {
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate store needs one byte offset");
+            auto indicesIdx = toIndexValues(self, indices);
+            if (failed(hivmave::createPredicateStore(
+                    self.getBuilder(), self.getLastLoc(), ptr,
+                    indicesIdx.front(), val)))
+              throw std::invalid_argument("invalid AVE predicate store");
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("val"))
+      .def(
+          "create_simd_pld",
+          [](TLABuilder &self, Value ptr, std::vector<Value> indices,
+             int32_t lanes, const std::string &dist) -> Value {
+            auto distEnum = hivmave::symbolizeLoadDist(dist);
+            if (!distEnum)
+              throw std::invalid_argument(
+                  "invalid predicate load distribution");
+            if (indices.size() != 1)
+              throw std::invalid_argument(
+                  "predicate load needs one byte offset");
+            auto indicesIdx = toIndexValues(self, indices);
+            auto result = hivmave::createPredicateLoad(
+                self.getBuilder(), self.getLastLoc(), ptr, indicesIdx.front(),
+                lanes, *distEnum);
+            if (failed(result))
+              throw std::invalid_argument("invalid AVE predicate load");
+            return *result;
+          },
+          py::arg("ptr"), py::arg("indices"), py::arg("lanes"), py::arg("dist"))
+      .def(
           "create_simd_vlds",
           [](TLABuilder &self, Value &ptr, std::vector<Value> &indices,
              py::object elem_tag, int32_t lanes, std::string &dist) -> Value {
@@ -855,6 +957,47 @@ void init_tla_builder(py::module &&m) {
           },
           py::arg("src"), py::arg("part"), py::arg("out_elem_tag"),
           py::arg("out_lanes"))
+      .def(
+          "create_simd_vunpack",
+          [](TLABuilder &self, Value src, py::object elem,
+             const std::string &part, const std::string &pp,
+             bool isSigned) -> Value {
+            auto &builder = self.getBuilder();
+            auto *ctx = builder.getContext();
+            auto srcTy = cast<VectorType>(src.getType());
+            auto elemTy = resolveSimdElementType(ctx, elem);
+            auto outTy = VectorType::get(
+                {2048 / elemTy.getIntOrFloatBitWidth()}, elemTy);
+            if (part == "lower" || part == "higher")
+              return self.create<hivmave::VFVunpackOp>(
+                  outTy, src, builder.getI32IntegerAttr(part == "higher"),
+                  hivm::TypeFnAttr::get(ctx, isSigned ? hivm::TypeFn::cast_signed
+                                                     : hivm::TypeFn::cast_unsigned))
+                  .getResult();
+            auto partEnum = hivmave::symbolizeVCVT_PartType(part);
+            auto ppEnum = hivmave::symbolizeVCVT_PPType(pp);
+            if (!partEnum || !ppEnum)
+              throw std::invalid_argument("invalid integer extension selector");
+            // Extension predicates are indexed by source position. Apply the
+            // user-supplied output mask with vsel in the Python frontend.
+            auto maskTy = VectorType::get({srcTy.getNumElements()},
+                                          builder.getI1Type());
+            Value mask = self.create<hivmave::VFPgeOp>(
+                maskTy, hivmave::PgePattern::ALL);
+            bool factor4 = srcTy.getElementType().isInteger(8) &&
+                           elemTy.isInteger(32);
+            auto partAttr = factor4 ? hivmave::VCVT_PartTypeAttr{}
+                                   : hivmave::VCVT_PartTypeAttr::get(ctx, *partEnum);
+            auto ppAttr = factor4 ? hivmave::VCVT_PPTypeAttr::get(ctx, *ppEnum)
+                                 : hivmave::VCVT_PPTypeAttr{};
+            if (isSigned)
+              return self.create<hivmave::VFExtSIOp>(
+                  outTy, src, mask, partAttr, ppAttr).getResult();
+            return self.create<hivmave::VFExtUIOp>(
+                outTy, src, mask, partAttr, ppAttr).getResult();
+          },
+          py::arg("src"), py::arg("elem"), py::arg("part"), py::arg("pp"),
+          py::arg("signed"))
       .def(
           "create_simd_vcvt",
           [](TLABuilder &self, std::string &kind, Value &src, Value &mask,
